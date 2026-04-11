@@ -262,29 +262,17 @@ module KeeperKeepalive = struct
 
   (** Per-call timeout in seconds for a single OAS Agent.run execution.
       Guards against indefinite LLM response waits within a turn.
-      With large context (200k+), each LLM call takes 60-120s, so
-      a 5-turn Agent.run can need 300-600s.
 
       When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
-      Otherwise, {!oas_timeout_for_context} computes an adaptive timeout
-      based on max_context tokens: base 180s + 1.5s per 1K context tokens,
-      capped at [30, turn_timeout_sec].
+      Otherwise, {!oas_timeout_for_context} computes an adaptive timeout:
+        base + ctx/1K × per_1k + min(oas_max_turns_per_call × 4, 40) × per_turn
+      References {!oas_max_turns_per_call} (default 15) directly to avoid
+      default drift.  Previous formula used 4× headroom on a default of 5,
+      producing min(20, 40)=20 effective turns.  With default 15, the 4×
+      multiplier would always saturate the cap, erasing context differentiation.
 
-      The formula includes both context-proportional overhead and a
-      per-turn budget.  extend_turns (ceiling=200) lets keepers run
-      20+ turns per OAS call; the previous formula (180 + ctx/1K × 1.5,
-      cap 600) yielded 573s at 262K context — right at the edge where
-      20-turn sessions would timeout, triggering manual_reconcile on
-      committed board mutations.
-
-      The new formula:
-        base + ctx/1K × per_1k + min(max_turns × 4, 40) × per_turn
-      adds an explicit turn budget with 4× headroom for extend_turns,
-      capped at 40 effective turns.
-
-      At 262K context, 5 initial turns:
-        Old: 180 + 393 = 573s  →  20-turn sessions timeout
-        New: 120 + 393 + 600 = 1113s  →  30+ turns fit comfortably
+      At 262K context, 15 turns/call:
+        120 + 393 + min(15,40)×30 = 120+393+450 = 963
 
       Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
       Range: [30, turn_timeout_sec]. *)
@@ -294,29 +282,6 @@ module KeeperKeepalive = struct
       Some (Float.max 30.0 (Float.min turn_timeout_sec
         (Option.value ~default:300.0 (Float.of_string_opt (String.trim raw)))))
     | None -> None
-
-  let oas_timeout_for_context ~(max_context : int) : float =
-    match oas_timeout_sec_override with
-    | Some v -> v
-    | None ->
-      let base = 120.0 in
-      let per_1k = 1.5 in
-      let per_turn = 30.0 in
-      let context_time = Float.of_int max_context /. 1000.0 *. per_1k in
-      let max_turns_per_call =
-        max 1 (min 50 (get_int ~default:5 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
-      in
-      let effective_turns =
-        Float.of_int (min (max_turns_per_call * 4) 40)
-      in
-      let turn_time = effective_turns *. per_turn in
-      Float.max 30.0
-        (Float.min turn_timeout_sec (base +. context_time +. turn_time))
-
-  (** Backward-compatible accessor: returns the env override or 300s default.
-      Prefer {!oas_timeout_for_context} when max_context is available. *)
-  let oas_timeout_sec =
-    Option.value ~default:300.0 oas_timeout_sec_override
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
@@ -330,6 +295,26 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 15. Range: [1, 50]. *)
   let oas_max_turns_per_call =
     max 1 (min 50 (get_int ~default:15 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+
+  let oas_timeout_for_context ~(max_context : int) : float =
+    match oas_timeout_sec_override with
+    | Some v -> v
+    | None ->
+      let base = 120.0 in
+      let per_1k = 1.5 in
+      let per_turn = 30.0 in
+      let context_time = Float.of_int max_context /. 1000.0 *. per_1k in
+      let effective_turns =
+        Float.of_int (min oas_max_turns_per_call 40)
+      in
+      let turn_time = effective_turns *. per_turn in
+      Float.max 30.0
+        (Float.min turn_timeout_sec (base +. context_time +. turn_time))
+
+  (** Backward-compatible accessor: returns the env override or 300s default.
+      Prefer {!oas_timeout_for_context} when max_context is available. *)
+  let oas_timeout_sec =
+    Option.value ~default:300.0 oas_timeout_sec_override
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.

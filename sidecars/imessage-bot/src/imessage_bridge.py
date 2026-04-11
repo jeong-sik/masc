@@ -34,6 +34,7 @@ SELECT DISTINCT
     m.service,
     h.id AS handle_id,
     h.service AS handle_service,
+    c.guid AS chat_guid,
     c.chat_identifier,
     c.display_name
 FROM message m
@@ -59,6 +60,7 @@ class InboundMessage:
     date: datetime
     service: str
     sender: str  # phone number or email
+    chat_guid: str
     chat_identifier: str
     display_name: str
 
@@ -141,6 +143,7 @@ def read_new_messages() -> list[InboundMessage]:
                     date=_apple_date_to_datetime(row["date"]),
                     service=row["service"] or "iMessage",
                     sender=row["handle_id"] or "unknown",
+                    chat_guid=row["chat_guid"] or "",
                     chat_identifier=row["chat_identifier"] or "",
                     display_name=row["display_name"] or "",
                 )
@@ -163,31 +166,37 @@ def read_new_messages() -> list[InboundMessage]:
     return messages
 
 
-def send_message(recipient: str, text: str) -> bool:
+def send_message(*, text: str, chat_guid: str = "") -> bool:
     """Send an iMessage via AppleScript.
 
     Uses ``on run argv`` to pass parameters as native AppleScript text
     objects, eliminating string-literal injection risks entirely.
 
     Args:
-        recipient: Phone number or Apple ID email.
         text: Message body.
+        chat_guid: Exact Messages.app chat identifier. Replies are sent only
+            when this value is available so the connector fails closed.
 
     Returns:
         True if AppleScript executed without error.
     """
+    if not chat_guid:
+        logger.error("AppleScript send aborted: missing chat_guid")
+        return False
+
     script = (
         'on run argv\n'
         '  tell application "Messages"\n'
-        '    set theBuddy to participant (item 1 of argv) of account 1\n'
-        '    send (item 2 of argv) to theBuddy\n'
+        '    set targetChat to first chat whose id is (item 1 of argv)\n'
+        '    send (item 2 of argv) to targetChat\n'
         '  end tell\n'
         'end run'
     )
+    argv = [chat_guid, text]
 
     try:
         result = subprocess.run(
-            ["osascript", "-e", script, recipient, text],
+            ["osascript", "-e", script, *argv],
             capture_output=True,
             text=True,
             timeout=15,
@@ -197,7 +206,7 @@ def send_message(recipient: str, text: str) -> bool:
             return False
         return True
     except subprocess.TimeoutExpired:
-        logger.error("AppleScript send timed out for %s", recipient)
+        logger.error("AppleScript send timed out for chat %s", chat_guid)
         return False
     except Exception as e:
         logger.error("AppleScript send error: %s", e)

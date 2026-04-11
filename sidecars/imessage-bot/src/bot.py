@@ -17,7 +17,7 @@ import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from .config import get_config
-from .gate_client import GateClient, GateResponse
+from .gate_client import GateClient
 from .imessage_bridge import InboundMessage, advance_cursor, read_new_messages, send_message
 from .status_store import ConnectorRuntimeStatus, StatusStore
 
@@ -98,18 +98,34 @@ class IMessageBot:
         )
 
         if response.ok and response.reply:
-            sent = send_message(msg.sender, response.reply)
+            if not msg.chat_guid:
+                logger.error(
+                    "Refusing to send reply to %s: missing chat guid for chat=%s",
+                    msg.sender,
+                    msg.chat_identifier or "unknown",
+                )
+                self._messages_failed += 1
+                return False
+            sent = send_message(
+                text=response.reply,
+                chat_guid=msg.chat_guid,
+            )
             if sent:
                 logger.info(
-                    "Replied to %s (%d chars, keeper=%s, model=%s, %dms)",
+                    "Replied to %s (chat=%s, %d chars, keeper=%s, model=%s, %dms)",
                     msg.sender,
+                    msg.chat_identifier or msg.chat_guid or "unknown",
                     len(response.reply),
                     response.keeper_name,
                     response.model_used,
                     response.duration_ms,
                 )
             else:
-                logger.error("Failed to send reply to %s via AppleScript", msg.sender)
+                logger.error(
+                    "Failed to send reply to %s (chat=%s) via AppleScript",
+                    msg.sender,
+                    msg.chat_identifier or msg.chat_guid or "unknown",
+                )
         elif response.error and response.error != "duplicate message":
             logger.warning("Gate error for %s: %s", msg.sender, response.error)
 

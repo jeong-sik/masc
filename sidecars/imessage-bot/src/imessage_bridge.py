@@ -241,7 +241,7 @@ def resolve_self_chat_guid(chat_db_path: str, explicit_chat_guid: str = "") -> s
     return chat_guid
 
 
-def send_message(*, text: str, chat_guid: str = "") -> bool:
+def send_message(*, text: str, chat_guid: str) -> bool:
     """Send an iMessage via AppleScript.
 
     Uses ``on run argv`` to pass parameters as native AppleScript text

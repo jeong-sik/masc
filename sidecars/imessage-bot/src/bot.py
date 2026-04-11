@@ -131,7 +131,9 @@ class IMessageBot:
                     msg.chat_identifier or msg.chat_guid or "unknown",
                 )
                 self._messages_failed += 1
-                return False
+                self._messages_processed += 1
+                self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
+                return True
             sent = send_message(
                 text=response.reply,
                 chat_guid=target_chat_guid,

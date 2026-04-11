@@ -63,9 +63,13 @@ class SendMessageTests(unittest.TestCase):
         self.assertIn("first chat whose id is", command[2])
         self.assertEqual(command[3:], ["iMessage;-;+15551234567", "hello"])
 
+    def test_send_message_requires_chat_guid_argument(self) -> None:
+        with self.assertRaises(TypeError):
+            send_message(text="hello")  # type: ignore[call-arg]
+
     @patch("src.imessage_bridge.subprocess.run")
-    def test_send_message_rejects_missing_target(self, run_mock) -> None:
-        ok = send_message(text="hello")
+    def test_send_message_rejects_blank_target(self, run_mock) -> None:
+        ok = send_message(text="hello", chat_guid="")
 
         self.assertFalse(ok)
         run_mock.assert_not_called()

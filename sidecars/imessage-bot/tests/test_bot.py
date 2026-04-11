@@ -80,7 +80,7 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
     @patch("src.bot.resolve_self_chat_guid", return_value="")
     @patch("src.bot.GateClient")
     @patch("src.bot.get_config")
-    async def test_handle_message_fails_closed_without_self_chat_guid(
+    async def test_handle_message_skips_reply_without_self_chat_guid(
         self,
         get_config_mock,
         gate_client_cls,
@@ -116,15 +116,17 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
 
         ok = await bot._handle_message(msg)
 
-        self.assertFalse(ok)
+        self.assertTrue(ok)
         self.assertEqual(resolve_self_chat_guid_mock.call_count, 2)
         send_message_mock.assert_not_called()
+        self.assertEqual(bot._messages_processed, 1)
+        self.assertEqual(bot._messages_failed, 1)
 
     @patch("src.bot.send_message", return_value=True)
     @patch("src.bot.resolve_self_chat_guid", return_value="")
     @patch("src.bot.GateClient")
     @patch("src.bot.get_config")
-    async def test_handle_message_fails_closed_without_chat_guid(
+    async def test_handle_message_skips_reply_without_source_chat_guid(
         self,
         get_config_mock,
         gate_client_cls,
@@ -160,9 +162,11 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
 
         ok = await bot._handle_message(msg)
 
-        self.assertFalse(ok)
+        self.assertTrue(ok)
         resolve_self_chat_guid_mock.assert_not_called()
         send_message_mock.assert_not_called()
+        self.assertEqual(bot._messages_processed, 1)
+        self.assertEqual(bot._messages_failed, 1)
 
     @patch("src.bot.send_message", return_value=True)
     @patch("src.bot.resolve_self_chat_guid", return_value="")

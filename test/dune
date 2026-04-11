@@ -39,6 +39,7 @@
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
         test_channel_gate_connector_routes
+        test_channel_gate_imessage_state
         test_dashboard
         test_dashboard_perf
         test_dashboard_tool_host_events
@@ -113,6 +114,7 @@
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
           test_channel_gate_connector_routes
+          test_channel_gate_imessage_state
           test_dashboard
           test_dashboard_perf
           test_dashboard_tool_host_events

@@ -32,6 +32,17 @@ let resolve_path raw_path =
   else
     raw_path
 
+let redact_chat_guid raw =
+  let value = String.trim raw in
+  if value = "" then ""
+  else
+    match List.rev (String.split_on_char ';' value) with
+    | [] -> "[redacted]"
+    | _target :: rev_prefix -> (
+        match List.rev rev_prefix with
+        | [] -> "[redacted]"
+        | prefix -> String.concat ";" prefix ^ ";[redacted]")
+
 let configured_write_path env_name ~default =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> resolve_path raw
@@ -245,7 +256,9 @@ let status_json ?(audit_limit = 10) () =
       ("audit_path", `String audit_path);
       ("updated_at", `String updated_at);
       ("reply_mode", `String (status_field "reply_mode" string_member ""));
-      ("self_chat_guid", `String (status_field "self_chat_guid" string_member ""));
+      ( "self_chat_guid",
+        `String
+          (redact_chat_guid (status_field "self_chat_guid" string_member "")) );
       ("last_message_at", `String (status_field "last_message_at" string_member ""));
       ("messages_processed", `Int (status_field "messages_processed" int_member 0));
       ("messages_failed", `Int (status_field "messages_failed" int_member 0));

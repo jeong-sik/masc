@@ -33,6 +33,11 @@ export interface HarnessOverview {
   pre_compact_last_event_at: number | null
   handoff_last_event_at: number | null
   fallback_ratio: number
+  // Added by lib/dashboard/dashboard_harness_health.ml as part of #6565.
+  // Ratio of verdicts whose generator_cascade ≠ evaluator_cascade among
+  // verdicts that carried a generator_cascade. undefined when the backend
+  // had zero eligible verdicts to compute the ratio.
+  cross_model_rate?: number
   latest_pre_compact_ratio: number | null
   latest_handoff_generation: number | null
 }
@@ -45,6 +50,9 @@ export interface HarnessVerdictItem {
   gate: string
   verdict: string
   evaluator_cascade: string
+  // Added by lib/tool_task.ml#build_verdict_sse_payload as part of #6565.
+  generator_cascade?: string | null
+  cross_model?: boolean
   fallback_reason?: string | null
 }
 

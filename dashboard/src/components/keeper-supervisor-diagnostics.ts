@@ -72,16 +72,24 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
   `
 }
 
-function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
+interface SpEventLike {
+  ts?: number
+  suppressed_count?: number
+  total?: number
+  dominant_cohort?: string
+}
+
+function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
   if (!sp_events || sp_events.length === 0) return null
+  const entries = sp_events.slice(0, 10) as SpEventLike[]
   return html`
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
-        ${sp_events.slice(0, 10).map((e: any) => html`
+        ${entries.map((e) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
             <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-            <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} 억제 (${e.dominant_cohort})</span>
+            <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
         `)}
       </div>

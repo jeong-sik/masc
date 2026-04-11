@@ -147,8 +147,12 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
 let config_root_for_base_path ~base_path =
+  let base_path =
+    if Filename.is_relative base_path then Filename.concat (Sys.getcwd ()) base_path
+    else base_path
+  in
   let inputs = Config_dir_resolver.inputs_from_env () in
-  let inputs = { inputs with env_base_path = Some base_path } in
+  let inputs = { inputs with cwd = base_path; env_base_path = Some base_path } in
   let resolution = Config_dir_resolver.resolve_with inputs in
   (resolution.Config_dir_resolver.config_root.path, resolution.warnings)
 

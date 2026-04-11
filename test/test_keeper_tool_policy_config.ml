@@ -39,6 +39,14 @@ let with_env name value f =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let with_cwd path f =
+  let saved = Sys.getcwd () in
+  Unix.chdir path;
+  Fun.protect ~finally:(fun () -> Unix.chdir saved) f
+
 let test_load_falls_back_to_resolved_config_dir () =
   (* Use the real project root so config/tool_policy.toml is found *)
   let base_path = Masc_test_deps.find_project_root () in
@@ -73,6 +81,25 @@ let test_load_honors_masc_config_dir_override () =
         (Printf.sprintf
            "expected config load to succeed for override config_dir=%s: %s"
            config_dir msg)
+
+let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
+  with_temp_dir "tool-policy-build-root" @@ fun fake_build_root ->
+  let source_root = Masc_test_deps.find_project_root () in
+  let fake_config_dir = Filename.concat fake_build_root "config" in
+  mkdir_p fake_config_dir;
+  write_file (Filename.concat fake_config_dir "cascade.json") "{}\n";
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_cwd fake_build_root @@ fun () ->
+  match KTPC.load ~base_path:source_root with
+  | Ok cfg ->
+      let presets = KTPC.preset_names cfg in
+      check bool "ignores cwd-only config candidate without tool_policy" true
+        (List.mem "full" presets && List.mem "messaging" presets)
+  | Error msg ->
+      fail
+        (Printf.sprintf
+           "expected config load to use base_path=%s instead of cwd=%s: %s"
+           source_root fake_build_root msg)
 
 (* ── preset_can_satisfy tests ───────────────────────────────── *)
 
@@ -183,6 +210,8 @@ let () =
             test_load_falls_back_to_resolved_config_dir;
           test_case "honors MASC_CONFIG_DIR override" `Quick
             test_load_honors_masc_config_dir_override;
+          test_case "anchors resolution to base_path over cwd candidate" `Quick
+            test_load_anchors_resolution_to_base_path_over_cwd_candidate;
         ] );
       ( "preset_can_satisfy",
         [

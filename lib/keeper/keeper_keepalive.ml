@@ -807,9 +807,17 @@ let run_keepalive_unified_turn
           false (* reconcile is now cleared — proceed as normal *))
         else false
       in
+      (* Honor a pending manual reconcile: the "keepalive turn skipped" log
+         at line 821 claims to skip, but previously should_run_turn did not
+         consult manual_reconcile_pending, so the log was a lie whenever the
+         reconcile record survived the auto-clear block above (e.g. the
+         record is too fresh per the age-threshold gate in #6497, or the
+         gate was never enabled). Make the skip real so the log matches
+         behavior and the pending record acts as a turn brake. *)
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
+        && (not manual_reconcile_pending)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates

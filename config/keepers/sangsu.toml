@@ -65,8 +65,8 @@ execution_scope = "workspace"
 tool_preset = "social"
 also_allow = ["keeper_voice_speak", "keeper_voice_listen"]
 
-# Local Ollama — tool_choice contract relaxed in OAS 0.119.1 (oas#786)
-cascade_name = "local_only"
+# GLM Coding Plan first, Ollama fallback (oas#786 relaxes tool_choice)
+cascade_name = "keeper_unified"
 
 # Telemetry Feedback
 telemetry_feedback_enabled = true

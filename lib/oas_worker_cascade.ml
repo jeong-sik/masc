@@ -304,7 +304,6 @@ let cascade_metrics_for_candidates
   in
   let metrics : Llm_provider.Metrics.t =
     {
-      Llm_provider.Metrics.noop with
       on_cache_hit = (fun ~model_id:_ -> ());
       on_cache_miss = (fun ~model_id:_ -> ());
       on_request_start =

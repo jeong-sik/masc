@@ -286,40 +286,51 @@ let read_archive_task_ids config =
       | None -> None
     ) tasks
 
-(** Append tasks to archive file (tasks-archive.json) *)
+(** Append tasks to archive file (tasks-archive.json).
+
+    The read→merge→write sequence is wrapped in [with_file_lock] so
+    concurrent callers cannot lose each other's archive entries.  Prior
+    version held no lock: a second caller that read the archive between
+    the first caller's [read_json] and its [write_json] would compute a
+    merged list from a stale snapshot and overwrite the first write,
+    dropping the tasks the first caller was archiving.  Matches the
+    file-lock discipline already used by [update_state] and
+    [Hebbian_eio.consolidate] (PR #6611). *)
 let append_archive_tasks config (tasks : task list) =
   if tasks = [] then ()
-  else begin
-    let open Yojson.Safe.Util in
-    let path = archive_path config in
-    let existing = read_json config path in
-    let existing_tasks =
-      match existing with
-      | `List items -> items
-      | `Assoc _ -> begin
-          match existing |> member "tasks" with
-          | `List items -> items
-          | _ -> []
-        end
-      | _ -> []
-    in
-    let new_tasks = List.map task_to_yojson tasks in
-    (* Deduplicate by task id, preserving first occurrence *)
-    let seen = Hashtbl.create 64 in
-    let dedup = List.filter (fun json ->
-      match json |> member "id" |> to_string_option with
-      | Some id ->
-          if Hashtbl.mem seen id then false
-          else (Hashtbl.add seen id (); true)
-      | None -> false
-    ) (existing_tasks @ new_tasks)
-    in
-    let archive_json = `Assoc [
-      ("tasks", `List dedup);
-      ("last_updated", `String (now_iso ()));
-    ] in
-    write_json config path archive_json
-  end
+  else
+    (* [let open Yojson.Safe.Util] below shadows [path] with the
+       Yojson accessor; use a distinct local name. *)
+    let arch_path = archive_path config in
+    with_file_lock config arch_path (fun () ->
+      let open Yojson.Safe.Util in
+      let existing = read_json config arch_path in
+      let existing_tasks =
+        match existing with
+        | `List items -> items
+        | `Assoc _ -> begin
+            match existing |> member "tasks" with
+            | `List items -> items
+            | _ -> []
+          end
+        | _ -> []
+      in
+      let new_tasks = List.map task_to_yojson tasks in
+      (* Deduplicate by task id, preserving first occurrence *)
+      let seen = Hashtbl.create 64 in
+      let dedup = List.filter (fun json ->
+        match json |> member "id" |> to_string_option with
+        | Some id ->
+            if Hashtbl.mem seen id then false
+            else (Hashtbl.add seen id (); true)
+        | None -> false
+      ) (existing_tasks @ new_tasks)
+      in
+      let archive_json = `Assoc [
+        ("tasks", `List dedup);
+        ("last_updated", `String (now_iso ()));
+      ] in
+      write_json config arch_path archive_json)
 
 (** Calculate next task id using backlog + archive to avoid reuse *)
 let next_task_number config backlog =

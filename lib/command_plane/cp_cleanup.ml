@@ -102,9 +102,17 @@ let find_dropped_intents ~days intents =
     intents
 
 (** Archive terminal operations to .masc/cp/archive/ *)
+(* Sibling bug of [Room_state.append_archive_tasks]: read→merge→write
+   without a file lock.  Two concurrent cleanup cycles (or a cleanup
+   racing with any future caller) would each read the same snapshot,
+   compute their own merged list, and the later write would drop the
+   earlier caller's operations.  Wrap the entire sequence in
+   [Room_utils.with_file_lock] on the archive path.  [cp_cleanup]
+   already depends on [Room_utils] (mkdir_p / read_json_opt / write_json
+   above), so this does not introduce a new dependency. *)
 let archive_operations config (ops : operation_record list) =
   if ops = [] then ()
-  else begin
+  else
     let archive_dir =
       Filename.concat (control_plane_dir config) "archive"
     in
@@ -112,26 +120,26 @@ let archive_operations config (ops : operation_record list) =
     let archive_path =
       Filename.concat archive_dir "operations.json"
     in
-    let existing =
-      if Sys.file_exists archive_path then
-        match Room_utils.read_json_opt config archive_path with
-        | Some (`Assoc fields) -> (
-            match List.assoc_opt "operations" fields with
-            | Some (`List rows) -> List.filter_map operation_of_json rows
-            | _ -> [])
-        | Some (`List rows) -> List.filter_map operation_of_json rows
-        | _ -> []
-      else []
-    in
-    let merged = existing @ ops in
-    Room_utils.write_json config archive_path
-      (`Assoc
-        [
-          ("version", `String "cp-v2");
-          ("archived_at", `String (Types.now_iso ()));
-          ("operations", `List (List.map operation_to_json merged));
-        ])
-  end
+    Room_utils.with_file_lock config archive_path (fun () ->
+      let existing =
+        if Sys.file_exists archive_path then
+          match Room_utils.read_json_opt config archive_path with
+          | Some (`Assoc fields) -> (
+              match List.assoc_opt "operations" fields with
+              | Some (`List rows) -> List.filter_map operation_of_json rows
+              | _ -> [])
+          | Some (`List rows) -> List.filter_map operation_of_json rows
+          | _ -> []
+        else []
+      in
+      let merged = existing @ ops in
+      Room_utils.write_json config archive_path
+        (`Assoc
+          [
+            ("version", `String "cp-v2");
+            ("archived_at", `String (Types.now_iso ()));
+            ("operations", `List (List.map operation_to_json merged));
+          ]))
 
 (** Remove dead units: empty roster + no leader + stale *)
 let cleanup_dead_units config ~days units =

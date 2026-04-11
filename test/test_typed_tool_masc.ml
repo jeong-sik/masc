@@ -27,7 +27,7 @@ let test_parse_missing_message () =
   | Error _ -> ()
 
 let test_parse_wrong_type () =
-  let json = `Assoc [("message", `Int 42)] in
+  let json = `Assoc [("message", `List [])] in
   match parse json with
   | Ok _ -> Alcotest.fail "expected parse error"
   | Error _ -> ()
@@ -76,7 +76,7 @@ let test_e2e_success () =
 
 let test_e2e_parse_error () =
   let oas_tool = Typed_tool_masc.to_oas Tool_broadcast_typed.tool in
-  match Agent_sdk.Typed_tool.execute oas_tool (`Assoc [("message", `Int 99)]) with
+  match Agent_sdk.Typed_tool.execute oas_tool (`Assoc [("message", `List [])]) with
   | Ok _ -> Alcotest.fail "expected error"
   | Error e -> Alcotest.(check bool) "recoverable" true e.recoverable
 

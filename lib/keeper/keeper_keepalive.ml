@@ -791,28 +791,9 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~keeper_name:meta_after_triage.name
       in
-      (* Auto-clear manual_reconcile to break deadlock: reconcile blocks
-         turns, but turns are needed to clear reconcile.  Clear both the
-         on-disk record AND the registry state, then proceed as if clean. *)
-      let manual_reconcile_pending =
-        if manual_reconcile_pending then (
-          Log.Keeper.info
-            "keeper:%s auto-clearing manual_reconcile to break deadlock"
-            meta_after_triage.name;
-          ignore (Keeper_manual_reconcile.clear ctx.config
-            ~keeper_name:meta_after_triage.name
-            ~actor:"auto_clear_deadlock_break"
-            ~resolution:"Automatic deadlock break: stale reconcile cleared to restore keeper activity"
-            ~evidence_refs:[]
-            ~idempotency_key:None);
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path meta_after_triage.name
-            Keeper_state_machine.Manual_reconcile_cleared);
-          false (* reconcile is now cleared — proceed as normal *))
-        else false
-      in
       let should_run_turn =
         (not (Atomic.get stop))
+        && (not manual_reconcile_pending)
         && turn_decision.should_run
       in
       let meta_after_observe =

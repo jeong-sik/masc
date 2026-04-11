@@ -150,11 +150,22 @@ end
     so agents can poll notifications without SSE subscription. *)
 let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
 
+(** One-shot gate for the "registry not wired" message below. Keeps the
+    log from flooding when callers on a hot path (Tool_task,
+    tool_inline_dispatch_comm) invoke push_event_to_sessions before
+    bootstrap wires the bridge — or in test harnesses that never wire
+    it at all. *)
+let unwired_warned = Atomic.make false
+
 let set_session_push_fn (fn : Yojson.Safe.t -> int) =
   (match !session_registry_ref with
    | Some _ -> Log.Sub.warn "WARNING: session push fn already set, overwriting"
    | None -> ());
-  session_registry_ref := Some fn
+  session_registry_ref := Some fn;
+  (* Reset the one-shot gate so a subsequent unwire (if any future
+     code paths clear the ref) would warn again. Current code never
+     clears the ref, but the reset keeps the gate honest. *)
+  Atomic.set unwired_warned false
 
 (** Push a structured event to all active agent sessions.
     Used by modules (e.g. Tool_task) that lack direct Session.registry access. *)
@@ -164,7 +175,10 @@ let push_event_to_sessions (event : Yojson.Safe.t) : unit =
       (try ignore (push_fn event)
        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
   | None ->
-      Log.Sub.info "push_event_to_sessions: registry not wired"
+      if Atomic.compare_and_set unwired_warned false true then
+        Log.Sub.info
+          "push_event_to_sessions: registry not wired \
+           (further calls silenced until set_session_push_fn runs)"
 
 (** Notify all subscribers of a resource change *)
 let notify_change ~(resource : resource_type) ~(change : change_type)

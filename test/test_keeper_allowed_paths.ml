@@ -25,10 +25,13 @@ let playground_bundle name =
     KAP.playground_mind_path name;
     KAP.playground_repos_path name ]
 
+(* After #6527 iter 4, `.worktrees/` is no longer a workspace default.
+   New worktrees land inside the keeper's own
+   `.masc/playground/<keeper>/repos/<clone>/.worktrees/...` and are
+   already covered by the playground bundle paths above. *)
 let workspace_defaults name =
   [ Printf.sprintf ".masc/keepers/%s/" name;
     ".masc/traces/";
-    ".worktrees/";
     "lib/"; "test/"; "config/"; "bin/"; "scripts/"; "docs/" ]
 
 (* ── observe_only scope ── *)

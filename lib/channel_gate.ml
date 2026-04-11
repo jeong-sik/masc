@@ -121,6 +121,33 @@ let dedup_table_size () =
 (* Register dedup_table_size callback to break cycle *)
 let () = Channel_gate_metrics.register_dedup_size_fn dedup_table_size
 
+(* ── Pulse consumer for periodic dedup cleanup ─────────────── *)
+
+(* [dedup_cleanup] exists in the .mli and is documented as "Called
+   periodically", but no production code path wired it to a timer
+   or Pulse consumer — only the test suite invoked it. Without a
+   periodic sweep, TTL-expired entries never leave the table until
+   it hits [dedup_max_entries] (default 10_000), at which point
+   every subsequent insert falls into the O(n) "evict the oldest"
+   branch in [dedup_check] while holding the lock. This consumer
+   restores the intended behavior: each beat calls [dedup_cleanup]
+   so stale entries are reclaimed before the cap is reached. *)
+let make_dedup_cleanup_consumer () : (module Pulse.Consumer) =
+  (module struct
+    let name = "channel-gate-dedup-cleanup"
+    let should_act _beat = true
+    let on_beat _beat =
+      try
+        dedup_cleanup ~now:(Unix.gettimeofday ());
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Error
+            (Printf.sprintf "dedup_cleanup failed: %s"
+               (Printexc.to_string exn))
+  end)
+
 (* ── Delegated helpers ───────────────────────────────────────── *)
 
 let validation_error_to_string = Gate_protocol.validation_error_to_string

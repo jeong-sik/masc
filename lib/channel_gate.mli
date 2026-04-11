@@ -64,10 +64,18 @@ val dedup_check : string -> bool
     within the TTL window (default 300 s).  Thread-safe. *)
 
 val dedup_cleanup : now:float -> unit
-(** Evict expired entries.  Called periodically. *)
+(** Evict expired entries.  Called periodically by the Pulse consumer
+    returned by {!make_dedup_cleanup_consumer}. *)
 
 val dedup_table_size : unit -> int
 (** Current number of entries in the dedup table.  For metrics. *)
+
+val make_dedup_cleanup_consumer : unit -> (module Pulse.Consumer)
+(** Pulse consumer that sweeps TTL-expired entries on every beat.
+    Wire into an existing Pulse engine (e.g. the orchestrator zombie
+    pulse) during server startup.  Without this, stale entries only
+    leave the table once it hits [dedup_max_entries] and the O(n)
+    evict-one-oldest branch takes over on every subsequent insert. *)
 
 (** {1 Dispatch} *)
 

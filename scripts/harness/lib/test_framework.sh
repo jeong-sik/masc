@@ -54,8 +54,8 @@ curl_post_mcp() {
 
 initialize_mcp_session() {
   local headers_file body_file
-  headers_file="$(mktemp -t masc-mcp-init-headers)"
-  body_file="$(mktemp -t masc-mcp-init-body)"
+  headers_file="$(mcp_mktemp_file "masc-mcp-init-headers")"
+  body_file="$(mcp_mktemp_file "masc-mcp-init-body")"
 
   if curl -sS -m "$CURL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \

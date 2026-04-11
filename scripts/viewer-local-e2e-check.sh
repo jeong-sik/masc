@@ -161,13 +161,14 @@ ensure_mcp_harness() {
 }
 
 ensure_viewer_mcp_session() {
+  ensure_mcp_harness
   if [ -n "$VIEWER_MCP_SESSION_ID" ]; then
     return 0
   fi
 
   local headers_file body_file
-  headers_file="$(mktemp -t viewer-mcp-init-headers)"
-  body_file="$(mktemp -t viewer-mcp-init-body)"
+  headers_file="$(mcp_mktemp_file "viewer-mcp-init-headers")"
+  body_file="$(mcp_mktemp_file "viewer-mcp-init-body")"
 
   if ! curl -sS -m 30 -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \

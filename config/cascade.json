@@ -12,6 +12,7 @@
   "keeper_unified_models": [
     "glm-coding:glm-4.7",
     "glm-coding:glm-5.1",
+    "glm:glm-5.1",
     "groq:qwen/qwen3-32b",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],

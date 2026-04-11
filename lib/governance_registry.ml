@@ -77,6 +77,73 @@ let inference_timeout =
     ~deserialize:deserialize_float
     ()
 
+(* ── dashboard surface (Low risk, display-only) ──────────────── *)
+
+(** Maximum path length before truncation in dashboard output. *)
+let dashboard_max_path_length =
+  Runtime_params.register
+    ~key:"dashboard.max_path_length"
+    ~default:(fun () -> 30)
+    ~validate:(validate_int_range ~min:10 ~max:200 "dashboard_max_path_length")
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ~meta:{ description = "대시보드 경로 출력 최대 길이 (문자)";
+            value_type = "int";
+            min_value = Some (`Int 10); max_value = Some (`Int 200) }
+    ()
+
+(** Maximum message body length before truncation. *)
+let dashboard_max_message_length =
+  Runtime_params.register
+    ~key:"dashboard.max_message_length"
+    ~default:(fun () -> 35)
+    ~validate:(validate_int_range ~min:10 ~max:500 "dashboard_max_message_length")
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ~meta:{ description = "대시보드 메시지 출력 최대 길이 (문자)";
+            value_type = "int";
+            min_value = Some (`Int 10); max_value = Some (`Int 500) }
+    ()
+
+(** Maximum number of pending tasks to show in dashboard. *)
+let dashboard_max_pending_tasks =
+  Runtime_params.register
+    ~key:"dashboard.max_pending_tasks"
+    ~default:(fun () -> 5)
+    ~validate:(validate_int_range ~min:1 ~max:50 "dashboard_max_pending_tasks")
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ~meta:{ description = "대시보드 pending task 표시 최대 개수";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 50) }
+    ()
+
+(** Maximum number of recent messages to show. *)
+let dashboard_max_recent_messages =
+  Runtime_params.register
+    ~key:"dashboard.max_recent_messages"
+    ~default:(fun () -> 5)
+    ~validate:(validate_int_range ~min:1 ~max:50 "dashboard_max_recent_messages")
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ~meta:{ description = "대시보드 recent message 표시 최대 개수";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 50) }
+    ()
+
+(** Minimum section border length. *)
+let dashboard_min_border_length =
+  Runtime_params.register
+    ~key:"dashboard.min_border_length"
+    ~default:(fun () -> 45)
+    ~validate:(validate_int_range ~min:20 ~max:200 "dashboard_min_border_length")
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ~meta:{ description = "대시보드 섹션 경계선 최소 길이";
+            value_type = "int";
+            min_value = Some (`Int 20); max_value = Some (`Int 200) }
+    ()
+
 (* ── cost_policy surface ──────────────────────────────────────── *)
 
 (** Per-session cost ceiling in USD.
@@ -459,6 +526,18 @@ let surfaces =
         "keeper.rule.guardrail_context_min";
       ];
     };
+    {
+      id = "dashboard";
+      description = "Dashboard rendering — truncation lengths, row limits, borders";
+      risk = "low";
+      param_keys = [
+        "dashboard.max_path_length";
+        "dashboard.max_message_length";
+        "dashboard.max_pending_tasks";
+        "dashboard.max_recent_messages";
+        "dashboard.min_border_length";
+      ];
+    };
   ]
 
 (* ── initialization ─────────────────────────────────────────── *)
@@ -467,6 +546,11 @@ let surfaces =
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_init () =
   ignore (Runtime_params.get message_max_count);
+  ignore (Runtime_params.get dashboard_max_path_length);
+  ignore (Runtime_params.get dashboard_max_message_length);
+  ignore (Runtime_params.get dashboard_max_pending_tasks);
+  ignore (Runtime_params.get dashboard_max_recent_messages);
+  ignore (Runtime_params.get dashboard_min_border_length);
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

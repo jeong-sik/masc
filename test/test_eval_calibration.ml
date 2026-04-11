@@ -277,6 +277,55 @@ let test_calibration_stats () =
   check int "total = 3" 3 total;
   check int "approves = 2" 2 approves;
   check int "rejects = 1" 1 rejects;
+  (* None of the above passed ~gen_cascade, so the cross-model
+     counters should be zero and the rate degenerate to 0.0. *)
+  let with_gen =
+    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_cascade" |> to_int) in
+  let cross_match =
+    Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
+  let cross_rate =
+    Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
+  check int "verdicts_with_generator_cascade = 0 when not recorded" 0 with_gen;
+  check int "cross_model_match_count = 0 when no generator" 0 cross_match;
+  check (float 1e-6) "cross_model_rate = 0.0 when no generator" 0.0 cross_rate;
+  Cal.reset_store_for_testing ()
+
+let test_calibration_stats_cross_model_mix () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  (* Four verdicts:
+     - same cascade (generator = evaluator)     → NOT cross-model
+     - distinct cascade (generator ≠ evaluator) → cross-model
+     - distinct cascade                          → cross-model
+     - no generator recorded                     → excluded from denominator
+     Expected: denominator=3, cross_match=2, rate=2/3 ≈ 0.667. *)
+  let same_cascade =
+    make_result ~cascade:"verifier" ~gen_cascade:"verifier" () in
+  let cross_a =
+    make_result ~cascade:"verifier" ~gen_cascade:"keeper_unified" () in
+  let cross_b =
+    make_result ~cascade:"cross_verifier" ~gen_cascade:"local_only" () in
+  let no_generator = make_result ~cascade:"verifier" () in
+  let req = make_req () in
+  Cal.record_verdict ~task_id:"cm1"
+    ~req:(make_req ~title:"a" ~notes:"na" ()) ~result:same_cascade ();
+  Cal.record_verdict ~task_id:"cm2"
+    ~req:(make_req ~title:"b" ~notes:"nb" ()) ~result:cross_a ();
+  Cal.record_verdict ~task_id:"cm3"
+    ~req:(make_req ~title:"c" ~notes:"nc" ()) ~result:cross_b ();
+  Cal.record_verdict ~task_id:"cm4" ~req ~result:no_generator ();
+  let stats = Cal.calibration_stats () in
+  let with_gen =
+    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_cascade" |> to_int) in
+  let cross_match =
+    Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
+  let cross_rate =
+    Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
+  check int "verdicts_with_generator_cascade = 3 (one was Null)" 3 with_gen;
+  check int "cross_model_match_count = 2 (two distinct)" 2 cross_match;
+  check (float 1e-3) "cross_model_rate ≈ 0.667" (2.0 /. 3.0) cross_rate;
   Cal.reset_store_for_testing ()
 
 (* ================================================================ *)
@@ -396,6 +445,7 @@ let () =
     ];
     "stats", [
       test_case "counts" `Quick test_calibration_stats;
+      test_case "cross_model mix" `Quick test_calibration_stats_cross_model_mix;
     ];
     "oas_conversion", [
       test_case "approve verdict" `Quick test_to_harness_verdict_approve;

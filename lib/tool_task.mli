@@ -24,3 +24,27 @@ val handle_archive_view : context -> Yojson.Safe.t -> tool_result
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 val schemas : Types.tool_schema list
+
+(** [is_cross_model_verdict result] is [true] iff [result] has both
+    [generator_cascade = Some g] and [evaluator_cascade] non-empty,
+    and [g <> evaluator_cascade].
+
+    Inclusion criteria align exactly with
+    {!Eval_calibration.calibration_stats} so the live SSE event and
+    the aggregated [cross_model_rate] never disagree on whether a
+    given verdict counts. *)
+val is_cross_model_verdict : Anti_rationalization.review_result -> bool
+
+(** [build_verdict_sse_payload ~now ~task_id ~req ~result] builds the
+    [verdict_recorded] SSE envelope for a finished review.
+
+    Pure function — no IO, no broadcast, no logging. Exposed so that
+    the payload contract (field names, nullability, [cross_model]
+    semantics) can be exercised by unit tests without touching
+    Sse.broadcast or the review pipeline. *)
+val build_verdict_sse_payload :
+  now:float ->
+  task_id:string ->
+  req:Anti_rationalization.review_request ->
+  result:Anti_rationalization.review_result ->
+  Yojson.Safe.t

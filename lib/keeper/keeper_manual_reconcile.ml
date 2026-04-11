@@ -197,10 +197,22 @@ let open_pending config ~keeper_name ~blocker_class ~summary ~failure_reason
   write_record config record;
   record
 
+let remove_file_best_effort config keeper_name =
+  let path = record_path config keeper_name in
+  try Sys.remove path with Sys_error _ -> ()
+
+(* Delete-on-clear: the on-disk record is removed once the caller is
+   handed a Cleared_record. Legacy binaries predating #6518 treat any
+   existing .manual_reconcile.json as a blocker, so leaving behind a
+   status=Cleared file can deadlock a rolling restart. The Cleared_record
+   returned from this function is the one-shot audit surface; callers
+   that need persistence must store it themselves. *)
 let clear config ~keeper_name ~actor ~resolution ~evidence_refs ~idempotency_key =
   match read config keeper_name with
   | None -> No_record
-  | Some ({ status = Cleared; _ } as record) -> Already_cleared record
+  | Some ({ status = Cleared; _ } as record) ->
+      remove_file_best_effort config keeper_name;
+      Already_cleared record
   | Some record ->
       let updated =
         {
@@ -214,5 +226,5 @@ let clear config ~keeper_name ~actor ~resolution ~evidence_refs ~idempotency_key
           clear_idempotency_key = idempotency_key;
         }
       in
-      write_record config updated;
+      remove_file_best_effort config keeper_name;
       Cleared_record updated

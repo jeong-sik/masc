@@ -218,7 +218,7 @@ let test_observe_uses_precollected_board_events () =
       check bool "board event schedules turn" true
         (WO.should_run_unified_turn ~meta:minimal_meta obs))
 
-let test_collect_board_events_skips_non_mentions_without_followup () =
+let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -243,9 +243,11 @@ let test_collect_board_events_skips_non_mentions_without_followup () =
           ~continuity_summary:"goal test-keeper"
           ~meta:minimal_meta
       in
-      check int "skips non-mention events" 0 (List.length events);
+      check int "keeps non-mention events" 1 (List.length events);
       check int "new count includes non-mention" 1 new_count;
-      check int "mention count stays zero" 0 mention_count)
+      check int "mention count stays zero" 0 mention_count;
+      check bool "event is not explicit mention" false
+        (List.hd events).explicit_mention)
 
 let test_collect_board_events_keeps_external_replies_after_self_comment () =
   let base_dir = temp_dir () in
@@ -2668,8 +2670,8 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
-          test_case "skips non-mention board events without follow-up" `Quick
-            test_collect_board_events_skips_non_mentions_without_followup;
+          test_case "keeps non-mention board events as follow-up signal" `Quick
+            test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
           test_case "collects room signal when enabled" `Quick

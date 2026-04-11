@@ -326,6 +326,7 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
 | `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
 | `glm` | `Glm` | `MASC_GLM_DEFAULT_MODEL` |
+| `groq` | runtime env | requires `GROQ_API_KEY` |
 | `gemini` | `Gemini` | `MASC_GEMINI_DEFAULT_MODEL` |
 | `claude` | `Claude` | `MASC_CLAUDE_DEFAULT_MODEL` |
 

@@ -114,17 +114,19 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
       match Grpc_eio.Stream.take raw_stream with
       | Ok bytes ->
         (try
-          push_typed (Ok (T.Event.of_bytes bytes))
+          ignore (push_typed (Ok (T.Event.of_bytes bytes)))
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          push_error
-            (Printf.sprintf "event decode error: %s"
-               (Printexc.to_string exn)));
+          ignore
+            (push_error
+               (Printf.sprintf "event decode error: %s"
+                  (Printexc.to_string exn))));
         loop ()
       | Error status ->
         if not (Grpc_core.Status.is_ok status) then
-          push_error
-            (Printf.sprintf "subscribe stream error: %s"
-               (Grpc_core.Status.to_string status));
+          ignore
+            (push_error
+               (Printf.sprintf "subscribe stream error: %s"
+                  (Grpc_core.Status.to_string status)));
         close_typed ()
       | exception End_of_file ->
         close_typed ()

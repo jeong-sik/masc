@@ -641,8 +641,8 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
   check bool "playground described as sandbox" true
     (contains_substring prompt "playground is your sandbox; worktree is a repo workflow");
-  check bool "pr workflow marked as legacy worktree helper" true
-    (contains_substring prompt "`keeper_pr_workflow` is a legacy one-shot worktree helper");
+  check bool "pr workflow marked as deprecated" true
+    (contains_substring prompt "Do NOT use keeper_pr_workflow");
   check bool "pr submit marked canonical" true
     (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
 

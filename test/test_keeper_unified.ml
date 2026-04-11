@@ -655,9 +655,17 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  check bool "world prompt names worktree workflow" true
+  (* #6648 iter9 — the worktree sentence was rewritten to place
+     worktrees *inside* the playground clone, closing the prompt-side
+     drift that iter1~iter8 left in place. Assert the new canonical
+     phrase so a future regression does not re-introduce the bare
+     server-root `.worktrees/` form. *)
+  check bool "world prompt names worktree workflow inside playground" true
     (contains_substring prompt
-       "Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`")
+       "Repo worktrees live *inside* your playground clone");
+  check bool "world prompt names canonical playground-rooted worktree path" true
+    (contains_substring prompt
+       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
 let test_system_prompt_prefers_submit_over_legacy_workflow () =
   let sys =

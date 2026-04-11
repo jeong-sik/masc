@@ -1317,11 +1317,8 @@ let run_turn
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
-              (match tool_choice with
-               | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-                 completion_contract_ref :=
-                   Keeper_tool_disclosure.Require_tool_use
-               | _ -> ());
+              completion_contract_ref :=
+                Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
               let lane =
                 if is_retry then "retry"
                 else (

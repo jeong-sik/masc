@@ -101,6 +101,52 @@ let test_profile_parses_non_empty profile () =
         (String.trim cfg.model_id <> ""))
     parsed
 
+(** Meta / regression guard: prove that the happy-path assertion in
+    [test_profile_parses_non_empty] is NOT vacuous.
+
+    The happy-path test asserts
+      [List.length parsed = List.length strings]
+    which would trivially pass if OAS [parse_model_strings] silently
+    accepted every string (even known-bad provider names). This negative
+    fixture feeds [parse_model_strings] a two-element profile where one
+    entry uses a deliberately unknown provider name that cannot collide
+    with any real registry entry. We assert the parser drops it — i.e.
+    [List.length parsed < List.length strings]. If this ever becomes
+    equal, the happy-path guarantee is broken and both tests will fire
+    loudly. *)
+let test_unknown_provider_is_dropped () =
+  let tmp = Filename.temp_file "cascade-negative-" ".json" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove tmp with _ -> ())
+    (fun () ->
+      let oc = open_out tmp in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          output_string oc
+            {|{
+  "regression_models": [
+    "ollama:qwen3.5:35b-a3b-nvfp4",
+    "__nonexistent_provider_sentinel__:fake-model"
+  ]
+}|});
+      let strings =
+        load_profile_strings ~path:tmp ~profile:"regression"
+      in
+      check int "fixture has both entries" 2 (List.length strings);
+      let parsed =
+        Llm_provider.Cascade_config.parse_model_strings strings
+      in
+      (* At least one entry must be dropped. Using "<" (not "=") keeps
+         the test correct if a future registry happens to also gate the
+         ollama entry behind an availability flag — the invariant we
+         care about is "unknown providers are non-identity for parse",
+         not an exact surviving count. *)
+      check bool
+        "unknown provider entry is dropped by parse_model_strings"
+        true
+        (List.length parsed < List.length strings))
+
 let () =
   let path = cascade_path () in
   let profiles = discover_profiles path in
@@ -113,4 +159,14 @@ let () =
           (test_profile_parses_non_empty p))
       profiles
   in
-  run "Cascade config validity" [ "profiles", profile_cases ]
+  run "Cascade config validity"
+    [
+      "profiles", profile_cases;
+      ( "regression",
+        [
+          test_case
+            "unknown provider dropped (meta-guard)"
+            `Quick
+            test_unknown_provider_is_dropped;
+        ] );
+    ]

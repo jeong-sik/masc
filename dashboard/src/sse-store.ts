@@ -105,10 +105,11 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   keeper_handoff:       { target: 'execution' },
   keeper_compaction:    { target: 'execution' },
   keeper_phase_changed: { target: 'execution' },
-  // Board — emitted by lib/tool_inline_dispatch_extra.ml
+  // Board content — emitted by lib/tool_inline_dispatch_extra.ml
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
   'masc/board_delete':  { target: 'board' },
+  // Board vote notifications — emitted by lib/server/server_bootstrap_loops.ml
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   // Activity graph

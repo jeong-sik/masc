@@ -27,7 +27,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     ])
   in
   match evt with
-  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
+  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id; _ } ->
     wrap "agent_started" (`Assoc [
       ("agent_name", `String agent_name);
       ("task_id", `String task_id);
@@ -48,24 +48,24 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       ("agent_name", `String agent_name);
       ("tool_name", `String tool_name);
     ])
-  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
+  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn; _ } ->
     wrap "turn_started" (`Assoc [
       ("agent_name", `String agent_name);
       ("turn", `Int turn);
     ])
-  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
+  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn; _ } ->
     wrap "turn_completed" (`Assoc [
       ("agent_name", `String agent_name);
       ("turn", `Int turn);
     ])
-  | Agent_sdk.Event_bus.ContextCompacted { agent_name; before_tokens; after_tokens; phase } ->
+  | Agent_sdk.Event_bus.ContextCompacted { agent_name; before_tokens; after_tokens; phase; _ } ->
     wrap "context_compacted" (`Assoc [
       ("agent_name", `String agent_name);
       ("before_tokens", `Int before_tokens);
       ("after_tokens", `Int after_tokens);
       ("phase", `String phase);
     ])
-  | Agent_sdk.Event_bus.TaskStateChanged { task_id; from_state; to_state } ->
+  | Agent_sdk.Event_bus.TaskStateChanged { task_id; from_state; to_state; _ } ->
     wrap "task_state_changed" (`Assoc [
       ("task_id", `String task_id);
       ("from_state", `String from_state);

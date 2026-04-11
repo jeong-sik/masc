@@ -14,11 +14,31 @@ type tool_result = bool * string
 let handle_worktree_create ctx args =
   (* LLM may omit agent_name in args; fall back to context agent_name.
      This prevents Validation.Agent_id failures when the 9B model
-     sends empty or missing agent_name. *)
-  let agent_name =
-    let from_args = get_string args "agent_name" "" in
-    if from_args = "" then ctx.agent_name else from_args
+     sends empty or missing agent_name.
+
+     #6527 iter 7: We must NOT trust an arbitrary agent_name from the
+     caller — that would let keeper-A do
+         masc_worktree_create agent_name=keeper-B task_id=...
+     and land a worktree inside keeper-B's playground, defeating the
+     per-keeper containment invariant established in iters 1–6. If
+     the caller supplies an agent_name that differs from
+     ctx.agent_name, reject it. Empty/missing still falls back to
+     ctx.agent_name. *)
+  let agent_name_result =
+    let from_args = String.trim (get_string args "agent_name" "") in
+    if from_args = "" then Ok ctx.agent_name
+    else if from_args = ctx.agent_name then Ok ctx.agent_name
+    else
+      Error (Printf.sprintf
+        "agent_name mismatch: arg=%S but context agent is %S. \
+         Cross-agent worktree creation is blocked — omit agent_name \
+         (or pass your own) so the worktree lands in your own \
+         playground."
+        from_args ctx.agent_name)
   in
+  match agent_name_result with
+  | Error msg -> (false, msg)
+  | Ok agent_name ->
   let raw_task_id = get_string args "task_id" "" in
   let base_branch = get_string args "base_branch" "develop" in
   (* repo_name comes straight from MCP tool args. Reject anything that

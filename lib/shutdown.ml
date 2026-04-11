@@ -62,6 +62,10 @@ type state = {
   mutable phase : phase;
   mutable started_at : float;
   mutable reason : string;
+  entered : bool Atomic.t;
+    (** CAS gate: ensures [initiate] runs phases at most once per state.
+        Separate from the global [shutting_down_flag] which is a
+        process-wide sticky observability flag. *)
   config : config;
 }
 
@@ -69,6 +73,7 @@ let create ?(config = config_from_env ()) () = {
   phase = Running;
   started_at = 0.0;
   reason = "";
+  entered = Atomic.make false;
   config;
 }
 
@@ -159,7 +164,16 @@ let phase_exit state ~exit_fn =
     @param drain_check Returns true when all in-flight work is complete
     @param exit_fn Called to terminate the process (e.g., Eio.Switch.fail) *)
 let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
-  if state.phase <> Running then begin
+  (* CAS on per-state [entered] flag as the single-entry gate. The old
+     code checked [state.phase <> Running] non-atomically, which races
+     when two signals arrive in close succession (e.g. SIGTERM then
+     SIGINT): both callers observe [Running] before either writes the
+     new phase, both proceed, and the phases double-run with clobbered
+     [started_at]/[reason]. Per-state CAS serializes entry at the CPU
+     level without depending on the global [shutting_down_flag], which
+     is documented as a sticky observability flag and must not gate
+     repeated [initiate] calls on distinct [state]s (e.g. in tests). *)
+  if not (Atomic.compare_and_set state.entered false true) then begin
     Log.Server.warn "[Shutdown] already in progress (phase=%s), ignoring"
       (phase_to_string state.phase);
   end else begin

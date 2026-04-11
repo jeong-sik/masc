@@ -58,6 +58,66 @@ let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
       "original_bytes", `Int len;
       "shown_bytes", `Int shown_bytes ]
 
+(** Regex matching --repo owner/name or -R owner/name in gh CLI commands. *)
+let repo_flag_re =
+  Re.compile
+    (Re.seq
+       [ Re.alt [ Re.str "--repo"; Re.str "-R" ]
+       ; Re.rep1 Re.blank
+       ; Re.rep1 (Re.compl [ Re.blank ])
+       ])
+
+(** Cached owner/repo slug from git remote origin. *)
+let _repo_slug_cache : string option option ref = ref None
+
+let project_repo_slug () : string option =
+  match !_repo_slug_cache with
+  | Some cached -> cached
+  | None ->
+      let slug =
+        match Process_eio.run_argv_with_status ~timeout_sec:5.0
+                ["git"; "remote"; "get-url"; "origin"] with
+        | Unix.WEXITED 0, url ->
+            let url = String.trim url in
+            (* git@github.com:owner/repo.git or https://github.com/owner/repo.git *)
+            let strip_git s =
+              if String.length s > 4 && String.sub s (String.length s - 4) 4 = ".git"
+              then String.sub s 0 (String.length s - 4)
+              else s
+            in
+            (match String.split_on_char ':' url with
+             | [_; path] when String.contains url '@' ->
+                 Some (strip_git path)
+             | _ ->
+                 (* https://github.com/owner/repo.git *)
+                 let parts = String.split_on_char '/' url in
+                 let n = List.length parts in
+                 if n >= 2 then
+                   let owner = List.nth parts (n - 2) in
+                   let repo = strip_git (List.nth parts (n - 1)) in
+                   Some (owner ^ "/" ^ repo)
+                 else None)
+        | _ -> None
+      in
+      _repo_slug_cache := Some slug;
+      slug
+
+(** Replace a wrong --repo/-R slug in cmd with the correct one.
+    Returns (corrected_cmd, was_corrected). *)
+let correct_repo_flag ~(correct_slug : string) (cmd : string) : string * bool =
+  if Re.execp repo_flag_re cmd then
+    let corrected =
+      Re.replace repo_flag_re
+        ~f:(fun g ->
+          let matched = Re.Group.get g 0 in
+          let flag = if String.length matched > 2 && matched.[0] = '-' && matched.[1] = 'R'
+                     then "-R" else "--repo" in
+          flag ^ " " ^ correct_slug)
+        cmd
+    in
+    (corrected, corrected <> cmd)
+  else (cmd, false)
+
 let handle_keeper_github
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -77,7 +137,6 @@ let handle_keeper_github
      This is the root fix for LLM hallucinating repo owners (#6043). *)
   let gh_raw =
     if repo_param <> "" then
-      (* Strip any --repo/-R from cmd to avoid duplication, then append *)
       let stripped = Re.replace repo_flag_re ~f:(fun _ -> "") gh_raw_base |> String.trim in
       Printf.sprintf "%s --repo %s" stripped repo_param
     else
@@ -86,7 +145,6 @@ let handle_keeper_github
           let (corrected, _) = correct_repo_flag ~correct_slug:slug gh_raw_base in
           corrected
       | None -> gh_raw_base
-  in
   in
   if gh_raw = ""
   then error_json "cmd is required. \

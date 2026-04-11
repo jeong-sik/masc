@@ -138,7 +138,26 @@ let dispatch_consumers_with_recovery t beat =
     if List.mem C.name t.disabled_consumers then
       ()  (* skip disabled consumers *)
     else if C.should_act beat then begin
-      match C.on_beat beat with
+      (* Convert raised exceptions to Error so they flow through the
+         same recovery pathway as explicit [Error _] returns. The
+         module doc comment promises "Consumer errors are logged but
+         never crash the pulse"; without this try/with, a consumer
+         that raises (Failure, Invalid_argument, or anything other
+         than a Result wrapper) would escape [dispatch], propagate
+         out of [tick], out of [loop], and kill the pulse fiber
+         entirely — silently breaking the "never crash the pulse"
+         invariant for every future beat. [Eio.Cancel.Cancelled] is
+         re-raised per the structured-concurrency contract. *)
+      let result =
+        try C.on_beat beat
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Error
+              (Printf.sprintf "uncaught exception: %s"
+                 (Printexc.to_string exn))
+      in
+      match result with
       | Ok () ->
           (* Reset consecutive failure count on success *)
           Hashtbl.remove t.consumer_failures C.name

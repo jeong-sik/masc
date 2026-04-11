@@ -63,8 +63,7 @@ let test_default_backend () =
 let test_backend_returns_jsonl () =
   match Board_dispatch.backend () with
   | Board_dispatch.Jsonl _ -> ()
-  | Board_dispatch.Postgres _ ->
-      Alcotest.fail "Expected Jsonl backend"
+  | _ -> Alcotest.fail "Expected Jsonl backend"
 
 (** {1 Post CRUD via Dispatch} *)
 

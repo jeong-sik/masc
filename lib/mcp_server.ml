@@ -464,8 +464,8 @@ type server_state = {
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option; (* For agent spawning *)
   fs: Eio.Fs.dir_ty Eio.Path.t option; (* For filesystem access *)
   clock: float Eio.Time.clock_ty Eio.Resource.t option; (* For timestamps/sleep *)
-  mono_clock: Eio.Time.Mono.ty Eio.Resource.t option; (* For readonly PG compute isolation *)
-  env: Caqti_eio.stdenv option; (* For DB/HTTP access - Agent Being Protocol *)
+  mono_clock: Eio.Time.Mono.ty Eio.Resource.t option;
+  env: Caqti_eio.stdenv option; (* For HTTP access - Agent Being Protocol *)
   net: Eio_context.eio_net option; (* For network calls - P3a: replaces global ref *)
 }
 
@@ -493,29 +493,14 @@ let create_state ~base_path =
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
-(** Create state with Eio context - required for PostgresNative backend *)
+(** Create state with Eio context. *)
 let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
     Room.default_config_eio ~sw ~env
       ~on_backend_ready:(fun backend ->
-        let open Room_utils_backend_setup in
-        if Board_dispatch.pg_forced () then begin
-          Log.Backend.info "Board: PostgreSQL forced by MASC_BOARD_BACKEND=pg";
-          match backend with
-          | PostgresNative pg ->
-              let pool = Backend.Postgres.get_pool pg in
-              (match Board_dispatch.init_pg pool with
-               | Ok () -> ()
-               | Error _ -> Board_dispatch.init_jsonl ())
-          | _ -> Board_dispatch.init_jsonl ()
-        end else if Board_dispatch.jsonl_forced () then begin
-          Log.Backend.info "Board: JSONL forced by MASC_BOARD_BACKEND=jsonl";
-          Board_dispatch.init_jsonl ()
-        end else begin
-          ignore backend;
-          Log.Backend.info "Board: JSONL default backend";
-          Board_dispatch.init_jsonl ()
-        end)
+        ignore backend;
+        Log.Backend.info "Board: JSONL default backend";
+        Board_dispatch.init_jsonl ())
       base_path
   in
   let registry = Session.create () in

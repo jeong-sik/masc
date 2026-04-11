@@ -5,12 +5,8 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
-let pg_env_var_names =
-  [| "MASC_POSTGRES_URL" |]
-
 let force_jsonl_fallback_env () =
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
-  Array.iter (fun name -> Unix.putenv name "") pg_env_var_names
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()

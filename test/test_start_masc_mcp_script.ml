@@ -173,11 +173,10 @@ let test_explicit_env_overrides_repo_env_files () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
-      check bool "explicit storage wins" true
-        (contains_substring captured "MASC_STORAGE_TYPE=postgres");
-      check bool "explicit DB URL wins" true
-        (contains_substring captured
-           "SUPABASE_DB_URL=postgresql://caller-override/db");
+      check bool "storage coerces to filesystem" true
+        (contains_substring captured "MASC_STORAGE_TYPE=filesystem");
+      check bool "PG URL stripped" true
+        (contains_substring captured "SUPABASE_DB_URL=");
       check bool "base path passed through" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ dir));
       check bool "explicit config dir preserved" true

@@ -259,13 +259,14 @@ let sb_path () =
   | Error msg -> raise (Config_error msg)
 
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
-    Valid: "filesystem", "postgres-native". *)
+    Valid: "filesystem", "memory". *)
 let storage_type () =
   match Sys.getenv_opt "MASC_STORAGE_TYPE" |> trim_opt with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
-      | "postgres" | "postgresql" | "postgres-native" -> "postgres-native"
-      | "filesystem" | "file" | "jsonl" -> "filesystem"
+      | "postgres" | "postgresql" | "postgres-native"
+      | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
+      | "memory" -> "memory"
       | other -> other)
   | None -> "filesystem"
 
@@ -326,13 +327,15 @@ let build_git_commit_opt () =
 let auto_respond_opt () =
   Sys.getenv_opt "MASC_AUTO_RESPOND" |> trim_opt
 
-(** {1 PostgreSQL} *)
+(** {1 Legacy PostgreSQL Compatibility} *)
 
-(** PostgreSQL connection URL. *)
+(** Legacy PostgreSQL connection URL.
+    Retained temporarily so older tests and callers can compile while
+    the runtime path is filesystem-only. *)
 let postgres_url_opt () =
-  Sys.getenv_opt "MASC_POSTGRES_URL" |> trim_opt
+  None
 
-(** PG connection pool size, clamped to [1, 50]. Default: 10. *)
+(** Legacy PG connection pool size, clamped to [1, 50]. Default: 10. *)
 let pg_pool_size () =
   max 1 (min 50 (get_int ~default:10 "MASC_PG_POOL_SIZE"))
 

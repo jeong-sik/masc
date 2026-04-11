@@ -20,19 +20,30 @@ let animals = [|
   "orca"; "rhino"; "sloth"; "tapir"; "zebra";
 |]
 
-(* Fiber-safe random state for nickname generation *)
+(* RNG for nickname generation.  [Random.State.t] is NOT fiber-safe —
+   the previous doc comment claiming otherwise was incorrect.  Guard
+   the shared state with an [Eio.Mutex] and route every RNG access
+   through [with_nickname_rng].  Same discipline as [Lib.A2a_tools]
+   ([a2a_rng] / [a2a_rng_mutex]). *)
 let nickname_rng = Random.State.make_self_init ()
+let nickname_rng_mutex = Eio.Mutex.create ()
+let with_nickname_rng f =
+  Eio.Mutex.use_ro nickname_rng_mutex (fun () -> f nickname_rng)
 
 (** Generate a short random suffix (4 hex chars) for uniqueness *)
 let random_suffix () =
-  Printf.sprintf "%04x" (Random.State.int nickname_rng 0xFFFF)
+  Printf.sprintf "%04x"
+    (with_nickname_rng (fun rng -> Random.State.int rng 0xFFFF))
 
 (** Generate a unique nickname for an agent type.
     Format: {agent_type}-{adjective}-{animal}
     Example: claude-swift-fox, gemini-brave-tiger *)
 let generate agent_type =
-  let adj = adjectives.(Random.State.int nickname_rng (Array.length adjectives)) in
-  let animal = animals.(Random.State.int nickname_rng (Array.length animals)) in
+  let adj, animal =
+    with_nickname_rng (fun rng ->
+      ( adjectives.(Random.State.int rng (Array.length adjectives)),
+        animals.(Random.State.int rng (Array.length animals)) ))
+  in
   Printf.sprintf "%s-%s-%s" agent_type adj animal
 
 (** Generate with suffix for guaranteed uniqueness.

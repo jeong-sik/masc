@@ -10,8 +10,17 @@
     @since 0.5.0
 *)
 
-(* Fiber-safe random state for UUID generation *)
+(* UUID / random generation.  [Random.State.t] is NOT fiber-safe —
+   concurrent [Random.State.int] or [Uuidm.v4_gen] calls against a
+   shared state can produce duplicate values or corrupt internal
+   state.  The previous doc comment claiming "Fiber-safe" was
+   incorrect.  Guard the shared state with an [Eio.Mutex] and route
+   every RNG access through [with_identity_rng].  Same discipline
+   used by [Lib.A2a_tools] ([a2a_rng] / [a2a_rng_mutex]). *)
 let identity_rng = Random.State.make_self_init ()
+let identity_rng_mutex = Eio.Mutex.create ()
+let with_identity_rng f =
+  Eio.Mutex.use_ro identity_rng_mutex (fun () -> f identity_rng)
 
 (** {1 Core Types} *)
 
@@ -82,7 +91,7 @@ type t = {
 (** Generate a unique agent UUID from name + timestamp hash *)
 let generate_uuid ~agent_name =
   let timestamp = Time_compat.now () in
-  let random_part = Random.State.int identity_rng 0xFFFFFF in
+  let random_part = with_identity_rng (fun rng -> Random.State.int rng 0xFFFFFF) in
   let input = Printf.sprintf "%s-%f-%d" agent_name timestamp random_part in
   (* Simple hash-based UUID: first 8 chars of hex digest *)
   let hash = Digest.string input |> Digest.to_hex in
@@ -92,7 +101,7 @@ let generate_uuid ~agent_name =
 
 (** Generate a unique session key *)
 let generate_session_key () =
-  let uuid = Uuidm.v4_gen identity_rng () in
+  let uuid = with_identity_rng (fun rng -> Uuidm.v4_gen rng ()) in
   Uuidm.to_string uuid
 
 (** Create identity from MCP request params *)

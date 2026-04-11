@@ -232,6 +232,17 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
     in
     List.mem action git_read_only_actions
   | "masc_worktree_list" -> true
+  (* MASC coordination tools: internal state only, no filesystem mutation *)
+  | "keeper_task_claim" | "keeper_task_done" | "keeper_tasks_list"
+  | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
+  | "keeper_board_list" | "keeper_board_get"
+  | "keeper_broadcast" -> true
+  (* Coding tools: operate in worktree scope (not main), safe for
+     multi-step coding pipelines. Without this, mutation boundary blocks
+     the create-worktree → edit → commit → push → PR pipeline. *)
+  | "masc_code_edit" | "masc_code_write" | "masc_code_delete"
+  | "masc_code_shell" | "masc_worktree_create"
+  | "keeper_pr_submit" | "keeper_fs_edit" -> true
   | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

@@ -66,8 +66,7 @@ execution_scope = "workspace"
 tool_preset = "social"
 also_allow = ["keeper_voice_speak", "keeper_voice_listen"]
 
-# GLM flash cascade for reliable tool calling (voice_speak, voice_listen).
-# local_only cascade has poor tool selection with qwen3.5.
+# GLM first, Ollama fallback
 cascade_name = "keeper_unified"
 
 # Telemetry Feedback

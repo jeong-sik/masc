@@ -23,6 +23,19 @@ let gh_not_found_hint ~(st : Unix.process_status) ~(out : string) =
          Use 'issue list' or 'pr list' to find valid targets first." ]
   else []
 
+(** Truncate gh output to prevent context explosion.
+    65KB responses were observed causing 300s timeout via token overflow. *)
+let max_gh_output_bytes = 8192
+
+let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
+  let len = String.length out in
+  if len <= max_gh_output_bytes then out, []
+  else
+    let truncated = String.sub out 0 max_gh_output_bytes in
+    truncated ^ "\n... [truncated: " ^ string_of_int len ^ " bytes total, showing first "
+    ^ string_of_int max_gh_output_bytes ^ "]",
+    [ "truncated", `Bool true; "original_bytes", `Int len ]
+
 let handle_keeper_github
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -148,13 +161,14 @@ let handle_keeper_github
             ^ (if cmd <> "" then cmd else String.concat " " (List.map Filename.quote gh_args))
           in
           let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
-          let st, out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
+          let st, raw_out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
+          let out, trunc_fields = truncate_gh_output raw_out in
           Yojson.Safe.to_string
             (`Assoc
                 ([ "ok", `Bool (st = Unix.WEXITED 0)
                  ; "status", Keeper_alerting_path.process_status_to_json st
                  ; "output", `String out
-                 ] @ gh_not_found_hint ~st ~out)))
+                 ] @ trunc_fields @ gh_not_found_hint ~st ~out)))
       else (
         let gh_cmd =
           if cmd <> ""
@@ -163,15 +177,16 @@ let handle_keeper_github
         in
         let root = Keeper_alerting_path.project_root_of_config config in
         let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
-        let st, out =
+        let st, raw_out =
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ]
         in
+        let out, trunc_fields = truncate_gh_output raw_out in
         Yojson.Safe.to_string
           (`Assoc
               ([ "ok", `Bool (st = Unix.WEXITED 0)
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "output", `String out
-               ] @ gh_not_found_hint ~st ~out))))
+               ] @ trunc_fields @ gh_not_found_hint ~st ~out))))
 ;;
 
 let handle_keeper_pr_workflow

@@ -51,15 +51,11 @@ let test_derive_default_dead () =
   check phase_t "default = Dead" SM.Dead (SM.derive_phase SM.default_conditions)
 
 let test_derive_offline () =
-  (* Offline is the true initial state: no fiber, no budget concept yet.
-     Offline requires all booleans false — including restart_budget_remaining. *)
-  (* In practice, Offline is only reachable at the derive_phase fallback.
-     Since fiber_alive=false + restart_budget_remaining=false = Dead,
-     Offline is currently unreachable via derive_phase alone.
-     It requires explicit construction from registry initialization. *)
-  (* Verify Offline exists in all_phases *)
-  check bool "Offline in all_phases" true
-    (List.mem SM.Offline SM.all_phases)
+  let c = { SM.default_conditions with
+    launch_pending = true;
+    restart_budget_remaining = true;
+  } in
+  check phase_t "launch pending = Offline" SM.Offline (SM.derive_phase c)
 
 let test_derive_dead_highest_priority () =
   let c = { running_conditions with
@@ -601,6 +597,33 @@ let test_guard_compaction_triggers () =
   ) events in
   check bool "compaction triggered" true has_compact
 
+let test_guard_zero_gates_do_not_force_compaction () =
+  let snap = { healthy_snapshot with
+    thresholds = { healthy_snapshot.thresholds with
+      compaction_message_gate = 0;
+      compaction_token_gate = 0;
+    };
+  } in
+  let events = Guard.evaluate snap in
+  let has_compact = List.exists (function
+    | SM.Compaction_started -> true | _ -> false
+  ) events in
+  check bool "zero gates disabled" false has_compact
+
+let test_guard_compaction_respects_cooldown () =
+  let snap = { healthy_snapshot with
+    context = { healthy_snapshot.context with context_ratio = 0.55 };
+    timing =
+      { healthy_snapshot.timing with
+        since_last_compaction_sec = 30.0;
+      };
+  } in
+  let events = Guard.evaluate snap in
+  let has_compact = List.exists (function
+    | SM.Compaction_started -> true | _ -> false
+  ) events in
+  check bool "cooldown blocks compaction" false has_compact
+
 let test_guard_handoff_triggers () =
   let snap = { healthy_snapshot with
     context = { healthy_snapshot.context with context_ratio = 0.90 };
@@ -637,6 +660,23 @@ let test_guard_hb_failure_threshold () =
     | _ -> false
   ) events in
   check bool "heartbeat failure at threshold" true has_hb_fail
+
+let test_guard_plan_requires_both_alignments_low () =
+  let snap = { healthy_snapshot with
+    similarity =
+      { healthy_snapshot.similarity with
+        goal_alignment = 0.2;
+        response_alignment = 0.7;
+      };
+  } in
+  let events = Guard.evaluate snap in
+  let plan_flag =
+    List.find_map (function
+      | SM.Context_measured { auto_rules; _ } -> Some auto_rules.plan
+      | _ -> None
+    ) events
+  in
+  check bool "plan requires both" false (Option.value ~default:true plan_flag)
 
 (* ── Phase roundtrip tests ─────────────────────────────── *)
 
@@ -1277,6 +1317,7 @@ let test_invariant_terminal_absorbing () =
 let test_invariant_fiber_started_reset_exhaustive () =
   (* Maximally dirty: every per-fiber condition set to "bad" state *)
   let dirty_conds = {
+    SM.launch_pending = false;
     SM.fiber_alive = false;
     heartbeat_healthy = false;
     turn_healthy = false;
@@ -1559,6 +1600,7 @@ let test_invariant_derive_matches_matrix () =
 let test_invariant_priority_chain () =
   (* All conditions true: stopped should win (highest fiber-alive priority) *)
   let all_true = {
+    SM.launch_pending = false;
     SM.fiber_alive = true;
     heartbeat_healthy = true;
     turn_healthy = true;
@@ -1763,9 +1805,12 @@ let () =
     "guard", [
       test_case "healthy = no action events" `Quick test_guard_healthy_no_crash_events;
       test_case "compaction triggers" `Quick test_guard_compaction_triggers;
+      test_case "zero gates disable compaction" `Quick test_guard_zero_gates_do_not_force_compaction;
+      test_case "compaction cooldown respected" `Quick test_guard_compaction_respects_cooldown;
       test_case "handoff triggers" `Quick test_guard_handoff_triggers;
       test_case "guardrail triggers" `Quick test_guard_guardrail_triggers;
       test_case "hb failure at threshold" `Quick test_guard_hb_failure_threshold;
+      test_case "plan requires both low" `Quick test_guard_plan_requires_both_alignments_low;
     ];
     "roundtrip", [
       test_case "phase string roundtrip" `Quick test_phase_string_roundtrip;

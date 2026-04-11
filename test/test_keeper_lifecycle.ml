@@ -99,11 +99,18 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta () in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+        KEC.apply_post_turn_lifecycle
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:512
           ~checkpoint:None
       in
+      check bool "compaction not attempted" false lifecycle.compaction.attempted;
+      check (option string) "compaction no failure" None
+        lifecycle.compaction.failure_reason;
+      check bool "handoff not attempted" false lifecycle.handoff_attempted;
       check bool "compaction not applied" false lifecycle.compaction.applied;
       check string "skip decision" "skipped:no_checkpoint"
         lifecycle.compaction.decision;
@@ -174,12 +181,20 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       in
       let _original_message_count = List.length original_ctx.messages in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
+      let compaction_started = ref 0 in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+        KEC.apply_post_turn_lifecycle
+          ~on_handoff_started:(fun () -> ())
+          ~base_dir ~meta
+          ~on_compaction_started:(fun () -> incr compaction_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:320
           ~checkpoint:(Some checkpoint)
       in
+      check int "compaction start hook called once" 1 !compaction_started;
+      check bool "compaction attempted" true lifecycle.compaction.attempted;
+      check (option string) "compaction no failure" None
+        lifecycle.compaction.failure_reason;
       check bool "compaction applied" true lifecycle.compaction.applied;
       check bool "saved tokens positive" true (lifecycle.compaction.saved_tokens > 0);
       check int "compaction count increments" 1
@@ -238,11 +253,15 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
       let original_count = List.length original_ctx.messages in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+        KEC.apply_post_turn_lifecycle
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
           ~checkpoint:(Some checkpoint)
       in
+      check bool "compaction not attempted" false lifecycle.compaction.attempted;
       check bool "compaction skipped" false lifecycle.compaction.applied;
       check string "skip decision recorded" "blocked:below_thresholds"
         lifecycle.compaction.decision;
@@ -292,12 +311,22 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
             "done\n\n[STATE]\nGoal: roll over safely\nProgress: ready\n[/STATE]"
         |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
       in
+      let compaction_started = ref 0 in
+      let handoff_started = ref 0 in
       let lifecycle =
         KEC.apply_post_turn_lifecycle ~base_dir ~meta
+          ~on_compaction_started:(fun () -> incr compaction_started)
+          ~on_handoff_started:(fun () -> incr handoff_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
           ~checkpoint:(Some checkpoint)
       in
+      check int "compaction start hook called once" 1 !compaction_started;
+      check int "handoff start hook called once" 1 !handoff_started;
+      check bool "compaction attempted" true lifecycle.compaction.attempted;
+      check bool "handoff attempted" true lifecycle.handoff_attempted;
+      check (option string) "handoff no failure" None
+        lifecycle.handoff_failure_reason;
       check bool "compaction applied before handoff" true
         lifecycle.compaction.applied;
       check bool "handoff emitted" true (Option.is_some lifecycle.handoff_json);
@@ -369,14 +398,21 @@ let test_rollover_aborts_on_save_failure () =
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx in
       (* Make base_dir read-only so new session dir creation fails *)
       Unix.chmod base_dir 0o555;
+      let handoff_started = ref 0 in
       let rollover =
-        KEC.maybe_rollover_oas_handoff ~base_dir ~meta
+        KEC.maybe_rollover_oas_handoff
+          ~on_started:(fun () -> incr handoff_started)
+          ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
           ~checkpoint:(Some checkpoint)
       in
       (* Restore permissions before assertions *)
       Unix.chmod base_dir 0o755;
+      check int "handoff start hook called once" 1 !handoff_started;
+      check bool "handoff attempted" true rollover.attempted;
+      check bool "handoff failure recorded" true
+        (Option.is_some rollover.failure_reason);
       check bool "handoff NOT emitted on save failure" false
         (Option.is_some rollover.handoff_json);
       check string "trace_id unchanged" original_trace

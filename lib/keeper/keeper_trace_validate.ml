@@ -25,6 +25,11 @@ let get_bool json key =
 
 let parse_conditions (json : Yojson.Safe.t) : (SM.conditions, string) result =
   let ( let* ) = Result.bind in
+  let launch_pending =
+    match Yojson.Safe.Util.member "launch_pending" json with
+    | `Bool b -> b
+    | _ -> false
+  in
   let* fiber_alive = get_bool json "fiber_alive" in
   let* heartbeat_healthy = get_bool json "heartbeat_healthy" in
   let* turn_healthy = get_bool json "turn_healthy" in
@@ -40,6 +45,7 @@ let parse_conditions (json : Yojson.Safe.t) : (SM.conditions, string) result =
   let* guardrail_triggered = get_bool json "guardrail_triggered" in
   let* drain_complete = get_bool json "drain_complete" in
   Ok SM.{
+    launch_pending;
     fiber_alive; heartbeat_healthy; turn_healthy; manual_reconcile_required;
     context_within_budget; context_handoff_needed;
     compaction_active; handoff_active; operator_paused;

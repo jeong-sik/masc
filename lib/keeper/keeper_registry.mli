@@ -74,8 +74,19 @@ type registry_entry = {
           Does not affect state machine phase derivation. *)
 }
 
-(** Register a keeper as running. Returns the new entry. *)
+(** Register a keeper with an already-live fiber. Primarily used by tests and
+    direct fixtures that want a keeper to begin in [Running]. *)
 val register : base_path:string -> string -> keeper_meta -> registry_entry
+
+(** Register a fresh keeper before its first keepalive fiber launch.
+    The entry starts in [Offline] and must receive [Fiber_started] when the
+    runtime actually launches the fiber. *)
+val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
+
+(** Register a keeper that is about to relaunch after a crash.
+    The entry starts in [Restarting] and must receive [Fiber_started] when the
+    replacement fiber launches. *)
+val register_restarting : base_path:string -> string -> keeper_meta -> registry_entry
 
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
@@ -228,6 +239,16 @@ val restore_tool_usage : base_path:string -> string -> unit
     Prefer this over [set_state] for new code. *)
 val dispatch_event :
   base_path:string -> string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Like [dispatch_event], but preserves richer audit metadata when the event
+    causes a phase transition. *)
+val dispatch_event_with_audit :
+  base_path:string ->
+  ?snapshot:Keeper_measurement.measurement_snapshot ->
+  ?events_fired:Keeper_state_machine.event list ->
+  ?selected_event:Keeper_state_machine.event ->
+  string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Get the fine-grained phase of a keeper. *)

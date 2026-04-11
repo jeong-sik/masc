@@ -12,7 +12,9 @@ open Keeper_memory
 open Keeper_context_core
 
 type compaction_event = {
+  attempted : bool;
   applied : bool;
+  failure_reason : string option;
   trigger : string option;
   decision : string;
   before_tokens : int;
@@ -24,6 +26,8 @@ type post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
+  handoff_attempted : bool;
+  handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
   context_ratio : float;
@@ -39,6 +43,8 @@ type overflow_retry_recovery = {
 } [@@warning "-69"]
 
 let apply_post_turn_lifecycle
+    ~(on_compaction_started : unit -> unit)
+    ~(on_handoff_started : unit -> unit)
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(model : string)
@@ -82,9 +88,13 @@ let apply_post_turn_lifecycle
         updated_meta;
         checkpoint = None;
         handoff_json = None;
+        handoff_attempted = false;
+        handoff_failure_reason = None;
         compaction =
           {
+            attempted = false;
             applied = false;
+            failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
             before_tokens = 0;
@@ -118,9 +128,10 @@ let apply_post_turn_lifecycle
       in
       (* Attempt save before updating meta so that a save failure is treated as
          compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
-      let effective_compaction_applied, effective_ctx, checkpoint =
-        if not compaction_decided then (false, ctx, Some cp)
+      let effective_compaction_applied, compaction_failure_reason, effective_ctx, checkpoint =
+        if not compaction_decided then (false, None, ctx, Some cp)
         else
+          let () = on_compaction_started () in
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in
@@ -130,12 +141,12 @@ let apply_post_turn_lifecycle
                ~agent_name:base_meta.agent_name
                ~model ~ctx:compacted_ctx ~generation:current_generation
           with
-          | Ok saved_cp -> (true, compacted_ctx, Some saved_cp)
+          | Ok saved_cp -> (true, None, compacted_ctx, Some saved_cp)
           | Error e ->
               Log.Keeper.error
                 "keeper:%s compaction checkpoint save failed: %s"
                 base_meta.name e;
-              (false, ctx, Some cp))
+              (false, Some e, ctx, Some cp))
       in
       let after_tokens = token_count effective_ctx in
       let saved_tokens = max 0 (before_tokens - after_tokens) in
@@ -165,7 +176,9 @@ let apply_post_turn_lifecycle
           base_meta
       in
       let rollover =
-        Keeper_rollover.maybe_rollover_oas_handoff ~base_dir
+        Keeper_rollover.maybe_rollover_oas_handoff
+          ~on_started:on_handoff_started
+          ~base_dir
           ~meta:meta_after_compaction
           ~model
           ~primary_model_max_tokens
@@ -180,9 +193,13 @@ let apply_post_turn_lifecycle
         updated_meta = continuity_meta;
         checkpoint;
         handoff_json = rollover.handoff_json;
+        handoff_attempted = rollover.attempted;
+        handoff_failure_reason = rollover.failure_reason;
         compaction =
           {
+            attempted = compaction_decided;
             applied = effective_compaction_applied;
+            failure_reason = compaction_failure_reason;
             trigger;
             decision;
             before_tokens;
@@ -321,7 +338,9 @@ let recover_latest_checkpoint_for_overflow_retry
       else
         let compaction =
           {
+            attempted = true;
             applied = true;
+            failure_reason = None;
             trigger;
             decision = base_decision;
             before_tokens;

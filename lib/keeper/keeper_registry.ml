@@ -119,8 +119,11 @@ let update_entry ~base_path name f =
 
 let max_crash_log_entries = 5
 
-let register ~base_path name meta =
-  Log.Keeper.info "registry: registering keeper name=%s base_path=%s" name base_path;
+let register_with_state ~base_path name meta
+    ~(phase : Keeper_state_machine.phase)
+    ~(conditions : Keeper_state_machine.conditions) =
+  Log.Keeper.info "registry: registering keeper name=%s base_path=%s phase=%s"
+    name base_path (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key !registry with
@@ -128,17 +131,12 @@ let register ~base_path name meta =
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
    | _ -> ());
-  let initial_conditions = {
-    Keeper_state_machine.default_conditions with
-    fiber_alive = true;
-    restart_budget_remaining = true;
-  } in
   let entry = {
     base_path;
     name;
     meta;
-    phase = Keeper_state_machine.Running;
-    conditions = initial_conditions;
+    phase;
+    conditions;
     fiber_stop = Atomic.make false;
     fiber_wakeup = Atomic.make false;
     started_at = Time_compat.now ();
@@ -161,10 +159,38 @@ let register ~base_path name meta =
     waiting_for_inference = Atomic.make false;
   } in
   put_entry key entry;
-  Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
+  if phase = Running then
+    Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
   Log.Keeper.debug "registry: keeper registered name=%s running_count=%d"
     name (Atomic.get running_count_atomic);
   entry
+
+let register ~base_path name meta =
+  let conditions = {
+    Keeper_state_machine.default_conditions with
+    fiber_alive = true;
+    restart_budget_remaining = true;
+  } in
+  let phase = Keeper_state_machine.derive_phase conditions in
+  register_with_state ~base_path name meta ~phase ~conditions
+
+let register_offline ~base_path name meta =
+  let conditions = {
+    Keeper_state_machine.default_conditions with
+    launch_pending = true;
+    restart_budget_remaining = true;
+  } in
+  let phase = Keeper_state_machine.derive_phase conditions in
+  register_with_state ~base_path name meta ~phase ~conditions
+
+let register_restarting ~base_path name meta =
+  let conditions = {
+    Keeper_state_machine.default_conditions with
+    restart_budget_remaining = true;
+    backoff_elapsed = true;
+  } in
+  let phase = Keeper_state_machine.derive_phase conditions in
+  register_with_state ~base_path name meta ~phase ~conditions
 
 let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
@@ -219,6 +245,7 @@ let mark_dead ~base_path name ~at =
        | _ -> ());
       let conditions =
         { Keeper_state_machine.default_conditions with
+          launch_pending = false;
           fiber_alive = false;
           restart_budget_remaining = false;
         }
@@ -558,7 +585,14 @@ let restore_tool_usage ~base_path name =
 (** Thread-safety: same as [set_state] — all operations are non-yielding
     (StringMap lookup + put, Atomic.set). In single-domain Eio, non-yielding
     code runs atomically w.r.t. other fibers. No mutex needed. *)
-let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
+let dispatch_event_with_audit
+    ~base_path
+    ?snapshot
+    ?events_fired
+    ?selected_event
+    name
+    (event : Keeper_state_machine.event)
+  =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key !registry with
   | None ->
@@ -585,9 +619,9 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
          (Keeper_state_machine.event_to_string event);
        (* Record transition in audit ring buffer for dashboard API *)
        Keeper_transition_audit.record_transition ~keeper_name:name {
-         snapshot = None;
-         events_fired = [event];
-         selected_event = event;
+         snapshot;
+         events_fired = Option.value events_fired ~default:[event];
+         selected_event = Option.value selected_event ~default:event;
          prev_phase = tr.prev_phase;
          new_phase = tr.new_phase;
          transition_outcome = "applied";
@@ -656,6 +690,9 @@ let dispatch_event ~base_path name (event : Keeper_state_machine.event) =
        Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"
          name (Keeper_state_machine.transition_error_to_string e);
        Error e)
+
+let dispatch_event ~base_path name event =
+  dispatch_event_with_audit ~base_path name event
 
 let get_phase ~base_path name =
   match get ~base_path name with

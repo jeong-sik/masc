@@ -250,6 +250,7 @@ let write_heartbeat_snapshot
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(now_ts : float)
+      ~(consecutive_hb_failures : int)
       ~(timing_ring : stage_timing array)
       ~(timing_filled : int)
   : unit
@@ -356,20 +357,24 @@ let write_heartbeat_snapshot
       | Some c -> Keeper_exec_context.token_count c
       | None -> 0
     in
-    let auto_rules =
-      evaluate_keeper_auto_rules
-        ~meta:meta_current
-        ~context_ratio:context_ratio_v
-        ~message_count:message_count_v
-        ~token_count:token_count_v
-        ~repetition_risk
-        ~goal_alignment
-        ~response_alignment
-        ()
+    let turn_fail_count =
+      Keeper_registry.get_turn_failures
+        ~base_path:ctx.config.base_path
+        meta_current.name
+    in
+    let since_last_compaction_sec =
+      if meta_current.runtime.compaction_rt.last_ts <= 0.0
+      then now_ts
+      else max 0.0 (now_ts -. meta_current.runtime.compaction_rt.last_ts)
+    in
+    let since_last_handoff_sec =
+      if meta_current.runtime.last_handoff_ts <= 0.0
+      then now_ts
+      else max 0.0 (now_ts -. meta_current.runtime.last_handoff_ts)
     in
     (* RFC-0002: build measurement_snapshot via pure capture function.
-       Timing/failure fields not yet wired from heartbeat loop context
-       use defaults; a follow-up PR will thread them through. *)
+       Timing/failure inputs now come from the live keepalive loop and
+       registry so audit reflects the real runtime decision surface. *)
     let thresholds : Keeper_measurement.threshold_params =
       { compaction_ratio_gate = meta_current.compaction.ratio_gate
       ; compaction_message_gate = meta_current.compaction.message_gate
@@ -398,7 +403,7 @@ let write_heartbeat_snapshot
       ; model_handoff_multiplier = 1.0
       }
     in
-    let _measurement =
+    let measurement =
       Keeper_measurement.capture
         ~snapshot_id:
           (Printf.sprintf "msnap-%s-%Ld"
@@ -417,17 +422,25 @@ let write_heartbeat_snapshot
         ~response_alignment
         ~now_ts
         ~idle_seconds:0
-        ~since_last_compaction_sec:0.0
-        ~since_last_handoff_sec:0.0
+        ~since_last_compaction_sec
+        ~since_last_handoff_sec
         ~proactive_warmup_elapsed:false
-        ~consecutive_hb_failures:0
-        ~consecutive_turn_failures:0
+        ~consecutive_hb_failures
+        ~consecutive_turn_failures:turn_fail_count
         ()
     in
+    let guard_events = Keeper_guard.evaluate measurement in
+    let auto_rules =
+      keeper_auto_rule_eval_of_measurement ~events:guard_events measurement
+    in
+    let selected_guard_event = Keeper_guard.prioritized_event guard_events in
     (* RFC-0002: dispatch Context_measured event through state machine *)
     let _dispatch_result =
-      Keeper_registry.dispatch_event
+      Keeper_registry.dispatch_event_with_audit
         ~base_path:ctx.config.base_path
+        ~snapshot:measurement
+        ~events_fired:guard_events
+        ~selected_event:selected_guard_event
         meta_current.name
         (Keeper_state_machine.Context_measured {
           context_ratio = context_ratio_v;
@@ -1038,6 +1051,7 @@ let maybe_write_heartbeat_snapshot
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(now_ts : float)
+      ~(consecutive_hb_failures : int)
       ~(last_snapshot_ts : float ref)
       ~(snapshot_interval_sec : int)
       ~(timing_ring : stage_timing array)
@@ -1047,7 +1061,13 @@ let maybe_write_heartbeat_snapshot
   if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
   then (
     (try
-       write_heartbeat_snapshot ~ctx ~meta_current ~now_ts ~timing_ring ~timing_filled
+       write_heartbeat_snapshot
+         ~ctx
+         ~meta_current
+         ~now_ts
+         ~consecutive_hb_failures
+         ~timing_ring
+         ~timing_filled
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -1201,6 +1221,7 @@ let run_heartbeat_loop
           ~ctx
           ~meta_current
           ~now_ts
+          ~consecutive_hb_failures:!consecutive_failures
           ~last_snapshot_ts
           ~snapshot_interval_sec:(snapshot_interval_sec ())
           ~timing_ring
@@ -1584,6 +1605,17 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
     ~detail:"keepalive"
 ;;
 
+let dispatch_fiber_started ~base_path keeper_name =
+  match Keeper_registry.dispatch_event ~base_path keeper_name
+          Keeper_state_machine.Fiber_started with
+  | Ok _ -> ()
+  | Error err ->
+      Log.Keeper.warn
+        "keeper %s: Fiber_started rejected during launch: %s"
+        keeper_name
+        (Keeper_state_machine.transition_error_to_string err)
+;;
+
 let resolve_registry_done
       (entry : Keeper_registry.registry_entry)
       (value : [ `Stopped | `Crashed of string ])
@@ -1609,8 +1641,6 @@ let record_keeper_stopped
       Keeper_state_machine.Stop_requested);
     ignore (Keeper_registry.dispatch_event ~base_path keeper_name
       Keeper_state_machine.Drain_complete);
-    ignore (Keeper_registry.dispatch_event ~base_path keeper_name
-      (Keeper_state_machine.Fiber_terminated { outcome = "stopped" }));
     publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail;
     true)
   else
@@ -1637,13 +1667,13 @@ let record_keeper_crashed
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
   =
-  if Keeper_registry.is_running ~base_path:ctx.config.base_path m.name
-  then Log.Keeper.info "start_keepalive: skipped %s (already running)" m.name
+  if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
+  then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
   else if not (Keeper_registry.spawn_slots_available ())
   then Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
   else (
     (* Register in Keeper_registry first — single source of truth. *)
-    let reg = Keeper_registry.register ~base_path:ctx.config.base_path m.name m in
+    let reg = Keeper_registry.register_offline ~base_path:ctx.config.base_path m.name m in
     (* Restore persisted tool usage stats from previous session *)
     Keeper_registry.restore_tool_usage ~base_path:ctx.config.base_path m.name;
     let stop = reg.fiber_stop in
@@ -1674,6 +1704,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
          ~interval_sec:60
          ~stop
      | _ -> ());
+    dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =
         record_keeper_crashed

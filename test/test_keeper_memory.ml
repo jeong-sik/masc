@@ -4,6 +4,7 @@ module Mention = Mention
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
+module Meas = Masc_mcp.Keeper_measurement
 module Keeper_types = Masc_mcp.Keeper_types
 module Types = Types
 
@@ -98,6 +99,55 @@ let base_eval : Recall.keeper_auto_rule_eval = {
   reasons = [];
 }
 
+let base_measurement : Meas.measurement_snapshot = {
+  snapshot_id = "measurement-1";
+  keeper_name = "memory-keeper";
+  generation = 1;
+  timestamp = 1000.0;
+  thresholds = {
+    compaction_ratio_gate = 0.5;
+    compaction_message_gate = 100;
+    compaction_token_gate = 1000;
+    compaction_cooldown_sec = 60;
+    handoff_threshold = 0.85;
+    handoff_cooldown_sec = 300;
+    auto_handoff_enabled = true;
+    reflect_repetition_threshold = 0.7;
+    plan_goal_alignment_threshold = 0.3;
+    plan_response_alignment_threshold = 0.3;
+    guardrail_repetition_threshold = 0.9;
+    guardrail_goal_alignment_threshold = 0.2;
+    guardrail_response_alignment_threshold = 0.2;
+    guardrail_context_threshold = 0.8;
+    max_consecutive_hb_failures = 5;
+    max_consecutive_turn_failures = 3;
+    model_ratio_multiplier = 1.0;
+    model_handoff_multiplier = 1.0;
+  };
+  context = {
+    context_ratio = 0.3;
+    message_count = 20;
+    token_count = 200;
+    max_tokens = 10000;
+  };
+  similarity = {
+    repetition_risk = 0.1;
+    goal_alignment = 0.8;
+    response_alignment = 0.8;
+  };
+  timing = {
+    now_ts = 1000.0;
+    idle_seconds = 0;
+    since_last_compaction_sec = 600.0;
+    since_last_handoff_sec = 600.0;
+    proactive_warmup_elapsed = true;
+  };
+  failures = {
+    consecutive_hb_failures = 0;
+    consecutive_turn_failures = 0;
+  };
+}
+
 let test_prioritized_action_none () =
   let action = Recall.prioritized_action base_eval in
   check string "no rule fired" "none"
@@ -173,6 +223,55 @@ let test_prioritized_action_to_string_all_variants () =
   check string "compact" "compact" (prioritized_action_to_string Act_compact);
   check string "handoff" "handoff" (prioritized_action_to_string Act_handoff);
   check string "none" "none" (prioritized_action_to_string Act_none)
+
+let test_auto_rule_eval_of_measurement_respects_cooldown () =
+  let measurement = {
+    base_measurement with
+    context = { base_measurement.context with context_ratio = 0.6 };
+    timing = { base_measurement.timing with since_last_compaction_sec = 30.0 };
+  } in
+  let eval = Recall.keeper_auto_rule_eval_of_measurement measurement in
+  check bool "compaction blocked by cooldown" false eval.compact
+
+let test_auto_rule_eval_of_measurement_plan_requires_both_low () =
+  let measurement = {
+    base_measurement with
+    similarity =
+      { base_measurement.similarity with
+        goal_alignment = 0.2;
+        response_alignment = 0.8;
+      };
+  } in
+  let eval = Recall.keeper_auto_rule_eval_of_measurement measurement in
+  check bool "single low alignment does not plan" false eval.plan
+
+let test_evaluate_keeper_auto_rules_plan_requires_both_low () =
+  let meta = keeper_meta ~name:"rules-keeper" ~mention_targets:["rules-keeper"] () in
+  let meta = {
+    meta with
+    compaction = {
+      meta.compaction with
+      ratio_gate = 0.5;
+      message_gate = 100;
+      token_gate = 1000;
+      cooldown_sec = 60;
+    };
+    handoff_threshold = 0.85;
+    handoff_cooldown_sec = 300;
+    auto_handoff = true;
+  } in
+  let eval =
+    Keeper_memory_recall.evaluate_keeper_auto_rules
+      ~meta
+      ~context_ratio:0.3
+      ~message_count:20
+      ~token_count:200
+      ~repetition_risk:0.1
+      ~goal_alignment:0.2
+      ~response_alignment:0.8
+      ()
+  in
+  check bool "public evaluator uses same plan contract" false eval.plan
 
 (* --- history recall tests --- *)
 
@@ -691,6 +790,12 @@ let () =
           test_case "handoff alone" `Quick test_prioritized_action_handoff_alone;
           test_case "guardrail default reason" `Quick test_prioritized_action_guardrail_default_reason;
           test_case "to_string all variants" `Quick test_prioritized_action_to_string_all_variants;
+          test_case "measurement evaluator respects cooldown" `Quick
+            test_auto_rule_eval_of_measurement_respects_cooldown;
+          test_case "measurement evaluator plan requires both low" `Quick
+            test_auto_rule_eval_of_measurement_plan_requires_both_low;
+          test_case "public evaluator plan requires both low" `Quick
+            test_evaluate_keeper_auto_rules_plan_requires_both_low;
         ] );
       ( "e2e_memory_pipeline",
         [

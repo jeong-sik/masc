@@ -1490,35 +1490,52 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           let lifecycle =
             apply_post_turn_lifecycle ~base_dir
+              ~on_compaction_started:(fun () ->
+                ignore (Keeper_registry.dispatch_event
+                  ~base_path:base_dir meta.name
+                  Keeper_state_machine.Compaction_started))
+              ~on_handoff_started:(fun () ->
+                ignore (Keeper_registry.dispatch_event
+                  ~base_path:base_dir meta.name
+                  Keeper_state_machine.Handoff_started))
               ~meta
               ~model:result.model_used
               ~primary_model_max_tokens:max_cascade_context
               ~checkpoint:result.checkpoint
           in
-          (* RFC-0002: dispatch buffer state events after lifecycle *)
-          if lifecycle.compaction.applied then begin
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:base_dir meta.name
-              Keeper_state_machine.Compaction_started);
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:base_dir meta.name
-              (Keeper_state_machine.Compaction_completed {
-                before_tokens = lifecycle.compaction.before_tokens;
-                after_tokens = lifecycle.compaction.after_tokens;
-              }))
-          end;
-          (match lifecycle.handoff_json with
-           | Some _json ->
-               ignore (Keeper_registry.dispatch_event
-                 ~base_path:base_dir meta.name
-                 Keeper_state_machine.Handoff_started);
+          if lifecycle.compaction.attempted then
+            if lifecycle.compaction.applied then
+              ignore (Keeper_registry.dispatch_event
+                ~base_path:base_dir meta.name
+                (Keeper_state_machine.Compaction_completed {
+                  before_tokens = lifecycle.compaction.before_tokens;
+                  after_tokens = lifecycle.compaction.after_tokens;
+                }))
+            else
+              ignore (Keeper_registry.dispatch_event
+                ~base_path:base_dir meta.name
+                (Keeper_state_machine.Compaction_failed {
+                  reason =
+                    Option.value lifecycle.compaction.failure_reason
+                      ~default:lifecycle.compaction.decision;
+                }));
+          (match lifecycle.handoff_attempted, lifecycle.handoff_json with
+           | true, Some _json ->
                ignore (Keeper_registry.dispatch_event
                  ~base_path:base_dir meta.name
                  (Keeper_state_machine.Handoff_completed {
                    generation = lifecycle.updated_meta.runtime.generation;
                    new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
                  }))
-           | None -> ());
+           | true, None ->
+               ignore (Keeper_registry.dispatch_event
+                 ~base_path:base_dir meta.name
+                 (Keeper_state_machine.Handoff_failed {
+                   reason =
+                     Option.value lifecycle.handoff_failure_reason
+                       ~default:"handoff_aborted";
+                 }))
+           | false, _ -> ());
           let scope_only_reactive =
             observation.pending_scope_messages <> []
             && observation.pending_mentions = []

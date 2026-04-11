@@ -70,6 +70,8 @@ let checkpoint_generation = Keeper_context_core.checkpoint_generation
 type handoff_rollover = Keeper_rollover.handoff_rollover = {
   updated_meta : keeper_meta;
   handoff_json : Yojson.Safe.t option;
+  attempted : bool;
+  failure_reason : string option;
   context_ratio : float;
   context_tokens : int;
   context_max : int;
@@ -90,7 +92,9 @@ let compact_if_needed = Keeper_compact_policy.compact_if_needed
 (* ================================================================ *)
 
 type compaction_event = Keeper_post_turn.compaction_event = {
+  attempted : bool;
   applied : bool;
+  failure_reason : string option;
   trigger : string option;
   decision : string;
   before_tokens : int;
@@ -102,6 +106,8 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
+  handoff_attempted : bool;
+  handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
   context_ratio : float;

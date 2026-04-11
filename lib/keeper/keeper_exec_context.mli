@@ -78,6 +78,8 @@ val save_oas_checkpoint :
 type handoff_rollover = {
   updated_meta : keeper_meta;
   handoff_json : Yojson.Safe.t option;
+  attempted : bool;
+  failure_reason : string option;
   context_ratio : float;
   context_tokens : int;
   context_max : int;
@@ -85,7 +87,9 @@ type handoff_rollover = {
 }
 
 type compaction_event = {
+  attempted : bool;
   applied : bool;
+  failure_reason : string option;
   trigger : string option;
   decision : string;
   before_tokens : int;
@@ -97,6 +101,8 @@ type post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
+  handoff_attempted : bool;
+  handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
   context_ratio : float;
@@ -112,6 +118,7 @@ type overflow_retry_recovery = {
 }
 
 val maybe_rollover_oas_handoff :
+  on_started:(unit -> unit) ->
   base_dir:string ->
   meta:keeper_meta ->
   model:string ->
@@ -157,6 +164,8 @@ val compact_if_needed :
   working_context * string option * string
 
 val apply_post_turn_lifecycle :
+  on_compaction_started:(unit -> unit) ->
+  on_handoff_started:(unit -> unit) ->
   base_dir:string ->
   meta:keeper_meta ->
   model:string ->

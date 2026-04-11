@@ -13,7 +13,7 @@ let init config ~agent_name =
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_keepers_dir = Filename.concat root_dir "keepers" in
-  let root_perpetual_dir = Filename.concat root_dir "perpetual" in
+  let root_traces_dir = Filename.concat root_dir "traces" in
   let root_tasks_dir = Filename.concat root_dir "tasks" in
   let root_messages_dir = Filename.concat root_dir "messages" in
   let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
@@ -21,7 +21,7 @@ let init config ~agent_name =
     [
       root_agents_dir;
       root_keepers_dir;
-      root_perpetual_dir;
+      root_traces_dir;
       root_tasks_dir;
       root_messages_dir;
     ];

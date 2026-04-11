@@ -481,14 +481,18 @@ fi
 if [ "$PORT_EXPLICIT" != "1" ]; then
     PORT="$(default_port_for_path "$SCRIPT_DIR")"
     if [ "$PORT" != "8935" ]; then
-        if [ -z "$MASC_GRPC_PORT" ]; then
-            export MASC_GRPC_PORT="$((PORT + 1))"
-        fi
-        if [ -z "$MASC_WS_PORT" ]; then
-            export MASC_WS_PORT="$((PORT + 2))"
-        fi
-        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT (gRPC=$MASC_GRPC_PORT, WS=$MASC_WS_PORT) for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
+        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
     fi
+fi
+
+if [ -z "${MASC_GRPC_PORT:-}" ] && [ "$PORT" != "8935" ]; then
+    export MASC_GRPC_PORT="$((PORT + 1))"
+fi
+if [ -z "${MASC_WS_PORT:-}" ] && [ "$PORT" != "8935" ]; then
+    export MASC_WS_PORT="$((PORT + 2))"
+fi
+if [ -n "$WORKTREE_PORT_HINT" ] && [ "$PORT" != "8935" ]; then
+    WORKTREE_PORT_HINT="$WORKTREE_PORT_HINT (gRPC=$MASC_GRPC_PORT, WS=$MASC_WS_PORT)"
 fi
 
 if [ "$PRINT_PORT_ONLY" = "1" ]; then
@@ -719,6 +723,14 @@ if [ "$HTTP_MODE" = "true" ]; then
     fi
 fi
 
+launch_from_base_path() {
+    if ! cd "$RESOLVED_BASE_PATH"; then
+        echo "Error: failed to chdir to base path: $RESOLVED_BASE_PATH" >&2
+        exit 1
+    fi
+    exec "$@"
+}
+
 # Eio server has different CLI format and is HTTP-only
 if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
@@ -736,7 +748,7 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
+    launch_from_base_path "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2
@@ -753,7 +765,7 @@ elif [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
+    launch_from_base_path "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
 else
     echo "Starting MASC MCP server (stdio mode, $RUNTIME_NAME)..." >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
@@ -762,8 +774,8 @@ else
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ "$EIO_MODE" = "true" ]; then
-        exec "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
+        launch_from_base_path "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
     else
-        exec "$SELECTED_EXE" --stdio --path "$RESOLVED_BASE_PATH"
+        launch_from_base_path "$SELECTED_EXE" --stdio --path "$RESOLVED_BASE_PATH"
     fi
 fi

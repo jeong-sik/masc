@@ -46,27 +46,51 @@ let canonical_path path =
   try Unix.realpath path with
   | Unix.Unix_error _ -> path
 
+let string_contains ~needle haystack =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  let rec loop idx =
+    if idx + needle_len > hay_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  if needle_len = 0 then true else loop 0
+
 let test_detects_dual_masc_roots () =
   with_temp_dir "base-path-diag" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
   Unix.mkdir cwd 0o755;
   Unix.mkdir effective 0o755;
-  Unix.mkdir (Filename.concat cwd ".masc") 0o755;
-  Unix.mkdir (Filename.concat effective ".masc") 0o755;
+  let cwd_masc = Filename.concat cwd ".masc" in
+  let effective_masc = Filename.concat effective ".masc" in
+  Unix.mkdir cwd_masc 0o755;
+  Unix.mkdir effective_masc 0o755;
+  Unix.mkdir (Filename.concat cwd_masc "perpetual") 0o755;
   let diag =
     Server_base_path_diagnostics.detect ~cwd
       ~input_base_path:effective
       ~env_masc_base_path:effective
       ~effective_base_path:effective
-      ~effective_masc_root:(Filename.concat effective ".masc")
+      ~effective_masc_root:effective_masc
       ()
   in
   Alcotest.(check bool) "roots diverge" true diag.roots_diverge;
   Alcotest.(check bool) "dual roots" true diag.dual_masc_roots;
   Alcotest.(check bool) "cwd .masc exists" true diag.cwd_has_masc_dir;
   Alcotest.(check bool) "effective .masc exists" true diag.effective_has_masc_dir;
-  Alcotest.(check bool) "warning present" true (Option.is_some diag.warning)
+  Alcotest.(check bool) "warning present" true (Option.is_some diag.warning);
+  Alcotest.(check (list string)) "cwd legacy dirs" [ "perpetual" ]
+    diag.cwd_legacy_dirs;
+  Alcotest.(check bool) "warning mentions ignored legacy dirs" true
+    (match diag.warning with
+     | Some warning ->
+         string_contains ~needle:"ignored cwd .masc still contains legacy dirs (perpetual)"
+           warning
+     | None -> false)
 
 let test_strict_violation_respects_env () =
   with_temp_dir "base-path-strict" @@ fun root ->
@@ -125,7 +149,11 @@ let test_to_yojson_exposes_effective_paths () =
   Alcotest.(check string) "effective masc root" "/tmp/workspace/.masc"
     (json |> member "effective_masc_root" |> to_string);
   Alcotest.(check bool) "roots diverge field" true
-    (json |> member "roots_diverge" |> to_bool)
+    (json |> member "roots_diverge" |> to_bool);
+  Alcotest.(check int) "cwd legacy dirs exposed" 0
+    (json |> member "cwd_legacy_dirs" |> to_list |> List.length);
+  Alcotest.(check int) "effective legacy dirs exposed" 0
+    (json |> member "effective_legacy_dirs" |> to_list |> List.length)
 
 let test_to_yojson_exposes_resolution_source () =
   let diag =

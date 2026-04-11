@@ -45,12 +45,11 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
   Printf.printf "   DELETE /mcp → Session termination\n%!";
   Printf.printf
     "   POST /graphql → GraphQL (read-only)\n%!";
-  Printf.printf "   GET  /sse → legacy SSE stream (deprecated; use /mcp)\n%!";
   Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
   Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";
-  Printf.printf
-    "   POST /messages → legacy client->server messages (deprecated)\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
+  Printf.printf
+    "   Compatibility (deprecated): GET /sse, POST /messages → use /mcp\n%!";
   if Masc_grpc_server.is_enabled () then
     Printf.printf
       "   gRPC :%d → Coordination + grpc.health.v1.Health + reflection\n%!"

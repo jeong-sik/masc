@@ -315,9 +315,8 @@ module FileSystem = struct
        | Ok () -> ()
        | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | Error exn ->
-           Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
-             (Printf.sprintf "key_index populate wait failed: %s"
-                (Printexc.to_string exn)))
+           Log.Backend.debug "key_index populate wait failed: %s"
+             (Printexc.to_string exn))
     | `Populate r ->
       (try
          let keys =
@@ -326,8 +325,7 @@ module FileSystem = struct
          ki_replace_bulk t (List.map (fun k -> (k, ())) keys);
          let len = ki_length t in
          if len > 0 then
-           Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
-             (Printf.sprintf "key_index populated: %d keys" len);
+           Log.Backend.info "key_index populated: %d keys" len;
          Eio.Promise.resolve_ok r ()
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Mutex.lock t.key_index_mu;
@@ -337,9 +335,8 @@ module FileSystem = struct
          match exn with
          | Eio.Cancel.Cancelled _ -> raise exn
          | _ ->
-           Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-             (Printf.sprintf "key_index population failed: %s"
-                (Printexc.to_string exn)))
+           Log.Backend.warn "key_index population failed: %s"
+             (Printexc.to_string exn))
 
   (** Check if key exists (in-memory index first, filesystem fallback) *)
   let exists t key =

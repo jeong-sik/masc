@@ -978,18 +978,30 @@ let classify_model_family ~is_local ~context_window =
   else "medium_cloud"
 
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string list =
-  let cn = string_of_provider_kind kind in
-  match resolve_direct_adapter cn with
-  | None -> []
-  | Some adapter ->
-    match adapter.auth_mode with
-    | No_auth -> []
-    | Api_key env_name -> [ env_name ]
-    | Vertex_adc { project_env; location_env } -> [ project_env; location_env ]
+  match kind with
+  | Llm_provider.Provider_config.Anthropic -> [ "ANTHROPIC_API_KEY" ]
+  | Llm_provider.Provider_config.Glm -> [ "ZAI_API_KEY" ]
+  | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
+  | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
+  | Llm_provider.Provider_config.Claude_code
+  | Llm_provider.Provider_config.Ollama -> []
+
+let is_loopback_host = function
+  | Some "localhost" | Some "127.0.0.1" -> true
+  | Some host when String.starts_with ~prefix:"127." host -> true
+  | _ -> false
+
+let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t) : string list =
+  match cfg.kind with
+  | Llm_provider.Provider_config.OpenAI_compat ->
+    let uri = Uri.of_string cfg.base_url in
+    if is_loopback_host (Uri.host uri) then [] else auth_env_keys_of_provider_kind cfg.kind
+  | Llm_provider.Provider_config.Gemini -> [ "GEMINI_API_KEY" ]
+  | _ -> auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =
   direct_adapters
-  |> List.filter_map (fun adapter ->
+  |> List.filter_map (fun (adapter : adapter) ->
     match adapter.auth_mode with
     | No_auth -> None
     | Api_key env_name -> Some env_name

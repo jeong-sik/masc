@@ -159,7 +159,7 @@ let auth_requirements_of_model_label model_label =
   match Llm_provider.Cascade_config.parse_model_string model_label with
   | None -> Ok []
   | Some cfg ->
-    let keys = Provider_adapter.auth_env_keys_of_provider_kind cfg.Llm_provider.Provider_config.kind in
+    let keys = Provider_adapter.docker_auth_env_keys_of_provider_config cfg in
     let missing = List.filter (fun key ->
       match Sys.getenv_opt key with Some v -> String.trim v = "" | None -> true
     ) keys in

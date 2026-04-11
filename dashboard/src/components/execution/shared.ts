@@ -117,26 +117,6 @@ export function openHandoff(handoff: DashboardExecutionHandoff | null | undefine
   )
 }
 
-export function MonitorStat({
-  label,
-  value,
-  color,
-  caption,
-}: {
-  label: string
-  value: string | number
-  color?: string
-  caption?: string
-}) {
-  return html`
-    <div class="border border-[var(--card-border)] rounded-xl bg-[var(--card)] py-[15px] px-3.5">
-      <div class="stat-label">${label}</div>
-      <div class="mt-1.5 text-[var(--text-strong)] text-[30px] font-bold leading-none tabular-nums" style=${color ? `color:${color}` : ''}>${value}</div>
-      ${caption ? html`<div class="monitor-stat-caption">${caption}</div>` : null}
-    </div>
-  `
-}
-
 export function HandoffButtons({
   intervene,
   command,

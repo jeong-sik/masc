@@ -1,4 +1,4 @@
-import { get, post } from './core'
+import { get } from './core'
 import {
   asBoolean,
   asNumber,
@@ -464,10 +464,3 @@ export async function fetchGateKeepers(signal?: AbortSignal): Promise<GateKeeper
   return decoded
 }
 
-export function saveGateBinding(channel_id: string, keeper_name: string): Promise<{ ok: boolean }> {
-  return post('/api/v1/gate/bind', { channel_id, keeper_name })
-}
-
-export function removeGateBinding(channel_id: string): Promise<{ ok: boolean }> {
-  return post('/api/v1/gate/unbind', { channel_id })
-}

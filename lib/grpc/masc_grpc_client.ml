@@ -91,6 +91,9 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
   (* Transform raw stream items to typed events *)
   let typed_stream = Grpc_eio.Stream.create 64 in
   Eio.Fiber.fork ~sw (fun () ->
+    let close_typed () =
+      try Grpc_eio.Stream.close typed_stream with _ -> ()
+    in
     let rec loop () =
       match Grpc_eio.Stream.take raw_stream with
       | Ok bytes ->
@@ -106,11 +109,20 @@ let subscribe t ~sw ~env ~agent_name ~session_id ~event_types ~since_seq =
           Grpc_eio.Stream.add typed_stream
             (Error (Printf.sprintf "subscribe stream error: %s"
               (Grpc_core.Status.to_string status)));
-        Grpc_eio.Stream.close typed_stream
+        close_typed ()
       | exception End_of_file ->
-        Grpc_eio.Stream.close typed_stream
+        close_typed ()
     in
-    loop ());
+    try loop ()
+    with
+    | Eio.Cancel.Cancelled _ as e ->
+      close_typed ();
+      raise e
+    | exn ->
+      Log.Transport.error
+        "gRPC subscribe fiber died outside iteration: %s"
+        (Printexc.to_string exn);
+      close_typed ());
   typed_stream
 
 let heartbeat_stream t ~sw ~env =

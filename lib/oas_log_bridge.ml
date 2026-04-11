@@ -76,3 +76,4 @@ let installed = Atomic.make false
 let install () : unit =
   if Atomic.compare_and_set installed false true then
     Agent_sdk.Log.add_sink (make_sink ())
+# trigger marker

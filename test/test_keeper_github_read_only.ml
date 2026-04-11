@@ -188,8 +188,8 @@ let test_non_keeper_github_tool () =
   Alcotest.(check bool) "keeper_bash is not affected"
     false
     (is_ro ~tool_name:"keeper_bash" ~input:(mk_cmd "pr list"));
-  (* keeper_board_post is a mutating tool, not read-only *)
-  Alcotest.(check bool) "keeper_board_post is not affected"
+  (* keeper_board_post is mutating (not read-only) but boundary-exempt *)
+  Alcotest.(check bool) "keeper_board_post is not read-only"
     false
     (is_ro ~tool_name:"keeper_board_post" ~input:(mk_cmd "pr list"))
 

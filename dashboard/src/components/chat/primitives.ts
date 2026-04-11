@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
+import { formatTimeHms } from '../../lib/format-time'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 export type ChatTranscriptVariant = 'default' | 'messenger'
@@ -10,7 +11,7 @@ function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
   const value = new Date(timestamp)
   if (Number.isNaN(value.getTime())) return null
-  return value.toLocaleTimeString()
+  return formatTimeHms(value.getTime() / 1000)
 }
 
 function deliveryLabel(entry: KeeperConversationEntry): string {

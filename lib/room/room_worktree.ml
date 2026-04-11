@@ -32,9 +32,11 @@ let is_git_repo config =
 
 (** Resolve the project root from config.base_path.
     If base_path ends with ".masc", use its parent; otherwise use base_path.
-    This is the SSOT for where .worktrees/ lives — not git rev-parse. *)
+    This is the SSOT for where .worktrees/ lives — not git rev-parse.
+    Inlined from Keeper_alerting_path to avoid room→keeper dependency. *)
 let project_root config =
-  Keeper_alerting_path.project_root_of_config config
+  let base = config.base_path in
+  if Filename.basename base = ".masc" then Filename.dirname base else base
 
 let require_repository_root_with_git config =
   let root = project_root config in

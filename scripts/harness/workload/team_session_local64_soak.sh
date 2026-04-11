@@ -80,7 +80,7 @@ record_metric "$(jq -cn \
 success=0
 for round in $(seq 1 "$ROUNDS"); do
   echo "[soak] round=$round/$ROUNDS"
-  round_log="$(mktemp -t "local64-soak-round.${round}")"
+  round_log="$(mcp_mktemp_file "local64-soak-round.${round}" ".log")"
   if MCP_URL="$MCP_URL" \
     COORD_AGENT="${COORD_AGENT}-r${round}" \
     WORKER_COUNT="$WORKER_COUNT" \

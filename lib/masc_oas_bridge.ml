@@ -8,9 +8,9 @@
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency. *)
 let run_safe ~timeout_s fn =
   let do_timeout fn =
-    match (Masc_eio_env.get ()).clock with
-    | Some clock -> Eio.Time.with_timeout_exn clock timeout_s fn
-    | None -> fn ()
+    match Masc_eio_env.get_opt () with
+    | Some { clock = Some clock; _ } -> Eio.Time.with_timeout_exn clock timeout_s fn
+    | Some { clock = None; _ } | None -> fn ()
   in
   try
     do_timeout fn

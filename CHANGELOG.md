@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-04-12
+
+### Added
+- Restore Groq cascade fallback, confirmed by OAS 0.121.0 (#6566)
+- Bridge Agent_sdk.Log to masc-mcp structured log (#6618)
+
+### Fixed
+- CP unit: bound descendant_ids recursion with max_tree_depth guard (#6635)
+- Room task: hold with_file_lock on agent state writes (#6634)
+- Room/CP: hold with_file_lock around archive read-modify-write (#6632)
+- Session: hold registry.lock on all hashtable reads, drop dead unregister_sync (#6628)
+- Auth: gate cross-agent create_token and revoke on initial_admin (#6627)
+- Channel gate: wire dedup_cleanup into orchestrator pulse (#6612)
+- Keeper: fix retry timeout budget and local-only context (#6593)
+- Config: prefer base-path config over repo-local env (#6626)
+
+### Changed
+- Bump OAS pin to v0.122.0 (#6631)
+
 ## [0.5.5] - 2026-04-12
 
 ### Added

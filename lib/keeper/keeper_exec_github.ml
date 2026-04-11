@@ -65,11 +65,28 @@ let handle_keeper_github
   =
   let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
   let gh_args = Safe_ops.json_string_list "args" args in
+  let repo_param = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
   let timeout_sec =
     Safe_ops.json_float ~default:30.0 "timeout_sec" args |> fun n -> max 1.0 (min 180.0 n)
   in
-  let gh_raw =
+  let gh_raw_base =
     if cmd <> "" then cmd else if gh_args <> [] then String.concat " " gh_args else ""
+  in
+  (* Structured repo parameter: if provided, inject --repo flag.
+     If not provided but cmd contains --repo/-R with wrong owner, correct it.
+     This is the root fix for LLM hallucinating repo owners (#6043). *)
+  let gh_raw =
+    if repo_param <> "" then
+      (* Strip any --repo/-R from cmd to avoid duplication, then append *)
+      let stripped = Re.replace repo_flag_re ~f:(fun _ -> "") gh_raw_base |> String.trim in
+      Printf.sprintf "%s --repo %s" stripped repo_param
+    else
+      match project_repo_slug () with
+      | Some slug ->
+          let (corrected, _) = correct_repo_flag ~correct_slug:slug gh_raw_base in
+          corrected
+      | None -> gh_raw_base
+  in
   in
   if gh_raw = ""
   then error_json "cmd is required. \

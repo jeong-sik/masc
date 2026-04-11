@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { formatTimeAgo } from '../lib/format-time'
-import type { Keeper } from '../types'
+import type { Keeper, KeeperSupervisorCrashLogEntry } from '../types'
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -33,11 +33,11 @@ function registryStateBadge(state: string | null) {
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
-function CrashCohortBar({ crash_log }: { crash_log: any[] }) {
+function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntry[] }) {
   if (!crash_log || crash_log.length === 0) return null
   const cohorts: Record<string, number> = {}
   for (const e of crash_log) {
-    const reason = (e.reason ?? 'unknown') as string
+    const reason = e.reason ?? 'unknown'
     const key = reason.startsWith('heartbeat') ? 'heartbeat'
       : reason.startsWith('turn') ? 'turn'
       : reason.startsWith('fiber') ? 'fiber'
@@ -72,16 +72,24 @@ function CrashCohortBar({ crash_log }: { crash_log: any[] }) {
   `
 }
 
-function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
+interface SpEventLike {
+  ts?: number
+  suppressed_count?: number
+  total?: number
+  dominant_cohort?: string
+}
+
+function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
   if (!sp_events || sp_events.length === 0) return null
+  const entries = sp_events.slice(0, 10) as SpEventLike[]
   return html`
     <div>
       <div class="text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto">
-        ${sp_events.slice(0, 10).map((e: any) => html`
+        ${entries.map((e) => html`
           <div class="flex items-center justify-between py-1 px-2 rounded text-[11px] bg-[rgba(139,92,246,0.06)]">
             <span class="font-mono text-[var(--text-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>
-            <span class="text-[#8b5cf6]">${e.suppressed_count}/${e.total} 억제 (${e.dominant_cohort})</span>
+            <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
         `)}
       </div>
@@ -92,9 +100,18 @@ function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
 // ── Main Panel ──────────────────────────────────────────
 
 export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
-  const diag = (keeper as any).supervisor_diagnostics
+  const diag = keeper.supervisor_diagnostics
   if (!diag) return null
-  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since, sp_events, health_score, dead_eta_sec } = diag
+  const {
+    restart_count = 0,
+    max_restarts = 0,
+    crash_log,
+    last_failure_reason,
+    dead_since,
+    sp_events,
+    health_score,
+    dead_eta_sec,
+  } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
   const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
   const hs = typeof health_score === 'number' ? health_score : 100
@@ -108,7 +125,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--text-muted)]">실행 상태</span>
-          ${registryStateBadge((keeper as any).registry_state)}
+          ${registryStateBadge(keeper.registry_state ?? null)}
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">

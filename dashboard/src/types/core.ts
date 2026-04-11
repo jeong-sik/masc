@@ -569,6 +569,7 @@ export interface Keeper {
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
   keepalive_running?: boolean
+  registry_state?: string | null
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
@@ -661,6 +662,23 @@ export interface Keeper {
   metrics_series?: KeeperMetricPoint[]
   inventory?: string[]
   relationships?: Record<string, string>
+  supervisor_diagnostics?: KeeperSupervisorDiagnostics
+}
+
+export interface KeeperSupervisorCrashLogEntry {
+  ts?: number
+  reason?: string
+}
+
+export interface KeeperSupervisorDiagnostics {
+  restart_count?: number
+  max_restarts?: number
+  crash_log?: KeeperSupervisorCrashLogEntry[]
+  last_failure_reason?: string | null
+  dead_since?: number | null
+  sp_events?: unknown[]
+  health_score?: number
+  dead_eta_sec?: number | null
 }
 
 // --- Keeper Config (structured read-only view) ---

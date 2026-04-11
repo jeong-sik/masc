@@ -178,7 +178,9 @@ let resolve_keeper_shell_write_cwd
    mount point is configurable (default "/home/keeper/playground"). *)
 let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
-  let playground_prefix = Filename.concat root ".masc/playground" in
+  let playground_prefix =
+    Filename.concat root Playground_paths.all_playgrounds_prefix
+  in
   let container_root =
     Env_config_keeper.DockerPlayground.container_playground_root
   in

@@ -99,10 +99,23 @@ fi
 
 # Portable semver comparison: returns 0 (true) if $1 >= $2.
 # Handles 3-part versions (major.minor.patch); missing parts default to 0.
+normalize_version_triplet() {
+  local value
+  value="$(printf '%s' "$1" | sed -E $'s/\x1B\\[[0-9;]*[[:alpha:]]//g')"
+  if [[ "${value}" =~ ([0-9]+(\.[0-9]+){0,2}) ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
 version_gte() {
+  local lhs rhs
+  lhs="$(normalize_version_triplet "$1")"
+  rhs="$(normalize_version_triplet "$2")"
+  [[ -n "${lhs}" && -n "${rhs}" ]] || return 1
+
   local IFS='.'
   # shellcheck disable=SC2206
-  local a=($1) b=($2)
+  local a=(${lhs}) b=(${rhs})
   local i
   for i in 0 1 2; do
     local va=${a[$i]:-0} vb=${b[$i]:-0}
@@ -119,12 +132,12 @@ if command -v opam >/dev/null 2>&1; then
 
   # Use opam list directly (not opam exec --) to avoid stale environment
   # from a cached exec context. Keep stderr visible for diagnostics.
-  installed_packages="$(opam list --installed --columns=name,version --short 2>&1)" || true
+  installed_packages="$(OPAMCOLOR=never opam list --installed --columns=name,version --short 2>&1)" || true
   installed_version="$(awk '$1 == "agent_sdk" { print $2 }' <<<"${installed_packages}")"
 
   # Fallback: opam show reads package metadata directly from the switch.
   if [[ -z "${installed_version}" ]]; then
-    installed_version="$(opam show agent_sdk --field=version 2>/dev/null || true)"
+    installed_version="$(OPAMCOLOR=never opam show agent_sdk --field=version 2>/dev/null || true)"
   fi
 
   if [[ -z "${installed_version}" ]]; then
@@ -139,7 +152,7 @@ if command -v opam >/dev/null 2>&1; then
     exit 1
   fi
 
-  pin_list_output="$(opam pin list 2>/dev/null || true)"
+  pin_list_output="$(OPAMCOLOR=never opam pin list 2>/dev/null || true)"
   pin_line="$(awk '$1 ~ /^agent_sdk\./ { print }' <<<"${pin_list_output}")"
   if [[ -n "${pin_line}" ]]; then
     installed_pin_source="$(awk '{print $3}' <<<"${pin_line}")"

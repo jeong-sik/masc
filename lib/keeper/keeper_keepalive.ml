@@ -831,6 +831,7 @@ let run_keepalive_unified_turn
         (not (Atomic.get stop))
         && (not manual_reconcile_pending)
         && turn_decision.should_run
+        && (not manual_reconcile_pending)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates

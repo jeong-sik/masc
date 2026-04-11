@@ -789,22 +789,60 @@ let run_keepalive_unified_turn
       in
       (* Auto-clear manual_reconcile to break deadlock: reconcile blocks
          turns, but turns are needed to clear reconcile.  Clear both the
-         on-disk record AND the registry state, then proceed as if clean. *)
+         on-disk record AND the registry state, then proceed as if clean.
+
+         Age gate: only auto-clear records older than
+         [auto_clear_min_age_sec]. Without a threshold this races with
+         explicit operator clears that immediately follow reconcile
+         openings — triage fires auto-clear first, operator's explicit
+         [masc_keeper_reconcile clear] then hits [Already_cleared]
+         returning [cleared=false], and any inspect/clear contract
+         test becomes flaky. Records older than the threshold are
+         genuinely stuck and still get the deadlock-break treatment. *)
+      let auto_clear_min_age_sec = 300.0 in
       let manual_reconcile_pending =
         if manual_reconcile_pending then (
-          Log.Keeper.info
-            "keeper:%s auto-clearing manual_reconcile to break deadlock"
-            meta_after_triage.name;
-          ignore (Keeper_manual_reconcile.clear ctx.config
-            ~keeper_name:meta_after_triage.name
-            ~actor:"auto_clear_deadlock_break"
-            ~resolution:"Automatic deadlock break: stale reconcile cleared to restore keeper activity"
-            ~evidence_refs:[]
-            ~idempotency_key:None);
-          ignore (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path meta_after_triage.name
-            Keeper_state_machine.Manual_reconcile_cleared);
-          false (* reconcile is now cleared — proceed as normal *))
+          let should_auto_clear =
+            match
+              Keeper_manual_reconcile.read
+                ctx.config
+                meta_after_triage.name
+            with
+            | Some record -> (
+                match Types.parse_iso8601_opt record.opened_at with
+                | Some opened_unix ->
+                    let age = Time_compat.now () -. opened_unix in
+                    age >= auto_clear_min_age_sec
+                | None ->
+                    (* Unparseable timestamp: treat as stale so a
+                       corrupted record doesn't keep a keeper blocked
+                       forever. *)
+                    true)
+            | None ->
+                (* Legacy pending flag without an on-disk record:
+                   preserve prior behavior and proceed as clean. *)
+                true
+          in
+          if should_auto_clear then (
+            Log.Keeper.info
+              "keeper:%s auto-clearing manual_reconcile to break deadlock"
+              meta_after_triage.name;
+            ignore (Keeper_manual_reconcile.clear ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~actor:"auto_clear_deadlock_break"
+              ~resolution:"Automatic deadlock break: stale reconcile cleared to restore keeper activity"
+              ~evidence_refs:[]
+              ~idempotency_key:None);
+            ignore (Keeper_registry.dispatch_event
+              ~base_path:ctx.config.base_path meta_after_triage.name
+              Keeper_state_machine.Manual_reconcile_cleared);
+            false (* reconcile is now cleared — proceed as normal *))
+          else (
+            Log.Keeper.debug
+              "keeper:%s manual_reconcile pending but below age threshold, \
+               leaving for operator"
+              meta_after_triage.name;
+            true))
         else false
       in
       (* Honor a pending manual reconcile: the "keepalive turn skipped" log

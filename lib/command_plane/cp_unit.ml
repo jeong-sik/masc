@@ -270,7 +270,34 @@ let augment_managed_units units agents =
     in
     root_units @ rewritten_units @ unassigned_units
 
-let rec descendant_units_of_kind units unit_id kind =
+(* Ceiling for all recursive unit-tree traversals in this module.
+   Shared by [descendant_units_of_kind], [descendant_ids],
+   [build_tree_json], and [build_tree_json_indexed] so the four
+   functions agree on what "too deep" means.  Moved up from below
+   [children_map] to make the constant visible to the earlier
+   [descendant_units_of_kind] definition. *)
+let _max_tree_depth = 50
+
+(* Same failure template as [descendant_ids] (fixed in #6635): no depth
+   guard, no cycle detection, non-tail body ([@] + [List.concat_map]).
+   On a deep unit tree the recursion descends to full subtree height and
+   burns a frame per level.  Running masc-mcp showed [option_exists]
+   (sole call site at line 277) as 36% of the main thread's CPU samples
+   during the recurrent cp-summary Stack_overflow at 828s/861s, post
+   #6635 deploy — that PR fixed [descendant_ids] but left this sibling
+   unguarded.
+
+   Bound the recursion with [_max_tree_depth] (matches [descendant_ids],
+   [build_tree_json], [build_tree_json_indexed]) and thread a visited
+   list through to catch true cycles consistently with the other
+   traversals.  Partial results at the ceiling are acceptable — the
+   function is used for "count descendant agents of this unit kind" in
+   dashboard rollups, so over-truncation just undercounts the summary
+   but never blocks the server. *)
+let rec descendant_units_of_kind ?(depth = 0) ?(visited = []) units unit_id kind =
+  if depth > _max_tree_depth || List.mem unit_id visited then []
+  else
+  let visited = unit_id :: visited in
   let direct_children =
     units
     |> List.filter (fun (unit : unit_record) ->
@@ -282,7 +309,9 @@ let rec descendant_units_of_kind units unit_id kind =
   in
   direct_matches
   @ List.concat_map
-      (fun (child : unit_record) -> descendant_units_of_kind units child.unit_id kind)
+      (fun (child : unit_record) ->
+        descendant_units_of_kind
+          ~depth:(depth + 1) ~visited units child.unit_id kind)
       direct_children
 
 let live_agent_names agents =
@@ -330,8 +359,6 @@ let children_map units =
           (parent_id, unit :: existing)
           :: List.remove_assoc parent_id acc)
     [] units
-
-let _max_tree_depth = 50
 
 (* [descendant_ids] was the Stack_overflow culprit for #6633: the visited-list
    cycle check catches true cycles but provides no protection against deep

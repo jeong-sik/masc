@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { formatTimeAgo } from '../lib/format-time'
-import type { Keeper } from '../types'
+import type { Keeper, KeeperSupervisorCrashLogEntry } from '../types'
 
 // ── Helpers ──────────────────────────────────────────────
 
@@ -33,11 +33,11 @@ function registryStateBadge(state: string | null) {
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
-function CrashCohortBar({ crash_log }: { crash_log: any[] }) {
+function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntry[] }) {
   if (!crash_log || crash_log.length === 0) return null
   const cohorts: Record<string, number> = {}
   for (const e of crash_log) {
-    const reason = (e.reason ?? 'unknown') as string
+    const reason = e.reason ?? 'unknown'
     const key = reason.startsWith('heartbeat') ? 'heartbeat'
       : reason.startsWith('turn') ? 'turn'
       : reason.startsWith('fiber') ? 'fiber'
@@ -92,9 +92,18 @@ function SpEventsPanel({ sp_events }: { sp_events: any[] }) {
 // ── Main Panel ──────────────────────────────────────────
 
 export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
-  const diag = (keeper as any).supervisor_diagnostics
+  const diag = keeper.supervisor_diagnostics
   if (!diag) return null
-  const { restart_count, max_restarts, crash_log, last_failure_reason, dead_since, sp_events, health_score, dead_eta_sec } = diag
+  const {
+    restart_count = 0,
+    max_restarts = 0,
+    crash_log,
+    last_failure_reason,
+    dead_since,
+    sp_events,
+    health_score,
+    dead_eta_sec,
+  } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
   const budgetColor = budgetPct >= 80 ? '#ef4444' : budgetPct >= 50 ? '#f59e0b' : '#4ade80'
   const hs = typeof health_score === 'number' ? health_score : 100
@@ -108,7 +117,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
         </div>
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--text-muted)]">실행 상태</span>
-          ${registryStateBadge((keeper as any).registry_state)}
+          ${registryStateBadge(null)}
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">

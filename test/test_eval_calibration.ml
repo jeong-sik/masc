@@ -288,7 +288,7 @@ let test_to_harness_verdict_approve () =
     record_type = "verdict"; notes_hash = "abc";
     task_id = "t1"; task_title = "Fix login";
     agent_name = "dreamer"; verdict = "approve";
-    gate = "llm"; evaluator_cascade = "glm5";
+    gate = AR.Structured_tool; evaluator_cascade = "glm5";
     generator_cascade = Some "claude"; fallback_reason = None;
     timestamp = 0.0;
   } in
@@ -296,7 +296,7 @@ let test_to_harness_verdict_approve () =
   check bool "passed" true hv.Agent_sdk.Harness.passed;
   check (option (float 0.01)) "score 1.0" (Some 1.0) hv.score;
   check bool "evidence has gate" true
-    (List.exists (fun s -> contains ~sub:"gate=llm" s) hv.evidence);
+    (List.exists (fun s -> contains ~sub:"gate=structured_tool" s) hv.evidence);
   check (option string) "no detail" None hv.detail
 
 let test_to_harness_verdict_reject () =
@@ -304,7 +304,7 @@ let test_to_harness_verdict_reject () =
     record_type = "verdict"; notes_hash = "def";
     task_id = "t2"; task_title = "Deploy fix";
     agent_name = "coder"; verdict = "reject:too short";
-    gate = "length"; evaluator_cascade = "local";
+    gate = AR.Length; evaluator_cascade = "local";
     generator_cascade = None; fallback_reason = None;
     timestamp = 0.0;
   } in

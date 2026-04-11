@@ -122,6 +122,22 @@ let test_keeper_reconcile_inspect_and_clear () =
       let status_json = parse_json_exn status_body in
       check string "status exposes blocker" "ambiguous_post_commit_timeout"
         Yojson.Safe.Util.(status_json |> member "runtime_blocker_class" |> to_string);
+      Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+      let ok, inspect_body_after_wait =
+        dispatch_keeper_exn ctx ~name:"masc_keeper_reconcile"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("action", `String "inspect");
+              ])
+      in
+      check bool "inspect ok after wait" true ok;
+      let inspect_after_wait_json = parse_json_exn inspect_body_after_wait in
+      check bool "inspect still pending after wait" true
+        Yojson.Safe.Util.(inspect_after_wait_json |> member "pending" |> to_bool);
+      check string "inspect still failing after wait" "failing"
+        Yojson.Safe.Util.(inspect_after_wait_json |> member "phase" |> to_string);
       let ok, clear_body =
         dispatch_keeper_exn ctx ~name:"masc_keeper_reconcile"
           ~args:

@@ -39,17 +39,17 @@ File operations:
 
 Workspace:
 - Your writable workspace is .masc/playground/YOUR_KEEPER_NAME/. Use keeper_fs_edit to write files there.
-- Concept split: playground is your sandbox; worktree is a repo workflow. They can coexist.
-- `keeper_pr_submit` is the canonical submit step after editing in either a playground clone or a repo worktree.
+- Your playground clone is at .masc/playground/YOUR_KEEPER_NAME/repos/masc-mcp/. This is your default coding workspace.
+- Do NOT create worktrees in the main repo .worktrees/ — that is the human workspace.
+- `keeper_pr_submit` is the canonical submit step after editing.
 - PR creation workflow (requires Coding, Delivery, or Full preset):
-  1. masc_worktree_create task_id=<your-task-id>  (creates a worktree under .worktrees/)
-  2. keeper_shell op=ls path=.worktrees/  (verify worktree exists)
-  3. keeper_fs_read path=<file-to-modify>  (read the file first)
-  4. masc_code_edit file_path=<path> old_text=<before> new_text=<after>  (edit the file)
-  5. masc_code_git action=add cwd=<worktree-path>  (stage changes)
-  6. masc_code_git action=commit cwd=<worktree-path> args=<commit-message>  (commit)
-  7. masc_code_git action=push cwd=<worktree-path>  (push)
-  8. keeper_pr_submit cwd=<worktree-path> pr_title=<title>  (create draft PR)
+  1. masc_worktree_create task_id=<your-task-id>  (creates worktree in your playground clone)
+  2. masc_code_read path=<file-to-modify>  (read the file first — understand before editing)
+  3. masc_code_edit file_path=<path> old_text=<before> new_text=<after>  (edit the file)
+  4. masc_code_git action=add cwd=<worktree-path>  (stage changes)
+  5. masc_code_git action=commit cwd=<worktree-path> args=<commit-message>  (commit)
+  6. masc_code_git action=push cwd=<worktree-path>  (push)
+  7. keeper_pr_submit cwd=<worktree-path> pr_title=<title>  (create draft PR)
   NOTE: Do NOT use keeper_pr_workflow — it is deprecated and will error.
 
 Knowledge lookup:

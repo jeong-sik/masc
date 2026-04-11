@@ -44,7 +44,6 @@ import {
   workflowTargetReady,
 } from './helpers'
 import { FlowControlPanel } from '../flow-control/flow-control-panel'
-import { ControlSurface } from '../command/control'
 import { displayStatus } from '../../lib/status-label'
 
 function severityClass(value?: string | null): string {
@@ -441,8 +440,6 @@ export function Ops() {
       ` : null}
 
       ${renderSummaryBadges(activeCount, deferredCount, recentCount)}
-      <${ControlSurface} />
-
       ${healthy ? html`
         <section class="grid grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] gap-4 max-[1200px]:grid-cols-1">
           <div class="grid gap-4 order-1 max-[1200px]:order-2">

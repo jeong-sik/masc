@@ -256,12 +256,15 @@ let handle_claim ctx args =
     | "" -> Types_core.Unassigned
     | s -> Types_core.role_of_string s
   in
+  let preset_warning = check_preset_mismatch ctx.config ~agent_name:ctx.agent_name ~task_id in
   let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
-  (* Notification harness: push claim event to all active sessions *)
   (match result with
    | Ok _ ->
-       (* Auto-set current_task so planning tools pick it up immediately *)
        Planning_eio.set_current_task ctx.config ~task_id;
+       (match preset_warning with
+        | Some warning ->
+            Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
+        | None -> ());
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
          ("task_id", `String task_id);
@@ -269,7 +272,10 @@ let handle_claim ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
-  result_to_response result
+  let (ok, msg) = result_to_response result in
+  match preset_warning, ok with
+  | Some warning, true -> (true, msg ^ "\n⚠️ " ^ warning)
+  | _ -> (ok, msg)
 
 (** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
 let preset_from_capabilities caps =
@@ -313,6 +319,32 @@ let resolve_agent_preset config agent_name =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> None
+
+(** Check if the agent's preset can satisfy the task's required_preset.
+    Returns a warning string if there is a mismatch, None if OK or
+    no preset requirement exists.  Used by [handle_claim] to warn on
+    manual claims that bypass preset-fit filtering. *)
+let check_preset_mismatch config ~agent_name ~task_id =
+  let agent_preset = resolve_agent_preset config agent_name in
+  let tasks = Room.get_tasks_raw config in
+  match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
+  | None -> None
+  | Some task ->
+      match task.required_preset, agent_preset with
+      | None, _ -> None
+      | Some required, None ->
+          Some (Printf.sprintf
+            "preset_mismatch: task %s requires preset '%s' but agent has no preset. \
+             Consider reassigning or changing the agent's preset."
+            task_id required)
+      | Some required, Some preset ->
+          if Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+          then None
+          else Some (Printf.sprintf
+            "preset_mismatch: task %s requires preset '%s' but agent has '%s'. \
+             The agent may lack tools needed for this task. \
+             Consider reassigning or upgrading the preset."
+            task_id required preset)
 
 (** Build a task_filter closure that checks required_preset against the agent's preset. *)
 let preset_task_filter ~agent_preset (task : Types.task) =

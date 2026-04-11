@@ -152,6 +152,69 @@ let test_keeper_reconcile_inspect_and_clear () =
         Yojson.Safe.Util.(
           status_after_json |> member "runtime" |> member "phase" |> to_string))
 
+let test_keeper_reconcile_clear_without_record_clears_runtime_blocker () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "reconcile-no-record" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, _body =
+        dispatch_keeper_exn ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Exercise no-record reconcile clear");
+                ("proactive_enabled", `Bool false);
+              ])
+      in
+      check bool "keeper up ok" true ok;
+      ignore
+        (Keeper_registry.dispatch_event
+           ~base_path:config.base_path
+           keeper_name
+           (Keeper_state_machine.Manual_reconcile_required
+              { reason = "stale runtime blocker" }));
+      let ok, clear_body =
+        dispatch_keeper_exn ctx ~name:"masc_keeper_reconcile"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("action", `String "clear");
+                ("resolution", `String "runtime state was already clear");
+              ])
+      in
+      check bool "clear ok" true ok;
+      let clear_json = parse_json_exn clear_body in
+      check bool "clear result true" true
+        Yojson.Safe.Util.(clear_json |> member "cleared" |> to_bool);
+      check bool "not already cleared" false
+        Yojson.Safe.Util.(clear_json |> member "already_cleared" |> to_bool);
+      check bool "not legacy only" false
+        Yojson.Safe.Util.(clear_json |> member "legacy_only" |> to_bool);
+      check bool "record null" true
+        Yojson.Safe.Util.(clear_json |> member "record" = `Null);
+      let ok, status_body_after =
+        dispatch_keeper_exn ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name) ])
+      in
+      check bool "status ok after clear" true ok;
+      let status_after_json = parse_json_exn status_body_after in
+      check string "phase recovered to running" "running"
+        Yojson.Safe.Util.(
+          status_after_json |> member "runtime" |> member "phase" |> to_string))
+
 let () =
   run "keeper_reconcile_tool"
     [
@@ -159,5 +222,7 @@ let () =
         [
           test_case "inspect -> clear" `Quick
             test_keeper_reconcile_inspect_and_clear;
+          test_case "clear without record clears runtime blocker" `Quick
+            test_keeper_reconcile_clear_without_record_clears_runtime_blocker;
         ] );
     ]

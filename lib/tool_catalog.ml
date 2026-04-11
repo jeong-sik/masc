@@ -212,6 +212,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_tool_revoke", destructive_tool);
     ( "masc_keeper_reconcile",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
+    ( "masc_keeper_reset",
+      { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_operation_stop",
       destructive_tool );
     ( "masc_operation_pause",

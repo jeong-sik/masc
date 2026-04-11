@@ -592,7 +592,7 @@ let handle_keeper_reconcile ctx args : tool_result =
                      [
                        ("name", `String name);
                        ("action", `String "clear");
-                       ("cleared", `Bool false);
+                       ("cleared", `Bool true);
                        ("already_cleared", `Bool true);
                        ("legacy_only", `Bool false);
                        ("record", Keeper_manual_reconcile.record_to_yojson record);
@@ -609,11 +609,12 @@ let handle_keeper_reconcile ctx args : tool_result =
                        ("record", `Null);
                      ]
                | Keeper_manual_reconcile.No_record ->
+                   clear_registry_manual_reconcile ~ctx ~name;
                    `Assoc
                      [
                        ("name", `String name);
                        ("action", `String "clear");
-                       ("cleared", `Bool false);
+                       ("cleared", `Bool true);
                        ("already_cleared", `Bool false);
                        ("legacy_only", `Bool false);
                        ("record", `Null);

@@ -44,6 +44,12 @@ VARIABLES
 vars == <<keeper_phase, task_status, task_claimer>>
 
 Phases == {"running", "draining", "dead"}
+\* "cancelled" is in Statuses for TypeOK completeness (the real task
+\* FSM has Cancelled) but this model has no action that transitions
+\* a task to "cancelled" — it is unreachable from Init. That is OK:
+\* the NoDeadKeeperHoldsTask invariant is insensitive to Cancelled
+\* since ~Held("cancelled"), and adding a CancelTask action would
+\* only enlarge the state space without strengthening the invariant.
 Statuses == {"todo", "claimed", "in_progress", "done", "cancelled"}
 Claimers == K \cup {"none"}
 

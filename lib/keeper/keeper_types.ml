@@ -793,21 +793,23 @@ type parsed_keeper_state =
   ; ps_runtime : agent_runtime_state
   }
 
-let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
+let parse_keeper_identity (json : Yojson.Safe.t)
+    : (parsed_keeper_identity, string) result =
   let pk_name = Safe_ops.json_string ~default:"" "name" json in
   let pk_agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
   let pk_trace_id_raw = Safe_ops.json_string ~default:"" "trace_id" json in
-  let pk_trace_id =
+  match
     if String.trim pk_trace_id_raw = "" then
-      failwith "keeper meta parse error: missing trace_id in persisted keeper identity"
+      Error "missing trace_id in persisted keeper identity"
     else
       match Keeper_id.Trace_id.of_string pk_trace_id_raw with
-      | Ok x -> x
+      | Ok x -> Ok x
       | Error err ->
-        failwith
-          ("keeper meta parse error: invalid trace_id in persisted keeper identity: "
-           ^ err)
-  in
+        Error
+          ("invalid trace_id in persisted keeper identity: " ^ err)
+  with
+  | Error e -> Error ("keeper meta parse error: " ^ e)
+  | Ok pk_trace_id ->
   let pk_trace_history =
     Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
   in
@@ -843,7 +845,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
   let pk_cascade_name =
     Safe_ops.json_string ~default:Keeper_config.default_cascade_name "cascade_name" json
   in
-  { pk_name
+  Ok { pk_name
   ; pk_agent_name
   ; pk_trace_id
   ; pk_trace_history
@@ -1140,8 +1142,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       match reject_legacy_keeper_meta_fields json with
       | Error e -> Error e
       | Ok () ->
-      let identity = parse_keeper_identity json in
-      (match parse_keeper_policy json ~keeper_name:identity.pk_name with
+      (match parse_keeper_identity json with
+       | Error _ as e -> e
+       | Ok identity ->
+      match parse_keeper_policy json ~keeper_name:identity.pk_name with
        | Error _ as e -> e
        | Ok policy ->
          let state =

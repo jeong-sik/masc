@@ -50,7 +50,18 @@ val mkdir_p : string -> unit
 (** Create directory recursively. *)
 
 val load_jsonl : string -> Yojson.Safe.t list
-(** Load JSONL file as list of JSON values. *)
+(** Load JSONL file as list of JSON values.
+    Malformed lines are logged and dropped. *)
+
+val load_jsonl_diagnostics : string -> Yojson.Safe.t list * int
+(** Load JSONL file, returning parsed values and count of malformed lines.
+    Logs each malformed line with file path.  Use when the caller needs
+    to surface degraded state (e.g. dashboard malformed_lines field). *)
+
+val parse_jsonl_lines : source:string -> string list -> Yojson.Safe.t list * int
+(** Parse pre-read string lines as JSONL, returning parsed values and
+    malformed count.  [source] is used in log messages.
+    Use when lines come from tail-readers or non-file sources. *)
 
 val append_jsonl : string -> Yojson.Safe.t -> unit
 (** Append JSON value as line to JSONL file. *)

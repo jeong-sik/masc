@@ -3,6 +3,7 @@ import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './st
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
+import { refreshProofSnapshot } from './proof-store'
 
 async function refreshActivityGraphSurface(): Promise<void> {
   const { refreshActivityGraph } = await import('./components/activity-graph')
@@ -41,6 +42,7 @@ export type RefreshTask =
   | 'execution'
   | 'activityGraph'
   | 'board'
+  | 'proof'
   | 'goals'
   | 'autoresearch'
   | 'harness'
@@ -73,6 +75,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'board') {
         return ['board']
       }
+      if (routeState.params.section === 'evidence') {
+        return ['proof']
+      }
       return []
     case 'lab':
       if (routeState.params.section === 'autoresearch') {
@@ -94,13 +99,19 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
   }
 }
 
-const REFRESHERS: Record<RefreshTask, () => void> = {
+const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'params'>) => void> = {
   shell: () => { void refreshShell({ force: true }) },
   namespaceTruth: () => { requestNamespaceTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   execution: () => { void refreshExecution({ force: true }) },
   activityGraph: () => { void refreshActivityGraphSurface() },
   board: () => { void refreshBoard() },
+  proof: routeState => {
+    void refreshProofSnapshot(
+      routeState.params.session_id ?? null,
+      routeState.params.operation_id ?? null,
+    )
+  },
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },
   harness: () => { void refreshHarnessLabSurface() },
@@ -146,6 +157,6 @@ export function refreshForRoute(
     recordTabVisit(routeState.tab, routeState.params.section)
   }
   refreshPlanForRoute(routeState).forEach(task => {
-    REFRESHERS[task]()
+    REFRESHERS[task](routeState)
   })
 }

@@ -36,7 +36,6 @@ import {
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
-  SSE_OPERATOR_DEBOUNCE_MS,
   SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
 
@@ -105,12 +104,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Keeper lifecycle (also triggers operator refresh via handler)
   keeper_handoff:        { target: 'execution' },
   keeper_compaction:     { target: 'execution' },
-  keeper_guardrail:      { target: 'execution' },
   keeper_phase_changed:  { target: 'execution' },
-  // Client input
-  client_input_approved:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
-  client_input_rejected:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
-  client_input_updated:   { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
   // Board
   board_post:           { target: 'board' },
   'masc/board_post':    { target: 'board' },
@@ -118,6 +112,8 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   'masc/board_comment': { target: 'board' },
   board_delete:         { target: 'board' },
   'masc/board_delete':  { target: 'board' },
+  post_voted:           { target: 'board' },
+  comment_voted:        { target: 'board' },
   // Activity graph
   'activity':                { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   'masc/activity':           { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
@@ -142,8 +138,8 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail', 'keeper_turn_complete', 'keeper_phase_changed',
-  'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_guardrail', 'masc/keeper_turn_complete',
+  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_phase_changed',
+  'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_turn_complete',
 ])
 
 const AUTORESEARCH_EVENTS = new Set([

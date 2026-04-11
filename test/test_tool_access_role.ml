@@ -163,6 +163,20 @@ let test_channel_gate_requires_worker () =
   check bool "Worker allows channel_gate" true
     (Tool_access_policy.allows_name worker_policy "channel_gate")
 
+let test_portal_tools_require_worker () =
+  let reader_policy = Tool_access_role.policy_for_role Reader in
+  let worker_policy = Tool_access_role.policy_for_role Worker in
+  List.iter (fun tool_name ->
+    check bool
+      (Printf.sprintf "Reader denies %s" tool_name)
+      false
+      (Tool_access_policy.allows_name reader_policy tool_name);
+    check bool
+      (Printf.sprintf "Worker allows %s" tool_name)
+      true
+      (Tool_access_policy.allows_name worker_policy tool_name))
+    [ "masc_portal_open"; "masc_portal_close"; "masc_portal_send" ]
+
 (* ================================================================ *)
 (* Unregistered tool behavior                                        *)
 (* ================================================================ *)
@@ -239,6 +253,8 @@ let () =
             test_worker_allows_worker_only_tools;
           test_case "channel_gate requires worker" `Quick
             test_channel_gate_requires_worker;
+          test_case "portal tools require worker" `Quick
+            test_portal_tools_require_worker;
         ] );
       ( "unregistered",
         [

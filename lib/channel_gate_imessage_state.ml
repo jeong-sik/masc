@@ -37,11 +37,9 @@ let redact_chat_guid raw =
   if value = "" then ""
   else
     match List.rev (String.split_on_char ';' value) with
-    | [] -> "[redacted]"
-    | _target :: rev_prefix -> (
-        match List.rev rev_prefix with
-        | [] -> "[redacted]"
-        | prefix -> String.concat ";" prefix ^ ";[redacted]")
+    | _target :: rev_prefix when rev_prefix <> [] ->
+        String.concat ";" (List.rev rev_prefix) ^ ";[redacted]"
+    | _ -> "[redacted]"
 
 let configured_write_path env_name ~default =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with

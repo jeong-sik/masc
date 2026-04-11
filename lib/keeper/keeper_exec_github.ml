@@ -767,11 +767,19 @@ let handle_keeper_pr_submit
             ; "error", `String "cwd_outside_playground"
             ; ( "reason"
               , `String
-                  "cwd must be inside this keeper's own playground bundle \
-                   (.masc/playground/<keeper>/...). \
-                   Open a worktree via masc_worktree_create first." )
+                  "cwd must be inside this keeper's own playground bundle. \
+                   Every cwd passed to keeper_pr_submit must start with \
+                   .masc/playground/<YOUR_KEEPER_NAME>/repos/<clone>/.worktrees/<name>/. \
+                   Other keepers' playgrounds and the MASC server \
+                   repository worktrees are not accepted." )
             ; "cwd", `String abs_cwd
             ; "expected_prefix", `String keeper_playground_prefix
+            ; ( "hint"
+              , `String
+                  "Call masc_worktree_create first (it returns a path \
+                   inside your playground), then re-call keeper_pr_submit \
+                   with cwd set to that returned path." )
+            ; "recovery_tool", `String "masc_worktree_create"
             ])
       else
         let steps = Buffer.create 512 in

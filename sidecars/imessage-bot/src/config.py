@@ -110,6 +110,11 @@ class BotConfig(BaseSettings):
             raise ValueError("reply_mode must be self-chat or source-chat")
         return normalized
 
+    @field_validator("self_chat_guid")
+    @classmethod
+    def validate_self_chat_guid(cls, v: str) -> str:
+        return v.strip()
+
     def gate_message_url(self) -> str:
         return f"{self.gate_base_url}/api/v1/gate/message"
 

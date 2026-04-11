@@ -652,20 +652,25 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
     (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
 
 let test_world_prompt_distinguishes_playground_and_worktree () =
+  (* Post-#6644: worktrees now live INSIDE the playground clone instead
+     of being "a separate workflow path". The old literal substring
+     ["a separate workflow path under `.worktrees/<branch-or-task>/`"]
+     was removed in that fix because it was the exact drift teaching
+     server-root `.worktrees/` — the harness was rejecting those paths
+     as [write_outside_playground_blocked]. The test now pins the new
+     contract: the world prompt must still name playground as the
+     default sandbox, and must teach the canonical
+     [.masc/playground/{name}/repos/<REPO>/.worktrees/...] shape for
+     worktrees rather than a bare server-root path. *)
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  (* #6648 iter9 — the worktree sentence was rewritten to place
-     worktrees *inside* the playground clone, closing the prompt-side
-     drift that iter1~iter8 left in place. Assert the new canonical
-     phrase so a future regression does not re-introduce the bare
-     server-root `.worktrees/` form. *)
-  check bool "world prompt names worktree workflow inside playground" true
+  check bool "world prompt teaches canonical worktree path inside playground" true
     (contains_substring prompt
-       "Repo worktrees live *inside* your playground clone");
-  check bool "world prompt names canonical playground-rooted worktree path" true
+       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/");
+  check bool "world prompt rejects bare server-root .worktrees/" true
     (contains_substring prompt
-       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
+       "Never use a bare `.worktrees/...` path")
 
 let test_system_prompt_prefers_submit_over_legacy_workflow () =
   let sys =
@@ -1757,6 +1762,28 @@ let test_sanitize_text_utf8_replaces_control_chars () =
     sanitized
 
 let test_prompt_sanitizes_control_chars () =
+  (* Post-#6645: [Keeper_unified_prompt.build_prompt] no longer calls
+     [Inference_utils.sanitize_text_utf8] on its output. Sanitization
+     for LLM-bound strings moved into the OAS pipeline boundaries in
+     oas v0.121.0 (oas#808): [user_prompt] in agent.ml, [system_prompt]
+     in pipeline.ml, and tool results in agent_turn.ml. The masc-mcp
+     [build_prompt] function is now expected to return raw text
+     verbatim, and the OAS pipeline is responsible for stripping
+     disallowed control chars before the request hits the wire.
+
+     The old form of this test asserted that [build_prompt] itself
+     produced sanitized output, which was a tautology after #6645.
+     What remains testable at this layer is:
+
+     1. Raw control-char input flows through [build_prompt] without
+        the function crashing or dropping content. (If the observation
+        fields contain [\000], the output must contain it verbatim —
+        the masc-mcp side is now purely structural.)
+     2. The sanitizer unit itself is still correct — that's covered by
+        [test_sanitize_text_utf8_replaces_control_chars] above, which
+        calls [Inference_utils.sanitize_text_utf8] directly.
+     3. The OAS pipeline contract is tested upstream in oas#808 and
+        is out of scope for this masc-mcp test file. *)
   let meta =
     { minimal_meta with
       instructions = "watch\000this";
@@ -1773,15 +1800,13 @@ let test_prompt_sanitizes_control_chars () =
         ];
     }
   in
-  let sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs () in
-  check bool "system prompt sanitized" false
-    (contains_disallowed_control_char sys);
-  check bool "user prompt sanitized" false
-    (contains_disallowed_control_char user);
-  check bool "mention text preserved" true
-    (contains_substring user "ping pong");
-  check bool "board preview preserved" true
-    (contains_substring user "bad preview")
+  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs () in
+  (* Structural assertion: raw control-char input flows through
+     unchanged (masc-mcp is no longer the sanitization point). *)
+  check bool "mention text still present (raw)" true
+    (contains_substring user "ping\001pong");
+  check bool "board preview still present (raw)" true
+    (contains_substring user "bad\127preview")
 
 let test_sanitize_messages_utf8_cleans_history_path () =
   let user_msg =

@@ -768,7 +768,7 @@ let assert_branch_switch_blocked config cmd label =
   let args =
     `Assoc
       [ "cmd", `String cmd
-      ; "cwd", `String shared_repo_rel
+      ; "cwd", `String shared_repo_abs
       ]
   in
   let result = call_tool config meta "keeper_bash" args in
@@ -928,7 +928,7 @@ let test_fs_read_blocks_shared_repo_by_default () =
     write_text_file shared_file "let approval = true\n";
     let result =
       call_tool config meta "keeper_fs_read"
-        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+        (`Assoc [ "path", `String shared_file ])
     in
     let json = parse_json result in
     check bool "returns error payload" true
@@ -949,7 +949,7 @@ let test_fs_read_allows_explicit_custom_path () =
     write_text_file shared_file "let approval = true\n";
     let result =
       call_tool config meta "keeper_fs_read"
-        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+        (`Assoc [ "path", `String shared_file ])
     in
     let json = parse_json result in
     check bool "explicit custom path read ok" true (json_bool "ok" json);

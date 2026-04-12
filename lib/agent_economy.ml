@@ -175,7 +175,9 @@ let append_transaction base_path (txn : transaction) : (unit, string) result =
     let line = Yojson.Safe.to_string (transaction_to_json txn) ^ "\n" in
     Fs_compat.append_file path line;
     Ok ()
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "[agent_economy] ledger write failed: %s"
              (Printexc.to_string e))
 

@@ -474,6 +474,17 @@ function buildRuntimeWarnings(rows: FleetRow[]): string[] {
     )
   }
 
+  const otherBlocked = rows.filter(row =>
+    row.runtime_blocker_class != null
+    && row.runtime_blocker_class !== 'admission_queue_wait_timeout'
+    && row.runtime_blocker_class !== 'autonomous_slot_wait_timeout',
+  )
+  if (otherBlocked.length > 0) {
+    warnings.push(
+      `${otherBlocked.length} keepers have other runtime blockers; inspect the row-level blocker hints for details.`,
+    )
+  }
+
   return warnings
 }
 

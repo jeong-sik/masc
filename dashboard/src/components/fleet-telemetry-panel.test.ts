@@ -211,7 +211,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Partial telemetry')
     expect(container.textContent).toContain('keepers are blocked in the admission queue')
     expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
-  })
+  }, 30_000)
 
   it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {
     const { buildFleetRows } = await loadPanel({

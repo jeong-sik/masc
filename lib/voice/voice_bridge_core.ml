@@ -170,6 +170,7 @@ let start_local_playback ~sw ~agent_id ~audio_file =
               "local voice playback unavailable: no ffplay/mpg123/play/open executable found"
         | Some argv ->
           Eio.Fiber.fork ~sw (fun () ->
+            try
               match Process_eio.run_argv_with_status ~timeout_sec:180.0 argv with
               | Unix.WEXITED 0, _ ->
                   log_info
@@ -192,7 +193,12 @@ let start_local_playback ~sw ~agent_id ~audio_file =
                     (Printf.sprintf
                        "local voice playback signaled (sig=%d): %s%s"
                        signal (String.concat " " argv)
-                       (if String.trim output = "" then "" else " :: " ^ String.trim output)))
+                       (if String.trim output = "" then "" else " :: " ^ String.trim output))
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                log_error (Printf.sprintf "voice playback exception: %s"
+                  (Printexc.to_string exn)))
 
 (** Get voice for agent, defaults to "Sarah" if config is unavailable *)
 let get_voice_for_agent agent_id =

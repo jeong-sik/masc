@@ -33,10 +33,16 @@ else
   exit 1
 fi
 
+read_ws_session_count() {
+  curl -fsS "${MASC_BASE_URL}/health" 2>/dev/null \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("transport",{}).get("websocket",{}).get("session_count",-1))' \
+    2>/dev/null || echo "-1"
+}
+
 wait_deadline=$(( $(date +%s) + 20 ))
 ws_resp="FAILED"
 while [[ "$(date +%s)" -lt "$wait_deadline" ]]; do
-  ws_resp="$(curl -sS -i -m 5 \
+  ws_resp="$(curl -sS -o /dev/null -D - -m 5 \
     -H "Connection: Upgrade" \
     -H "Upgrade: websocket" \
     -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
@@ -156,12 +162,16 @@ ws_client_pid=$!
 #
 # Falls back to the old 1-second wait if jq is missing or /health does
 # not expose the field.
+ws_sessions_before="$(read_ws_session_count)"
+ws_target_sessions=1
+if [[ "$ws_sessions_before" =~ ^[0-9]+$ ]]; then
+  ws_target_sessions=$(( ws_sessions_before + 1 ))
+fi
+
 ws_ready_deadline=$(( $(date +%s) + 10 ))
 while [[ "$(date +%s)" -lt "$ws_ready_deadline" ]]; do
-  ws_sessions="$(curl -fsS "${MASC_BASE_URL}/health" 2>/dev/null \
-    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("transport",{}).get("websocket",{}).get("session_count",-1))' \
-    2>/dev/null || echo "-1")"
-  if [[ "$ws_sessions" =~ ^[0-9]+$ ]] && [[ "$ws_sessions" -ge 1 ]]; then
+  ws_sessions="$(read_ws_session_count)"
+  if [[ "$ws_sessions" =~ ^[0-9]+$ ]] && [[ "$ws_sessions" -ge "$ws_target_sessions" ]]; then
     break
   fi
   sleep 0.2

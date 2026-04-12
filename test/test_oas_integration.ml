@@ -36,7 +36,7 @@ let test_event_bus_broadcast () =
   Oas_events.publish_broadcast bus ~agent_name:"test-agent" ~content:"hello";
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match List.hd events with
+  match (List.hd events : Event_bus.event).payload with
   | Event_bus.Custom ("masc:broadcast", payload) ->
     let agent = Yojson.Safe.Util.(member "agent_name" payload |> to_string) in
     Alcotest.(check string) "agent name" "test-agent" agent
@@ -50,7 +50,7 @@ let test_event_bus_heartbeat () =
   Oas_events.publish_heartbeat bus ~agent_name:"keeper-runtime" ~turn:5 ~context_pct:0.42;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match List.hd events with
+  match (List.hd events : Event_bus.event).payload with
   | Event_bus.Custom ("masc:heartbeat", payload) ->
     let turn = Yojson.Safe.Util.(member "turn" payload |> to_int) in
     Alcotest.(check int) "turn" 5 turn
@@ -65,7 +65,7 @@ let test_event_bus_task_transition () =
     ~task_id:"task-1" ~transition:"done";
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match List.hd events with
+  match (List.hd events : Event_bus.event).payload with
   | Event_bus.Custom ("masc:task_transition", payload) ->
     let tid = Yojson.Safe.Util.(member "task_id" payload |> to_string) in
     Alcotest.(check string) "task id" "task-1" tid
@@ -85,14 +85,14 @@ let test_oas_sse_bridge_persists_native_events () =
         Eio.Switch.run (fun sw ->
           Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
           Event_bus.publish bus
-            (Event_bus.ToolCalled
-               {
-                 agent_name = "bridge-agent";
-                 tool_name = "masc_status";
-                 input = `Assoc [];
-                 session_id = Some "sess-bridge";
-                 worker_run_id = Some "run-bridge";
-               });
+            (Event_bus.mk_event
+               ~correlation_id:"sess-bridge" ~run_id:"run-bridge"
+               (ToolCalled
+                  {
+                    agent_name = "bridge-agent";
+                    tool_name = "masc_status";
+                    input = `Assoc [];
+                  }));
           Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
           let store =
             Dated_jsonl.create

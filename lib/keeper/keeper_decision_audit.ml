@@ -10,9 +10,10 @@
 (* ================================================================ *)
 
 let decision_layer_level_cached =
-  lazy (Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
 
-let decision_layer_level () = Lazy.force decision_layer_level_cached
+let decision_layer_level () = Eio.Lazy.force decision_layer_level_cached
 
 let audit_enabled () = decision_layer_level () >= 1
 
@@ -71,9 +72,10 @@ let to_json (r : decision_record) : Yojson.Safe.t =
 (* ================================================================ *)
 
 let ring_capacity_cached =
-  lazy (Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
 
-let ring_capacity () = max 1 (Lazy.force ring_capacity_cached)
+let ring_capacity () = max 1 (Eio.Lazy.force ring_capacity_cached)
 
 type ring = {
   buf : decision_record option array;
@@ -86,8 +88,6 @@ type ring = {
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 8
 
 let flush_interval_sec_cached =
-  (* Flush cadence is only consulted from keeper runtime fibers, so use
-     Eio.Lazy here to avoid concurrent Stdlib.Lazy.force hazards. *)
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     Env_config_core.get_float ~default:60.0
       "MASC_DECISION_AUDIT_FLUSH_INTERVAL_SEC")

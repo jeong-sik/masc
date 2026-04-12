@@ -9,11 +9,19 @@
 (* Feature flag                                                     *)
 (* ================================================================ *)
 
+(* Stdlib.Lazy — NOT Eio.Lazy — because [audit_enabled] is called
+   from test contexts and module-init paths that run before the Eio
+   scheduler is installed.  [Eio.Lazy.force] requires an active Eio
+   effect handler and raises [Effect.Unhandled] without one.  The
+   body is a pure env-var read (no yield, no I/O), so the
+   concurrent-force hazard that motivates Eio.Lazy does not apply.
+   See [flush_interval_sec_cached] below for the Eio.Lazy
+   counterpart — those are only accessed from keeper runtime fibers
+   which always run inside [Eio_main.run]. *)
 let decision_layer_level_cached =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
+  lazy (Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
 
-let decision_layer_level () = Eio.Lazy.force decision_layer_level_cached
+let decision_layer_level () = Lazy.force decision_layer_level_cached
 
 let audit_enabled () = decision_layer_level () >= 1
 
@@ -71,11 +79,12 @@ let to_json (r : decision_record) : Yojson.Safe.t =
 (* Ring buffer                                                      *)
 (* ================================================================ *)
 
+(* Stdlib.Lazy — same reasoning as [decision_layer_level_cached]:
+   accessed from test contexts without Eio runtime. *)
 let ring_capacity_cached =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
+  lazy (Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
 
-let ring_capacity () = max 1 (Eio.Lazy.force ring_capacity_cached)
+let ring_capacity () = max 1 (Lazy.force ring_capacity_cached)
 
 type ring = {
   buf : decision_record option array;

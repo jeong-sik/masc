@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-04-12
+
+### Fixed
+- CP unit: bound descendant_units_of_kind recursion (#6647)
+- Prompt registry: merge validate+write into single mutex transaction (#6646)
+- Room task schedule: reuse Room_task.update_local_agent_state on agent writes (#6642)
+
+### Changed
+- Bump OAS pin for min_p capability gate fix (#6653)
+- Keeper: remove redundant UTF-8 sanitize calls on LLM input path (#6645)
+- Docs: fix prompt-layer drift teaching server-root .worktrees/ (#6648)
+
 ## [0.5.6] - 2026-04-12
 
 ### Added

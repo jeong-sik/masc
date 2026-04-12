@@ -6,13 +6,6 @@ open Tool_args
     reference this constant instead of using the string literal. *)
 let default_cascade_name = Keeper_cascade_profile.default_name
 
-(** Default model list for keeper turns. Used when a keeper TOML does not
-    declare its own [models] field. Each entry is a "provider:model_id"
-    string that OAS Cascade_config.parse_model_string_exn already parses. *)
-let default_keeper_models =
-  [ "glm-coding:glm-5.1"
-  ; "ollama:qwen3.5:35b-a3b-nvfp4"
-  ]
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward

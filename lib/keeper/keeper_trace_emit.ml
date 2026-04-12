@@ -5,12 +5,13 @@
 
 module SM = Keeper_state_machine
 
-let enabled_cache : bool Lazy.t =
-  lazy (match Sys.getenv_opt "MASC_TLA_TRACE" with
+let enabled_cache =
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+    match Sys.getenv_opt "MASC_TLA_TRACE" with
     | Some ("1" | "true" | "yes") -> true
     | _ -> false)
 
-let enabled () = Lazy.force enabled_cache
+let enabled () = Eio.Lazy.force enabled_cache
 
 let trace_path ~base_path ~keeper_name =
   Filename.concat
@@ -27,7 +28,7 @@ let emit_transition
     ~(conditions_after : SM.conditions)
     ~(restart_count : int)
   =
-  if not (Lazy.force enabled_cache) then ()
+  if not (Eio.Lazy.force enabled_cache) then ()
   else
     let json = `Assoc [
       "seq", `Int seq;

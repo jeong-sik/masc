@@ -60,8 +60,8 @@ let wrap_event ~ts ~event_type ~payload ?agent_name ?session_id ?worker_run_id
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
   let ts = Time_compat.now () in
   match evt with
-  | Agent_sdk.Event_bus.AgentStarted
-      { agent_name; task_id; session_id; worker_run_id; _ } ->
+  | { Agent_sdk.Event_bus.payload = Agent_sdk.Event_bus.AgentStarted
+      { agent_name; task_id; session_id; worker_run_id; _ }; _ } ->
       let payload =
         `Assoc
           [
@@ -74,8 +74,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"agent_started" ~payload ~agent_name
            ~task_id ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.AgentCompleted
-      { agent_name; task_id; elapsed; session_id; worker_run_id; _ } ->
+  | { payload = Agent_sdk.Event_bus.AgentCompleted
+      { agent_name; task_id; elapsed; session_id; worker_run_id; _ }; _ } ->
       let payload =
         `Assoc
           [
@@ -89,8 +89,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"agent_completed" ~payload ~agent_name
            ~task_id ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.ToolCalled
-      { agent_name; tool_name; session_id; worker_run_id; _ } ->
+  | { payload = Agent_sdk.Event_bus.ToolCalled
+      { agent_name; tool_name; session_id; worker_run_id; _ }; _ } ->
       let payload =
         `Assoc
           [
@@ -103,8 +103,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"tool_called" ~payload ~agent_name
            ~tool_name ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.ToolCompleted
-      { agent_name; tool_name; session_id; worker_run_id; _ } ->
+  | { payload = Agent_sdk.Event_bus.ToolCompleted
+      { agent_name; tool_name; session_id; worker_run_id; _ }; _ } ->
       let payload =
         `Assoc
           [
@@ -117,8 +117,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"tool_completed" ~payload ~agent_name
            ~tool_name ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.TurnStarted
-      { agent_name; turn; session_id; worker_run_id; _ } ->
+  | { payload = Agent_sdk.Event_bus.TurnStarted
+      { agent_name; turn; session_id; worker_run_id; _ }; _ } ->
       let payload =
         `Assoc
           [
@@ -131,8 +131,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"turn_started" ~payload ~agent_name ~turn
            ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.TurnCompleted
-      { agent_name; turn; session_id; worker_run_id; _ } ->
+  | { payload = Agent_sdk.Event_bus.TurnCompleted
+      { agent_name; turn; session_id; worker_run_id; _ }; _ } ->
       let payload =
         `Assoc
           [
@@ -145,7 +145,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"turn_completed" ~payload ~agent_name ~turn
            ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.ContextCompacted
+  | { payload = Agent_sdk.Event_bus.ContextCompacted
       {
         agent_name;
         before_tokens;
@@ -153,7 +153,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         phase;
         session_id;
         worker_run_id;
-      } ->
+      }; _ } ->
       let payload =
         `Assoc
           [
@@ -168,7 +168,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some
         (wrap_event ~ts ~event_type:"context_compacted" ~payload ~agent_name
            ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.TaskStateChanged { task_id; from_state; to_state } ->
+  | { payload = Agent_sdk.Event_bus.TaskStateChanged { task_id; from_state; to_state }; _ } ->
       let payload =
         `Assoc
           [
@@ -178,9 +178,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           ]
       in
       Some (wrap_event ~ts ~event_type:"task_state_changed" ~payload ~task_id ())
-  | Agent_sdk.Event_bus.ElicitationCompleted _ ->
+  | { payload = Agent_sdk.Event_bus.ElicitationCompleted _; _ } ->
     None  (* Internal; no SSE relay needed *)
-  | Agent_sdk.Event_bus.Custom (name, payload) ->
+  | { payload = Agent_sdk.Event_bus.Custom (name, payload); _ } ->
       Some
         (wrap_event ~ts ~event_type:name ~payload
            ?agent_name:(payload_agent_name payload)

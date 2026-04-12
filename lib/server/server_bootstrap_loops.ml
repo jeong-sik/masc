@@ -33,7 +33,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   let keeper_lifecycle_sub =
     Agent_sdk.Event_bus.subscribe event_bus
       ~filter:(function
-        | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", _) -> true
+        | { Agent_sdk.Event_bus.payload = Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", _); _ } -> true
         | _ -> false)
   in
   Eio.Fiber.fork ~sw (fun () ->
@@ -42,7 +42,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
         List.iter
           (function
-            | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload) ->
+            | { Agent_sdk.Event_bus.payload = Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload); _ } ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload,
                      Safe_ops.json_string_opt "keeper_name" payload )

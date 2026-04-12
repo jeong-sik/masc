@@ -158,13 +158,14 @@ let resolve_provider_of_label (label : string) : Oas.Provider.config =
 
 let publish_lifecycle bus ~name ~event ~detail =
   Oas.Event_bus.publish bus
-    (Oas.Event_bus.Custom
-      (Printf.sprintf "masc:oas_worker:%s" event,
-       `Assoc [
-         ("agent", `String name);
-         ("detail", `String detail);
-         ("timestamp", `Float (Time_compat.now ()));
-       ]))
+    (Oas.Event_bus.mk_event
+      (Custom
+        (Printf.sprintf "masc:oas_worker:%s" event,
+         `Assoc [
+           ("agent", `String name);
+           ("detail", `String detail);
+           ("timestamp", `Float (Time_compat.now ()));
+         ])))
 
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)

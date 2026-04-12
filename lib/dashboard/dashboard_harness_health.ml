@@ -27,7 +27,6 @@ type pre_compact_event = {
   message_count : int;
   token_count : int;
   strategies : string list;
-  model_family : string;  (** Derived label for backward compat (SSE/dashboard) *)
   context_window : int;
   is_local_model : bool;
   trigger : string;
@@ -154,7 +153,6 @@ let pre_compact_record_json (event : pre_compact_event) =
       ("message_count", `Int event.message_count);
       ("token_count", `Int event.token_count);
       ("strategies", `List (List.map (fun value -> `String value) event.strategies));
-      ("model_family", `String event.model_family);
       ("context_window", `Int event.context_window);
       ("is_local_model", `Bool event.is_local_model);
       ("trigger", `String event.trigger);
@@ -169,7 +167,6 @@ let pre_compact_event_json (event : pre_compact_event) =
       ("message_count", `Int event.message_count);
       ("token_count", `Int event.token_count);
       ("strategies", `List (List.map (fun value -> `String value) event.strategies));
-      ("model_family", `String event.model_family);
       ("context_window", `Int event.context_window);
       ("is_local_model", `Bool event.is_local_model);
       ("trigger", `String event.trigger);
@@ -187,7 +184,6 @@ let pre_compact_event_of_json json =
         message_count = Safe_ops.json_int ~default:0 "message_count" json;
         token_count = Safe_ops.json_int ~default:0 "token_count" json;
         strategies = Safe_ops.json_string_list "strategies" json;
-        model_family = string_field json "model_family";
         context_window = Safe_ops.json_int ~default:128_000 "context_window" json;
         is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json;
         trigger = string_field json "trigger";
@@ -399,9 +395,6 @@ let overview_json
 
 let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
     ~token_count ~strategies ~context_window ~is_local_model ~trigger =
-  let model_family =
-    Provider_adapter.classify_model_family ~is_local:is_local_model ~context_window
-  in
   let event =
     {
       timestamp;
@@ -410,7 +403,6 @@ let record_pre_compact_at ~timestamp ~keeper_name ~context_ratio ~message_count
       message_count;
       token_count;
       strategies;
-      model_family;
       context_window;
       is_local_model;
       trigger;

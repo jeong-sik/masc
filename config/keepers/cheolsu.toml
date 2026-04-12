@@ -50,8 +50,11 @@ allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
 
 tool_preset = "coding"
 
-# Capability-first cascade: glm-5.1(17s) -> 5-turbo -> local
-cascade_name = "coding_first"
+# Cascade: glm-coding:glm-5.1 -> glm:glm-5.1 -> groq -> local
+# Previously [coding_first], which was a pure alias of [keeper_unified]
+# with identical models/temperature/max_tokens. Collapsed to the single
+# [keeper_unified] profile on 2026-04-12.
+cascade_name = "keeper_unified"
 
 # Telemetry Feedback
 telemetry_feedback_enabled = true

@@ -152,12 +152,16 @@ let test_missing_file_error_includes_directory_suggestions () =
         Sys.remove (Filename.concat dir f));
         Unix.rmdir dir with _ -> ()))
     (fun () ->
-      let existing = Filename.concat dir "known.txt" in
-      Out_channel.with_open_text existing
-        (fun oc -> Out_channel.output_string oc "known");
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
+      let pg_dir = Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name) in
+      Fs_compat.mkdir_p pg_dir;
+      let existing = Filename.concat pg_dir "known.txt" in
+      Out_channel.with_open_text existing
+        (fun oc -> Out_channel.output_string oc "known");
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       match Tool.execute tool (`Assoc [("path", `String "missing.txt")]) with
@@ -223,6 +227,10 @@ let test_failure_count_resets_after_success () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Room.default_config dir in
+      let pg_dir = Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name) in
+      Fs_compat.mkdir_p pg_dir;
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let path = "reset-after-success.txt" in
@@ -232,7 +240,7 @@ let test_failure_count_resets_after_success () =
         | Error _ -> ()
         | Ok _ -> fail "missing file should fail before reset"
       done;
-      let abs_path = Filename.concat dir path in
+      let abs_path = Filename.concat pg_dir path in
       Out_channel.with_open_text abs_path
         (fun oc -> Out_channel.output_string oc "ok");
       (match Tool.execute tool args with

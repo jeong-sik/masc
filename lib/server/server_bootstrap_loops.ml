@@ -32,7 +32,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk.Event_bus.subscribe event_bus
-      ~filter:(function
+      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
+        match evt.payload with
         | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", _) -> true
         | _ -> false)
   in
@@ -41,7 +42,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       (try
         let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
         List.iter
-          (function
+          (fun (evt : Agent_sdk.Event_bus.event) ->
+            match evt.payload with
             | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload) ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload,

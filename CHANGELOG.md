@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-04-12
+
+### Added
+- Harden OAS telemetry visibility and proactive monitoring (#6679)
+
+### Fixed
+- Keeper: add keeper_board_delete + cleanup to boundary-exempt list (#6698)
+- Lazy: replace Stdlib.Lazy with Eio.Lazy in keeper modules (#6696)
+- Dashboard: externalize agent status thresholds (#6683)
+- Prompt: restore world prompt contract and sanitize unified prompt (#6675)
+- Prompt: reinforce playground containment in keeper capabilities (#6678)
+- Re-raise Eio.Cancel.Cancelled in 5 catch-all handlers (#6697)
+- CI: unblock Build and Test (#6699)
+
+### Hardened
+- Store cache: mutex-protect Dated_jsonl store caches (#6690)
+- Agent registry: serialise session cache mutations (#6682)
+
+### Performance
+- Memory OAS bridge: move episode JSONL load outside cache mutex (#6671)
+- Prompt registry: move markdown disk reads outside registry mutex (#6663)
+
 ## [0.5.8] - 2026-04-12
 
 ### Fixed

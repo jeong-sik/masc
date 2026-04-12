@@ -291,7 +291,7 @@ let list_detachments_json_from_state ?operation_id ?detachment_id
   in
   let rows =
     detachments
-    |> List.map (fun (detachment : detachment_record) ->
+    |> Safe_ops.map_safe (fun (detachment : detachment_record) ->
            let operation =
              operation_by_id operations detachment.operation_id
              |> Option.map operation_to_json
@@ -529,7 +529,7 @@ let list_alerts_json_from_state _config (state : snapshot_state) =
                | Some reason -> reason
                | None -> "Pending policy gate approval"));
   (* Add occurrences count to deduped alerts *)
-  let enriched = List.rev !alerts |> List.map (fun (key, json) ->
+  let enriched = List.rev !alerts |> Safe_ops.map_safe (fun (key, json) ->
     let occurrences =
       Hashtbl.find_opt seen key |> Option.map (fun count -> !count) |> Option.value ~default:1
     in

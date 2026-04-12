@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Enforce type/area/target planning labels
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           TRIAGE_LABEL: triage-required
         with:

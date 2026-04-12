@@ -9,11 +9,12 @@
 (* Feature flag                                                     *)
 (* ================================================================ *)
 
+(* These values are read from tests and module-init code that can run before an
+   Eio scheduler exists, so they must stay on Stdlib.Lazy. *)
 let decision_layer_level_cached =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
+  lazy (Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
 
-let decision_layer_level () = Eio.Lazy.force decision_layer_level_cached
+let decision_layer_level () = Lazy.force decision_layer_level_cached
 
 let audit_enabled () = decision_layer_level () >= 1
 
@@ -72,10 +73,9 @@ let to_json (r : decision_record) : Yojson.Safe.t =
 (* ================================================================ *)
 
 let ring_capacity_cached =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
+  lazy (Env_config_core.get_int ~default:50 "MASC_DECISION_AUDIT_RING_CAPACITY")
 
-let ring_capacity () = max 1 (Eio.Lazy.force ring_capacity_cached)
+let ring_capacity () = max 1 (Lazy.force ring_capacity_cached)
 
 type ring = {
   buf : decision_record option array;

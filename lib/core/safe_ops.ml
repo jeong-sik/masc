@@ -256,6 +256,22 @@ let json_member_opt key json =
   | `Null -> None
   | v -> Some v
 
+(** {1 Tail-recursive list helpers} *)
+
+(** Tail-recursive replacement for [Stdlib.List.concat_map].
+    [Stdlib.List.concat_map f l] is implemented as [concat (map f l)] —
+    neither [map] nor [concat] is tail-recursive, so a list of N elements
+    where [f] returns M-element sub-lists uses O(N + N*M) stack frames.
+    This version uses [fold_left] + [rev_append] — constant stack. *)
+let concat_map_safe (f : 'a -> 'b list) (l : 'a list) : 'b list =
+  List.rev (List.fold_left (fun acc x -> List.rev_append (f x) acc) [] l)
+
+(** Tail-recursive replacement for [Stdlib.List.map].
+    [Stdlib.List.map] builds the result on the stack — O(N) frames.
+    For lists that may exceed ~10K elements, use this instead. *)
+let map_safe (f : 'a -> 'b) (l : 'a list) : 'b list =
+  List.rev (List.rev_map f l)
+
 (** {1 Safe Process Execution} *)
 
 (* Intentionally empty: process execution lives in Process_eio (argv-only). *)

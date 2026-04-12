@@ -655,14 +655,12 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  (* #6648 iter9 — the worktree sentence was rewritten to place
-     worktrees *inside* the playground clone, closing the prompt-side
-     drift that iter1~iter8 left in place. Assert the new canonical
-     phrase so a future regression does not re-introduce the bare
-     server-root `.worktrees/` form. *)
+  (* The current prompt frames `.worktrees/` as a separate workflow path that
+     still must stay inside the playground clone. Keep the containment clause
+     asserted so bare server-root `.worktrees/...` paths cannot drift back in. *)
   check bool "world prompt names worktree workflow inside playground" true
     (contains_substring prompt
-       "Repo worktrees live *inside* your playground clone");
+       "must live *inside* your playground clone");
   check bool "world prompt names canonical playground-rooted worktree path" true
     (contains_substring prompt
        ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
@@ -989,8 +987,10 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
-    check int "unified max_tokens default" 16384
-      (KC.keeper_unified_max_tokens ())
+    (* This unit test does not run Runtime_params.restore, so an empty env var
+       falls back to the code-level default rather than config/cascade.json. *)
+    check int "unified max_tokens default" 65536
+    (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 
 let test_meta_defaults_social_model () =

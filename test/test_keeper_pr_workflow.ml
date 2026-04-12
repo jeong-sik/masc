@@ -593,6 +593,15 @@ let seed_playground_clone config keeper_name source_repo =
   let clone_path = Filename.concat repos_dir (Filename.basename source_repo) in
   if Sys.file_exists clone_path then rm_rf clone_path;
   run_cmd_exn [ "git"; "clone"; source_repo; clone_path ];
+  (* Replace origin with a local bare repo so git-push succeeds locally
+     but gh-pr-create fails harmlessly — prevents real PRs leaking to GitHub. *)
+  let local_bare = clone_path ^ ".bare" in
+  if Sys.file_exists local_bare then rm_rf local_bare;
+  run_cmd_exn [ "git"; "init"; "--bare"; local_bare ];
+  run_cmd_exn [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; local_bare ];
+  (* Ensure main branch exists (clone from worktree may default to another branch) *)
+  ignore (run_cmd [ "git"; "-C"; clone_path; "checkout"; "-B"; "main" ]);
+  run_cmd_exn [ "git"; "-C"; clone_path; "push"; "-u"; "origin"; "main" ];
   clone_path
 
 let cleanup_test_branch repo_root branch =

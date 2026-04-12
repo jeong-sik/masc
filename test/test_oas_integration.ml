@@ -112,10 +112,10 @@ let test_oas_sse_bridge_persists_native_events () =
                  (field_string "event_type");
                Alcotest.(check string) "agent name" "bridge-agent"
                  (field_string "agent_name");
-               Alcotest.(check string) "session id" "sess-bridge"
-                 (field_string "session_id");
-               Alcotest.(check string) "worker run id" "run-bridge"
-                 (field_string "worker_run_id")
+               Alcotest.(check string) "correlation id" "sess-bridge"
+                 (field_string "correlation_id");
+               Alcotest.(check string) "run id" "run-bridge"
+                 (field_string "run_id")
            | _ -> Alcotest.fail "expected persisted oas event object");
           raise Exit)
       with Exit -> ())

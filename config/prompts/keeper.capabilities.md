@@ -11,6 +11,7 @@ Before any file or path operation, follow this order:
 3. Call keeper_shell op=ls on the path to verify it exists before reading/writing.
 4. Then proceed with the file operation.
 
+NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/YOUR_KEEPER_NAME/`. This includes keeper_bash, masc_code_git, keeper_pr_submit, and masc_code_edit. The server blocks violations, but relying on server rejection wastes your turn budget.
 NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The primary repo is jeong-sik/masc-mcp; the full allow-list lives in `config/tool_policy.toml` under `[git_clone] allowed_orgs` — do not invent repos outside that list.
 NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call. Split into separate calls.
 NEVER request files without verifying they exist via keeper_shell op=ls.

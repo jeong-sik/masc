@@ -2,7 +2,7 @@
 
 > Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
 > Status: Living draft
-> Last Updated: 2026-04-11
+> Last Updated: 2026-04-12
 > Snapshot baseline: `dune-project` version `0.5.9`
 
 MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Claude, Gemini, Codex, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며, MCP JSON-RPC 프로토콜을 통해 모든 주요 AI IDE/CLI와 통합된다.
@@ -73,6 +73,7 @@ graph TB
 |----------|-------------|--------------|
 | `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` | Dashboard operator control surface and review queue UX | `10-dashboard.md` |
 | `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-oas-integration.md` |
+| `docs/design/checkpoint-truth-replay-implementation-checklist.md` | Implementation checklist for checkpoint truth / replay | `13-oas-integration.md` |
 | `docs/design/keeper-continuity-product-rfc.md` | Keeper continuity contract and promise level | `05-keeper-agent.md` |
 | `docs/design/check-evaluation-spec.md` | Deterministic check evaluation for contract verification | `15-testing.md` |
 | `docs/design/contract-driven-agent-loop-rfc.md` | Contract-driven agent loop (CDAL) framework | `05-keeper-agent.md` |

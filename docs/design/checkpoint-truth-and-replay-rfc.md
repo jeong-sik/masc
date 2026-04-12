@@ -8,6 +8,7 @@
 ## Related Documents
 
 - `../spec/13-oas-integration.md`
+- `./checkpoint-truth-replay-implementation-checklist.md`
 - `./oas-masc-state-boundary.md`
 - `./delta-checkpoint-read-path.md`
 - `./keeper-continuity-product-rfc.md`

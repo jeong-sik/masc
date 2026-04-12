@@ -14,6 +14,27 @@ let target_agent_name ctx args =
   | "" -> ctx.agent_name
   | name -> name
 
+(* Authorisation gate for cross-agent admin actions (#6623).
+   Returns [true] when [ctx.agent_name] is allowed to act on a
+   different agent's credentials. The rule matches the existing
+   [initial_admin] concept written by [Auth.enable_auth] — the
+   agent that enabled auth is the bootstrap admin and retains
+   full permission. Any other caller must pass their own
+   [agent_name] (i.e. target == ctx), otherwise the cross-agent
+   action is rejected. *)
+let caller_is_initial_admin (ctx : context) : bool =
+  match Auth.read_initial_admin ctx.config.base_path with
+  | Some admin -> String.equal admin ctx.agent_name
+  | None -> false
+
+let cross_agent_forbidden_msg ~action ~(ctx : context) ~target =
+  Printf.sprintf
+    "%s is restricted: agent_name must match the authenticated \
+     agent (caller=%S) unless the caller is the initial admin. \
+     Requested target=%S. Cross-agent %s is blocked to prevent \
+     credential spoofing. See #6623."
+    action ctx.agent_name target action
+
 let handle_auth_enable ctx args =
   let require_token = get_bool args "require_token" false in
   let (secret, bootstrap_token) =
@@ -69,6 +90,17 @@ let create_token_failures = Hashtbl.create 16
 
 let handle_auth_create_token ctx args =
   let target_agent = target_agent_name ctx args in
+  (* #6623 iter 8 — reject cross-agent token creation unless the
+     caller is the initial_admin recorded at enable_auth time.
+     Without this gate, any authenticated caller could forge a
+     token for any other agent (including admin role) and hot-swap
+     identity. Matches the self-only guard already in
+     [handle_auth_refresh]. *)
+  if target_agent <> ctx.agent_name && not (caller_is_initial_admin ctx) then
+    (false, cross_agent_forbidden_msg
+              ~action:"masc_auth_create_token"
+              ~ctx ~target:target_agent)
+  else
   let failures = match Hashtbl.find_opt create_token_failures target_agent with Some f -> f | None -> 0 in
   if failures >= 3 then
     (false, Printf.sprintf "Circuit breaker open: masc_auth_create_token failed %d times for %s. Check auth directories permissions or secret key configuration." failures target_agent)
@@ -136,6 +168,15 @@ Expires: %s
 
 let handle_auth_revoke ctx args =
   let target_agent = target_agent_name ctx args in
+  (* #6623 iter 8 — same gate as handle_auth_create_token. Cross-agent
+     revoke is a denial-of-service primitive: any authenticated caller
+     could lock another agent out at will. Allow only self-revoke, or
+     revoke-by-initial-admin for legitimate credential rotation. *)
+  if target_agent <> ctx.agent_name && not (caller_is_initial_admin ctx) then
+    (false, cross_agent_forbidden_msg
+              ~action:"masc_auth_revoke"
+              ~ctx ~target:target_agent)
+  else
   match Auth.load_credential ctx.config.base_path target_agent with
   | None ->
       (false, Printf.sprintf "No credential found for %s" target_agent)

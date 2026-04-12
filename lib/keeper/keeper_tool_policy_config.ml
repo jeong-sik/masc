@@ -146,11 +146,29 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
   { allowed_orgs; denied_repos; default_depth;
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
+(* Shortcut: if the caller's [base_path] already points at a project root
+   that has [base_path/config/tool_policy.toml], prefer that directly.
+   This is the common case when callers pass the result of
+   [Masc_test_deps.find_project_root ()] in tests or the repo root in
+   production. The direct check avoids the executable-relative walk in
+   [Config_dir_resolver] which can pick up partial config shards
+   materialised by dune into [_build/default/config/cascade.json] and
+   resolve the wrong root. Scoped to this loader only — the generic
+   resolver (used by dashboard/runtime code that reads per-env state
+   from the resolved root) is untouched. *)
 let config_root_for_base_path ~base_path =
-  let inputs = Config_dir_resolver.inputs_from_env () in
-  let inputs = { inputs with env_base_path = Some base_path } in
-  let resolution = Config_dir_resolver.resolve_with inputs in
-  (resolution.Config_dir_resolver.config_root.path, resolution.warnings)
+  let base_path =
+    if Filename.is_relative base_path then Filename.concat (Sys.getcwd ()) base_path
+    else base_path
+  in
+  let direct_config = Filename.concat base_path "config" in
+  let direct_policy = Filename.concat direct_config "tool_policy.toml" in
+  if Sys.file_exists direct_policy then (direct_config, [])
+  else
+    let inputs = Config_dir_resolver.inputs_from_env () in
+    let inputs = { inputs with cwd = base_path; env_base_path = Some base_path } in
+    let resolution = Config_dir_resolver.resolve_with inputs in
+    (resolution.Config_dir_resolver.config_root.path, resolution.warnings)
 
 let load ~base_path : (t, string) result =
   let config_root, resolution_warnings = config_root_for_base_path ~base_path in

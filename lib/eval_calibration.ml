@@ -298,6 +298,12 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let recent_fallback_reasons : string list ref = ref [] in
   let max_fallback_reasons = 5 in
   let fallback_tag = Anti_rationalization.gate_to_string Fallback in
+  (* Cross-model accounting: how many verdicts were produced by an
+     evaluator cascade distinct from the generator cascade? This is
+     the *runtime enforcement* rate of the cross-model review policy
+     declared in anti_rationalization.mli (#3067). *)
+  let verdicts_with_generator = ref 0 in
+  let cross_model_match = ref 0 in
   List.iter (fun json ->
     let rt = string_field json "record_type" in
     let hash = string_field json "notes_hash" in
@@ -310,6 +316,13 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       let prev = Option.value ~default:0 (Hashtbl.find_opt gate_counts gate) in
       Hashtbl.replace gate_counts gate (prev + 1);
       Hashtbl.replace verdict_hashes hash v;
+      let ev_cascade = string_field json "evaluator_cascade" in
+      let gen_cascade = string_field json "generator_cascade" in
+      if gen_cascade <> "" && ev_cascade <> "" then begin
+        incr verdicts_with_generator;
+        if not (String.equal gen_cascade ev_cascade) then
+          incr cross_model_match
+      end;
       if gate = fallback_tag && List.length !recent_fallback_reasons < max_fallback_reasons then
         (let reason = string_field json "fallback_reason" in
          if reason <> "" then
@@ -344,6 +357,10 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     Option.value ~default:0
       (Hashtbl.find_opt gate_counts (Anti_rationalization.gate_to_string Fallback))
   in
+  let cross_model_rate =
+    if !verdicts_with_generator = 0 then 0.0
+    else float_of_int !cross_model_match /. float_of_int !verdicts_with_generator
+  in
   `Assoc [
     ("total_verdicts", `Int !total_verdicts);
     ("approve_count", `Int !approve_count);
@@ -354,6 +371,9 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     ("false_negative_count", `Int !false_neg);
     ("agreement_rate", `Float agreement_rate);
     ("fallback_count", `Int fallback_count);
+    ("verdicts_with_generator_cascade", `Int !verdicts_with_generator);
+    ("cross_model_match_count", `Int !cross_model_match);
+    ("cross_model_rate", `Float cross_model_rate);
     ("recent_fallback_reasons",
      `List (List.rev_map (fun s -> `String s) !recent_fallback_reasons));
   ]

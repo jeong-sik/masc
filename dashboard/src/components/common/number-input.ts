@@ -10,13 +10,13 @@ interface NumberInputProps {
   step?: number | 'any'
   min?: number
   max?: number
-  onInput?: (value: number) => void
+  onInput?: (value: number | undefined) => void
 }
 
 export function NumberInput({ value, placeholder, disabled, class: cx, step, min, max, onInput }: NumberInputProps) {
   const handleInput = (e: Event) => {
     const raw = (e.target as HTMLInputElement).value
-    if (raw === '') { onInput?.(undefined as unknown as number); return }
+    if (raw === '') { onInput?.(undefined); return }
     const num = Number(raw)
     if (!Number.isNaN(num)) onInput?.(num)
   }

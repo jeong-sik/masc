@@ -551,6 +551,7 @@ let test_namespace_truth_snapshot_hash_ignores_generated_at () =
     ~finally:(fun () ->
       Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None)
     (fun () ->
+      Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None;
       Eio_main.run @@ fun _env ->
       let snapshot ~generated_at ~active_sessions =
         `Assoc

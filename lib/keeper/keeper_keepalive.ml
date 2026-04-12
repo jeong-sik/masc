@@ -53,6 +53,33 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
+    turn slot. Without this, a keeper whose peers hold all slots while
+    their LLM calls stall for the entire 1200s turn budget would block
+    unboundedly, because [Eio.Semaphore.acquire] has no intrinsic timeout.
+
+    Empirical motivation (2026-04-11): [semaphore_wait_ms] of 1.1-2.1 Ms
+    observed in keeper decision logs — the sitting keeper waited past its
+    own turn budget because peers held slots for the full outer wall-clock.
+
+    Default 60s = short enough that keepers fail fast and fall back to the
+    next heartbeat cycle (giving real slot holders time to release), long
+    enough that legitimate turn contention (3+ concurrent keepers on a
+    fast provider) does not mis-trigger.
+
+    Env: [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. Default 60. Range [5, 600]. *)
+let semaphore_wait_timeout_sec =
+  Keeper_config.float_of_env_default
+    "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
+    ~default:60.0 ~min_v:5.0 ~max_v:600.0
+;;
+
+(** Raised by [with_keeper_turn_slot] when [semaphore_wait_timeout_sec]
+    elapses before both turn semaphores could be acquired. The caller
+    should treat this as "skip this turn, retry on next heartbeat"; it is
+    not a keeper failure in the unified-turn sense. *)
+exception Semaphore_wait_timeout of float
+
 let with_keeper_turn_slot ~channel f =
   let is_autonomous =
     match channel with
@@ -64,15 +91,53 @@ let with_keeper_turn_slot ~channel f =
     (if is_autonomous then "autonomous" else "reactive")
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
     (Eio.Semaphore.get_value turn_semaphore);
-  if is_autonomous then Eio.Semaphore.acquire autonomous_turn_semaphore;
-  Eio.Semaphore.acquire turn_semaphore;
-  let semaphore_wait_ms =
-    int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  (* Track acquisitions in mutable flags so the outer Fun.protect can
+     release exactly the slots we hold — regardless of which exception
+     path fires (Semaphore_wait_timeout, Eio.Cancel.Cancelled, or any
+     other). This keeps resource cleanup independent of Eio.Semaphore's
+     internal cancel-race handling. *)
+  let acquired_autonomous = ref false in
+  let acquired_turn = ref false in
+  let acquire_bounded ~label sem =
+    match Eio_context.get_clock_opt () with
+    | Some clock ->
+      (try
+        Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
+          Eio.Semaphore.acquire sem)
+      with Eio.Time.Timeout ->
+        Log.Keeper.warn
+          "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
+           skipping turn"
+          label semaphore_wait_timeout_sec
+          (if is_autonomous then "autonomous" else "reactive");
+        raise (Semaphore_wait_timeout semaphore_wait_timeout_sec))
+    | None ->
+      (* No Eio clock available: we are running outside an Eio main loop
+         (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
+         always provides a clock via [Masc_eio_env.init]; reaching this
+         branch at runtime would indicate an environment-setup drift,
+         so log it prominently before falling back to unbounded acquire. *)
+      Log.Keeper.warn
+        "semaphore_wait: no Eio clock available — %s acquire will be unbounded (environment drift?)"
+        label;
+      Eio.Semaphore.acquire sem
+  in
   Fun.protect
     ~finally:(fun () ->
-      Eio.Semaphore.release turn_semaphore;
-      if is_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
-    (fun () -> f ~semaphore_wait_ms)
+      (* Release exactly what we acquired. Order does not matter because
+         these two semaphores do not contend with each other. *)
+      if !acquired_turn then Eio.Semaphore.release turn_semaphore;
+      if !acquired_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
+    (fun () ->
+      if is_autonomous then begin
+        acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
+        acquired_autonomous := true
+      end;
+      acquire_bounded ~label:"turn" turn_semaphore;
+      acquired_turn := true;
+      let semaphore_wait_ms =
+        int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+      f ~semaphore_wait_ms)
 ;;
 
 (** Optional gRPC client + env — WORM Atomic: set at server bootstrap
@@ -84,6 +149,57 @@ let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
 let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   Atomic.set grpc_client_ref (Some c);
   Atomic.set grpc_env_ref env
+;;
+
+(* Per-keeper throttle for the "keepalive turn skipped: manual reconcile
+   pending" INFO log. Without this, every scheduled keepalive tick
+   emits one line per stuck keeper — 6 stuck keepers × ~30s tick rate
+   flooded /tmp/masc-min-p-restart.log with 266 identical skip lines
+   in 14 minutes on 2026-04-12. The underlying state is a legitimate
+   operator-only recovery point (cleared via the [keeper_manual_reconcile]
+   MCP tool), so we cannot drop the log entirely — operators need
+   periodic confirmation that the keeper is still blocked. We emit
+   INFO at most once per [skip_log_throttle_sec] per keeper; the rest
+   go to DEBUG for deep-investigation scenarios.
+
+   The throttle table is guarded by a [Stdlib.Mutex] even though all
+   production call sites live on a single Eio domain. Reason: the
+   module exposes [should_log_manual_reconcile_skip] in the [.mli] so
+   regression tests can exercise the window semantics — exposing it
+   admits a call path where an unrelated caller on another domain
+   reaches the table, and OCaml 5's Hashtbl is not multi-domain safe.
+   The mutex is cheap relative to Hashtbl ops and avoids reasoning
+   about hypothetical yield points inside Hashtbl internals. *)
+let skip_log_throttle_sec = 60.0
+
+let manual_reconcile_skip_log_mutex = Mutex.create ()
+
+let manual_reconcile_skip_log_last_ts : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+
+let should_log_manual_reconcile_skip ~(now : float) keeper_name =
+  Mutex.lock manual_reconcile_skip_log_mutex;
+  let result =
+    match
+      Hashtbl.find_opt manual_reconcile_skip_log_last_ts keeper_name
+    with
+    | Some last when now -. last < skip_log_throttle_sec -> false
+    | _ ->
+        Hashtbl.replace manual_reconcile_skip_log_last_ts keeper_name now;
+        true
+  in
+  Mutex.unlock manual_reconcile_skip_log_mutex;
+  result
+;;
+
+(** Test-only reset for the throttle table. Clears every [(keeper, ts)]
+    entry, restoring the "never logged" state used by test setup
+    fixtures. Production code must not call this — doing so would
+    flood the log on the next tick. *)
+let reset_skip_log_throttle () =
+  Mutex.lock manual_reconcile_skip_log_mutex;
+  Hashtbl.clear manual_reconcile_skip_log_last_ts;
+  Mutex.unlock manual_reconcile_skip_log_mutex
 ;;
 
 let format_since_last_scheduled_autonomous = function
@@ -293,7 +409,12 @@ let write_heartbeat_snapshot
     let min_keeper_context = Keeper_config.min_keeper_context_tokens in
     let raw = match meta_current.max_context_override with
       | Some v -> v
-      | None -> Oas_model_resolve.resolve_max_cascade_context cascade_models
+      | None ->
+          let resolved =
+            Oas_model_resolve.resolve_max_cascade_context cascade_models
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:cascade_models ~max_context:resolved
     in
     max min_keeper_context raw
   in
@@ -832,11 +953,17 @@ let run_keepalive_unified_turn
       in
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
       let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
-      if manual_reconcile_pending && turn_decision.should_run then
-        Log.Keeper.info
+      if manual_reconcile_pending && turn_decision.should_run then (
+        let now = Time_compat.now () in
+        let log_fn =
+          if should_log_manual_reconcile_skip ~now meta_after_triage.name
+          then Log.Keeper.info
+          else Log.Keeper.debug
+        in
+        log_fn
           "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
           meta_after_triage.name channel_str
-          (String.concat "," verdict_strs);
+          (String.concat "," verdict_strs));
       if (not should_run_turn) && (not manual_reconcile_pending) then (
         let log_not_scheduled =
           match turn_decision.verdict with
@@ -935,6 +1062,15 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
+    | Semaphore_wait_timeout wait_sec ->
+      (* Peers held the turn semaphore longer than the wait cap — not a
+         keeper failure. Skip this cycle and let the next heartbeat retry
+         once a slot opens up. Meta is left untouched so failure counters
+         do not tick. *)
+      Log.Keeper.warn
+        "%s: skipping turn (semaphore wait > %.0fs, peers holding slot)"
+        meta_after_triage.name wait_sec;
+      meta_after_triage
     | exn ->
       Log.Keeper.error "%s: unified turn exception: %s"
         meta_after_triage.name (Printexc.to_string exn);

@@ -470,6 +470,21 @@ function AgentPulse() {
 
 // --- Tool Call Health ---
 
+interface CompactKpiProps {
+  value: string | number
+  valueClass?: string
+  label: string
+}
+
+function CompactKpi({ value, valueClass, label }: CompactKpiProps) {
+  return html`
+    <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
+      <div class="text-[22px] font-bold ${valueClass ?? 'text-text-strong'}">${value}</div>
+      <div class="text-[11px] text-text-muted mt-1">${label}</div>
+    </div>
+  `
+}
+
 function ToolCallHealthPanel() {
   const status = serverStatus.value
   const health = status?.tool_call_health
@@ -492,22 +507,10 @@ function ToolCallHealthPanel() {
     <div>
       <${HomeSectionHeader} label="도구 호출" linkLabel="품질 분석 ->" linkTab="lab" linkParams=${{ section: 'tool-quality' }} />
       <div class="grid grid-cols-4 gap-3 max-[640px]:grid-cols-2">
-        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
-          <div class="text-[22px] font-bold text-text-strong">${health.tool_calls.toLocaleString()}</div>
-          <div class="text-[11px] text-text-muted mt-1">호출 (${health.window_hours}h)</div>
-        </div>
-        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
-          <div class="text-[22px] font-bold ${successColor}">${successRate != null ? `${successRate.toFixed(1)}%` : '-'}</div>
-          <div class="text-[11px] text-text-muted mt-1">성공률</div>
-        </div>
-        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
-          <div class="text-[22px] font-bold text-text-strong">${health.failures}</div>
-          <div class="text-[11px] text-text-muted mt-1">실패</div>
-        </div>
-        <div class="rounded-lg border border-card-border/30 bg-card/40 p-3 text-center">
-          <div class="text-[22px] font-bold ${rateColor}">${ratePct}</div>
-          <div class="text-[11px] text-text-muted mt-1">실패율</div>
-        </div>
+        <${CompactKpi} value=${health.tool_calls.toLocaleString()} label=${`호출 (${health.window_hours}h)`} />
+        <${CompactKpi} value=${successRate != null ? `${successRate.toFixed(1)}%` : '-'} valueClass=${successColor} label="성공률" />
+        <${CompactKpi} value=${health.failures} label="실패" />
+        <${CompactKpi} value=${ratePct} valueClass=${rateColor} label="실패율" />
       </div>
       ${successRate != null ? html`
         <div class="mt-2 h-1.5 rounded-full overflow-hidden bg-[var(--white-6)]">

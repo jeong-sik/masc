@@ -47,9 +47,9 @@ function writeKeeperChatMetadataVisible(value: boolean): void {
 function readKeeperChatInternalVisible(): boolean {
   try {
     const stored = localStorage.getItem(KEEPER_CHAT_INTERNAL_VISIBLE_KEY)
-    return stored === null ? false : stored === 'true'
+    return stored === null ? true : stored === 'true'
   } catch {
-    return false
+    return true
   }
 }
 
@@ -301,7 +301,7 @@ export function KeeperConversationPanel({
               </span>
             </div>
             <div class="mt-1 text-[13px] leading-[1.65] text-[var(--text-secondary)]">
-              Keeper 상세 안에서 직접 주고받은 대화만 보여줍니다. 내부 프롬프트와 tool chatter는 자동으로 숨깁니다.
+              Keeper 상세 안에서 직접 대화와 내부 메시지를 함께 봅니다. 필요하면 토글로 내부 프롬프트와 tool chatter를 숨길 수 있습니다.
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -348,7 +348,7 @@ export function KeeperConversationPanel({
             : null}
           <${ChatTranscript}
             entries=${thread}
-            emptyText="아직 직접 대화가 없습니다. 내부 키퍼 프롬프트와 도구 호출은 숨김 처리됩니다."
+            emptyText="아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다."
             showMetadata=${showMetadata}
             variant="messenger"
           />

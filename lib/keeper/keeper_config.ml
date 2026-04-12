@@ -7,8 +7,9 @@ open Tool_args
 let default_cascade_name = "keeper_unified"
 
 (** Minimum context window (tokens) for any keeper turn.
-    Prevents running with a context too small for effective reasoning. *)
-let min_keeper_context_tokens = 65_536
+    64k-class local models are valid keeper backends; do not clamp them upward
+    to 65,536, which can exceed the discovered provider ceiling. *)
+let min_keeper_context_tokens = 64_000
 
 (* ── Alert preview truncation lengths ─────────────────────── *)
 (* Invariant: excerpt_min < message_max < reply_max.

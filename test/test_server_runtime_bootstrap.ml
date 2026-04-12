@@ -29,6 +29,9 @@ let write_file path content =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let canonical_path path =
+  try Unix.realpath path with Unix.Unix_error _ -> path
+
 let project_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when String.trim root <> "" -> root
@@ -294,6 +297,8 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "tool_policy.toml")
+        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
         Server_runtime_bootstrap.startup_config_resolution ~base_path
@@ -818,22 +823,24 @@ let test_create_server_state_preserves_raw_input_base_path () =
 
 let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
   with_temp_dir "startup-prompts" (fun dir ->
-      let expected =
-        Prompt_defaults.prompt_markdown_dir_candidates
-          ~workspace_path:dir ~base_path:dir
-        |> List.find_opt (fun path -> Sys.file_exists path && Sys.is_directory path)
-      in
-      let expected =
-        match expected with
-        | Some path -> path
-        | None -> Alcotest.fail "no prompt markdown directory candidates exist"
-      in
+      let config_root = Filename.concat dir "config" in
+      let expected = Filename.concat config_root "prompts" in
+      Fs_compat.mkdir_p expected;
+      write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "tool_policy.toml")
+        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd dir @@ fun () ->
+      Config_dir_resolver.reset ();
       let resolved =
-        Prompt_defaults.resolve_prompt_markdown_dir
-          ~workspace_path:dir ~base_path:dir
+        Fun.protect
+          ~finally:(fun () -> Config_dir_resolver.reset ())
+          (fun () ->
+             Prompt_defaults.resolve_prompt_markdown_dir
+               ~workspace_path:dir ~base_path:dir)
       in
       Alcotest.(check string) "temp room falls back to resolved prompt dir"
-        expected resolved)
+        (canonical_path expected) (canonical_path resolved))
 
 let test_prompt_markdown_dir_honors_masc_config_dir_override () =
   with_temp_dir "startup-prompts-override" (fun dir ->

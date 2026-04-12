@@ -2,12 +2,114 @@
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-04-12
+
+### Fixed
+- SSE: stop double-incrementing event_counter when ~id is passed (#6660)
+- RNG: guard module-level Random.State with Eio.Mutex in 3 modules (#6652)
+- Repair loop: gate working_dir on caller playground (#6651)
+- Local runtime pool: drop dead select_runtime, re-check fingerprint after env load (#6650)
+- Cascade: remove coding_first profile, cap max_tokens to 32768 (#6687)
+- Cascade: clamp keeper_unified + coding_first max_tokens to 32768 (Groq limit) (#6686)
+- Build identity: probe exe_dir before cwd for git commit (#6688)
+- Keeper: masc_* boundary-exempt gap + cascade.json prune (#6681)
+- Worker OAS: stop sending min_p=0.0 to cloud providers (#6672)
+- Keeper checkpoint store: classify Eio.Io Fs Not_found as Not_found (#6655)
+
+### Changed
+- Bump OAS pin for GLM max_tokens clamp (#6689)
+- Improve keeper timeout visibility (#6552)
+
+### Performance
+- Board: move Agent_economy.earn outside store.mutex (#6649)
+
+## [0.5.7] - 2026-04-12
+
+### Fixed
+- CP unit: bound descendant_units_of_kind recursion (#6647)
+- Prompt registry: merge validate+write into single mutex transaction (#6646)
+- Room task schedule: reuse Room_task.update_local_agent_state on agent writes (#6642)
+
+### Changed
+- Bump OAS pin for min_p capability gate fix (#6653)
+- Keeper: remove redundant UTF-8 sanitize calls on LLM input path (#6645)
+- Docs: fix prompt-layer drift teaching server-root .worktrees/ (#6648)
+
+## [0.5.6] - 2026-04-12
+
 ### Added
-- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (CSV of provider kinds - `ollama`, `glm`, etc.). Flows through `Env_config_keeper.KeeperCascade.provider_allowlist` -> `Keeper_agent_run.run_turn` -> OAS `Cascade_config.apply_provider_filter`. Unset => full cascade, no behavior change. (#6478)
-- `Config_dir_resolver.log_resolution` info log emitted once at server startup. When `MASC_CONFIG_DIR` silently shadows a `<base_path>/.masc/config` overlay, the log line appends a hint so operators don't lose time debugging an overlay that is being ignored. (#6478)
-- `test_cascade_config_validity` alcotest suite - runs every committed `config/cascade.json` profile through OAS `parse_model_string_exn`, hard-fails on unknown providers / invalid specs, soft-passes on "provider unavailable" (missing API key). Profile names are discovered from the JSON, not hardcoded. Includes a meta-guard that feeds a synthetic unknown-provider entry to prove the happy-path assertion is not vacuous. (#6478)
-- `scripts/sync-version-truth.sh` - dry-run-by-default helper that keeps `dune-project`, `masc_mcp.opam`, and `ROADMAP.md` "Current package version" in sync. Uses `dune-project` as the single source of truth; regenerates opam via `dune build`; updates ROADMAP with an anchored sed. `--apply` required to write; `check-version-truth.sh` post-verify runs automatically. (#6478)
-- `scripts/opam-pin-external-deps.sh --install` flag - rebuild pinned packages after pin, closes the "pin updated but binary is still old" local-dev footgun documented in the file header. (#6478)
+- Restore Groq cascade fallback, confirmed by OAS 0.121.0 (#6566)
+- Bridge Agent_sdk.Log to masc-mcp structured log (#6618)
+
+### Fixed
+- CP unit: bound descendant_ids recursion with max_tree_depth guard (#6635)
+- Room task: hold with_file_lock on agent state writes (#6634)
+- Room/CP: hold with_file_lock around archive read-modify-write (#6632)
+- Session: hold registry.lock on all hashtable reads, drop dead unregister_sync (#6628)
+- Auth: gate cross-agent create_token and revoke on initial_admin (#6627)
+- Channel gate: wire dedup_cleanup into orchestrator pulse (#6612)
+- Keeper: fix retry timeout budget and local-only context (#6593)
+- Config: prefer base-path config over repo-local env (#6626)
+
+### Changed
+- Bump OAS pin to v0.122.0 (#6631)
+
+## [0.5.5] - 2026-04-12
+
+### Added
+- Harness: expose cross-model enforcement rate on dashboard (#6565)
+- Dashboard: expose keeper FSM + root-fix hardcoded constants + TLA+ bug model (#6556)
+
+### Fixed
+- Keeper: cap Eio.Semaphore.acquire wait in with_keeper_turn_slot (#6608)
+- Keeper: delete manual_reconcile file on clear to unblock legacy binaries (#6576)
+- Tool worktree: reject cross-agent agent_name in masc_worktree_create (#6617)
+- Tool code_write: scope writable paths and clone cwd per-agent (#6610)
+- CI: narrow Keeper_tool_policy_config shortcut, revert signature tightening (#6607)
+- CI: require tool_policy.toml in config_signature_exists (#6595)
+
+### Changed
+- Bump OAS pin to v0.121.0 for keep_alive=-1 fix (#6601)
+- CI: wire specs/bug-models/ into tla-check.sh (#6582)
+
+### Specifications
+- TLA+ KeeperTaskInterlock: no Dead keeper holds a claimed task (#6574)
+
+### Documentation
+- Document post-turn-lifecycle implicit invariant (#6604)
+
+## [0.5.4] - 2026-04-11
+
+### Added
+- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (#6478)
+- `Config_dir_resolver.log_resolution` startup log with shadow hint (#6478)
+- `test_cascade_config_validity` alcotest suite for cascade.json profiles (#6478)
+- `scripts/sync-version-truth.sh` dry-run version sync helper (#6478)
+- `scripts/opam-pin-external-deps.sh --install` flag (#6478)
+
+### Changed
+- Keeper: remove scope_kind gating (#6544)
+- Cascade: drop unsupported groq labels (#6558)
+- Dashboard: remove dead SSE route entries (#6557)
+
+### Fixed
+- Keeper: block write ops outside playground in keeper_bash (#6579)
+- Keeper: address cross-model review follow-ups for #6543 (#6563)
+- Keeper: log when open_pending overwrites a Cleared reconcile record (#6562)
+- Keeper: use Eio.Lazy for decision_audit env caches (#6549)
+- Keeper: tolerate text_response when provider ignores tool_choice (#6532)
+- Keeper: distinguish Cancel from Timeout in LLM bridge (#6543)
+- Keeper: enforce base path SSOT for playgrounds (#6548)
+- Keeper: fix startup base path and cwd defaults (#6546)
+- Keeper: fix channel gate ack leak (#6545)
+- gRPC: guarantee cleanup on heartbeat fiber exit paths (#6524)
+- gRPC: guarantee typed_stream close on subscribe fiber exit paths (#6529)
+- Worktree: remove server-root fallback from worktree_create_r (#6542)
+- Config: align config truth with runtime paths (#6503)
+- CI: clean log noise and TLA workflow (#6505)
+- Dashboard: type supervisor_diagnostics + ErrorState wave 3 (#6550)
+- Test: clone into playground before masc_worktree_* (#6577)
+- Docs: require keeper worktree under own playground clone (#6533)
 
 ## [0.5.3] - 2026-04-11
 

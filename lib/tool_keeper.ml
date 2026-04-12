@@ -367,33 +367,28 @@ let handle_keeper_repair ctx args : tool_result =
         (false, "task_spec is required")
       else
         let target_mode = get_string args "target_mode" "snippet" in
-        let working_dir_arg = get_string args "working_dir" (Sys.getcwd ()) in
+        let working_dir_arg = get_string args "working_dir" "" in
         let plugin_id = get_string args "plugin_id" "ocaml" in
         let target_file_opt = get_string_opt args "target_file" in
-        let cwd_root =
-          try Unix.realpath (Sys.getcwd ()) with
-          | Unix.Unix_error _ -> Sys.getcwd ()
-        in
-        let resolved_working_dir_result =
-          try Ok (Unix.realpath working_dir_arg) with
-          | Unix.Unix_error _ ->
-              Error "working_dir does not exist or is not accessible"
-        in
-        match resolved_working_dir_result with
+        (* #6641 iter10 — narrow working_dir to caller's playground.
+           Default (empty arg) resolves to the caller's own playground
+           bundle root, not [Sys.getcwd ()]. Cross-keeper targets are
+           rejected. Shares the resolver with tool_repair_loop so the
+           same fix applies to both dispatchers. *)
+        match
+          Tool_repair_loop.resolve_playground_working_dir
+            ~agent_name:ctx.agent_name
+            ~base_path:ctx.config.base_path
+            ~working_dir_arg
+        with
         | Error msg -> (false, msg)
         | Ok working_dir ->
-            if not
-                 (Tool_repair_loop.is_safe_subpath ~parent:cwd_root
-                    ~child:working_dir)
-            then
-              (false, "working_dir must be within the current workspace")
-            else
-              match
-                Tool_repair_loop.validate_target_file ~working_dir
-                  ~target_file:target_file_opt
-              with
-              | Error msg -> (false, msg)
-              | Ok validated_target_file ->
+            match
+              Tool_repair_loop.validate_target_file ~working_dir
+                ~target_file:target_file_opt
+            with
+            | Error msg -> (false, msg)
+            | Ok validated_target_file ->
                   let validator_profile =
                     get_string args "validator_profile"
                       (if

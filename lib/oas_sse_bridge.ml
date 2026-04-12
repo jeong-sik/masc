@@ -61,7 +61,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
   let ts = Time_compat.now () in
   match evt with
   | Agent_sdk.Event_bus.AgentStarted
-      { agent_name; task_id; session_id; worker_run_id } ->
+      { agent_name; task_id; session_id; worker_run_id; _ } ->
       let payload =
         `Assoc
           [
@@ -118,7 +118,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         (wrap_event ~ts ~event_type:"tool_completed" ~payload ~agent_name
            ~tool_name ?session_id ?worker_run_id ())
   | Agent_sdk.Event_bus.TurnStarted
-      { agent_name; turn; session_id; worker_run_id } ->
+      { agent_name; turn; session_id; worker_run_id; _ } ->
       let payload =
         `Assoc
           [
@@ -132,7 +132,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         (wrap_event ~ts ~event_type:"turn_started" ~payload ~agent_name ~turn
            ?session_id ?worker_run_id ())
   | Agent_sdk.Event_bus.TurnCompleted
-      { agent_name; turn; session_id; worker_run_id } ->
+      { agent_name; turn; session_id; worker_run_id; _ } ->
       let payload =
         `Assoc
           [

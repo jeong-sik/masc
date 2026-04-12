@@ -252,7 +252,7 @@ masc_keeper_up(name: "sangsu")
 - 기본적으로 git repo root를 `MASC_BASE_PATH`로 자동 해석한다.
 - `start-masc-mcp.sh`는 worktree에서 실행해도 위 규칙을 그대로 따른다.
 - shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 명시적으로 덮어쓴다.
-- repo-managed config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 뒤에만 `~/.masc/config`, repo `config/` 자동 탐색이 fallback으로 동작한다.
+- resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 뒤에만 `~/.masc/config`, repo `config/` 자동 탐색이 fallback으로 동작한다. repo `config/`는 체크인된 default/example source이며, 마지막 fallback이다.
 - `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
 
 공유 config/persona를 repo 밖에 두고 실행하는 예시:

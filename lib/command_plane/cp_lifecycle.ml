@@ -746,7 +746,22 @@ let dispatch_plan_json config json =
         | Some op -> op.stage
         | None -> None
       in
-      candidate_units_for_operation units operations current_unit_id
+      let candidate_pool =
+        match operation with
+        | Some op ->
+            let target_unit_ids =
+              detachment_targets_for_operation units op
+              |> List.map (fun (unit : unit_record) -> unit.unit_id)
+            in
+            candidate_units_for_operation units operations current_unit_id
+            |> List.filter (fun (unit : unit_record) ->
+                   List.mem unit.unit_id target_unit_ids
+                   &&
+                   not
+                     (decision_requires_approval units current_unit_id unit.unit_id))
+        | None -> candidate_units_for_operation units operations current_unit_id
+      in
+      candidate_pool
       |> List.filter_map (fun (unit : unit_record) ->
              match
                operation_assignment_guard_json config unit.unit_id

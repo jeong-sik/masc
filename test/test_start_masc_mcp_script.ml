@@ -16,6 +16,9 @@ let quote = Filename.quote
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let canonical_path path =
+  try Unix.realpath path with _ -> path
+
 let contains_substring haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -129,7 +132,7 @@ set -eu
 capture="${FAKE_CAPTURE_FILE:?}"
 {
   printf 'FAKE_EXE_MARKER=%s\n' '%s'
-  printf 'PWD=%%s\n' "$PWD"
+  printf 'PWD=%%s\n' "$(pwd)"
   printf 'MASC_STORAGE_TYPE=%%s\n' "${MASC_STORAGE_TYPE:-}"
   printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
@@ -193,7 +196,8 @@ let test_explicit_env_overrides_repo_env_files () =
       check bool "PG URL stripped" true
         (contains_substring captured "SUPABASE_DB_URL=");
       check bool "base path passed through" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ dir));
+        (contains_substring captured
+           ("MASC_BASE_PATH=" ^ canonical_path dir));
       check bool "explicit config dir preserved" true
         (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
@@ -207,7 +211,9 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       let home_dir = Filename.concat dir "home" in
       mkdir_p (Filename.concat home_dir ".masc/config/prompts");
       write_file (Filename.concat home_dir ".masc/config/cascade.json") "{}";
-      let bootstrapped_config = Filename.concat dir ".masc/config" in
+      let bootstrapped_config =
+        Filename.concat (canonical_path dir) ".masc/config"
+      in
       let capture_default = Filename.concat dir "captured-default.txt" in
       let code_default, stdout_default, stderr_default =
         run_shell ~cwd:dir
@@ -266,7 +272,9 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
-      let bootstrapped_config = Filename.concat dir ".masc/config" in
+      let bootstrapped_config =
+        Filename.concat (canonical_path dir) ".masc/config"
+      in
       let capture = Filename.concat dir "captured-fallback.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
@@ -316,8 +324,9 @@ let test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_root = canonical_path stale_root in
       check bool "absolute inherited base path preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ stale_root)))
+        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -347,8 +356,9 @@ let test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved () 
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_root = canonical_path parent in
       check bool "absolute parent root inheritance preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ parent)))
+        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_zshenv_absolute_base_path_with_dual_roots_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -379,8 +389,9 @@ let test_zshenv_absolute_base_path_with_dual_roots_is_preserved () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_root = canonical_path parent in
       check bool "zshenv absolute base path preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ parent)))
+        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -408,8 +419,9 @@ let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_root = canonical_path inherited_root in
       check bool "opt-in preserves inherited base path" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ inherited_root)))
+        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_worktree_prefers_local_build_over_workspace_build () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -473,8 +485,80 @@ let test_explicit_base_path_execs_from_base_path () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_root = canonical_path parent in
       check bool "exec cwd matches explicit base path" true
-        (contains_substring captured ("PWD=" ^ parent)))
+        (contains_substring captured ("PWD=" ^ expected_root)))
+
+let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let parent = Filename.concat dir "parent-root" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let home_dir = Filename.concat dir "home" in
+      mkdir_p repo;
+      mkdir_p home_dir;
+      ignore (make_config_root repo);
+      write_file (Filename.concat home_dir ".zshenv")
+        (Printf.sprintf
+           "export MASC_CONFIG_DIR=%s\nexport MASC_PERSONAS_DIR=%s\n"
+           (Filename.concat repo "config")
+           (Filename.concat repo "config/personas"));
+      let script = Filename.concat repo "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe repo;
+      let capture = Filename.concat dir "captured-explicit-base-config.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+            ]
+          (Printf.sprintf "%s --http --port 9967 --base-path %s"
+             (quote script) (quote parent))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "explicit base path resets config root to base path" true
+        (contains_substring captured
+           ("MASC_CONFIG_DIR=" ^ Filename.concat parent ".masc/config"));
+      check bool "stderr explains repo-local config ignore" true
+        (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR");
+      check bool "stderr explains repo-local personas ignore" true
+        (contains_substring stderr "Ignoring repo-local MASC_PERSONAS_DIR"))
+
+let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let parent = Filename.concat dir "parent-root" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      mkdir_p repo;
+      ignore (make_config_root repo);
+      let script = Filename.concat repo "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe repo;
+      let capture = Filename.concat dir "captured-explicit-parent-env.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:repo
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_CONFIG_DIR", Filename.concat repo "config");
+              ("MASC_PERSONAS_DIR", Filename.concat repo "config/personas");
+            ]
+          (Printf.sprintf "%s --http --port 9968 --base-path %s"
+             (quote script) (quote parent))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "parent env repo-local config ignored under external base path"
+        true
+        (contains_substring captured
+           ("MASC_CONFIG_DIR=" ^ Filename.concat parent ".masc/config"));
+      check bool "parent env repo-local config ignore is logged" true
+        (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR"))
 
 let test_explicit_http_port_derives_sidecar_ports () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -601,6 +685,14 @@ let () =
             test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved;
           test_case "explicit base path execs from base path" `Quick
             test_explicit_base_path_execs_from_base_path;
+          test_case
+            "explicit base path ignores repo-local config from zshenv"
+            `Quick
+            test_explicit_base_path_ignores_repo_local_config_from_zshenv;
+          test_case
+            "explicit base path ignores repo-local config from parent env"
+            `Quick
+            test_explicit_base_path_ignores_repo_local_config_from_parent_env;
           test_case "explicit http port derives sidecar ports" `Quick
             test_explicit_http_port_derives_sidecar_ports;
           test_case "grpc-direct banner is preserved in stderr" `Quick

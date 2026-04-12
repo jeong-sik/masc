@@ -326,7 +326,18 @@ let load_runtimes_from_env () =
 
 (* ensure_loaded: the only function that may yield (debug_log calls Log.LocalWorker.debug).
    Yield happens AFTER the ref swap, so callers reading !pool after this
-   function returns see a consistent snapshot. *)
+   function returns see a consistent snapshot.
+
+   The [load_runtimes_from_env] call and the fingerprint paired with it
+   must be captured atomically: both functions read environment
+   variables, and if env changes between them the installed
+   [(fingerprint, runtimes)] pair would be inconsistent (e.g.
+   fingerprint X with Y-era runtimes).  To avoid that, re-read the
+   fingerprint immediately after [load_runtimes_from_env] and only
+   install if the environment still looks like what we loaded.  If the
+   env flipped mid-load, we drop the work and let the next caller
+   (which will capture the new fingerprint at the top of its own
+   [ensure_loaded] call) redo the load for the current state. *)
 let ensure_loaded () =
   let fingerprint = current_fingerprint () in
   let needs_reload =
@@ -334,19 +345,27 @@ let ensure_loaded () =
   in
   if needs_reload then begin
     let loaded, errors = load_runtimes_from_env () in
-    let refreshed = List.map refresh_runtime_metrics loaded in
-    let reloaded =
-      with_pool_lock (fun () ->
-        let state = !pool in
-        if not (String.equal fingerprint state.fingerprint) then begin
-          pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
-          true
-        end else
-          false)
-    in
-    if reloaded then
-      debug_log "reload runtimes count=%d errors=%d" (List.length loaded)
-        (List.length errors)
+    let loaded_fingerprint = current_fingerprint () in
+    if String.equal loaded_fingerprint fingerprint then begin
+      let refreshed = List.map refresh_runtime_metrics loaded in
+      let reloaded =
+        with_pool_lock (fun () ->
+          let state = !pool in
+          if not (String.equal fingerprint state.fingerprint) then begin
+            pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
+            true
+          end else
+            false)
+      in
+      if reloaded then
+        debug_log "reload runtimes count=%d errors=%d" (List.length loaded)
+          (List.length errors)
+    end else
+      (* Env changed mid-load: drop this attempt.  The next caller will
+         capture [loaded_fingerprint] at its own top and redo the load
+         against the current env snapshot. *)
+      debug_log "env drift during reload (captured=%s, post-load=%s); skipping install"
+        fingerprint loaded_fingerprint
   end else begin
     with_pool_lock (fun () ->
       let state = !pool in
@@ -502,11 +521,6 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
               Error
                 (sprintf "no local runtime configured for model %s" requested)
           | None -> Error "no local runtimes configured")
-
-(* Backward-compatible wrapper that loads from env first. *)
-let select_runtime ?preferred_pool ?model_name () =
-  ensure_loaded ();
-  select_runtime_from (!pool).runtimes ?preferred_pool ?model_name ()
 
 (* acquire: ensure_loaded may yield (Log.LocalWorker.debug inside debug_log).
    After that, reading !pool and swapping pool := are yield-free. *)

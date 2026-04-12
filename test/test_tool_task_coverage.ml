@@ -601,4 +601,114 @@ let () = test "get_int_opt_missing" (fun () ->
   assert (Tool_args.get_int_opt args "key" = None)
 )
 
+(* ================================================================ *)
+(* verdict_recorded SSE payload contract                             *)
+(*                                                                   *)
+(* The payload is built by Tool_task.build_verdict_sse_payload —     *)
+(* a pure helper — so dashboard subscribers depend on a stable       *)
+(* JSON shape. The cross_model bool must match Eval_calibration's    *)
+(* inclusion rule (both cascades non-empty AND distinct).            *)
+(* ================================================================ *)
+
+let make_review_request () : Anti_rationalization.review_request =
+  { task_title = "Fix login bug";
+    task_description = "desc";
+    completion_notes = "notes";
+    agent_name = "dreamer" }
+
+let make_review_result
+    ?(verdict = Anti_rationalization.Approve)
+    ?(evaluator_cascade = "verifier")
+    ?generator_cascade
+    ?(gate = Anti_rationalization.Structured_tool)
+    ?fallback_reason
+    () : Anti_rationalization.review_result =
+  { verdict; evaluator_cascade; generator_cascade; gate; fallback_reason }
+
+let payload_member key (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields -> List.assoc "payload" fields |> (function
+      | `Assoc payload_fields -> List.assoc key payload_fields
+      | _ -> failwith "payload is not an object")
+  | _ -> failwith "top-level is not an object"
+
+let () = test "build_verdict_sse_payload: distinct cascades = cross_model true" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:"verifier"
+      ~generator_cascade:"keeper_unified"
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t1" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool true);
+  assert (payload_member "generator_cascade" json = `String "keeper_unified");
+  assert (payload_member "evaluator_cascade" json = `String "verifier");
+  assert (payload_member "task_id" json = `String "t1")
+)
+
+let () = test "build_verdict_sse_payload: same cascade = cross_model false" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:"verifier"
+      ~generator_cascade:"verifier"
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t2" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "generator_cascade" json = `String "verifier")
+)
+
+let () = test "build_verdict_sse_payload: no generator = cross_model false + null" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result ~evaluator_cascade:"verifier" () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t3" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "generator_cascade" json = `Null)
+)
+
+let () = test "build_verdict_sse_payload: empty generator string = cross_model false" (fun () ->
+  (* Defensive: align with Eval_calibration which excludes empty
+     strings from the denominator. Without this guard SSE and stats
+     would disagree when a cascade is empty. *)
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:"verifier"
+      ~generator_cascade:""
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t4" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "generator_cascade" json = `String "")
+)
+
+let () = test "build_verdict_sse_payload: empty evaluator string = cross_model false" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:""
+      ~generator_cascade:"keeper_unified"
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t5" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false)
+)
+
+let () = test "build_verdict_sse_payload: fallback_reason serialized" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~fallback_reason:"llm timeout"
+      ~gate:Anti_rationalization.Fallback
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t6" ~req ~result in
+  assert (payload_member "fallback_reason" json = `String "llm timeout");
+  assert (payload_member "gate" json = `String "fallback")
+)
+
 let () = Printf.printf "\n✅ All Tool_task tests passed!\n"

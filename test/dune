@@ -583,6 +583,7 @@
         test_ag_ui_coverage test_tool_verification_coverage
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_code_write_coverage
+        test_tool_repair_loop_containment
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
@@ -618,6 +619,7 @@
         test_ag_ui_coverage test_tool_verification_coverage
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_code_write_coverage
+        test_tool_repair_loop_containment
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
@@ -641,6 +643,23 @@
           test_command_plane_v2_search)
  (libraries masc_test_deps))
 
+; Cp_unit.descendant_ids depth guard regression (#6633)
+(test
+ (name test_cp_unit_descendant_ids)
+ (libraries masc_test_deps))
+
+; Keeper_checkpoint_store.is_not_found_detail classifier
+; regression (observed 334-retry loop on trace-1775487505102-6a347
+; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)
+(test
+ (name test_keeper_checkpoint_classify)
+ (libraries masc_test_deps))
+
+; Keeper_keepalive.should_log_manual_reconcile_skip throttle regression
+; (observed 266-line log flood from 6 stuck keepers on 2026-04-12)
+(test
+ (name test_keeper_keepalive_skip_log_throttle)
+ (libraries masc_test_deps))
 ; Operator Control (7 modules)
 (test
  (name test_operator_control)

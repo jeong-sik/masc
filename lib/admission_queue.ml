@@ -23,6 +23,8 @@ type snapshot = {
   waiters : waiter_info list;
 }
 
+exception Wait_timeout of int
+
 type waiter = {
   rank : int;
   info : waiter_info;
@@ -70,8 +72,9 @@ let global : t = {
 }
 
 let now_ts () = Unix.gettimeofday ()
+let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
-let rec acquire ~priority ~keeper_name ~cascade_name t =
+let rec acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
   let resolved = Llm_provider.Request_priority.resolve priority in
   let rank = Llm_provider.Request_priority.to_int resolved in
   let action =
@@ -99,39 +102,52 @@ let rec acquire ~priority ~keeper_name ~cascade_name t =
     ()
   | `Wait (p, entry) ->
     let enqueue_ts = entry.info.enqueue_ts in
+    let cancel_wait exn =
+      Atomic.set entry.cancelled true;
+      Admission_queue_metrics.on_dequeue ~keeper_name ~cascade_name;
+      Admission_queue_metrics.on_cancelled ~keeper_name ~cascade_name;
+      (* If release already resolved our promise, the slot was handed
+         to us but we are being cancelled. Release it back. *)
+      if Eio.Promise.is_resolved p then
+        release_slot t;
+      raise exn
+    in
     (try
-       Eio.Promise.await p;
-       let wait_ms =
-         int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
-       in
+       (match wait_timeout_sec with
+        | Some timeout_sec ->
+            (match Eio_context.get_clock_opt () with
+             | Some clock ->
+                 Eio.Time.with_timeout_exn clock timeout_sec
+                   (fun () -> Eio.Promise.await p)
+             | None ->
+                 Eio.Promise.await p)
+        | None -> Eio.Promise.await p);
+       let wait_ms = wait_ms_since enqueue_ts in
        Admission_queue_metrics.on_dequeue ~keeper_name ~cascade_name;
        Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms
-     with exn ->
-       Atomic.set entry.cancelled true;
-       Admission_queue_metrics.on_dequeue ~keeper_name ~cascade_name;
-       Admission_queue_metrics.on_cancelled ~keeper_name ~cascade_name;
-       (* If release already resolved our promise, the slot was handed
-          to us but we are being cancelled. Release it back. *)
-       if Eio.Promise.is_resolved p then
-         release_slot t;
-       raise exn)
+     with
+     | Eio.Time.Timeout ->
+         cancel_wait (Wait_timeout (wait_ms_since enqueue_ts))
+     | exn ->
+         cancel_wait exn)
 
 and release_slot t =
   let to_wake =
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-      let rec find_valid = function
+      let rec find_valid acc = function
         | [] ->
+          t.waiters <- List.rev acc;
           t.active <- t.active - 1;
           None
         | entry :: rest ->
           if Atomic.get entry.cancelled then
-            find_valid rest
+            find_valid acc rest
           else (
-            t.waiters <- rest;
+            t.waiters <- List.rev_append acc rest;
             Some entry
           )
       in
-      find_valid t.waiters)
+      find_valid [] t.waiters)
   in
   match to_wake with
   | Some entry -> Eio.Promise.resolve entry.resolver ()
@@ -139,8 +155,8 @@ and release_slot t =
 
 (* ── Public API ────────────────────────────────────────── *)
 
-let with_permit ~priority ~keeper_name ~cascade_name f =
-  acquire ~priority ~keeper_name ~cascade_name global;
+let with_permit ?wait_timeout_sec ~priority ~keeper_name ~cascade_name f =
+  acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name global;
   Fun.protect f
     ~finally:(fun () ->
       Admission_queue_metrics.on_release ~keeper_name ~cascade_name;

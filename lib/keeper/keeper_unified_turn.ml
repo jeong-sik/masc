@@ -181,6 +181,21 @@ let max_transient_retries = 2
 let transient_backoff_sec (attempt : int) : float =
   Float.min 4.0 (1.0 *. Float.of_int (1 lsl (attempt - 1)))
 
+let oas_timeout_guard_sec = 1.0
+
+let min_oas_timeout_budget_sec = 30.0
+
+let bounded_oas_timeout_for_turn_budget ~(max_context : int)
+    ~(remaining_turn_budget_s : float) : float option =
+  let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
+  if usable_budget < min_oas_timeout_budget_sec
+  then None
+  else
+    Some
+      (Float.min
+         (Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context)
+         usable_budget)
+
 (** Detect context overflow errors via structured OAS error types.
     Matches [ContextOverflow] (API-level) and [TokenBudgetExceeded]
     for input token budget exceeded.  Both are recoverable
@@ -1095,7 +1110,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           | Some v ->
               Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
               v
-          | None -> Oas_model_resolve.resolve_max_cascade_context model_labels
+          | None ->
+              let resolved =
+                Oas_model_resolve.resolve_max_cascade_context model_labels
+              in
+              Oas_model_resolve.clamp_context_for_pure_local_labels
+                ~labels:model_labels ~max_context:resolved
         in
         if raw < min_keeper_context then begin
           Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
@@ -1180,7 +1200,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           Keeper_exec_tools.remove_tool_call_observer side_effect_observer)
         (fun () ->
         Keeper_exec_context.timed (fun () ->
-          let do_run ~run_meta ~max_context ~run_generation ~is_retry =
+          let clock = Eio_context.get_clock () in
+          let timeout_sec =
+            Env_config_keeper.KeeperKeepalive.turn_timeout_sec
+          in
+          let turn_deadline = Eio.Time.now clock +. timeout_sec in
+          let remaining_turn_budget_s () =
+            Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
+          in
+          let do_run ~run_meta ~max_context ~run_generation ~is_retry
+              ~oas_timeout_s =
             let max_idle_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
@@ -1197,6 +1226,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
+              ~oas_timeout_s
               ~max_cost_usd
               ~is_retry
               ?shared_context
@@ -1206,7 +1236,27 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry
               ~overflow_retry_used =
-            match do_run ~run_meta ~max_context ~run_generation ~is_retry with
+            let attempt_result =
+              match
+                bounded_oas_timeout_for_turn_budget
+                  ~max_context
+                  ~remaining_turn_budget_s:(remaining_turn_budget_s ())
+              with
+              | None ->
+                  Error
+                    (Oas.Error.Api
+                       (Timeout
+                          {
+                            message =
+                              Printf.sprintf
+                                "Turn wall-clock budget exhausted before retry (remaining=%.1fs)"
+                                (remaining_turn_budget_s ());
+                          }))
+              | Some oas_timeout_s ->
+                  do_run ~run_meta ~max_context ~run_generation ~is_retry
+                    ~oas_timeout_s
+            in
+            match attempt_result with
             | Ok _ as ok -> ok
             | Error err ->
                 let committed_tools =
@@ -1277,7 +1327,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                     meta.name meta.cascade_name max_context
                     attempt max_transient_retries delay
                     (short_preview (Oas.Error.to_string err));
-                  Eio.Time.sleep (Eio_context.get_clock ()) delay;
+                  Eio.Time.sleep clock delay;
                   retry_loop ~run_meta ~max_context ~run_generation
                     ~attempt:(attempt + 1)
                     ~is_retry:true ~overflow_retry_used
@@ -1309,11 +1359,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           (* Wall-clock timeout guards against indefinite TCP-level hangs
              from upstream LLM providers. Without this, a single stalled
              connection blocks the keeper fiber forever. *)
-          let timeout_sec =
-            Env_config_keeper.KeeperKeepalive.turn_timeout_sec
-          in
           (try
-            Eio.Time.with_timeout_exn (Eio_context.get_clock ()) timeout_sec
+            Eio.Time.with_timeout_exn clock timeout_sec
               (fun () ->
                 retry_loop ~run_meta:meta ~max_context:max_cascade_context
                   ~run_generation:generation ~attempt:1

@@ -63,7 +63,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
         <label class="text-[11px] text-[var(--text-muted)] font-medium">${name}${requiredMark}</label>
         ${hint}
         <${NumberInput} value=${(value as number) ?? (schema.default as number) ?? ''} placeholder=${name}
-          step=${schema.type === 'integer' ? 1 : 'any'} onInput=${(v: number) => onChange(name, v)} />
+          step=${schema.type === 'integer' ? 1 : 'any'} onInput=${(v: number | undefined) => onChange(name, v)} />
       </div>
     `
   }

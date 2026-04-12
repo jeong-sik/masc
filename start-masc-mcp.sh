@@ -83,6 +83,11 @@ is_absolute_path() {
 # so both see the same effective base path.
 resolve_base_path() {
     local path="$1"
+    local abs_path=""
+
+    if [ -d "$path" ]; then
+        abs_path="$(cd "$path" && pwd -P)"
+    fi
 
     if [ -f "$path/.git" ]; then
         local gitdir
@@ -102,7 +107,7 @@ resolve_base_path() {
     fi
 
     if [ -d "$path/.git" ]; then
-        echo "$path"
+        echo "${abs_path:-$path}"
         return
     fi
 
@@ -110,12 +115,12 @@ resolve_base_path() {
         local git_root
         git_root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
         if [ -n "$git_root" ]; then
-            echo "$git_root"
+            echo "$(cd "$git_root" && pwd -P)"
             return
         fi
     fi
 
-    echo "$path"
+    echo "${abs_path:-$path}"
 }
 
 build_dashboard_spa() {
@@ -279,6 +284,41 @@ restore_env_override() {
 }
 
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
+
+repo_local_config_dir_match() {
+    local candidate="${1:-}"
+    candidate="${candidate%/}"
+    [ -n "$candidate" ] || return 1
+    [ "$candidate" = "$REPO_ENV_ROOT/config" ] || [ "$candidate" = "$SCRIPT_DIR/config" ]
+}
+
+repo_local_personas_dir_match() {
+    local candidate="${1:-}"
+    candidate="${candidate%/}"
+    [ -n "$candidate" ] || return 1
+    [ "$candidate" = "$REPO_ENV_ROOT/config/personas" ] || [ "$candidate" = "$SCRIPT_DIR/config/personas" ]
+}
+
+clear_repo_local_config_for_explicit_base_path() {
+    local resolved_base_path="$1"
+
+    if [ "$BASE_PATH_EXPLICIT" != "1" ]; then
+        return 0
+    fi
+    if [ "$resolved_base_path" = "$REPO_ENV_ROOT" ] || [ "$resolved_base_path" = "$SCRIPT_DIR" ]; then
+        return 0
+    fi
+
+    if repo_local_config_dir_match "${MASC_CONFIG_DIR:-}"; then
+        echo "[startup] Ignoring repo-local MASC_CONFIG_DIR=${MASC_CONFIG_DIR%/} because --base-path was supplied; defaulting to $resolved_base_path/.masc/config" >&2
+        unset MASC_CONFIG_DIR
+    fi
+
+    if repo_local_personas_dir_match "${MASC_PERSONAS_DIR:-}"; then
+        echo "[startup] Ignoring repo-local MASC_PERSONAS_DIR=${MASC_PERSONAS_DIR%/} because --base-path was supplied; personas will resolve from the active config root" >&2
+        unset MASC_PERSONAS_DIR
+    fi
+}
 
 # Caller-provided env must win over repo-local .env/.env.local files.
 for env_name in \
@@ -611,6 +651,7 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
 fi
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
+clear_repo_local_config_for_explicit_base_path "$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH_RESOLUTION_SOURCE="$BASE_PATH_RESOLUTION_SOURCE"
 bootstrap_base_path_config "$RESOLVED_BASE_PATH"

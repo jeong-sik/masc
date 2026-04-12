@@ -1,6 +1,7 @@
 include module type of Cp_unit
 
 type section_cache = {
+  mutable base_path : string option;
   mutable topo_units_mtime : float;
   mutable topo_agents_mtime : float;
   mutable agents : Types.agent list;

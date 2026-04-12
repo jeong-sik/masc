@@ -226,7 +226,19 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
       ignore
         (Server_meta_cognition_feedback.maybe_post_digest
            ~config:state.Mcp_server.room_config snapshot);
-      Log.Dashboard.info "namespace-truth snapshot pushed via SSE"
+      (* Demote the "pushed via SSE" log to DEBUG when no SSE client is
+         connected. With zero observers, the broadcast still runs (for
+         the replay buffer and external subscribers) but the log line
+         is pure housekeeping noise — once per minute for 96 minutes
+         straight in a fresh masc-server.log when nothing is tailing
+         /namespace-truth. Operators only care about this signal when
+         there is an actual client on the wire. *)
+      let log_fn =
+        if Sse.client_count () > 0
+        then Log.Dashboard.info
+        else Log.Dashboard.debug
+      in
+      log_fn "namespace-truth snapshot pushed via SSE"
   | Some _ ->
       Log.Dashboard.debug "namespace-truth snapshot unchanged, skipping SSE broadcast"
 

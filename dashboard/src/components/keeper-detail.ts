@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
-import { useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
@@ -96,6 +96,15 @@ async function refreshAfterRuntimeAction(): Promise<void> {
   await refreshDashboard({ force: true })
 }
 
+function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
+  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const blocker = keeper.last_blocker?.trim()
+  const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
+  const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
+  const hbStale = hbAgeMs != null && hbAgeMs > 300_000
+  return keeper.paused || Boolean(runtimeBlocker) || Boolean(blocker) || hbStale
+}
+
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
@@ -103,12 +112,23 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
-  const needsAttention = keeper.paused || Boolean(runtimeBlocker) || Boolean(blocker) || hbStale
+  const needsAttention = keeperNeedsDiagnosticAttention(keeper)
   if (!needsAttention && !keeper.last_autonomous_action_at) return null
 
   const toneClass = keeper.paused || runtimeBlocker || blocker || hbStale
     ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
+  const runtimeBlockerLabel = runtimeBlockerClass
+    ? {
+        ambiguous_post_commit_timeout: 'Post-commit timeout',
+        ambiguous_post_commit_failure: 'Post-commit failure',
+        autonomous_slot_wait_timeout: 'Autonomous slot wait timeout',
+        admission_queue_wait_timeout: 'Admission queue wait timeout',
+        turn_timeout_after_queue_wait: 'Turn timeout after queue wait',
+        turn_timeout: 'Turn timeout',
+        completion_contract_violation: 'Completion contract violation',
+      }[runtimeBlockerClass]
+    : null
 
   return html`
     <div class="px-6 pt-4">
@@ -126,7 +146,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${runtimeBlockerClass
           ? html`
               <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
-                ${runtimeBlockerClass === 'ambiguous_post_commit_timeout' ? 'Post-commit timeout' : 'Post-commit failure'}
+                ${runtimeBlockerLabel ?? 'Runtime blocker'}
               </span>
             `
           : null}
@@ -376,7 +396,12 @@ export function KeeperDetailOverlay() {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
-  const [diagOpen, setDiagOpen] = useState(false)
+  const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
+  const [diagOpen, setDiagOpen] = useState(shouldOpenDiagnostics)
+
+  useEffect(() => {
+    setDiagOpen(keeperNeedsDiagnosticAttention(keeper))
+  }, [keeper.name])
 
   return html`
     <${DialogOverlay}
@@ -539,7 +564,11 @@ export function KeeperDetailOverlay() {
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* ── Runtime diagnostics (supervisor + keeper diagnostics unified) ── */}
-        <details class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}>
+        <details
+          class="rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm"
+          open=${diagOpen}
+          onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}
+        >
           <summary class="cursor-pointer py-3 px-5 text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
             런타임 진단

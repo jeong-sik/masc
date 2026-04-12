@@ -97,10 +97,17 @@ let rec start_child ~sw ~clock cs =
             end else begin
               cs.restart_count <- cs.restart_count + 1;
               cs.restart_times <- Unix.gettimeofday () :: cs.restart_times;
-              (* Backoff delay: 1s * restart_count, capped at 30s *)
-              let delay = Float.min 30.0 (Float.of_int cs.restart_count) in
-              Log.Server.info "[Supervisor] restarting %s in %.0fs (attempt %d)"
-                name delay cs.restart_count;
+              (* Backoff delay based on *recent* restarts within the window
+                 (pruned by [restart_limit_exceeded] above), not the
+                 lifetime [restart_count]. A child that crashed heavily
+                 once and has been stable for a long time deserves a
+                 short delay on a new crash — using the lifetime counter
+                 would pin it at the 30s cap forever. *)
+              let recent = List.length cs.restart_times in
+              let delay = Float.min 30.0 (Float.of_int recent) in
+              Log.Server.info
+                "[Supervisor] restarting %s in %.0fs (recent %d in %.0fs, lifetime %d)"
+                name delay recent cs.spec.restart_window_s cs.restart_count;
               Eio.Time.sleep clock delay;
               start_child ~sw ~clock cs
             end)

@@ -75,9 +75,23 @@ let git_probe_from_root repo_root =
   in
   Eio_guard.run_in_systhread f
 
+(** Pick the ordered list of directories to probe for a git repo,
+    executable_dir first so the binary's own source tree wins over
+    whatever cwd the user started the process from.
+
+    Rationale: running `cd ~/me && ~/.../masc-mcp/_build/.../main_eio.exe`
+    used to report ~/me's git HEAD instead of masc-mcp's because the old
+    implementation sorted candidates with [List.sort_uniq String.compare]
+    and cwd happened to sort first alphabetically.
+
+    Pure — exposed for unit testing. *)
+let pick_repo_candidates ~exe_dir ~cwd =
+  if String.equal exe_dir cwd then [ exe_dir ] else [ exe_dir; cwd ]
+
 let probe_git_commit () =
-  [ Sys.getcwd (); executable_dir () ]
-  |> List.sort_uniq String.compare
+  pick_repo_candidates
+    ~exe_dir:(executable_dir ())
+    ~cwd:(Sys.getcwd ())
   |> List.find_map (fun dir ->
          match find_git_root dir with
          | Some root -> git_probe_from_root root

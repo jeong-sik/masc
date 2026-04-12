@@ -280,6 +280,7 @@ let run_turn
       ?guardrails
       ?temperature
       ?max_tokens
+      ?oas_timeout_s
       ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
@@ -393,13 +394,6 @@ let run_turn
   let { system_prompt = turn_system_prompt; dynamic_context } =
     build_turn_prompt ~base_system_prompt ~messages:ctx_work.messages
   in
-  (* Defense in depth: unified prompt builders sanitize their own output,
-     but run_turn is shared by other callers and is the final boundary before
-     handing prompts/history to OAS. Keep this sanitization here even when
-     upstream builders already cleaned their strings. *)
-  let turn_system_prompt = Inference_utils.sanitize_text_utf8 turn_system_prompt in
-  let dynamic_context = Inference_utils.sanitize_text_utf8 dynamic_context in
-  let user_message = Inference_utils.sanitize_text_utf8 user_message in
   let prompt_metrics =
     build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
       ~user_message
@@ -1422,6 +1416,12 @@ let run_turn
     else None
   in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
+  let admission_wait_timeout_sec =
+    if Llm_provider.Request_priority.resolve priority
+       = Llm_provider.Request_priority.Proactive
+    then Some Env_config_keeper.KeeperKeepalive.admission_wait_timeout_sec
+    else None
+  in
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
@@ -1431,7 +1431,12 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
-    let timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context in
+    let timeout_s =
+      match oas_timeout_s with
+      | Some value -> value
+      | None ->
+          Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context
+    in
     (match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
@@ -1464,6 +1469,7 @@ let run_turn
            ~temperature
            ~max_tokens
            ?max_cost_usd
+           ?wait_timeout_sec:admission_wait_timeout_sec
            ?guardrails
            ?on_event
            ?on_yield

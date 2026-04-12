@@ -78,7 +78,12 @@ let voice_guard_fragments =
 let init_keeper_bridge () =
   Masc_test_deps.init_keeper_tool_registry ();
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
-  (match KET.init_policy_config ~base_path:(Sys.getcwd ()) with
+  (* Use find_project_root — the test cwd is _build/default/test/ which
+     does not contain config/tool_policy.toml, so Sys.getcwd fails the
+     direct shortcut and falls into the exe-relative walk that picks up
+     the partial _build/default/config/cascade.json. *)
+  let base_path = Masc_test_deps.find_project_root () in
+  (match KET.init_policy_config ~base_path with
    | Ok () -> ()
    | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
   Masc_mcp.Keeper_exec_shared.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;

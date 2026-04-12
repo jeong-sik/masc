@@ -54,10 +54,6 @@ val register : registry -> agent_name:string -> session
 (** Unregister an agent session (mutex-protected). *)
 val unregister : registry -> agent_name:string -> unit
 
-(** Unregister synchronously without extra mutex layer.
-    Safe in single-fiber Eio context. *)
-val unregister_sync : registry -> agent_name:string -> unit
-
 (** Update the activity timestamp and optionally the listening flag. *)
 val update_activity :
   registry -> agent_name:string -> ?is_listening:bool option -> unit -> unit

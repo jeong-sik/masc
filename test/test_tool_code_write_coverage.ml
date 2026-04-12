@@ -177,6 +177,152 @@ let test_mixed_case_org () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
 
+(* ── Per-agent containment (#6527 iter 6) ───────────────────────────
+   Regression tests for PR #6610 — verify that validate_writable_path
+   and validate_clone_cwd refuse cross-agent playground writes even
+   for two distinct agent_names sharing the same config.base_path.
+
+   The gate uses String.starts_with against
+   Keeper_alerting_path.playground_path_of_keeper agent_name, so a
+   lexical check is enough — no real filesystem setup is required
+   beyond a tmp base_path that points inside an existing git repo
+   (required by Tool_code.validate_path canonicalisation). *)
+
+let is_error result =
+  match result with
+  | Ok _ -> false
+  | Error _ -> true
+
+let contains needle haystack =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let error_msg result =
+  match result with
+  | Ok _ -> ""
+  | Error (Types.IoError m) -> m
+  | Error _ -> "<non-IoError>"
+
+let make_config base_path : Masc_mcp.Room.config =
+  (* Override MASC_BASE_PATH so default_config does not pick up the
+     developer's global MASC root instead of our fresh tmp tree. The
+     test runner sets this env var from the user's shell. *)
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Masc_mcp.Room.default_config base_path
+
+(* Ensure the base path exists as a real git repository so
+   Tool_code.validate_path (which requires
+   Room_git.git_root ~base_path) can canonicalise against it.
+
+   On macOS, $TMPDIR points to /var/folders/... which is a symlink
+   target of /private/var/folders/... Room_git.git_root returns the
+   fully realpath-resolved root, so we also realpath-resolve the
+   base_path before returning it — otherwise the prefix check inside
+   Tool_code.validate_path trips on the `/private/` divergence. *)
+let fresh_base_path () =
+  let raw_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "tool_code_write_iter6_%d_%d"
+       (Unix.getpid ())
+       (int_of_float (Unix.gettimeofday () *. 1_000_000.))) in
+  Unix.mkdir raw_dir 0o755;
+  let dir = try Unix.realpath raw_dir with _ -> raw_dir in
+  (* Initialise a minimal git repository so validate_path has a
+     canonical root. An empty `git init` plus an initial commit
+     is sufficient; Room_git.git_root walks up from base_path. *)
+  let run_git args =
+    let cmd = String.concat " "
+      (List.map Filename.quote ("git" :: args) @ [">"; "/dev/null"; "2>&1"]) in
+    ignore (Sys.command cmd)
+  in
+  run_git [ "init"; "-b"; "main"; dir ];
+  run_git [ "-C"; dir; "config"; "user.email"; "iter6@example.test" ];
+  run_git [ "-C"; dir; "config"; "user.name"; "Iter6 Test" ];
+  let readme = Filename.concat dir "README.md" in
+  Out_channel.with_open_bin readme
+    (fun oc -> output_string oc "# iter6 test\n");
+  run_git [ "-C"; dir; "add"; "README.md" ];
+  run_git [ "-C"; dir; "commit"; "-m"; "init" ];
+  (* Create the playground subtrees for two distinct agents so
+     validate_writable_path's path canonicalisation does not trip on
+     a missing directory. *)
+  let mkdir_p path =
+    let rec go acc = function
+      | [] -> ()
+      | part :: rest ->
+        let acc = Filename.concat acc part in
+        (try Unix.mkdir acc 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        go acc rest
+    in
+    match String.split_on_char '/' path with
+    | "" :: parts -> go "/" parts
+    | parts -> go "." parts
+  in
+  mkdir_p (Filename.concat dir ".masc/playground/agent-a/mind");
+  mkdir_p (Filename.concat dir ".masc/playground/agent-b/mind");
+  mkdir_p (Filename.concat dir ".masc/playground/agent-a/repos");
+  mkdir_p (Filename.concat dir ".masc/playground/agent-b/repos");
+  dir
+
+let test_writable_path_allows_own_playground () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let path_a = Filename.concat base_path ".masc/playground/agent-a/mind/note.md" in
+  let result =
+    Tool_code_write.validate_writable_path ~agent_name:"agent-a" config path_a
+  in
+  (check bool) "agent-a writing into agent-a own playground is allowed"
+    false (is_error result)
+
+let test_writable_path_blocks_cross_agent () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let path_b = Filename.concat base_path ".masc/playground/agent-b/mind/note.md" in
+  let result =
+    Tool_code_write.validate_writable_path ~agent_name:"agent-a" config path_b
+  in
+  (check bool) "agent-a writing into agent-b playground is rejected"
+    true (is_error result);
+  (check bool) "error mentions own playground prefix" true
+    (contains "agent-a" (error_msg result));
+  (check bool) "error flags cross-agent block" true
+    (contains "Cross-agent" (error_msg result))
+
+let test_clone_cwd_allows_own_repos () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let cwd_a = Filename.concat base_path ".masc/playground/agent-a/repos" in
+  let result =
+    Tool_code_write.validate_clone_cwd ~agent_name:"agent-a" config cwd_a
+  in
+  (* validate_clone_cwd may still error on non-git root detection, so
+     accept either Ok or an IoError that does NOT mention "Cross-agent".
+     The point of this case is to confirm that the per-agent prefix
+     check accepts the caller's own path. *)
+  (check bool) "agent-a cloning into own repos is not rejected by containment" false
+    (contains "Cross-agent" (error_msg result))
+
+let test_clone_cwd_blocks_cross_agent_repos () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let cwd_b = Filename.concat base_path ".masc/playground/agent-b/repos" in
+  let result =
+    Tool_code_write.validate_clone_cwd ~agent_name:"agent-a" config cwd_b
+  in
+  (* Cross-agent path must trip either the playground prefix check
+     ("Cross-agent playground clones are blocked") or the earlier
+     "Not in a git repository" error when base_path has no .git. We
+     only assert the rejection, not the exact branch taken. *)
+  (check bool) "agent-a cloning into agent-b repos is rejected"
+    true (is_error result)
+
 (* ── Runner ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -207,5 +353,15 @@ let () =
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
+    ]);
+    ("per_agent_containment_6527_iter6", [
+      test_case "writable_path allows own playground" `Quick
+        test_writable_path_allows_own_playground;
+      test_case "writable_path blocks cross-agent" `Quick
+        test_writable_path_blocks_cross_agent;
+      test_case "clone_cwd does not reject own repos on containment axis" `Quick
+        test_clone_cwd_allows_own_repos;
+      test_case "clone_cwd blocks cross-agent repos" `Quick
+        test_clone_cwd_blocks_cross_agent_repos;
     ]);
   ]

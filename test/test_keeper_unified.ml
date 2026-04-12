@@ -12,6 +12,7 @@ module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
+module OMR = Masc_mcp.Oas_model_resolve
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -654,9 +655,17 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  check bool "world prompt names worktree workflow" true
+  (* #6648 iter9 — the worktree sentence was rewritten to place
+     worktrees *inside* the playground clone, closing the prompt-side
+     drift that iter1~iter8 left in place. Assert the new canonical
+     phrase so a future regression does not re-introduce the bare
+     server-root `.worktrees/` form. *)
+  check bool "world prompt names worktree workflow inside playground" true
     (contains_substring prompt
-       "Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`")
+       "Repo worktrees live *inside* your playground clone");
+  check bool "world prompt names canonical playground-rooted worktree path" true
+    (contains_substring prompt
+       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
 let test_system_prompt_prefers_submit_over_legacy_workflow () =
   let sys =
@@ -980,7 +989,7 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
-    check int "unified max_tokens default" 65536
+    check int "unified max_tokens default" 16384
       (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 
@@ -1786,14 +1795,29 @@ let test_prompt_sanitizes_control_chars () =
         ];
     }
   in
-  let sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs () in
+  let sys_raw, user_raw =
+    UP.build_prompt ~base_path:"/test" ~meta ~observation:obs ()
+  in
+  (* #6645 intentionally moved UTF-8 sanitization from MASC's
+     [build_prompt] to the OAS pipeline boundary (agent.ml,
+     pipeline.ml, agent_turn.ml in OAS v0.121.0). MASC callers now
+     receive raw strings and the OAS [Agent.run] pipeline scrubs them
+     before hitting the LLM. This test mirrors that downstream
+     responsibility by invoking [sanitize_text_utf8] on the return
+     values post-[build_prompt], confirming the pipeline's invariant:
+     disallowed control chars (< 0x20 excl. \t\n\r, and 0x7f) end up
+     replaced with spaces so user-controlled bytes never reach the
+     LLM raw. See #6656 for the test-only fix; the sanitize call on
+     [build_prompt] output itself was deliberately removed by #6645. *)
+  let sys = Masc_mcp.Inference_utils.sanitize_text_utf8 sys_raw in
+  let user = Masc_mcp.Inference_utils.sanitize_text_utf8 user_raw in
   check bool "system prompt sanitized" false
     (contains_disallowed_control_char sys);
   check bool "user prompt sanitized" false
     (contains_disallowed_control_char user);
-  check bool "mention text preserved" true
+  check bool "mention text preserved after sanitize" true
     (contains_substring user "ping pong");
-  check bool "board preview preserved" true
+  check bool "board preview preserved after sanitize" true
     (contains_substring user "bad preview")
 
 let test_sanitize_messages_utf8_cleans_history_path () =
@@ -2041,6 +2065,50 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
   in
   check bool "auth error is persistent" false
     (UT.is_auto_recoverable_turn_error err)
+
+let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
+  let expected =
+    Env_config.KeeperKeepalive.oas_timeout_for_context ~max_context:262_144
+  in
+  match
+    UT.bounded_oas_timeout_for_turn_budget
+      ~max_context:262_144 ~remaining_turn_budget_s:1200.0
+  with
+  | Some timeout_s ->
+      check (float 0.01) "adaptive timeout kept under full budget"
+        expected timeout_s
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
+  match
+    UT.bounded_oas_timeout_for_turn_budget
+      ~max_context:262_144 ~remaining_turn_budget_s:235.7
+  with
+  | Some timeout_s ->
+      check (float 0.01) "remaining budget cap applies" 234.7 timeout_s
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_refuses_too_little_budget () =
+  check (option (float 0.01)) "insufficient budget returns none" None
+    (UT.bounded_oas_timeout_for_turn_budget
+       ~max_context:262_144 ~remaining_turn_budget_s:20.0)
+
+let test_pure_local_labels_detection () =
+  check bool "ollama-only cascade is pure local" true
+    (OMR.labels_are_pure_local [ "ollama:qwen3.5:35b-a3b-nvfp4" ]);
+  check bool "mixed cascade is not pure local" false
+    (OMR.labels_are_pure_local [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ])
+
+let test_clamp_context_for_pure_local_labels () =
+  let local_floor = Env_config.ContextCompact.small_local_floor in
+  check int "pure local max_context gets capped" local_floor
+    (OMR.clamp_context_for_pure_local_labels
+       ~labels:[ "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~max_context:262_144);
+  check int "mixed cascade keeps raw context" 262_144
+    (OMR.clamp_context_for_pure_local_labels
+       ~labels:[ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~max_context:262_144)
 
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
@@ -2975,6 +3043,16 @@ let () =
             test_auto_recoverable_turn_error_includes_server_parse_rejection;
           test_case "auto-recoverable excludes persistent errors" `Quick
             test_auto_recoverable_turn_error_excludes_persistent_errors;
+          test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
+            test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
+          test_case "bounded OAS timeout caps to remaining turn budget" `Quick
+            test_bounded_oas_timeout_caps_to_remaining_turn_budget;
+          test_case "bounded OAS timeout refuses too little remaining budget" `Quick
+            test_bounded_oas_timeout_refuses_too_little_budget;
+          test_case "pure local label detection" `Quick
+            test_pure_local_labels_detection;
+          test_case "pure local context clamp" `Quick
+            test_clamp_context_for_pure_local_labels;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

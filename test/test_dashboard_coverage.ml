@@ -15,19 +15,19 @@ module Dashboard = Masc_mcp.Dashboard
    ============================================================ *)
 
 let test_max_path_length () =
-  check bool "positive" true (Dashboard.max_path_length > 0)
+  check bool "positive" true (Dashboard.max_path_length () > 0)
 
 let test_max_message_length () =
-  check bool "positive" true (Dashboard.max_message_length > 0)
+  check bool "positive" true (Dashboard.max_message_length () > 0)
 
 let test_max_pending_tasks () =
-  check bool "positive" true (Dashboard.max_pending_tasks > 0)
+  check bool "positive" true (Dashboard.max_pending_tasks () > 0)
 
 let test_max_recent_messages () =
-  check bool "positive" true (Dashboard.max_recent_messages > 0)
+  check bool "positive" true (Dashboard.max_recent_messages () > 0)
 
 let test_min_border_length () =
-  check bool "positive" true (Dashboard.min_border_length > 0)
+  check bool "positive" true (Dashboard.min_border_length () > 0)
 
 (* ============================================================
    section Tests
@@ -130,15 +130,15 @@ let test_truncate_path_short () =
 
 let test_truncate_path_exact () =
   (* Create a path that's exactly max_path_length *)
-  let exact = String.make Dashboard.max_path_length 'x' in
+  let exact = String.make (Dashboard.max_path_length ()) 'x' in
   let result = Dashboard.truncate_path exact in
   check string "unchanged exact" exact result
 
 let test_truncate_path_long () =
   (* Create a path longer than max_path_length *)
-  let long = String.make (Dashboard.max_path_length + 20) 'x' in
+  let long = String.make (Dashboard.max_path_length () + 20) 'x' in
   let result = Dashboard.truncate_path long in
-  check int "truncated length" Dashboard.max_path_length (String.length result);
+  check int "truncated length" (Dashboard.max_path_length ()) (String.length result);
   check bool "starts with ellipsis" true
     (String.length result >= 3 && String.sub result 0 3 = "...")
 
@@ -160,21 +160,21 @@ let test_truncate_message_short () =
   check string "unchanged" short result
 
 let test_truncate_message_exact () =
-  let exact = String.make Dashboard.max_message_length 'y' in
+  let exact = String.make (Dashboard.max_message_length ()) 'y' in
   let result = Dashboard.truncate_message exact in
   check string "unchanged exact" exact result
 
 let test_truncate_message_long () =
-  let long = String.make (Dashboard.max_message_length + 10) 'z' in
+  let long = String.make (Dashboard.max_message_length () + 10) 'z' in
   let result = Dashboard.truncate_message long in
-  check int "truncated length" Dashboard.max_message_length (String.length result);
+  check int "truncated length" (Dashboard.max_message_length ()) (String.length result);
   check bool "ends with ellipsis" true
     (let len = String.length result in
      len >= 3 && String.sub result (len - 3) 3 = "...")
 
 let test_truncate_message_preserves_prefix () =
   let prefix = "Important: " in
-  let long = prefix ^ String.make (Dashboard.max_message_length + 10) 'x' in
+  let long = prefix ^ String.make (Dashboard.max_message_length () + 10) 'x' in
   let result = Dashboard.truncate_message long in
   check bool "starts with prefix" true
     (String.length result >= String.length prefix &&

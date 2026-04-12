@@ -437,7 +437,8 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
   }
 
 let append_worker_completion_log ~base_path ~worker_name
-    ~prompt ~tool_names ~status ~output ?error () =
+    ~prompt ~tool_names ~status ~output ?error ?raw_trace_run
+    ?evidence_session_id ?proof_run_id ?proof_result_status () =
   append_worker_turn_log ~base_path ~worker_name
     (`Assoc
       [
@@ -446,6 +447,19 @@ let append_worker_completion_log ~base_path ~worker_name
         ("prompt", `String (safe_text_for_followup prompt));
         ("tool_names", `List (List.map (fun name -> `String name) tool_names));
         ("output_preview", `String (safe_text_for_followup output));
+        ( "raw_trace_run",
+          match raw_trace_run with
+          | Some run_ref -> Oas.Raw_trace.run_ref_to_yojson run_ref
+          | None -> `Null );
+        ( "evidence_session_id",
+          Option.fold ~none:`Null ~some:(fun value -> `String value)
+            evidence_session_id );
+        ( "proof_run_id",
+          Option.fold ~none:`Null ~some:(fun value -> `String value)
+            proof_run_id );
+        ( "proof_result_status",
+          Option.fold ~none:`Null ~some:(fun value -> `String value)
+            proof_result_status );
         ( "error",
           Option.fold ~none:`Null ~some:(fun value -> `String value) error );
       ])

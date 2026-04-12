@@ -29,7 +29,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           (Printexc.to_string exn))
   in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
-  Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
+  Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk.Event_bus.subscribe event_bus
       ~filter:(function

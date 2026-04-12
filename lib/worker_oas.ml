@@ -666,6 +666,12 @@ and run_existing_worker_agent
           (Oas.Agent.run ~sw agent prompt, None)
       in
       let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
+      let evidence_session_id =
+        Worker_container.evidence_session_id_of_worker_run
+          (Option.map
+             (fun (run_ref : Oas.Raw_trace.run_ref) -> run_ref.worker_run_id)
+             raw_trace_run)
+      in
       let checkpoint = Oas.Agent.checkpoint ~session_id agent in
       let tool_names =
         List.rev !tool_names_ref
@@ -695,7 +701,15 @@ and run_existing_worker_agent
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~worker_name ~prompt ~tool_names
-              ~status:"ok" ~output ()
+              ~status:"ok" ~output
+              ?raw_trace_run
+              ?evidence_session_id
+              ?proof_run_id:(Option.map (fun p -> p.Oas.Cdal_proof.run_id) proof)
+              ?proof_result_status:
+                (Option.map
+                   (fun p -> proof_result_status_to_string p.Oas.Cdal_proof.result_status)
+                   proof)
+              ()
           in
           Ok
             {
@@ -727,7 +741,15 @@ and run_existing_worker_agent
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~worker_name ~prompt ~tool_names
-              ~status:"error" ~output:detail ~error:detail ()
+              ~status:"error" ~output:detail ~error:detail
+              ?raw_trace_run
+              ?evidence_session_id
+              ?proof_run_id:(Option.map (fun p -> p.Oas.Cdal_proof.run_id) proof)
+              ?proof_result_status:
+                (Option.map
+                   (fun p -> proof_result_status_to_string p.Oas.Cdal_proof.result_status)
+                   proof)
+              ()
           in
           Error detail)
 

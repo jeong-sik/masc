@@ -2,13 +2,11 @@
 
 open Masc_mcp
 
-let parse (json : Yojson.Safe.t) : (string * string, string) result =
-  match Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema json with
-  | Ok v -> Ok v
-  | Error errs ->
-      Error
-        (Agent_sdk.Tool_input_validation.format_errors
-           ~tool_name:"masc_broadcast_typed" errs)
+let parse json =
+  Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema json
+  |> Result.map_error
+       (Agent_sdk.Tool_input_validation.format_errors
+          ~tool_name:"masc_broadcast_typed")
 
 let test_parse_valid () =
   let json = `Assoc [("message", `String "hello world")] in

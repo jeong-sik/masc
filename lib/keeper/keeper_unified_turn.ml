@@ -514,6 +514,16 @@ let append_decision_record
           match error with
           | Some reason -> `String reason
           | None -> `Null );
+        ( "trace_ref",
+          match result with
+          | Some { trace_ref = Some trace_ref; _ } ->
+              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+          | _ -> `Null );
+        ( "run_validation",
+          match result with
+          | Some { run_validation = Some validation; _ } ->
+              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+          | _ -> `Null );
         ( "cdal_proof",
           match result with
           | Some { proof = Some p; _ } ->
@@ -924,6 +934,16 @@ let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
          match handoff_json with
          | Some value -> value
          | None -> `Assoc [ ("performed", `Bool false) ]);
+        ( "trace_ref",
+          match result.trace_ref with
+          | Some trace_ref ->
+              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+          | None -> `Null );
+        ( "run_validation",
+          match result.run_validation with
+          | Some validation ->
+              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+          | None -> `Null );
         ("cdal_proof",
          match result.proof with
          | Some p ->

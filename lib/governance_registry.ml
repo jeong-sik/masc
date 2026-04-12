@@ -144,6 +144,44 @@ let dashboard_min_border_length =
             min_value = Some (`Int 20); max_value = Some (`Int 200) }
     ()
 
+(** Threshold for surfacing a quiet-agent warning in dashboard labels. *)
+let dashboard_agent_quiet_threshold_sec =
+  Runtime_params.register
+    ~key:"dashboard.agent_quiet_threshold_sec"
+    ~default:(fun () -> Env_config_runtime.InternalTimers.label_quiet_threshold_sec)
+    ~validate:
+      (validate_float_range ~min:30.0 ~max:Masc_time_constants.day
+         "dashboard_agent_quiet_threshold_sec")
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ~meta:
+      {
+        description = "대시보드 quiet 상태 임계값(초)";
+        value_type = "float";
+        min_value = Some (`Float 30.0);
+        max_value = Some (`Float Masc_time_constants.day);
+      }
+    ()
+
+(** Threshold for surfacing a stuck-agent warning in dashboard labels. *)
+let dashboard_agent_stuck_threshold_sec =
+  Runtime_params.register
+    ~key:"dashboard.agent_stuck_threshold_sec"
+    ~default:(fun () -> Env_config_runtime.InternalTimers.label_stuck_threshold_sec)
+    ~validate:
+      (validate_float_range ~min:60.0 ~max:(7.0 *. Masc_time_constants.day)
+         "dashboard_agent_stuck_threshold_sec")
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ~meta:
+      {
+        description = "대시보드 STUCK 상태 임계값(초)";
+        value_type = "float";
+        min_value = Some (`Float 60.0);
+        max_value = Some (`Float (7.0 *. Masc_time_constants.day));
+      }
+    ()
+
 (* ── cost_policy surface ──────────────────────────────────────── *)
 
 (** Per-session cost ceiling in USD.
@@ -528,7 +566,7 @@ let surfaces =
     };
     {
       id = "dashboard";
-      description = "Dashboard rendering — truncation lengths, row limits, borders";
+      description = "Dashboard rendering — truncation lengths, row limits, borders, status thresholds";
       risk = "low";
       param_keys = [
         "dashboard.max_path_length";
@@ -536,6 +574,8 @@ let surfaces =
         "dashboard.max_pending_tasks";
         "dashboard.max_recent_messages";
         "dashboard.min_border_length";
+        "dashboard.agent_quiet_threshold_sec";
+        "dashboard.agent_stuck_threshold_sec";
       ];
     };
   ]
@@ -551,6 +591,8 @@ let ensure_init () =
   ignore (Runtime_params.get dashboard_max_pending_tasks);
   ignore (Runtime_params.get dashboard_max_recent_messages);
   ignore (Runtime_params.get dashboard_min_border_length);
+  ignore (Runtime_params.get dashboard_agent_quiet_threshold_sec);
+  ignore (Runtime_params.get dashboard_agent_stuck_threshold_sec);
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

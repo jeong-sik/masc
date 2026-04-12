@@ -243,6 +243,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         cascade_name = (match p.profile_defaults.cascade_name with
           | Some name -> name
           | None -> Keeper_config.default_cascade_name);
+        models = (match p.profile_defaults.models with
+          | Some ms -> ms
+          | None -> Keeper_config.default_keeper_models);
         will;
         needs;
         desires;

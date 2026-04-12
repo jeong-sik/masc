@@ -12,6 +12,10 @@
     @since v2.128.0 *)
 val default_cascade_name : string
 
+(** Default model list for keeper turns. Used when a keeper TOML does not
+    declare its own [models] field. *)
+val default_keeper_models : string list
+
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int
 

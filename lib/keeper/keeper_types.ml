@@ -122,6 +122,7 @@ type keeper_meta =
   ; long_goal : string
   ; social_model : string
   ; cascade_name : string
+  ; models : string list
   ; will : string
   ; needs : string
   ; desires : string
@@ -651,6 +652,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     
     ; "social_model", `String m.social_model
     ; "cascade_name", `String m.cascade_name
+    ; "models", `List (List.map (fun s -> `String s) m.models)
     ; "will", `String m.will
     ; "needs", `String m.needs
     ; "desires", `String m.desires
@@ -752,6 +754,7 @@ type parsed_keeper_identity =
   
   ; pk_social_model : string
   ; pk_cascade_name : string
+  ; pk_models : string list
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -843,6 +846,14 @@ let parse_keeper_identity (json : Yojson.Safe.t)
     Safe_ops.json_string ~default:Keeper_config.default_cascade_name "cascade_name" json
     |> Keeper_cascade_profile.canonicalize
   in
+  let pk_models =
+    match json |> Yojson.Safe.Util.member "models" with
+    | `List items ->
+      List.filter_map
+        (function `String s -> Some (String.trim s) | _ -> None)
+        items
+    | _ -> []
+  in
   Ok { pk_name
   ; pk_agent_name
   ; pk_trace_id
@@ -853,6 +864,7 @@ let parse_keeper_identity (json : Yojson.Safe.t)
   ; pk_long_goal
   ; pk_social_model
   ; pk_cascade_name
+  ; pk_models
   ; pk_will
   ; pk_needs
   ; pk_desires
@@ -1165,6 +1177,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; long_goal = identity.pk_long_goal
              ; social_model = identity.pk_social_model
              ; cascade_name = identity.pk_cascade_name
+             ; models = identity.pk_models
              ; will = identity.pk_will
              ; needs = identity.pk_needs
              ; desires = identity.pk_desires
@@ -1233,6 +1246,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "long_goal"
   ; "social_model"
   ; "cascade_name"
+  ; "models"
   ; "will"
   ; "needs"
   ; "desires"

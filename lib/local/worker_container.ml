@@ -469,7 +469,9 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       temperature = Some Oas_worker_cascade.worker_temperature;
       top_p = Some Oas_worker_cascade.worker_top_p;
       top_k = Some Oas_worker_cascade.worker_top_k;
-      min_p = Some Oas_worker_cascade.worker_min_p;
+      (* min_p is effectively disabled (0.0) and some cloud providers
+         reject the field itself even when the value is a no-op. *)
+      min_p = None;
       enable_thinking = Some thinking_enabled;
       tool_choice = Some Oas.Types.Auto;
     }

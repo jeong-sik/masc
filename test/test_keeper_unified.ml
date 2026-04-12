@@ -989,7 +989,13 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
-    check int "unified max_tokens default" 16384
+    (* #6700: the code-level default in keeper_config.ml is 65536.
+       cascade.json overrides it to 16384 at load time, but this test
+       runs with an empty MASC_KEEPER_UNIFIED_MAX_TOKENS env var
+       before cascade loading, so the code default is what surfaces.
+       PR #6693 updated this assertion to 16384 but that's the
+       cascade-loaded value, not the code default. *)
+    check int "unified max_tokens default" 65536
       (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 

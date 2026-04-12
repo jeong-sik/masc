@@ -29,12 +29,20 @@ let handle_worktree_create ctx args =
     if from_args = "" then Ok ctx.agent_name
     else if from_args = ctx.agent_name then Ok ctx.agent_name
     else
-      Error (Printf.sprintf
-        "agent_name mismatch: arg=%S but context agent is %S. \
-         Cross-agent worktree creation is blocked — omit agent_name \
-         (or pass your own) so the worktree lands in your own \
-         playground."
-        from_args ctx.agent_name)
+      (* Normalize both forms via Playground_paths so "masc-improver"
+         and "keeper-masc-improver-agent" compare equal — they are the
+         same keeper, just different name forms (short vs canonical).
+         The security invariant is preserved: different keepers still
+         have different normalized names. *)
+      let normalize = Playground_paths.sanitize_keeper_name in
+      if normalize from_args = normalize ctx.agent_name then Ok ctx.agent_name
+      else
+        Error (Printf.sprintf
+          "agent_name mismatch: arg=%S but context agent is %S. \
+           Cross-agent worktree creation is blocked — omit agent_name \
+           (or pass your own) so the worktree lands in your own \
+           playground."
+          from_args ctx.agent_name)
   in
   match agent_name_result with
   | Error msg -> (false, msg)

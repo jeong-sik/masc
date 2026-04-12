@@ -157,11 +157,21 @@ type checkpoint_load_error =
   | Parse_error of string
   | Io_error of string
 
+let string_contains_sub ~sub s =
+  let sub_len = String.length sub and s_len = String.length s in
+  if sub_len > s_len then false
+  else
+    let rec loop i =
+      if i > s_len - sub_len then false
+      else if String.sub s i sub_len = sub then true
+      else loop (i + 1)
+    in loop 0
+
 let is_not_found_detail (detail : string) : bool =
   let d = String.lowercase_ascii detail in
-  String.starts_with ~prefix:"no_such_file" d  (* Eio.Fs.Not_found *)
-  || String.starts_with ~prefix:"no such file" d
-  || String.starts_with ~prefix:"unix_error (enoent" d  (* POSIX *)
+  string_contains_sub ~sub:"not_found" d
+  || string_contains_sub ~sub:"no such file" d
+  || string_contains_sub ~sub:"enoent" d
 
 let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   match e with

@@ -173,6 +173,18 @@ val apply_post_turn_lifecycle :
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
+val dispatch_keeper_phase_event :
+  config:Room.config ->
+  keeper_name:string ->
+  Keeper_state_machine.event ->
+  unit
+
+val dispatch_post_turn_lifecycle_events :
+  config:Room.config ->
+  keeper_name:string ->
+  post_turn_lifecycle ->
+  unit
+
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
   meta:keeper_meta ->

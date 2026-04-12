@@ -1451,6 +1451,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_transient ~social_state ()
           in
           if is_ambiguous_partial then begin
+            (* Log the partial commit but do NOT block the keeper with
+               a manual_reconcile file. Keeper tools (board_vote,
+               board_comment, broadcast) are safe to re-encounter —
+               duplicates are tolerable, but a stuck keeper is not.
+               The failure is still recorded in decisions.jsonl and
+               failure_reason for observability. *)
             let failure_reason =
               Option.value
                 ~default:
@@ -1463,23 +1469,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
               (Some failure_reason);
-            ignore
-              (Keeper_manual_reconcile.open_pending
-                 config
-                 ~keeper_name:meta.name
-                 ~blocker_class:(blocker_class_of_failure_reason failure_reason)
-                 ~summary:(short_preview e_str)
-                 ~failure_reason:
-                   (Some (Keeper_registry.failure_reason_to_string failure_reason))
-                 ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-                 ~generation:(Some meta.runtime.generation)
-                 ~committed_tools:
-                   (committed_mutating_tools !mutating_tools_committed));
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:config.base_path meta.name
-              (Keeper_state_machine.Manual_reconcile_required {
-                reason = short_preview e_str;
-              }))
+            Log.Keeper.warn
+              "%s: auto-recoverable partial commit (tools=[%s]); \
+               continuing without manual reconcile block"
+              meta.name
+              (String.concat ", "
+                 (committed_mutating_tools !mutating_tools_committed))
           end;
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
@@ -1565,51 +1560,24 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let lifecycle =
             apply_post_turn_lifecycle ~base_dir
               ~on_compaction_started:(fun () ->
-                ignore (Keeper_registry.dispatch_event
-                  ~base_path:base_dir meta.name
-                  Keeper_state_machine.Compaction_started))
+                dispatch_keeper_phase_event
+                  ~config
+                  ~keeper_name:meta.name
+                  Keeper_state_machine.Compaction_started)
               ~on_handoff_started:(fun () ->
-                ignore (Keeper_registry.dispatch_event
-                  ~base_path:base_dir meta.name
-                  Keeper_state_machine.Handoff_started))
+                dispatch_keeper_phase_event
+                  ~config
+                  ~keeper_name:meta.name
+                  Keeper_state_machine.Handoff_started)
               ~meta
               ~model:result.model_used
               ~primary_model_max_tokens:max_cascade_context
               ~checkpoint:result.checkpoint
           in
-          if lifecycle.compaction.attempted then
-            if lifecycle.compaction.applied then
-              ignore (Keeper_registry.dispatch_event
-                ~base_path:base_dir meta.name
-                (Keeper_state_machine.Compaction_completed {
-                  before_tokens = lifecycle.compaction.before_tokens;
-                  after_tokens = lifecycle.compaction.after_tokens;
-                }))
-            else
-              ignore (Keeper_registry.dispatch_event
-                ~base_path:base_dir meta.name
-                (Keeper_state_machine.Compaction_failed {
-                  reason =
-                    Option.value lifecycle.compaction.failure_reason
-                      ~default:lifecycle.compaction.decision;
-                }));
-          (match lifecycle.handoff_attempted, lifecycle.handoff_json with
-           | true, Some _json ->
-               ignore (Keeper_registry.dispatch_event
-                 ~base_path:base_dir meta.name
-                 (Keeper_state_machine.Handoff_completed {
-                   generation = lifecycle.updated_meta.runtime.generation;
-                   new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
-                 }))
-           | true, None ->
-               ignore (Keeper_registry.dispatch_event
-                 ~base_path:base_dir meta.name
-                 (Keeper_state_machine.Handoff_failed {
-                   reason =
-                     Option.value lifecycle.handoff_failure_reason
-                       ~default:"handoff_aborted";
-                 }))
-           | false, _ -> ());
+          dispatch_post_turn_lifecycle_events
+            ~config
+            ~keeper_name:meta.name
+            lifecycle;
           let scope_only_reactive =
             observation.pending_scope_messages <> []
             && observation.pending_mentions = []

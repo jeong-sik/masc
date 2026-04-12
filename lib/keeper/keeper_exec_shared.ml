@@ -74,14 +74,26 @@ let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
-(* Resolve relative paths against the keeper's playground root.
-   Structural containment: relative paths land inside
-   .masc/playground/<name>/ — escape requires an absolute path which
-   is then checked against allowed_paths. *)
-let playground_relative ~(config : Room.config) ~(meta : keeper_meta)
-    (raw : string) : string =
+let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
+  let boundary prefix =
+    let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
+    prefix <> ""
+    && (String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw)
+  in
+  keeper_effective_allowed_paths ~meta
+  |> List.filter Filename.is_relative
+  |> List.exists boundary
+
+(* Bare filenames default to the keeper playground, but rooted-looking relative
+   paths (for example "workspace/..." or "lib/...") keep project-root/boundary semantics. *)
+let playground_relative_unless_allowed_root ~(config : Room.config)
+    ~(meta : keeper_meta) (raw : string) : string =
   let trimmed = String.trim raw in
-  if trimmed = "" || not (Filename.is_relative trimmed) then trimmed
+  if trimmed = ""
+     || not (Filename.is_relative trimmed)
+     || String.contains trimmed '/'
+     || relative_path_targets_allowed_root ~meta trimmed
+  then trimmed
   else
     let pg = keeper_playground_root ~config ~meta in
     Filename.concat pg trimmed
@@ -91,7 +103,7 @@ let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path
   resolve_keeper_target_path
     ~config
     ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path:(playground_relative ~config ~meta raw_path)
+    ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
 ;;
 
 let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
@@ -99,7 +111,7 @@ let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
   Keeper_alerting_path.resolve_keeper_read_path
     ~config
     ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path:(playground_relative ~config ~meta raw_path)
+    ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) =

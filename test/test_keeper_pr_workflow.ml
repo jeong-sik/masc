@@ -593,6 +593,15 @@ let seed_playground_clone config keeper_name source_repo =
   let clone_path = Filename.concat repos_dir (Filename.basename source_repo) in
   if Sys.file_exists clone_path then rm_rf clone_path;
   run_cmd_exn [ "git"; "clone"; source_repo; clone_path ];
+  (* Replace origin with a local bare repo so git-push succeeds locally
+     but gh-pr-create fails harmlessly — prevents real PRs leaking to GitHub. *)
+  let local_bare = clone_path ^ ".bare" in
+  if Sys.file_exists local_bare then rm_rf local_bare;
+  run_cmd_exn [ "git"; "init"; "--bare"; local_bare ];
+  run_cmd_exn [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; local_bare ];
+  (* Ensure main branch exists (clone from worktree may default to another branch) *)
+  ignore (run_cmd [ "git"; "-C"; clone_path; "checkout"; "-B"; "main" ]);
+  run_cmd_exn [ "git"; "-C"; clone_path; "push"; "-u"; "origin"; "main" ];
   clone_path
 
 let cleanup_test_branch repo_root branch =
@@ -768,7 +777,7 @@ let assert_branch_switch_blocked config cmd label =
   let args =
     `Assoc
       [ "cmd", `String cmd
-      ; "cwd", `String shared_repo_rel
+      ; "cwd", `String shared_repo_abs
       ]
   in
   let result = call_tool config meta "keeper_bash" args in
@@ -928,7 +937,7 @@ let test_fs_read_blocks_shared_repo_by_default () =
     write_text_file shared_file "let approval = true\n";
     let result =
       call_tool config meta "keeper_fs_read"
-        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+        (`Assoc [ "path", `String shared_file ])
     in
     let json = parse_json result in
     check bool "returns error payload" true
@@ -949,7 +958,7 @@ let test_fs_read_allows_explicit_custom_path () =
     write_text_file shared_file "let approval = true\n";
     let result =
       call_tool config meta "keeper_fs_read"
-        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+        (`Assoc [ "path", `String shared_file ])
     in
     let json = parse_json result in
     check bool "explicit custom path read ok" true (json_bool "ok" json);

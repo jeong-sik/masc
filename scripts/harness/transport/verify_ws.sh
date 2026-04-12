@@ -33,31 +33,17 @@ else
   exit 1
 fi
 
-wait_deadline=$(( $(date +%s) + 20 ))
-ws_resp="FAILED"
-while [[ "$(date +%s)" -lt "$wait_deadline" ]]; do
-  ws_resp="$(curl -sS -i -m 5 \
-    -H "Connection: Upgrade" \
-    -H "Upgrade: websocket" \
-    -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-    -H "Sec-WebSocket-Version: 13" \
-    "http://127.0.0.1:${ws_port}/" 2>&1 || true)"
-  if echo "$ws_resp" | grep -q "101"; then
-    break
-  fi
-  sleep 1
-done
-if echo "$ws_resp" | grep -q "101"; then
-  pass "WebSocket handshake on :${ws_port}: 101 Switching Protocols"
-else
-  fail "WebSocket handshake on :${ws_port}" "${ws_resp:0:160}"
-  summary
-  exit 1
-fi
+read_sse_external_subscriber_count() {
+  curl -fsS "${MASC_BASE_URL}/metrics" 2>/dev/null \
+    | awk '$1=="masc_sse_external_subscribers_total" { print int($2); found=1; exit } END { if (!found) print -1 }' \
+    2>/dev/null || echo "-1"
+}
 
 ws_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws.XXXXXX")"
+ws_handshake="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws-handshake.XXXXXX")"
+ws_subscribers_before="$(read_sse_external_subscriber_count)"
 MASC_WS_HOST="127.0.0.1" MASC_WS_PORT="$ws_port" WS_OUTPUT="$ws_output" \
-WS_EXPECT="ws-e2e-test-event" python3 - <<'PY' &
+WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" python3 - <<'PY' &
 import base64
 import os
 import socket
@@ -67,6 +53,7 @@ host = os.environ["MASC_WS_HOST"]
 port = int(os.environ["MASC_WS_PORT"])
 output_path = os.environ["WS_OUTPUT"]
 expected = os.environ["WS_EXPECT"]
+handshake_path = os.environ["WS_HANDSHAKE"]
 
 sock = socket.create_connection((host, port), timeout=5)
 key = base64.b64encode(os.urandom(16)).decode()
@@ -90,6 +77,9 @@ while b"\r\n\r\n" not in buffer:
 status_line = buffer.split(b"\r\n", 1)[0]
 if b"101" not in status_line:
     raise SystemExit(2)
+with open(handshake_path, "w", encoding="utf-8") as fh:
+    fh.write(status_line.decode("utf-8", errors="replace"))
+    fh.write("\n")
 buffer = buffer.split(b"\r\n\r\n", 1)[1]
 sock.settimeout(6)
 
@@ -134,8 +124,29 @@ raise SystemExit(4)
 PY
 ws_client_pid=$!
 
-# Poll /health for websocket.session_count >= 1 instead of a fixed
-# sleep. The Python client above needs time for:
+ws_handshake_deadline=$(( $(date +%s) + 10 ))
+while [[ "$(date +%s)" -lt "$ws_handshake_deadline" ]]; do
+  if [[ -s "$ws_handshake" ]]; then
+    break
+  fi
+  if ! kill -0 "$ws_client_pid" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+
+if [[ -s "$ws_handshake" ]]; then
+  pass "WebSocket handshake on :${ws_port}: 101 Switching Protocols"
+else
+  wait "$ws_client_pid" || true
+  fail "WebSocket handshake on :${ws_port}" "client did not complete upgrade"
+  rm -f "$ws_output" "$ws_handshake"
+  summary
+  exit 1
+fi
+
+# Poll Prometheus for the SSE external-subscriber count instead of a
+# fixed sleep. The Python client above needs time for:
 #   1. socket connect
 #   2. upgrade request/response (101 Switching Protocols)
 #   3. server-side [create_websocket] callback to run and call
@@ -148,20 +159,23 @@ ws_client_pid=$!
 # call, so the broadcast event had no subscriber to deliver to and the
 # Python client's 6-second recv timeout elapsed with zero frames.
 #
-# Polling against the server's own [websocket.session_count] counter
-# provides a deterministic barrier — the server only increments that
-# counter inside [Sse.subscribe_external] (via [set_ws_sessions] in
-# [server_mcp_transport_ws.ml]), so once /health reports >=1 we know
-# the subscriber is registered and ready to receive broadcasts.
+# Polling against [masc_sse_external_subscribers_total] provides the
+# deterministic barrier we actually need. The previous
+# [websocket.session_count] guard was still racy because
+# [server_mcp_transport_ws.ml] inserts the session before it calls
+# [Sse.subscribe_external], so /health could report the new WS session
+# even while the SSE fanout registry was still missing the subscriber.
 #
-# Falls back to the old 1-second wait if jq is missing or /health does
-# not expose the field.
+# Falls back to the old 1-second wait if /metrics is unavailable.
+ws_target_subscribers=1
+if [[ "$ws_subscribers_before" =~ ^[0-9]+$ ]]; then
+  ws_target_subscribers=$(( ws_subscribers_before + 1 ))
+fi
+
 ws_ready_deadline=$(( $(date +%s) + 10 ))
 while [[ "$(date +%s)" -lt "$ws_ready_deadline" ]]; do
-  ws_sessions="$(curl -fsS "${MASC_BASE_URL}/health" 2>/dev/null \
-    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("transport",{}).get("websocket",{}).get("session_count",-1))' \
-    2>/dev/null || echo "-1")"
-  if [[ "$ws_sessions" =~ ^[0-9]+$ ]] && [[ "$ws_sessions" -ge 1 ]]; then
+  ws_subscribers="$(read_sse_external_subscriber_count)"
+  if [[ "$ws_subscribers" =~ ^[0-9]+$ ]] && [[ "$ws_subscribers" -ge "$ws_target_subscribers" ]]; then
     break
   fi
   sleep 0.2
@@ -180,7 +194,7 @@ if wait "$ws_client_pid"; then
 else
   fail "WebSocket frame delivery" "client did not receive a text frame"
 fi
-rm -f "$ws_output"
+rm -f "$ws_output" "$ws_handshake"
 
 if curl -fsS "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
   pass "server healthy after WebSocket test"

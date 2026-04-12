@@ -921,8 +921,13 @@ let test_shell_readonly_cat_uses_explicit_cwd_for_custom_root () =
 let test_fs_read_blocks_shared_repo_by_default () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
+    let playground_root =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper "test-keeper")
+    in
     let shared_file =
-      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+      Filename.concat playground_root
         "workspace/yousleepwhen/oas/lib/approval.ml"
     in
     write_text_file shared_file "let approval = true\n";
@@ -942,8 +947,13 @@ let test_fs_read_allows_explicit_custom_path () =
       { (make_meta_with_preset "delivery") with
         allowed_paths = [ "workspace/yousleepwhen/oas/" ] }
     in
+    let playground_root =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper "test-keeper")
+    in
     let shared_file =
-      Filename.concat (Keeper_alerting_path.project_root_of_config config)
+      Filename.concat playground_root
         "workspace/yousleepwhen/oas/lib/approval.ml"
     in
     write_text_file shared_file "let approval = true\n";

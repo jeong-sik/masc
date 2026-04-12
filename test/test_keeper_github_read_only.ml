@@ -233,6 +233,26 @@ let test_keeper_bash_still_opens_boundary () =
     false
     (is_boundary_exempt ~tool_name:"keeper_bash" ~input:(mk_cmd "git status"))
 
+(* Regression: [masc_] prefix coordination aliases for [keeper_] prefix
+   tools were missing from [is_main_worktree_boundary_exempt_with_input]
+   in main until #6671, causing masc_improver to hang mid-turn after
+   [masc_add_task] opened the boundary and [masc_claim_next] was
+   blocked.  Lock the [masc_] and [keeper_] families to the same
+   exemption semantics so the next rename does not silently drift. *)
+let test_masc_coordination_aliases_bypass_boundary () =
+  let check_pair name =
+    Alcotest.(check bool) (name ^ " is mutating") false
+      (is_ro ~tool_name:name ~input:(`Assoc []));
+    Alcotest.(check bool) (name ^ " bypasses boundary") true
+      (is_boundary_exempt ~tool_name:name ~input:(`Assoc []))
+  in
+  List.iter check_pair
+    [ "masc_tasks"; "masc_add_task"; "masc_claim_next";
+      "masc_batch_add_tasks"; "masc_plan_init"; "masc_plan_set_task";
+      "masc_plan_update"; "masc_transition"; "masc_broadcast";
+      "masc_board_post"; "masc_board_comment"; "masc_board_vote";
+      "masc_board_comment_vote"; "masc_board_delete" ]
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -284,5 +304,7 @@ let () =
             test_masc_code_git_write_actions_bypass_boundary;
           Alcotest.test_case "keeper_bash still opens boundary" `Quick
             test_keeper_bash_still_opens_boundary;
+          Alcotest.test_case "masc_* coordination aliases bypass boundary" `Quick
+            test_masc_coordination_aliases_bypass_boundary;
         ] );
     ]

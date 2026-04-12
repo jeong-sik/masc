@@ -990,7 +990,7 @@ let test_unified_turn_runtime_defaults () =
     (* This unit test does not run Runtime_params.restore, so an empty env var
        falls back to the code-level default rather than config/cascade.json. *)
     check int "unified max_tokens default" 65536
-      (KC.keeper_unified_max_tokens ())
+    (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 
 let test_meta_defaults_social_model () =

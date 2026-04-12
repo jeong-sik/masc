@@ -573,7 +573,15 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
-  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_class?:
+    | 'ambiguous_post_commit_timeout'
+    | 'ambiguous_post_commit_failure'
+    | 'autonomous_slot_wait_timeout'
+    | 'admission_queue_wait_timeout'
+    | 'turn_timeout_after_queue_wait'
+    | 'turn_timeout'
+    | 'completion_contract_violation'
+    | null
   runtime_blocker_summary?: string | null
   runtime_blocker_manual_reconcile?: boolean | null
   active_goal_ids?: string[]
@@ -761,7 +769,15 @@ export interface KeeperConfigRuntime {
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number
-  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_class?:
+    | 'ambiguous_post_commit_timeout'
+    | 'ambiguous_post_commit_failure'
+    | 'autonomous_slot_wait_timeout'
+    | 'admission_queue_wait_timeout'
+    | 'turn_timeout_after_queue_wait'
+    | 'turn_timeout'
+    | 'completion_contract_violation'
+    | null
   runtime_blocker_summary?: string | null
   runtime_blocker_manual_reconcile?: boolean | null
 }

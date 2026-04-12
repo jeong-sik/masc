@@ -29,15 +29,20 @@ type snapshot = {
   waiters : waiter_info list;
 }
 
+exception Wait_timeout of int
+(** Raised when [with_permit] exceeds [wait_timeout_sec]. Carries [wait_ms]. *)
+
 val with_permit :
+  ?wait_timeout_sec:float ->
   priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
   cascade_name:string ->
   (unit -> 'a) ->
   'a
 (** Acquire a permit, run [f], release permit on exit (normal or exception).
-    Blocks if at capacity. Cancel-safe: Eio fiber cancellation releases
-    the waiter from the queue without leaking permits.
+    Blocks if at capacity unless [wait_timeout_sec] is reached.
+    Cancel-safe: Eio fiber cancellation releases the waiter from the queue
+    without leaking permits.
 
     Emits Prometheus metrics via [Admission_queue_metrics] on
     enqueue/dequeue/acquire/release. *)

@@ -91,6 +91,7 @@ val run_named :
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
+  ?wait_timeout_sec:float ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
@@ -138,6 +139,7 @@ val run_model_by_label :
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
+  ?wait_timeout_sec:float ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
@@ -166,6 +168,7 @@ val run_named_with_masc_tools :
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
+  ?wait_timeout_sec:float ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
@@ -195,6 +198,7 @@ val run_model_with_masc_tools :
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
+  ?wait_timeout_sec:float ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->

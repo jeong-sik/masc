@@ -1037,6 +1037,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
   switch (blockerClass) {
     case 'ambiguous_post_commit_timeout':
     case 'ambiguous_post_commit_failure':
+    case 'autonomous_slot_wait_timeout':
+    case 'admission_queue_wait_timeout':
+    case 'turn_timeout_after_queue_wait':
+    case 'turn_timeout':
+    case 'completion_contract_violation':
       return blockerClass
     default:
       return null

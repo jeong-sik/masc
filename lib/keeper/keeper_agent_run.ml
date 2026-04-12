@@ -1415,6 +1415,12 @@ let run_turn
     else None
   in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
+  let admission_wait_timeout_sec =
+    if Llm_provider.Request_priority.resolve priority
+       = Llm_provider.Request_priority.Proactive
+    then Some Env_config_keeper.KeeperKeepalive.admission_wait_timeout_sec
+    else None
+  in
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
@@ -1462,6 +1468,7 @@ let run_turn
            ~temperature
            ~max_tokens
            ?max_cost_usd
+           ?wait_timeout_sec:admission_wait_timeout_sec
            ?guardrails
            ?on_event
            ?on_yield

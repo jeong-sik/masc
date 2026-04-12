@@ -144,7 +144,9 @@ end = struct
       try
         let r = Httpc.post client ~sw ~headers ~body uri in
         Ok r
-      with e -> Error e
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error e
     in
     match r with
     | Error e ->
@@ -428,7 +430,11 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
   Eio.Fiber.fork ~sw (fun () ->
       while not @@ Atomic.get stop do
         Eio.Time.sleep env#clock 0.5;
-        B.tick ()
+        (try B.tick ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Eio.traceln "otel tick failed: %s" (Printexc.to_string exn))
       done);
   (module B)
 

@@ -11,7 +11,7 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let schema_properties entries = `Assoc entries
 
@@ -224,7 +224,7 @@ let json_string_of_result = function
   | Ok json -> (true, Yojson.Safe.to_string json)
   | Error message -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String message) ]))
 
-let dispatch (ctx : 'a context) ~name ~args : result option =
+let dispatch (ctx : 'a context) ~name ~args : tool_result option =
   let control_ctx : 'a Operator_control.context =
     {
       config = ctx.config;
@@ -301,6 +301,14 @@ let _tool_spec_requires_join = [ "masc_operator_action"; "masc_operator_confirm"
 let _tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_surface_audit" ]
 let _tool_spec_hidden_destructive = [ "masc_operator_action" ]
 
+let tool_required_permission = function
+  | "masc_operator_snapshot" | "masc_operator_digest" | "masc_surface_audit" ->
+      Some Types.CanReadState
+  | "masc_operator_action" | "masc_operator_confirm"
+  | "masc_operator_judgment_write" ->
+      Some Types.CanBroadcast
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : tool_schema) ->
@@ -321,5 +329,6 @@ let () =
            ~is_destructive
            ~allow_direct_call_when_hidden:is_hidden
            ?reason:existing.reason
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

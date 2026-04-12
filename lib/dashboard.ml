@@ -13,22 +13,24 @@
     6. Footer — tempo, locks, worktrees (one line)
 *)
 
-(* ===== Constants ===== *)
+(* ===== Runtime-tunable parameters =====
+   Values come from Runtime_params via Governance_registry. Call these
+   as thunks to pick up governance overrides without restart. *)
 
-(** Maximum path length before truncation *)
-let max_path_length = 30
+(** Maximum path length before truncation. *)
+let max_path_length () = Runtime_params.get Governance_registry.dashboard_max_path_length
 
-(** Maximum message content length before truncation *)
-let max_message_length = 35
+(** Maximum message content length before truncation. *)
+let max_message_length () = Runtime_params.get Governance_registry.dashboard_max_message_length
 
-(** Maximum pending tasks to show *)
-let max_pending_tasks = 5
+(** Maximum pending tasks to show. *)
+let max_pending_tasks () = Runtime_params.get Governance_registry.dashboard_max_pending_tasks
 
-(** Maximum recent messages to show *)
-let max_recent_messages = 5
+(** Maximum recent messages to show. *)
+let max_recent_messages () = Runtime_params.get Governance_registry.dashboard_max_recent_messages
 
-(** Minimum section border length *)
-let min_border_length = 45
+(** Minimum section border length. *)
+let min_border_length () = Runtime_params.get Governance_registry.dashboard_min_border_length
 
 (* ===== Types ===== *)
 
@@ -66,7 +68,7 @@ type swarm_lane_summary = Dashboard_labels.swarm_lane_summary = {
 (** Format a section *)
 let format_section (s : section) : string =
   let header = Printf.sprintf "== %s ==" s.title in
-  let border_len = max min_border_length (String.length header + 4) in
+  let border_len = max (min_border_length ()) (String.length header + 4) in
   let top_border = header ^ String.make (border_len - String.length header) '=' in
   let bottom_border = String.make border_len '-' in
   let content =
@@ -84,14 +86,16 @@ let parse_iso_timestamp = Dashboard_labels.parse_iso_timestamp
 let format_elapsed = Dashboard_labels.format_elapsed
 
 let truncate_path (path : string) : string =
-  if String.length path > max_path_length then
-    let suffix_len = max_path_length - 3 in
+  let limit = max_path_length () in
+  if String.length path > limit then
+    let suffix_len = limit - 3 in
     "..." ^ String.sub path (String.length path - suffix_len) suffix_len
   else path
 
 let truncate_message (msg : string) : string =
-  if String.length msg > max_message_length then
-    let prefix_len = max_message_length - 3 in
+  let limit = max_message_length () in
+  if String.length msg > limit then
+    let prefix_len = limit - 3 in
     String.sub msg 0 prefix_len ^ "..."
   else msg
 
@@ -115,6 +119,7 @@ let split_tasks (tasks : Types.task list) =
 
 let task_lines (tasks : Types.task list) =
   let (active, pending) = split_tasks tasks in
+  let pending_limit = max_pending_tasks () in
   let content =
     (List.map (fun (task : Types.task) ->
       let assignee =
@@ -125,11 +130,11 @@ let task_lines (tasks : Types.task list) =
       in
       Printf.sprintf "[P%d] %s (@%s)" task.priority task.title assignee
     ) active)
-    @ (List.filteri (fun idx _ -> idx < max_pending_tasks) pending
+    @ (List.filteri (fun idx _ -> idx < pending_limit) pending
        |> List.map (fun (task : Types.task) ->
               Printf.sprintf "[P%d] %s (pending)" task.priority task.title))
   in
-  let pending_more = List.length pending - max_pending_tasks in
+  let pending_more = List.length pending - pending_limit in
   if pending_more > 0 then
     content @ [Printf.sprintf "   ... +%d more pending" pending_more]
   else
@@ -219,7 +224,7 @@ let rec count_lock_files path =
 let count_locks_for_dir (config : Room_utils.config) locks_dir =
   match config.backend with
   | Room_utils.FileSystem _ -> count_lock_files locks_dir
-  | Room_utils.Memory _ | Room_utils.PostgresNative _ ->
+  | Room_utils.Memory _ ->
       (match Room_utils.key_of_path config locks_dir with
        | Some key_prefix ->
            (match Room_utils.backend_list_keys config ~prefix:(key_prefix ^ ":") with
@@ -247,7 +252,7 @@ let room_snapshot (config : Room_utils.config) ~current_room room_id =
     is_current = String.equal room_id current_room;
     agents = Room.get_active_agents config;
     tasks = Room.get_tasks_safe config;
-    messages = Room.get_messages_raw config ~since_seq:0 ~limit:max_recent_messages;
+    messages = Room.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
     locks = count_locks_for_room config room_id;
   }
 
@@ -472,6 +477,44 @@ let agents_grouped_section now (agents : Types.agent list) : section =
   in
   { title = "Agents"; content; empty_msg = "(no agents)" }
 
+(** Format elapsed seconds from a Unix timestamp to now. *)
+let format_elapsed_float now ts =
+  let elapsed = now -. ts in
+  if elapsed < 0.0 then "0s"
+  else if elapsed < 60.0 then Printf.sprintf "%.0fs" elapsed
+  else if elapsed < 3600.0 then Printf.sprintf "%.0fm" (elapsed /. 60.0)
+  else Printf.sprintf "%.1fh" (elapsed /. 3600.0)
+
+(** Keepers section: real-time FSM phase from Keeper_registry.
+    Reads registry snapshot each render — no dashboard-side cache. *)
+let keepers_section now : section =
+  let entries = Keeper_registry.all () in
+  let sorted =
+    List.sort (fun (a : Keeper_registry.registry_entry) b ->
+      String.compare a.name b.name) entries
+  in
+  let format_entry (e : Keeper_registry.registry_entry) =
+    let phase_str = Keeper_state_machine.phase_to_string e.phase in
+    let since =
+      match e.phase with
+      | Dead ->
+        (match e.dead_since_ts with
+         | Some ts -> format_elapsed_float now ts
+         | None -> "?")
+      | _ -> format_elapsed_float now e.started_at
+    in
+    let last_info =
+      match e.last_error with
+      | Some err ->
+        Printf.sprintf " | err=%s" (truncate_message err)
+      | None -> ""
+    in
+    Printf.sprintf "%s: %s | seq=%d | since=%s%s"
+      e.name phase_str e.transition_seq since last_info
+  in
+  let content = List.map format_entry sorted in
+  { title = "Keepers"; content; empty_msg = "(no keepers registered)" }
+
 (** Attention section: items requiring operator action *)
 let attention_section now (snapshots : room_snapshot list)
     (swarm_json_data : Yojson.Safe.t) : section =
@@ -510,6 +553,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
     [
       attention_section now snapshots swarm;
       agents_grouped_section now all_agents;
+      keepers_section now;
       tasks_section all_tasks;
       swarm_health_section now config swarm;
       messages_section
@@ -568,6 +612,16 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
   let offline_count =
     List.length all_agents - working_count - stuck_count - idle_count
   in
+  (* Keeper phase summary *)
+  let keeper_entries = Keeper_registry.all () in
+  let keeper_by_phase phase =
+    List.length (List.filter
+      (fun (e : Keeper_registry.registry_entry) -> e.phase = phase)
+      keeper_entries)
+  in
+  let k_running = keeper_by_phase Running in
+  let k_dead = keeper_by_phase Dead in
+  let k_other = List.length keeper_entries - k_running - k_dead in
   (* Swarm health *)
   let swarm = swarm_json config in
   let lanes = swarm_lane_summaries now swarm in
@@ -591,5 +645,7 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
         working_count idle_count stuck_count offline_count
         (List.length active_tasks) (List.length pending_tasks)
         (List.length blocked_tasks);
+      Printf.sprintf "KEEPERS: %d running / %d dead / %d other"
+        k_running k_dead k_other;
       Printf.sprintf "HEALTH: %s | Next: %s" health next_tool;
     ]

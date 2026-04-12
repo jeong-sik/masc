@@ -5,7 +5,7 @@
 
 open Tool_args
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -101,7 +101,7 @@ let handle_pause_status ctx args =
 let schemas = Tool_schemas_control.schemas
 
 (* Dispatch function *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_pause" -> Some (handle_pause ctx args)
   | "masc_resume" -> Some (handle_resume ctx args)
@@ -111,6 +111,11 @@ let dispatch ctx ~name ~args : result option =
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
+
+let tool_required_permission = function
+  | "masc_pause_status" -> Some Types.CanReadState
+  | "masc_pause" | "masc_resume" -> Some Types.CanBroadcast
+  | _ -> None
 
 let () =
   List.iter
@@ -122,5 +127,6 @@ let () =
            ~module_tag:Tool_dispatch.Mod_control
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

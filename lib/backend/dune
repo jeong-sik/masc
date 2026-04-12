@@ -4,13 +4,9 @@
  (public_name masc_mcp.masc_backend)
  (wrapped false)
  (modules
-  pg_infix
-  backend_pg_url
   backend_types
   backend_compression
-  backend_pg
-  backend
-  task_pg)
+  backend)
  (libraries
  masc_types
   masc_core
@@ -25,10 +21,6 @@
   unix
   eio
   eio.unix
-  caqti
-  caqti-eio
-  caqti-eio.unix
-  caqti-driver-postgresql
   uri
   str
   mtime

@@ -4,8 +4,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { fetchDashboardGoalsTree } from '../../api/dashboard'
-import { EmptyState } from '../common/empty-state'
-import { LoadingState } from '../common/feedback-state'
+import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
@@ -243,9 +242,7 @@ export function GoalTree() {
           </div>
         </div>
 
-        ${error ? html`
-          <div class="rounded-xl border border-bad/25 bg-bad/10 px-4 py-3 text-[13px] text-bad">${error}</div>
-        ` : null}
+        ${error ? html`<${ErrorState} message=${error} />` : null}
 
         ${data ? html`<${TreeSummary} summary=${data.summary} />` : null}
       </section>

@@ -12,11 +12,10 @@ open Tool_args
 (* Re-export sub-modules *)
 include Tool_autoresearch_registry
 include Tool_autoresearch_broadcast
-include Tool_autoresearch_repo_synthesis
-
+type context = Tool_autoresearch_context.t
 let schemas = Tool_autoresearch_schemas.schemas
 
-type result = bool * string
+type tool_result = bool * string
 
 let persisted_summary_json (summary : Autoresearch.persisted_summary) =
   `Assoc
@@ -282,15 +281,6 @@ let handle_start (ctx : context) args =
         ("warnings", `List (List.map (fun value -> `String value) state.warnings));
       ])
 
-let handle_swarm_start (_ctx : context) _args =
-  (* Team session engine removed — swarm start is no longer supported. *)
-  `Assoc
-    [
-      ( "error",
-        `String
-          "masc_autoresearch_swarm_start is no longer supported (team session engine removed)" );
-    ]
-
 let handle_status (ctx : context) args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
@@ -430,13 +420,9 @@ let handle_search_findings _ctx args =
     ]
 
 (** Dispatch an autoresearch tool call (standard MCP pattern). *)
-let dispatch (ctx : context) ~name ~args : result option =
+let dispatch (ctx : context) ~name ~args : tool_result option =
   match name with
   | "masc_autoresearch_start" -> Some (wrap_result (handle_start ctx args))
-  | "masc_autoresearch_swarm_start" ->
-      Some (wrap_result (handle_swarm_start ctx args))
-  | "masc_repo_synthesis_swarm_start" ->
-      Some (wrap_result (handle_repo_synthesis_swarm_start ctx args))
   | "masc_autoresearch_status" -> Some (wrap_result (handle_status ctx args))
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))
@@ -448,6 +434,15 @@ let dispatch (ctx : context) ~name ~args : result option =
 (* ================================================================ *)
 
 let _tool_spec_system_internal = [ "masc_autoresearch_status" ]
+
+let tool_required_permission = function
+  | "masc_autoresearch_status" ->
+      Some Types.CanReadState
+  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
+  | "masc_repo_synthesis_swarm_start" | "masc_autoresearch_cycle"
+  | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
+      Some Types.CanAdmin
+  | _ -> None
 
 let () =
   List.iter
@@ -462,5 +457,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
            ~allow_direct_call_when_hidden:is_system
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

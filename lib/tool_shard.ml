@@ -44,9 +44,13 @@ Use to timestamp events, check elapsed time, or include current time in reports.
   (* Context status *)
   {
     name = "keeper_context_status";
-    description = "Check your own context window usage and session state. Returns context_ratio (0.0-1.0), \
-token_count, message_count, generation, continuity_summary. Use when deciding whether to \
-compact context, extend turns, or hand off to the next generation.";
+    description = "Check your own context window usage and session state. Returns: \
+name (your keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
+message_count, generation, last_model_used, continuity_summary, and your three \
+canonical playground paths (playground_bundle, playground_mind, playground_repos) \
+relative to the server base_path. Use when deciding whether to compact context, \
+extend turns, hand off to the next generation, or resolve a path without \
+string-interpolating your own keeper name.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -274,7 +278,8 @@ let shell_tools : Types.tool_schema list = [
     name = "keeper_shell";
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
-Defaults to the keeper playground; use cwd to target an explicit allowed directory or cloned repo. \
+Read-only ops default to the keeper playground. \
+Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
 git_clone: clone a repo into your playground (url required, sandboxed to .masc/playground/<name>/). \
@@ -323,13 +328,15 @@ For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
     name = "keeper_github";
     description = "Run a single gh CLI command. \
 NO chaining (&&/||/;), NO pipes (|), NO redirects (>). \
-Good: cmd='pr list --state open'. Bad: cmd='pr list && echo done'. \
+Do NOT put --repo in cmd. Use the repo parameter instead, or omit it to use the current repo. \
+Good: cmd='pr list --state open'. Bad: cmd='pr list --repo owner/repo'. \
 Use for: issues, PRs, review comments, CI status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'issue create --title ...'")]);
         ("args", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Optional argv list for gh (without leading gh)")]);
+        ("repo", `Assoc [("type", `String "string"); ("description", `String "owner/repo slug. Omit to use the current repo from git remote. Do NOT guess.")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180)")]);
       ]);
     ];
@@ -731,14 +738,9 @@ let shard_taskboard : shard = {
   description = "Task board management: list, audit, force-release, force-done, broadcast";
 }
 
-(** Autoresearch tools: filtered subset for keeper use.
-    Excludes team-session front doors that require runtime support outside the
-    normal keeper execution surface. *)
+(** Autoresearch tools available to keepers. *)
 let autoresearch_keeper_tools : Types.tool_schema list =
   Tool_autoresearch_schemas.schemas
-  |> List.filter (fun (t : Types.tool_schema) ->
-       t.name <> "masc_autoresearch_swarm_start"
-       && t.name <> "masc_repo_synthesis_swarm_start")
 
 let shard_autoresearch : shard = {
   name = "autoresearch";
@@ -967,6 +969,14 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : (bool * Yojson.Sa
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let _tool_spec_read_only = [ "masc_tool_list" ]
+let _tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
+
+let tool_required_permission = function
+  | "masc_tool_list" -> Some Types.CanReadState
+  | "masc_tool_grant" | "masc_tool_revoke" -> Some Types.CanAdmin
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -977,5 +987,9 @@ let () =
            ~module_tag:Tool_dispatch.Mod_shard
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~is_destructive:(List.mem s.name _tool_spec_destructive)
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

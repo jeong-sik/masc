@@ -83,6 +83,7 @@ let with_room f =
     ~clock:(Eio.Stdenv.clock env);
   let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
   let saved_sb = Sys.getenv_opt "SB_PG_URL" in
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Unix.putenv "MASC_POSTGRES_URL" "";
   Unix.putenv "SB_PG_URL" "";
   Fun.protect
@@ -93,9 +94,13 @@ let with_room f =
       (match saved_sb with
        | Some v -> Unix.putenv "SB_PG_URL" v
        | None -> (try Unix.putenv "SB_PG_URL" "" with _ -> ()));
+      (match saved_base with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
+       | None -> (try Unix.putenv "MASC_BASE_PATH" "" with _ -> ()));
       Process_eio.reset_for_testing ();
       (try rm_rf dir with _ -> ()))
     (fun () ->
+      Unix.putenv "MASC_BASE_PATH" dir;
       let config = Room.default_config dir in
       let _msg = Room.init config ~agent_name:(Some "test-keeper") in
       f config)
@@ -511,13 +516,16 @@ let with_real_repo_room f =
   in
   let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
   let saved_sb = Sys.getenv_opt "SB_PG_URL" in
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Unix.putenv "MASC_POSTGRES_URL" "";
   Unix.putenv "SB_PG_URL" "";
   Fun.protect
     ~finally:(fun () ->
       (match saved_pg with Some v -> Unix.putenv "MASC_POSTGRES_URL" v | None -> ());
-      (match saved_sb with Some v -> Unix.putenv "SB_PG_URL" v | None -> ()))
+      (match saved_sb with Some v -> Unix.putenv "SB_PG_URL" v | None -> ());
+      (match saved_base with Some v -> Unix.putenv "MASC_BASE_PATH" v | None -> Unix.putenv "MASC_BASE_PATH" ""))
     (fun () ->
+      Unix.putenv "MASC_BASE_PATH" repo_root;
       let config = Room.default_config repo_root in
       (* Room may already be initialized in the real repo *)
       (try ignore (Room.init config ~agent_name:(Some "test-integration")) with _ -> ());
@@ -533,14 +541,17 @@ let with_local_git_repo_room f =
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
   let saved_sb = Sys.getenv_opt "SB_PG_URL" in
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Unix.putenv "MASC_POSTGRES_URL" "";
   Unix.putenv "SB_PG_URL" "";
   Fun.protect
     ~finally:(fun () ->
       (match saved_pg with Some v -> Unix.putenv "MASC_POSTGRES_URL" v | None -> ());
       (match saved_sb with Some v -> Unix.putenv "SB_PG_URL" v | None -> ());
+      (match saved_base with Some v -> Unix.putenv "MASC_BASE_PATH" v | None -> Unix.putenv "MASC_BASE_PATH" "");
       (try rm_rf dir with _ -> ()))
     (fun () ->
+      Unix.putenv "MASC_BASE_PATH" dir;
       write_text_file (Filename.concat dir "README.md") "# local keeper_pr_workflow test\n";
       write_text_file (Filename.concat dir "CHANGELOG.md")
         "# Changelog\n\n## [0.1.0] - 2026-04-08\n";
@@ -573,11 +584,25 @@ let derive_worktree_id keeper_name branch =
   |> String.of_seq
   |> Printf.sprintf "%s-%s" keeper_name
 
-let workflow_repo_root config =
+let seed_playground_clone config keeper_name source_repo =
   let project_root = Keeper_alerting_path.project_root_of_config config in
-  match Room_git.git_root ~base_path:project_root with
-  | Some path -> path
-  | None -> project_root
+  let repos_dir =
+    Filename.concat project_root (Keeper_alerting_path.playground_repos_path keeper_name)
+  in
+  Fs_compat.mkdir_p repos_dir;
+  let clone_path = Filename.concat repos_dir (Filename.basename source_repo) in
+  if Sys.file_exists clone_path then rm_rf clone_path;
+  run_cmd_exn [ "git"; "clone"; source_repo; clone_path ];
+  (* Replace origin with a local bare repo so git-push succeeds locally
+     but gh-pr-create fails harmlessly — prevents real PRs leaking to GitHub. *)
+  let local_bare = clone_path ^ ".bare" in
+  if Sys.file_exists local_bare then rm_rf local_bare;
+  run_cmd_exn [ "git"; "init"; "--bare"; local_bare ];
+  run_cmd_exn [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; local_bare ];
+  (* Ensure main branch exists (clone from worktree may default to another branch) *)
+  ignore (run_cmd [ "git"; "-C"; clone_path; "checkout"; "-B"; "main" ]);
+  run_cmd_exn [ "git"; "-C"; clone_path; "push"; "-u"; "origin"; "main" ];
+  clone_path
 
 let cleanup_test_branch repo_root branch =
   ignore (Sys.command
@@ -590,52 +615,51 @@ let cleanup_test_branch repo_root branch =
 let test_worktree_create_writes_and_cleans_up () =
   with_real_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
-    let workflow_root = workflow_repo_root config in
+    let workflow_root = seed_playground_clone config meta.name repo_root in
     let test_branch = Printf.sprintf "test/integration-%s" (fresh_nonce ()) in
-    let args = `Assoc
-      [ "branch", `String test_branch
-      ; "file_path", `String "test-integration-verify.txt"
-      ; "file_content", `String "integration test content"
-      ; "commit_message", `String "test: integration verify worktree workflow"
-      ; "pr_title", `String "test: integration verify"
-      ] in
-    let result = call_tool config meta "keeper_pr_workflow" args in
-    let json = parse_json result in
-    let steps = json_string "steps" json in
-    let error = json_string "error" json in
-    (* worktree_create step must succeed *)
-    check bool "worktree_create step present"
-      true (String_util.contains_substring_ci steps "worktree_create");
-    check bool "worktree_create ok"
-      true (String_util.contains_substring_ci steps "worktree_create: ok");
-    (* file_write step must succeed *)
-    check bool "file_write ok"
-      true (String_util.contains_substring_ci steps "file_write: ok");
-    (* After file_write, either version_truth_check may fail due repo state,
-       or git_commit_push may run and fail later at push. Both prove the
-       worktree path executed correctly. *)
-    let reached_post_write_gate =
-      String_util.contains_substring_ci steps "version_truth_check: ok"
-      || String_util.contains_substring_ci error "version truth check failed"
-      || String_util.contains_substring_ci steps "git_commit_push: ok"
-      || String_util.contains_substring_ci error "git push"
-    in
-    check bool "workflow reached post-write gate" true reached_post_write_gate;
-    (* Verify worktree was cleaned up (step 5 runs even on failure). *)
-    let worktree_id = derive_worktree_id meta.name test_branch in
-    let worktree_path = Filename.concat workflow_root (Filename.concat ".worktrees" worktree_id) in
-    check bool "worktree cleaned up"
-      false (Sys.file_exists worktree_path);
-    (* Clean up remote branch if push somehow succeeded *)
-    if String_util.contains_substring_ci steps "git_commit_push: ok" then begin
-      ignore repo_root;
-      cleanup_test_branch workflow_root test_branch
-    end)
+    let pushed = ref false in
+    Fun.protect
+      ~finally:(fun () ->
+        if !pushed then cleanup_test_branch workflow_root test_branch;
+        try rm_rf workflow_root with _ -> ())
+      (fun () ->
+        let args = `Assoc
+          [ "branch", `String test_branch
+          ; "file_path", `String "test-integration-verify.txt"
+          ; "file_content", `String "integration test content"
+          ; "commit_message", `String "test: integration verify worktree workflow"
+          ; "pr_title", `String "test: integration verify"
+          ] in
+        let result = call_tool config meta "keeper_pr_workflow" args in
+        let json = parse_json result in
+        let steps = json_string "steps" json in
+        let error = json_string "error" json in
+        check bool "worktree_create step present"
+          true (String_util.contains_substring_ci steps "worktree_create");
+        check bool "worktree_create ok"
+          true (String_util.contains_substring_ci steps "worktree_create: ok");
+        check bool "file_write ok"
+          true (String_util.contains_substring_ci steps "file_write: ok");
+        let reached_post_write_gate =
+          String_util.contains_substring_ci steps "version_truth_check: ok"
+          || String_util.contains_substring_ci error "version truth check failed"
+          || String_util.contains_substring_ci steps "git_commit_push: ok"
+          || String_util.contains_substring_ci error "git push"
+        in
+        check bool "workflow reached post-write gate" true reached_post_write_gate;
+        let worktree_id = derive_worktree_id meta.name test_branch in
+        let worktree_path =
+          Filename.concat workflow_root (Filename.concat ".worktrees" worktree_id)
+        in
+        check bool "worktree cleaned up"
+          false (Sys.file_exists worktree_path);
+        if String_util.contains_substring_ci steps "git_commit_push: ok"
+        then pushed := true))
 
 let test_existing_worktree_path_is_retried_safely () =
   with_real_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
-    let workflow_root = workflow_repo_root config in
+    let workflow_root = seed_playground_clone config meta.name repo_root in
     let test_branch = Printf.sprintf "test/retry-%s" (fresh_nonce ()) in
     let worktree_id = derive_worktree_id meta.name test_branch in
     let worktree_path = Filename.concat workflow_root (Filename.concat ".worktrees" worktree_id) in
@@ -644,8 +668,8 @@ let test_existing_worktree_path_is_retried_safely () =
         ignore (Sys.command
           (Printf.sprintf "cd %s && git worktree remove --force %s >/dev/null 2>&1"
             (Filename.quote workflow_root) (Filename.quote worktree_path)));
-        ignore repo_root;
-        cleanup_test_branch workflow_root test_branch)
+        cleanup_test_branch workflow_root test_branch;
+        try rm_rf workflow_root with _ -> ())
       (fun () ->
         ignore (run_cmd [ "/usr/bin/git"; "-C"; workflow_root; "worktree"; "remove"; "--force"; worktree_path ]);
         cleanup_test_branch workflow_root test_branch;
@@ -685,41 +709,44 @@ let test_existing_worktree_path_is_retried_safely () =
           || String_util.contains_substring_ci error "git push"
         in
         check bool "retry workflow reached post-write gate" true reached_post_write_gate;
-        check bool "retry worktree cleaned up"
-          false (Sys.file_exists worktree_path)))
+        check bool "retry keeps pre-existing worktree intact"
+          true (Sys.file_exists worktree_path)))
 
 let test_local_repo_worktree_runs_truth_via_absolute_bash () =
   with_local_git_repo_room (fun config repo_root ->
     let meta = make_meta_with_preset "delivery" in
-    let workflow_root = workflow_repo_root config in
+    let workflow_root = seed_playground_clone config meta.name repo_root in
     let test_branch = Printf.sprintf "test/local-%s" (fresh_nonce ()) in
     let worktree_id = derive_worktree_id meta.name test_branch in
     let worktree_path = Filename.concat workflow_root (Filename.concat ".worktrees" worktree_id) in
-    let args = `Assoc
-      [ "branch", `String test_branch
-      ; "file_path", `String "README.md"
-      ; "file_content", `String "# updated by keeper_pr_workflow\n"
-      ; "commit_message", `String "test: local worktree workflow"
-      ; "pr_title", `String "test: local worktree workflow"
-      ] in
-    let result = call_tool config meta "keeper_pr_workflow" args in
-    let json = parse_json result in
-    let steps = json_string "steps" json in
-    let error = json_string "error" json in
-    check bool "worktree_create ok in local repo"
-      true (String_util.contains_substring_ci steps "worktree_create: ok");
-    check bool "file_write ok in local repo"
-      true (String_util.contains_substring_ci steps "file_write: ok");
-    check bool "version truth ok via absolute bash"
-      true (String_util.contains_substring_ci steps "version_truth_check: ok");
-    check bool "git commit push ok in local repo"
-      true (String_util.contains_substring_ci steps "git_commit_push: ok");
-    check bool "gh pr create becomes terminal failure"
-      true (String_util.contains_substring_ci error "gh pr create");
-    check bool "local repo worktree cleaned up"
-      false (Sys.file_exists worktree_path);
-    ignore repo_root;
-    cleanup_test_branch workflow_root test_branch)
+    Fun.protect
+      ~finally:(fun () ->
+        cleanup_test_branch workflow_root test_branch;
+        try rm_rf workflow_root with _ -> ())
+      (fun () ->
+        let args = `Assoc
+          [ "branch", `String test_branch
+          ; "file_path", `String "README.md"
+          ; "file_content", `String "# updated by keeper_pr_workflow\n"
+          ; "commit_message", `String "test: local worktree workflow"
+          ; "pr_title", `String "test: local worktree workflow"
+          ] in
+        let result = call_tool config meta "keeper_pr_workflow" args in
+        let json = parse_json result in
+        let steps = json_string "steps" json in
+        let error = json_string "error" json in
+        check bool "worktree_create ok in local repo"
+          true (String_util.contains_substring_ci steps "worktree_create: ok");
+        check bool "file_write ok in local repo"
+          true (String_util.contains_substring_ci steps "file_write: ok");
+        check bool "version truth ok via absolute bash"
+          true (String_util.contains_substring_ci steps "version_truth_check: ok");
+        check bool "git commit push ok in local repo"
+          true (String_util.contains_substring_ci steps "git_commit_push: ok");
+        check bool "gh pr create becomes terminal failure"
+          true (String_util.contains_substring_ci error "gh pr create");
+        check bool "local repo worktree cleaned up"
+          false (Sys.file_exists worktree_path)))
 
 (* --- keeper_bash branch-switch guard --- *)
 
@@ -750,7 +777,7 @@ let assert_branch_switch_blocked config cmd label =
   let args =
     `Assoc
       [ "cmd", `String cmd
-      ; "cwd", `String shared_repo_rel
+      ; "cwd", `String shared_repo_abs
       ]
   in
   let result = call_tool config meta "keeper_bash" args in
@@ -837,6 +864,69 @@ let test_shell_readonly_pwd_defaults_to_playground () =
     check bool "pwd ok" true (json_bool "ok" json);
     check string "pwd cwd" expected_cwd (json_string "cwd" json))
 
+let test_shell_readonly_pwd_stays_in_playground_with_explicit_allowed_root () =
+  with_room (fun config ->
+    let shared_repo_rel = "workspace/yousleepwhen/oas" in
+    let shared_repo_abs =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config) shared_repo_rel
+    in
+    Fs_compat.mkdir_p shared_repo_abs;
+    let meta =
+      { (make_meta_with_preset "delivery") with
+        allowed_paths = [ shared_repo_rel ^ "/" ] }
+    in
+    let expected_cwd =
+      Filename.concat
+        (Keeper_alerting_path.project_root_of_config config)
+        (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    in
+    let result =
+      call_tool config meta "keeper_shell"
+        (`Assoc [ "op", `String "pwd" ])
+    in
+    let json = parse_json result in
+    ignore shared_repo_abs;
+    check bool "pwd with explicit allowed root ok" true (json_bool "ok" json);
+    check string "pwd still defaults to keeper playground" expected_cwd
+      (json_string "cwd" json))
+
+let test_shell_readonly_cat_uses_explicit_cwd_for_custom_root () =
+  with_room (fun config ->
+    let shared_repo_rel = "workspace/yousleepwhen/oas" in
+    let shared_repo_abs =
+      Filename.concat (Keeper_alerting_path.project_root_of_config config) shared_repo_rel
+    in
+    let shared_file = Filename.concat shared_repo_abs "lib/approval.ml" in
+    write_text_file shared_file "let approval = true\n";
+    let meta =
+      { (make_meta_with_preset "delivery") with
+        allowed_paths = [ shared_repo_rel ^ "/" ] }
+    in
+    let default_result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "cat"
+          ; "path", `String "lib/approval.ml"
+          ])
+    in
+    let default_json = parse_json default_result in
+    check bool "default cat stays in playground and misses shared repo" true
+      (match default_json with `Assoc fields -> List.mem_assoc "error" fields | _ -> false);
+    let explicit_result =
+      call_tool config meta "keeper_shell"
+        (`Assoc
+          [ "op", `String "cat"
+          ; "cwd", `String (shared_repo_abs ^ "/")
+          ; "path", `String "lib/approval.ml"
+          ])
+    in
+    let explicit_json = parse_json explicit_result in
+    check bool "cat with explicit cwd ok" true (json_bool "ok" explicit_json);
+    check string "cat path resolves from explicit cwd" shared_file
+      (json_string "path" explicit_json);
+    check string "cat returns shared repo content" "let approval = true\n"
+      (json_string "content" explicit_json))
+
 let test_fs_read_blocks_shared_repo_by_default () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
@@ -847,7 +937,7 @@ let test_fs_read_blocks_shared_repo_by_default () =
     write_text_file shared_file "let approval = true\n";
     let result =
       call_tool config meta "keeper_fs_read"
-        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+        (`Assoc [ "path", `String shared_file ])
     in
     let json = parse_json result in
     check bool "returns error payload" true
@@ -868,7 +958,7 @@ let test_fs_read_allows_explicit_custom_path () =
     write_text_file shared_file "let approval = true\n";
     let result =
       call_tool config meta "keeper_fs_read"
-        (`Assoc [ "path", `String "workspace/yousleepwhen/oas/lib/approval.ml" ])
+        (`Assoc [ "path", `String shared_file ])
     in
     let json = parse_json result in
     check bool "explicit custom path read ok" true (json_bool "ok" json);
@@ -1076,7 +1166,9 @@ let with_grep_only_path expected_cwd f =
   in
   let fake_bin = Filename.concat expected_cwd "fake-bin" in
   Fs_compat.mkdir_p fake_bin;
-  Unix.symlink grep_path (Filename.concat fake_bin "grep");
+  let fake_grep = Filename.concat fake_bin "grep" in
+  if Sys.file_exists fake_grep then Sys.remove fake_grep;
+  Unix.symlink grep_path fake_grep;
   let saved_path = Sys.getenv_opt "PATH" in
   Fun.protect
     ~finally:(fun () ->
@@ -1196,6 +1288,10 @@ let () =
       ; test_case "status allowed" `Quick test_bash_git_status_allowed
       ; test_case "readonly pwd defaults to playground" `Quick
           test_shell_readonly_pwd_defaults_to_playground
+      ; test_case "readonly pwd stays in playground with explicit allowed root" `Quick
+          test_shell_readonly_pwd_stays_in_playground_with_explicit_allowed_root
+      ; test_case "readonly cat uses explicit cwd for custom root" `Quick
+          test_shell_readonly_cat_uses_explicit_cwd_for_custom_root
       ; test_case "fs read blocks shared repo by default" `Quick
           test_fs_read_blocks_shared_repo_by_default
       ; test_case "fs read allows explicit custom path" `Quick

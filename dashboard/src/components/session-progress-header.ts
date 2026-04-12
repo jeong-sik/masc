@@ -2,7 +2,7 @@
 // Lightweight: all metric KPIs live in KpiGrid to avoid duplication.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import type { Keeper } from '../types'
 import { formatDuration } from './tool-call-shared'
@@ -47,23 +47,13 @@ function statusLabel(status: string): { text: string; color: string; bgColor: st
 
 function ElapsedTimer({ startMs }: { startMs: number }) {
   const elapsed = useSignal(Date.now() - startMs)
-  const rafRef = useRef<number>(0)
 
   useEffect(() => {
-    let mounted = true
-    const tick = () => {
-      if (!mounted) return
+    // Format granularity is seconds, so a 1 Hz tick is sufficient.
+    const interval = setInterval(() => {
       elapsed.value = Date.now() - startMs
-      rafRef.current = requestAnimationFrame(tick)
-    }
-    // Update once per second instead of every frame
-    const interval = setInterval(() => { elapsed.value = Date.now() - startMs }, 1000)
-    tick()
-    return () => {
-      mounted = false
-      cancelAnimationFrame(rafRef.current)
-      clearInterval(interval)
-    }
+    }, 1000)
+    return () => clearInterval(interval)
   }, [startMs])
 
   return html`<span class="font-mono tabular-nums">${formatDuration(elapsed.value)}</span>`

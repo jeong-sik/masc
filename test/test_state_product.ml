@@ -13,45 +13,76 @@ let mk ?(keeper=K.Offline) ?(turn=AT.Idle) ?(validation=TV.Unchecked) () : State
 
 let test_turn_happy_path () =
   let open AT in
-  let s = apply_event ~current:Idle Turn_start in
+  let s = apply_event_lossy ~current:Idle Turn_start in
   Alcotest.(check string) "prompting" "prompting" (phase_to_string s);
-  let s = apply_event ~current:s Prompt_ready in
+  let s = apply_event_lossy ~current:s Prompt_ready in
   Alcotest.(check string) "awaiting" "awaiting" (phase_to_string s);
-  let s = apply_event ~current:s Response_received in
+  let s = apply_event_lossy ~current:s Response_received in
   Alcotest.(check string) "parsing" "parsing" (phase_to_string s);
-  let s = apply_event ~current:s Parse_complete in
+  let s = apply_event_lossy ~current:s Parse_complete in
   Alcotest.(check string) "dispatching" "dispatching" (phase_to_string s);
-  let s = apply_event ~current:s Tools_dispatched in
+  let s = apply_event_lossy ~current:s Tools_dispatched in
   Alcotest.(check string) "collecting" "collecting" (phase_to_string s);
-  let s = apply_event ~current:s Results_collected in
+  let s = apply_event_lossy ~current:s Results_collected in
   Alcotest.(check string) "finalizing" "finalizing" (phase_to_string s);
-  let s = apply_event ~current:s Turn_complete in
+  let s = apply_event_lossy ~current:s Turn_complete in
   Alcotest.(check string) "back to idle" "idle" (phase_to_string s)
 
 let test_turn_error_resets () =
-  let s = AT.apply_event ~current:Awaiting (Turn_error "timeout") in
+  let s = AT.apply_event_lossy ~current:Awaiting (Turn_error "timeout") in
   Alcotest.(check string) "error resets" "idle" (AT.phase_to_string s)
 
 (* ── Tool Validation FSM ────────────────────────────────── *)
 
 let test_validation_det_fixed () =
-  let s = TV.apply_event ~current:Unchecked Validate_start in
+  let s = TV.apply_event_lossy ~current:Unchecked Validate_start in
   Alcotest.(check string) "det_correcting" "det_correcting" (TV.phase_to_string s);
-  let s = TV.apply_event ~current:s Det_fixed in
+  let s = TV.apply_event_lossy ~current:s Det_fixed in
   Alcotest.(check string) "det_valid" "det_valid" (TV.phase_to_string s)
 
 let test_validation_nondet_retry () =
-  let s = TV.apply_event ~current:Det_invalid (Nondet_attempt 1) in
+  let s = TV.apply_event_lossy ~current:Det_invalid (Nondet_attempt 1) in
   Alcotest.(check string) "nondet_retrying" "nondet_retrying" (TV.phase_to_string s);
-  let s = TV.apply_event ~current:s Nondet_fixed in
+  let s = TV.apply_event_lossy ~current:s Nondet_fixed in
   Alcotest.(check string) "valid" "valid" (TV.phase_to_string s)
 
 let test_validation_rejected () =
-  let s = TV.apply_event ~current:Nondet_retrying Nondet_exhausted in
+  let s = TV.apply_event_lossy ~current:Nondet_retrying Nondet_exhausted in
   Alcotest.(check string) "rejected" "rejected" (TV.phase_to_string s)
 
+(* ── Nondet Retry Cap ──────────────────────────────────── *)
+
+let test_nondet_attempt_under_cap () =
+  (* attempt n=2 with default cap 3 -> still retrying *)
+  let s = TV.apply_event ~current:Nondet_retrying (Nondet_attempt 2) in
+  match s with
+  | Applied Nondet_retrying -> ()
+  | Applied p -> Alcotest.fail (Printf.sprintf "expected Nondet_retrying, got %s" (TV.phase_to_string p))
+  | Ignored _ -> Alcotest.fail "expected Applied, got Ignored"
+
+let test_nondet_attempt_at_cap () =
+  (* attempt n=3 with default cap 3 -> rejected *)
+  let s = TV.apply_event ~current:Nondet_retrying (Nondet_attempt 3) in
+  match s with
+  | Applied Rejected -> ()
+  | Applied p -> Alcotest.fail (Printf.sprintf "expected Rejected, got %s" (TV.phase_to_string p))
+  | Ignored _ -> Alcotest.fail "expected Applied, got Ignored"
+
+let test_nondet_custom_cap () =
+  (* custom cap of 1: attempt n=0 ok, attempt n=1 rejected *)
+  let s0 = TV.apply_event ~max_nondet_retries:1 ~current:Nondet_retrying (Nondet_attempt 0) in
+  (match s0 with
+   | Applied Nondet_retrying -> ()
+   | Applied p -> Alcotest.fail (Printf.sprintf "n=0: expected Nondet_retrying, got %s" (TV.phase_to_string p))
+   | Ignored _ -> Alcotest.fail "n=0: expected Applied, got Ignored");
+  let s1 = TV.apply_event ~max_nondet_retries:1 ~current:Nondet_retrying (Nondet_attempt 1) in
+  (match s1 with
+   | Applied Rejected -> ()
+   | Applied p -> Alcotest.fail (Printf.sprintf "n=1: expected Rejected, got %s" (TV.phase_to_string p))
+   | Ignored _ -> Alcotest.fail "n=1: expected Applied, got Ignored")
+
 let test_validation_skip () =
-  let s = TV.apply_event ~current:Unchecked Skip_validation in
+  let s = TV.apply_event_lossy ~current:Unchecked Skip_validation in
   Alcotest.(check string) "valid" "valid" (TV.phase_to_string s)
 
 (* ── Product Invariants ─────────────────────────────────── *)
@@ -132,6 +163,9 @@ let () =
       Alcotest.test_case "nondet retry" `Quick test_validation_nondet_retry;
       Alcotest.test_case "rejected" `Quick test_validation_rejected;
       Alcotest.test_case "skip" `Quick test_validation_skip;
+      Alcotest.test_case "nondet attempt under cap" `Quick test_nondet_attempt_under_cap;
+      Alcotest.test_case "nondet attempt at cap" `Quick test_nondet_attempt_at_cap;
+      Alcotest.test_case "nondet custom cap" `Quick test_nondet_custom_cap;
     ]);
     ("invariants", [
       Alcotest.test_case "initial ok" `Quick test_initial_ok;

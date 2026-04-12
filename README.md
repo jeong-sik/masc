@@ -179,6 +179,7 @@ Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers
 - OAS owns cascade schema, parsing, and label semantics.
 - MASC uses that contract to choose repo-level checked-in defaults; each keeper can override via `cascade_name` in its TOML.
 - For committed defaults, prefer explicit `provider:model_id` labels instead of convenience labels.
+- Checked-in defaults must stay limited to providers recognized by the currently pinned OAS parser.
 - See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
 
 ## Safe Starting Paths

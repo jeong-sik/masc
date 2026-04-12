@@ -1,7 +1,8 @@
 (** Code Write Tools — File write, edit, delete, shell, git for keeper agents.
 
     Security model:
-    - All write operations restricted to .worktrees/ directories
+    - Write operations restricted to allowed sandboxes
+      (.worktrees/ checkouts and keeper playground clones)
     - Shell commands restricted to allowlist
     - Git push to main/master blocked
     - Git clone restricted to allowed GitHub orgs (config/tool_policy.toml)
@@ -18,43 +19,96 @@ type context = {
   agent_name : string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let max_write_size = 1024 * 1024 (* 1MB *)
 
-(* Security: Validate path is within a .worktrees/ directory.
+let normalize_dir_prefix path =
+  Tool_code.normalize_path path ^ "/"
+
+let first_nonempty_line output =
+  output
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.find_opt (fun s -> s <> "")
+
+let git_common_root path =
+  try
+    match
+      Process_eio.run_argv_with_status
+        ~timeout_sec:5.0
+        [ "git"; "-C"; path; "rev-parse"; "--git-common-dir" ]
+    with
+    | Unix.WEXITED 0, output ->
+      (match first_nonempty_line output with
+       | None -> None
+       | Some git_common_dir ->
+         let git_common_dir =
+           if Filename.is_relative git_common_dir
+           then Filename.concat path git_common_dir
+           else git_common_dir
+         in
+         Some (Tool_code.normalize_path (Filename.dirname git_common_dir)))
+    | _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Unix.Unix_error _ -> None
+  | Sys_error _ -> None
+
+let dedupe_keep_order paths =
+  let seen = Hashtbl.create (List.length paths) in
+  List.filter
+    (fun path ->
+      if Hashtbl.mem seen path then false
+      else (
+        Hashtbl.replace seen path ();
+        true))
+    paths
+
+let allowed_worktree_prefixes config =
+  [ git_common_root config.Room.base_path;
+    git_common_root (Sys.getcwd ()) ]
+  |> List.filter_map (fun root -> root)
+  |> dedupe_keep_order
+  |> List.map (fun root -> normalize_dir_prefix (Filename.concat root ".worktrees"))
+
+(* Security: Validate path is within an allowed writable sandbox.
    Uses canonical paths from Tool_code.validate_path — already normalized.
-   Checks both the base_path git root AND the process cwd git root,
-   because base_path may be ~/me while the actual repo worktrees live
-   under ~/me/workspace/.../masc-mcp/.worktrees/. *)
-let validate_writable_path config path =
+   Worktree paths are anchored to actual git common roots so a nested
+   "/.worktrees/" segment elsewhere in the tree is not accepted.
+
+   Playground writes are gated per-agent (#6527 iter 6): the caller
+   must only be allowed to write inside its own
+   [.masc/playground/<agent_name>/] bundle. This prevents one agent
+   from mutating another agent's playground via the shared
+   `masc_code_*` dispatch. Server-wide `.worktrees/` remains allowed
+   so legacy server operations that need to touch repo worktrees
+   continue to work. *)
+let validate_writable_path ~(agent_name : string) config path =
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->
-    let worktree_roots =
-      let base_root = Room_git.git_root ~base_path:config.Room.base_path in
-      let cwd_root =
-        try Some (String.trim (Tool_code.normalize_path (Sys.getcwd ())))
-        with _ -> None
-      in
-      List.filter_map (fun r ->
-        match r with
-        | Some root -> Some (Tool_code.normalize_path
-            (Filename.concat root ".worktrees"))
-        | None -> None)
-        [base_root; cwd_root]
-      |> List.sort_uniq String.compare
+    let worktree_prefixes = allowed_worktree_prefixes config in
+    let agent_playground_prefix =
+      normalize_dir_prefix
+        (Filename.concat config.Room.base_path
+           (Keeper_alerting_path.playground_path_of_keeper agent_name))
     in
-    if worktree_roots = [] then
-      Error (IoError "Not in a git repository")
-    else if List.exists (fun prefix ->
-      String.starts_with ~prefix:(prefix ^ "/") canonical_path
-    ) worktree_roots then
+    if List.exists
+         (fun prefix -> String.starts_with ~prefix canonical_path)
+         worktree_prefixes
+       || String.starts_with ~prefix:agent_playground_prefix canonical_path then
       Ok canonical_path
     else
       Error (IoError (Printf.sprintf
-        "Write restricted to .worktrees/ directory (got: %s, checked: [%s])"
-        canonical_path (String.concat "; " worktree_roots)))
+        "Write restricted to allowed sandboxes for agent %s. \
+         Expected path prefix: %s (or /.worktrees/ for server ops). \
+         Got: %s. Cross-agent playground writes are blocked — write \
+         under your own playground only. Call masc_status if you are \
+         unsure of your agent_name."
+        agent_name
+        agent_playground_prefix
+        canonical_path))
 
 (* Shell command allowlist *)
 let allowed_shell_commands = [
@@ -205,8 +259,11 @@ let validate_clone_url ~base_path url =
         | _ -> Ok ()
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
-    and .masc/playground/{name}/repos/ directories. *)
-let validate_clone_cwd config cwd =
+    and THIS agent's own .masc/playground/<agent_name>/repos/ directory.
+
+    #6527 iter 6 scoped this per-agent so agent A cannot drop a clone
+    into agent B's playground/repos/ via masc_code_git action=clone. *)
+let validate_clone_cwd ~(agent_name : string) config cwd =
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->
@@ -215,34 +272,42 @@ let validate_clone_cwd config cwd =
     | Some root ->
       let worktree_prefix = Tool_code.normalize_path
         (Filename.concat root ".worktrees") in
-      let playground_prefix = Tool_code.normalize_path
-        (Filename.concat root ".masc/playground") in
+      let agent_playground_prefix = Tool_code.normalize_path
+        (Filename.concat root
+           (Keeper_alerting_path.playground_path_of_keeper agent_name)) in
       let in_worktrees =
         canonical_path = worktree_prefix ||
         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
       in
-      let in_playground_repos =
-        (* Match .masc/playground/{name}/repos or subdirs thereof.
-           Path after playground_prefix must be /{name}/repos[/...]. *)
-        if String.starts_with ~prefix:(playground_prefix ^ "/") canonical_path then
-          let suffix = String.sub canonical_path
-            (String.length playground_prefix + 1)
-            (String.length canonical_path - String.length playground_prefix - 1) in
-          match String.index_opt suffix '/' with
-          | None -> false
-          | Some idx ->
-            let after_name = String.sub suffix (idx + 1)
-              (String.length suffix - idx - 1) in
-            after_name = "repos" ||
-            String.starts_with ~prefix:"repos/" after_name
-        else false
+      let in_agent_playground_repos =
+        (* Match <agent_playground_prefix>/repos or subdirs thereof.
+           [playground_path_of_keeper] already ends with "/", and the
+           canonical normalisation strips trailing slashes, so we strip
+           the trailing slash before prefix matching. *)
+        let prefix_no_slash =
+          if String.length agent_playground_prefix > 0
+             && agent_playground_prefix.[String.length agent_playground_prefix - 1] = '/'
+          then String.sub agent_playground_prefix 0
+                 (String.length agent_playground_prefix - 1)
+          else agent_playground_prefix
+        in
+        canonical_path = Filename.concat prefix_no_slash "repos"
+        || String.starts_with
+             ~prefix:(Filename.concat prefix_no_slash "repos/")
+             canonical_path
       in
-      if in_worktrees || in_playground_repos then
+      if in_worktrees || in_agent_playground_repos then
         Ok canonical_path
       else
         Error (IoError (Printf.sprintf
-          "Clone restricted to .worktrees/ or .masc/playground/*/repos/ directory (got: %s)"
-          canonical_path))
+          "Clone restricted to /.worktrees/ or this agent's own \
+           %srepos/ (got: %s). Cross-agent playground clones are blocked \
+           — clone into %srepos/<repo-name> instead. Call masc_status \
+           if you are unsure of your agent_name (currently %s)."
+          agent_playground_prefix
+          canonical_path
+          agent_playground_prefix
+          agent_name))
 
 (* Handler: masc_code_write — Create or overwrite a file *)
 let handle_code_write ctx args =
@@ -258,7 +323,7 @@ let handle_code_write ctx args =
   else if Tool_code.is_binary_file path then
     (false, "Binary file extension not allowed for write")
   else begin
-    match validate_writable_path ctx.config path with
+    match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok abs_path ->
       try
@@ -289,7 +354,7 @@ let handle_code_edit ctx args =
   else if old_string = "" then (false, "old_string parameter required")
   else if old_string = new_string then (false, "old_string and new_string are identical")
   else begin
-    match validate_writable_path ctx.config path with
+    match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
@@ -374,7 +439,7 @@ let handle_code_delete ctx args =
 
   if path = "" then (false, "path parameter required")
   else begin
-    match validate_writable_path ctx.config path with
+    match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok abs_path ->
       if not (Sys.file_exists abs_path) then
@@ -417,7 +482,7 @@ let handle_code_shell ctx args =
       (* Validate cwd if provided *)
       let cwd_result =
         if cwd = "" then Ok None
-        else match validate_writable_path ctx.config cwd with
+        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
           | Error e -> Error e
       in
@@ -478,7 +543,7 @@ let handle_code_git ctx args =
       match validate_clone_url ~base_path:ctx.config.Room.base_path url with
       | Error msg -> (false, msg)
       | Ok () ->
-        match validate_clone_cwd ctx.config cwd with
+        match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
         | Error e -> (false, Types.masc_error_to_string e)
         | Ok abs_cwd ->
           (* Only pass the validated URL — no extra args allowed.
@@ -531,7 +596,7 @@ let handle_code_git ctx args =
       let cwd_result =
         if cwd = "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
           if ok then Ok None else Error (IoError msg)
-        else match validate_writable_path ctx.config cwd with
+        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
           | Error e -> Error e
       in
@@ -566,7 +631,7 @@ let handle_code_git ctx args =
   end
 
 (* Dispatch *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_code_write" -> Some (handle_code_write ctx args)
   | "masc_code_edit" -> Some (handle_code_edit ctx args)
@@ -579,7 +644,8 @@ let dispatch ctx ~name ~args : result option =
 let schemas : Types.tool_schema list = [
   {
     name = "masc_code_write";
-    description = "Create or overwrite a file in a worktree (.worktrees/ only). \
+    description = "Create or overwrite a file in an allowed coding sandbox \
+(.worktrees/ or .masc/playground/). \
 Use to generate new source files, configs, or replace entire file contents. \
 For partial edits (change a function, fix a line), use masc_code_edit instead. \
 Returns bytes_written. Max 1MB. Set up a worktree first with masc_worktree_create.";
@@ -588,7 +654,7 @@ Returns bytes_written. Max 1MB. Set up a worktree first with masc_worktree_creat
       ("properties", `Assoc [
         ("path", `Assoc [
           ("type", `String "string");
-          ("description", `String "File path to write (must be within .worktrees/)");
+          ("description", `String "File path to write (must be within .worktrees/ or .masc/playground/)");
         ]);
         ("content", `Assoc [
           ("type", `String "string");
@@ -606,7 +672,8 @@ Returns bytes_written. Max 1MB. Set up a worktree first with masc_worktree_creat
 
   {
     name = "masc_code_edit";
-    description = "Replace text in a file in a worktree (.worktrees/ only). \
+    description = "Replace text in a file in an allowed coding sandbox \
+(.worktrees/ or .masc/playground/). \
 Use for surgical edits: fix a bug, update a function, change a config value. \
 old_string must match exactly once (unless replace_all=true). Returns replacement_count. \
 For full file replacement, use masc_code_write. Read the file first with masc_code_read \
@@ -616,7 +683,7 @@ to get the exact text to replace.";
       ("properties", `Assoc [
         ("path", `Assoc [
           ("type", `String "string");
-          ("description", `String "File path to edit (must be within .worktrees/)");
+          ("description", `String "File path to edit (must be within .worktrees/ or .masc/playground/)");
         ]);
         ("old_string", `Assoc [
           ("type", `String "string");
@@ -638,14 +705,15 @@ to get the exact text to replace.";
 
   {
     name = "masc_code_delete";
-    description = "Delete a file in a worktree (.worktrees/ only). Cannot delete directories. \
+    description = "Delete a file in an allowed coding sandbox \
+(.worktrees/ or .masc/playground/). Cannot delete directories. \
 Use when removing generated, obsolete, or conflicting files during code work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("path", `Assoc [
           ("type", `String "string");
-          ("description", `String "File path to delete (must be within .worktrees/)");
+          ("description", `String "File path to delete (must be within .worktrees/ or .masc/playground/)");
         ]);
       ]);
       ("required", `List [`String "path"]);
@@ -654,7 +722,8 @@ Use when removing generated, obsolete, or conflicting files during code work.";
 
   {
     name = "masc_code_shell";
-    description = "Run an allowlisted command in a worktree (.worktrees/ only). \
+    description = "Run an allowlisted command in an allowed coding sandbox \
+(.worktrees/ or .masc/playground/). \
 Allowed: dune, make, npm, npx, node, git, ls, cat, head, tail, wc, rg, find, \
 diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and testing code \
 in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
@@ -668,7 +737,7 @@ Returns exit_code and stdout (truncated at 10KB).";
         ]);
         ("cwd", `Assoc [
           ("type", `String "string");
-          ("description", `String "Working directory (must be within .worktrees/)");
+          ("description", `String "Working directory (must be within .worktrees/ or .masc/playground/)");
         ]);
         ("timeout", `Assoc [
           ("type", `String "integer");
@@ -682,7 +751,8 @@ Returns exit_code and stdout (truncated at 10KB).";
 
   {
     name = "masc_code_git";
-    description = "Run git commands in a worktree (.worktrees/ only). Structured alternative \
+    description = "Run git commands in an allowed coding sandbox \
+(.worktrees/ or .masc/playground/). Structured alternative \
 to masc_code_shell for git operations. Supports: add, commit, push, diff, status, \
 log, branch, checkout, stash, fetch, clone. Force push and push to main/master are blocked. \
 Clone is restricted to allowed GitHub orgs (configured in config/tool_policy.toml). \
@@ -702,7 +772,7 @@ Returns git command output.";
         ]);
         ("cwd", `Assoc [
           ("type", `String "string");
-          ("description", `String "Worktree directory (must be within .worktrees/)");
+          ("description", `String "Working directory (must be within .worktrees/ or .masc/playground/)");
         ]);
       ]);
       ("required", `List [`String "action"; `String "cwd"]);

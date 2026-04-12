@@ -81,6 +81,97 @@ let test_dispatch_unknown_tool () =
   | Some _ -> fail "expected None for unknown tool"
 
 (* ============================================================
+   Iter-7 (#6527) — agent_name spoof rejection
+   ============================================================
+   handle_worktree_create used to trust the `agent_name` MCP arg
+   verbatim, so agent-A could call
+       masc_worktree_create agent_name=agent-B task_id=foo
+   and land a worktree inside agent-B's playground. PR #6617 fixed
+   the dispatcher to reject any arg value that does not equal
+   ctx.agent_name. These cases lock the three-branch decision down
+   so a future refactor cannot silently re-introduce the leak. *)
+
+let contains needle haystack =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let test_dispatch_worktree_create_spoofed_agent_blocked () =
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("agent_name", `String "other-agent");
+    ("task_id", `String "task-spoof");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (true, _) -> fail "spoofed agent_name should have been rejected"
+  | Some (false, msg) ->
+    check bool "error mentions agent_name mismatch" true
+      (contains "agent_name mismatch" msg);
+    check bool "error mentions the caller ctx agent" true
+      (contains "test-agent" msg);
+    check bool "error mentions the spoofed arg value" true
+      (contains "other-agent" msg);
+    check bool "error explains cross-agent is blocked" true
+      (contains "Cross-agent" msg)
+
+let test_dispatch_worktree_create_matching_agent_passes_check () =
+  (* When the arg matches ctx.agent_name, the spoof gate must not
+     fire. The downstream Room.worktree_create_r call may still fail
+     because the fixture base_path is not a real git repository, so
+     we only assert that any error returned is NOT the spoof error. *)
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("agent_name", `String "test-agent");
+    ("task_id", `String "task-match");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (_ok, msg) ->
+    check bool "matching agent_name does not trip spoof gate" false
+      (contains "agent_name mismatch" msg)
+
+let test_dispatch_worktree_create_empty_agent_falls_back () =
+  (* The 9B fallback: empty/missing agent_name arg uses ctx.agent_name
+     instead of rejecting. Same assertion shape as the matching case —
+     we only prove that the spoof branch is not taken. *)
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("task_id", `String "task-empty-fallback");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (_ok, msg) ->
+    check bool "empty agent_name arg does not trip spoof gate" false
+      (contains "agent_name mismatch" msg)
+
+let test_dispatch_worktree_create_whitespace_agent_trimmed () =
+  (* Trailing/leading whitespace must be trimmed before the spoof
+     check so a 9B model that sends " " by mistake still gets the
+     empty-fallback path, not a mismatch rejection. *)
+  let ctx = make_ctx () in
+  let args = `Assoc [
+    ("agent_name", `String "   ");
+    ("task_id", `String "task-ws");
+    ("base_branch", `String "main");
+  ] in
+  match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
+  | None -> fail "dispatch returned None for masc_worktree_create"
+  | Some (_ok, msg) ->
+    check bool "whitespace agent_name trimmed to fallback" false
+      (contains "agent_name mismatch" msg)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -100,5 +191,15 @@ let () =
       test_case "worktree_remove" `Quick test_dispatch_worktree_remove;
       test_case "worktree_list" `Quick test_dispatch_worktree_list;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
+    ];
+    "agent_name_spoof", [
+      test_case "spoofed agent_name blocked" `Quick
+        test_dispatch_worktree_create_spoofed_agent_blocked;
+      test_case "matching agent_name passes spoof gate" `Quick
+        test_dispatch_worktree_create_matching_agent_passes_check;
+      test_case "empty agent_name falls back to ctx" `Quick
+        test_dispatch_worktree_create_empty_agent_falls_back;
+      test_case "whitespace agent_name trimmed" `Quick
+        test_dispatch_worktree_create_whitespace_agent_trimmed;
     ];
   ]

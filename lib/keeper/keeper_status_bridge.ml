@@ -40,7 +40,6 @@ let coordination_surface_json (meta : keeper_meta) =
   `Assoc
     [
       ("room_scope", `String meta.room_scope);
-      ("scope_kind", `String meta.scope_kind);
       ("mention_targets", string_list_to_json meta.mention_targets);
       ("joined_room_ids", string_list_to_json meta.joined_room_ids);
     ]
@@ -91,10 +90,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | Some value ->
             let authored = String.trim value in
             authored <> "" && authored <> meta.room_scope
-        | None -> false)
-  |> add_if "coordination.scope_kind"
-       (match defaults.scope_kind with
-        | Some value -> canonical_scope_kind value <> meta.scope_kind
         | None -> false)
   |> add_if "coordination.mention_targets"
        (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)
@@ -155,6 +150,30 @@ let runtime_blocker_surface_of_registry_entry
       Some (blocker_class, summary, true)
   | _ -> None
 
+let runtime_blocker_surface_of_reason (reason : string) =
+  let trimmed = String.trim reason in
+  if trimmed = "" then
+    None
+  else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
+  then
+    Some ("autonomous_slot_wait_timeout", trimmed, false)
+  else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
+  then
+    Some ("admission_queue_wait_timeout", trimmed, false)
+  else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+          && String_util.contains_substring_ci trimmed "semaphore_wait_ms="
+  then
+    Some ("turn_timeout_after_queue_wait", trimmed, false)
+  else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+  then
+    Some ("turn_timeout", trimmed, false)
+  else if String_util.contains_substring_ci trimmed "completion contract"
+          || String_util.contains_substring_ci trimmed "completion_contract"
+  then
+    Some ("completion_contract_violation", trimmed, false)
+  else
+    None
+
 let runtime_blocker_fields_json
     (config : Room_utils.config)
     (meta : keeper_meta) =
@@ -176,18 +195,33 @@ let runtime_blocker_fields_json
          runtime_blocker_surface_of_registry_entry
            (runtime_registry_entry config meta.name)
        with
-  | Some (blocker_class, summary, manual_reconcile) ->
-      [
-        ("runtime_blocker_class", `String blocker_class);
-        ("runtime_blocker_summary", `String summary);
-        ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
-      ]
-  | None ->
-      [
-        ("runtime_blocker_class", `Null);
-        ("runtime_blocker_summary", `Null);
-        ("runtime_blocker_manual_reconcile", `Null);
-      ])
+       | Some (blocker_class, summary, manual_reconcile) ->
+           [
+             ("runtime_blocker_class", `String blocker_class);
+             ("runtime_blocker_summary", `String summary);
+             ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
+           ]
+       | None ->
+           let derived =
+             match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
+             | Some blocker -> Some blocker
+             | None ->
+                 runtime_blocker_surface_of_reason
+                   meta.runtime.proactive_rt.last_reason
+           in
+           match derived with
+           | Some (blocker_class, summary, manual_reconcile) ->
+               [
+                 ("runtime_blocker_class", `String blocker_class);
+                 ("runtime_blocker_summary", `String summary);
+                 ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
+               ]
+           | None ->
+               [
+                 ("runtime_blocker_class", `Null);
+                 ("runtime_blocker_summary", `Null);
+                 ("runtime_blocker_manual_reconcile", `Null);
+               ])
 
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in

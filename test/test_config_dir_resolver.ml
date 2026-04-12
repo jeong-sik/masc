@@ -35,6 +35,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "cascade.json") "{}";
+  write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
 
 let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
@@ -200,6 +201,7 @@ let test_personas_dirs_ignores_base_path_fallback () =
   mkdir_p (Filename.concat config_root "keepers");
   mkdir_p (Filename.concat config_root "personas");
   write_file (Filename.concat config_root "cascade.json") "{}";
+  write_file (Filename.concat config_root "tool_policy.toml") "# test marker\n";
   let base = Filename.dirname config_root in
   let base_personas = Filename.concat (Filename.concat base ".masc") "personas" in
   mkdir_p base_personas;

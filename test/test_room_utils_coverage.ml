@@ -1,7 +1,7 @@
 (** Room_utils Module Coverage Tests
 
     Tests for Room utility functions:
-    - storage_backend type: Memory, FileSystem, PostgresNative
+    - storage_backend type: Memory, FileSystem
     - config record type
     - parse_gitdir_to_main_root: gitdir line parsing for worktrees
     - env_opt: environment variable helper
@@ -93,7 +93,7 @@ let rec rm_rf path =
 
 (* capture_stderr removed — legacy warning tests removed in room flat-path cleanup *)
 
-let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
+let test_resolve_masc_base_path_explicit_env_wins_over_git_root_resolution () =
   let scratch = Filename.temp_dir "room-utils-worktree" "" in
   let repo_root = Filename.concat scratch "repo" in
   let repo_git = Filename.concat repo_root ".git" in
@@ -111,10 +111,10 @@ let test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored () =
     [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
-      check string "ignored env still resolves git root" repo_root
+      check string "explicit env wins over git root" "/Users/dancer/me"
         (Room_utils.resolve_masc_base_path worktree_path))
 
-let test_resolve_masc_base_path_ignores_inherited_env_in_test () =
+let test_resolve_masc_base_path_preserves_explicit_env_in_test () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-requested"
   in
@@ -122,7 +122,7 @@ let test_resolve_masc_base_path_ignores_inherited_env_in_test () =
     [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
-      check string "requested temp path wins in tests" requested
+      check string "explicit env wins in tests" "/Users/dancer/me"
         (Room_utils.resolve_masc_base_path requested))
 
 let test_resolve_masc_base_path_keeps_matching_explicit_env () =
@@ -162,19 +162,19 @@ let test_resolve_masc_base_path_collapses_explicit_env_masc_dir () =
       check string "explicit .masc env collapses to parent" requested
         (Room_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_allows_test_opt_in () =
+let test_resolve_masc_base_path_preserves_explicit_env_without_opt_in () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-opt-in"
   in
   let explicit = "/Users/dancer/me" in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", Some "true") ]
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
-      check string "opt-in preserves inherited env" explicit
+      check string "explicit env preserved without opt-in" explicit
         (Room_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override ()
+let test_resolve_masc_base_path_preserves_explicit_env_with_dual_masc_roots ()
     =
   let scratch = Filename.temp_dir "room-utils-dual-roots" "" in
   let requested = Filename.concat scratch "repo" in
@@ -191,10 +191,10 @@ let test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override ()
           ("MASC_ALLOW_INHERITED_BASE_PATH", None);
           ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
         (fun () ->
-          check string "dual roots prefer requested path" requested
+          check string "dual roots still preserve explicit path" explicit
             (Room_utils.resolve_masc_base_path requested)))
 
-let test_resolve_masc_base_path_allows_dual_root_opt_in () =
+let test_resolve_masc_base_path_dual_root_opt_in_is_noop () =
   let scratch = Filename.temp_dir "room-utils-dual-opt-in" "" in
   let requested = Filename.concat scratch "repo" in
   let explicit = Filename.concat scratch "parent-root" in
@@ -210,7 +210,7 @@ let test_resolve_masc_base_path_allows_dual_root_opt_in () =
           ("MASC_ALLOW_INHERITED_BASE_PATH", Some "true");
           ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
         (fun () ->
-          check string "opt-in preserves explicit dual-root env" explicit
+          check string "dual-root opt-in no longer changes result" explicit
             (Room_utils.resolve_masc_base_path requested)))
 
 let test_resolve_masc_base_path_preserves_ancestor_explicit_path () =
@@ -242,12 +242,29 @@ let test_default_config_syncs_test_base_path_env () =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-env"
   in
   with_envs
-    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+    [ ("MASC_BASE_PATH", None);
+      ("MASC_TEST_SYNCED_BASE_PATH", None);
       ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
     (fun () ->
       ignore (Room_utils.default_config requested);
       check (option string) "env synced to requested path" (Some requested)
         (Sys.getenv_opt "MASC_BASE_PATH"))
+
+let test_auto_synced_test_base_path_does_not_override_later_requests () =
+  let first =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-first"
+  in
+  let second =
+    Filename.concat (Filename.get_temp_dir_name ()) "room-utils-sync-second"
+  in
+  with_envs
+    [ ("MASC_BASE_PATH", None);
+      ("MASC_TEST_SYNCED_BASE_PATH", None);
+      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+    (fun () ->
+      ignore (Room_utils.default_config first);
+      check string "later requested path wins over auto-synced env" second
+        (Room_utils.resolve_masc_base_path second))
 
 (* ============================================================
    env_opt Tests
@@ -285,10 +302,6 @@ let test_storage_backend_memory_variant () =
 
 let test_storage_backend_filesystem_variant () =
   let _ : string = "FileSystem" in
-  ()
-
-let test_storage_backend_postgres_variant () =
-  let _ : string = "PostgresNative" in
   ()
 
 (* ============================================================
@@ -441,7 +454,7 @@ let test_storage_type_explicit_postgres () =
   with_envs
     (pg_env_bindings ~masc_storage_type:"postgres" ())
     (fun () ->
-      check string "explicit postgres" "postgres"
+      check string "explicit postgres coerces to filesystem" "filesystem"
         (Room_utils.storage_type_from_env ()))
 
 let test_storage_type_legacy_url_does_not_auto_select () =
@@ -461,7 +474,7 @@ let test_storage_type_auto_is_deprecated () =
 
 let test_backend_config_for_requires_explicit_postgres () =
   let url = "postgresql://sb.example/test_backend_config" in
-  (* Legacy URL alone should NOT select postgres *)
+  (* Legacy URL alone should NOT select postgres. *)
   with_envs
     (pg_env_bindings ~sb_pg_url:url ())
     (fun () ->
@@ -470,16 +483,16 @@ let test_backend_config_for_requires_explicit_postgres () =
         (match cfg.backend_type with
          | Backend_types.FileSystem -> true
          | _ -> false));
-  (* Explicit MASC_STORAGE_TYPE=postgres + MASC_POSTGRES_URL should select postgres *)
+  (* Explicit postgres selection is now coerced to filesystem. *)
   with_envs
     (pg_env_bindings ~masc_storage_type:"postgres" ~masc_postgres_url:url ())
     (fun () ->
       let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
-      check bool "explicit postgres selects postgres native" true
+      check bool "explicit postgres still resolves to filesystem" true
         (match cfg.backend_type with
-         | Backend_types.PostgresNative -> true
+         | Backend_types.FileSystem -> true
          | _ -> false);
-      check (option string) "postgres url" (Some url) cfg.postgres_url)
+      check (option string) "postgres url ignored" None cfg.postgres_url)
 
 let test_postgres_url_from_env_ignores_legacy_without_masc_url () =
   let raw_url =
@@ -499,8 +512,8 @@ let test_postgres_url_from_env_uses_masc_postgres_url () =
   with_envs
     (pg_env_bindings ~masc_postgres_url:url ())
     (fun () ->
-      check (option string) "MASC_POSTGRES_URL is primary"
-        (Some url)
+      check (option string) "MASC_POSTGRES_URL ignored"
+        None
         (Room_utils.postgres_url_from_env ()))
 
 (* ============================================================
@@ -656,26 +669,28 @@ let () =
       test_case "empty" `Quick test_parse_gitdir_empty;
       test_case "nested" `Quick test_parse_gitdir_nested_worktree;
       test_case "with spaces" `Quick test_parse_gitdir_with_spaces;
-      test_case "ignored env keeps git-root resolution" `Quick
-        test_resolve_masc_base_path_keeps_git_root_resolution_when_env_ignored;
-      test_case "ignores inherited base env in tests" `Quick
-        test_resolve_masc_base_path_ignores_inherited_env_in_test;
+      test_case "explicit env wins over git-root resolution" `Quick
+        test_resolve_masc_base_path_explicit_env_wins_over_git_root_resolution;
+      test_case "preserves explicit base env in tests" `Quick
+        test_resolve_masc_base_path_preserves_explicit_env_in_test;
       test_case "keeps matching explicit env" `Quick
         test_resolve_masc_base_path_keeps_matching_explicit_env;
       test_case "collapses requested .masc path" `Quick
         test_resolve_masc_base_path_collapses_requested_masc_dir;
       test_case "collapses explicit .masc env" `Quick
         test_resolve_masc_base_path_collapses_explicit_env_masc_dir;
-      test_case "allows explicit opt-in to inherited env" `Quick
-        test_resolve_masc_base_path_allows_test_opt_in;
-      test_case "ignores dual .masc roots by default" `Quick
-        test_resolve_masc_base_path_ignores_dual_masc_roots_outside_test_override;
-      test_case "allows dual-root opt-in" `Quick
-        test_resolve_masc_base_path_allows_dual_root_opt_in;
+      test_case "preserves explicit env without opt-in" `Quick
+        test_resolve_masc_base_path_preserves_explicit_env_without_opt_in;
+      test_case "preserves explicit env with dual .masc roots" `Quick
+        test_resolve_masc_base_path_preserves_explicit_env_with_dual_masc_roots;
+      test_case "dual-root opt-in is noop" `Quick
+        test_resolve_masc_base_path_dual_root_opt_in_is_noop;
       test_case "preserves ancestor explicit path" `Quick
         test_resolve_masc_base_path_preserves_ancestor_explicit_path;
       test_case "default config syncs test base env" `Quick
         test_default_config_syncs_test_base_path_env;
+      test_case "auto-synced test base env does not override later requests" `Quick
+        test_auto_synced_test_base_path_does_not_override_later_requests;
     ];
     "env_opt", [
       test_case "nonexistent" `Quick test_env_opt_nonexistent;
@@ -687,7 +702,6 @@ let () =
     "storage_backend", [
       test_case "memory variant" `Quick test_storage_backend_memory_variant;
       test_case "filesystem variant" `Quick test_storage_backend_filesystem_variant;
-      test_case "postgres variant" `Quick test_storage_backend_postgres_variant;
     ];
     "config", [
       test_case "base_path type" `Quick test_config_base_path_type;

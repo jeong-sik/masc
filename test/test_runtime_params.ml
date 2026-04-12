@@ -214,6 +214,34 @@ let () =
      | Ok () -> Alcotest.fail "should reject empty model name")
   in
 
+  let test_dashboard_params_registered () =
+    Governance_registry.ensure_init ();
+    let entries = Runtime_params.registry () in
+    let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
+    Alcotest.(check bool) "dashboard.agent_quiet_threshold_sec"
+      true (has "dashboard.agent_quiet_threshold_sec");
+    Alcotest.(check bool) "dashboard.agent_stuck_threshold_sec"
+      true (has "dashboard.agent_stuck_threshold_sec")
+  in
+
+  let test_dashboard_surface () =
+    let surfaces = Governance_registry.surfaces in
+    let dashboard_surface =
+      List.find_opt
+        (fun (s : Governance_registry.surface) -> s.id = "dashboard")
+        surfaces
+    in
+    match dashboard_surface with
+    | None -> Alcotest.fail "dashboard surface not found"
+    | Some s ->
+        Alcotest.(check string) "risk" "low" s.risk;
+        Alcotest.(check int) "param count" 7 (List.length s.param_keys);
+        Alcotest.(check bool) "has quiet threshold"
+          true (List.mem "dashboard.agent_quiet_threshold_sec" s.param_keys);
+        Alcotest.(check bool) "has stuck threshold"
+          true (List.mem "dashboard.agent_stuck_threshold_sec" s.param_keys)
+  in
+
   (* ── clear_by_key ────────────────────────────────────────── *)
 
   let test_clear_by_key () =
@@ -419,6 +447,9 @@ let () =
         [
           Alcotest.test_case "registration" `Quick test_governance_registry;
           Alcotest.test_case "validation" `Quick test_governance_registry_validation;
+          Alcotest.test_case "dashboard params registered" `Quick
+            test_dashboard_params_registered;
+          Alcotest.test_case "dashboard surface" `Quick test_dashboard_surface;
         ] );
       ( "keeper_lifecycle",
         [

@@ -74,13 +74,6 @@ let unregister registry ~agent_name =
       agent_name (Hashtbl.length registry.sessions)
   )
 
-(** @deprecated Use [unregister] instead. Direct Hashtbl.remove without
-    mutex creates a race window with concurrent register/heartbeat calls
-    (see TLA+ SessionRegistryGhost spec). *)
-let unregister_sync (registry : registry) ~agent_name =
-  Hashtbl.remove registry.sessions agent_name;
-  Log.Session.info "Session unregistered (sync): %s (total: %d)"
-    agent_name (Hashtbl.length registry.sessions)
 
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
@@ -293,10 +286,22 @@ let wait_for_message registry ~agent_name ~timeout =
   let start_time = Time_compat.now () in
   let check_interval = 2.0 in
 
-  (* Ensure session exists *)
-  (match Hashtbl.find_opt registry.sessions agent_name with
-   | Some _ -> ()
-   | None -> ignore (register registry ~agent_name));
+  (* Ensure session exists — check under lock so the read of
+     [registry.sessions] is atomic with respect to concurrent
+     [register]/[unregister]/[push_message] calls.  [register] itself
+     takes [with_lock] internally, but the existence probe here must
+     also be guarded; without it, a concurrent [unregister] between
+     the probe and the [register] call could cause a redundant
+     re-registration that clobbers a session that was just restored. *)
+  with_lock registry (fun () ->
+    if not (Hashtbl.mem registry.sessions agent_name) then
+      ignore (Hashtbl.replace registry.sessions agent_name {
+        agent_name;
+        connected_at = Time_compat.now ();
+        last_activity = Time_compat.now ();
+        is_listening = false;
+        message_queue = [];
+      }));
 
   update_activity registry ~agent_name ~is_listening:(Some true) ();
 
@@ -325,32 +330,43 @@ let wait_for_message registry ~agent_name ~timeout =
 
 (** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =
-  let now = Time_compat.now () in
-  Hashtbl.fold (fun name session acc ->
-    if now -. session.last_activity > threshold then
-      name :: acc
-    else
-      acc
-  ) registry.sessions []
+  (* [session.last_activity] is mutable and is written by
+     [update_activity] under [registry.lock]; folding the hashtable
+     without the same lock is a contract violation of the type
+     declaration ("accessed exclusively under registry.lock").  Build
+     the result inside the critical section and return it. *)
+  with_lock registry (fun () ->
+    let now = Time_compat.now () in
+    Hashtbl.fold (fun name session acc ->
+      if now -. session.last_activity > threshold then
+        name :: acc
+      else
+        acc
+    ) registry.sessions [])
 
 (** Get all agent statuses *)
 let get_agent_statuses registry =
-  let now = Time_compat.now () in
-  Hashtbl.fold (fun name session acc ->
-    let idle_secs = int_of_float (now -. session.last_activity) in
-    let status_icon =
-      if session.is_listening then "🎧"
-      else if idle_secs > 60 then "💤"
-      else "🔨"
-    in
-    let status = `Assoc [
-      ("name", `String name);
-      ("listening", `Bool session.is_listening);
-      ("idle_seconds", `Int idle_secs);
-      ("status", `String status_icon);
-    ] in
-    status :: acc
-  ) registry.sessions []
+  (* Reads mutable [is_listening] and [last_activity] fields plus the
+     hashtable itself.  Must hold [registry.lock] to match the
+     contract and to avoid observing torn state after a concurrent
+     [update_activity]/[register]/[unregister]. *)
+  with_lock registry (fun () ->
+    let now = Time_compat.now () in
+    Hashtbl.fold (fun name session acc ->
+      let idle_secs = int_of_float (now -. session.last_activity) in
+      let status_icon =
+        if session.is_listening then "🎧"
+        else if idle_secs > 60 then "💤"
+        else "🔨"
+      in
+      let status = `Assoc [
+        ("name", `String name);
+        ("listening", `Bool session.is_listening);
+        ("idle_seconds", `Int idle_secs);
+        ("status", `String status_icon);
+      ] in
+      status :: acc
+    ) registry.sessions [])
 
 (** Format status for display *)
 let status_string registry =
@@ -389,7 +405,11 @@ let status_string registry =
 
 (** Connected agent names *)
 let connected_agents registry =
-  Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions []
+  (* Reading [registry.sessions] without [registry.lock] races with
+     [register]/[unregister] which write under the lock; the type
+     declaration explicitly forbids lock-free access. *)
+  with_lock registry (fun () ->
+    Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions [])
 
 (** Restore sessions from disk (call on server startup) *)
 let restore_from_disk registry ~agents_path =
@@ -433,6 +453,20 @@ module McpSessionStore = struct
   let sessions : (string, mcp_session) Hashtbl.t = Hashtbl.create 64
   let max_age = ref Env_config.Session.max_age_seconds
 
+  (** Mutex protecting all reads and writes to [sessions].
+
+      The background [start_mcp_session_cleanup_loop] fiber runs
+      [cleanup_stale] concurrently with HTTP handler fibers that call
+      [create]/[get]/[remove].  Without the mutex, [Hashtbl.fold] inside
+      [cleanup_stale] can race with [Hashtbl.add] in [create] (rehash
+      under iterator) or with [get]'s mutable field writes on a shared
+      record.  Under single-domain Eio none of the Hashtbl operations
+      yield, so the race is theoretical today; the mutex closes the
+      contract gap documented in issue #6629 and matches the discipline
+      already established by the sibling [registry.lock] in this file. *)
+  let mu = Eio.Mutex.create ()
+  let with_lock f = Eio_guard.with_mutex mu f
+
   (** Generate MCP session ID *)
   let generate_id () : string =
     let bytes = Mirage_crypto_rng.generate 16 in
@@ -444,37 +478,42 @@ module McpSessionStore = struct
 
   (** Create new MCP session *)
   let create ?agent_name () : mcp_session =
-    let now = Time_compat.now () in
-    let session = {
-      id = generate_id ();
-      created_at = now;
-      last_activity = now;
-      agent_name;
-      metadata = [];
-      request_count = 0;
-    } in
-    Hashtbl.add sessions session.id session;
-    session
+    with_lock (fun () ->
+      let now = Time_compat.now () in
+      let session = {
+        id = generate_id ();
+        created_at = now;
+        last_activity = now;
+        agent_name;
+        metadata = [];
+        request_count = 0;
+      } in
+      Hashtbl.add sessions session.id session;
+      session)
 
-  (** Get MCP session by ID *)
+  (** Get MCP session by ID, updating last_activity and request_count. *)
   let get (session_id : string) : mcp_session option =
-    match Hashtbl.find_opt sessions session_id with
-    | None -> None
-    | Some session ->
-      session.last_activity <- Time_compat.now ();
-      session.request_count <- session.request_count + 1;
-      Some session
+    with_lock (fun () ->
+      match Hashtbl.find_opt sessions session_id with
+      | None -> None
+      | Some session ->
+        session.last_activity <- Time_compat.now ();
+        session.request_count <- session.request_count + 1;
+        Some session)
 
   (** Cleanup stale MCP sessions *)
   let cleanup_stale () : int =
-    let now = Time_compat.now () in
-    let stale = Hashtbl.fold (fun id session acc ->
-      if now -. session.last_activity > !max_age then id :: acc else acc
-    ) sessions [] in
-    List.iter (Hashtbl.remove sessions) stale;
-    List.length stale
+    with_lock (fun () ->
+      let now = Time_compat.now () in
+      let stale = Hashtbl.fold (fun id session acc ->
+        if now -. session.last_activity > !max_age then id :: acc else acc
+      ) sessions [] in
+      List.iter (Hashtbl.remove sessions) stale;
+      List.length stale)
 
-  (** Convert MCP session to JSON *)
+  (** Convert MCP session to JSON.
+      Reads immutable fields of the record — no lock needed because
+      the caller owns the value returned by [get]. *)
   let to_json (s : mcp_session) : Yojson.Safe.t =
     `Assoc [
       ("id", `String s.id);
@@ -487,14 +526,16 @@ module McpSessionStore = struct
 
   (** List all MCP sessions *)
   let list_all () : mcp_session list =
-    Hashtbl.fold (fun _ s acc -> s :: acc) sessions []
+    with_lock (fun () ->
+      Hashtbl.fold (fun _ s acc -> s :: acc) sessions [])
 
   (** Remove session *)
   let remove (id : string) : bool =
-    if Hashtbl.mem sessions id then begin
-      Hashtbl.remove sessions id;
-      true
-    end else false
+    with_lock (fun () ->
+      if Hashtbl.mem sessions id then begin
+        Hashtbl.remove sessions id;
+        true
+      end else false)
 end
 
 (** Start a background fiber that periodically cleans up stale MCP sessions.
@@ -503,9 +544,15 @@ let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
-      let removed = McpSessionStore.cleanup_stale () in
-      if removed > 0 then
-        Log.Session.info "Cleaned up %d stale MCP sessions" removed;
+      (try
+        let removed = McpSessionStore.cleanup_stale () in
+        if removed > 0 then
+          Log.Session.info "Cleaned up %d stale MCP sessions" removed
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Session.warn "mcp session cleanup failed: %s"
+           (Printexc.to_string exn));
       loop ()
     in
     loop ()

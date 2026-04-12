@@ -5,8 +5,13 @@ let schemas : tool_schema list = [
     name = "masc_worktree_create";
     description = "Create an isolated Git worktree for a task. \
 Requires task_id (REQUIRED). Example: task_id='fix-login', task_id='feature/auth'. \
-Optional base_branch (default: auto-detect main/develop). \
-Use before starting file edits. After work, create PR then call masc_worktree_remove.";
+The worktree is rooted in your playground clone — typically at \
+.masc/playground/<your-name>/repos/<repo>/.worktrees/<agent>-<task_id>. \
+Repo resolution: pass repo_name to target a specific clone, otherwise \
+the first git clone under your repos/ is used (alphabetical). Clone \
+the target repo first with keeper_shell op=git_clone if your repos/ \
+directory is empty. After work, create a PR then call \
+masc_worktree_remove.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -22,6 +27,17 @@ Use before starting file edits. After work, create PR then call masc_worktree_re
           ("type", `String "string");
           ("description", `String "Base branch (default: auto-detect). Rarely needed.");
           ("default", `String "develop");
+        ]);
+        ("repo_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional. Disambiguates which playground clone to use when you have multiple repos under .masc/playground/<your-name>/repos/. Example: repo_name='masc-mcp'. Allowed characters: [A-Za-z0-9._-]. Must be a single directory name — no slashes, no path traversal. The special values '.' and '..' match the character class above but are rejected at runtime in tool_worktree.handle_worktree_create and Room_worktree.worktree_create_r. Leave empty to auto-pick the first clone alphabetically.");
+          (* Negative lookahead is not supported by JSON Schema Draft 7
+             (used by most MCP clients), so the pattern below only
+             enforces the character class. The ".", ".." special cases
+             are enforced at runtime so the three layers (schema,
+             tool dispatch, Room resolver) agree on the same rule even
+             though the schema cannot express it. *)
+          ("pattern", `String "^[A-Za-z0-9._-]+$");
         ]);
       ]);
       ("required", `List [`String "task_id"]);

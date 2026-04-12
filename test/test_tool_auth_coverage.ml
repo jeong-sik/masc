@@ -28,11 +28,37 @@ let extract_first_backtick_value text =
        | None -> failwith ("unterminated backtick-delimited value in: " ^ text)
        | Some stop -> String.sub text (start + 1) (stop - start - 1))
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_isolated_runtime_env f =
+  with_env "MASC_BASE_PATH" None (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+      with_env "MASC_STORAGE_TYPE" None (fun () ->
+        with_env "MASC_POSTGRES_URL" None (fun () ->
+          with_env "DATABASE_URL" None (fun () ->
+            with_env "SUPABASE_DB_URL" None (fun () ->
+              with_env "SB_PG_URL" None f))))))
+
 (* Test helper — wraps in Eio context so dispatch paths that use
    Eio.Mutex or structured concurrency work correctly. *)
 let test name f =
   try
-    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
+    Eio_main.run @@ (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_isolated_runtime_env f);
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
@@ -141,8 +167,14 @@ let () = test "dispatch_auth_revoke" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "handle_auth_create_token_respects_agent_name" (fun () ->
+(* #6623 iter 8 — cross-agent create_token must be gated on
+   initial_admin. This case pins the admin path: set [ctx.agent_name]
+   as the initial admin of the test config, then create a token for
+   a different target. Expected: success (admin can provision tokens
+   for any agent). *)
+let () = test "handle_auth_create_token_admin_can_target_others" (fun () ->
   let ctx = make_test_ctx () in
+  Auth.write_initial_admin ctx.config.base_path ctx.agent_name;
   let target = "dashboard-eager-manta" in
   let args =
     `Assoc [
@@ -157,6 +189,66 @@ let () = test "handle_auth_create_token_respects_agent_name" (fun () ->
   match Auth.verify_token ctx.config.base_path ~agent_name:target ~token:raw_token with
   | Ok _ -> ()
   | Error e -> failwith (Types.masc_error_to_string e)
+)
+
+(* #6623 iter 8 — negative case: non-admin caller cannot forge a
+   token for another agent. Rejection must be surfaced as
+   (false, msg) with a Cross-agent-blocked message. *)
+let () = test "handle_auth_create_token_non_admin_cross_agent_blocked" (fun () ->
+  let ctx = make_test_ctx () in
+  (* Do NOT write an initial_admin entry — ctx.agent_name is a plain
+     caller, not the bootstrap admin. *)
+  let target = "other-agent" in
+  let args =
+    `Assoc [
+      ("agent_name", `String target);
+      ("role", `String "worker");
+    ]
+  in
+  let (success, result) = Tool_auth.handle_auth_create_token ctx args in
+  assert (not success);
+  assert (contains_substring result "Cross-agent");
+  assert (contains_substring result "masc_auth_create_token");
+  assert (contains_substring result target);
+  (* The leaked credential should not have been persisted. *)
+  match Auth.load_credential ctx.config.base_path target with
+  | Some _ -> failwith "credential was persisted despite rejection"
+  | None -> ()
+)
+
+(* #6623 iter 8 — self path: caller == target must still work for
+   any agent, admin or not. This is the non-privileged happy path. *)
+let () = test "handle_auth_create_token_self_always_allowed" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc [
+      ("agent_name", `String ctx.agent_name);
+      ("role", `String "worker");
+    ]
+  in
+  let (success, result) = Tool_auth.handle_auth_create_token ctx args in
+  assert success;
+  assert (contains_substring result ctx.agent_name)
+)
+
+(* #6623 iter 8 — same rejection gate for revoke. *)
+let () = test "handle_auth_revoke_non_admin_cross_agent_blocked" (fun () ->
+  let ctx = make_test_ctx () in
+  (* Seed a credential for a foreign agent. The revoke attempt must
+     be rejected before reaching delete_credential. *)
+  let target = "victim-agent" in
+  (match Auth.create_token ctx.config.base_path ~agent_name:target ~role:Types.Worker with
+   | Ok _ -> ()
+   | Error e -> failwith (Types.masc_error_to_string e));
+  let args = `Assoc [ ("agent_name", `String target) ] in
+  let (success, result) = Tool_auth.handle_auth_revoke ctx args in
+  assert (not success);
+  assert (contains_substring result "Cross-agent");
+  assert (contains_substring result "masc_auth_revoke");
+  (* Credential must still exist. *)
+  match Auth.load_credential ctx.config.base_path target with
+  | Some _ -> ()
+  | None -> failwith "credential was deleted despite rejection"
 )
 
 let () = test "handle_auth_refresh_respects_agent_name" (fun () ->
@@ -194,8 +286,11 @@ let () = test "handle_auth_refresh_rejects_other_agent" (fun () ->
   assert (contains_substring result "authenticated agent")
 )
 
-let () = test "handle_auth_revoke_respects_agent_name" (fun () ->
+(* #6623 iter 8 — admin can revoke cross-agent credentials for
+   legitimate rotation. Mirrors the create_token admin path. *)
+let () = test "handle_auth_revoke_admin_can_target_others" (fun () ->
   let ctx = make_test_ctx () in
+  Auth.write_initial_admin ctx.config.base_path ctx.agent_name;
   let target = "dashboard-eager-manta" in
   ignore (Auth.create_token ctx.config.base_path ~agent_name:target ~role:Types.Worker);
   let args = `Assoc [("agent_name", `String target)] in

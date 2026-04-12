@@ -45,6 +45,14 @@ type completion_contract =
   | Allow_text_or_tool
   | Require_tool_use
 
+let completion_contract_of_tool_choice
+      (tool_choice : Agent_sdk.Types.tool_choice option)
+  : completion_contract
+  =
+  match tool_choice with
+  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> Require_tool_use
+  | _ -> Allow_text_or_tool
+
 let validate_completion_contract
       ~(contract : completion_contract)
       ~(tool_names : string list)

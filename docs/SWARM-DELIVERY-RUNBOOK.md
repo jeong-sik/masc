@@ -102,13 +102,11 @@ stale pending reviewer PID가 있으면 정리한 뒤 다시 시작한다.
 
 ## Autoresearch Wrapper
 
-Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, supervised swarm path로 진입할 때는 `masc_autoresearch_swarm_start`를 우선 사용한다.
+Karpathy-style raw `masc_autoresearch_*` loop는 standalone loop로만 유지한다. 예전 `masc_autoresearch_swarm_start` front door는 제거되었고, 필요하면 raw loop와 supervised delivery lane을 별도로 조합한다.
 
 - raw loop 생성
-- best-effort `research_pipeline/normalize` managed operation 생성
-- linked execution session 시작
-- `research-driver` / `research-auditor` planned worker seed 기록
-- 이후 operator/digest/session status에서 `linked_autoresearch` block으로 상태 확인
+- 필요 시 별도 managed operation 또는 supervisor flow를 명시적으로 시작
+- 상태 확인은 raw loop status와 command-plane read surface를 분리해서 본다
 
 기본 호출 shape:
 

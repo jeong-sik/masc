@@ -36,7 +36,6 @@ import {
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
-  SSE_OPERATOR_DEBOUNCE_MS,
   SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
 
@@ -93,34 +92,28 @@ interface SimpleRoute {
   debounceMs?: number
 }
 
+// Route table maps SSE event type → refresh target. Only entries whose
+// corresponding server emitter exists in lib/ are kept; dead keys were
+// removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle (server may emit with or without "masc/" prefix)
-  agent_joined:          { target: 'execution' },
-  'masc/agent_joined':   { target: 'execution' },
-  agent_left:            { target: 'execution' },
-  'masc/agent_left':     { target: 'execution' },
-  // Broadcasts
-  broadcast:             { target: 'execution' },
-  'masc/broadcast':      { target: 'execution' },
+  // Agent lifecycle — emitted by lib/tool_inline_dispatch_room.ml
+  'masc/agent_joined':  { target: 'execution' },
+  'masc/agent_left':    { target: 'execution' },
+  // Broadcasts — emitted by lib/tool_inline_dispatch_comm.ml
+  'masc/broadcast':     { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
-  keeper_handoff:        { target: 'execution' },
-  keeper_compaction:     { target: 'execution' },
-  keeper_guardrail:      { target: 'execution' },
-  keeper_phase_changed:  { target: 'execution' },
-  // Client input
-  client_input_approved:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
-  client_input_rejected:  { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
-  client_input_updated:   { target: 'operator', debounceMs: SSE_OPERATOR_DEBOUNCE_MS },
-  // Board
-  board_post:           { target: 'board' },
+  keeper_handoff:       { target: 'execution' },
+  keeper_compaction:    { target: 'execution' },
+  keeper_phase_changed: { target: 'execution' },
+  // Board content — emitted by lib/tool_inline_dispatch_extra.ml
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
-  'masc/board_comment': { target: 'board' },
-  board_delete:         { target: 'board' },
   'masc/board_delete':  { target: 'board' },
+  // Board vote notifications — emitted by lib/server/server_bootstrap_loops.ml
+  post_voted:           { target: 'board' },
+  comment_voted:        { target: 'board' },
   // Activity graph
-  'activity':                { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
-  'masc/activity':           { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
+  activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
 }
 
 // Prefix patterns for events that use startsWith matching
@@ -142,8 +135,8 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail', 'keeper_turn_complete', 'keeper_phase_changed',
-  'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_guardrail', 'masc/keeper_turn_complete',
+  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_phase_changed',
+  'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_turn_complete',
 ])
 
 const AUTORESEARCH_EVENTS = new Set([
@@ -389,11 +382,9 @@ export function setupSSEReaction(): () => void {
 
 // --- Periodic refresh ---
 
-const PERIODIC_REFRESH_MS =
-  typeof import.meta !== 'undefined'
-    && Boolean((import.meta as unknown as { env?: { DEV?: unknown } }).env?.DEV)
-    ? PERIODIC_REFRESH_DEV_MS
-    : PERIODIC_REFRESH_PROD_MS
+const PERIODIC_REFRESH_MS = import.meta.env.DEV
+  ? PERIODIC_REFRESH_DEV_MS
+  : PERIODIC_REFRESH_PROD_MS
 
 let _periodicId: ReturnType<typeof setInterval> | null = null
 

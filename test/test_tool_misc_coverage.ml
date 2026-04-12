@@ -5,6 +5,9 @@ open Masc_mcp
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path))
 
 let () = Printf.printf "\n=== Tool_misc Coverage Tests ===\n"
 
@@ -24,15 +27,6 @@ let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
-(* Test helper — runs inside Eio context for code paths that use Eio.Mutex *)
-let test name f =
-  try
-    Eio_main.run (fun _env -> f ());
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
-
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -47,6 +41,26 @@ let with_env name value_opt f =
       | Some value -> Unix.putenv name value
       | None -> Unix.putenv name "");
       f ())
+
+let with_isolated_runtime_env f =
+  with_env "MASC_BASE_PATH" None (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+      with_env "MASC_STORAGE_TYPE" None (fun () ->
+        with_env "MASC_POSTGRES_URL" None (fun () ->
+          with_env "DATABASE_URL" None (fun () ->
+            with_env "SUPABASE_DB_URL" None (fun () ->
+              with_env "SB_PG_URL" None f))))))
+
+(* Test helper — runs inside Eio context for code paths that use Eio.Mutex *)
+let test name f =
+  try
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_isolated_runtime_env f);
+    Printf.printf "✓ %s passed\n" name
+  with e ->
+    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
+    exit 1
 
 (* Create test context *)
 let test_counter = ref 0

@@ -378,7 +378,12 @@ let test_handle_mcp_session_tool_no_action () =
    status_string Tests (requires Eio runtime - basic only)
    ============================================================ *)
 
+(* [status_string] / [connected_agents] now take [registry.lock]
+   (Eio.Mutex) to match the contract on [registry]: all fields
+   accessed exclusively under the lock.  Eio.Mutex requires an active
+   Eio context, so both tests run inside [Eio_main.run]. *)
 let test_status_string_empty () =
+  Eio_main.run @@ fun _env ->
   let registry = Session.create () in
   let status = Session.status_string registry in
   check bool "says no agents" true (
@@ -392,6 +397,7 @@ let test_status_string_empty () =
    ============================================================ *)
 
 let test_connected_agents_empty () =
+  Eio_main.run @@ fun _env ->
   let registry = Session.create () in
   let agents = Session.connected_agents registry in
   check (list string) "empty" [] agents

@@ -77,6 +77,8 @@ specs/**/TraceData.tla
 # Infrastructure secrets (launchd plist contains env vars with tokens)
 infrastructure/launchd/*.plist
 infrastructure/**/*.env
+certs/*.key
+certs/*.pem
 
 # Serena MCP local state
 .serena/
@@ -103,3 +105,5 @@ config/personas/uranium666
 /pr_list.txt
 /scripts/changelog_unreleased.txt
 /specs/bug-models/*_TTrace_*.bin
+
+# End of .gitignore

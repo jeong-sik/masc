@@ -513,6 +513,46 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Telemetry Stores')
   }, 60_000)
 
+  it('warns when the OAS relay lags behind fresher agent telemetry', async () => {
+    const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
+    const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue({
+      generated_at: '2026-04-09T08:11:00Z',
+      total_entries: 366,
+      sources: [
+        {
+          source: 'agent_event',
+          entry_count: 220,
+          exists: true,
+          latest_ts_unix: 2_000,
+          latest_age_s: 30,
+        },
+        {
+          source: 'oas_event',
+          entry_count: 146,
+          exists: true,
+          latest_ts_unix: 1_000,
+          latest_age_s: 1_030,
+        },
+      ],
+    } satisfies TelemetrySummaryResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('Partial telemetry')
+    expect(container.textContent).toContain('OAS event relay trails agent events by 16m 40s.')
+    expect(container.textContent).toContain('last 17m 10s ago')
+  }, 60_000)
+
   it('refreshes automatically on a visible page', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
     const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)

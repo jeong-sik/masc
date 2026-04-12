@@ -39,6 +39,8 @@ val all_phases : phase list
     Phase is DERIVED from conditions via [derive_phase].
     Conditions are the primitive; phase is the projection. *)
 type conditions = {
+  launch_pending : bool;
+  (** Fresh registration exists, but the keepalive fiber has not started yet. *)
   fiber_alive : bool;
   (** [done_p] unresolved AND [fiber_stop] not set *)
   heartbeat_healthy : bool;
@@ -88,7 +90,37 @@ type auto_rule_summary = {
 
 (** Typed events that trigger condition re-evaluation.
     These are the ONLY inputs to the deterministic state machine.
-    Non-deterministic measurements become typed events at the boundary. *)
+    Non-deterministic measurements become typed events at the boundary.
+
+    {2 Post-turn lifecycle contract (implicit invariant)}
+
+    [Compaction_started] / [Handoff_started] / their matching
+    [_completed] / [_failed] events MUST be dispatched only from
+    {!Keeper_post_turn.apply_post_turn_lifecycle}, which runs
+    synchronously at the tail of a keeper turn (inside
+    [Keeper_unified_turn.run_unified_turn] or the legacy
+    [Keeper_turn] path).
+
+    The keepalive loop ({!Keeper_keepalive.run_heartbeat_loop}) does
+    NOT explicitly gate dispatch on [phase]. It relies on the
+    structural property that [Compaction_started] and [Handoff_started]
+    are always paired with their [_completed] / [_failed] counterparts
+    inside a single [run_unified_turn] call, so the next keepalive
+    iteration can never observe the keeper in [Compacting] or
+    [HandingOff] phase at its dispatch decision point.
+
+    Violating this rule — for example, by emitting [Compaction_started]
+    from a separate async monitor fiber while a turn is still in flight
+    — reopens the {b KeepalivePhaseConsistency} safety bug formalized in
+    [specs/bug-models/KeepalivePhaseConsistency.tla]. That spec's
+    [NoDrainTransition] / [GhostDispatch] actions are the exact
+    counterexamples TLC will find.
+
+    If a future change needs to emit these events from outside
+    [apply_post_turn_lifecycle], add an explicit phase gate to the
+    keepalive dispatch site (roughly: [phase_allows_dispatch] reading
+    [Keeper_registry.get] before [run_unified_turn]) and re-verify
+    the TLA+ spec against the new code path. *)
 type event =
   | Heartbeat_ok
   | Heartbeat_failed of { consecutive : int; max_allowed : int }
@@ -103,11 +135,19 @@ type event =
       auto_rules : auto_rule_summary;
     }
   | Compaction_started
+    (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
+        See the post-turn lifecycle contract above. *)
   | Compaction_completed of { before_tokens : int; after_tokens : int }
+    (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Compaction_failed of { reason : string }
+    (** Must fire in the same turn as the matching [Compaction_started]. *)
   | Handoff_started
+    (** Emit ONLY from {!Keeper_post_turn.apply_post_turn_lifecycle}.
+        See the post-turn lifecycle contract above. *)
   | Handoff_completed of { new_trace_id : string; generation : int }
+    (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Handoff_failed of { reason : string }
+    (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Operator_pause
   | Operator_resume
   | Operator_stop of { remove_meta : bool }
@@ -158,17 +198,17 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins):
     1. Dead (terminal)
-    2. Restarting (fiber dead + budget + backoff elapsed)
-    3. Crashed (fiber dead + budget remaining)
-    4. Stopped (stop_requested + drain_complete)
-    5. Draining (stop_requested)
-    6. Guardrail -> Failing
-    7. Paused (operator_paused)
-    8. HandingOff (handoff_active)
-    9. Compacting (compaction_active)
-    10. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
-    11. Running (fiber_alive)
-    12. Offline (default) *)
+    2. Stopped (stop_requested + drain_complete)
+    3. Offline (launch_pending before first fiber start)
+    4. Restarting (fiber dead + budget + backoff elapsed)
+    5. Crashed (fiber dead + budget remaining)
+    6. Draining (stop_requested)
+    7. Guardrail -> Failing
+    8. Paused (operator_paused)
+    9. HandingOff (handoff_active)
+    10. Compacting (compaction_active)
+    11. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
+    12. Running (fiber_alive) *)
 val derive_phase : conditions -> phase
 
 (** Apply an event to the current state: update conditions, derive new phase.

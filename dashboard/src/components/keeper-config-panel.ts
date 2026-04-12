@@ -10,6 +10,7 @@ import type { KeeperConfig } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
+import { ErrorState, LoadingState } from './common/feedback-state'
 import { createAsyncResource, loaded } from '../lib/async-state'
 
 // ── State ────────────────────────────────────────────────
@@ -345,11 +346,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   if (state.status === 'loading') {
-    return html`<div class="py-3 text-xs text-[var(--text-muted)]">설정 로딩 중...</div>`
+    return html`<${LoadingState}>설정 불러오는 중...<//>`
   }
 
   if (state.status === 'error') {
-    return html`<div class="py-3 text-xs text-[var(--bad)]">${state.message}</div>`
+    return html`<${ErrorState} message=${state.message} />`
   }
 
   if (state.status !== 'loaded') return null
@@ -496,7 +497,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${Callout}
         title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 모델은 keeper별 설정이 아니라 config/cascade.json 해석 결과로 결정됩니다."
+        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 모델은 keeper별 설정이 아니라 resolved config root의 cascade.json 해석 결과로 결정됩니다."
       />
 
       ${promptSection}
@@ -637,7 +638,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="네임스페이스 조율" />
       <${ConfigRow} label="프로젝트 범위" value=${c.coordination.room_scope || '--'} />
-      <${ConfigRow} label="범위 유형" value=${c.coordination.scope_kind || '--'} />
       ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
         <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>

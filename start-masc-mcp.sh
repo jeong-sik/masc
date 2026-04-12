@@ -15,10 +15,7 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Storage backend: filesystem by default (single-machine, no PG dependency).
-# PG auto-detect caused 4-min connection timeouts that starved Eio fibers
-# and blocked keeper autoboot (2026-03-28 incident). Board LISTEN/NOTIFY
-# uses its own dedicated PG connection and is unaffected by this setting.
+# Storage backend: filesystem by default.
 export MASC_STORAGE_TYPE="${MASC_STORAGE_TYPE:-filesystem}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,6 +83,11 @@ is_absolute_path() {
 # so both see the same effective base path.
 resolve_base_path() {
     local path="$1"
+    local abs_path=""
+
+    if [ -d "$path" ]; then
+        abs_path="$(cd "$path" && pwd -P)"
+    fi
 
     if [ -f "$path/.git" ]; then
         local gitdir
@@ -105,7 +107,7 @@ resolve_base_path() {
     fi
 
     if [ -d "$path/.git" ]; then
-        echo "$path"
+        echo "${abs_path:-$path}"
         return
     fi
 
@@ -113,12 +115,12 @@ resolve_base_path() {
         local git_root
         git_root="$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)"
         if [ -n "$git_root" ]; then
-            echo "$git_root"
+            echo "$(cd "$git_root" && pwd -P)"
             return
         fi
     fi
 
-    echo "$path"
+    echo "${abs_path:-$path}"
 }
 
 build_dashboard_spa() {
@@ -283,15 +285,44 @@ restore_env_override() {
 
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
+repo_local_config_dir_match() {
+    local candidate="${1:-}"
+    candidate="${candidate%/}"
+    [ -n "$candidate" ] || return 1
+    [ "$candidate" = "$REPO_ENV_ROOT/config" ] || [ "$candidate" = "$SCRIPT_DIR/config" ]
+}
+
+repo_local_personas_dir_match() {
+    local candidate="${1:-}"
+    candidate="${candidate%/}"
+    [ -n "$candidate" ] || return 1
+    [ "$candidate" = "$REPO_ENV_ROOT/config/personas" ] || [ "$candidate" = "$SCRIPT_DIR/config/personas" ]
+}
+
+clear_repo_local_config_for_explicit_base_path() {
+    local resolved_base_path="$1"
+
+    if [ "$BASE_PATH_EXPLICIT" != "1" ]; then
+        return 0
+    fi
+    if [ "$resolved_base_path" = "$REPO_ENV_ROOT" ] || [ "$resolved_base_path" = "$SCRIPT_DIR" ]; then
+        return 0
+    fi
+
+    if repo_local_config_dir_match "${MASC_CONFIG_DIR:-}"; then
+        echo "[startup] Ignoring repo-local MASC_CONFIG_DIR=${MASC_CONFIG_DIR%/} because --base-path was supplied; defaulting to $resolved_base_path/.masc/config" >&2
+        unset MASC_CONFIG_DIR
+    fi
+
+    if repo_local_personas_dir_match "${MASC_PERSONAS_DIR:-}"; then
+        echo "[startup] Ignoring repo-local MASC_PERSONAS_DIR=${MASC_PERSONAS_DIR%/} because --base-path was supplied; personas will resolve from the active config root" >&2
+        unset MASC_PERSONAS_DIR
+    fi
+}
+
 # Caller-provided env must win over repo-local .env/.env.local files.
-# This keeps one-off overrides like MASC_STORAGE_TYPE=postgres effective
-# instead of being silently reset by checked-in defaults.
 for env_name in \
     MASC_STORAGE_TYPE \
-    MASC_POSTGRES_URL \
-    DATABASE_URL \
-    SUPABASE_DB_URL \
-    SB_PG_URL \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
     MASC_MCP_PORT \
     MASC_HOST \
@@ -320,10 +351,6 @@ fi
 
 for env_name in \
     MASC_STORAGE_TYPE \
-    MASC_POSTGRES_URL \
-    DATABASE_URL \
-    SUPABASE_DB_URL \
-    SB_PG_URL \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
     MASC_MCP_PORT \
     MASC_HOST \
@@ -335,6 +362,17 @@ for env_name in \
 do
     restore_env_override "$env_name"
 done
+
+case "$(printf '%s' "${MASC_STORAGE_TYPE:-filesystem}" | tr '[:upper:]' '[:lower:]')" in
+    postgres|postgresql|postgres-native)
+        export MASC_STORAGE_TYPE="filesystem"
+        ;;
+esac
+
+unset MASC_POSTGRES_URL
+unset DATABASE_URL
+unset SUPABASE_DB_URL
+unset SB_PG_URL
 
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0
@@ -450,29 +488,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Guard against inherited MASC_BASE_PATH ambiguity. When shell startup files
-# or env files inject a parent project root and both that root and this
-# checkout have their own .masc directories, the server can silently
-# read/write the wrong state tree. Explicit --base-path still wins; an
-# inherited/env-file root needs an opt-in to survive this ambiguity.
-if [ "$BASE_PATH_EXPLICIT" != "1" ] && \
-   [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && \
-   [ -n "$BASE_PATH" ] && \
-   ! is_absolute_path "$BASE_PATH" && \
-   ! is_truthy "${MASC_ALLOW_INHERITED_BASE_PATH:-0}"; then
-    # Use the same git-root-aware resolution that will be used for the
-    # final MASC_BASE_PATH export so this guard sees the effective path.
-    RESOLVED_BASE="$(resolve_base_path "$BASE_PATH")"
-    # Canonicalize to an absolute path so that relative forms like '.' or
-    # './' don't cause a false mismatch against the already-absolute SCRIPT_DIR.
-    RESOLVED_BASE="$(cd "$RESOLVED_BASE" 2>/dev/null && pwd || echo "$RESOLVED_BASE")"
-    if [ "$RESOLVED_BASE" != "$SCRIPT_DIR" ] && \
-       [ -d "$SCRIPT_DIR/.masc" ] && [ -d "$RESOLVED_BASE/.masc" ]; then
-        echo "WARN: Ignoring inherited MASC_BASE_PATH=$BASE_PATH because both $SCRIPT_DIR and $RESOLVED_BASE have .masc. Use --base-path or MASC_ALLOW_INHERITED_BASE_PATH=1 to keep the inherited root." >&2
-        BASE_PATH="$SCRIPT_DIR"
-    fi
-fi
-
 BASE_PATH_RESOLUTION_SOURCE="implicit_repo_root"
 if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
@@ -483,14 +498,18 @@ fi
 if [ "$PORT_EXPLICIT" != "1" ]; then
     PORT="$(default_port_for_path "$SCRIPT_DIR")"
     if [ "$PORT" != "8935" ]; then
-        if [ -z "$MASC_GRPC_PORT" ]; then
-            export MASC_GRPC_PORT="$((PORT + 1))"
-        fi
-        if [ -z "$MASC_WS_PORT" ]; then
-            export MASC_WS_PORT="$((PORT + 2))"
-        fi
-        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT (gRPC=$MASC_GRPC_PORT, WS=$MASC_WS_PORT) for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
+        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
     fi
+fi
+
+if [ -z "${MASC_GRPC_PORT:-}" ] && [ "$PORT" != "8935" ]; then
+    export MASC_GRPC_PORT="$((PORT + 1))"
+fi
+if [ -z "${MASC_WS_PORT:-}" ] && [ "$PORT" != "8935" ]; then
+    export MASC_WS_PORT="$((PORT + 2))"
+fi
+if [ -n "$WORKTREE_PORT_HINT" ] && [ "$PORT" != "8935" ]; then
+    WORKTREE_PORT_HINT="$WORKTREE_PORT_HINT (gRPC=$MASC_GRPC_PORT, WS=$MASC_WS_PORT)"
 fi
 
 if [ "$PRINT_PORT_ONLY" = "1" ]; then
@@ -537,7 +556,7 @@ RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
 INSTALLED_EXE="$(command -v masc-mcp || true)"
-# Eio-based server (main_eio.exe) - for PostgresNative backend
+# Eio-based server (main_eio.exe)
 WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_stdio_eio.exe"
@@ -632,6 +651,7 @@ if [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
 fi
 
 RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
+clear_repo_local_config_for_explicit_base_path "$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH_RESOLUTION_SOURCE="$BASE_PATH_RESOLUTION_SOURCE"
 bootstrap_base_path_config "$RESOLVED_BASE_PATH"
@@ -721,6 +741,14 @@ if [ "$HTTP_MODE" = "true" ]; then
     fi
 fi
 
+launch_from_base_path() {
+    if ! cd "$RESOLVED_BASE_PATH"; then
+        echo "Error: failed to chdir to base path: $RESOLVED_BASE_PATH" >&2
+        exit 1
+    fi
+    exec "$@"
+}
+
 # Eio server has different CLI format and is HTTP-only
 if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
@@ -738,7 +766,7 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
+    launch_from_base_path "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2
     echo "  Host: $HOST" >&2
@@ -755,7 +783,7 @@ elif [ "$HTTP_MODE" = "true" ]; then
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
     echo "  Legacy Accept fallback: MASC_ALLOW_LEGACY_ACCEPT=1" >&2
-    exec "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
+    launch_from_base_path "$SELECTED_EXE" --http --port "$PORT" --path "$RESOLVED_BASE_PATH"
 else
     echo "Starting MASC MCP server (stdio mode, $RUNTIME_NAME)..." >&2
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
@@ -764,8 +792,8 @@ else
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ "$EIO_MODE" = "true" ]; then
-        exec "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
+        launch_from_base_path "$SELECTED_EXE" --base-path "$RESOLVED_BASE_PATH"
     else
-        exec "$SELECTED_EXE" --stdio --path "$RESOLVED_BASE_PATH"
+        launch_from_base_path "$SELECTED_EXE" --stdio --path "$RESOLVED_BASE_PATH"
     fi
 fi

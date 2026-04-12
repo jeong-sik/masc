@@ -39,6 +39,7 @@
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
         test_channel_gate_connector_routes
+        test_channel_gate_imessage_state
         test_dashboard
         test_dashboard_perf
         test_dashboard_tool_host_events
@@ -57,6 +58,7 @@
         test_keeper_registry
         test_keeper_supervisor
         test_keeper_allowed_paths
+        test_playground_paths
         test_keeper_llama_only
         test_keeper_meta_cwd_resilience
         test_metrics_rotation
@@ -113,6 +115,7 @@
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
           test_channel_gate_connector_routes
+          test_channel_gate_imessage_state
           test_dashboard
           test_dashboard_perf
           test_dashboard_tool_host_events
@@ -131,6 +134,7 @@
           test_keeper_registry
           test_keeper_supervisor
           test_keeper_allowed_paths
+          test_playground_paths
           test_keeper_llama_only
           test_keeper_meta_cwd_resilience
           test_metrics_rotation
@@ -244,6 +248,7 @@
         test_server_base_path_diagnostics
         test_server_startup_takeover
         test_keeper_meta_listing
+        test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -270,13 +275,11 @@
         test_resilience
         test_common
         test_room_messages_raw
-        test_room_messages_pg
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
         test_cp_jsonl_tail
         ; test_swarm_persistence removed (team session cleanup)
-        test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -293,7 +296,6 @@
         test_room_eio
         test_http_server_eio
         test_compression
-        test_pubsub_postgres
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
@@ -394,6 +396,7 @@
         test_server_base_path_diagnostics
         test_server_startup_takeover
         test_keeper_meta_listing
+        test_keeper_identity_parse
         test_worker_runtime
         test_capability_registry
         test_tool_local_runtime_verify
@@ -420,13 +423,11 @@
         test_resilience
         test_common
         test_room_messages_raw
-        test_room_messages_pg
         test_cp_cleanup
         test_cp_search_fabric
         test_cp_section_cache
         test_cp_jsonl_tail
         ; test_swarm_persistence removed (team session cleanup)
-        test_tool_repo_synthesis
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -443,7 +444,6 @@
         test_room_eio
         test_http_server_eio
         test_compression
-        test_pubsub_postgres
         test_fs_compat
         test_concurrency_stress
         test_eio_mutex_concurrency
@@ -519,12 +519,32 @@
 
 (test
  (name test_keeper_mutex_coverage)
+ (modules test_keeper_mutex_coverage)
  (libraries masc_test_deps))
 
 ; Tool diversity: Shannon entropy + QCheck PBT
 (test
  (name test_tool_diversity)
  (modules test_tool_diversity)
+ (libraries masc_test_deps))
+
+; Static validity check for the committed config/cascade.json.
+; Feeds every profile's model string list through the OAS parser
+; (parse_model_string_exn) so unknown provider names fail at test time
+; rather than when a keeper actually tries to resolve the cascade at
+; runtime. Path is injected via env var, not hardcoded.
+;
+; The test uses parse_model_string_exn and explicitly accepts the
+; "provider unavailable" error path, so the file-level (ZAI_API_KEY "")
+; default does NOT need to be overridden here — a known provider with
+; an unset API key is a soft pass, only unknown providers hard-fail.
+(test
+ (name test_cascade_config_validity)
+ (modules test_cascade_config_validity)
+ (deps %{workspace_root}/config/cascade.json)
+ (action
+  (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
+   (run %{test})))
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -563,6 +583,7 @@
         test_ag_ui_coverage test_tool_verification_coverage
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_code_write_coverage
+        test_tool_repair_loop_containment
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
@@ -598,6 +619,7 @@
         test_ag_ui_coverage test_tool_verification_coverage
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_code_write_coverage
+        test_tool_repair_loop_containment
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
@@ -621,6 +643,23 @@
           test_command_plane_v2_search)
  (libraries masc_test_deps))
 
+; Cp_unit.descendant_ids depth guard regression (#6633)
+(test
+ (name test_cp_unit_descendant_ids)
+ (libraries masc_test_deps))
+
+; Keeper_checkpoint_store.is_not_found_detail classifier
+; regression (observed 334-retry loop on trace-1775487505102-6a347
+; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)
+(test
+ (name test_keeper_checkpoint_classify)
+ (libraries masc_test_deps))
+
+; Keeper_keepalive.should_log_manual_reconcile_skip throttle regression
+; (observed 266-line log flood from 6 stuck keepers on 2026-04-12)
+(test
+ (name test_keeper_keepalive_skip_log_throttle)
+ (libraries masc_test_deps))
 ; Operator Control (7 modules)
 (test
  (name test_operator_control)
@@ -817,20 +856,6 @@
  (name test_keeper_fs)
  (modules test_keeper_fs)
  (libraries masc_mcp alcotest yojson unix eio eio_main))
-
-; ============================================================
-; Special: Board PG (requires caqti-driver-postgresql)
-; ============================================================
-
-(test
- (name test_board_pg)
- (modules test_board_pg)
- (libraries masc_test_deps caqti caqti-eio.unix caqti-driver-postgresql))
-
-(test
- (name test_board_pg_notify)
- (modules test_board_pg_notify)
- (libraries masc_test_deps))
 
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)

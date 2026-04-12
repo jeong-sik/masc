@@ -3,7 +3,7 @@
 // Keeper state (CTX gauge, generation, autonomy) shown inline on the card.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useMemo, useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
 import type {
   DashboardMissionAgentBrief,
@@ -317,8 +317,28 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const keeperList = keepers.value
   const briefs = missionAgentBriefs.value
   const keeperBriefs = missionKeeperBriefs.value
-  const liveRuntimeCounts = countRuntimeKinds(agentList, keeperList, keeperBriefs)
-  const rosterAgents = buildAgentRoster(agentList, keeperList, keeperBriefs)
+
+  // Memoize roster and lookup Maps — these iterate full keeper/agent arrays
+  const rosterAgents = useMemo(
+    () => buildAgentRoster(agentList, keeperList, keeperBriefs),
+    [agentList, keeperList, keeperBriefs],
+  )
+  const keeperInfoLookup = useMemo(
+    () => buildKeeperInfoLookup(keeperList, keeperBriefs),
+    [keeperList, keeperBriefs],
+  )
+  const keeperRuntimeLookup = useMemo(
+    () => buildKeeperRuntimeLookup(keeperList),
+    [keeperList],
+  )
+
+  // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
+  const liveRuntimeCounts = useMemo(() => {
+    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'keeper-only').length
+    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, 'agent-only').length
+    return { agents: agentCount, keepers: keeperCount, totalRuntimes: rosterAgents.length }
+  }, [rosterAgents, keeperList, keeperBriefs])
+
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
@@ -332,33 +352,43 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const namespaceName = namespaceStatus?.namespace ?? 'default'
   const namespaceBasePath = namespaceStatus?.namespace_base_path ?? null
 
-  const briefMap = new Map<string, DashboardMissionAgentBrief>(
-    briefs.map(brief => [brief.agent_name, brief] as const),
+  const briefMap = useMemo(
+    () => new Map<string, DashboardMissionAgentBrief>(
+      briefs.map(brief => [brief.agent_name, brief] as const),
+    ),
+    [briefs],
   )
-  const scopedAgents = scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter)
-  const keeperInfoLookup = buildKeeperInfoLookup(keeperList, keeperBriefs)
-  const keeperRuntimeLookup = buildKeeperRuntimeLookup(keeperList)
-  const bandByAgent = new Map(
-    scopedAgents.map(agent => [
-      agent.name,
-      runtimeBandMetaForAgent(
-        agent,
-        keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList),
-      ),
-    ] as const),
+  const scopedAgents = useMemo(
+    () => scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperBriefs, keeperFilter),
+    [rosterAgents, keeperList, keeperBriefs, keeperFilter],
+  )
+  const bandByAgent = useMemo(
+    () => new Map(
+      scopedAgents.map(agent => [
+        agent.name,
+        runtimeBandMetaForAgent(
+          agent,
+          keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList),
+        ),
+      ] as const),
+    ),
+    [scopedAgents, keeperRuntimeLookup, keeperList],
   )
   const normalizedSearch = search.trim().toLowerCase()
-  const searchTermsByAgent = new Map(
-    scopedAgents.map(agent => {
-      const keeper = keeperInfoLookup.get(agent.name) ?? findKeeper(agent.name, keeperList, keeperBriefs)
-      return [
-        agent.name,
-        keeperIdentitySearchTerms(
-          keeper?.name ?? null,
-          keeper?.agent_name ?? agent.name,
-        ).map(term => term.toLowerCase()),
-      ] as const
-    }),
+  const searchTermsByAgent = useMemo(
+    () => new Map(
+      scopedAgents.map(agent => {
+        const keeper = keeperInfoLookup.get(agent.name) ?? findKeeper(agent.name, keeperList, keeperBriefs)
+        return [
+          agent.name,
+          keeperIdentitySearchTerms(
+            keeper?.name ?? null,
+            keeper?.agent_name ?? agent.name,
+          ).map(term => term.toLowerCase()),
+        ] as const
+      }),
+    ),
+    [scopedAgents, keeperInfoLookup, keeperList, keeperBriefs],
   )
   const pageTitle = keeperFilter === 'keeper-only'
     ? '키퍼 목록'

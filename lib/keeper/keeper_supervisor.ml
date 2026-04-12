@@ -58,6 +58,14 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
   let base_path = ctx.config.base_path in
   let keepers_dir =
     Filename.concat (Room.masc_root_dir ctx.config) "keepers" in
+  (match Keeper_registry.dispatch_event ~base_path meta.name
+           Keeper_state_machine.Fiber_started with
+   | Ok _ -> ()
+   | Error err ->
+       Log.Keeper.warn
+         "%s: Fiber_started rejected during supervised launch: %s"
+         meta.name
+         (Keeper_state_machine.transition_error_to_string err));
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =
@@ -78,8 +86,6 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              Keeper_state_machine.Stop_requested);
            ignore (Keeper_registry.dispatch_event ~base_path meta.name
              Keeper_state_machine.Drain_complete);
-           ignore (Keeper_registry.dispatch_event ~base_path meta.name
-             (Keeper_state_machine.Fiber_terminated { outcome = "normal exit" }));
            if resolve_done `Stopped then
              publish_lifecycle "stopped" meta.name "normal exit"
          with
@@ -145,13 +151,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
-  if Keeper_registry.is_running ~base_path:ctx.config.base_path meta.name
+  if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
   then ()
   else if not (Keeper_registry.spawn_slots_available ()) then ()
   else begin
     (* Register in Keeper_registry — single source of truth. *)
     let reg =
-      Keeper_registry.register ~base_path:ctx.config.base_path meta.name meta
+      Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
     in
     (* Room initialization *)
     (try
@@ -383,7 +389,7 @@ let sweep_and_recover (ctx : _ context) =
           (Keeper_state_machine.Supervisor_restart_attempt { attempt }));
         let old_crash_log = old_entry.crash_log in
         let reg =
-          Keeper_registry.register ~base_path old_entry.name meta
+          Keeper_registry.register_restarting ~base_path old_entry.name meta
         in
         Keeper_registry.restore_supervisor_state ~base_path old_entry.name
           ~restart_count:attempt ~last_restart_ts:now

@@ -73,20 +73,23 @@ let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_context
 
 let test_oas_timeout_32k () =
   let v = adaptive ~max_context:32_000 in
-  check (float 1.0) "32K → ~768s" 768.0 v
+  (* 120 + 32*1.5 + min(15,40)*30 = 120+48+450 = 618 *)
+  check (float 1.0) "32K → 618s" 618.0 v
 
 let test_oas_timeout_128k () =
   let v = adaptive ~max_context:128_000 in
-  check (float 1.0) "128K → ~912s" 912.0 v
+  (* 120 + 128*1.5 + 450 = 762 *)
+  check (float 1.0) "128K → 762s" 762.0 v
 
 let test_oas_timeout_262k () =
   let v = adaptive ~max_context:262_144 in
-  (* 120 + 262.144 * 1.5 + 20 * 30 = 1113.216, which is below turn_timeout_sec. *)
-  check bool "262K → [1100, 1200]" true (v >= 1100.0 && v <= 1200.0)
+  (* 120 + 262.144*1.5 + min(15,40)*30 = 120+393.216+450 = 963.216 *)
+  check bool "262K → [960, 970]" true (v >= 960.0 && v <= 970.0)
 
 let test_oas_timeout_zero () =
   let v = adaptive ~max_context:0 in
-  check (float 1.0) "0 context → base+turn budget 720s" 720.0 v
+  (* 120 + 0 + min(15,40)*30 = 570 *)
+  check (float 1.0) "0 context → base+turn budget 570s" 570.0 v
 
 let test_oas_timeout_monotonic () =
   let v1 = adaptive ~max_context:32_000 in
@@ -116,6 +119,29 @@ let test_oas_timeout_sec_compat () =
   (* Without env override, oas_timeout_sec returns 300.0 default *)
   let v = Cfg.KeeperKeepalive.oas_timeout_sec in
   check (float 1.0) "backward compat default 300s" 300.0 v
+
+(* ── Semaphore wait timeout (defense against peer slot hoarding) ── *)
+
+let test_semaphore_wait_timeout_default () =
+  (* Default 60s — short enough to unblock starved keepers, long enough
+     to not mis-trigger under legitimate contention. *)
+  check (float 0.1) "default semaphore wait timeout 60s" 60.0
+    KK.semaphore_wait_timeout_sec
+
+let test_semaphore_wait_timeout_range () =
+  let v = KK.semaphore_wait_timeout_sec in
+  check bool "wait timeout >= 5s" true (v >= 5.0);
+  check bool "wait timeout <= 600s" true (v <= 600.0)
+
+let test_semaphore_wait_timeout_exception_shape () =
+  (* The exception carries the wait cap in seconds so the caller can
+     render it in a log line without re-reading the env var. *)
+  let carried =
+    try
+      raise (KK.Semaphore_wait_timeout 42.5)
+    with KK.Semaphore_wait_timeout v -> v
+  in
+  check (float 0.001) "exception carries wait sec" 42.5 carried
 
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
@@ -288,6 +314,11 @@ let () =
       test_case "max_turns default is 5" `Quick test_max_turns_default;
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "oas_timeout_sec backward compat" `Quick test_oas_timeout_sec_compat;
+    ];
+    "semaphore_wait_timeout", [
+      test_case "default 60s" `Quick test_semaphore_wait_timeout_default;
+      test_case "range [5, 600]" `Quick test_semaphore_wait_timeout_range;
+      test_case "exception carries wait sec" `Quick test_semaphore_wait_timeout_exception_shape;
     ];
     "grpc_config", [
       test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;

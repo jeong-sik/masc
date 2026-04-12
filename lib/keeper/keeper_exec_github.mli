@@ -9,6 +9,12 @@ val gh_not_found_hint :
   out:string ->
   (string * Yojson.Safe.t) list
 
+val max_gh_output_bytes : int
+
+val truncate_gh_output :
+  string ->
+  string * (string * Yojson.Safe.t) list
+
 val handle_keeper_github :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->

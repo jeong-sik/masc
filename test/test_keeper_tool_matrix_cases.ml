@@ -78,7 +78,12 @@ let voice_guard_fragments =
 let init_keeper_bridge () =
   Masc_test_deps.init_keeper_tool_registry ();
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
-  (match KET.init_policy_config ~base_path:(Sys.getcwd ()) with
+  (* Use find_project_root — the test cwd is _build/default/test/ which
+     does not contain config/tool_policy.toml, so Sys.getcwd fails the
+     direct shortcut and falls into the exe-relative walk that picks up
+     the partial _build/default/config/cascade.json. *)
+  let base_path = Masc_test_deps.find_project_root () in
+  (match KET.init_policy_config ~base_path with
    | Ok () -> ()
    | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
   Masc_mcp.Keeper_exec_shared.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;
@@ -299,8 +304,6 @@ let extra_guard_fragments_for_name = function
   | "masc_autoresearch_status"
   | "masc_autoresearch_stop" ->
       [ "no autoresearch loop running" ]
-  | "masc_autoresearch_swarm_start" ->
-      [ "requires local team-session runtime context" ]
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
@@ -316,37 +319,31 @@ let merge_expectation base extras =
   | Expect_success_or_guard fragments ->
       Expect_success_or_guard (fragments @ extras)
 
-let retired_front_door_case_for_name name =
-  match name with
-  | "masc_repo_synthesis_swarm_start" ->
-      Some
-        {
-          init_mode = Init_joined;
-          prepare = (fun _fixture -> ());
-          arguments =
-            (fun fixture _schema ->
-              `Assoc
-                [
-                  ("question", `String "tool matrix synthesis question");
-                  ("repo_path", `String fixture.generic.base_path);
-                ]);
-          expectation =
-            Expect_success_or_guard
-              ([ "requires local team-session runtime context";
-                 "requires team-session launch support" ]
-              @ extra_guard_fragments_for_name name);
-        }
-  | _ -> None
-
 let case_for_name name =
-  match retired_front_door_case_for_name name with
-  | Some case -> case
-  | None ->
   if string_starts_with ~prefix:"masc_" name then
     let generic_case = Generic.case_for_name name in
     {
       init_mode = generic_case.init_mode;
-      prepare = (fun fixture -> Generic.prepare_for_name fixture.generic name);
+      prepare = (fun fixture ->
+        Generic.prepare_for_name fixture.generic name;
+        (* In the keeper tool matrix, masc_worktree_* runs inside a
+           keeper context whose meta.name is "keeper-tool-matrix", not
+           the generic fixture's "codex-tool-matrix". After PRs
+           #6533/#6542 the worktree resolver requires a clone under
+           the keeper's own playground, so mirror the generic
+           ensure_playground_clone for the keeper meta name too.
+           For masc_worktree_remove, also create the actual worktree
+           under the keeper name so the removal has a matching target. *)
+        if List.mem name [ "masc_worktree_create"; "masc_worktree_list" ] then
+          ignore
+            (Generic.ensure_playground_clone_for
+               ~agent:"keeper-tool-matrix" fixture.generic);
+        if name = "masc_worktree_remove" then begin
+          fixture.generic.worktree_task_id <- None;
+          ignore
+            (Generic.ensure_worktree_created_for
+               ~agent:"keeper-tool-matrix" fixture.generic)
+        end);
       arguments =
         (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
       expectation =

@@ -157,11 +157,48 @@ type checkpoint_load_error =
   | Parse_error of string
   | Io_error of string
 
+(* Checkpoint-load failures classify as [Not_found] only when the
+   underlying SDK error is genuinely "this file does not exist on first
+   boot" — any other I/O problem should stay [Io_error] so we keep the
+   detail in the error log.
+
+   The matching surface is fragile because [Agent_sdk] serializes
+   filesystem failures via [Printexc.to_string] inside
+   [FileOpFailed.detail] (see oas/lib/fs_result.ml), so we pattern-match
+   on the rendered strings of every exception constructor the OAS
+   wrapper produces:
+
+   - [Eio.Io (Fs Not_found _)] → "Eio.Io Fs Not_found Unix_error ..."
+   - [Unix.Unix_error (ENOENT, _, _)] → "Unix_error(ENOENT, ...)"
+   - [Sys_error "..."] → "No such file or directory: ..."
+   - legacy masc-mcp path that stored just "no_such_file" as detail
+
+   The [has_substring] fallback catches the canonical ENOENT phrase
+   anywhere in the rendered string so that wrapper layers that prepend
+   context (e.g. [sprintf "load %s: %s" path ...]) still classify
+   correctly. *)
 let is_not_found_detail (detail : string) : bool =
   let d = String.lowercase_ascii detail in
-  String.starts_with ~prefix:"no_such_file" d  (* Eio.Fs.Not_found *)
+  (* Local to keep [Keeper_checkpoint_store] surface free of a generic
+     string helper — this module has no .mli so every top-level [let]
+     is exported. *)
+  let has_substring haystack needle =
+    let hl = String.length haystack and nl = String.length needle in
+    if nl = 0 then true
+    else if nl > hl then false
+    else
+      let rec loop i =
+        if i + nl > hl then false
+        else if String.sub haystack i nl = needle then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  String.starts_with ~prefix:"no_such_file" d  (* legacy masc-mcp path *)
   || String.starts_with ~prefix:"no such file" d
   || String.starts_with ~prefix:"unix_error (enoent" d  (* POSIX *)
+  || String.starts_with ~prefix:"eio.io fs not_found" d  (* Eio.Io (Fs Not_found _) *)
+  || has_substring d "no such file or directory"
 
 let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   match e with

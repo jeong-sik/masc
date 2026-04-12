@@ -44,8 +44,13 @@ module Agent_turn : sig
 
   val event_to_string : event -> string
 
-  (** Pure transition function. *)
-  val apply_event : current:phase -> event -> phase
+  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+
+  (** Pure transition function. Returns [Ignored] for invalid transitions. *)
+  val apply_event : current:phase -> event -> transition
+
+  (** Like [apply_event] but silently returns the phase on invalid transitions. *)
+  val apply_event_lossy : current:phase -> event -> phase
 end
 
 (** {3 Dimension 3: Tool Validation Lifecycle} *)
@@ -74,8 +79,21 @@ module Tool_validation : sig
 
   val event_to_string : event -> string
 
-  (** Pure transition function. *)
-  val apply_event : current:phase -> event -> phase
+  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+
+  val default_max_nondet_retries : int
+  (** Default cap on [Nondet_attempt] transitions (3). *)
+
+  val apply_event :
+    ?max_nondet_retries:int -> current:phase -> event -> transition
+  (** Pure transition function. When [current = Nondet_retrying] and
+      [event = Nondet_attempt n], the attempt is rejected (transitions to
+      [Rejected]) if [n >= max_nondet_retries] (default {!default_max_nondet_retries}).
+      Returns [Ignored] for otherwise invalid transitions. *)
+
+  val apply_event_lossy :
+    ?max_nondet_retries:int -> current:phase -> event -> phase
+  (** Like [apply_event] but silently returns the phase on invalid transitions. *)
 end
 
 (** {4 Product State} *)
@@ -111,8 +129,10 @@ val apply_turn_event :
   product -> Agent_turn.event -> (product, string) result
 
 (** Apply a validation event.
-    Guarded: validation events are only accepted when [turn = Dispatching]. *)
+    Guarded: validation events are only accepted when [turn = Dispatching].
+    @param max_nondet_retries cap on [Nondet_attempt] retries (default 3). *)
 val apply_validation_event :
+  ?max_nondet_retries:int ->
   product -> Tool_validation.event -> (product, string) result
 
 (** {7 Serialization} *)

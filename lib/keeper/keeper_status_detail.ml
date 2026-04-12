@@ -1,7 +1,7 @@
 (** Keeper_status_detail — single-keeper detailed status handler.
     Split from keeper_status.ml.
 
-    Server-side response cache: keyed on (name, updated_at, args_hash).
+    Server-side response cache: keyed on (base_path, name, updated_at, args_hash).
     Avoids expensive JSONL parsing and checkpoint loading when keeper
     state has not changed between consecutive status polls. *)
 
@@ -28,10 +28,21 @@ type cache_entry = {
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 
 let invalidate_status_cache_for name =
-  Hashtbl.remove _cache name
+  Hashtbl.filter_map_inplace
+    (fun key entry ->
+      match String.rindex_opt key ':' with
+      | Some idx ->
+          let cached_name =
+            String.sub key (idx + 1) (String.length key - idx - 1)
+          in
+          if String.equal cached_name name then None else Some entry
+      | None -> Some entry)
+    _cache
 
 let invalidate_status_cache_all () =
   Hashtbl.clear _cache
+
+let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
 let normalize_status_name = String.trim
 
@@ -78,9 +89,10 @@ let handle_keeper_status ctx args : tool_result =
   match resolve_status_target ctx args with
   | Error err -> (false, err)
   | Ok (name, m) ->
+      let cache_key = status_cache_key ~base_path:ctx.config.base_path ~name in
       let args_hash = hash_status_args ctx.config name args in
       (* Cache hit: same updated_at + same args → return cached response *)
-      (match Hashtbl.find_opt _cache name with
+      (match Hashtbl.find_opt _cache cache_key with
        | Some entry
          when entry.updated_at = m.updated_at
            && entry.args_hash = args_hash ->
@@ -101,7 +113,20 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = Oas_model_resolve.models_of_cascade_name m.cascade_name in
-      let primary_max_context = Oas_model_resolve.resolve_max_cascade_context models in
+      let primary_max_context =
+        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+        let raw =
+          match m.max_context_override with
+          | Some value -> value
+          | None ->
+              let resolved =
+                Oas_model_resolve.resolve_max_cascade_context models
+              in
+              Oas_model_resolve.clamp_context_for_pure_local_labels
+                ~labels:models ~max_context:resolved
+        in
+        max min_keeper_context raw
+      in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
@@ -211,11 +236,10 @@ let handle_keeper_status ctx args : tool_result =
              else read_file_tail_lines metrics_path
                     ~max_bytes:tail_bytes ~max_lines:tail_turns
            in
-           `List
-             (List.filter_map
-                (fun line ->
-                  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
-                lines)
+           let (parsed, _) =
+             Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
+           in
+           `List parsed
          in
          let metrics_window_lines =
            if include_metrics_overview then
@@ -685,6 +709,7 @@ let handle_keeper_status ctx args : tool_result =
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in
            "execution_context", `Assoc [
              ("playground_path", `String playground_rel);
+             ("default_cwd", `String playground_abs);
              ("execution_scope", `String m.execution_scope);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
@@ -737,6 +762,6 @@ let handle_keeper_status ctx args : tool_result =
            ]);
          ]) in
          let response = Yojson.Safe.pretty_to_string json in
-         Hashtbl.replace _cache name
+         Hashtbl.replace _cache cache_key
            { updated_at = m.updated_at; args_hash; response };
          (true, response))

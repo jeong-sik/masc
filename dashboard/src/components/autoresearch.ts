@@ -327,7 +327,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
           <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Safety Harness</div>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-[1.6] text-[var(--text-body)]">
-            evaluator fallback, pre-compaction pressure, continuity DNA quality는 하네스에서 봅니다.
+            평가 모델, 압축 전 상태, 세대 교체 rail 상태는 하네스에서 봅니다.
           </div>
           <button
             type="button"

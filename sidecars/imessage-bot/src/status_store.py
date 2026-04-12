@@ -22,6 +22,8 @@ class ConnectorRuntimeStatus:
     chat_db_path: str
     poll_interval_sec: float
     pid: int
+    reply_mode: str = ""
+    self_chat_guid: str = ""
 
 
 class StatusStore:

@@ -9,7 +9,7 @@ type ('clock, 'net) context = ('clock, 'net) Tool_command_plane_support.context 
   auth_token : string option;
 }
 
-type result = Tool_command_plane_support.result
+type tool_result = Tool_command_plane_support.tool_result
 
 let dispatch = Tool_command_plane_dispatch.dispatch
 
@@ -25,6 +25,28 @@ let schemas : Types.tool_schema list =
 let _destructive_tools = [ "masc_operation_stop" ]
 let _non_destructive_tools = [ "masc_operation_pause" ]
 
+let tool_required_permission = function
+  | "masc_unit_list" | "masc_operation_status" | "masc_dispatch_plan"
+  | "masc_policy_status" | "masc_observe_topology"
+  | "masc_observe_operations" | "masc_observe_swarm"
+  | "masc_observe_alerts" | "masc_observe_capacity"
+  | "masc_observe_traces" | "masc_intent_status"
+  | "masc_intent_forecast" ->
+      Some Types.CanReadState
+  | "masc_unit_define" | "masc_unit_reparent" | "masc_unit_reassign"
+  | "masc_operation_start" | "masc_operation_checkpoint"
+  | "masc_operation_pause" | "masc_operation_resume"
+  | "masc_operation_stop" | "masc_operation_finalize"
+  | "masc_dispatch_assign" | "masc_dispatch_rebalance"
+  | "masc_dispatch_escalate" | "masc_dispatch_recall"
+  | "masc_dispatch_tick" | "masc_policy_approve"
+  | "masc_policy_deny" | "masc_policy_update"
+  | "masc_intent_create" | "masc_intent_update" ->
+      Some Types.CanBroadcast
+  | "masc_policy_freeze_unit" | "masc_policy_kill_switch" ->
+      Some Types.CanAdmin
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -37,5 +59,6 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ~is_destructive
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

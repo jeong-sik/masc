@@ -6,7 +6,7 @@
 
 open Yojson.Safe.Util
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -24,6 +24,54 @@ let verdict_to_string (result : Anti_rationalization.review_result) =
   match result.verdict with
   | Anti_rationalization.Approve -> "approve"
   | Anti_rationalization.Reject reason -> "reject:" ^ reason
+
+(** True when both cascades are non-empty AND distinct.
+
+    Must match {!Eval_calibration.calibration_stats} inclusion criteria
+    exactly (both [evaluator_cascade <> ""] and [generator_cascade <> ""])
+    so that a real-time SSE event and the aggregated cross_model_rate
+    agree on which verdicts count as cross-model. *)
+let is_cross_model_verdict (result : Anti_rationalization.review_result) : bool =
+  match result.generator_cascade with
+  | None -> false
+  | Some g ->
+    g <> ""
+    && result.evaluator_cascade <> ""
+    && not (String.equal g result.evaluator_cascade)
+
+(** Build the [verdict_recorded] SSE payload for a finished review.
+
+    Pure function: no IO, no broadcast, no logging. Extracted so the
+    payload contract can be exercised by unit tests. *)
+let build_verdict_sse_payload
+    ~(now : float)
+    ~(task_id : string)
+    ~(req : Anti_rationalization.review_request)
+    ~(result : Anti_rationalization.review_result) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("type", `String "oas:masc:harness:verdict_recorded");
+      ( "payload",
+        `Assoc
+          [
+            ("timestamp", `Float now);
+            ("task_id", `String task_id);
+            ("task_title", `String req.task_title);
+            ("agent_name", `String req.agent_name);
+            ("gate", `String (Anti_rationalization.gate_to_string result.gate));
+            ("verdict", `String (verdict_to_string result));
+            ("evaluator_cascade", `String result.evaluator_cascade);
+            ( "generator_cascade",
+              match result.generator_cascade with
+              | Some c -> `String c
+              | None -> `Null );
+            ("cross_model", `Bool (is_cross_model_verdict result));
+            ( "fallback_reason",
+              match result.fallback_reason with
+              | Some reason -> `String reason
+              | None -> `Null );
+          ] );
+    ]
 
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
@@ -51,26 +99,9 @@ let review_completion_notes
           ~task_id ~req:ar_req ~result ();
         (try
            Sse.broadcast
-             (`Assoc
-               [
-                 ("type", `String "oas:masc:harness:verdict_recorded");
-                 ( "payload",
-                   `Assoc
-                     [
-                       ("timestamp", `Float (Time_compat.now ()));
-                       ("task_id", `String task_id);
-                       ("task_title", `String ar_req.task_title);
-                       ("agent_name", `String ar_req.agent_name);
-                       ("gate", `String (Anti_rationalization.gate_to_string result.gate));
-                       ("verdict", `String (verdict_to_string result));
-                       ( "evaluator_cascade",
-                         `String result.evaluator_cascade );
-                       ( "fallback_reason",
-                         match result.fallback_reason with
-                         | Some reason -> `String reason
-                         | None -> `Null );
-                     ] );
-               ])
+             (build_verdict_sse_payload
+                ~now:(Time_compat.now ())
+                ~task_id ~req:ar_req ~result)
          with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -244,33 +275,6 @@ let handle_batch_add_tasks ctx args =
     in
     (true, Room.batch_add_tasks_with_contracts ctx.config tasks)
 
-let handle_claim ctx args =
-  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
-    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
-  else
-  let task_id = get_string args "task_id" "" in
-  match validate_task_id task_id with
-  | Error e -> result_to_response (Error e)
-  | Ok task_id ->
-  let agent_role = match get_string args "agent_role" "" with
-    | "" -> Types_core.Unassigned
-    | s -> Types_core.role_of_string s
-  in
-  let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
-  (* Notification harness: push claim event to all active sessions *)
-  (match result with
-   | Ok _ ->
-       (* Auto-set current_task so planning tools pick it up immediately *)
-       Planning_eio.set_current_task ctx.config ~task_id;
-       Subscriptions.push_event_to_sessions (`Assoc [
-         ("type", `String "masc/task_claimed");
-         ("task_id", `String task_id);
-         ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Time_compat.now ()));
-       ])
-   | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
-  result_to_response result
-
 (** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
 let preset_from_capabilities caps =
   List.find_map
@@ -314,13 +318,68 @@ let resolve_agent_preset config agent_name =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> None
 
+(** Evaluate whether an agent's preset satisfies a task's requirement.
+    Returns [Ok ()] on match or no requirement, [Error reason] on mismatch.
+    SSOT for preset-fit logic — used by both claim and claim_next. *)
+let evaluate_preset_fit ~(agent_preset : string option)
+    ~(required_preset : string option) : (unit, string) result =
+  match required_preset, agent_preset with
+  | None, _ -> Ok ()
+  | Some required, None ->
+      Error (Printf.sprintf
+        "requires preset '%s' but agent has no preset" required)
+  | Some required, Some preset ->
+      if Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+      then Ok ()
+      else Error (Printf.sprintf
+        "requires preset '%s' but agent has '%s'" required preset)
+
 (** Build a task_filter closure that checks required_preset against the agent's preset. *)
 let preset_task_filter ~agent_preset (task : Types.task) =
-  match task.required_preset, agent_preset with
-  | None, _ -> true
-  | Some _required, None -> false  (* agent without preset cannot satisfy preset requirement *)
-  | Some required, Some preset ->
-    Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
+  evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset
+  |> Result.is_ok
+
+let handle_claim ctx args =
+  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
+    result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
+  else
+  let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
+  let agent_role = match get_string args "agent_role" "" with
+    | "" -> Types_core.Unassigned
+    | s -> Types_core.role_of_string s
+  in
+  let preset_warning =
+    let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
+    let tasks = Room.get_tasks_raw ctx.config in
+    match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
+    | None -> None
+    | Some task ->
+        match evaluate_preset_fit ~agent_preset ~required_preset:task.required_preset with
+        | Ok () -> None
+        | Error reason ->
+            Some (Printf.sprintf "preset_mismatch: task %s %s" task_id reason)
+  in
+  let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
+  (match result with
+   | Ok _ ->
+       (match preset_warning with
+        | Some warning -> Log.Task.warn "%s (agent=%s)" warning ctx.agent_name
+        | None -> ());
+       Planning_eio.set_current_task ctx.config ~task_id;
+       Subscriptions.push_event_to_sessions (`Assoc [
+         ("type", `String "masc/task_claimed");
+         ("task_id", `String task_id);
+         ("agent_name", `String ctx.agent_name);
+         ("timestamp", `Float (Time_compat.now ()));
+       ])
+   | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
+  let (ok, msg) = result_to_response result in
+  match preset_warning, ok with
+  | Some warning, true -> (true, msg ^ "\n⚠️ " ^ warning)
+  | _ -> (ok, msg)
 
 let handle_claim_next ctx _args =
   if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
@@ -720,10 +779,8 @@ let handle_task_history ctx args =
   let limit = get_int args "limit" 50 in
   let scan_limit = min 500 (limit * 5) in
   let lines = Mcp_server.read_event_lines ctx.config ~limit:scan_limit in
-  let parsed =
-    List.filter_map (fun line ->
-      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-    ) lines
+  let (parsed, _malformed) =
+    Fs_compat.parse_jsonl_lines ~source:"task_events" lines
   in
   let matches_task json =
     let task = json |> member "task" |> to_string_option in
@@ -779,7 +836,7 @@ let handle_archive_view ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ctx args)
@@ -798,6 +855,17 @@ let dispatch ctx ~name ~args : result option =
 let _tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
 let _tool_spec_requires_join = [ "masc_add_task"; "masc_claim_next"; "masc_transition" ]
 
+let tool_required_permission = function
+  | "masc_tasks" | "masc_task_history" | "masc_archive_view" ->
+      Some Types.CanReadState
+  | "masc_add_task" | "masc_batch_add_tasks" ->
+      Some Types.CanAddTask
+  | "masc_claim_next" ->
+      Some Types.CanClaimTask
+  | "masc_transition" | "masc_update_priority" ->
+      Some Types.CanCompleteTask
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
@@ -811,5 +879,6 @@ let () =
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

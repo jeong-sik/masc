@@ -15,6 +15,10 @@ open Masc_mcp
 let is_ro ~tool_name ~input =
   Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
 
+let is_boundary_exempt ~tool_name ~input =
+  Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
+    ~tool_name ~input
+
 let mk_cmd cmd =
   `Assoc [ ("cmd", `String cmd) ]
 
@@ -24,6 +28,9 @@ let mk_args args =
 let mk_cmd_and_args cmd args =
   `Assoc [ ("cmd", `String cmd);
            ("args", `List (List.map (fun s -> `String s) args)) ]
+
+let mk_action action =
+  `Assoc [ ("action", `String action) ]
 
 (* ================================================================ *)
 (* Read-only subcommands via cmd                                     *)
@@ -181,8 +188,8 @@ let test_non_keeper_github_tool () =
   Alcotest.(check bool) "keeper_bash is not affected"
     false
     (is_ro ~tool_name:"keeper_bash" ~input:(mk_cmd "pr list"));
-  (* keeper_board_post is a mutating tool, not read-only *)
-  Alcotest.(check bool) "keeper_board_post is not affected"
+  (* keeper_board_post is mutating (not read-only) but boundary-exempt *)
+  Alcotest.(check bool) "keeper_board_post is not read-only"
     false
     (is_ro ~tool_name:"keeper_board_post" ~input:(mk_cmd "pr list"))
 
@@ -195,6 +202,85 @@ let test_api_via_args () =
     false
     (is_ro ~tool_name:"keeper_github"
        ~input:(mk_args ["api"; "-X"; "POST"; "/repos/o/r/pulls/1/merge"]))
+
+(* ================================================================ *)
+(* Main-worktree mutation-boundary exemptions                        *)
+(* ================================================================ *)
+
+let test_task_claim_is_mutating_but_boundary_exempt () =
+  Alcotest.(check bool) "task claim is not read-only"
+    false
+    (is_ro ~tool_name:"keeper_task_claim" ~input:(`Assoc []));
+  Alcotest.(check bool) "task claim bypasses boundary"
+    true
+    (is_boundary_exempt ~tool_name:"keeper_task_claim" ~input:(`Assoc []))
+
+let test_masc_code_git_write_actions_bypass_boundary () =
+  List.iter
+    (fun action ->
+      Alcotest.(check bool)
+        (Printf.sprintf "git %s is mutating" action)
+        false
+        (is_ro ~tool_name:"masc_code_git" ~input:(mk_action action));
+      Alcotest.(check bool)
+        (Printf.sprintf "git %s bypasses boundary" action)
+        true
+        (is_boundary_exempt ~tool_name:"masc_code_git" ~input:(mk_action action)))
+    [ "add"; "commit"; "push" ]
+
+let test_keeper_bash_still_opens_boundary () =
+  Alcotest.(check bool) "keeper_bash not exempt"
+    false
+    (is_boundary_exempt ~tool_name:"keeper_bash" ~input:(mk_cmd "git status"))
+
+(* Regression: [masc_] prefix coordination aliases for [keeper_] prefix
+   tools were missing from [is_main_worktree_boundary_exempt_with_input]
+   in main until #6671, causing masc_improver to hang mid-turn after
+   [masc_add_task] opened the boundary and [masc_claim_next] was
+   blocked.  Lock the [masc_] and [keeper_] families to the same
+   exemption semantics so the next rename does not silently drift. *)
+let test_masc_coordination_aliases_bypass_boundary () =
+  let check_pair name =
+    Alcotest.(check bool) (name ^ " is mutating") false
+      (is_ro ~tool_name:name ~input:(`Assoc []));
+    Alcotest.(check bool) (name ^ " bypasses boundary") true
+      (is_boundary_exempt ~tool_name:name ~input:(`Assoc []))
+  in
+  List.iter check_pair
+    [ "masc_tasks"; "masc_add_task"; "masc_claim_next";
+      "masc_batch_add_tasks"; "masc_plan_init"; "masc_plan_set_task";
+      "masc_plan_update"; "masc_plan_get"; "masc_transition";
+      "masc_broadcast"; "masc_messages"; "masc_status";
+      "masc_dashboard"; "masc_agents"; "masc_agent_card";
+      "masc_board_post"; "masc_board_comment"; "masc_board_vote";
+      "masc_board_comment_vote"; "masc_board_delete";
+      "masc_board_list"; "masc_board_get"; "masc_board_stats";
+      "masc_board_hearths"; "masc_board_profile" ]
+
+(* Regression: [keeper_board_delete] and [keeper_board_cleanup] were
+   missing from the [keeper_*] side of the exempt list even though
+   their [masc_*] coordination alias [masc_board_delete] was already
+   exempt at line 283 of [keeper_tool_registry.ml].  Observed 2026-04-12
+   01:15:25 KST on janitor: the first [keeper_board_delete] of a cleanup
+   turn succeeded and opened the mutation boundary, and every subsequent
+   [keeper_board_delete] in the same turn was blocked by the
+   [pre_tool_use_guard] — burning janitor's turn budget on a repeating
+   "tool skipped" loop instead of progressing through the cleanup queue.
+   Same structural gap class as #6671 / #6681.
+
+   Board delete and cleanup are MASC-state-only mutations (board post
+   store), not main-worktree writes, so multiple deletes per turn are
+   safe.  This test locks the exemption so the next rename does not
+   silently drift the [keeper_*] side out of sync with [masc_*]. *)
+let test_keeper_board_delete_and_cleanup_bypass_boundary () =
+  let check name =
+    Alcotest.(check bool) (name ^ " is mutating") false
+      (is_ro ~tool_name:name ~input:(`Assoc []));
+    Alcotest.(check bool) (name ^ " bypasses boundary") true
+      (is_boundary_exempt ~tool_name:name ~input:(`Assoc []))
+  in
+  List.iter check
+    [ "keeper_board_delete"; "keeper_board_cleanup" ]
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -241,5 +327,15 @@ let () =
             test_non_keeper_github_tool;
           Alcotest.test_case "api via args" `Quick
             test_api_via_args;
+          Alcotest.test_case "task claim mutating but boundary exempt" `Quick
+            test_task_claim_is_mutating_but_boundary_exempt;
+          Alcotest.test_case "masc_code_git write actions bypass boundary" `Quick
+            test_masc_code_git_write_actions_bypass_boundary;
+          Alcotest.test_case "keeper_bash still opens boundary" `Quick
+            test_keeper_bash_still_opens_boundary;
+          Alcotest.test_case "masc_* coordination aliases bypass boundary" `Quick
+            test_masc_coordination_aliases_bypass_boundary;
+          Alcotest.test_case "keeper_board_delete and cleanup bypass boundary" `Quick
+            test_keeper_board_delete_and_cleanup_bypass_boundary;
         ] );
     ]

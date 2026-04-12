@@ -2,14 +2,241 @@
 
 ## [Unreleased]
 
+## [0.5.9] - 2026-04-12
+
+### Added
+- Harden OAS telemetry visibility and proactive monitoring (#6679)
+
+### Fixed
+- Keeper: add keeper_board_delete + cleanup to boundary-exempt list (#6698)
+- Lazy: replace Stdlib.Lazy with Eio.Lazy in keeper modules (#6696)
+- Dashboard: externalize agent status thresholds (#6683)
+- Prompt: restore world prompt contract and sanitize unified prompt (#6675)
+- Prompt: reinforce playground containment in keeper capabilities (#6678)
+- Re-raise Eio.Cancel.Cancelled in 5 catch-all handlers (#6697)
+- CI: unblock Build and Test (#6699)
+
+### Hardened
+- Store cache: mutex-protect Dated_jsonl store caches (#6690)
+- Agent registry: serialise session cache mutations (#6682)
+
+### Performance
+- Memory OAS bridge: move episode JSONL load outside cache mutex (#6671)
+- Prompt registry: move markdown disk reads outside registry mutex (#6663)
+
+## [0.5.8] - 2026-04-12
+
+### Fixed
+- SSE: stop double-incrementing event_counter when ~id is passed (#6660)
+- RNG: guard module-level Random.State with Eio.Mutex in 3 modules (#6652)
+- Repair loop: gate working_dir on caller playground (#6651)
+- Local runtime pool: drop dead select_runtime, re-check fingerprint after env load (#6650)
+- Cascade: remove coding_first profile, cap max_tokens to 32768 (#6687)
+- Cascade: clamp keeper_unified + coding_first max_tokens to 32768 (Groq limit) (#6686)
+- Build identity: probe exe_dir before cwd for git commit (#6688)
+- Keeper: masc_* boundary-exempt gap + cascade.json prune (#6681)
+- Worker OAS: stop sending min_p=0.0 to cloud providers (#6672)
+- Keeper checkpoint store: classify Eio.Io Fs Not_found as Not_found (#6655)
+
 ### Changed
-- Restructure keeper.world.md and keeper.capabilities.md: path rules at top, NEVER directives, BAD/GOOD bash examples (#6298)
-- Substitute actual keeper_name into world/capabilities prompts, replacing YOUR_KEEPER_NAME placeholder (#6316)
-- Expand decision log error_category: 5 → 7 categories (added timeout, ambiguous_side_effect) (#6316)
-- Auto-correct common wrong path prefixes in keeper_shell: /repos/X → .masc/playground/name/repos/X (#6317)
-- Wire OAS Tool_retry_policy (retry_on_validation_error=true, Structured_tool_result) (#6324)
-- Wire OAS post_tool_use_failure hook for structured failure metrics (#6324)
-- Per-keeper error prevention hints in TOML instructions: janitor, sangsu, cheolsu, masc-improver (#6298)
+- Bump OAS pin for GLM max_tokens clamp (#6689)
+- Improve keeper timeout visibility (#6552)
+
+### Performance
+- Board: move Agent_economy.earn outside store.mutex (#6649)
+
+## [0.5.7] - 2026-04-12
+
+### Fixed
+- CP unit: bound descendant_units_of_kind recursion (#6647)
+- Prompt registry: merge validate+write into single mutex transaction (#6646)
+- Room task schedule: reuse Room_task.update_local_agent_state on agent writes (#6642)
+
+### Changed
+- Bump OAS pin for min_p capability gate fix (#6653)
+- Keeper: remove redundant UTF-8 sanitize calls on LLM input path (#6645)
+- Docs: fix prompt-layer drift teaching server-root .worktrees/ (#6648)
+
+## [0.5.6] - 2026-04-12
+
+### Added
+- Restore Groq cascade fallback, confirmed by OAS 0.121.0 (#6566)
+- Bridge Agent_sdk.Log to masc-mcp structured log (#6618)
+
+### Fixed
+- CP unit: bound descendant_ids recursion with max_tree_depth guard (#6635)
+- Room task: hold with_file_lock on agent state writes (#6634)
+- Room/CP: hold with_file_lock around archive read-modify-write (#6632)
+- Session: hold registry.lock on all hashtable reads, drop dead unregister_sync (#6628)
+- Auth: gate cross-agent create_token and revoke on initial_admin (#6627)
+- Channel gate: wire dedup_cleanup into orchestrator pulse (#6612)
+- Keeper: fix retry timeout budget and local-only context (#6593)
+- Config: prefer base-path config over repo-local env (#6626)
+
+### Changed
+- Bump OAS pin to v0.122.0 (#6631)
+
+## [0.5.5] - 2026-04-12
+
+### Added
+- Harness: expose cross-model enforcement rate on dashboard (#6565)
+- Dashboard: expose keeper FSM + root-fix hardcoded constants + TLA+ bug model (#6556)
+
+### Fixed
+- Keeper: cap Eio.Semaphore.acquire wait in with_keeper_turn_slot (#6608)
+- Keeper: delete manual_reconcile file on clear to unblock legacy binaries (#6576)
+- Tool worktree: reject cross-agent agent_name in masc_worktree_create (#6617)
+- Tool code_write: scope writable paths and clone cwd per-agent (#6610)
+- CI: narrow Keeper_tool_policy_config shortcut, revert signature tightening (#6607)
+- CI: require tool_policy.toml in config_signature_exists (#6595)
+
+### Changed
+- Bump OAS pin to v0.121.0 for keep_alive=-1 fix (#6601)
+- CI: wire specs/bug-models/ into tla-check.sh (#6582)
+
+### Specifications
+- TLA+ KeeperTaskInterlock: no Dead keeper holds a claimed task (#6574)
+
+### Documentation
+- Document post-turn-lifecycle implicit invariant (#6604)
+
+## [0.5.4] - 2026-04-11
+
+### Added
+- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (#6478)
+- `Config_dir_resolver.log_resolution` startup log with shadow hint (#6478)
+- `test_cascade_config_validity` alcotest suite for cascade.json profiles (#6478)
+- `scripts/sync-version-truth.sh` dry-run version sync helper (#6478)
+- `scripts/opam-pin-external-deps.sh --install` flag (#6478)
+
+### Changed
+- Keeper: remove scope_kind gating (#6544)
+- Cascade: drop unsupported groq labels (#6558)
+- Dashboard: remove dead SSE route entries (#6557)
+
+### Fixed
+- Keeper: block write ops outside playground in keeper_bash (#6579)
+- Keeper: address cross-model review follow-ups for #6543 (#6563)
+- Keeper: log when open_pending overwrites a Cleared reconcile record (#6562)
+- Keeper: use Eio.Lazy for decision_audit env caches (#6549)
+- Keeper: tolerate text_response when provider ignores tool_choice (#6532)
+- Keeper: distinguish Cancel from Timeout in LLM bridge (#6543)
+- Keeper: enforce base path SSOT for playgrounds (#6548)
+- Keeper: fix startup base path and cwd defaults (#6546)
+- Keeper: fix channel gate ack leak (#6545)
+- gRPC: guarantee cleanup on heartbeat fiber exit paths (#6524)
+- gRPC: guarantee typed_stream close on subscribe fiber exit paths (#6529)
+- Worktree: remove server-root fallback from worktree_create_r (#6542)
+- Config: align config truth with runtime paths (#6503)
+- CI: clean log noise and TLA workflow (#6505)
+- Dashboard: type supervisor_diagnostics + ErrorState wave 3 (#6550)
+- Test: clone into playground before masc_worktree_* (#6577)
+- Docs: require keeper worktree under own playground clone (#6533)
+
+## [0.5.3] - 2026-04-11
+
+### Added
+- Expose llm_provider_http_status via Prometheus counter (#6514)
+
+### Changed
+- Extract shared tool permission map from auth (#6501)
+- Rename type result to tool_result across all tool modules (#6482)
+- Bump OAS pin to v0.120.0 (#6510)
+- Replace tautological assertions with observable post-conditions in keeper-registry tests (#6506)
+- Prune retired front doors (#6520)
+- Remove unused delete_posts_by_predicate (#6509)
+- Remove 13 dead dashboard exports (#6493)
+
+### Fixed
+- Keeper: gate auto-clear of manual reconcile behind age threshold (#6497)
+- Keeper: should_run_turn now consults manual_reconcile_pending (#6518)
+- Keeper: SSOT playground paths, drop hardcoded masc-mcp and container root (#6468)
+- Keeper: convert parse_keeper_identity from failwith to Result (#6479)
+- Keeper FSM runtime integration (#6451)
+- Goal-janitor: surface write_meta Error instead of ignoring (#6513)
+- Board: log vote/vote_comment errors instead of silent drop (#6463)
+- Backend: detect partial writes in atomic_increment and atomic_update (#6480)
+- Transport: surface WS and WebRTC send failures in server bootstrap (#6517)
+- Eio: wrap oas_sse_bridge + rate_limit cleanup fibers with exception loggers (#6519)
+- Dashboard: restore control surface routing (#6490, #6523)
+- Dashboard: standardize error display to CSS variable color scheme (#6494)
+- Dashboard: standardize time display to relativeTime/TimeAgo (#6491)
+- Dashboard: improve accessibility for buttons and form labels (#6496)
+- Dashboard: preserve board scroll position on refresh (#6461)
+- Dashboard: rename harness rail labels to match actual state (#6521)
+- Dashboard: align navigation descriptions with actual UI (#6526)
+- Worktree: use config base_path for worktree root (#6449)
+- Playground: docker_playground_cwd double-slash escape (#6522)
+
+### Security
+- Remove tracked localhost TLS key from repository (#6487)
+
+### Performance
+- Memoize expensive derived state in fleet and agent-roster dashboard (#6492)
+
+## [0.5.2] - 2026-04-11
+
+### Changed
+- Eliminate vendor hardcoding outside provider_adapter boundary (#6495)
+- Root cause fixes for JSONL parsing, keeper_github repo, preset validation (#6457)
+
+### Fixed
+- Restore loopback cross-port relaxation in auth (#6504)
+- Delegate context budget to OAS pipeline (#6488)
+
+## [0.5.1] - 2026-04-11
+
+### Changed
+- FSM apply_event returns `Applied | Ignored` transition type — detect invalid events (#6481)
+- Replace stringly-typed gate field with variant type (#6454)
+
+### Fixed
+- Restore keeper reset surface and typed tool expectations (#6477)
+- Use glm-coding (Coding Plan) before glm (pay-per-use) in cascade (#6475)
+- Align 4 tests with post-#6433 main state (#6460)
+
+## [0.5.0] - 2026-04-11
+
+### Added
+- Typed_tool_masc + State_product + TLA+ orthogonal FSM verification (#6321)
+- Trust Observatory dashboard — raw signals (Phase C0) (#6359)
+- B-SIM Monte Carlo verification — 4 gates pass (#6352)
+- Per-decision trifecta evaluation (Phase B3) (#6346)
+- Guard → Thompson bridge (Phase B1) (#6307)
+- TLA+ KeeperDecisionPipeline — Phase B0 gate (#6277)
+- Shared gate client + Telegram/CLI connectors (#6367)
+- iMessage channel connector (#6329)
+- Docker playground for keeper_bash (#6338)
+- Decision Pipeline FSM diagram in keeper detail dashboard (#6405)
+- masc_keeper_reset command for stale runtime state (#6428)
+- rate_limit.mli — hide bucket internals behind abstract type (#6431)
+- coding_first cascade profile — glm-5.1 first for PR-capable keepers (#6430)
+- Voice tools for sangsu (ElevenLabs Roger) (#6247)
+- Keeper Failing → recovery minimum shards + .masc/ whitelist (Phase B2) (#6325)
+
+### Changed
+- Restructure keeper.world.md and keeper.capabilities.md (#6298)
+- Substitute keeper_name into world/capabilities prompts (#6316)
+- Expand decision log error_category: 5 → 7 categories (#6316)
+- Wire OAS Tool_retry_policy + post_tool_use_failure hook (#6324)
+- Per-keeper error prevention hints in TOML instructions (#6298)
+- Broadcast PoC uses Tool_schema_gen combinators (#6427)
+- Remove params_to_input_schema duplicate — use OAS shared utility (#6418)
+- Draining invariant doc fix to match TLA+ (#6403)
+- Rename team_session → execution_session (#6364)
+- Remove remaining team session surfaces (#6363)
+- OAS pin bumped to v0.119.1 (#6446)
+- Allow localhost cross-port browser mutations for dev dashboard (#6459)
+
+### Fixed
+- Keeper turn timeout 300s → 1200s default (env var override removed) (#6371)
+- Auto-recover reconcile-safe tools on server parse errors (#6370)
+- Feature flag registry: MASC_KEEPER_DOCKER_PLAYGROUND (#6365)
+- Voice config empty session endpoints (#6357)
+- Keeper sidecar suffix check for dotted names (#6408)
+- Worktree basepath config resolution (#6449)
+- Keeper autonomous stall — raise turn budget, classify shell read-only (#6371)
+- 50 additional bug fixes across keeper, dashboard, and infrastructure
 
 ## [0.3.0] - 2026-04-09
 

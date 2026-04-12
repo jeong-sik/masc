@@ -5,7 +5,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
 import { ActionButton } from '../common/button'
-import { EmptyState } from '../common/empty-state'
+import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SessionTraceEntry } from './session-trace-entry'
 import { SessionTraceFilter } from './session-trace-filter'
 import {
@@ -122,14 +122,14 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   // Loading state
   if (loading && events.length === 0) {
-    return html`<div class="py-8 text-center text-[var(--text-muted)] text-xs">활동 추적 로딩 중...</div>`
+    return html`<${LoadingState}>활동 추적 불러오는 중...<//>`
   }
 
   // Error state
   if (error) {
     return html`
-      <div class="py-4">
-        <div class="text-xs text-[var(--bad)] mb-2">${error}</div>
+      <div class="flex flex-col items-center gap-3 py-4">
+        <${ErrorState} message=${error} />
         <${ActionButton} variant="ghost" size="sm" onClick=${handleRefresh}>재시도<//>
       </div>
     `

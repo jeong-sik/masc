@@ -29,6 +29,33 @@ let make_timestamp_pair seconds_ago =
   in
   (now, past_iso)
 
+let with_dashboard_label_thresholds ?quiet ?stuck f =
+  let set_or_fail param value =
+    match Lib.Runtime_params.set param value with
+    | Ok () -> ()
+    | Error msg -> Alcotest.fail msg
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter
+        (fun _ ->
+          Lib.Runtime_params.clear
+            Lib.Governance_registry.dashboard_agent_quiet_threshold_sec)
+        quiet;
+      Option.iter
+        (fun _ ->
+          Lib.Runtime_params.clear
+            Lib.Governance_registry.dashboard_agent_stuck_threshold_sec)
+        stuck)
+    (fun () ->
+      Option.iter
+        (set_or_fail Lib.Governance_registry.dashboard_agent_quiet_threshold_sec)
+        quiet;
+      Option.iter
+        (set_or_fail Lib.Governance_registry.dashboard_agent_stuck_threshold_sec)
+        stuck;
+      f ())
+
 let test_working_agent () =
   let (now, recent_iso) = make_timestamp_pair 60.0 in
   let result =
@@ -36,12 +63,36 @@ let test_working_agent () =
   in
   Alcotest.(check string) "active+recent = working" "working" result
 
+let test_quiet_threshold_override () =
+  with_dashboard_label_thresholds ~quiet:30.0 ~stuck:900.0 @@ fun () ->
+  let (now, quiet_iso) = make_timestamp_pair 60.0 in
+  let result =
+    Lib.Dashboard_labels.translate_agent_status ~now Types.Active quiet_iso
+  in
+  Alcotest.(check bool) "override surfaces quiet warning" true
+    (try
+       ignore (Str.search_forward (Str.regexp_string "quiet") result 0);
+       true
+     with Not_found -> false)
+
 let test_stuck_agent () =
   let (now, old_iso) = make_timestamp_pair 1200.0 in (* 20 minutes ago *)
   let result =
     Lib.Dashboard_labels.translate_agent_status ~now Types.Active old_iso
   in
   Alcotest.(check bool) "stuck agent contains STUCK" true
+    (try
+       ignore (Str.search_forward (Str.regexp_string "STUCK") result 0);
+       true
+     with Not_found -> false)
+
+let test_stuck_threshold_override () =
+  with_dashboard_label_thresholds ~quiet:300.0 ~stuck:60.0 @@ fun () ->
+  let (now, stuck_iso) = make_timestamp_pair 120.0 in
+  let result =
+    Lib.Dashboard_labels.translate_agent_status ~now Types.Busy stuck_iso
+  in
+  Alcotest.(check bool) "override surfaces stuck warning" true
     (try
        ignore (Str.search_forward (Str.regexp_string "STUCK") result 0);
        true
@@ -306,6 +357,25 @@ let test_classify_listening_is_idle () =
   Alcotest.(check bool) "listening = Idle" true
     (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Idle)
 
+let test_classify_uses_stuck_threshold_override () =
+  with_dashboard_label_thresholds ~stuck:60.0 @@ fun () ->
+  let (now, stuck_iso) = make_timestamp_pair 120.0 in
+  let agent : Types.agent =
+    {
+      name = "test-agent";
+      agent_type = "test";
+      status = Types.Active;
+      capabilities = [];
+      current_task = None;
+      joined_at = "2026-01-01T00:00:00Z";
+      last_seen = stuck_iso;
+      meta = None;
+    }
+  in
+  let group = Lib.Dashboard_labels.classify_agent ~now agent in
+  Alcotest.(check bool) "active can classify as Stuck via override" true
+    (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Stuck)
+
 (* ===== Attention Items ===== *)
 
 let test_attention_empty () =
@@ -328,7 +398,9 @@ let () =
       ( "Agent Status",
         [
           ("working agent", `Quick, test_working_agent);
+          ("quiet threshold override", `Quick, test_quiet_threshold_override);
           ("stuck agent", `Quick, test_stuck_agent);
+          ("stuck threshold override", `Quick, test_stuck_threshold_override);
           ("utc parser matches canonical", `Quick, test_parse_iso_timestamp_matches_canonical_utc);
           ("fractional utc normalizes", `Quick, test_parse_iso_timestamp_fractional_utc_normalizes);
           ("numeric offset normalizes", `Quick, test_parse_iso_timestamp_offset_matches_utc);
@@ -369,6 +441,7 @@ let () =
         [
           ("inactive is Offline", `Quick, test_classify_inactive_is_offline);
           ("listening is Idle", `Quick, test_classify_listening_is_idle);
+          ("stuck override applied", `Quick, test_classify_uses_stuck_threshold_override);
         ] );
       ( "Attention",
         [

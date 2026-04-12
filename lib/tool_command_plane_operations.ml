@@ -204,13 +204,13 @@ let blocker_json ~code ~detail =
 
 (* --- Operation handlers --- *)
 
-let handle_operation_status (ctx : (_, _) context) args : result =
+let handle_operation_status (ctx : (_, _) context) args : tool_result =
   let operation_id = get_string_opt args "operation_id" in
   ( true,
     Yojson.Safe.to_string
       (Command_plane_v2.operation_status_json ctx.config ?operation_id ()) )
 
-let handle_operation_start (ctx : (_, _) context) args : result =
+let handle_operation_start (ctx : (_, _) context) args : tool_result =
   try
     match
       Command_plane_v2.start_operation ctx.config ~actor:ctx.agent_name args
@@ -225,7 +225,7 @@ let handle_operation_start (ctx : (_, _) context) args : result =
     | Error message -> (false, json_error message)
   with Invalid_argument message -> (false, json_error message)
 
-let handle_operation_checkpoint (ctx : (_, _) context) args : result =
+let handle_operation_checkpoint (ctx : (_, _) context) args : tool_result =
   try
     match Command_plane_v2.checkpoint_operation ctx.config ~actor:ctx.agent_name args with
     | Ok operation ->
@@ -240,21 +240,21 @@ let handle_operation_checkpoint (ctx : (_, _) context) args : result =
 
 (* --- Intent handlers --- *)
 
-let handle_intent_create (ctx : (_, _) context) args : result =
+let handle_intent_create (ctx : (_, _) context) args : tool_result =
   (match Command_plane_v2.create_intent_json ctx.config ~actor:ctx.agent_name args with
   | Ok intent -> (true, json_ok [ ("result", Command_plane_v2.intent_to_json intent) ])
   | Error message -> (false, json_error message))
 
-let handle_intent_status (ctx : (_, _) context) args : result =
+let handle_intent_status (ctx : (_, _) context) args : tool_result =
   let intent_id = get_string_opt args "intent_id" in
   (true, Yojson.Safe.to_string (Command_plane_v2.list_intents_json ?intent_id ctx.config))
 
-let handle_intent_update (ctx : (_, _) context) args : result =
+let handle_intent_update (ctx : (_, _) context) args : tool_result =
   (match Command_plane_v2.update_intent_json ctx.config ~actor:ctx.agent_name args with
   | Ok intent -> (true, json_ok [ ("result", Command_plane_v2.intent_to_json intent) ])
   | Error message -> (false, json_error message))
 
-let handle_intent_forecast (ctx : (_, _) context) args : result =
+let handle_intent_forecast (ctx : (_, _) context) args : tool_result =
   let intent_id =
     match get_string_opt args "intent_id" with
     | Some value -> value
@@ -269,16 +269,16 @@ let handle_intent_forecast (ctx : (_, _) context) args : result =
 
 (* --- Observe handlers --- *)
 
-let handle_observe_topology (ctx : (_, _) context) : result =
+let handle_observe_topology (ctx : (_, _) context) : tool_result =
   (true, Yojson.Safe.to_string (Command_plane_v2.topology_json ctx.config))
 
-let handle_observe_alerts (ctx : (_, _) context) : result =
+let handle_observe_alerts (ctx : (_, _) context) : tool_result =
   (true, Yojson.Safe.to_string (Command_plane_v2.list_alerts_json ctx.config))
 
-let handle_observe_operations (ctx : (_, _) context) : result =
+let handle_observe_operations (ctx : (_, _) context) : tool_result =
   (true, Yojson.Safe.to_string (Command_plane_v2.observe_operations_json ctx.config))
 
-let handle_observe_swarm (ctx : (_, _) context) args : result =
+let handle_observe_swarm (ctx : (_, _) context) args : tool_result =
   let run_id =
     match get_string_opt args "run_id" with
     | Some value -> Some value
@@ -430,10 +430,10 @@ let handle_observe_swarm (ctx : (_, _) context) args : result =
                   ] );
             ] ) )
 
-let handle_observe_capacity (ctx : (_, _) context) : result =
+let handle_observe_capacity (ctx : (_, _) context) : tool_result =
   (true, Yojson.Safe.to_string (Command_plane_v2.observe_capacity_json ctx.config))
 
-let handle_observe_traces (ctx : (_, _) context) args : result =
+let handle_observe_traces (ctx : (_, _) context) args : tool_result =
   let operation_id = get_string_opt args "operation_id" in
   let limit =
     match Yojson.Safe.Util.member "limit" args with

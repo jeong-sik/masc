@@ -12,6 +12,7 @@ module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
+module OMR = Masc_mcp.Oas_model_resolve
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -218,7 +219,7 @@ let test_observe_uses_precollected_board_events () =
       check bool "board event schedules turn" true
         (WO.should_run_unified_turn ~meta:minimal_meta obs))
 
-let test_collect_board_events_skips_non_mentions_without_followup () =
+let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -243,9 +244,11 @@ let test_collect_board_events_skips_non_mentions_without_followup () =
           ~continuity_summary:"goal test-keeper"
           ~meta:minimal_meta
       in
-      check int "skips non-mention events" 0 (List.length events);
+      check int "keeps non-mention events" 1 (List.length events);
       check int "new count includes non-mention" 1 new_count;
-      check int "mention count stays zero" 0 mention_count)
+      check int "mention count stays zero" 0 mention_count;
+      check bool "event is not explicit mention" false
+        (List.hd events).explicit_mention)
 
 let test_collect_board_events_keeps_external_replies_after_self_comment () =
   let base_dir = temp_dir () in
@@ -639,10 +642,12 @@ let test_prompt_includes_operational_tool_guidance () =
 
 let test_capabilities_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.capabilities" in
-  check bool "playground described as sandbox" true
-    (contains_substring prompt "playground is your sandbox; worktree is a repo workflow");
-  check bool "pr workflow marked as legacy worktree helper" true
-    (contains_substring prompt "`keeper_pr_workflow` is a legacy one-shot worktree helper");
+  check bool "playground paths documented" true
+    (contains_substring prompt ".masc/playground/");
+  check bool "playground is default coding workspace" true
+    (contains_substring prompt "default coding workspace");
+  check bool "pr workflow deprecated" true
+    (contains_substring prompt "Do NOT use keeper_pr_workflow");
   check bool "pr submit marked canonical" true
     (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
 
@@ -650,9 +655,15 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  check bool "world prompt names worktree workflow" true
+  (* The current prompt frames `.worktrees/` as a separate workflow path that
+     still must stay inside the playground clone. Keep the containment clause
+     asserted so bare server-root `.worktrees/...` paths cannot drift back in. *)
+  check bool "world prompt names worktree workflow inside playground" true
     (contains_substring prompt
-       "Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`")
+       "must live *inside* your playground clone");
+  check bool "world prompt names canonical playground-rooted worktree path" true
+    (contains_substring prompt
+       ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
 let test_system_prompt_prefers_submit_over_legacy_workflow () =
   let sys =
@@ -976,8 +987,10 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
+    (* This unit test does not run Runtime_params.restore, so an empty env var
+       falls back to the code-level default rather than config/cascade.json. *)
     check int "unified max_tokens default" 65536
-      (KC.keeper_unified_max_tokens ())
+    (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
 
 let test_meta_defaults_social_model () =
@@ -993,6 +1006,7 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
   KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
 
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
+    ?trace_ref
     ?run_validation
     ?cascade_observation
     () : Masc_mcp.Keeper_agent_run.run_result =
@@ -1007,6 +1021,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     tools_used = tools;
     checkpoint = None;
     proof = None;
+    trace_ref;
     run_validation;
     stop_reason = Masc_mcp.Oas_worker.Completed;
     inference_telemetry = None;
@@ -1399,6 +1414,15 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Masc_mcp.Room.default_config base_dir in
+      let validation : Agent_sdk.Raw_trace.run_validation = {
+        run_ref = sample_run_ref; ok = true;
+        checks = []; evidence = ["tool_paired:keeper_board_list"];
+        paired_tool_result_count = 1; has_file_write = false;
+        verification_pass_after_file_write = false;
+        final_text = Some "Observed";
+        tool_names = ["keeper_board_list"];
+        stop_reason = Some "completed"; failure_reason = None;
+      } in
       let result =
         {
           (make_run_result ~text:"Observed" ~tools:[]
@@ -1410,6 +1434,8 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
               ~dynamic_context:"Pending mentions: 2"
               ~user_message:"Review the board and decide what to do next."
               ();
+          trace_ref = Some sample_run_ref;
+          run_validation = Some validation;
           cascade_observation =
             Some
               {
@@ -1479,6 +1505,8 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         ~compaction:
           {
             Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
             trigger = None;
             decision = "no_compaction";
             before_tokens = 0;
@@ -1542,7 +1570,16 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
            result.prompt_metrics.user_message_segment.fingerprint)
         Yojson.Safe.Util.(
           json |> member "prompt" |> member "user_message"
-          |> member "fingerprint" |> to_string))
+          |> member "fingerprint" |> to_string);
+      check string "trace ref worker run id persisted"
+        sample_run_ref.worker_run_id
+        Yojson.Safe.Util.(
+          json |> member "trace_ref" |> member "worker_run_id" |> to_string);
+      check bool "run validation persisted" true
+        Yojson.Safe.Util.(json |> member "run_validation" <> `Null);
+      check bool "run validation ok persisted" true
+        Yojson.Safe.Util.(
+          json |> member "run_validation" |> member "ok" |> to_bool))
 
 let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
   Eio_main.run @@ fun env ->
@@ -1582,6 +1619,8 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         ~compaction:
           {
             Masc_mcp.Keeper_exec_context.applied = false;
+            attempted = false;
+            failure_reason = None;
             trigger = None;
             decision = "no_compaction";
             before_tokens = 0;
@@ -1756,14 +1795,29 @@ let test_prompt_sanitizes_control_chars () =
         ];
     }
   in
-  let sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs () in
+  let sys_raw, user_raw =
+    UP.build_prompt ~base_path:"/test" ~meta ~observation:obs ()
+  in
+  (* #6645 intentionally moved UTF-8 sanitization from MASC's
+     [build_prompt] to the OAS pipeline boundary (agent.ml,
+     pipeline.ml, agent_turn.ml in OAS v0.121.0). MASC callers now
+     receive raw strings and the OAS [Agent.run] pipeline scrubs them
+     before hitting the LLM. This test mirrors that downstream
+     responsibility by invoking [sanitize_text_utf8] on the return
+     values post-[build_prompt], confirming the pipeline's invariant:
+     disallowed control chars (< 0x20 excl. \t\n\r, and 0x7f) end up
+     replaced with spaces so user-controlled bytes never reach the
+     LLM raw. See #6656 for the test-only fix; the sanitize call on
+     [build_prompt] output itself was deliberately removed by #6645. *)
+  let sys = Masc_mcp.Inference_utils.sanitize_text_utf8 sys_raw in
+  let user = Masc_mcp.Inference_utils.sanitize_text_utf8 user_raw in
   check bool "system prompt sanitized" false
     (contains_disallowed_control_char sys);
   check bool "user prompt sanitized" false
     (contains_disallowed_control_char user);
-  check bool "mention text preserved" true
+  check bool "mention text preserved after sanitize" true
     (contains_substring user "ping pong");
-  check bool "board preview preserved" true
+  check bool "board preview preserved after sanitize" true
     (contains_substring user "bad preview")
 
 let test_sanitize_messages_utf8_cleans_history_path () =
@@ -1988,6 +2042,80 @@ let test_server_rejected_parse_error_network_error () =
   check bool "network error is NOT parse error" false
     (UT.is_server_rejected_parse_error err)
 
+let test_auto_recoverable_turn_error_includes_transient_network () =
+  let err =
+    Agent_sdk.Error.Api
+      (Timeout { message = "Execution cancelled after 300.0s" })
+  in
+  check bool "timeout is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
+  let err =
+    Agent_sdk.Error.Api
+      (InvalidRequest { message = "Parse error at position 42" })
+  in
+  check bool "server parse rejection is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_auto_recoverable_turn_error_excludes_persistent_errors () =
+  let err =
+    Agent_sdk.Error.Api
+      (AuthError { message = "Unauthorized" })
+  in
+  check bool "auth error is persistent" false
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
+  let expected =
+    Env_config.KeeperKeepalive.oas_timeout_for_context ~max_context:262_144
+  in
+  match
+    UT.bounded_oas_timeout_for_turn_budget
+      ~max_context:262_144 ~remaining_turn_budget_s:1200.0
+  with
+  | Some timeout_s ->
+      check (float 0.01) "adaptive timeout kept under full budget"
+        expected timeout_s
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
+  match
+    UT.bounded_oas_timeout_for_turn_budget
+      ~max_context:262_144 ~remaining_turn_budget_s:235.7
+  with
+  | Some timeout_s ->
+      check (float 0.01) "remaining budget cap applies" 234.7 timeout_s
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_refuses_too_little_budget () =
+  check (option (float 0.01)) "insufficient budget returns none" None
+    (UT.bounded_oas_timeout_for_turn_budget
+       ~max_context:262_144 ~remaining_turn_budget_s:20.0)
+
+let test_pure_local_labels_detection () =
+  check bool "ollama-only cascade is pure local" true
+    (OMR.labels_are_pure_local [ "ollama:qwen3.5:35b-a3b-nvfp4" ]);
+  check bool "mixed cascade is not pure local" false
+    (OMR.labels_are_pure_local [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ])
+
+let test_clamp_context_for_pure_local_labels () =
+  let local_floor = Env_config.ContextCompact.small_local_floor in
+  check int "pure local max_context gets capped" local_floor
+    (OMR.clamp_context_for_pure_local_labels
+       ~labels:[ "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~max_context:262_144);
+  check int "mixed cascade keeps raw context" 262_144
+    (OMR.clamp_context_for_pure_local_labels
+       ~labels:[ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ]
+       ~max_context:262_144)
+
+let test_resolved_max_context_for_turn_uses_primary_budget () =
+  let labels = [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ] in
+  let expected = OMR.resolve_primary_max_context labels in
+  check int "turn budget follows primary available model" expected
+    (UT.resolved_max_context_for_turn ~meta:minimal_meta labels)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -2122,6 +2250,22 @@ let test_validate_completion_contract_accepts_stay_silent () =
   with
   | Ok () -> ()
   | Error e -> fail ("unexpected error: " ^ e)
+
+let test_completion_contract_of_tool_choice_allows_auto () =
+  check bool "auto allows text" true
+    (match KTD.completion_contract_of_tool_choice None with
+     | KTD.Allow_text_or_tool -> true
+     | KTD.Require_tool_use -> false);
+  check bool "none allows text" true
+    (match KTD.completion_contract_of_tool_choice (Some Agent_sdk.Types.None_) with
+     | KTD.Allow_text_or_tool -> true
+     | KTD.Require_tool_use -> false)
+
+let test_completion_contract_of_tool_choice_requires_any () =
+  check bool "any requires tool use" true
+    (match KTD.completion_contract_of_tool_choice (Some Agent_sdk.Types.Any) with
+     | KTD.Require_tool_use -> true
+     | KTD.Allow_text_or_tool -> false)
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before =
@@ -2622,8 +2766,8 @@ let () =
           test_case "with mentions" `Quick test_observation_with_mentions;
           test_case "uses precollected board events" `Quick
             test_observe_uses_precollected_board_events;
-          test_case "skips non-mention board events without follow-up" `Quick
-            test_collect_board_events_skips_non_mentions_without_followup;
+          test_case "keeps non-mention board events as follow-up signal" `Quick
+            test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
           test_case "collects room signal when enabled" `Quick
@@ -2788,6 +2932,10 @@ let () =
             test_validate_completion_contract_requires_tool_use;
           test_case "completion contract accepts stay silent" `Quick
             test_validate_completion_contract_accepts_stay_silent;
+          test_case "completion contract mapping allows auto" `Quick
+            test_completion_contract_of_tool_choice_allows_auto;
+          test_case "completion contract mapping requires any" `Quick
+            test_completion_contract_of_tool_choice_requires_any;
           test_case "tool usage delta uses registry counts" `Quick
             test_tool_usage_delta_uses_registry_counts;
           test_case "tool usage delta ignores removed tools" `Quick
@@ -2895,6 +3043,24 @@ let () =
             test_server_rejected_parse_error_generic_cant_find;
           test_case "network error is NOT server parse error" `Quick
             test_server_rejected_parse_error_network_error;
+          test_case "auto-recoverable includes transient network" `Quick
+            test_auto_recoverable_turn_error_includes_transient_network;
+          test_case "auto-recoverable includes server parse rejection" `Quick
+            test_auto_recoverable_turn_error_includes_server_parse_rejection;
+          test_case "auto-recoverable excludes persistent errors" `Quick
+            test_auto_recoverable_turn_error_excludes_persistent_errors;
+          test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
+            test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
+          test_case "bounded OAS timeout caps to remaining turn budget" `Quick
+            test_bounded_oas_timeout_caps_to_remaining_turn_budget;
+          test_case "bounded OAS timeout refuses too little remaining budget" `Quick
+            test_bounded_oas_timeout_refuses_too_little_budget;
+          test_case "pure local label detection" `Quick
+            test_pure_local_labels_detection;
+          test_case "pure local context clamp" `Quick
+            test_clamp_context_for_pure_local_labels;
+          test_case "turn context budget uses primary model" `Quick
+            test_resolved_max_context_for_turn_uses_primary_budget;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

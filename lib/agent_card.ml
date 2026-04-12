@@ -405,7 +405,7 @@ let generate_default
     extensions = [
       ("masc", `Assoc [
         ("roomPath", `String ".masc");
-        ("storageTypes", `List [`String "file"; `String "postgres"]);
+        ("storageTypes", `List [`String "file"]);
         ("features", `Assoc [
           ("voting", `Bool true);
           ("worktree", `Bool true);

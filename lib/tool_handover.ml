@@ -11,7 +11,7 @@ type context = {
   sw: Eio.Switch.t option;  (* Only needed when fs and proc_mgr are Some *)
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 (* Individual handlers *)
 let handle_handover_create ctx args =
@@ -227,7 +227,7 @@ Pair with masc_handover_list to browse available handovers first.";
 ]
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_handover_create" -> Some (handle_handover_create ctx args)
   | "masc_handover_list" -> Some (handle_handover_list ctx args)

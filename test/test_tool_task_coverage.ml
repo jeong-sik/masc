@@ -6,10 +6,36 @@ let () = Random.self_init ()
 
 let () = Printf.printf "\n=== Tool_task Coverage Tests ===\n"
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_isolated_runtime_env f =
+  with_env "MASC_BASE_PATH" None (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+      with_env "MASC_STORAGE_TYPE" None (fun () ->
+        with_env "MASC_POSTGRES_URL" None (fun () ->
+          with_env "DATABASE_URL" None (fun () ->
+            with_env "SUPABASE_DB_URL" None (fun () ->
+              with_env "SB_PG_URL" None f))))))
+
 (* Test helper *)
 let test name f =
   try
-    Eio_main.run @@ (fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env); f ());
+    Eio_main.run @@ (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_isolated_runtime_env f);
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
@@ -71,6 +97,18 @@ let () = test "dispatch_tasks" (fun () ->
   match Tool_task.dispatch ctx ~name:"masc_tasks" ~args with
   | Some (success, _result) -> assert success
   | None -> failwith "dispatch returned None"
+)
+
+let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
+  match Masc_eio_env.get_opt () with
+  | Some _ ->
+    failwith
+      "masc_oas_bridge_runs_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
+  | None ->
+    match Masc_oas_bridge.run_safe ~timeout_s:0.1 (fun () -> Ok "ok") with
+    | Ok "ok" -> ()
+    | Ok other -> failwith ("unexpected result: " ^ other)
+    | Error err -> failwith (Oas.Error.to_string err)
 )
 
 (* Test dispatch transition claim *)
@@ -299,6 +337,62 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
+let () = test "handle_claim_appends_preset_warning_only_on_success" (fun () ->
+  let agent_name = "test-agent" in
+  let ctx = make_test_ctx_with_agent agent_name in
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
+  (match
+     Room.update_agent_r ctx.config ~agent_name
+       ~capabilities:[ "preset:minimal" ] ()
+   with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Needs social");
+          ("required_preset", `String "social");
+        ])
+  in
+  let success, result =
+    Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  assert success;
+  assert (str_contains result "preset_mismatch")
+)
+
+let () = test "handle_claim_skips_preset_warning_on_failed_claim" (fun () ->
+  let agent_name = "test-agent" in
+  let ctx = make_test_ctx_with_agent agent_name in
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
+  (match
+     Room.update_agent_r ctx.config ~agent_name
+       ~capabilities:[ "preset:minimal" ] ()
+   with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let _ =
+    Tool_task.handle_add_task ctx
+      (`Assoc
+        [
+          ("title", `String "Needs social");
+          ("required_preset", `String "social");
+        ])
+  in
+  let _ = Room.join ctx.config ~agent_name:"other-agent" ~capabilities:[] () in
+  (match Room.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () with
+  | Ok _ -> ()
+  | Error e -> failwith (Types.masc_error_to_string e));
+  let success, result =
+    Tool_task.handle_claim ctx (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  assert (not success);
+  assert (not (str_contains result "preset_mismatch"))
+)
+
 let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim next")]) in
@@ -505,6 +599,116 @@ let () = test "get_int_opt_present" (fun () ->
 let () = test "get_int_opt_missing" (fun () ->
   let args = `Assoc [] in
   assert (Tool_args.get_int_opt args "key" = None)
+)
+
+(* ================================================================ *)
+(* verdict_recorded SSE payload contract                             *)
+(*                                                                   *)
+(* The payload is built by Tool_task.build_verdict_sse_payload —     *)
+(* a pure helper — so dashboard subscribers depend on a stable       *)
+(* JSON shape. The cross_model bool must match Eval_calibration's    *)
+(* inclusion rule (both cascades non-empty AND distinct).            *)
+(* ================================================================ *)
+
+let make_review_request () : Anti_rationalization.review_request =
+  { task_title = "Fix login bug";
+    task_description = "desc";
+    completion_notes = "notes";
+    agent_name = "dreamer" }
+
+let make_review_result
+    ?(verdict = Anti_rationalization.Approve)
+    ?(evaluator_cascade = "verifier")
+    ?generator_cascade
+    ?(gate = Anti_rationalization.Structured_tool)
+    ?fallback_reason
+    () : Anti_rationalization.review_result =
+  { verdict; evaluator_cascade; generator_cascade; gate; fallback_reason }
+
+let payload_member key (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `Assoc fields -> List.assoc "payload" fields |> (function
+      | `Assoc payload_fields -> List.assoc key payload_fields
+      | _ -> failwith "payload is not an object")
+  | _ -> failwith "top-level is not an object"
+
+let () = test "build_verdict_sse_payload: distinct cascades = cross_model true" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:"verifier"
+      ~generator_cascade:"keeper_unified"
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t1" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool true);
+  assert (payload_member "generator_cascade" json = `String "keeper_unified");
+  assert (payload_member "evaluator_cascade" json = `String "verifier");
+  assert (payload_member "task_id" json = `String "t1")
+)
+
+let () = test "build_verdict_sse_payload: same cascade = cross_model false" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:"verifier"
+      ~generator_cascade:"verifier"
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t2" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "generator_cascade" json = `String "verifier")
+)
+
+let () = test "build_verdict_sse_payload: no generator = cross_model false + null" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result ~evaluator_cascade:"verifier" () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t3" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "generator_cascade" json = `Null)
+)
+
+let () = test "build_verdict_sse_payload: empty generator string = cross_model false" (fun () ->
+  (* Defensive: align with Eval_calibration which excludes empty
+     strings from the denominator. Without this guard SSE and stats
+     would disagree when a cascade is empty. *)
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:"verifier"
+      ~generator_cascade:""
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t4" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "generator_cascade" json = `String "")
+)
+
+let () = test "build_verdict_sse_payload: empty evaluator string = cross_model false" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~evaluator_cascade:""
+      ~generator_cascade:"keeper_unified"
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t5" ~req ~result in
+  assert (payload_member "cross_model" json = `Bool false)
+)
+
+let () = test "build_verdict_sse_payload: fallback_reason serialized" (fun () ->
+  let req = make_review_request () in
+  let result =
+    make_review_result
+      ~fallback_reason:"llm timeout"
+      ~gate:Anti_rationalization.Fallback
+      () in
+  let json = Tool_task.build_verdict_sse_payload
+    ~now:1234567890.0 ~task_id:"t6" ~req ~result in
+  assert (payload_member "fallback_reason" json = `String "llm timeout");
+  assert (payload_member "gate" json = `String "fallback")
 )
 
 let () = Printf.printf "\n✅ All Tool_task tests passed!\n"

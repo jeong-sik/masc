@@ -136,7 +136,7 @@ let read_json_root config path =
   | Some key -> begin
       match config.backend with
       | FileSystem _ when Sys.file_exists path -> read_json_local path
-      | Memory _ | FileSystem _ | PostgresNative _ ->
+      | Memory _ | FileSystem _ ->
       match backend_get config ~key with
       | Ok (Some content) ->
           (let trimmed = String.trim content in
@@ -181,7 +181,7 @@ let path_exists_root config path =
   | Some key ->
       (match config.backend with
        | FileSystem _ -> Sys.file_exists path || backend_exists config ~key
-       | Memory _ | PostgresNative _ -> backend_exists config ~key)
+       | Memory _ -> backend_exists config ~key)
   | None -> Sys.file_exists path
 
 let read_json config path =
@@ -189,7 +189,7 @@ let read_json config path =
   | Some key -> begin
       match config.backend with
       | FileSystem _ when Sys.file_exists path -> read_json_local path
-      | Memory _ | FileSystem _ | PostgresNative _ ->
+      | Memory _ | FileSystem _ ->
       match backend_get config ~key with
       | Ok (Some content) ->
           (let trimmed = String.trim content in
@@ -216,7 +216,7 @@ let read_json_result config path =
   | Some key -> begin
       match config.backend with
       | FileSystem _ when Sys.file_exists path -> read_json_local_result path
-      | Memory _ | FileSystem _ | PostgresNative _ ->
+      | Memory _ | FileSystem _ ->
       match backend_get config ~key with
       | Ok (Some content) ->
           parse_backend_json ~context:"read_json_result" content
@@ -247,7 +247,7 @@ let read_text config path =
 let should_dual_write_local (config : config) =
   match config.backend with
   | FileSystem _ -> false
-  | Memory _ | PostgresNative _ -> true
+  | Memory _ -> true
 
 let write_json config path json =
   match key_of_path config path with
@@ -301,7 +301,7 @@ let path_exists config path =
   | Some key ->
       (match config.backend with
        | FileSystem _ -> Sys.file_exists path || backend_exists config ~key
-       | Memory _ | PostgresNative _ -> backend_exists config ~key)
+       | Memory _ -> backend_exists config ~key)
   | None -> Sys.file_exists path
 
 let append_text config path content =
@@ -450,7 +450,7 @@ let with_file_lock_impl ?clock config path f =
              Serialize same-path updates cooperatively to avoid read-modify-write
              races in append/readback helpers. *)
           File_lock_eio.with_mutex path f
-      | FileSystem _ | PostgresNative _ ->
+      | FileSystem _ ->
           with_distributed_lock ?clock config path key f)
 
 let with_file_lock_eio ~clock config path f =
@@ -467,7 +467,7 @@ let with_file_lock_r_impl ?clock config path f : ('a, masc_error) result =
   | Some key -> (
       match config.backend with
       | Memory _ -> File_lock_eio.with_mutex path (fun () -> Ok (f ()))
-      | FileSystem _ | PostgresNative _ ->
+      | FileSystem _ ->
           with_distributed_lock_r ?clock config path key f)
 
 let with_file_lock_r_eio ~clock config path f : ('a, masc_error) result =

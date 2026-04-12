@@ -14,9 +14,9 @@
 *)
 
 (** Re-export shared types so callers can use
-    [Tool_inline_dispatch.context] and [Tool_inline_dispatch.result]
+    [Tool_inline_dispatch.context] and [Tool_inline_dispatch.tool_result]
     without knowing about the types sub-module. *)
-type result = Tool_inline_dispatch_types.result
+type tool_result = Tool_inline_dispatch_types.tool_result
 type context = Tool_inline_dispatch_types.context = {
   config : Room.config;
   agent_name : string;
@@ -45,7 +45,7 @@ let safe_exec = Tool_inline_dispatch_types.safe_exec
 (** Dispatch a tool call.
     Returns [Some (success, message)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
-let dispatch (ctx : context) ~(name : string) : result option =
+let dispatch (ctx : context) ~(name : string) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in

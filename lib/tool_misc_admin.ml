@@ -10,7 +10,7 @@ open Tool_args
 
 module U = Yojson.Safe.Util
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config: Room.config;
@@ -200,7 +200,7 @@ let enforcement_summary_json () =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_feature_flags args : result =
+let handle_feature_flags args : tool_result =
   let category_filter =
     match U.member "category" args with
     | `String c when String.trim c <> "" -> Some (String.lowercase_ascii (String.trim c))
@@ -230,7 +230,7 @@ let handle_feature_flags args : result =
   ] in
   (true, Yojson.Safe.to_string json)
 
-let handle_config args : result =
+let handle_config args : tool_result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
   (true, Yojson.Safe.to_string json)

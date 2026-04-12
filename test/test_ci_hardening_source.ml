@@ -211,6 +211,9 @@ let test_keeper_direct_reply_contracts () =
   check bool "operator keeper_message forwards direct reply flag" true
     (file_contains_pattern "lib/operator/operator_control.ml"
        {|("direct_reply", `Bool true)|});
+  check bool "channel gate keeper bridge uses streaming reply path" true
+    (file_contains_pattern "lib/gate_keeper_backend.ml"
+       "Tool_keeper.dispatch_stream");
   check bool "keeper turn parses direct reply flag" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "get_bool args \"direct_reply\"");
@@ -374,8 +377,8 @@ let test_dashboard_component_split_contracts () =
   check bool "mission attention card exported from split file" true
     (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
        "export function AttentionCard");
-  check bool "room backend setup prefers supabase transaction companion when present" true
-    (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
+  check bool "room backend setup no longer references transaction companion after PG removal" true
+    (file_not_contains_pattern "lib/room/room_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
 let test_mission_briefing_memory_guard_contracts () =

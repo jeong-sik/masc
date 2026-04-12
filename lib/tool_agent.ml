@@ -400,6 +400,17 @@ let _tool_spec_read_only =
   [ "masc_agents"; "masc_agent_card"; "masc_meta_cognition_snapshot" ]
 let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 
+let tool_required_permission = function
+  | "masc_agents" | "masc_agent_card" | "masc_agent_fitness"
+  | "masc_select_agent" | "masc_collaboration_graph"
+  | "masc_get_metrics" | "masc_agent_relations"
+  | "masc_meta_cognition_snapshot" ->
+      Some Types.CanReadState
+  | "masc_register_capabilities" | "masc_agent_update"
+  | "masc_find_by_capability" ->
+      Some Types.CanBroadcast
+  | _ -> None
+
 (* Heartbeat tools are dispatched by Tool_heartbeat, not Tool_agent.
    Registering them here under Mod_agent would create a module_tag conflict.
    Derived from Tool_heartbeat.schemas to stay in sync automatically. *)
@@ -416,9 +427,10 @@ let () =
              ~description:s.description
              ~module_tag:Tool_dispatch.Mod_agent
              ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
+             ~handler_binding:Tag_dispatch
              ~is_read_only:(List.mem s.name _tool_spec_read_only)
              ~is_idempotent:(List.mem s.name _tool_spec_read_only)
              ~requires_join:(List.mem s.name _tool_spec_requires_join)
+             ?required_permission:(tool_required_permission s.name)
              ()))
     schemas

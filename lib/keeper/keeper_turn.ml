@@ -187,7 +187,12 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
              | Some v ->
                  Log.Keeper.debug "%s: using max_context_override=%d (manual turn)" meta.name v;
                  v
-             | None -> Oas_model_resolve.resolve_max_cascade_context effective_models
+             | None ->
+                 let resolved =
+                   Oas_model_resolve.resolve_max_cascade_context effective_models
+                 in
+                 Oas_model_resolve.clamp_context_for_pure_local_labels
+                   ~labels:effective_models ~max_context:resolved
            in
            if raw < min_keeper_context then begin
              Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
@@ -306,6 +311,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~build_turn_prompt
                     ~user_message:message
                     ~cascade_name:turn_cascade_name
+                    ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event
                     ~trajectory_acc
@@ -329,35 +335,25 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  ~label:"trajectory finalize (agent_run ok)" exn);
               let lifecycle =
                 Keeper_exec_context.apply_post_turn_lifecycle ~base_dir
+                  ~on_compaction_started:(fun () ->
+                    Keeper_exec_context.dispatch_keeper_phase_event
+                      ~config:ctx.config
+                      ~keeper_name:meta.name
+                      Keeper_state_machine.Compaction_started)
+                  ~on_handoff_started:(fun () ->
+                    Keeper_exec_context.dispatch_keeper_phase_event
+                      ~config:ctx.config
+                      ~keeper_name:meta.name
+                      Keeper_state_machine.Handoff_started)
                   ~meta
                   ~model:result.model_used
                   ~primary_model_max_tokens:max_cascade_context
                   ~checkpoint:result.checkpoint
               in
-              (* RFC-0002: dispatch buffer state events after lifecycle *)
-              if lifecycle.compaction.applied then begin
-                ignore (Keeper_registry.dispatch_event
-                  ~base_path:base_dir meta.name
-                  Keeper_state_machine.Compaction_started);
-                ignore (Keeper_registry.dispatch_event
-                  ~base_path:base_dir meta.name
-                  (Keeper_state_machine.Compaction_completed {
-                    before_tokens = lifecycle.compaction.before_tokens;
-                    after_tokens = lifecycle.compaction.after_tokens;
-                  }))
-              end;
-              (match lifecycle.handoff_json with
-               | Some _json ->
-                   ignore (Keeper_registry.dispatch_event
-                     ~base_path:base_dir meta.name
-                     Keeper_state_machine.Handoff_started);
-                   ignore (Keeper_registry.dispatch_event
-                     ~base_path:base_dir meta.name
-                     (Keeper_state_machine.Handoff_completed {
-                       generation = lifecycle.updated_meta.runtime.generation;
-                       new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
-                     }))
-               | None -> ());
+              Keeper_exec_context.dispatch_post_turn_lifecycle_events
+                ~config:ctx.config
+                ~keeper_name:meta.name
+                lifecycle;
               let updated_meta =
                 update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
               in

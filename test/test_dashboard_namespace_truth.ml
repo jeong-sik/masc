@@ -1,6 +1,9 @@
 (** Dashboard namespace-truth read-model regression tests. *)
 
 let () = Masc_mcp.Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  let base_path = Masc_test_deps.find_project_root () in
+  ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path))
 
 module Lib = Masc_mcp
 module Feedback = Masc_mcp.Server_meta_cognition_feedback
@@ -512,6 +515,7 @@ let test_last_good_shell_fallback_preserves_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      ignore (Lib.Room.init state.Lib.Mcp_server.room_config ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so _last_good_shell gets populated. *)
       Lib.Server_dashboard_http.warm_shell_cache state;
@@ -547,6 +551,7 @@ let test_namespace_truth_snapshot_hash_ignores_generated_at () =
     ~finally:(fun () ->
       Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None)
     (fun () ->
+      Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None;
       Eio_main.run @@ fun _env ->
       let snapshot ~generated_at ~active_sessions =
         `Assoc

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
+import { LoadingState } from './common/feedback-state'
 import { fetchExcusePatterns, updateExcusePatterns } from '../api/dashboard'
 import type { ExcusePattern } from '../api/dashboard'
 import { createAsyncResource } from '../lib/async-state'
@@ -51,7 +52,7 @@ export function ExcusePatterns() {
   if (s.status === 'loading') {
     return html`
       <${Card} title="Anti-Rationalization Excuse Patterns">
-        <div class="p-4 text-[var(--text-muted)]">핑계 패턴 로딩 중...</div>
+        <${LoadingState}>핑계 패턴 불러오는 중...<//>
       </Card>
     `
   }

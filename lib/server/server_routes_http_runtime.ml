@@ -124,13 +124,6 @@ let make_health_json ?(listener = "http/1.1") request =
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
-    ("pg_pool", let max_size = Backend_types.configured_max_pool_size () in
-      let shared = Option.is_some (Board_dispatch.get_pg_pool ()) in
-      Backend_types.pool_stats_to_yojson {
-        max_size;
-        pool_count = (if shared then 3 else 5);
-        shared_pool_injected = shared;
-      });
     ("subsystems", Subsystem_health.to_yojson ());
     ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);

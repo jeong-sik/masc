@@ -54,7 +54,6 @@ idle 규칙:
 """
 
 room_scope = "current"
-scope_kind = "local"
 mention_targets = ["sangsu", "상수", "홍상수", "cheolsu", "uranium666"]
 
 proactive_enabled = true
@@ -66,8 +65,7 @@ execution_scope = "workspace"
 tool_preset = "social"
 also_allow = ["keeper_voice_speak", "keeper_voice_listen"]
 
-# GLM flash cascade for reliable tool calling (voice_speak, voice_listen).
-# local_only cascade has poor tool selection with qwen3.5.
+# GLM Coding Plan first, Ollama fallback (oas#786 relaxes tool_choice)
 cascade_name = "keeper_unified"
 
 # Telemetry Feedback

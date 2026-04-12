@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from typing import Any
 from typing import Final
 from urllib.parse import urlparse
 
@@ -55,6 +56,16 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("IMESSAGE_POLL_INTERVAL", "poll_interval_sec"),
         description="Seconds between chat.db polls for new messages.",
     )
+    reply_mode: str = Field(
+        default="self-chat",
+        validation_alias=AliasChoices("IMESSAGE_REPLY_MODE", "reply_mode"),
+        description="Outbound reply mode: self-chat or source-chat.",
+    )
+    self_chat_guid: str = Field(
+        default="",
+        validation_alias=AliasChoices("IMESSAGE_SELF_CHAT_GUID", "self_chat_guid"),
+        description="Optional explicit Messages.app chat guid for self-chat mode.",
+    )
 
     # Gate HTTP
     gate_timeout_sec: float = Field(default=30.0)
@@ -91,6 +102,23 @@ class BotConfig(BaseSettings):
         if v < 0.5:
             raise ValueError("poll_interval_sec must be >= 0.5")
         return v
+
+    @field_validator("reply_mode")
+    @classmethod
+    def validate_reply_mode(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in {"self-chat", "source-chat"}:
+            raise ValueError("reply_mode must be self-chat or source-chat")
+        return normalized
+
+    @field_validator("self_chat_guid", mode="before")
+    @classmethod
+    def validate_self_chat_guid(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            raise ValueError("self_chat_guid must be a string or null")
+        return v.strip()
 
     def gate_message_url(self) -> str:
         return f"{self.gate_base_url}/api/v1/gate/message"

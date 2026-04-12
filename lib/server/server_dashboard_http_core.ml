@@ -19,12 +19,10 @@ let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
 let dashboard_runtime ?net ?mono_clock (config : Room.config) :
     Server_dashboard_http_runtime_support.runtime option =
-  match config.backend_config.Backend.backend_type with
-  | Backend.PostgresNative -> (
-      match net, mono_clock with
-      | Some net, Some mono_clock -> Some { net; mono_clock }
-      | _ -> None)
-  | Backend.Memory | Backend.FileSystem -> None
+  let _ = config in
+  match net, mono_clock with
+  | Some net, Some mono_clock -> Some { net; mono_clock }
+  | _ -> None
 
 let run_dashboard_compute ?(mode = Offloaded_readonly) ?net ?mono_clock ~sw ~clock
     ~(config : Room.config) compute =

@@ -1,6 +1,7 @@
 include Cp_unit
 
 type section_cache = {
+  mutable base_path : string option;
   mutable topo_units_mtime : float;
   mutable topo_agents_mtime : float;
   mutable agents : Types.agent list;
@@ -23,6 +24,7 @@ type section_cache = {
 
 let create () =
   {
+    base_path = None;
     topo_units_mtime = 0.0;
     topo_agents_mtime = 0.0;
     agents = [];

@@ -211,30 +211,15 @@ let resolve_keeper_target_path ~(config : Room.config)
      [`allowed_paths`] explicitly if needed.)
     - [`*`] → [] (full access, explicit opt-in bypasses path checks)
     - other  → playground :: workspace_defaults @ explicit *)
-let sanitize_keeper_name (name : string) : string =
-  String.map (fun c ->
-    if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-       || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
-    then c else '_') name
-
-let playground_path_of_keeper (name : string) : string =
-  let safe_name = sanitize_keeper_name name in
-  Printf.sprintf ".masc/playground/%s/" safe_name
-
-let playground_mind_path (name : string) : string =
-  let safe_name = sanitize_keeper_name name in
-  Printf.sprintf ".masc/playground/%s/mind/" safe_name
-
-let playground_repos_path (name : string) : string =
-  let safe_name = sanitize_keeper_name name in
-  Printf.sprintf ".masc/playground/%s/repos/" safe_name
-
-let playground_bundle_paths (name : string) : string list =
-  [
-    playground_path_of_keeper name;
-    playground_mind_path name;
-    playground_repos_path name;
-  ]
+(* Playground path SSOT lives in [Playground_paths] (masc_config). These
+   names preserve the historical keeper-facing API. Do not re-implement
+   the literal ".masc/playground" layout here — edit [Playground_paths]
+   if it ever changes. *)
+let sanitize_keeper_name = Playground_paths.sanitize_keeper_name
+let playground_path_of_keeper = Playground_paths.bundle_root
+let playground_mind_path = Playground_paths.mind_path
+let playground_repos_path = Playground_paths.repos_path
+let playground_bundle_paths = Playground_paths.bundle_paths
 
 let ensure_playground_bundle ~(config : Room.config) ~(name : string) : string list =
   let root = project_root_of_config config in
@@ -248,12 +233,22 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     match String.lowercase_ascii meta.execution_scope with
     | "workspace" ->
       let safe_name = sanitize_keeper_name meta.name in
+      (* NOTE (#6527 iter 4): `.worktrees/` was previously included
+         here so keepers could read and write worktrees created at the
+         server repository root by the old `worktree_create_r`
+         fallback. That fallback was removed in PR #6542 (iter 2), so
+         new worktrees always land at
+         `.masc/playground/<keeper>/repos/<clone>/.worktrees/<name>/`,
+         which is already inside `playground_paths`. Keeping
+         `.worktrees/` as a workspace default would allow any keeper
+         with workspace scope to read and write into another keeper's
+         server-root worktree or into the MASC repo's own worktrees —
+         exactly the containment leak #6527 is closing. Remove it.
+         Keepers that genuinely need access to a specific worktree can
+         still add it via explicit `allowed_paths` on their keeper
+         meta. *)
       [ Printf.sprintf ".masc/keepers/%s/" safe_name;
         ".masc/traces/";
-        (* Worktrees created by masc_worktree_create land here.
-           Without this, keepers can create worktrees but cannot
-           read or write files inside them. *)
-        ".worktrees/";
         (* Main repo source for read access *)
         "lib/";
         "test/";

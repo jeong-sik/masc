@@ -12,6 +12,8 @@ open Keeper_context_core
 type handoff_rollover = {
   updated_meta : keeper_meta;
   handoff_json : Yojson.Safe.t option;
+  attempted : bool;
+  failure_reason : string option;
   context_ratio : float;
   context_tokens : int;
   context_max : int;
@@ -19,6 +21,7 @@ type handoff_rollover = {
 }
 
 let maybe_rollover_oas_handoff
+    ~(on_started : unit -> unit)
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(model : string)
@@ -29,6 +32,8 @@ let maybe_rollover_oas_handoff
       {
         updated_meta = meta;
         handoff_json = None;
+        attempted = false;
+        failure_reason = None;
         context_ratio = 0.0;
         context_tokens = 0;
         context_max = primary_model_max_tokens;
@@ -53,6 +58,8 @@ let maybe_rollover_oas_handoff
         {
           updated_meta = base_meta;
           handoff_json = None;
+          attempted = false;
+          failure_reason = None;
           context_ratio = ratio;
           context_tokens = token_count ctx;
           context_max = ctx.max_tokens;
@@ -70,6 +77,7 @@ let maybe_rollover_oas_handoff
         let prev_trace_id = base_meta.runtime.trace_id in
         let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
+        on_started ();
         (try
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir
@@ -83,14 +91,17 @@ let maybe_rollover_oas_handoff
               Log.Keeper.error
                 "keeper:%s OAS handoff rollover ABORTED — checkpoint save failed: %s"
                 base_meta.name e;
-              rollover_base
+              { rollover_base with attempted = true; failure_reason = Some e }
           | Ok _checkpoint ->
               (match Keeper_id.Trace_id.of_string new_trace_id with
                | Error err ->
                  Log.Keeper.error
                    "keeper:%s OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
                    base_meta.name new_trace_id err;
-                 rollover_base
+                 { rollover_base with
+                   attempted = true;
+                   failure_reason = Some err;
+                 }
                | Ok parsed_trace_id ->
                  let updated_meta =
                    {
@@ -122,9 +133,17 @@ let maybe_rollover_oas_handoff
                    "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
                    base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
                    next_generation ratio;
-                 { rollover_base with updated_meta; handoff_json = Some handoff_json })
+                 { rollover_base with
+                   updated_meta;
+                   handoff_json = Some handoff_json;
+                   attempted = true;
+                   failure_reason = None;
+                 })
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             log_keeper_exn ~label:"keeper OAS handoff rollover failed" exn;
-            rollover_base)
+            { rollover_base with
+              attempted = true;
+              failure_reason = Some (Printexc.to_string exn);
+            })

@@ -90,19 +90,56 @@ let episode_ids_of episodes =
    Callers that need fewer use cached_recent_episodes ~limit. *)
 let episode_cache_limit = 500
 
-let load_all_episodes_cached_unlocked () =
-  let path = Institution_eio.episodes_jsonl_path () in
+(* Pure cache construction: stat + JSONL read + build a fresh
+   [episode_file_cache].  Touches no shared state, so safe to run
+   with no lock held. *)
+let build_episode_cache_from_disk path =
   let stamp = file_stamp_opt path in
-  match Hashtbl.find_opt episode_file_cache_tbl path with
-  | Some cache when cache.stamp = stamp -> cache
-  | _ ->
-      let episodes = Institution_eio.load_recent_episodes_jsonl ~limit:episode_cache_limit in
-      let cache = { stamp; episodes; ids = episode_ids_of episodes } in
-      Hashtbl.replace episode_file_cache_tbl path cache;
-      cache
+  let episodes =
+    Institution_eio.load_recent_episodes_jsonl ~limit:episode_cache_limit
+  in
+  { stamp; episodes; ids = episode_ids_of episodes }
 
+(* Cache-aware episode loader.
+
+   Previously held [episode_cache_mu] across
+   [Institution_eio.load_recent_episodes_jsonl] on every cache miss,
+   meaning all concurrent [seed_episodes] / [persisted_episode_ids]
+   / [cached_recent_episodes] callers serialised on a single JSONL
+   read of up to [episode_cache_limit = 500] records.  Same drift
+   class as the [Prompt_registry] / [Discovery_cache] siblings fixed
+   in PRs #6663 / #6668 — an [_unlocked] helper was called from
+   inside the caller's [with_mutex], re-introducing the
+   I/O-under-lock anti-pattern.
+
+   Split into:
+   1. Stamp check under the mutex (pure [Hashtbl.find_opt] +
+      [Unix.stat]).
+   2. Hot path returns the cached record if the stamp still matches.
+   3. On miss, release the lock, build the cache from disk outside
+      the lock, install under a fresh short mutex section.
+
+   Concurrent misses may both run the JSONL read; that is wasteful
+   but correct (the last writer wins on [Hashtbl.replace]).  In
+   practice the stamp check short-circuits the vast majority of
+   calls. *)
 let load_all_episodes_cached () =
-  Eio_guard.with_mutex episode_cache_mu load_all_episodes_cached_unlocked
+  let path = Institution_eio.episodes_jsonl_path () in
+  let cached_opt =
+    Eio_guard.with_mutex episode_cache_mu (fun () ->
+      let current_stamp = file_stamp_opt path in
+      match Hashtbl.find_opt episode_file_cache_tbl path with
+      | Some cache when cache.stamp = current_stamp -> Some cache
+      | _ -> None)
+  in
+  match cached_opt with
+  | Some cache -> cache
+  | None ->
+      (* JSONL read OUTSIDE the mutex. *)
+      let fresh = build_episode_cache_from_disk path in
+      Eio_guard.with_mutex episode_cache_mu (fun () ->
+        Hashtbl.replace episode_file_cache_tbl path fresh);
+      fresh
 
 let cached_recent_episodes ~limit =
   let cache = load_all_episodes_cached () in
@@ -116,33 +153,49 @@ let cached_recent_episodes ~limit =
     in
     drop (total - limit) cache.episodes
 
+(* Record an episode that was just appended to the JSONL file.
+
+   Previously called [load_all_episodes_cached_unlocked] while
+   holding [episode_cache_mu], which meant a cache-miss during
+   flush would block on the same under-mutex JSONL read the main
+   fix addresses above.  Instead, look the cache up in place: if
+   it exists, mutate in place (fast path — no I/O); if it's
+   missing, skip — the next [load_all_episodes_cached] call will
+   populate a fresh cache from disk including the newly-appended
+   episode.
+
+   The [stamp] update keeps the cache in sync with the file's new
+   mtime so subsequent loaders do not trigger a reload purely
+   because [note_episode_flush] just wrote to the file. *)
 let note_episode_flush (episode : Institution_eio.episode) =
+  let path = Institution_eio.episodes_jsonl_path () in
   Eio_guard.with_mutex episode_cache_mu (fun () ->
-    let path = Institution_eio.episodes_jsonl_path () in
-    let cache = load_all_episodes_cached_unlocked () in
-    if not (Hashtbl.mem cache.ids episode.id) then begin
-      let episodes = cache.episodes @ [episode] in
-      (* Trim oldest entries when cache exceeds limit *)
-      let total = List.length episodes in
-      let episodes =
-        if total > episode_cache_limit then
-          let drop_n = total - episode_cache_limit in
-          let rec drop n = function
-            | [] -> []
-            | remaining when n <= 0 -> remaining
-            | (ep : Institution_eio.episode) :: rest ->
-                Hashtbl.remove cache.ids ep.id;
-                drop (n - 1) rest
-          in
-          drop drop_n episodes
-        else
-          episodes
-      in
-      cache.episodes <- episodes;
-      Hashtbl.replace cache.ids episode.id ();
-    end;
-    cache.stamp <- file_stamp_opt path;
-    Hashtbl.replace episode_file_cache_tbl path cache)
+    match Hashtbl.find_opt episode_file_cache_tbl path with
+    | None -> ()  (* No cache to update; next loader will populate fresh *)
+    | Some cache ->
+      if not (Hashtbl.mem cache.ids episode.id) then begin
+        let episodes = cache.episodes @ [episode] in
+        (* Trim oldest entries when cache exceeds limit *)
+        let total = List.length episodes in
+        let episodes =
+          if total > episode_cache_limit then
+            let drop_n = total - episode_cache_limit in
+            let rec drop n = function
+              | [] -> []
+              | remaining when n <= 0 -> remaining
+              | (ep : Institution_eio.episode) :: rest ->
+                  Hashtbl.remove cache.ids ep.id;
+                  drop (n - 1) rest
+            in
+            drop drop_n episodes
+          else
+            episodes
+        in
+        cache.episodes <- episodes;
+        Hashtbl.replace cache.ids episode.id ();
+      end;
+      cache.stamp <- file_stamp_opt path;
+      Hashtbl.replace episode_file_cache_tbl path cache)
 
 type procedure_file_cache = {
   mutable stamp : file_stamp option;

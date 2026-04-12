@@ -100,10 +100,7 @@ let rate_limiting_entries =
 let storage_entries =
   [
     entry ~default:"filesystem" "MASC_STORAGE_TYPE"
-      "Backend storage type (filesystem|postgres)";
-    entry ~sensitive:true ~default:"(none)" "MASC_POSTGRES_URL"
-      "PostgreSQL connection URL";
-    entry ~default:"10" "MASC_PG_POOL_SIZE" "PostgreSQL connection pool size";
+      "Backend storage type (filesystem only)";
     entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES"
       "Max pubsub messages per batch";
   ]

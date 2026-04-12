@@ -50,6 +50,7 @@ let all_phases =
 (* ── Conditions ────────────────────────────────────────── *)
 
 type conditions = {
+  launch_pending : bool;
   fiber_alive : bool;
   heartbeat_healthy : bool;
   turn_healthy : bool;
@@ -67,6 +68,7 @@ type conditions = {
 }
 
 let default_conditions = {
+  launch_pending = false;
   fiber_alive = false;
   heartbeat_healthy = true;
   turn_healthy = true;
@@ -260,27 +262,29 @@ let derive_phase (c : conditions) : phase =
   (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
   if c.stop_requested && c.drain_complete
      && not c.compaction_active && not c.handoff_active then Stopped
-  (* 2. Fiber lifecycle — Dead / Restarting / Crashed *)
+  (* 2. Pre-start registration. This is the only path into Offline. *)
+  else if c.launch_pending && not c.fiber_alive then Offline
+  (* 3. Fiber lifecycle — Dead / Restarting / Crashed *)
   else if not c.fiber_alive && not c.restart_budget_remaining then Dead
   else if not c.fiber_alive && c.restart_budget_remaining && c.backoff_elapsed then Restarting
   else if not c.fiber_alive && c.restart_budget_remaining then Crashed
-  (* 3. In-progress stop — still draining *)
+  (* 4. In-progress stop — still draining *)
   else if c.stop_requested then Draining
-  (* 4. Guardrail -> Failing *)
+  (* 5. Guardrail -> Failing *)
   else if c.guardrail_triggered then Failing
-  (* 5. Operator control *)
+  (* 6. Operator control *)
   else if c.operator_paused then Paused
-  (* 6. Buffer states: in-progress operations *)
+  (* 7. Buffer states: in-progress operations *)
   else if c.handoff_active then HandingOff
   else if c.compaction_active then Compacting
-  (* 7. Health degradation *)
+  (* 8. Health degradation *)
   else if not c.heartbeat_healthy
           || not c.turn_healthy
           || c.manual_reconcile_required
   then Failing
-  (* 8. Healthy running *)
+  (* 9. Healthy running *)
   else if c.fiber_alive then Running
-  (* 9. Initial / unreachable fallback *)
+  (* 10. Initial / unreachable fallback *)
   else Offline
 
 (* ── Condition Updaters ────────────────────────────────── *)
@@ -346,6 +350,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
        that should survive restarts. Budget is preserved — it's a supervisor
        policy, not a fiber concern. *)
     { c with
+      launch_pending = false;
       fiber_alive = true;
       heartbeat_healthy = true;
       turn_healthy = true;
@@ -453,6 +458,7 @@ let phase_to_json p = `String (phase_to_string p)
 
 let conditions_to_json (c : conditions) =
   `Assoc [
+    "launch_pending", `Bool c.launch_pending;
     "fiber_alive", `Bool c.fiber_alive;
     "heartbeat_healthy", `Bool c.heartbeat_healthy;
     "turn_healthy", `Bool c.turn_healthy;

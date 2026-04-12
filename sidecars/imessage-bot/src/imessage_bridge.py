@@ -34,6 +34,7 @@ SELECT DISTINCT
     m.service,
     h.id AS handle_id,
     h.service AS handle_service,
+    c.guid AS chat_guid,
     c.chat_identifier,
     c.display_name
 FROM message m
@@ -49,6 +50,40 @@ ORDER BY m.ROWID ASC
 LIMIT 100
 """
 
+SELF_CHAT_GUID_QUERY: Final[str] = """
+WITH own_aliases AS (
+    SELECT DISTINCT
+        trim(
+            CASE
+                WHEN account_login LIKE 'E:%' OR account_login LIKE 'P:%'
+                    THEN substr(account_login, 3)
+                ELSE account_login
+            END
+        ) AS alias
+    FROM chat
+    WHERE service_name = 'iMessage'
+      AND account_login IS NOT NULL
+      AND trim(account_login) != ''
+),
+self_chats AS (
+    SELECT
+        c.guid AS chat_guid,
+        max(coalesce(m.date, 0)) AS last_date,
+        count(m.ROWID) AS msg_count
+    FROM chat c
+    JOIN own_aliases a ON c.chat_identifier = a.alias
+    LEFT JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
+    LEFT JOIN message m ON m.ROWID = cmj.message_id
+    WHERE c.service_name = 'iMessage'
+    GROUP BY c.ROWID
+)
+SELECT chat_guid
+FROM self_chats
+WHERE trim(chat_guid) != ''
+ORDER BY last_date DESC, msg_count DESC
+LIMIT 1
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class InboundMessage:
@@ -59,6 +94,7 @@ class InboundMessage:
     date: datetime
     service: str
     sender: str  # phone number or email
+    chat_guid: str
     chat_identifier: str
     display_name: str
 
@@ -66,6 +102,17 @@ class InboundMessage:
     def room_id(self) -> str:
         """Use chat_identifier as room ID for gate routing."""
         return self.chat_identifier or self.sender
+
+
+def redact_chat_guid(raw: str) -> str:
+    """Redact the PII-bearing tail of a Messages chat guid for logs/UI."""
+    value = raw.strip()
+    if value == "":
+        return ""
+    parts = value.split(";")
+    if len(parts) <= 1:
+        return "[redacted]"
+    return ";".join(parts[:-1] + ["[redacted]"])
 
 
 def _apple_date_to_datetime(apple_ns: int) -> datetime:
@@ -141,6 +188,7 @@ def read_new_messages() -> list[InboundMessage]:
                     date=_apple_date_to_datetime(row["date"]),
                     service=row["service"] or "iMessage",
                     sender=row["handle_id"] or "unknown",
+                    chat_guid=row["chat_guid"] or "",
                     chat_identifier=row["chat_identifier"] or "",
                     display_name=row["display_name"] or "",
                 )
@@ -163,31 +211,78 @@ def read_new_messages() -> list[InboundMessage]:
     return messages
 
 
-def send_message(recipient: str, text: str) -> bool:
+def resolve_self_chat_guid(chat_db_path: str, explicit_chat_guid: str = "") -> str:
+    """Resolve the chat guid to use for self-chat mode.
+
+    Prefers an explicit override. Otherwise auto-detects the most recently
+    active self-chat whose chat identifier matches one of the account aliases
+    visible in Messages metadata.
+    """
+    explicit = explicit_chat_guid.strip()
+    if explicit:
+        return explicit
+
+    db_path = Path(chat_db_path)
+    if not db_path.exists():
+        logger.warning("Cannot resolve self-chat guid: chat.db not found at %s", db_path)
+        return ""
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(SELF_CHAT_GUID_QUERY).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as e:
+        logger.warning("Failed to resolve self-chat guid from chat.db: %s", e)
+        return ""
+    except Exception as e:
+        logger.warning("Unexpected error resolving self-chat guid: %s", e)
+        return ""
+
+    if row is None:
+        logger.warning("No self-chat guid candidate found in chat.db")
+        return ""
+
+    chat_guid = str(row["chat_guid"] or "").strip()
+    if chat_guid == "":
+        logger.warning("Resolved self-chat row without a chat guid")
+        return ""
+    return chat_guid
+
+
+def send_message(*, text: str, chat_guid: str) -> bool:
     """Send an iMessage via AppleScript.
 
     Uses ``on run argv`` to pass parameters as native AppleScript text
     objects, eliminating string-literal injection risks entirely.
 
     Args:
-        recipient: Phone number or Apple ID email.
         text: Message body.
+        chat_guid: Exact Messages.app chat identifier. Replies are sent only
+            when this value is available so the connector fails closed.
 
     Returns:
         True if AppleScript executed without error.
     """
+    if not chat_guid:
+        logger.error("AppleScript send aborted: missing chat_guid")
+        return False
+
     script = (
         'on run argv\n'
         '  tell application "Messages"\n'
-        '    set theBuddy to participant (item 1 of argv) of account 1\n'
-        '    send (item 2 of argv) to theBuddy\n'
+        '    set targetChat to first chat whose id is (item 1 of argv)\n'
+        '    send (item 2 of argv) to targetChat\n'
         '  end tell\n'
         'end run'
     )
+    argv = [chat_guid, text]
 
     try:
         result = subprocess.run(
-            ["osascript", "-e", script, recipient, text],
+            ["osascript", "-e", script, *argv],
             capture_output=True,
             text=True,
             timeout=15,
@@ -197,7 +292,7 @@ def send_message(recipient: str, text: str) -> bool:
             return False
         return True
     except subprocess.TimeoutExpired:
-        logger.error("AppleScript send timed out for %s", recipient)
+        logger.error("AppleScript send timed out for chat %s", redact_chat_guid(chat_guid))
         return False
     except Exception as e:
         logger.error("AppleScript send error: %s", e)

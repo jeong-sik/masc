@@ -1,7 +1,6 @@
 (** Task_dispatch - Runtime backend selection for MASC Tasks
 
-    Routes Task operations to either JSONL (Room.* functions) or PostgreSQL (Task_pg.t).
-    Backend is selected once at server startup based on MASC_POSTGRES_URL env var.
+    Uses JSONL (Room.* functions) only.
 
     @since 0.7.0
 *)
@@ -11,7 +10,6 @@ open Types
 (** Backend variant *)
 type task_backend =
   | Jsonl
-  | Postgres of Task_pg.t
 
 type backend_state =
   | Uninitialized
@@ -24,22 +22,6 @@ let is_initialized () =
   match !backend_state with
   | Active _ -> true
   | Uninitialized -> false
-
-(** Initialize PostgreSQL backend if URL is available *)
-let init_pg pool =
-  if match !backend_state with Active _ -> true | Uninitialized -> false then begin
-    Log.Task.warn "WARNING: already initialized, ignoring init_pg";
-    Ok ()
-  end else
-  match Task_pg.create pool with
-  | Ok t ->
-      backend_state := Active (Postgres t);
-      Log.Task.info "PostgreSQL backend initialized.";
-      Ok ()
-  | Error e ->
-      Log.Task.error "PG init failed, falling back to JSONL: %s"
-        (show_masc_error e);
-      Error e
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
@@ -64,37 +46,17 @@ let backend () =
       Jsonl
 
 (** Check if PostgreSQL backend is active *)
-let is_postgres () =
-  match backend () with
-  | Postgres _ -> true
-  | Jsonl -> false
-
-(** Get PostgreSQL pool if available *)
-let get_pg_pool () =
-  match !backend_state with
-  | Active (Postgres t) -> Some (Task_pg.get_pool t)
-  | _ -> None
+let is_postgres () = false
 
 (** {1 Dispatch Functions} *)
 
 (** Add a new task.
-    In JSONL mode, delegates to Room.add_task.
-    In PG mode, inserts directly to database. *)
+    Delegates to Room.add_task. *)
 let add_task config ~title ~priority ~description =
   match backend () with
   | Jsonl ->
       (* Use existing Room.add_task *)
       Ok (Room.add_task config ~title ~priority ~description)
-  | Postgres t ->
-      let backlog = Room.read_backlog config in
-      let task_id = Printf.sprintf "task-%03d" (Room.next_task_number config backlog) in
-      let created_at = now_iso () in
-      match Task_pg.add_task t ~id:task_id ~title ~description ~priority ~created_at () with
-      | Ok _ ->
-          let _ = Room.broadcast config ~from_agent:"system"
-            ~content:(Printf.sprintf "📋 New quest: %s" title) in
-          Ok (Printf.sprintf "✅ Added %s: %s (PG)" task_id title)
-      | Error e -> Error e
 
 (** Get a task by ID *)
 let get_task config ~task_id =
@@ -102,8 +64,6 @@ let get_task config ~task_id =
   | Jsonl ->
       let backlog = Room.read_backlog config in
       Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks)
-  | Postgres t ->
-      Task_pg.get_task t ~id:task_id
 
 (** List tasks *)
 let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
@@ -119,8 +79,6 @@ let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
         not dominated
       ) backlog.tasks in
       Ok tasks
-  | Postgres t ->
-      Task_pg.list_tasks t ~include_done ~include_cancelled
 
 (** Validate that a state transition is allowed.
     Terminal states (Done, Cancelled) cannot transition to each other. *)
@@ -154,8 +112,6 @@ let update_status config ~task_id ~status =
             } in
             Room.write_backlog config new_backlog;
             Ok ())
-  | Postgres t ->
-      Task_pg.update_task_status t ~id:task_id ~status
 
 (** Delete a task *)
 let delete_task config ~task_id =
@@ -170,13 +126,8 @@ let delete_task config ~task_id =
       } in
       Room.write_backlog config new_backlog;
       Ok ()
-  | Postgres t ->
-      Task_pg.delete_task t ~id:task_id
 
 (** Migrate all tasks from JSONL to PostgreSQL *)
 let migrate_to_pg config =
-  match backend () with
-  | Jsonl -> Error (IoError "Not in PostgreSQL mode")
-  | Postgres t ->
-      let backlog = Room.read_backlog config in
-      Task_pg.migrate_from_backlog t backlog
+  let _ = config in
+  Error (IoError "PostgreSQL task backend removed")

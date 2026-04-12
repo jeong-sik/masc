@@ -10,7 +10,9 @@ type t = {
   resolution_source : string option;
   cwd_masc_root : string;
   cwd_has_masc_dir : bool;
+  cwd_legacy_dirs : string list;
   effective_has_masc_dir : bool;
+  effective_legacy_dirs : string list;
   roots_diverge : bool;
   dual_masc_roots : bool;
   fail_fast_enabled : bool;
@@ -43,6 +45,19 @@ let normalize_path ~cwd path =
 let dir_exists path =
   Sys.file_exists path && Sys.is_directory path
 
+let legacy_dir_names = [ "perpetual"; "resident-keepers"; "rooms" ]
+
+let legacy_dirs_under masc_root =
+  if not (dir_exists masc_root) then
+    []
+  else
+    List.filter (fun name -> dir_exists (Filename.concat masc_root name))
+      legacy_dir_names
+
+let format_legacy_dirs = function
+  | [] -> "none"
+  | dirs -> String.concat ", " dirs
+
 let fail_fast_env_enabled () =
   match Sys.getenv_opt "MASC_BASE_PATH_STRICT" with
   | Some raw -> (
@@ -72,7 +87,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   let effective_masc_norm = normalize_path ~cwd effective_masc_root in
   let cwd_masc_root = normalize_path ~cwd (Filename.concat cwd_norm ".masc") in
   let cwd_has_masc_dir = dir_exists cwd_masc_root in
+  let cwd_legacy_dirs = legacy_dirs_under cwd_masc_root in
   let effective_has_masc_dir = dir_exists effective_masc_norm in
+  let effective_legacy_dirs = legacy_dirs_under effective_masc_norm in
   let roots_diverge = not (String.equal cwd_norm effective_base_norm) in
   let dual_masc_roots =
     roots_diverge
@@ -80,24 +97,49 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     && effective_has_masc_dir
     && not (String.equal cwd_masc_root effective_masc_norm)
   in
+  let resolution_source = resolution_source_opt ?resolution_source () in
+  (* Dual .masc roots only force fail-fast when the effective base
+     path was derived from a cwd heuristic (i.e. NOT an explicit env
+     or CLI flag). If the operator, CI harness, or test driver
+     explicitly set [MASC_BASE_PATH] / [--base-path], the warning
+     already documents that "runtime will use the explicit base path,
+     but operator surfaces may inspect stale state from cwd" — that is
+     exactly the contract that lets test harnesses point the server at
+     a [/tmp/...-base-<hex>] directory from inside a checked-out git
+     worktree that happens to carry its own committed [.masc/] tree.
+     Pre-#6548 behavior had this escape; removing it broke the
+     [Run SSE reconnect e2e] CI step which fails immediately on
+     [Dual .masc roots are not supported]. *)
+  let implicit_dual_roots =
+    dual_masc_roots && not (explicit_resolution_source resolution_source)
+  in
   let fail_fast_enabled =
     match strict with
-    | Some enabled -> enabled
-    | None -> fail_fast_env_enabled ()
+    | Some enabled -> enabled || implicit_dual_roots
+    | None -> fail_fast_env_enabled () || implicit_dual_roots
   in
-  let resolution_source = resolution_source_opt ?resolution_source () in
   let warning =
     if dual_masc_roots then
+      let stale_suffix =
+        if cwd_legacy_dirs = [] then
+          ""
+        else
+          Printf.sprintf
+            "; ignored cwd .masc still contains legacy dirs (%s)"
+            (format_legacy_dirs cwd_legacy_dirs)
+      in
       if explicit_resolution_source resolution_source then
         Some
           (Printf.sprintf
-             "process cwd (%s) differs from explicit effective base path (%s) and both .masc roots exist (%s vs %s); runtime will use the explicit base path, but operator surfaces may inspect stale state from cwd"
-             cwd_norm effective_base_norm cwd_masc_root effective_masc_norm)
+             "process cwd (%s) differs from explicit effective base path (%s) and both .masc roots exist (%s vs %s); runtime will use the explicit base path, but operator surfaces may inspect stale state from cwd%s"
+             cwd_norm effective_base_norm cwd_masc_root effective_masc_norm
+             stale_suffix)
       else
         Some
           (Printf.sprintf
-             "process cwd (%s) differs from effective base path (%s) and both .masc roots exist (%s vs %s); operator surfaces may inspect stale state"
-             cwd_norm effective_base_norm cwd_masc_root effective_masc_norm)
+             "process cwd (%s) differs from effective base path (%s) and both .masc roots exist (%s vs %s); operator surfaces may inspect stale state%s"
+             cwd_norm effective_base_norm cwd_masc_root effective_masc_norm
+             stale_suffix)
     else
       None
   in
@@ -110,7 +152,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     resolution_source;
     cwd_masc_root;
     cwd_has_masc_dir;
+    cwd_legacy_dirs;
     effective_has_masc_dir;
+    effective_legacy_dirs;
     roots_diverge;
     dual_masc_roots;
     fail_fast_enabled;
@@ -118,8 +162,14 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   }
 
 let strict_violation (diag : t) =
-  diag.fail_fast_enabled
-  && diag.dual_masc_roots
+  (* Only a *heuristic* dual-root detection should abort startup. If the
+     operator explicitly pointed the server at a base path via env or
+     CLI, honor that decision — the warning still fires so operator
+     tools can flag the stale cwd [.masc] tree, but the runtime must
+     not kill itself out from under a CI/test harness or a developer
+     who deliberately pointed at a tmp directory. Pairs with the same
+     escape condition used to compute [fail_fast_enabled] above. *)
+  diag.dual_masc_roots
   && not (explicit_resolution_source diag.resolution_source)
 
 let startup_lines (diag : t) =
@@ -139,6 +189,18 @@ let startup_lines (diag : t) =
       (match diag.warning with
        | Some message -> Some (Printf.sprintf "   Path warning: %s" message)
        | None -> None);
+      (if diag.dual_masc_roots then
+         Some
+           (Printf.sprintf "   Ignored cwd .masc legacy dirs: %s"
+              (format_legacy_dirs diag.cwd_legacy_dirs))
+       else
+         None);
+      (if diag.effective_has_masc_dir then
+         Some
+           (Printf.sprintf "   Active .masc legacy dirs: %s"
+              (format_legacy_dirs diag.effective_legacy_dirs))
+       else
+         None);
       (if diag.fail_fast_enabled then
          Some "   Path strict mode: enabled"
        else
@@ -172,7 +234,10 @@ let to_yojson (diag : t) =
        ("effective_masc_root", `String diag.effective_masc_root);
        ("cwd_masc_root", `String diag.cwd_masc_root);
        ("cwd_has_masc_dir", `Bool diag.cwd_has_masc_dir);
+       ("cwd_legacy_dirs", `List (List.map (fun dir -> `String dir) diag.cwd_legacy_dirs));
        ("effective_has_masc_dir", `Bool diag.effective_has_masc_dir);
+       ( "effective_legacy_dirs",
+         `List (List.map (fun dir -> `String dir) diag.effective_legacy_dirs) );
        ("roots_diverge", `Bool diag.roots_diverge);
        ("dual_masc_roots", `Bool diag.dual_masc_roots);
        ("fail_fast_enabled", `Bool diag.fail_fast_enabled);

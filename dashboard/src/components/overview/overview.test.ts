@@ -178,29 +178,29 @@ describe('Overview freshness strip', () => {
       status: 'warn',
       warnings: ['Resolved config child is missing: keepers'],
       config_root: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config',
+        path: '/Users/dancer/me/.masc/config',
         exists: true,
-        source: 'env',
+        source: 'local_masc',
       },
       cascade: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/cascade.json',
+        path: '/Users/dancer/me/.masc/config/cascade.json',
         exists: true,
-        source: 'config_root',
+        source: 'local_masc',
       },
       prompts: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/prompts',
+        path: '/Users/dancer/me/.masc/config/prompts',
         exists: true,
-        source: 'config_root',
+        source: 'local_masc',
       },
       keepers: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/keepers',
+        path: '/Users/dancer/me/.masc/config/keepers',
         exists: false,
-        source: 'config_root',
+        source: 'local_masc',
       },
       personas: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/personas',
+        path: '/Users/dancer/me/.masc/config/personas',
         exists: true,
-        source: 'config_root',
+        source: 'local_masc',
       },
     }
     shellRuntimeResolution.value = {
@@ -227,7 +227,7 @@ describe('Overview freshness strip', () => {
         source: 'runtime_data',
       },
       prompt_markdown_dir: {
-        path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config/prompts',
+        path: '/Users/dancer/me/.masc/config/prompts',
         exists: true,
         source: 'prompt_registry',
       },
@@ -250,7 +250,7 @@ describe('Overview freshness strip', () => {
     expect(container.textContent).toContain('설정 Truth')
     expect(container.textContent).toContain('warning 3')
     expect(container.textContent).toContain('config root')
-    expect(container.textContent).toContain('/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config')
+    expect(container.textContent).toContain('/Users/dancer/me/.masc/config')
     expect(container.textContent).toContain('runtime root')
     expect(container.textContent).toContain('/Users/dancer/me/.masc')
     expect(container.textContent).toContain('personas')

@@ -16,7 +16,12 @@ keeper_task_claim id=<task-id>
 ```
 masc_worktree_create branch=fix/<short-description>
 ```
-This creates `.worktrees/fix/<short-description>/` — all subsequent work happens here.
+The returned path is `<playground-worktree-path>` — always under
+`.masc/playground/<your-name>/repos/masc-mcp/.worktrees/fix/<short-description>/`.
+Call `keeper_context_status` first if you need your name. Treat
+`<playground-worktree-path>` as a variable in every step below; never substitute
+a server-root path (see the WRONG paths list in `keeper.world.md`), which the
+harness blocks as `cwd_outside_playground` / `write_outside_playground_blocked`.
 
 ### Step 3: Read and understand
 ```
@@ -28,22 +33,22 @@ keeper_shell op=rg args=["pattern", "lib/"]  (search codebase)
 
 ### Step 4: Edit code
 ```
-masc_code_write path=.worktrees/fix/<name>/<file> content=<full-content>
-masc_code_edit path=.worktrees/fix/<name>/<file> old=<old> new=<new>
+masc_code_write path=<playground-worktree-path>/<file> content=<full-content>
+masc_code_edit path=<playground-worktree-path>/<file> old=<old> new=<new>
 ```
 
 ### Step 5: Build and test
 ```
-masc_code_shell cmd="dune build --root ." cwd=.worktrees/fix/<name>
-masc_code_shell cmd="dune exec test/<relevant_test>.exe" cwd=.worktrees/fix/<name>
+masc_code_shell cmd="dune build --root ." cwd=<playground-worktree-path>
+masc_code_shell cmd="dune exec test/<relevant_test>.exe" cwd=<playground-worktree-path>
 ```
 If build fails, fix the error and retry. Never proceed to commit with a broken build.
 
 ### Step 6: Commit and push
 ```
-masc_code_git action=add args=["<file1>", "<file2>"] cwd=.worktrees/fix/<name>
-masc_code_git action=commit args=["-m", "fix(<scope>): <description>"] cwd=.worktrees/fix/<name>
-masc_code_git action=push args=["origin", "fix/<name>"] cwd=.worktrees/fix/<name>
+masc_code_git action=add args=["<file1>", "<file2>"] cwd=<playground-worktree-path>
+masc_code_git action=commit args=["-m", "fix(<scope>): <description>"] cwd=<playground-worktree-path>
+masc_code_git action=push args=["origin", "fix/<name>"] cwd=<playground-worktree-path>
 ```
 
 ### Step 7: Create draft PR
@@ -59,7 +64,7 @@ keeper_broadcast msg="PR #<number> created for <task-title>"
 
 ## Rules
 
-1. All file operations must be inside `.worktrees/`. Never edit files in the repo root.
+1. All file operations must be inside your playground worktree (the `<playground-worktree-path>` returned by `masc_worktree_create`, under `.masc/playground/<your-name>/repos/masc-mcp/.worktrees/...`). Never edit files in the repo root, and never use a bare `.worktrees/...` path — the harness rejects it as `write_outside_playground_blocked`.
 2. Never push to main or master. Always push to a feature branch.
 3. Always create PRs with `--draft`. Human review is required before merge.
 4. Build must pass before committing. If tests exist for the changed area, they must pass too.

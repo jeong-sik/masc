@@ -295,6 +295,7 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Select checkbox -->
       <div class="flex items-start pt-1">
         <input type="checkbox"
+          aria-label=${`게시글 선택: ${post.id}`}
           class="w-3.5 h-3.5 rounded cursor-pointer accent-[var(--accent)]"
           checked=${selectedPostIds.value.has(post.id)}
           onClick=${(e: Event) => togglePostSelection(post.id, e)}
@@ -408,11 +409,12 @@ export function Memory() {
       <div class="mb-4">
         <${NewPostForm} />
       </div>
-      ${boardLoading.value
+      ${posts.length === 0 && boardLoading.value
         ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
         : posts.length === 0
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
+              ${boardLoading.value ? html`<div class="mb-2 text-[11px] text-[var(--text-muted)] animate-pulse">업데이트 중...</div>` : null}
               ${renderSection('직접 작성 글', grouped.direct, visibleLimit)}
               ${renderSection('자동화 글', grouped.automation, automationVisibleLimit)}
               ${renderSection('시스템 글', grouped.system, systemVisibleLimit)}

@@ -92,10 +92,6 @@ let keeper_schemas : tool_schema list = [
           ("enum", `List [`String "current"]);
           ("description", `String "Single-room compatibility field. Keepers always attach to the current/default namespace.");
         ]);
-        ("scope_kind", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "local"; `String "global"]);
-        ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -180,11 +176,6 @@ let keeper_schemas : tool_schema list = [
         ("desires", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: keeper's desire/drive statement (욕구).");
-        ]);
-        ("scope_kind", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "local"; `String "global"]);
-          ("description", `String "Keeper message/board visibility scope inside the single default namespace.");
         ]);
         ("room_scope", `Assoc [
           ("type", `String "string");

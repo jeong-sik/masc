@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { CARD_STANDARD } from '../common/card'
+import { EmptyState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { openKeeperDetail } from '../keeper-detail'
 import { findKeeper } from '../execution/shared'
@@ -85,7 +86,7 @@ export function OpsKeeperColumn() {
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">keeper를 선택하면 아래에서 메시지를 보내거나 상세 정보를 볼 수 있습니다.</p>
 
         <div class="flex flex-col gap-2">
-          ${keepers.length === 0 ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
+          ${keepers.length === 0 ? html`<${EmptyState} message="지금 보이는 keeper가 없습니다." compact />` : keepers.map(keeper => html`
             ${(() => {
               const tone = keeperPriorityTone(keeper)
               const prioritySummary = keeperPrioritySummary(keeper)
@@ -134,7 +135,7 @@ export function OpsKeeperColumn() {
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45] mt-3">Persistent agent alias는 같은 keeper 런타임을 호환 표기로 보여줍니다.</p>
         <div class="flex flex-col gap-2">
           ${persistentAgents.length === 0
-            ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">분리된 persistent agent는 없습니다.</div>`
+            ? html`<${EmptyState} message="분리된 persistent agent는 없습니다." compact />`
             : persistentAgents.map(agent => html`
                 <article key=${agent.name} class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
                   <div class="flex justify-between items-center gap-3 max-[880px]:flex-col max-[880px]:items-start">
@@ -191,14 +192,14 @@ export function OpsKeeperColumn() {
               메시지 보내기
             <//>
           </div>
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">키퍼를 선택하면 바로 메시지를 보낼 수 있습니다.</div>`}
+        ` : html`<${EmptyState} message="키퍼를 선택하면 바로 메시지를 보낼 수 있습니다." compact />`}
       </section>
 
       <section class="${CARD_STANDARD} flex flex-col gap-3 min-h-0">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">최근 개입 로그</h3>
         <div class="flex flex-col gap-2">
           ${operatorActionLog.value.length === 0 ? html`
-            <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">이 세션에서 실행한 개입이 아직 없습니다.</div>
+            <${EmptyState} message="이 세션에서 실행한 개입이 아직 없습니다." compact />
           ` : operatorActionLog.value.map(entry => html`
             <article key=${entry.id} class="py-2.5 border-b border-[var(--white-4)] hover:bg-[var(--white-3)] transition-colors px-2 rounded ${logEntryBorderClass(entry.outcome)}">
               <div class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex gap-2">

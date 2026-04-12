@@ -162,6 +162,19 @@ module FileSystem = struct
             Unix.close fd)
         @@ fun () -> f fd)
 
+  (** Write all bytes to fd, retrying on partial writes.
+      Raises [Unix.Unix_error] if a zero-length write occurs (disk full). *)
+  let write_all_substring fd s ofs len =
+    let rec loop ofs remaining =
+      if remaining > 0 then begin
+        let written = Unix.write_substring fd s ofs remaining in
+        if written = 0 then
+          raise (Unix.Unix_error (Unix.EIO, "write_all_substring", "zero-length write"));
+        loop (ofs + written) (remaining - written)
+      end
+    in
+    loop ofs len
+
   (** {2 Core Operations} *)
 
   let _ensure_parent_dir ?(log_errors = false) path =
@@ -302,9 +315,8 @@ module FileSystem = struct
        | Ok () -> ()
        | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | Error exn ->
-           Log.legacy_traceln ~level:Log.Debug ~module_name:"Backend"
-             (Printf.sprintf "key_index populate wait failed: %s"
-                (Printexc.to_string exn)))
+           Log.Backend.debug "key_index populate wait failed: %s"
+             (Printexc.to_string exn))
     | `Populate r ->
       (try
          let keys =
@@ -313,8 +325,7 @@ module FileSystem = struct
          ki_replace_bulk t (List.map (fun k -> (k, ())) keys);
          let len = ki_length t in
          if len > 0 then
-           Log.legacy_traceln ~level:Log.Info ~module_name:"Backend"
-             (Printf.sprintf "key_index populated: %d keys" len);
+           Log.Backend.info "key_index populated: %d keys" len;
          Eio.Promise.resolve_ok r ()
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Mutex.lock t.key_index_mu;
@@ -324,9 +335,8 @@ module FileSystem = struct
          match exn with
          | Eio.Cancel.Cancelled _ -> raise exn
          | _ ->
-           Log.legacy_traceln ~level:Log.Warn ~module_name:"Backend"
-             (Printf.sprintf "key_index population failed: %s"
-                (Printexc.to_string exn)))
+           Log.Backend.warn "key_index population failed: %s"
+             (Printexc.to_string exn))
 
   (** Check if key exists (in-memory index first, filesystem fallback) *)
   let exists t key =
@@ -533,8 +543,8 @@ module FileSystem = struct
           let new_value = current + 1 in
           let new_str = string_of_int new_value in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
-          let _ = Unix.ftruncate fd 0 in
-          let _ = Unix.write_substring fd new_str 0 (String.length new_str) in
+          Unix.ftruncate fd 0;
+          write_all_substring fd new_str 0 (String.length new_str);
           Ok new_value
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
@@ -610,8 +620,8 @@ module FileSystem = struct
           let new_content = f current in
           let compressed = _compress new_content in
           let _ = Unix.lseek fd 0 Unix.SEEK_SET in
-          let _ = Unix.ftruncate fd 0 in
-          let _ = Unix.write_substring fd compressed 0 (String.length compressed) in
+          Unix.ftruncate fd 0;
+          write_all_substring fd compressed 0 (String.length compressed);
           Ok new_content
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))
@@ -724,75 +734,48 @@ module Memory = struct
     )
 end
 
-(** {1 PostgreSQL Backend (Eio)}
-    Implementation delegated to Backend_pg for separation of concerns. *)
-
-module Postgres = struct
-  include Backend_pg
-
-  (** Adapter: accept [config] record matching [Backend.config]. *)
-  let create ~sw ~env ~url config =
-    Backend_pg.create ~sw ~env ~url
-      ~cluster_name:config.cluster_name ~node_id:config.node_id
-
-  (** Readonly adapter with smaller pool. *)
-  let create_readonly ~sw ~env ~url config =
-    Backend_pg.create_readonly ~sw ~env ~url
-      ~cluster_name:config.cluster_name ~node_id:config.node_id
-end
-
 (** {1 Unified Backend} *)
 
 type backend =
   | FS of FileSystem.t
   | Mem of Memory.t
-  | PG of Postgres.t
 
 let get = function
   | FS t -> FileSystem.get t
   | Mem t -> Memory.get t
-  | PG t -> Postgres.get t
 
 let set = function
   | FS t -> FileSystem.set t
   | Mem t -> Memory.set t
-  | PG t -> Postgres.set t
 
 let exists = function
   | FS t -> FileSystem.exists t
   | Mem t -> Memory.exists t
-  | PG t -> Postgres.exists t
 
 let delete = function
   | FS t -> FileSystem.delete t
   | Mem t -> Memory.delete t
-  | PG t -> Postgres.delete t
 
 let list_keys = function
   | FS t -> FileSystem.list_keys t ~prefix:""
   | Mem t -> Memory.list_keys t ~prefix:""
-  | PG t -> Postgres.list_keys t ~prefix:""
 
 let set_if_not_exists backend key value =
   match backend with
   | FS t -> FileSystem.set_if_not_exists t key value
   | Mem t -> Memory.set_if_not_exists t key value
-  | PG t -> Postgres.set_if_not_exists t key value
 
 let acquire_lock backend ~key ~owner ~ttl_seconds =
   match backend with
   | FS t -> FileSystem.acquire_lock t ~key ~owner ~ttl_seconds
   | Mem _ -> Ok true  (* In-memory is single-process *)
-  | PG t -> Postgres.acquire_lock t ~key ~owner ~ttl_seconds
 
 let release_lock backend ~key ~owner =
   match backend with
   | FS t -> FileSystem.release_lock t ~key ~owner
   | Mem _ -> Ok true
-  | PG t -> Postgres.release_lock t ~key ~owner
 
 let extend_lock backend ~key ~owner ~ttl_seconds =
   match backend with
   | FS t -> FileSystem.extend_lock t ~key ~owner ~ttl_seconds
   | Mem _ -> Ok true
-  | PG t -> Postgres.extend_lock t ~key ~owner ~ttl_seconds

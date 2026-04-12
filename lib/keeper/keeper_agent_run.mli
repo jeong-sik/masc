@@ -47,6 +47,7 @@ type run_result =
   ; tools_used : string list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
+  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
@@ -131,6 +132,7 @@ val run_turn :
   -> ?guardrails:Agent_sdk.Guardrails.t
   -> ?temperature:float
   -> ?max_tokens:int
+  -> ?oas_timeout_s:float
   -> ?max_cost_usd:float
   -> ?on_event:(Oas.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator

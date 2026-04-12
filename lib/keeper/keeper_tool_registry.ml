@@ -120,10 +120,9 @@ let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 
 (* ── Input-aware read-only check ─────────────────────────────
-   Some tools (keeper_github) mix read-only and mutating subcommands
-   within a single tool name.  This function inspects the JSON input
-   to distinguish read-only invocations so that the mutation boundary
-   lets them through without opening a reconcile window. *)
+   Some tools (keeper_github, masc_code_git) mix read-only and mutating
+   subcommands within a single tool name. This function inspects the
+   JSON input to distinguish calls with no side effects. *)
 
 let gh_read_only_prefixes =
   [ "pr list"; "pr view"; "pr diff"; "pr checks"; "pr status"
@@ -206,6 +205,14 @@ let gh_effective_cmd (input : Yojson.Safe.t) : string =
 let git_read_only_actions =
   [ "diff"; "status"; "log"; "branch"; "fetch" ]
 
+let git_action_of_input (input : Yojson.Safe.t) : string =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "action" fields with
+     | Some (`String s) -> String.lowercase_ascii (String.trim s)
+     | _ -> "")
+  | _ -> ""
+
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   if is_effectively_read_only_tool tool_name then true
   else match tool_name with
@@ -221,18 +228,76 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
         String.length cmd_lower >= String.length prefix
         && String.sub cmd_lower 0 (String.length prefix) = prefix
       ) gh_read_only_prefixes
-  | "masc_code_git" ->
-    let action =
-      match input with
-      | `Assoc fields ->
-        (match List.assoc_opt "action" fields with
-         | Some (`String s) -> String.lowercase_ascii (String.trim s)
-         | _ -> "")
-      | _ -> ""
-    in
-    List.mem action git_read_only_actions
+  | "masc_code_git" -> List.mem (git_action_of_input input) git_read_only_actions
   | "masc_worktree_list" -> true
   | _ -> false
+
+(* ── Input-aware mutation-boundary bypass ────────────────────
+   Some tools do mutate state, but they should not open the
+   main-worktree checkpoint boundary because they either:
+   - only touch MASC coordination state (tasks, board, broadcast), or
+   - operate inside an explicit worktree/playground sandbox.
+
+   Keep these tools mutating for reconcile/error handling; this predicate
+   only controls whether the per-turn boundary blocks follow-up tools.
+
+   DESIGN SMELL — see [keeper_tool_registry.mli] follow-up: the allowlist
+   is hardcoded by tool name, so it drifts whenever a new tool is added
+   (or renamed) in [keeper_tool_registry]/[masc_mcp.ml].  The [keeper_*]
+   and [masc_*] name prefixes carry no effect-domain semantics — e.g.,
+   [keeper_task_claim] and [masc_claim_next] both claim a task but this
+   predicate listed only the former until #6671 (this change).  The
+   structural fix is to tag every tool spec with an
+   [effect_domain = Read_only | Masc_coordination | Playground_write |
+   Main_worktree_write] variant and derive this predicate from the tag,
+   so the OCaml exhaustiveness checker catches missing entries at
+   compile time.  Tracked as follow-up; the minimal patch below unblocks
+   keepers first. *)
+let is_main_worktree_boundary_exempt_with_input
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t) : bool =
+  if is_read_only_with_input ~tool_name ~input then true
+  else
+    match tool_name with
+    | "keeper_task_claim" | "keeper_task_done" | "keeper_tasks_list"
+    | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
+    | "keeper_board_list" | "keeper_board_get"
+    (* Board delete and cleanup are MASC-state-only mutations (board
+       post store), not main-worktree writes.  Missing here until #6692
+       caused [janitor] to hit a mutation-boundary block loop at
+       2026-04-12 01:15:25 KST: the first [keeper_board_delete] in a
+       cleanup turn succeeded and opened the boundary, and every
+       subsequent [keeper_board_delete] in the same turn was blocked
+       by the [pre_tool_use_guard], burning the turn budget without
+       progress.  The [masc_board_delete] alias was already exempt at
+       line 283 but its [keeper_*] counterpart had drifted out of this
+       list — same structural gap fixed by #6681 for [masc_claim_next]. *)
+    | "keeper_board_delete" | "keeper_board_cleanup"
+    | "keeper_broadcast" -> true
+    (* MASC coordination aliases for the [keeper_*] entries above.
+       These share the same name with a [masc_] prefix because they are
+       exposed via the masc-mcp tool surface instead of the per-keeper
+       surface, but their effect is identical: MASC task/board state
+       only, never the main worktree.  Missing here until #6671 caused
+       [masc_improver] to hang after [masc_add_task] opened a boundary:
+       the follow-up [masc_claim_next] was blocked, the LLM looped on
+       text-only responses, and the turn exhausted cascade budget on
+       [max_tokens] — all downstream of this allowlist gap.  See log
+       timestamp 2026-04-12 09:40:58 "pre_tool_use guard blocked
+       masc_claim_next". *)
+    | "masc_tasks" | "masc_add_task" | "masc_claim_next"
+    | "masc_batch_add_tasks" | "masc_plan_init" | "masc_plan_set_task"
+    | "masc_plan_update" | "masc_plan_get" | "masc_transition"
+    | "masc_broadcast" | "masc_messages" | "masc_status"
+    | "masc_dashboard" | "masc_agents" | "masc_agent_card"
+    | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
+    | "masc_board_comment_vote" | "masc_board_delete"
+    | "masc_board_list" | "masc_board_get" | "masc_board_stats"
+    | "masc_board_hearths" | "masc_board_profile" -> true
+    | "masc_code_edit" | "masc_code_write" | "masc_code_delete"
+    | "masc_code_shell" | "masc_code_git" | "masc_worktree_create"
+    | "keeper_pr_submit" | "keeper_fs_edit" -> true
+    | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
 

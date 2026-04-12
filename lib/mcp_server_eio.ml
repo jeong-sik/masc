@@ -36,8 +36,8 @@ let get_clock () = Eio_context.get_clock ()
 let create_state ?test_mode:_ ~base_path () =
   Mcp_server.create_state ~base_path
 
-let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
-  Mcp_server.create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~mono_clock
+let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
+  Mcp_server.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock
     ~net:(net :> Eio_context.eio_net) ~base_path
 
 (** {1 Re-exported Mcp_server Functions} *)

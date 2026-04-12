@@ -208,7 +208,25 @@ function runtimeBlockerHint(keeper: Keeper): string | null {
   if (blockerClass === 'ambiguous_post_commit_timeout') {
     return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
   }
-  return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
+  if (blockerClass === 'ambiguous_post_commit_failure') {
+    return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'autonomous_slot_wait_timeout') {
+    return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
+  }
+  if (blockerClass === 'admission_queue_wait_timeout') {
+    return 'OAS admission queue 대기 시간이 초과되었습니다.'
+  }
+  if (blockerClass === 'turn_timeout_after_queue_wait') {
+    return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
+  }
+  if (blockerClass === 'turn_timeout') {
+    return '턴 실행 시간이 제한 시간을 초과했습니다.'
+  }
+  if (blockerClass === 'completion_contract_violation') {
+    return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
+  }
+  return '런타임 차단 상태를 확인해야 합니다.'
 }
 
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {

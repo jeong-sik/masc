@@ -19,12 +19,19 @@ type mention_record = {
 
 (** {1 ID Generation} *)
 
-(* Fiber-safe random state *)
+(* RNG for mention-id generation.  [Random.State.t] is NOT fiber-safe —
+   the previous doc comment claiming otherwise was incorrect.  Guard
+   the shared state with an [Eio.Mutex] and route every RNG access
+   through [with_mention_rng].  Same discipline as [Lib.A2a_tools]
+   ([a2a_rng] / [a2a_rng_mutex]). *)
 let mention_rng = Random.State.make_self_init ()
+let mention_rng_mutex = Eio.Mutex.create ()
+let with_mention_rng f =
+  Eio.Mutex.use_ro mention_rng_mutex (fun () -> f mention_rng)
 
 let generate_mention_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.State.int mention_rng 10000 in
+  let rand = with_mention_rng (fun rng -> Random.State.int rng 10000) in
   Printf.sprintf "m-%d-%04d" ts rand
 
 (** {1 JSON Serialization} *)

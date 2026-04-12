@@ -4,7 +4,6 @@
 type storage_backend =
   | Memory of Backend.Memory.t
   | FileSystem of Backend.FileSystem.t
-  | PostgresNative of Backend.Postgres.t
 
 (** Room configuration *)
 type config = {
@@ -15,54 +14,17 @@ type config = {
   backend: storage_backend;
 }
 
-let _domain_local_pg_backend_created = Atomic.make 0
-let _domain_local_pg_backend_failed = Atomic.make 0
-let _domain_local_pg_backend_last_error = Atomic.make ""
-
 let domain_local_pg_backend_diagnostics_json () =
   `Assoc
     [
-      ("creations", `Int (Atomic.get _domain_local_pg_backend_created));
-      ("failures", `Int (Atomic.get _domain_local_pg_backend_failed));
-      ( "last_error",
-        match String.trim (Atomic.get _domain_local_pg_backend_last_error) with
-        | "" -> `Null
-        | value -> `String value );
+      ("creations", `Int 0);
+      ("failures", `Int 0);
+      ("last_error", `Null);
     ]
 
-(** Create a config with a domain-local PostgresNative backend.
-    Use when running in a different Eio domain (e.g., Executor_pool)
-    where the main domain's Caqti pool would crash due to Switch
-    being domain-bound.  Skips schema init (already done by main pool).
-    Constructs [Caqti_eio.stdenv] from [Eio_context] globals (net/clock
-    are cross-domain safe, only Switch is domain-bound).
-    Returns [None] on failure. *)
 let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
-  match config.backend with
-  | PostgresNative _ ->
-    let env : Caqti_eio.stdenv =
-      object
-        method net = (net :> [`Generic] Eio.Net.ty Eio.Resource.t)
-        method clock = clock
-        method mono_clock = mono_clock
-      end
-    in
-    let url = match config.backend_config.Backend_types.postgres_url with
-      | Some u -> u
-      | None -> ""
-    in
-    (match Backend.Postgres.create_readonly ~sw ~env ~url config.backend_config with
-    | Ok t ->
-      Atomic.fetch_and_add _domain_local_pg_backend_created 1 |> ignore;
-      Some { config with backend = PostgresNative t }
-    | Error err ->
-      Atomic.fetch_and_add _domain_local_pg_backend_failed 1 |> ignore;
-      Atomic.set _domain_local_pg_backend_last_error (Backend_types.show_error err);
-      Log.Room.warn "Domain-local PG backend failed: %s"
-        (Backend_types.show_error err);
-      None)
-  | Memory _ | FileSystem _ ->
-    Some config
+  let _ = sw, net, clock, mono_clock in
+  Some config
 
 (* ============================================ *)
 (* Git Root Detection (Worktree Support)        *)
@@ -128,28 +90,11 @@ let rec find_git_root path =
     else find_git_root parent
   end
 
-let bool_env name = Env_config_core.get_bool ~default:false name
-
 let normalize_base_path path =
   let trimmed = Env_config_core.normalize_masc_base_path_input path in
   if trimmed = "" then ""
   else if Filename.is_relative trimmed then Filename.concat (Sys.getcwd ()) trimmed
   else trimmed
-
-let canonical_base_path path =
-  let normalized = normalize_base_path path in
-  match find_git_root normalized with
-  | Some git_root -> git_root
-  | None -> normalized
-  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-  | exception exn ->
-    Log.Room.warn "canonical_base_path: git root lookup failed for %s: %s"
-      normalized (Printexc.to_string exn);
-    normalized
-
-let path_has_masc_dir path =
-  let masc_dir = Filename.concat path ".masc" in
-  Sys.file_exists masc_dir && Sys.is_directory masc_dir
 
 let running_under_test_executable () =
   let executable =
@@ -157,68 +102,15 @@ let running_under_test_executable () =
   in
   String.starts_with ~prefix:"test_" executable
 
-let realpath p =
-  try Unix.realpath p with Unix.Unix_error _ -> p
-
-let is_ancestor_path ~ancestor ~descendant =
-  let a = realpath ancestor in
-  let d = realpath descendant in
-  let a = if String.ends_with ~suffix:"/" a then a else a ^ "/" in
-  String.starts_with ~prefix:a d
-
-let explicit_base_path_is_authoritative explicit_path =
-  let trimmed = String.trim explicit_path in
-  trimmed <> ""
-  && not (Filename.is_relative trimmed)
-  && not (running_under_test_executable ())
-
-let should_ignore_inherited_base_path ~requested_path ~explicit_path =
-  not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
-  && not (explicit_base_path_is_authoritative explicit_path)
-  && String.trim requested_path <> ""
-  && not (String.equal requested_path ".")
-  &&
-  let requested = canonical_base_path requested_path in
-  let explicit = canonical_base_path explicit_path in
-  requested <> ""
-  && explicit <> ""
-  && not (String.equal requested explicit)
-  && not (is_ancestor_path ~ancestor:explicit ~descendant:requested)
-  && path_has_masc_dir requested
-  && path_has_masc_dir explicit
-
-let should_ignore_inherited_test_base_path ~requested_path ~explicit_path =
-  running_under_test_executable ()
-  && not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
-  && not (bool_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
-  && String.trim requested_path <> ""
-  && not (String.equal requested_path ".")
-  && not (String.equal explicit_path requested_path)
-  && not (is_ancestor_path ~ancestor:(canonical_base_path explicit_path)
-            ~descendant:(canonical_base_path requested_path))
-
-let should_ignore_inherited_server_base_path ~requested_path ~explicit_path =
-  not (bool_env "MASC_ALLOW_INHERITED_BASE_PATH")
-  && not (explicit_base_path_is_authoritative explicit_path)
-  && String.trim requested_path <> ""
-  && not (String.equal requested_path ".")
-  &&
-  let requested = canonical_base_path requested_path in
-  let explicit = canonical_base_path explicit_path in
-  requested <> ""
-  && explicit <> ""
-  && not (String.equal requested explicit)
-  && path_has_masc_dir requested
-  && path_has_masc_dir explicit
-
 let sync_test_base_path_env resolved_path =
   if running_under_test_executable ()
-     && not (bool_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+     && not (Env_config_core.get_bool ~default:false "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
   then
     match Env_config_core.base_path_opt () with
     | Some current when String.equal current resolved_path -> ()
     | _ ->
         Unix.putenv "MASC_BASE_PATH" resolved_path;
+        Unix.putenv "MASC_TEST_SYNCED_BASE_PATH" resolved_path;
         Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 
@@ -232,53 +124,29 @@ let resolve_requested_base_path path =
       Log.Room.info "MASC base: %s (no git root found)" requested;
       requested
 
-(** Resolve base_path: when MASC_BASE_PATH is explicitly set, use it
-    directly unless a test executable intentionally ignores an inherited
-    override. Git root detection applies for worktree auto-resolution when
-    no explicit path is configured, or when that inherited test override is
-    ignored. When the explicit path is an ancestor of the requested path
-    (e.g. ~/me contains ~/me/workspace/.../masc-mcp), the ancestor wins
-    because the sub-repo is part of the parent project. Only unrelated
-    sibling paths with dual .masc/ dirs trigger the ignore guard. *)
+(** Resolve base_path with a single authority:
+    - explicit [MASC_BASE_PATH] always wins
+    - otherwise resolve the requested path to its git root *)
 let resolve_masc_base_path path =
   match Env_config_core.base_path_opt () with
   | Some explicit
-    when should_ignore_inherited_base_path ~requested_path:path
-           ~explicit_path:explicit ->
-      let resolved = resolve_requested_base_path path in
+    when running_under_test_executable ()
+         && not
+              (Env_config_core.get_bool ~default:false
+                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+         && Option.equal String.equal
+              (Sys.getenv_opt "MASC_TEST_SYNCED_BASE_PATH")
+              (Some explicit) ->
       Log.Room.info
-        "Ignoring inherited MASC_BASE_PATH=%s because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
-        explicit (canonical_base_path path) (canonical_base_path explicit) resolved;
-      resolved
-  | Some explicit
-    when should_ignore_inherited_test_base_path ~requested_path:path
-           ~explicit_path:explicit ->
-      Log.Room.warn
-        "Ignoring inherited MASC_BASE_PATH=%s for test executable %s; using requested base path %s"
-        explicit (Filename.basename Sys.executable_name) path;
+        "Ignoring auto-synced MASC_BASE_PATH=%s for requested test path %s"
+        explicit path;
       resolve_requested_base_path path
   | Some explicit ->
       Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
   | None -> resolve_requested_base_path path
 
-let resolve_server_default_base_path path =
-  match Env_config_core.base_path_opt () with
-  | Some explicit
-    when should_ignore_inherited_server_base_path ~requested_path:path
-           ~explicit_path:explicit ->
-      let resolved = resolve_requested_base_path path in
-      let explicit_binding =
-        match Env_config_core.base_path_source_opt () with
-        | Some (name, raw) -> Printf.sprintf "%s=%s" name raw
-        | None -> Printf.sprintf "MASC_BASE_PATH=%s" explicit
-      in
-      Log.Room.warn
-        "Ignoring inherited %s for direct server startup because both %s and %s have .masc; using requested base path %s. Set MASC_ALLOW_INHERITED_BASE_PATH=1 to preserve the inherited root."
-        explicit_binding (canonical_base_path path) (canonical_base_path explicit)
-        resolved;
-      resolved
-  | _ -> resolve_masc_base_path path
+let resolve_server_default_base_path path = resolve_masc_base_path path
 
 (* ============================================ *)
 (* Environment helpers                          *)
@@ -292,7 +160,7 @@ let is_unresolved_template value =
 let env_opt name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" ->
-      if Backend_pg_url.is_unresolved_template value then begin
+      if is_unresolved_template value then begin
         Log.Backend.warn
           "%s contains unresolved 1Password template; skipping" name;
         None
@@ -300,53 +168,7 @@ let env_opt name =
         Some value
   | _ -> None
 
-let legacy_pg_env_var_names =
-  [| "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" |]
-
-let configured_legacy_pg_envs () =
-  legacy_pg_env_var_names
-  |> Array.to_list
-  |> List.filter (fun name -> env_opt name <> None)
-
-let legacy_pg_warning_signature : string option ref = ref None
-
-let warn_ignored_legacy_pg_envs storage_type =
-  if storage_type <> "postgres" then
-    let configured = configured_legacy_pg_envs () in
-    if configured <> [] then begin
-      let signature = String.concat "," configured in
-      if !legacy_pg_warning_signature <> Some signature then begin
-        legacy_pg_warning_signature := Some signature;
-        Log.Backend.warn
-          "Ignoring legacy PG envs for MASC backend selection: %s. \
-           Use MASC_STORAGE_TYPE=postgres with MASC_POSTGRES_URL for explicit PG mode."
-          (String.concat ", " configured)
-      end
-    end
-
-let postgres_url_from_env () =
-  match env_opt "MASC_POSTGRES_URL" with
-  | None -> None
-  | Some _ ->
-      let candidates : string option list =
-        [
-          env_opt "MASC_POSTGRES_URL";
-          env_opt "DATABASE_URL";
-          env_opt "SUPABASE_DB_URL";
-          env_opt "SB_PG_URL";
-        ]
-      in
-      (match Backend_pg_url.choose_preferred_url candidates with
-       | Some
-           {
-             url;
-             preferred_supabase_transaction_companion = true;
-             preferred_host = Some host;
-           } ->
-           Log.Backend.info "Supabase Session Pooler configured on %s:5432; preferring available Transaction Pooler companion on %s:6543" host host;
-           Some url
-       | Some { url; _ } -> Some url
-       | None -> None)
+let postgres_url_from_env () = None
 
 (** Auto-detect best backend based on environment variables.
     Stage-1 SSOT policy: no implicit PG auto-detect.
@@ -360,21 +182,18 @@ let auto_detect_backend () =
 
 (** Storage type from environment variable.
     Defaults to filesystem when MASC_STORAGE_TYPE is not set.
-    Requires explicit MASC_STORAGE_TYPE=postgres for PG mode. *)
+    PostgreSQL values are normalized to filesystem because PG storage
+    is no longer part of the live runtime path. *)
 let storage_type_from_env () =
-  let storage_type =
-    match env_opt "MASC_STORAGE_TYPE" with
-    | Some raw ->
-        let value = String.lowercase_ascii (String.trim raw) in
-        (match value with
-         | "postgres" | "postgresql" | "postgres-native" -> "postgres"
-         | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
-         | "memory" -> "memory"
-         | other -> other)
-    | None -> auto_detect_backend ()
-  in
-  warn_ignored_legacy_pg_envs storage_type;
-  storage_type
+  match env_opt "MASC_STORAGE_TYPE" with
+  | Some raw ->
+      let value = String.lowercase_ascii (String.trim raw) in
+      (match value with
+       | "postgres" | "postgresql" | "postgres-native"
+       | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
+       | "memory" -> "memory"
+       | other -> other)
+  | None -> auto_detect_backend ()
 
 (* ============================================ *)
 (* Backend creation                             *)
@@ -398,16 +217,6 @@ let sanitize_namespace_segment name =
 
 let backend_config_for base_path =
   let storage_type = storage_type_from_env () in
-  let postgres_url = postgres_url_from_env () in
-  if storage_type = "postgres" && postgres_url = None then
-    invalid_arg
-      (match configured_legacy_pg_envs () with
-       | [] -> "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL"
-       | configured ->
-           Printf.sprintf
-             "MASC_STORAGE_TYPE=postgres requires MASC_POSTGRES_URL; \
-              ignored legacy envs: %s"
-             (String.concat ", " configured));
   let cluster_name =
     match env_opt "MASC_CLUSTER_NAME" with
     | Some name -> name
@@ -415,7 +224,6 @@ let backend_config_for base_path =
   in
   let backend_type =
     match storage_type with
-    | "postgres" | "postgresql" -> Backend_types.PostgresNative
     | "memory" -> Backend_types.Memory
     | _ -> Backend_types.FileSystem
   in
@@ -432,7 +240,7 @@ let backend_config_for base_path =
   in
   {
     Backend_types.backend_type;
-    Backend_types.postgres_url;
+    Backend_types.postgres_url = None;
     Backend_types.base_path = backend_base_path;
     Backend_types.cluster_name;
     Backend_types.node_id = Backend_types.generate_node_id ();
@@ -472,60 +280,37 @@ let create_backend cfg =
               Fall back to shared Memory backend for the same base path. *)
            filesystem_fallback
              "No Eio fs context for FileSystem backend;")
-  | Backend_types.PostgresNative ->
-      (* PostgresNative requires Eio context - use create_backend_eio instead *)
-      Error (Backend_types.BackendNotSupported "PostgresNative requires Eio context (use create_backend_eio)")
-
-(** Create backend with Eio context - required for PostgresNative *)
-let create_backend_eio ~sw ~env cfg =
-  match cfg.Backend_types.backend_type with
-  | Backend_types.PostgresNative ->
-      let url = match cfg.Backend_types.postgres_url with
-        | Some u -> u
-        | None -> ""
-      in
-      (match Backend.Postgres.create ~sw ~env ~url cfg with
-       | Ok backend -> Ok (PostgresNative backend)
-       | Error e -> Error e)
-  | _ ->
-      (* Non-Eio backends can use the regular create_backend *)
-      create_backend cfg
+(** Create backend with Eio context. *)
+let create_backend_eio ~sw cfg =
+  let _ = sw in
+  create_backend cfg
 
 let default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
-  Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
-    (Backend_types.show_backend_type backend_config.backend_type)
-    (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
+  Log.Backend.info "MASC Backend: type=%s"
+    (Backend_types.show_backend_type backend_config.backend_type);
   let backend =
     match create_backend backend_config with
     | Ok backend ->
         Log.Backend.info "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem"
-           | PostgresNative _ -> "PostgresNative");
+           | FileSystem _ -> "FileSystem");
         backend
     | Error e ->
-        (match backend_config.Backend_types.backend_type with
-         | Backend_types.PostgresNative ->
-             invalid_arg
-               (Printf.sprintf
-                  "MASC_STORAGE_TYPE=postgres failed to initialize backend: %s"
-                  (Backend_types.show_error e))
-         | Backend_types.Memory | Backend_types.FileSystem ->
-             Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-               (Backend_types.show_error e);
-             let fallback_cfg =
-               { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-             in
-             (match create_backend fallback_cfg with
-              | Ok fb -> fb
-              | Error _ ->
-                  (* Final fallback: shared in-memory to keep server alive *)
-                  Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)))
+        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+          (Backend_types.show_error e);
+        let fallback_cfg =
+          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
+        in
+        (match create_backend fallback_cfg with
+         | Ok fb -> fb
+         | Error _ ->
+             (* Final fallback: shared in-memory to keep server alive *)
+             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -535,44 +320,35 @@ let default_config base_path =
     backend;
   }
 
-(** Create config with Eio context - required for PostgresNative backend.
+(** Create config with Eio context.
     [on_backend_ready] is called after backend creation, allowing callers
     to initialize dependent systems (e.g., Board) without Room depending on them. *)
-let default_config_eio ~sw ~env ?(on_backend_ready = fun _backend -> ()) base_path =
+let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
-  Log.Backend.info "MASC Backend: type=%s, postgres_url=%s"
-    (Backend_types.show_backend_type backend_config.backend_type)
-    (match backend_config.postgres_url with Some _ -> "<configured>" | None -> "none");
+  Log.Backend.info "MASC Backend: type=%s"
+    (Backend_types.show_backend_type backend_config.backend_type);
   let backend =
-    match create_backend_eio ~sw ~env backend_config with
+    match create_backend_eio ~sw backend_config with
     | Ok backend ->
         Log.Backend.info "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem"
-           | PostgresNative _ -> "PostgresNative");
+           | FileSystem _ -> "FileSystem");
         on_backend_ready backend;
         backend
     | Error e ->
-        (match backend_config.Backend_types.backend_type with
-         | Backend_types.PostgresNative ->
-             invalid_arg
-               (Printf.sprintf
-                  "MASC_STORAGE_TYPE=postgres failed to initialize backend: %s"
-                  (Backend_types.show_error e))
-         | Backend_types.Memory | Backend_types.FileSystem ->
-             Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
-               (Backend_types.show_error e);
-             let fallback_cfg =
-               { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-             in
-             (match create_backend fallback_cfg with
-              | Ok fb -> fb
-              | Error _ ->
-                  (* Final fallback: shared in-memory to keep server alive *)
-                  Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)))
+        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+          (Backend_types.show_error e);
+        let fallback_cfg =
+          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
+        in
+        (match create_backend fallback_cfg with
+         | Ok fb -> fb
+         | Error _ ->
+             (* Final fallback: shared in-memory to keep server alive *)
+             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
   in
   {
     base_path = resolved_path;

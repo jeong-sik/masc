@@ -184,7 +184,6 @@ let keeper_list_row_json ~runtime_class config name =
             ("agent_name", `String meta.agent_name);
             ("status", `String status);
             ("keepalive_running", `Bool keepalive_running);
-            ("scope_kind", `String meta.scope_kind);
             ("room_scope", `String meta.room_scope);
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
@@ -368,33 +367,28 @@ let handle_keeper_repair ctx args : tool_result =
         (false, "task_spec is required")
       else
         let target_mode = get_string args "target_mode" "snippet" in
-        let working_dir_arg = get_string args "working_dir" (Sys.getcwd ()) in
+        let working_dir_arg = get_string args "working_dir" "" in
         let plugin_id = get_string args "plugin_id" "ocaml" in
         let target_file_opt = get_string_opt args "target_file" in
-        let cwd_root =
-          try Unix.realpath (Sys.getcwd ()) with
-          | Unix.Unix_error _ -> Sys.getcwd ()
-        in
-        let resolved_working_dir_result =
-          try Ok (Unix.realpath working_dir_arg) with
-          | Unix.Unix_error _ ->
-              Error "working_dir does not exist or is not accessible"
-        in
-        match resolved_working_dir_result with
+        (* #6641 iter10 — narrow working_dir to caller's playground.
+           Default (empty arg) resolves to the caller's own playground
+           bundle root, not [Sys.getcwd ()]. Cross-keeper targets are
+           rejected. Shares the resolver with tool_repair_loop so the
+           same fix applies to both dispatchers. *)
+        match
+          Tool_repair_loop.resolve_playground_working_dir
+            ~agent_name:ctx.agent_name
+            ~base_path:ctx.config.base_path
+            ~working_dir_arg
+        with
         | Error msg -> (false, msg)
         | Ok working_dir ->
-            if not
-                 (Tool_repair_loop.is_safe_subpath ~parent:cwd_root
-                    ~child:working_dir)
-            then
-              (false, "working_dir must be within the current workspace")
-            else
-              match
-                Tool_repair_loop.validate_target_file ~working_dir
-                  ~target_file:target_file_opt
-              with
-              | Error msg -> (false, msg)
-              | Ok validated_target_file ->
+            match
+              Tool_repair_loop.validate_target_file ~working_dir
+                ~target_file:target_file_opt
+            with
+            | Error msg -> (false, msg)
+            | Ok validated_target_file ->
                   let validator_profile =
                     get_string args "validator_profile"
                       (if
@@ -592,7 +586,7 @@ let handle_keeper_reconcile ctx args : tool_result =
                      [
                        ("name", `String name);
                        ("action", `String "clear");
-                       ("cleared", `Bool false);
+                       ("cleared", `Bool true);
                        ("already_cleared", `Bool true);
                        ("legacy_only", `Bool false);
                        ("record", Keeper_manual_reconcile.record_to_yojson record);
@@ -609,11 +603,12 @@ let handle_keeper_reconcile ctx args : tool_result =
                        ("record", `Null);
                      ]
                | Keeper_manual_reconcile.No_record ->
+                   clear_registry_manual_reconcile ~ctx ~name;
                    `Assoc
                      [
                        ("name", `String name);
                        ("action", `String "clear");
-                       ("cleared", `Bool false);
+                       ("cleared", `Bool true);
                        ("already_cleared", `Bool false);
                        ("legacy_only", `Bool false);
                        ("record", `Null);
@@ -691,7 +686,13 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 let _tool_spec_read_only = [ "masc_keeper_list"; "masc_keeper_status" ]
 
 let tool_required_permission = function
-  | "masc_keeper_reconcile" -> Some Types.CanBroadcast
+  | "masc_persona_list" | "masc_keeper_list" | "masc_keeper_status" ->
+      Some Types.CanReadState
+  | "masc_keeper_create_from_persona" | "masc_keeper_up"
+  | "masc_keeper_msg" | "masc_keeper_msg_result"
+  | "masc_keeper_repair" | "masc_keeper_reconcile"
+  | "masc_keeper_down" | "masc_keeper_reset" ->
+      Some Types.CanBroadcast
   | _ -> None
 
 let () =

@@ -131,6 +131,27 @@ let build_snapshot_state (config : Room_utils.config) =
         _section_cache := Some cache;
         cache
   in
+  if not (Option.equal String.equal sc.base_path (Some config.base_path)) then begin
+    sc.base_path <- Some config.base_path;
+    sc.topo_units_mtime <- 0.0;
+    sc.topo_agents_mtime <- 0.0;
+    sc.agents <- [];
+    sc.managed_units <- [];
+    sc.units <- [];
+    sc.source <- "auto";
+    sc.intents_mtime <- 0.0;
+    sc.intents <- [];
+    sc.ops_topo_units_mtime <- 0.0;
+    sc.ops_topo_agents_mtime <- 0.0;
+    sc.ops_mtime <- 0.0;
+    sc.operations <- [];
+    sc.det_mtime <- 0.0;
+    sc.det_ops_mtime <- 0.0;
+    sc.detachments <- [];
+    sc.decisions_mtime <- 0.0;
+    sc.decisions_operator_mtime <- 0.0;
+    sc.decisions <- []
+  end;
   match config.backend with
       | FileSystem _ ->
           (* Per-section mtime check: only re-read sections whose files changed. *)
@@ -189,7 +210,7 @@ let build_snapshot_state (config : Room_utils.config) =
               ~detachments:sc.detachments ~decisions:sc.decisions
           in
           state
-      | Memory _ | PostgresNative _ ->
+      | Memory _ ->
           let agents, managed_units, units, source = topology_units config in
           let intents = read_intents config in
           let operations = all_operations config units in
@@ -270,7 +291,7 @@ let list_detachments_json_from_state ?operation_id ?detachment_id
   in
   let rows =
     detachments
-    |> List.map (fun (detachment : detachment_record) ->
+    |> Safe_ops.map_safe (fun (detachment : detachment_record) ->
            let operation =
              operation_by_id operations detachment.operation_id
              |> Option.map operation_to_json
@@ -508,7 +529,7 @@ let list_alerts_json_from_state _config (state : snapshot_state) =
                | Some reason -> reason
                | None -> "Pending policy gate approval"));
   (* Add occurrences count to deduped alerts *)
-  let enriched = List.rev !alerts |> List.map (fun (key, json) ->
+  let enriched = List.rev !alerts |> Safe_ops.map_safe (fun (key, json) ->
     let occurrences =
       Hashtbl.find_opt seen key |> Option.map (fun count -> !count) |> Option.value ~default:1
     in

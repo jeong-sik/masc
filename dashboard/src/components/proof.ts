@@ -2,8 +2,7 @@ import { html } from 'htm/preact'
 import { JsonViewerCard } from './common/json-viewer'
 import { useEffect } from 'preact/hooks'
 import { Card, CARD_STANDARD } from './common/card'
-import { EmptyState } from './common/empty-state'
-import { LoadingState } from './common/feedback-state'
+import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
 import { route } from '../router'
 import { proofError, proofLoading, proofSnapshot, refreshProofSnapshot } from '../proof-store'
 import type {
@@ -120,7 +119,7 @@ export function Proof() {
       </div>
 
       ${proofError.value
-        ? html`<div class="p-4 rounded-xl border border-bad/30 bg-bad/10 text-[13px] text-bad font-medium shadow-sm">${proofError.value}</div>`
+        ? html`<${ErrorState} message=${proofError.value} />`
         : null}
 
       <${SelectionCard} selection=${selection} summary=${summary ?? null} />

@@ -12,6 +12,20 @@ val get_bus : unit -> Agent_sdk.Event_bus.t option
     each interval, and processes [HeartbeatAck] directives. *)
 val set_grpc_client : ?env:Eio_unix.Stdenv.base -> Masc_grpc_client.t -> unit
 
+(** Throttle predicate for the "keepalive turn skipped: manual
+    reconcile pending" log. Returns [true] iff the caller should emit
+    INFO for [keeper_name] at time [now]; otherwise the caller should
+    demote to DEBUG. The window is 60s per keeper, applied on a
+    module-global in-memory table guarded by a [Stdlib.Mutex].
+    Exposed for regression testing of the throttle semantics — not
+    intended for production callers outside [keeper_keepalive.ml]. *)
+val should_log_manual_reconcile_skip : now:float -> string -> bool
+
+(** Test-only reset for the throttle table. Clears all entries so the
+    next [should_log_manual_reconcile_skip] call emits INFO again.
+    Never call this from production code. *)
+val reset_skip_log_throttle : unit -> unit
+
 (** Process a single directive string from a gRPC HeartbeatAck.
     Supported: "pause", "resume", "wakeup", "claim:<task_id>". *)
 val process_directive : agent_name:string -> string -> unit
@@ -27,6 +41,20 @@ val wakeup_all_keepers : ?base_path:string -> unit -> unit
 val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
     [MASC_KEEPER_AUTOBOOT_MAX]. *)
+
+val semaphore_wait_timeout_sec : float
+(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
+    turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]
+    (default 60.0, range [5, 600]). Keepers whose peers hold slots past
+    this cap are skipped for the current cycle and retry on the next
+    heartbeat. *)
+
+exception Semaphore_wait_timeout of float
+(** Raised inside [with_keeper_turn_slot] when acquiring either the
+    autonomous or turn semaphore exceeds [semaphore_wait_timeout_sec].
+    The float carries the wait cap so the caller can render it without
+    re-reading the env var. Callers should treat this as "skip this
+    turn, retry on next heartbeat" rather than a keeper failure. *)
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Room.config -> Board_dispatch.keeper_board_signal -> unit

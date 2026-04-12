@@ -3,6 +3,8 @@ open Alcotest
 module R = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
+module Audit = Masc_mcp.Keeper_transition_audit
+module Meas = Masc_mcp.Keeper_measurement
 
 let bp = "/tmp/test"
 
@@ -33,6 +35,129 @@ let test_register_and_get () =
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected entry for k1"
   | Some e -> check string "get name" "k1" e.name
+
+let test_register_offline_and_start () =
+  R.clear ();
+  let entry = R.register_offline ~base_path:bp "k1-offline" (make_meta "k1-offline") in
+  check string "offline phase" "offline" (KSM.phase_to_string entry.phase);
+  check bool "not running yet" false (R.is_running ~base_path:bp "k1-offline");
+  ignore (R.dispatch_event ~base_path:bp "k1-offline" KSM.Fiber_started);
+  match R.get ~base_path:bp "k1-offline" with
+  | None -> fail "expected k1-offline"
+  | Some e ->
+      check string "running after Fiber_started" "running"
+        (KSM.phase_to_string e.phase);
+      check bool "running after Fiber_started" true
+        (R.is_running ~base_path:bp "k1-offline")
+
+let test_register_restarting_and_start () =
+  R.clear ();
+  let entry = R.register_restarting ~base_path:bp "k1-restart" (make_meta "k1-restart") in
+  check string "restarting phase" "restarting" (KSM.phase_to_string entry.phase);
+  check bool "not running yet" false (R.is_running ~base_path:bp "k1-restart");
+  ignore (R.dispatch_event ~base_path:bp "k1-restart" KSM.Fiber_started);
+  match R.get ~base_path:bp "k1-restart" with
+  | None -> fail "expected k1-restart"
+  | Some e ->
+      check string "running after Fiber_started" "running"
+        (KSM.phase_to_string e.phase);
+      check bool "running after Fiber_started" true
+        (R.is_running ~base_path:bp "k1-restart")
+
+let test_dispatch_event_with_audit_preserves_snapshot () =
+  R.clear ();
+  let keeper_name = "k-audit-guardrail" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  let measurement : Meas.measurement_snapshot =
+    { snapshot_id = "msnap-test"
+    ; keeper_name
+    ; generation = 1
+    ; timestamp = 1000.0
+    ; thresholds =
+        { compaction_ratio_gate = 0.5
+        ; compaction_message_gate = 100
+        ; compaction_token_gate = 1000
+        ; compaction_cooldown_sec = 60
+        ; handoff_threshold = 0.85
+        ; handoff_cooldown_sec = 300
+        ; auto_handoff_enabled = true
+        ; reflect_repetition_threshold = 0.7
+        ; plan_goal_alignment_threshold = 0.3
+        ; plan_response_alignment_threshold = 0.3
+        ; guardrail_repetition_threshold = 0.9
+        ; guardrail_goal_alignment_threshold = 0.2
+        ; guardrail_response_alignment_threshold = 0.2
+        ; guardrail_context_threshold = 0.8
+        ; max_consecutive_hb_failures = 5
+        ; max_consecutive_turn_failures = 3
+        ; model_ratio_multiplier = 1.0
+        ; model_handoff_multiplier = 1.0
+        }
+    ; context =
+        { context_ratio = 0.85
+        ; message_count = 120
+        ; token_count = 2000
+        ; max_tokens = 10000
+        }
+    ; similarity =
+        { repetition_risk = 0.95
+        ; goal_alignment = 0.1
+        ; response_alignment = 0.1
+        }
+    ; timing =
+        { now_ts = 1000.0
+        ; idle_seconds = 0
+        ; since_last_compaction_sec = 120.0
+        ; since_last_handoff_sec = 120.0
+        ; proactive_warmup_elapsed = true
+        }
+    ; failures =
+        { consecutive_hb_failures = 0
+        ; consecutive_turn_failures = 0
+        }
+    }
+  in
+  let context_event =
+    KSM.Context_measured {
+      context_ratio = measurement.context.context_ratio;
+      message_count = measurement.context.message_count;
+      token_count = measurement.context.token_count;
+      auto_rules =
+        { reflect = true
+        ; plan = true
+        ; compact = true
+        ; handoff = true
+        ; guardrail_stop = true
+        ; guardrail_reason = Some "guardrail fired"
+        ; goal_drift = 0.9
+        };
+    }
+  in
+  let events =
+    [ KSM.Guardrail_stop { reason = "guardrail fired" }
+    ; context_event
+    ]
+  in
+  ignore (R.dispatch_event_with_audit
+    ~base_path:bp
+    ~snapshot:measurement
+    ~events_fired:events
+    ~selected_event:(List.hd events)
+    keeper_name
+    context_event);
+  match Audit.recent_transitions ~keeper_name ~limit:1 with
+  | [] -> fail "expected transition audit"
+  | [ audit ] ->
+      check string "selected event"
+        "guardrail_stop(guardrail fired)"
+        (KSM.event_to_string audit.selected_event);
+      check int "events_fired preserved" 2 (List.length audit.events_fired);
+      (match audit.snapshot with
+       | None -> fail "expected measurement snapshot"
+       | Some snapshot ->
+           check string "snapshot id" "msnap-test" snapshot.snapshot_id);
+      check string "new phase" "failing" (KSM.phase_to_string audit.new_phase)
+  | _ -> fail "expected exactly one transition audit entry"
 
 let test_unregister () =
   R.clear ();
@@ -159,7 +284,8 @@ let test_noop_on_missing () =
   R.set_grpc_close ~base_path:bp "ghost" None;
   R.wakeup ~base_path:bp "ghost";
   R.unregister ~base_path:bp "ghost";
-  check bool "no crash on missing" true true
+  check bool "ghost never materialized via no-op ops" true
+    (Option.is_none (R.get ~base_path:bp "ghost"))
 
 let test_register_replaces () =
   R.clear ();
@@ -431,7 +557,8 @@ let test_directive_unknown_no_crash () =
 let test_directive_nonexistent_agent () =
   R.clear ();
   KK.process_directive ~agent_name:"ghost-agent" "pause";
-  check bool "no crash on missing agent" true true
+  check bool "directive on ghost agent leaves registry empty" true
+    (Option.is_none (R.get ~base_path:bp "ghost-agent"))
 
 let test_stop_keepalive_scoped_to_base_path () =
   R.clear ();
@@ -481,6 +608,10 @@ let () =
       ( "basic",
         [
           eio_test "register and get" test_register_and_get;
+          eio_test "register offline and start" test_register_offline_and_start;
+          eio_test "register restarting and start" test_register_restarting_and_start;
+          eio_test "dispatch event with audit preserves snapshot"
+            test_dispatch_event_with_audit_preserves_snapshot;
           eio_test "unregister" test_unregister;
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;

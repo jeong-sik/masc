@@ -23,10 +23,6 @@
    board_core_classify
    board_core_payload
    board_votes
-   board_pg
-   board_pg_queries
-   board_pg_notify
-   board_pg_admin
    board_dispatch
    capability_registry
    bounded
@@ -133,7 +129,6 @@
    server_h2_gateway_routes_extra
    server_h2_gateway_routes_cp
    server_bootstrap_http
-   server_bootstrap_pg
    server_bootstrap_loops
    server_base_path_diagnostics
    server_runtime_bootstrap
@@ -176,6 +171,8 @@
    institution_eio
    level2_config
    level4_config
+   llm_metric_bridge
+   oas_log_bridge
    local_runtime_pool
    retrieval_projection
    sdk_tool_contract
@@ -197,7 +194,6 @@
    prompt_composer
    oas_response
    thompson_sampling
-   memory_pg
    memory_jsonl
    memory_oas_bridge
    meta_cognition
@@ -293,6 +289,7 @@
    tool_run
    tool_bridge
    tool_access_policy
+   tool_permission_map
    tool_access_role
    tool_portal
    tool_worktree
@@ -532,10 +529,10 @@
    autoresearch
    autoresearch_codegen
    autoresearch_knowledge
+   tool_autoresearch_context
    tool_autoresearch_schemas
    tool_autoresearch_registry
    tool_autoresearch_broadcast
-   tool_autoresearch_repo_synthesis
    tool_autoresearch_cycle
    tool_autoresearch
    ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
@@ -658,10 +655,10 @@
   ;; godsplit-phase2: additional sub-modules
   autoresearch_codegen
   autoresearch_knowledge
+  tool_autoresearch_context
   tool_autoresearch_schemas
   tool_autoresearch_registry
   tool_autoresearch_broadcast
-  tool_autoresearch_repo_synthesis
   tool_autoresearch_cycle
   keeper_skill_routing
   keeper_alerting_path
@@ -694,9 +691,6 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  ;; godsplit-board-pg: board_pg decomposition
-  board_pg_notify
-  board_pg_admin
   ;; godsplit-tool-task: schema extraction
   tool_task_schemas
   ;; godsplit-board-core: board_core decomposition
@@ -715,11 +709,6 @@
    httpun-ws
    httpun-ws-eio
    bigstringaf
-   ;; PostgreSQL backend (Eio-native, non-blocking)
-   caqti
-   caqti-eio
-   caqti-eio.unix
-   caqti-driver-postgresql
    sqlite3
    unix
    threads

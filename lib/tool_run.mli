@@ -10,16 +10,16 @@ type context = {
 }
 
 (** Tool result type *)
-type result = bool * string
+type tool_result = bool * string
 
 (** {1 Individual Handlers} *)
 
-val handle_run_init : context -> Yojson.Safe.t -> result
-val handle_run_plan : context -> Yojson.Safe.t -> result
-val handle_run_log : context -> Yojson.Safe.t -> result
-val handle_run_deliverable : context -> Yojson.Safe.t -> result
-val handle_run_get : context -> Yojson.Safe.t -> result
-val handle_run_list : context -> Yojson.Safe.t -> result
+val handle_run_init : context -> Yojson.Safe.t -> tool_result
+val handle_run_plan : context -> Yojson.Safe.t -> tool_result
+val handle_run_log : context -> Yojson.Safe.t -> tool_result
+val handle_run_deliverable : context -> Yojson.Safe.t -> tool_result
+val handle_run_get : context -> Yojson.Safe.t -> tool_result
+val handle_run_list : context -> Yojson.Safe.t -> tool_result
 
 (** {1 Dispatcher} *)
 
@@ -27,4 +27,4 @@ val handle_run_list : context -> Yojson.Safe.t -> result
 (** Tool schemas for MCP tools/list *)
 val schemas : Types.tool_schema list
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option

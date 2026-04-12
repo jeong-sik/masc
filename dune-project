@@ -1,10 +1,11 @@
 (lang dune 3.17)
 
 (name masc_mcp)
-(version 0.3.0)
+(version 0.5.9)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
+(executables_implicit_empty_intf false)
 
 (source
  (github jeong-sik/masc-mcp))
@@ -37,7 +38,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
-  (agent_sdk (>= 0.119.0))
+  (agent_sdk (>= 0.124.0))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -57,9 +58,6 @@
   (httpun-ws (>= 0.2))
   (httpun-ws-eio (>= 0.2))
   (bigstringaf (>= 0.10))
-  (caqti (>= 2.1))
-  (caqti-eio (>= 2.1))
-  (caqti-driver-postgresql (>= 2.1))
   (eio (>= 1.0))
   (eio_main (>= 1.0))
   (eio_posix (>= 0.16))

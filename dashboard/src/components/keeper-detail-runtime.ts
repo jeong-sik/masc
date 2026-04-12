@@ -37,27 +37,6 @@ const DEFAULT_ALLOWLIST_PREVIEW_LIMIT = 12
 
 // ── Utility functions ────────────────────────────────────
 
-export function actionDescriptorLabel(actionType?: string): string {
-  switch (actionType) {
-    case 'keeper_message':
-      return 'message'
-    case 'keeper_probe':
-      return 'probe'
-    case 'keeper_recover':
-      return 'recover'
-    case 'broadcast':
-      return 'broadcast'
-    case 'room_pause':
-      return 'pause'
-    case 'room_resume':
-      return 'resume'
-    case 'social_sweep':
-      return 'social'
-    default:
-      return actionType?.trim() || 'action'
-  }
-}
-
 export function resolveKeeperCurrentTaskLabel(
   keeper: Keeper | null | undefined,
 ): string {

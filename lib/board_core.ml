@@ -315,43 +315,54 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
     Error (Validation_error "Content cannot be empty")
   else
 
-  with_lock store (fun () ->
-    (* Check capacity *)
-    if !(store.post_count) >= Limits.max_posts then
-      Error (Capacity_exceeded { current = !(store.post_count); max = Limits.max_posts })
-    else begin
-      let now = Time_compat.now () in
-      let post = {
-        id = Post_id.generate ();
-        author = author_id;
-        title = normalized_title;
-        body = normalized_body;
-        content = normalized_body;
-        post_kind = normalized_kind;
-        meta_json = normalized_meta;
-        visibility;
-        created_at = now;
-        updated_at = now;  (* Initially same as created_at *)
-        expires_at;
-        votes_up = 0;
-        votes_down = 0;
-        reply_count = 0;
-        hearth;
-        thread_id;
-      } in
-      Hashtbl.add store.posts (Post_id.to_string post.id) post;
-      incr store.post_count;
-      invalidate_post_caches store;
-      append_post post;
-      (* Agent Economy: earn credits for board post *)
-      (match Agent_economy.earn
-         ~base_path:(board_base_path ()) ~agent_name:author
-         ~kind:Earn_board_post ~reason:"board post" () with
-       | Ok _ -> ()
-       | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-      Ok post
-    end
-  )
+  let board_result =
+    with_lock store (fun () ->
+      (* Check capacity *)
+      if !(store.post_count) >= Limits.max_posts then
+        Error (Capacity_exceeded { current = !(store.post_count); max = Limits.max_posts })
+      else begin
+        let now = Time_compat.now () in
+        let post = {
+          id = Post_id.generate ();
+          author = author_id;
+          title = normalized_title;
+          body = normalized_body;
+          content = normalized_body;
+          post_kind = normalized_kind;
+          meta_json = normalized_meta;
+          visibility;
+          created_at = now;
+          updated_at = now;  (* Initially same as created_at *)
+          expires_at;
+          votes_up = 0;
+          votes_down = 0;
+          reply_count = 0;
+          hearth;
+          thread_id;
+        } in
+        Hashtbl.add store.posts (Post_id.to_string post.id) post;
+        incr store.post_count;
+        invalidate_post_caches store;
+        append_post post;
+        Ok post
+      end)
+  in
+  (* Agent Economy: earn credits for board post.  Moved OUTSIDE
+     [with_lock] because [Agent_economy.earn] does its own disk I/O
+     against a ledger file unrelated to the board store, and modifies
+     no board state — holding [store.mutex] across it was pure
+     contention that blocked every other board reader/writer while
+     the ledger write landed.  If the earn fails we log at warn; the
+     post itself is already in the store and on disk. *)
+  (match board_result with
+   | Ok post ->
+       (match Agent_economy.earn
+          ~base_path:(board_base_path ()) ~agent_name:author
+          ~kind:Earn_board_post ~reason:"board post" () with
+        | Ok _ -> ()
+        | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
+       Ok post
+   | Error _ as e -> e)
 
 let get_post store ~post_id : (post, board_error) result =
   maybe_sweep store;

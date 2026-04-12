@@ -5,10 +5,13 @@
 
 module SM = Keeper_state_machine
 
-let enabled_cache : bool Lazy.t =
-  lazy (match Sys.getenv_opt "MASC_TLA_TRACE" with
-    | Some ("1" | "true" | "yes") -> true
-    | _ -> false)
+(* This flag is queried from registry/test code that can run before an Eio
+   scheduler exists, so the cache must stay on Stdlib.Lazy. *)
+let enabled_cache =
+  lazy
+    (match Sys.getenv_opt "MASC_TLA_TRACE" with
+     | Some ("1" | "true" | "yes") -> true
+     | _ -> false)
 
 let enabled () = Lazy.force enabled_cache
 

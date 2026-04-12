@@ -108,7 +108,12 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     net;
   } in
   let start_time = Unix.gettimeofday () in
-  match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
+  (* Channel gate needs the final keeper reply, not the async request ACK that
+     plain [Tool_keeper.dispatch] returns for masc_keeper_msg. *)
+  match
+    Tool_keeper.dispatch_stream ~on_text_delta:(fun _ -> ()) keeper_ctx
+      ~name:"masc_keeper_msg" ~args
+  with
   | Some (true, body) ->
       let duration_ms =
         int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)

@@ -569,10 +569,19 @@ export interface Keeper {
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
   keepalive_running?: boolean
+  registry_state?: string | null
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
-  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_class?:
+    | 'ambiguous_post_commit_timeout'
+    | 'ambiguous_post_commit_failure'
+    | 'autonomous_slot_wait_timeout'
+    | 'admission_queue_wait_timeout'
+    | 'turn_timeout_after_queue_wait'
+    | 'turn_timeout'
+    | 'completion_contract_violation'
+    | null
   runtime_blocker_summary?: string | null
   runtime_blocker_manual_reconcile?: boolean | null
   active_goal_ids?: string[]
@@ -661,6 +670,23 @@ export interface Keeper {
   metrics_series?: KeeperMetricPoint[]
   inventory?: string[]
   relationships?: Record<string, string>
+  supervisor_diagnostics?: KeeperSupervisorDiagnostics
+}
+
+export interface KeeperSupervisorCrashLogEntry {
+  ts?: number
+  reason?: string
+}
+
+export interface KeeperSupervisorDiagnostics {
+  restart_count?: number
+  max_restarts?: number
+  crash_log?: KeeperSupervisorCrashLogEntry[]
+  last_failure_reason?: string | null
+  dead_since?: number | null
+  sp_events?: unknown[]
+  health_score?: number
+  dead_eta_sec?: number | null
 }
 
 // --- Keeper Config (structured read-only view) ---
@@ -743,14 +769,21 @@ export interface KeeperConfigRuntime {
   fiber_health: string
   presence_keepalive: boolean
   presence_keepalive_sec: number
-  runtime_blocker_class?: 'ambiguous_post_commit_timeout' | 'ambiguous_post_commit_failure' | null
+  runtime_blocker_class?:
+    | 'ambiguous_post_commit_timeout'
+    | 'ambiguous_post_commit_failure'
+    | 'autonomous_slot_wait_timeout'
+    | 'admission_queue_wait_timeout'
+    | 'turn_timeout_after_queue_wait'
+    | 'turn_timeout'
+    | 'completion_contract_violation'
+    | null
   runtime_blocker_summary?: string | null
   runtime_blocker_manual_reconcile?: boolean | null
 }
 
 export interface KeeperConfigCoordination {
   room_scope: string
-  scope_kind: string
   mention_targets: string[]
   joined_room_ids: string[]
 }

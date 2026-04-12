@@ -6,6 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { keepers } from '../store'
 import { fetchKeeperTransitions, type KeeperTransition, type KeeperTransitionsResponse } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
+import { LoadingState } from './common/feedback-state'
 import { getPhaseStyle } from './keeper-phase-indicator'
 
 const transitionData = signal<Map<string, KeeperTransitionsResponse>>(new Map())
@@ -114,7 +115,7 @@ export function KeeperPhaseTimeline() {
   const keeperList = keepers.value
 
   if (isLoading && data.size === 0) {
-    return html`<div class="text-[12px] text-[var(--text-muted)] py-4 text-center">페이즈 타임라인 로딩 중...</div>`
+    return html`<${LoadingState}>페이즈 타임라인 불러오는 중...<//>`
   }
 
   if (keeperList.length === 0) {

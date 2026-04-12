@@ -27,7 +27,7 @@ let invalid_bounded_agents (agents : string list) : string list =
   List.sort_uniq String.compare invalid
 
 (** masc_bounded_run — run a bounded multi-agent execution *)
-let handle_bounded_run (ctx : context) : result option =
+let handle_bounded_run (ctx : context) : tool_result option =
   let module U = Yojson.Safe.Util in
   let state = ctx.state in
   let sw = ctx.sw in
@@ -70,7 +70,7 @@ let handle_bounded_run (ctx : context) : result option =
       Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
 
 (** masc_broadcast — broadcast a message to the room *)
-let handle_broadcast (ctx : context) : result option =
+let handle_broadcast (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -124,14 +124,14 @@ let handle_broadcast (ctx : context) : result option =
   end
 
 (** masc_messages — retrieve recent messages *)
-let handle_messages (ctx : context) : result option =
+let handle_messages (ctx : context) : tool_result option =
   let config = ctx.config in
   let since_seq = arg_get_int ctx "since_seq" 0 in
   let limit = arg_get_int ctx "limit" 10 in
   Some (true, Room.get_messages config ~since_seq ~limit)
 
 (** masc_listen — long-poll for a message addressed to this agent *)
-let handle_listen (ctx : context) : result option =
+let handle_listen (ctx : context) : tool_result option =
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
   let timeout = float_of_int (arg_get_int ctx "timeout" 300) in
@@ -155,6 +155,6 @@ Call masc_listen again to continue listening.
        Some (true, Printf.sprintf "Listening timed out after %.0fs. No messages received." timeout))
 
 (** masc_who — list agents currently in the room *)
-let handle_who (ctx : context) : result option =
+let handle_who (ctx : context) : tool_result option =
   let registry = ctx.registry in
   Some (true, Session.status_string registry)

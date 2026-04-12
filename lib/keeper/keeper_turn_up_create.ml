@@ -31,12 +31,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> Option.value ~default:"current"
     |> canonical_room_scope
   in
-  let scope_kind =
-    p.scope_kind_opt
-    |> first_some p.profile_defaults.scope_kind
-    |> Option.value ~default:(if room_scope = "all" then "global" else "local")
-    |> canonical_scope_kind
-  in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -196,7 +190,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     let primary_max_context =
       match p.max_context_override_opt with
       | Some v -> v
-      | None -> Oas_model_resolve.resolve_max_cascade_context cascade_models
+      | None ->
+          let resolved =
+            Oas_model_resolve.resolve_max_cascade_context cascade_models
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:cascade_models ~max_context:resolved
     in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
     let trace_id = generate_trace_id () in
@@ -251,7 +250,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         policy_voice_enabled;
         execution_scope;
         allowed_paths;
-        scope_kind;
         tool_access;
         tool_denylist;
         room_scope;
@@ -273,7 +271,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           message_gate = compaction_message_gate;
           token_gate = compaction_token_gate;
           cooldown_sec = continuity_compaction_cooldown_sec;
-          max_checkpoint_messages = 120;
+          max_checkpoint_messages = 80;
         };
         auto_handoff;
         handoff_threshold;

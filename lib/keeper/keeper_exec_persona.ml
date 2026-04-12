@@ -23,8 +23,8 @@ let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
     []
   else
     read_file_tail_lines path ~max_bytes ~max_lines
-    |> List.filter_map (fun line ->
-           try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
+    |> Fs_compat.parse_jsonl_lines ~source:"persona_metrics"
+    |> fst
 
 let find_jsonl_row_by_action_id rows action_id =
   rows
@@ -36,7 +36,7 @@ let find_jsonl_row_by_action_id rows action_id =
 let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ~will ~needs ~desires ~policy_voice_enabled
-    ~room_scope ~scope_kind ~mention_targets
+    ~room_scope ~mention_targets
     ~tool_preset ~tool_also_allow ~tool_denylist
     ~proactive_enabled ~shards
     ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
@@ -54,7 +54,6 @@ let resolved_keeper_args_to_json
       ("desires", `String desires);
       ("policy_voice_enabled", `Bool policy_voice_enabled);
       ("room_scope", `String room_scope);
-      ("scope_kind", `String scope_kind);
       ("mention_targets", string_list_to_json mention_targets);
       ("tool_preset", `String (tool_preset_to_string tool_preset));
       ("tool_also_allow", string_list_to_json tool_also_allow);
@@ -166,13 +165,6 @@ let resolved_keeper_args_from_persona args :
               |> Option.value ~default:"current"
               |> canonical_room_scope
             in
-            let scope_kind =
-              get_string_opt args "scope_kind"
-              |> first_some defaults.scope_kind
-              |> Option.value
-                   ~default:(if room_scope = "all" then "global" else "local")
-              |> canonical_scope_kind
-            in
             let mention_targets =
               let explicit = get_string_list args "mention_targets" in
               let raw =
@@ -229,7 +221,7 @@ let resolved_keeper_args_from_persona args :
                          ~goal ~short_goal ~mid_goal ~long_goal
                          ~instructions  ~will ~needs ~desires
                          ~policy_voice_enabled
-                         ~room_scope ~scope_kind ~mention_targets
+                         ~room_scope ~mention_targets
                          ~tool_preset ~tool_also_allow ~tool_denylist
                          ~proactive_enabled ~shards
                          ~auto_handoff ~handoff_threshold
@@ -273,7 +265,7 @@ let resolved_keeper_args_from_persona args :
                      ~goal ~short_goal ~mid_goal ~long_goal
                      ~instructions  ~will ~needs ~desires
                      ~policy_voice_enabled
-                     ~room_scope ~scope_kind ~mention_targets
+                     ~room_scope ~mention_targets
                      ~tool_preset ~tool_also_allow ~tool_denylist
                      ~proactive_enabled ~shards
                      ~auto_handoff ~handoff_threshold

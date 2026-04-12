@@ -143,6 +143,11 @@ let default_port_of_scheme = function
   | Some "https" -> Some 443
   | _ -> None
 
+let normalize_loopback_host host =
+  match String.lowercase_ascii (String.trim host) with
+  | "127.0.0.1" -> "localhost"
+  | other -> other
+
 (** Returns (host, explicit_port, scheme). *)
 let host_port_scheme_of_origin origin =
   try
@@ -193,12 +198,22 @@ let ensure_same_origin_browser_request request :
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),
         Some (request_host, request_port)
-        when String.equal origin_host request_host ->
-          (* Normalize implicit ports using Origin's scheme so that
-             e.g. Origin "https://h" (port=None→443) matches Host "h:443". *)
+        when String.equal
+               (normalize_loopback_host origin_host)
+               (normalize_loopback_host request_host) ->
           let default = default_port_of_scheme scheme in
           let norm p = match p with Some _ -> p | None -> default in
-          if norm origin_port = norm request_port then Ok ()
+          (* Loopback relaxation: when both origin and host resolve to a
+             loopback address (localhost / 127.0.0.1 / ::1), cross-port
+             mutations are allowed. The dev proxy (vite 5173 → backend
+             8935) relies on this, and remote attackers cannot forge a
+             loopback Origin. For public hosts we still require an
+             exact port match. Restores the behaviour that
+             test_auth_coverage.test_same_origin_allows_different_
+             explicit_port_on_loopback expects after #6449. *)
+          if is_loopback_host (normalize_loopback_host origin_host) then
+            Ok ()
+          else if norm origin_port = norm request_port then Ok ()
           else (
             Log.Auth.debug
               "same-origin port mismatch: origin=%S host=%s"

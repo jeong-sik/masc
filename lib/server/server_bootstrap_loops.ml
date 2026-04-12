@@ -29,10 +29,11 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           (Printexc.to_string exn))
   in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
-  Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
+  Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk.Event_bus.subscribe event_bus
-      ~filter:(function
+      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
+        match evt.payload with
         | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", _) -> true
         | _ -> false)
   in
@@ -41,7 +42,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       (try
         let events = Agent_sdk.Event_bus.drain keeper_lifecycle_sub in
         List.iter
-          (function
+          (fun (evt : Agent_sdk.Event_bus.event) ->
+            match evt.payload with
             | Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload) ->
                 (match
                    ( Safe_ops.json_string_opt "event" payload,
@@ -359,8 +361,20 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             Log.Server.info "Reaped %d stale connections (active: %d)"
               (List.length stale_sids) (Sse.client_count ());
           let evicted_events = Sse.cleanup_expired_events () in
-          if evicted_events > 0 then
-            Log.Server.info "Evicted %d expired SSE buffer events" evicted_events;
+          if evicted_events > 0 then begin
+            (* Same rationale as the namespace-truth broadcast log below:
+               when zero SSE clients are attached, the eviction loop is
+               garbage-collecting events that nobody would ever replay,
+               which is routine housekeeping rather than an
+               operator-actionable signal. Emit at INFO only when at
+               least one client is on the wire — otherwise DEBUG. *)
+            let log_fn =
+              if Sse.client_count () > 0
+              then Log.Server.info
+              else Log.Server.debug
+            in
+            log_fn "Evicted %d expired SSE buffer events" evicted_events
+          end;
           let evicted = Cache_eio.evict_expired state.room_config in
           if evicted > 0 then
             Log.Server.info "Cache: evicted %d expired entries" evicted;

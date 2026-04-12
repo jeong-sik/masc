@@ -1037,6 +1037,11 @@ function normalizeRuntimeBlockerClass(value: unknown): KeeperConfig['runtime']['
   switch (blockerClass) {
     case 'ambiguous_post_commit_timeout':
     case 'ambiguous_post_commit_failure':
+    case 'autonomous_slot_wait_timeout':
+    case 'admission_queue_wait_timeout':
+    case 'turn_timeout_after_queue_wait':
+    case 'turn_timeout':
+    case 'completion_contract_violation':
       return blockerClass
     default:
       return null
@@ -1155,7 +1160,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     coordination: {
       room_scope: asNullableString(coordination.room_scope) ?? 'current',
-      scope_kind: asNullableString(coordination.scope_kind) ?? 'current',
       mention_targets: normalizeStringList(coordination.mention_targets),
       joined_room_ids: normalizeStringList(coordination.joined_room_ids),
     },
@@ -1484,6 +1488,7 @@ export type TelemetrySource =
   | 'agent_event'
   | 'tool_call_io'
   | 'tool_usage'
+  | 'oas_event'
   | 'tool_metric'
 
 export type TelemetryEntry = Record<string, unknown> & {
@@ -1507,6 +1512,9 @@ export type TelemetrySourceSummary = {
   entry_count: number
   keepers?: Array<{ name: string; path: string }>
   keeper_count?: number
+  latest_ts_unix?: number | null
+  latest_ts_iso?: string | null
+  latest_age_s?: number | null
 }
 
 export type TelemetrySummaryResponse = {
@@ -1521,6 +1529,7 @@ function decodeTelemetrySource(value: unknown): TelemetrySource | null {
     case 'agent_event':
     case 'tool_call_io':
     case 'tool_usage':
+    case 'oas_event':
     case 'tool_metric':
       return value
     default:
@@ -1572,6 +1581,9 @@ function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | nu
       })
       .filter((keeper): keeper is { name: string; path: string } => keeper !== null),
     keeper_count: asNumber(raw.keeper_count),
+    latest_ts_unix: asNumber(raw.latest_ts_unix),
+    latest_ts_iso: asString(raw.latest_ts_iso),
+    latest_age_s: asNumber(raw.latest_age_s),
   }
 }
 

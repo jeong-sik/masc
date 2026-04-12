@@ -24,3 +24,10 @@ val resolve_commit :
   env_value:string option -> probe:(unit -> string option) -> string option
 (** Resolve commit hash from env var or probe function.
     Exposed for testing. *)
+
+val pick_repo_candidates :
+  exe_dir:string -> cwd:string -> string list
+(** Ordered list of directories to probe for a git repo. Places [exe_dir]
+    before [cwd] so the binary's own source tree wins when the process is
+    launched from an unrelated cwd. Returns a single entry when both
+    arguments are equal. Pure — exposed for unit testing. *)

@@ -3,6 +3,7 @@
 
 open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
+module KES = Masc_mcp.Keeper_exec_shared
 module KT = Masc_mcp.Keeper_types
 
 let make_meta ?(execution_scope = "observe_only") ?(allowed_paths = [])
@@ -24,10 +25,29 @@ let playground_bundle name =
     KAP.playground_mind_path name;
     KAP.playground_repos_path name ]
 
+(* After #6527 iter 4, `.worktrees/` is no longer a workspace default.
+   New worktrees land inside the keeper's own
+   `.masc/playground/<keeper>/repos/<clone>/.worktrees/...` and are
+   already covered by the playground bundle paths above. *)
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  Fun.protect ~finally:(fun () ->
+    let rec rm dir =
+      if Sys.file_exists dir then
+        if Sys.is_directory dir then begin
+          Sys.readdir dir
+          |> Array.iter (fun name -> rm (Filename.concat dir name));
+          Unix.rmdir dir
+        end else
+          Sys.remove dir
+    in
+    rm path
+  ) (fun () -> f path)
 let workspace_defaults name =
   [ Printf.sprintf ".masc/keepers/%s/" name;
     ".masc/traces/";
-    ".worktrees/";
     "lib/"; "test/"; "config/"; "bin/"; "scripts/"; "docs/" ]
 
 (* ── observe_only scope ── *)
@@ -152,6 +172,36 @@ let test_ensure_playground_bundle_creates_subdirs () =
       check bool ("is_dir: " ^ path) true (Sys.is_directory path)
     ) created)
 
+let with_temp_config f =
+  with_temp_dir "keeper_default_root_" (fun dir ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    f (Masc_mcp.Room.default_config dir))
+
+let check_default_roots_use_playground (meta : KT.keeper_meta) =
+  with_temp_config (fun config ->
+    let expected =
+      Filename.concat
+        (KAP.project_root_of_config config)
+        (KAP.playground_path_of_keeper meta.name)
+    in
+    let write_root = KES.keeper_default_write_root ~config ~meta in
+    let read_root = KES.keeper_default_read_root ~config ~meta in
+    check string "default write root is playground" expected write_root;
+    check string "default read root is playground" expected read_root;
+    check bool "playground dir exists" true (Sys.file_exists expected);
+    check bool "playground dir is directory" true (Sys.is_directory expected))
+
+let test_default_roots_use_playground_with_explicit_paths () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:["workspace/yousleepwhen/oas/"] ~name:"keeper" () in
+  check_default_roots_use_playground meta
+
+let test_default_roots_use_playground_with_full_access () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:["*"] ~name:"keeper" () in
+  check_default_roots_use_playground meta
+
 (* ── Runner ── *)
 
 let () =
@@ -186,5 +236,9 @@ let () =
             test_playground_always_present;
           test_case "ensure playground bundle creates subdirs" `Quick
             test_ensure_playground_bundle_creates_subdirs;
+          test_case "default roots stay in playground with explicit paths" `Quick
+            test_default_roots_use_playground_with_explicit_paths;
+          test_case "default roots stay in playground with full access" `Quick
+            test_default_roots_use_playground_with_full_access;
         ] );
     ]

@@ -59,31 +59,51 @@ let keeper_effective_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_allowed_paths ~meta
 ;;
 
-let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
-  let project_root = Keeper_alerting_path.project_root_of_config config in
-  match keeper_effective_allowed_paths ~meta with
-  | [] -> project_root
-  | first :: _ ->
-    (match
-       Keeper_alerting_path.resolve_keeper_target_path
-         ~config ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-         ~raw_path:first
-     with
-     | Ok path ->
-       Fs_compat.mkdir_p path;
-       path
-     | Error _ ->
-       let fallback = Filename.concat project_root first in
-       Fs_compat.mkdir_p fallback;
-       fallback)
+let keeper_playground_root ~(config : Room.config) ~(meta : keeper_meta) =
+  ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
+  Filename.concat
+    (Keeper_alerting_path.project_root_of_config config)
+    (Keeper_alerting_path.playground_path_of_keeper meta.name)
 ;;
+
+let keeper_default_write_root ~(config : Room.config) ~(meta : keeper_meta) =
+  keeper_playground_root ~config ~meta
+;;
+
+let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
+  keeper_playground_root ~config ~meta
+;;
+
+let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
+  let boundary prefix =
+    let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
+    prefix <> ""
+    && (String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw)
+  in
+  keeper_effective_allowed_paths ~meta
+  |> List.filter Filename.is_relative
+  |> List.exists boundary
+
+(* Bare filenames default to the keeper playground, but rooted-looking relative
+   paths (for example "workspace/..." or "lib/...") keep project-root/boundary semantics. *)
+let playground_relative_unless_allowed_root ~(config : Room.config)
+    ~(meta : keeper_meta) (raw : string) : string =
+  let trimmed = String.trim raw in
+  if trimmed = ""
+     || not (Filename.is_relative trimmed)
+     || String.contains trimmed '/'
+     || relative_path_targets_allowed_root ~meta trimmed
+  then trimmed
+  else
+    let pg = keeper_playground_root ~config ~meta in
+    Filename.concat pg trimmed
 
 let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path : string)
   =
   resolve_keeper_target_path
     ~config
     ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path
+    ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
 ;;
 
 let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
@@ -91,7 +111,7 @@ let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
   Keeper_alerting_path.resolve_keeper_read_path
     ~config
     ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path
+    ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) =

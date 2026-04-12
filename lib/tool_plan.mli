@@ -11,24 +11,24 @@ type context = {
 }
 
 (** Tool result type *)
-type result = bool * string
+type tool_result = bool * string
 
 (** {1 Individual Handlers} *)
 
-val handle_plan_init : context -> Yojson.Safe.t -> result
-val handle_plan_update : context -> Yojson.Safe.t -> result
-val handle_note_add : context -> Yojson.Safe.t -> result
-val handle_deliver : context -> Yojson.Safe.t -> result
-val handle_plan_get : context -> Yojson.Safe.t -> result
-val handle_error_add : context -> Yojson.Safe.t -> result
-val handle_error_resolve : context -> Yojson.Safe.t -> result
-val handle_plan_set_task : context -> Yojson.Safe.t -> result
-val handle_plan_get_task : context -> Yojson.Safe.t -> result
-val handle_plan_clear_task : context -> Yojson.Safe.t -> result
+val handle_plan_init : context -> Yojson.Safe.t -> tool_result
+val handle_plan_update : context -> Yojson.Safe.t -> tool_result
+val handle_note_add : context -> Yojson.Safe.t -> tool_result
+val handle_deliver : context -> Yojson.Safe.t -> tool_result
+val handle_plan_get : context -> Yojson.Safe.t -> tool_result
+val handle_error_add : context -> Yojson.Safe.t -> tool_result
+val handle_error_resolve : context -> Yojson.Safe.t -> tool_result
+val handle_plan_set_task : context -> Yojson.Safe.t -> tool_result
+val handle_plan_get_task : context -> Yojson.Safe.t -> tool_result
+val handle_plan_clear_task : context -> Yojson.Safe.t -> tool_result
 
 (** {1 Dispatcher} *)
 
 (** Dispatch plan tool by name. Returns None if not a plan tool. *)
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 val schemas : Types.tool_schema list

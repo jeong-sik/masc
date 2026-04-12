@@ -164,17 +164,40 @@ let mkdir_p (path : string) : unit =
       let eio_path = Eio.Path.(fs / path) in
       Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
 
-(** Load JSONL file as list of JSON values.
-    Filters out malformed lines. *)
-let load_jsonl (path : string) : Yojson.Safe.t list =
-  if not (file_exists path) then []
+(** Parse pre-read string lines as JSONL.
+    Use when lines come from [Keeper_memory.read_file_tail_lines] or
+    other non-file sources.  Logs malformed lines with [source] tag. *)
+let parse_jsonl_lines ~(source : string) (lines : string list)
+    : Yojson.Safe.t list * int =
+  let malformed = ref 0 in
+  let parsed =
+    List.filter_map (fun line ->
+      let trimmed = String.trim line in
+      if trimmed = "" then None
+      else
+        match Yojson.Safe.from_string trimmed with
+        | json -> Some json
+        | exception Yojson.Json_error msg ->
+            incr malformed;
+            Printf.eprintf "[fs_compat] malformed JSONL (%s): %s\n%!" source msg;
+            None
+    ) lines
+  in
+  (parsed, !malformed)
+
+(** Load JSONL file, returning parsed values and count of malformed lines.
+    Delegates to [parse_jsonl_lines] for the actual parsing. *)
+let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
+  if not (file_exists path) then ([], 0)
   else
     let content = load_file path in
-    String.split_on_char '\n' content
-    |> List.filter (fun line -> String.length (String.trim line) > 0)
-    |> List.filter_map (fun line ->
-        try Some (Yojson.Safe.from_string line)
-        with Yojson.Json_error _ -> None)
+    let lines = String.split_on_char '\n' content in
+    parse_jsonl_lines ~source:(Filename.basename path) lines
+
+(** Load JSONL file as list of JSON values.
+    Malformed lines are logged and dropped. *)
+let load_jsonl (path : string) : Yojson.Safe.t list =
+  fst (load_jsonl_diagnostics path)
 
 (** Append JSON value as line to JSONL file. *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

@@ -20,6 +20,10 @@ vi.mock('./mission-store', () => ({
   refreshMissionSnapshot: vi.fn(),
 }))
 
+vi.mock('./proof-store', () => ({
+  refreshProofSnapshot: vi.fn(),
+}))
+
 vi.mock('./components/tool-quality-panel', () => ({
   refreshToolQuality: vi.fn(),
 }))
@@ -40,6 +44,7 @@ vi.mock('./command-store', () => ({
 
 import { refreshFeatureHealth } from './components/feature-health'
 import { refreshServerConfig } from './components/server-config'
+import { refreshProofSnapshot } from './proof-store'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 
 describe('refreshPlanForRoute', () => {
@@ -90,6 +95,11 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['board'])
 
     expect(refreshPlanForRoute({
+      tab: 'workspace',
+      params: { section: 'evidence' },
+    })).toEqual(['proof'])
+
+    expect(refreshPlanForRoute({
       tab: 'lab',
       params: { section: 'autoresearch' },
     })).toEqual(['autoresearch'])
@@ -120,5 +130,18 @@ describe('refreshPlanForRoute', () => {
       expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
       expect(refreshServerConfig).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('refreshes proof with the current route session and operation scope', () => {
+    refreshForRoute({
+      tab: 'workspace',
+      params: {
+        section: 'evidence',
+        session_id: 'session-123',
+        operation_id: 'op-456',
+      },
+    })
+
+    expect(refreshProofSnapshot).toHaveBeenCalledWith('session-123', 'op-456')
   })
 })

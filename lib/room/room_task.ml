@@ -26,6 +26,41 @@ let read_backlog_or_raise config =
   | Ok backlog -> backlog
   | Error msg -> raise (Invalid_argument msg)
 
+(** Update the on-disk agent state record under its own file lock.
+
+    Task transitions ([claim], [complete], [cancel], …) need to
+    reflect the new task assignment on the agent record at
+    [<agents_dir>/<name>.json].  Every pre-existing call site in this
+    module did the read→modify→write inline without holding any lock
+    on that file — the enclosing [with_file_lock config backlog_path]
+    only serializes backlog writers, not agent-state writers.  Sibling
+    writers in [Room_agent.update_agent_r] correctly take
+    [with_file_lock_r config agent_file], so concurrent
+    [update_agent_r] or concurrent room_task transitions can race and
+    lose each other's updates.
+
+    This helper centralises the pattern, takes [with_file_lock] on the
+    agent file, and silently skips the write when the file is missing
+    (matching the pre-existing [if Sys.file_exists agent_file]
+    guards).  It never blocks the caller on a missing/corrupt agent
+    record — the backlog transition is the source of truth and the
+    agent mirror is best-effort telemetry.  On JSON parse failure the
+    error is logged with the agent name for diagnostic context. *)
+let update_local_agent_state config ~agent_name f =
+  let agent_file =
+    Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+  in
+  if Sys.file_exists agent_file then
+    with_file_lock config agent_file (fun () ->
+      let json = read_json config agent_file in
+      match agent_of_yojson json with
+      | Ok agent ->
+          write_json config agent_file (agent_to_yojson (f agent))
+      | Error msg ->
+          Log.Misc.error
+            "update_local_agent_state: parse failed for %s: %s"
+            agent_name msg)
+
 (** Tighter variant of [resolve_agent_name] for task ownership guards.
     Only accepts the resolved identity when it is the exact [-agent] suffix
     form of the normalised input (e.g. "keeper-coder" -> "keeper-coder-agent").
@@ -402,16 +437,8 @@ let claim_task config ~agent_name ~task_id =
               version = backlog.version + 1;
             } in
             write_backlog config new_backlog;
-            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
-              | Ok agent ->
-                  let updated = { agent with status = Busy; current_task = Some task_id } in
-                  write_json config agent_file (agent_to_yojson updated)
-              | Error msg ->
-                  Log.Misc.error "agent state write failed: %s" msg
-            end;
+            update_local_agent_state config ~agent_name (fun agent ->
+              { agent with status = Busy; current_task = Some task_id });
             let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
             emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
@@ -513,16 +540,8 @@ let claim_task_r config ~agent_name ~task_id
               version = backlog.version + 1;
             } in
             write_backlog config new_backlog;
-            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
-              | Ok agent ->
-                  let updated = { agent with status = Busy; current_task = Some task_id } in
-                  write_json config agent_file (agent_to_yojson updated)
-              | Error msg ->
-                  Log.Misc.error "agent state write failed: %s" msg
-            end;
+            update_local_agent_state config ~agent_name (fun agent ->
+              { agent with status = Busy; current_task = Some task_id });
             let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
             emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
               ~payload:(`Assoc [ ("task_id", `String task_id) ]);
@@ -674,24 +693,14 @@ let transition_task_r config ~agent_name ~task_id ~action
           version = backlog.version + 1;
         } in
         write_backlog config new_backlog;
-        let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-        if Sys.file_exists agent_file then begin
-          let json = read_json config agent_file in
-          match agent_of_yojson json with
-          | Ok agent ->
-              let updated =
-                match set_current with
-                | Some _ -> { agent with status = Busy; current_task = Some task_id }
-                | None ->
-                    if agent.current_task = Some task_id then
-                      { agent with status = Active; current_task = None }
-                    else
-                      agent
-              in
-              write_json config agent_file (agent_to_yojson updated)
-          | Error msg ->
-              Log.Misc.error "agent state write failed: %s" msg
-        end;
+        update_local_agent_state config ~agent_name (fun agent ->
+          match set_current with
+          | Some _ -> { agent with status = Busy; current_task = Some task_id }
+          | None ->
+              if agent.current_task = Some task_id then
+                { agent with status = Active; current_task = None }
+              else
+                agent);
         log_event config
           (Yojson.Safe.to_string
              (`Assoc
@@ -854,16 +863,8 @@ let complete_task config ~agent_name ~task_id ~notes =
               version = backlog.version + 1;
             } in
             write_backlog config new_backlog;
-            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-            if Sys.file_exists agent_file then begin
-              let json = read_json config agent_file in
-              match agent_of_yojson json with
-              | Ok agent ->
-                  let updated = { agent with status = Active; current_task = None } in
-                  write_json config agent_file (agent_to_yojson updated)
-              | Error msg ->
-                  Log.Misc.error "agent state write failed: %s" msg
-            end;
+            update_local_agent_state config ~agent_name (fun agent ->
+              { agent with status = Active; current_task = None });
             let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
                       else Printf.sprintf "✅ Completed %s - %s" task_id notes in
             let _ = broadcast config ~from_agent:agent_name ~content:msg in
@@ -970,14 +971,8 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                 version = backlog.version + 1;
               } in
               write_backlog config new_backlog;
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent -> let updated = { agent with status = Active; current_task = None } in write_json config agent_file (agent_to_yojson updated)
-                | Error msg ->
-                    Log.Misc.error "agent state write failed: %s" msg
-              end;
+              update_local_agent_state config ~agent_name (fun agent ->
+                { agent with status = Active; current_task = None });
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
               emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
@@ -1056,15 +1051,11 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               } in
               write_backlog config new_backlog;
               (* Update agent status if they had this task *)
-              let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-              if Sys.file_exists agent_file then begin
-                let json = read_json config agent_file in
-                match agent_of_yojson json with
-                | Ok agent when agent.current_task = Some task_id ->
-                    let updated = { agent with status = Active; current_task = None } in
-                    write_json config agent_file (agent_to_yojson updated)
-                | _ -> ()
-              end;
+              update_local_agent_state config ~agent_name (fun agent ->
+                if agent.current_task = Some task_id then
+                  { agent with status = Active; current_task = None }
+                else
+                  agent);
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
               emit_task_activity config ~agent_name ~task_id

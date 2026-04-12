@@ -75,12 +75,22 @@ val broadcast_lifecycle_events :
     Uses structured [Oas.Error.sdk_error] pattern matching. *)
 val is_transient_network_error : Oas.Error.sdk_error -> bool
 
+(** Cap a single OAS Agent.run timeout to the remaining unified-turn
+    wall-clock budget. Returns [None] when too little budget remains to
+    schedule another call safely. *)
+val bounded_oas_timeout_for_turn_budget :
+  max_context:int -> remaining_turn_budget_s:float -> float option
+
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
     rejecting a malformed request body).  The LLM never
     processed the request, so committed tool results are not at risk
     of duplication.  Used to auto-recover reconcile-safe tools instead
     of requiring manual reconcile. *)
 val is_server_rejected_parse_error : Oas.Error.sdk_error -> bool
+
+(** [true] when the keeper should preserve liveness and skip consecutive
+    failure counting, even if same-turn retry is still disabled. *)
+val is_auto_recoverable_turn_error : Oas.Error.sdk_error -> bool
 
 (** Reclassify any post-commit turn error as a persistent integrity error when
     mutating tool calls already committed in the same turn. *)
@@ -98,6 +108,15 @@ val is_ambiguous_side_effect_error : Oas.Error.sdk_error -> bool
 
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Oas.Error.sdk_error -> bool
+
+(** Resolve the initial keeper turn context budget.
+    Uses the first available model in the cascade rather than the largest
+    fallback model, so lifecycle context math matches the provider that will
+    receive the first request. Exposed for regression tests. *)
+val resolved_max_context_for_turn :
+  meta:Keeper_types.keeper_meta ->
+  string list ->
+  int
 
 val run_unified_turn :
   config:Room.config ->

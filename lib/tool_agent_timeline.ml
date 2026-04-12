@@ -11,7 +11,7 @@
 
 open Tool_args
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config : Room.config;
@@ -428,7 +428,7 @@ let schemas : Types.tool_schema list =
   ]
 
 (* Handler *)
-let handle_agent_timeline (ctx : context) args : result =
+let handle_agent_timeline (ctx : context) args : tool_result =
   let agent_name = get_string args "agent_name" "" in
   if String.length agent_name = 0 then
     (false, "agent_name is required")
@@ -445,7 +445,7 @@ let handle_agent_timeline (ctx : context) args : result =
     (true, Yojson.Safe.to_string json)
 
 (* Dispatch *)
-let dispatch (ctx : context) ~name ~args : result option =
+let dispatch (ctx : context) ~name ~args : tool_result option =
   match name with
   | "masc_agent_timeline" -> Some (handle_agent_timeline ctx args)
   | _ -> None

@@ -10,7 +10,7 @@ type context = {
   agent_name: string;
 }
 
-type result = bool * string
+type tool_result = bool * string
 
 let handle_poll_events _ctx args =
   let subscription_id = get_string args "subscription_id" "" in
@@ -51,13 +51,18 @@ let handle_heartbeat_result _ctx args =
     | Error e -> (false, Printf.sprintf "Submit result failed: %s" e)
 
 (* Dispatch function - returns None if tool not handled *)
-let dispatch ctx ~name ~args : result option =
+let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_poll_events" -> Some (handle_poll_events ctx args)
   | "masc_heartbeat_result" -> Some (handle_heartbeat_result ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_a2a.schemas
+
+let tool_required_permission = function
+  | "masc_poll_events" | "masc_heartbeat_result" ->
+      Some Types.CanReadState
+  | _ -> None
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -73,5 +78,6 @@ let () =
            ~module_tag:Tool_dispatch.Mod_a2a
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

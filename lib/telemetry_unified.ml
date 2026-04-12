@@ -11,6 +11,7 @@
     - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
     - [<masc_root>/tool_usage/]              — System_internal surface tool calls
+    - [<masc_root>/oas-events/]              — Durable OAS native/custom events
     - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
     @since 2.251.0 *)
 
@@ -19,6 +20,7 @@ type source =
   | Agent_event    (** Agent lifecycle, task, handoff events *)
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Tool_usage     (** System_internal surface tool invocations *)
+  | Oas_event      (** Durable OAS native/custom event bus relays *)
   | Tool_metric    (** Tool duration and success metrics *)
 
 let source_to_string = function
@@ -26,6 +28,7 @@ let source_to_string = function
   | Agent_event -> "agent_event"
   | Tool_call_io -> "tool_call_io"
   | Tool_usage -> "tool_usage"
+  | Oas_event -> "oas_event"
   | Tool_metric -> "tool_metric"
 
 let source_of_string = function
@@ -33,10 +36,18 @@ let source_of_string = function
   | "agent_event" -> Some Agent_event
   | "tool_call_io" -> Some Tool_call_io
   | "tool_usage" -> Some Tool_usage
+  | "oas_event" -> Some Oas_event
   | "tool_metric" -> Some Tool_metric
   | _ -> None
 
-let all_sources = [Keeper_metric; Agent_event; Tool_call_io; Tool_usage; Tool_metric]
+let all_sources =
+  [ Keeper_metric
+  ; Agent_event
+  ; Tool_call_io
+  ; Tool_usage
+  ; Oas_event
+  ; Tool_metric
+  ]
 
 (* ── Store paths ────────────────────────────────────── *)
 
@@ -49,6 +60,7 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Agent_event  -> Some (Filename.concat masc_root "telemetry")
   | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
+  | Oas_event    -> Some (Filename.concat masc_root "oas-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
   | Keeper_metric -> None  (* handled separately *)
 
@@ -94,6 +106,41 @@ let extract_ts (json : Yojson.Safe.t) : float =
             | _ -> 0.0))
   | _ -> 0.0
 
+let max_ts_opt current candidate =
+  match current with
+  | Some existing when existing >= candidate -> current
+  | _ -> Some candidate
+
+let latest_ts_of_entries (entries : Yojson.Safe.t list) : float option =
+  List.fold_left
+    (fun acc json ->
+      let ts = extract_ts json in
+      if ts > 0.0 then max_ts_opt acc ts else acc)
+    None entries
+
+let latest_store_ts dir label : float option =
+  if not (Sys.file_exists dir) then None
+  else
+    match Dated_jsonl.create ~base_dir:dir () with
+    | store -> latest_ts_of_entries (Dated_jsonl.read_recent store 64)
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      Log.Telemetry.warn "latest_store_ts: %s store open failed: %s" label
+        (Printexc.to_string exn);
+      None
+
+let freshness_fields ~now latest_ts =
+  match latest_ts with
+  | Some ts ->
+    let age = max 0.0 (now -. ts) in
+    [
+      ("latest_ts_unix", `Float ts);
+      ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+      ("latest_age_s", `Float age);
+    ]
+  | None ->
+    [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
+
 (* ── Entry tagging ──────────────────────────────────── *)
 
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
@@ -113,8 +160,13 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
       | Some (`String k) -> String.equal k name
       | _ -> false
     in
-    (* keeper_metric: "name" field; tool_call_io: "keeper"; tool_usage: "caller" *)
-    check "name" || check "keeper" || check "caller" || check "agent_id"
+    (* keeper_metric: "name" field; tool_call_io: "keeper"; oas_event: "agent_name" *)
+    check "name"
+    || check "keeper"
+    || check "caller"
+    || check "agent_id"
+    || check "agent_name"
+    || check "agent"
   | _ -> false
 
 let matches_string_field field expected (json : Yojson.Safe.t) : bool =
@@ -221,6 +273,7 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
          0)
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
+  let now = Unix.gettimeofday () in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
     List.fold_left (fun acc (name, dir) ->
@@ -234,38 +287,55 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
          0)
     ) 0 keeper_dirs
   in
-  let source_json source =
+  let keeper_latest_ts =
+    List.fold_left
+      (fun acc (name, dir) ->
+        match latest_store_ts dir (Printf.sprintf "keeper %s" name) with
+        | Some ts -> max_ts_opt acc ts
+        | None -> acc)
+      None keeper_dirs
+  in
+  let source_json_and_count source =
     match source with
     | Keeper_metric ->
-      `Assoc [
-        ("source", `String (source_to_string source));
-        ("keepers", `List (List.map (fun (name, dir) ->
-           `Assoc [
-             ("name", `String name);
-             ("path", `String dir);
-           ]) keeper_dirs));
-        ("keeper_count", `Int (List.length keeper_dirs));
-        ("entry_count", `Int keeper_total);
-      ]
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ( "keepers",
+               `List
+                 (List.map
+                    (fun (name, dir) ->
+                      `Assoc [ ("name", `String name); ("path", `String dir) ])
+                    keeper_dirs) );
+             ("keeper_count", `Int (List.length keeper_dirs));
+             ("entry_count", `Int keeper_total);
+           ]
+          @ freshness_fields ~now keeper_latest_ts),
+        keeper_total )
     | _ ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let exists = dir <> "" && Sys.file_exists dir in
       let count = if exists then count_fixed_source_entries ~masc_root ~base_path source else 0 in
-      `Assoc [
-        ("source", `String (source_to_string source));
-        ("path", `String dir);
-        ("exists", `Bool exists);
-        ("entry_count", `Int count);
-      ]
+      let latest_ts =
+        if exists then latest_store_ts dir (source_to_string source) else None
+      in
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ("path", `String dir);
+             ("exists", `Bool exists);
+             ("entry_count", `Int count);
+           ]
+          @ freshness_fields ~now latest_ts),
+        count )
   in
-  let fixed_total =
-    List.fold_left (fun acc s ->
-      acc + count_fixed_source_entries ~masc_root ~base_path s
-    ) 0 (List.filter (fun s -> s <> Keeper_metric) all_sources)
+  let source_summaries = List.map source_json_and_count all_sources in
+  let total_entries =
+    List.fold_left (fun acc (_json, count) -> acc + count) 0 source_summaries
   in
   `Assoc [
     ("generated_at", `String (Types.now_iso ()));
-    ("sources", `List (List.map source_json all_sources));
-    ("total_entries", `Int (keeper_total + fixed_total));
+    ("sources", `List (List.map fst source_summaries));
+    ("total_entries", `Int total_entries);
   ]

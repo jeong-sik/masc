@@ -63,10 +63,6 @@ let test_validate_ttl_boundary () =
 let test_get_status_all_backends () =
   let cfg_mem = { Backend_types.default_config with backend_type = Backend_types.Memory } in
   let cfg_fs = { Backend_types.default_config with backend_type = Backend_types.FileSystem } in
-  let cfg_pg = { Backend_types.default_config with
-    backend_type = Backend_types.PostgresNative;
-    postgres_url = Some "postgresql://localhost/test"
-  } in
 
   let open Yojson.Safe.Util in
 
@@ -75,10 +71,8 @@ let test_get_status_all_backends () =
 
   let s2 = Backend_types.get_status cfg_fs in
   check string "fs status" "filesystem" (s2 |> member "backend_type" |> to_string);
-
-  let s3 = Backend_types.get_status cfg_pg in
-  check string "pg status" "postgres_native" (s3 |> member "backend_type" |> to_string);
-  check bool "pg url present" true (s3 |> member "postgres_url" |> to_string_option |> Option.is_some)
+  check bool "default postgres_url remains optional" true
+    (s2 |> member "postgres_url" |> to_string_option |> Option.is_none)
 
 let test_pubsub_max_messages_env () =
   (* Test the default value - cannot easily test env override in unit test *)

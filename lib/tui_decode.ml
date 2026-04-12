@@ -32,7 +32,6 @@ type keeper = {
   k_last_turn_ts : string;
   k_compaction_count : int;
   k_compaction_ratio_gate : float;
-  k_scope_kind : string;
   k_room_scope : string;
   k_trigger_mode : string;
   k_context_budget : int;
@@ -192,7 +191,6 @@ let decode_keeper ~filename json =
   in
   let* k_compaction_count = require_int_field json "compaction_count" in
   let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
-  let* k_scope_kind = require_string_field json "scope_kind" in
   let* k_room_scope = require_string_field json "room_scope" in
   let* k_trigger_mode = require_string_field json "trigger_mode" in
   let* k_context_budget = require_int_field json "context_budget" in
@@ -224,7 +222,6 @@ let decode_keeper ~filename json =
       k_last_turn_ts;
       k_compaction_count;
       k_compaction_ratio_gate;
-      k_scope_kind;
       k_room_scope;
       k_trigger_mode;
       k_context_budget;

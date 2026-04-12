@@ -1,4 +1,4 @@
-import { get, post } from './core'
+import { get } from './core'
 import {
   asBoolean,
   asNumber,
@@ -126,6 +126,8 @@ export interface ConnectorRuntimeSummary {
   status: string
   error: string
   updated_at: string
+  reply_mode: string
+  self_chat_guid: string
   last_ready_at: string
   bot_user_name: string
   bot_user_id: string
@@ -157,6 +159,8 @@ export interface GateConnectorInfo {
   binding_store_path: string
   audit_path: string
   updated_at: string
+  reply_mode: string
+  self_chat_guid: string
   last_ready_at: string
   bot_user_name: string
   bot_user_id: string
@@ -361,6 +365,8 @@ function decodeRuntimeSummary(raw: unknown): ConnectorRuntimeSummary {
     status: asString(record.status, ''),
     error: asString(record.error, ''),
     updated_at: asString(record.updated_at, ''),
+    reply_mode: asString(record.reply_mode, ''),
+    self_chat_guid: asString(record.self_chat_guid, ''),
     last_ready_at: asString(record.last_ready_at, ''),
     bot_user_name: asString(record.bot_user_name, ''),
     bot_user_id: asString(record.bot_user_id, ''),
@@ -410,6 +416,8 @@ function decodeGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
     binding_store_path: asString(raw.binding_store_path, ''),
     audit_path: asString(raw.audit_path, ''),
     updated_at: asString(raw.updated_at, ''),
+    reply_mode: asString(raw.reply_mode, ''),
+    self_chat_guid: asString(raw.self_chat_guid, ''),
     last_ready_at: asString(raw.last_ready_at, ''),
     bot_user_name: asString(raw.bot_user_name, ''),
     bot_user_id: asString(raw.bot_user_id, ''),
@@ -464,10 +472,3 @@ export async function fetchGateKeepers(signal?: AbortSignal): Promise<GateKeeper
   return decoded
 }
 
-export function saveGateBinding(channel_id: string, keeper_name: string): Promise<{ ok: boolean }> {
-  return post('/api/v1/gate/bind', { channel_id, keeper_name })
-}
-
-export function removeGateBinding(channel_id: string): Promise<{ ok: boolean }> {
-  return post('/api/v1/gate/unbind', { channel_id })
-}

@@ -151,6 +151,7 @@ type run_result =
   ; tools_used : string list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; proof : Agent_sdk.Cdal_proof.t option
+  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
@@ -279,6 +280,7 @@ let run_turn
       ?guardrails
       ?temperature
       ?max_tokens
+      ?oas_timeout_s
       ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
@@ -392,13 +394,6 @@ let run_turn
   let { system_prompt = turn_system_prompt; dynamic_context } =
     build_turn_prompt ~base_system_prompt ~messages:ctx_work.messages
   in
-  (* Defense in depth: unified prompt builders sanitize their own output,
-     but run_turn is shared by other callers and is the final boundary before
-     handing prompts/history to OAS. Keep this sanitization here even when
-     upstream builders already cleaned their strings. *)
-  let turn_system_prompt = Inference_utils.sanitize_text_utf8 turn_system_prompt in
-  let dynamic_context = Inference_utils.sanitize_text_utf8 dynamic_context in
-  let user_message = Inference_utils.sanitize_text_utf8 user_message in
   let prompt_metrics =
     build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
       ~user_message
@@ -925,14 +920,14 @@ let run_turn
       ~generation
       ~pre_tool_use_guard:(fun ~tool_name ~input ->
         match !mutation_boundary_tool_name with
-        | Some _ when Keeper_tool_registry.is_read_only_with_input
+        | Some _ when Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
                         ~tool_name ~input ->
-          None (* read-only tools/subcommands pass through mutation boundary *)
+          None (* coordination/worktree-sandbox tools pass through boundary *)
         | Some _ -> Some (mutation_boundary_summary ())
         | None -> None)
       ~on_tool_executed:(fun ~tool_name ~input ~output_text:_ ~success ->
         if success
-           && not (Keeper_tool_registry.is_read_only_with_input
+           && not (Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
                      ~tool_name ~input)
            && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
            && Option.is_none !mutation_boundary_tool_name
@@ -1317,16 +1312,14 @@ let run_turn
                 then current_params.tool_choice (* last turn: Auto for [STATE] block *)
                 else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
-              (match tool_choice with
-               | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-                 completion_contract_ref :=
-                   Keeper_tool_disclosure.Require_tool_use
-               | _ -> ());
+              completion_contract_ref :=
+                Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
               let lane =
                 if is_retry then "retry"
                 else (
                   match tool_choice with
-                  | Some Agent_sdk.Types.Any -> "tool_required"
+                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+                    "tool_required"
                   | Some Agent_sdk.Types.None_ -> "tool_disabled"
                   | _ -> "tool_optional")
               in
@@ -1400,17 +1393,13 @@ let run_turn
       ()
   in
   let reducer =
-    Agent_sdk.Context_reducer.dynamic (fun ~turn:_ ~messages:_ ->
-      (* Token_budget is the only constraint needed: with 262k context,
-       keeper conversations rarely approach the limit.  The previous
-       Stub_tool_results{keep_recent=3} after turn 5 operated on ALL
-       messages including initial_messages from the checkpoint, wiping
-       tool results from prior turns and destroying the history that
-       lets keepers learn from their own actions.
-       Merge_contiguous collapses adjacent same-role messages.
-       Rescued from orphaned commit db730c58a (post-merge on #5508). *)
-      let open Agent_sdk.Context_reducer in
-      Compose [ Merge_contiguous; Token_budget max_context ])
+    Agent_sdk.Context_reducer.compose [
+      Agent_sdk.Context_reducer.drop_thinking;
+      Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3;
+      Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
+      Agent_sdk.Context_reducer.repair_dangling_tool_calls;
+      Agent_sdk.Context_reducer.merge_contiguous;
+    ]
   in
   (* 8. Run Agent *)
   let contract =
@@ -1430,6 +1419,12 @@ let run_turn
     else None
   in
   let priority = Option.value priority ~default:Llm_provider.Request_priority.Proactive in
+  let admission_wait_timeout_sec =
+    if Llm_provider.Request_priority.resolve priority
+       = Llm_provider.Request_priority.Proactive
+    then Some Env_config_keeper.KeeperKeepalive.admission_wait_timeout_sec
+    else None
+  in
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
@@ -1439,7 +1434,12 @@ let run_turn
   with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok oas_allowed_paths ->
-    let timeout_s = Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context in
+    let timeout_s =
+      match oas_timeout_s with
+      | Some value -> value
+      | None ->
+          Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context
+    in
     (match
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
@@ -1472,6 +1472,7 @@ let run_turn
            ~temperature
            ~max_tokens
            ?max_cost_usd
+           ?wait_timeout_sec:admission_wait_timeout_sec
            ?guardrails
            ?on_event
            ?on_yield
@@ -1594,22 +1595,46 @@ let run_turn
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
-       (match
-          Keeper_tool_disclosure.validate_completion_contract
-            ~contract:!completion_contract_ref
-            ~tool_names
-            ()
-        with
+       (* Text-response trap tolerance: when tool_choice=Any is set but
+          the provider ignores it (e.g. Ollama #14493), the model returns
+          text-only on non-last turns. Instead of hard-failing the turn
+          (which wastes the entire OAS run), log a warning and treat the
+          text response as valid. The turn is counted as text_response
+          in telemetry via keeper_unified_turn. See #5566. *)
+       let text =
+         match
+           Keeper_tool_disclosure.validate_completion_contract
+             ~contract:!completion_contract_ref
+             ~tool_names
+             ()
+         with
+         | Ok () -> text
+         | Error reason ->
+           let contract_str =
+             match !completion_contract_ref with
+             | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
+             | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
+           in
+           Log.Keeper.warn
+             "keeper:%s text_response trap: tool contract violated \
+              (turn=%d, tools=0, contract=%s). \
+              Provider likely ignored tool_choice=Any. Tolerating text-only \
+              response to avoid wasting OAS run. Reason: %s"
+             meta.name result.turns contract_str reason;
+           (* When both text and tool_names are empty, normalize_response_text
+              would hard-fail. Synthesize minimal text so the turn survives. *)
+           if String.trim text = "" && tool_names = []
+           then "[no output]"
+           else text
+       in
+       (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
         | Error e -> Error (Oas.Error.Internal e)
-        | Ok () ->
-          (match Keeper_tool_disclosure.normalize_response_text ~text ~tool_names () with
-           | Error e -> Error (Oas.Error.Internal e)
-           | Ok response_text ->
-             (* Ensure every generation has a [STATE] block for continuity.
-                If the model omitted it, synthesize one deterministically
-                from tool usage and stop reason. *)
-             let response_text =
-               match Keeper_memory_policy.find_state_block response_text with
+        | Ok response_text ->
+          (* Ensure every generation has a [STATE] block for continuity.
+             If the model omitted it, synthesize one deterministically
+             from tool usage and stop reason. *)
+          let response_text =
+            match Keeper_memory_policy.find_state_block response_text with
                | Some _ -> response_text
                | None ->
                  let stop_reason_str =
@@ -1802,8 +1827,9 @@ let run_turn
                ; tools_used = tool_names
                ; checkpoint = saved_checkpoint
                ; proof = result.proof
+               ; trace_ref = result.trace_ref
                ; run_validation = result.run_validation
                ; stop_reason = result.stop_reason
                ; inference_telemetry = result.response.telemetry
-               })))
+               }))
 ;;

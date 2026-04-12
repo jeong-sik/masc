@@ -18,11 +18,19 @@ let with_pg_envs f =
   with_env "SUPABASE_DB_URL" (Some "postgresql://supabase/db") @@ fun () ->
   with_env "SB_PG_URL" (Some "postgresql://sb/db") f
 
+let with_clean_base_path_env f =
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
+
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
+
+let canonical_path path =
+  try Unix.realpath path with Unix.Unix_error _ -> path
 
 let project_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -51,7 +59,8 @@ let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+  Fun.protect ~finally:(fun () -> rm_rf dir)
+    (fun () -> with_clean_base_path_env (fun () -> f dir))
 
 let with_cwd path f =
   let saved = Sys.getcwd () in
@@ -288,6 +297,8 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "tool_policy.toml")
+        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
         Server_runtime_bootstrap.startup_config_resolution ~base_path
@@ -371,11 +382,13 @@ let test_room_init_bootstraps_keeper_runtime_dirs () =
       ignore (Room.init config ~agent_name:None);
       let root_dir = Room.masc_root_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in
-      let perpetual_dir = Filename.concat root_dir "perpetual" in
+      let traces_dir = Filename.concat root_dir "traces" in
       Alcotest.(check bool) "keeper dir exists" true
         (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir);
-      Alcotest.(check bool) "perpetual dir exists" true
-        (Sys.file_exists perpetual_dir && Sys.is_directory perpetual_dir))
+      Alcotest.(check bool) "traces dir exists" true
+        (Sys.file_exists traces_dir && Sys.is_directory traces_dir);
+      Alcotest.(check bool) "perpetual dir not recreated" false
+        (Sys.file_exists (Filename.concat root_dir "perpetual")))
 
 let test_otel_exporter_setup_failure_is_soft () =
   Otel_spans.shutdown ~enabled:true ();
@@ -810,22 +823,24 @@ let test_create_server_state_preserves_raw_input_base_path () =
 
 let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
   with_temp_dir "startup-prompts" (fun dir ->
-      let expected =
-        Prompt_defaults.prompt_markdown_dir_candidates
-          ~workspace_path:dir ~base_path:dir
-        |> List.find_opt (fun path -> Sys.file_exists path && Sys.is_directory path)
-      in
-      let expected =
-        match expected with
-        | Some path -> path
-        | None -> Alcotest.fail "no prompt markdown directory candidates exist"
-      in
+      let config_root = Filename.concat dir "config" in
+      let expected = Filename.concat config_root "prompts" in
+      Fs_compat.mkdir_p expected;
+      write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "tool_policy.toml")
+        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd dir @@ fun () ->
+      Config_dir_resolver.reset ();
       let resolved =
-        Prompt_defaults.resolve_prompt_markdown_dir
-          ~workspace_path:dir ~base_path:dir
+        Fun.protect
+          ~finally:(fun () -> Config_dir_resolver.reset ())
+          (fun () ->
+             Prompt_defaults.resolve_prompt_markdown_dir
+               ~workspace_path:dir ~base_path:dir)
       in
       Alcotest.(check string) "temp room falls back to resolved prompt dir"
-        expected resolved)
+        (canonical_path expected) (canonical_path resolved))
 
 let test_prompt_markdown_dir_honors_masc_config_dir_override () =
   with_temp_dir "startup-prompts-override" (fun dir ->

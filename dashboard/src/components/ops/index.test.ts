@@ -18,7 +18,6 @@ async function loadOps() {
   vi.doMock('../flow-control/flow-control-panel', () => ({
     FlowControlPanel: () => html`<div data-testid="flow-control-panel">FlowControlPanel</div>`,
   }))
-
   const router = await import('../../router')
   const operatorStore = await import('../../operator-store')
   const helpers = await import('./helpers')
@@ -140,6 +139,8 @@ describe('Ops intervene surface', () => {
     expect(container.textContent).toContain('보류 1')
     expect(container.textContent).toContain('최근 처리 2')
     expect(container.textContent).toContain('프로젝트 진행 중')
+    expect(container.textContent).toContain('QuickIntervene')
+    expect(container.textContent).toContain('FlowControlPanel')
     expect(container.textContent).not.toContain('Active Queue')
     expect(container.textContent).not.toContain('Healthy Console')
 
@@ -222,6 +223,8 @@ describe('Ops intervene surface', () => {
 
     expect(container.textContent).toContain('즉시 검토 1')
     expect(container.textContent).toContain('프로젝트 일시정지')
+    expect(container.textContent).toContain('QuickIntervene')
+    expect(container.textContent).toContain('FlowControlPanel')
     expect(container.textContent).toContain('실행 작업대')
     expect(container.textContent).toContain('현재 상태')
     expect(container.textContent).toContain('마찰 요인')

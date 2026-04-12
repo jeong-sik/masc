@@ -156,7 +156,23 @@ let open_pending config ~keeper_name ~blocker_class ~summary ~failure_reason
   let opened_at =
     match pending_record config keeper_name with
     | Some record -> record.opened_at
-    | None -> now_iso ()
+    | None ->
+        (* If a Cleared record exists on disk, this open overwrites its
+           resolution/cleared_at/cleared_by/idempotency_key metadata
+           silently — a contract bug tracked in #6561. Until the full
+           audit-history redesign lands, emit a warn log so the erase
+           is at least visible in operations. *)
+        (match read config keeper_name with
+         | Some { status = Cleared; cleared_at; cleared_by; _ } ->
+             Log.Keeper.warn
+               "keeper:%s manual_reconcile open_pending overwrites prior \
+                Cleared record (cleared_at=%s cleared_by=%s); audit trail \
+                for the previous clear is lost. See #6561."
+               keeper_name
+               (Option.value cleared_at ~default:"?")
+               (Option.value cleared_by ~default:"?")
+         | _ -> ());
+        now_iso ()
   in
   let record =
     {
@@ -181,10 +197,22 @@ let open_pending config ~keeper_name ~blocker_class ~summary ~failure_reason
   write_record config record;
   record
 
+let remove_file_best_effort config keeper_name =
+  let path = record_path config keeper_name in
+  try Sys.remove path with Sys_error _ -> ()
+
+(* Delete-on-clear: the on-disk record is removed once the caller is
+   handed a Cleared_record. Legacy binaries predating #6518 treat any
+   existing .manual_reconcile.json as a blocker, so leaving behind a
+   status=Cleared file can deadlock a rolling restart. The Cleared_record
+   returned from this function is the one-shot audit surface; callers
+   that need persistence must store it themselves. *)
 let clear config ~keeper_name ~actor ~resolution ~evidence_refs ~idempotency_key =
   match read config keeper_name with
   | None -> No_record
-  | Some ({ status = Cleared; _ } as record) -> Already_cleared record
+  | Some ({ status = Cleared; _ } as record) ->
+      remove_file_best_effort config keeper_name;
+      Already_cleared record
   | Some record ->
       let updated =
         {
@@ -198,5 +226,5 @@ let clear config ~keeper_name ~actor ~resolution ~evidence_refs ~idempotency_key
           clear_idempotency_key = idempotency_key;
         }
       in
-      write_record config updated;
+      remove_file_best_effort config keeper_name;
       Cleared_record updated

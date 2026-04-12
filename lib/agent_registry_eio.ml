@@ -55,18 +55,46 @@ let session_identity_map : (string, string) Hashtbl.t = Hashtbl.create 64
     ~180 lines of identity resolution on 2nd+ calls. *)
 let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
 
+(** Mutex serialising multi-step operations on the two session caches
+    above.  Single [Hashtbl] operations are atomic on a single Eio
+    domain, but [get_or_create_identity] interleaves a cache lookup
+    with a [Registry.register] call that yields via [reg.lock], which
+    is a classic check-then-act race window:
+
+    Fiber A                             Fiber B
+    Hashtbl.find_opt sid -> None
+                                        Hashtbl.find_opt sid -> None
+    Registry.register id_a              Registry.register id_b
+    Hashtbl.replace sid id_a.key        Hashtbl.replace sid id_b.key
+
+    Both fibers produce fresh UUID session keys via
+    [Agent_identity.generate_session_key], so [Registry.register] is
+    NOT idempotent here — it installs two distinct identities for the
+    same MCP session, and only the last writer wins in
+    [session_identity_map].  The earlier identity is orphaned in the
+    registry until the zombie sweep collects it.
+
+    Fix: double-checked locking in the create path and a short
+    critical section around all multi-step cache mutations
+    (clear / evict / cleanup / unregister).  Single-entry reads
+    and writes (get_resolved_name / set_resolved_name) also go
+    through the mutex to keep invariants simple. *)
+let session_cache_mu = Eio.Mutex.create ()
+
 (** Maximum session cache entries before forced eviction.
     Prevents unbounded growth when many MCP sessions connect over time. *)
 let max_session_cache_entries = 1024
 
 let clear_session_caches () =
-  Hashtbl.clear session_identity_map;
-  Hashtbl.clear resolved_names
+  Eio_guard.with_mutex session_cache_mu (fun () ->
+    Hashtbl.clear session_identity_map;
+    Hashtbl.clear resolved_names)
 
 (** Evict all session cache entries if either cache exceeds [max_session_cache_entries].
     A simple full-clear is safe because the caches are write-through
-    (identity is reconstructed from params on the next call). *)
-let maybe_evict_session_caches () =
+    (identity is reconstructed from params on the next call).
+    Caller must hold [session_cache_mu]. *)
+let maybe_evict_session_caches_locked () =
   if Hashtbl.length session_identity_map > max_session_cache_entries
      || Hashtbl.length resolved_names > max_session_cache_entries
   then begin
@@ -75,12 +103,15 @@ let maybe_evict_session_caches () =
       (Hashtbl.length session_identity_map)
       (Hashtbl.length resolved_names)
       max_session_cache_entries;
-    clear_session_caches ()
+    Hashtbl.clear session_identity_map;
+    Hashtbl.clear resolved_names
   end
 
 (** Reset registry for testing *)
 let reset_for_testing () =
-  clear_session_caches ();
+  Eio_guard.with_mutex session_cache_mu (fun () ->
+    Hashtbl.clear session_identity_map;
+    Hashtbl.clear resolved_names);
   global_registry := Some (Agent_identity.Registry.create ())
 
 (** {1 Identity Resolution} *)
@@ -99,46 +130,66 @@ let reset_for_testing () =
 let get_or_create_identity ?mcp_session_id params =
   let reg = get_registry_exn () in
 
-  (* Try to find existing identity by MCP session ID *)
+  let touch_and_return identity =
+    let room_id = Yojson.Safe.Util.(
+      try Some (params |> member "room" |> to_string)
+      with Yojson.Safe.Util.Type_error _ -> None
+    ) in
+    Agent_identity.Registry.touch reg identity.Agent_identity.session_key
+      ?room_id ();
+    match Agent_identity.Registry.find_by_session reg identity.session_key with
+    | Some updated -> updated
+    | None -> identity
+  in
+
+  (* Fast path: unlocked lookup is safe because values in
+     [session_identity_map] are immutable [session_key] strings and
+     [Hashtbl.find_opt] is atomic on a single Eio domain.  Registry
+     touches have their own internal lock. *)
   let existing_by_session =
     match mcp_session_id with
     | None -> None
     | Some sid ->
         (match Hashtbl.find_opt session_identity_map sid with
-        | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
-        | None -> None)
+         | Some session_key ->
+             Agent_identity.Registry.find_by_session reg session_key
+         | None -> None)
   in
 
   match existing_by_session with
-  | Some identity ->
-      (* Touch to update last_seen and room *)
-      let room_id = Yojson.Safe.Util.(
-        try Some (params |> member "room" |> to_string)
-        with Yojson.Safe.Util.Type_error _ -> None
-      ) in
-      Agent_identity.Registry.touch reg identity.session_key ?room_id ();
-      (* Return fresh identity with updated room *)
-      (match Agent_identity.Registry.find_by_session reg identity.session_key with
-       | Some updated -> updated
-       | None -> identity)
+  | Some identity -> touch_and_return identity
   | None ->
-      (* Create new identity from params *)
-      let identity = Agent_identity.from_mcp_params params in
-      let registered = Agent_identity.Registry.register reg identity in
-
-      (* Link MCP session ID to identity session key *)
-      (match mcp_session_id with
-       | Some sid ->
-           Hashtbl.replace session_identity_map sid registered.session_key
-       | None -> ());
-
-      Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
-        registered.agent_name
-        (String.sub registered.session_key 0 8)
-        (Option.value mcp_session_id ~default:"none");
-
-      maybe_evict_session_caches ();
-      registered
+      (* Slow path: serialise identity creation so concurrent fibers
+         sharing an [mcp_session_id] cannot both register distinct
+         identities and leak the earlier one into the registry.  The
+         double-check inside the critical section covers the window
+         between the lockless lookup above and lock acquisition. *)
+      Eio_guard.with_mutex session_cache_mu (fun () ->
+        let already =
+          match mcp_session_id with
+          | None -> None
+          | Some sid ->
+              (match Hashtbl.find_opt session_identity_map sid with
+               | Some session_key ->
+                   Agent_identity.Registry.find_by_session reg session_key
+               | None -> None)
+        in
+        match already with
+        | Some identity -> touch_and_return identity
+        | None ->
+            let identity = Agent_identity.from_mcp_params params in
+            let registered = Agent_identity.Registry.register reg identity in
+            (match mcp_session_id with
+             | Some sid ->
+                 Hashtbl.replace session_identity_map sid registered.session_key
+             | None -> ());
+            Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
+              registered.agent_name
+              (String.sub registered.session_key 0
+                 (min 8 (String.length registered.session_key)))
+              (Option.value mcp_session_id ~default:"none");
+            maybe_evict_session_caches_locked ();
+            registered)
 
 (** Get identity by agent name (for backward compatibility) *)
 let get_by_name agent_name =
@@ -162,10 +213,12 @@ let get_by_session session_key =
     ~180 lines of identity resolution on 2nd+ calls. *)
 
 let get_resolved_name sid =
-  Hashtbl.find_opt resolved_names sid
+  Eio_guard.with_mutex session_cache_mu (fun () ->
+    Hashtbl.find_opt resolved_names sid)
 
 let set_resolved_name sid name =
-  Hashtbl.replace resolved_names sid name
+  Eio_guard.with_mutex session_cache_mu (fun () ->
+    Hashtbl.replace resolved_names sid name)
 
 (** {1 Statistics} *)
 
@@ -195,24 +248,32 @@ let list_active ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
 
 (** {1 Cleanup} *)
 
-(** Clean up stale session mappings and resolved-name cache entries *)
+(** Clean up stale session mappings and resolved-name cache entries.
+
+    Two-phase under [session_cache_mu]: snapshot the [(sid, session_key)]
+    pairs inside the lock, look them up against the registry while still
+    holding the lock (Registry has its own lock but does not depend on
+    ours), then remove stale entries.  Holding the mutex across the
+    scan prevents a concurrent [get_or_create_identity] from installing
+    a fresh entry that this scan would then incorrectly remove. *)
 let cleanup_stale_sessions () =
   match get_registry () with
   | Error e ->
       Log.Identity.warn "cleanup_stale_sessions: registry unavailable: %s" e;
       0
   | Ok reg ->
-    let to_remove = ref [] in
-    Hashtbl.iter (fun sid session_key ->
-      match Agent_identity.Registry.find_by_session reg session_key with
-      | None -> to_remove := sid :: !to_remove
-      | Some _ -> ()
-    ) session_identity_map;
-    List.iter (fun sid ->
-      Hashtbl.remove session_identity_map sid;
-      Hashtbl.remove resolved_names sid
-    ) !to_remove;
-    List.length !to_remove
+    Eio_guard.with_mutex session_cache_mu (fun () ->
+      let to_remove = ref [] in
+      Hashtbl.iter (fun sid session_key ->
+        match Agent_identity.Registry.find_by_session reg session_key with
+        | None -> to_remove := sid :: !to_remove
+        | Some _ -> ()
+      ) session_identity_map;
+      List.iter (fun sid ->
+        Hashtbl.remove session_identity_map sid;
+        Hashtbl.remove resolved_names sid
+      ) !to_remove;
+      List.length !to_remove)
 
 (** Unregister an identity *)
 let unregister session_key =
@@ -222,11 +283,12 @@ let unregister session_key =
         (String.sub session_key 0 (min 8 (String.length session_key))) e
   | Ok reg ->
     Agent_identity.Registry.unregister reg session_key;
-    let to_remove = ref [] in
-    Hashtbl.iter (fun sid sk ->
-      if sk = session_key then to_remove := sid :: !to_remove
-    ) session_identity_map;
-    List.iter (fun sid ->
-      Hashtbl.remove session_identity_map sid;
-      Hashtbl.remove resolved_names sid
-    ) !to_remove
+    Eio_guard.with_mutex session_cache_mu (fun () ->
+      let to_remove = ref [] in
+      Hashtbl.iter (fun sid sk ->
+        if sk = session_key then to_remove := sid :: !to_remove
+      ) session_identity_map;
+      List.iter (fun sid ->
+        Hashtbl.remove session_identity_map sid;
+        Hashtbl.remove resolved_names sid
+      ) !to_remove)

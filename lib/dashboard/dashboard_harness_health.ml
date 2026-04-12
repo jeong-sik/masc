@@ -359,6 +359,20 @@ let overview_json
     if total_verdicts = 0 then 0.0
     else float_of_int fallback_count /. float_of_int total_verdicts
   in
+  (* Cross-model enforcement ratio: of verdicts that recorded both a
+     generator and an evaluator cascade, what fraction used distinct
+     cascades? This is the *runtime* rate at which the cross-model
+     review policy (anti_rationalization.mli, #3067) actually fired. *)
+  let verdicts_with_generator =
+    Safe_ops.json_int ~default:0 "verdicts_with_generator_cascade" calibration
+  in
+  let cross_model_match =
+    Safe_ops.json_int ~default:0 "cross_model_match_count" calibration
+  in
+  let cross_model_rate =
+    if verdicts_with_generator = 0 then 0.0
+    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
+  in
   let last_signal_at =
     max_timestamp verdict_last (max_timestamp pre_compact_last handoff_last)
   in
@@ -374,6 +388,9 @@ let overview_json
       ("pre_compact_last_event_at", Json_util.float_opt_to_json pre_compact_last);
       ("handoff_last_event_at", Json_util.float_opt_to_json handoff_last);
       ("fallback_ratio", `Float fallback_ratio);
+      ("cross_model_rate", `Float cross_model_rate);
+      ("cross_model_match_count", `Int cross_model_match);
+      ("verdicts_with_generator_cascade", `Int verdicts_with_generator);
       ( "latest_pre_compact_ratio",
         Json_util.float_opt_to_json (Option.map pre_compact_ratio latest_pre_compact) );
       ( "latest_handoff_generation",

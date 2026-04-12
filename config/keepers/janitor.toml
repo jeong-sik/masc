@@ -44,7 +44,6 @@ idle 규칙:
 """
 
 room_scope = "current"
-scope_kind = "global"
 mention_targets = ["janitor", "garbage-keeper", "coder", "masc-improver"]
 
 proactive_enabled = true

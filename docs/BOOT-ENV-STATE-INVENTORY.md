@@ -303,10 +303,10 @@ Current observed state on the inspected host:
 - Effective runtime root:
   - `/Users/dancer/me/.masc`
 - Effective config root:
-  - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config`
-  - Reason: `MASC_CONFIG_DIR` is present in the live server environment.
-- Passive base-path config root also exists:
   - `/Users/dancer/me/.masc/config`
+  - Reason: for the normal `--base-path=/Users/dancer/me` runtime without an explicit `MASC_CONFIG_DIR` override, config resolves under the base path.
+- Checked-in fallback/default config tree:
+  - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config`
 - Home fallback config root is absent on this host right now:
   - `/Users/dancer/.masc/config` does not exist.
 - Both of these trees exist at the same time:
@@ -317,7 +317,8 @@ Interpretation:
 
 - `/Users/dancer/me/.masc` is the current canonical runtime root.
 - `/Users/dancer/me/.masc/.masc` should be treated as historical drift from earlier runs that used `/Users/dancer/me/.masc` itself as `base_path`.
-- The active config root is the repo-managed override, not the passive base-path copy under `/Users/dancer/me/.masc/config`.
+- The active config root should be treated as the resolved runtime config root under `/Users/dancer/me/.masc/config` unless `MASC_CONFIG_DIR` explicitly points elsewhere.
+- The checked-in repo `config/` tree is the versioned default/fallback source, not the live runtime truth by itself.
 
 Current host definitely has live filesystem data for:
 

@@ -32,9 +32,14 @@ let make_temp_dir () =
 (** Run in temp dir without git (to test error paths). *)
 let with_non_git_room f =
   let dir = make_temp_dir () in
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
+    (match saved_base with
+     | Some v -> Unix.putenv "MASC_BASE_PATH" v
+     | None -> Unix.putenv "MASC_BASE_PATH" "");
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
   ) (fun () ->
+    Unix.putenv "MASC_BASE_PATH" dir;
     let config = Room.default_config dir in
     let _msg = Room.init config ~agent_name:None in
     f dir config
@@ -187,13 +192,30 @@ let run_cmd cmd =
   if exit_code <> 0 then
     failwith (Printf.sprintf "command failed (exit %d): %s" exit_code cmd)
 
+let seed_playground_clone ~base_path ~agent_name ~source_repo =
+  let repos_dir =
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/%s/repos" agent_name)
+  in
+  let clone_path = Filename.concat repos_dir (Filename.basename source_repo) in
+  Fs_compat.mkdir_p repos_dir;
+  if Sys.file_exists clone_path then
+    ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote clone_path)));
+  run_cmd (Printf.sprintf "git clone %s %s"
+    (Filename.quote source_repo) (Filename.quote clone_path));
+  clone_path
+
 let test_full_lifecycle () =
   let base = make_temp_dir () in
   let dir = base in
   let bare_dir = base ^ "-bare" in
   (* Remove the empty dir first since git clone wants a non-existent target *)
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
+    (match saved_base with
+     | Some v -> Unix.putenv "MASC_BASE_PATH" v
+     | None -> Unix.putenv "MASC_BASE_PATH" "");
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
   ) (fun () ->
@@ -223,10 +245,15 @@ let test_full_lifecycle () =
       let cwd = Eio.Stdenv.cwd env in
       Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
+      Unix.putenv "MASC_BASE_PATH" dir;
       let config = Room.default_config dir in
       let _msg = Room.init config ~agent_name:None in
       let _join = Room.join config ~agent_name:"lifecycle-agent"
         ~capabilities:["test"] () in
+      let clone_path =
+        seed_playground_clone ~base_path:dir
+          ~agent_name:"lifecycle-agent" ~source_repo:dir
+      in
 
       match Task_sandbox.create ~config ~task_id:"task-life"
               ~agent_name:"lifecycle-agent" () with
@@ -271,7 +298,8 @@ let test_full_lifecycle () =
         (match Task_sandbox.cleanup ~config ~agent_name:"lifecycle-agent" sb with
          | Ok changed ->
            check bool "cleanup returned files" true (List.length changed >= 0);
-           check bool "worktree removed" false (Sys.file_exists path_before)
+           check bool "worktree removed" false (Sys.file_exists path_before);
+           check bool "clone still exists" true (Sys.file_exists clone_path)
          | Error e ->
            (* On some platforms cleanup may fail but we should not crash *)
            Printf.eprintf "[WARN] cleanup error (acceptable in CI): %s\n%!" e)
@@ -283,7 +311,11 @@ let test_with_sandbox_lifecycle () =
   let dir = base in
   let bare_dir = base ^ "-bare" in
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
+    (match saved_base with
+     | Some v -> Unix.putenv "MASC_BASE_PATH" v
+     | None -> Unix.putenv "MASC_BASE_PATH" "");
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
   ) (fun () ->
@@ -311,10 +343,15 @@ let test_with_sandbox_lifecycle () =
       let cwd = Eio.Stdenv.cwd env in
       Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
+      Unix.putenv "MASC_BASE_PATH" dir;
       let config = Room.default_config dir in
       let _msg = Room.init config ~agent_name:None in
       let _join = Room.join config ~agent_name:"with-agent"
         ~capabilities:["test"] () in
+      let _clone_path =
+        seed_playground_clone ~base_path:dir
+          ~agent_name:"with-agent" ~source_repo:dir
+      in
 
       match Task_sandbox.with_sandbox ~config ~task_id:"task-with"
               ~agent_name:"with-agent"
@@ -333,7 +370,11 @@ let test_with_sandbox_cleans_up_on_exception () =
   let dir = base in
   let bare_dir = base ^ "-bare" in
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect ~finally:(fun () ->
+    (match saved_base with
+     | Some v -> Unix.putenv "MASC_BASE_PATH" v
+     | None -> Unix.putenv "MASC_BASE_PATH" "");
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote bare_dir)))
   ) (fun () ->
@@ -361,10 +402,15 @@ let test_with_sandbox_cleans_up_on_exception () =
       let cwd = Eio.Stdenv.cwd env in
       Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
+      Unix.putenv "MASC_BASE_PATH" dir;
       let config = Room.default_config dir in
       let _msg = Room.init config ~agent_name:None in
       let _join = Room.join config ~agent_name:"exc-agent"
         ~capabilities:["test"] () in
+      let _clone_path =
+        seed_playground_clone ~base_path:dir
+          ~agent_name:"exc-agent" ~source_repo:dir
+      in
 
       let worktree_path_ref = ref "" in
       (try

@@ -21,6 +21,10 @@ let contains_check result = String.sub result 0 3 = "\xE2\x9C\x85"  (* ✅ *)
 let contains_warning result = String.sub result 0 3 = "\xE2\x9A\xA0"  (* ⚠ *)
 let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀 *)
 
+let room_config tmp_dir =
+  Unix.putenv "MASC_BASE_PATH" tmp_dir;
+  Room.default_config tmp_dir
+
 let test_init_creates_folder () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -28,7 +32,7 @@ let test_init_creates_folder () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
 
   (* Initially not initialized *)
   Alcotest.(check bool) "not init" false (Room.is_initialized config);
@@ -51,7 +55,7 @@ let test_join_creates_agent () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* Join - now returns auto-generated nickname like "test_agent-swift-fox" *)
@@ -76,7 +80,7 @@ let test_add_and_claim_task () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
 
   (* Add task *)
@@ -102,7 +106,7 @@ let test_add_task_uses_archive_max_id () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   let archive_path = Filename.concat (Filename.concat tmp_dir ".masc") "tasks-archive.json" in
@@ -129,7 +133,7 @@ let test_broadcast_message () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
 
   (* Broadcast *)
@@ -151,7 +155,7 @@ let test_worktree_list_no_git () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* worktree_list should return error for non-git dir *)
@@ -173,7 +177,7 @@ let test_worktree_create_no_git () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* worktree_create_r should fail for non-git dir *)
@@ -184,6 +188,102 @@ let test_worktree_create_no_git () =
   let _ = Room.reset config in
   Unix.rmdir tmp_dir
 
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let test_worktree_project_root_for_nested_subdir () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = room_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let nested = Filename.concat repo_root "nested" in
+  Unix.mkdir nested 0o755;
+  let nested_config = { config with base_path = nested } in
+  Alcotest.(check string) "nested path resolves to repo root"
+    repo_root
+    (Room.project_root nested_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
+let test_worktree_project_root_for_gitfile_worktree () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = room_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let worktrees_dir = Filename.concat repo_root ".worktrees" in
+  Unix.mkdir worktrees_dir 0o755;
+  let worktree_root = Filename.concat worktrees_dir "agent-task" in
+  Unix.mkdir worktree_root 0o755;
+  write_file (Filename.concat worktree_root ".git")
+    "gitdir: /tmp/fake-common-dir/worktrees/agent-task\n";
+  let worktree_config = { config with base_path = worktree_root } in
+  Alcotest.(check string) "worktree path resolves to shared repo root"
+    repo_root
+    (Room.project_root worktree_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
+let test_worktree_project_root_for_nested_gitfile_worktree_subdir () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = room_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let worktrees_dir = Filename.concat repo_root ".worktrees" in
+  Unix.mkdir worktrees_dir 0o755;
+  let worktree_root = Filename.concat worktrees_dir "agent-task" in
+  Unix.mkdir worktree_root 0o755;
+  write_file (Filename.concat worktree_root ".git")
+    "gitdir: /tmp/fake-common-dir/worktrees/agent-task\n";
+  let nested = Filename.concat worktree_root "nested" in
+  Unix.mkdir nested 0o755;
+  let nested_config = { config with base_path = nested } in
+  Alcotest.(check string) "nested worktree path resolves to shared repo root"
+    repo_root
+    (Room.project_root nested_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
+let test_worktree_project_root_for_masc_dir_base () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  Unix.mkdir tmp_dir 0o755;
+  let config = room_config tmp_dir in
+  let _ = Room.init config ~agent_name:(Some "claude") in
+  let repo_root = config.base_path in
+  Unix.mkdir (Filename.concat repo_root ".git") 0o755;
+  let masc_config = { config with base_path = Filename.concat repo_root ".masc" } in
+  Alcotest.(check string) ".masc base path resolves to repo root"
+    repo_root
+    (Room.project_root masc_config);
+  let _ = Room.reset config in
+  rm_rf tmp_dir
+
 let test_event_log () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -191,7 +291,7 @@ let test_event_log () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
@@ -220,7 +320,7 @@ let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   try
     f config;
@@ -513,7 +613,7 @@ let test_event_log_on_join () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
   let _ = Room.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
 
@@ -534,7 +634,7 @@ let test_event_log_on_claim_done () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
   let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
@@ -986,7 +1086,7 @@ let test_reset_clears_all_state () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let _ = Room.add_task config ~title:"Task" ~priority:1 ~description:"" in
   let _ = Room.broadcast config ~from_agent:"claude" ~content:"Hello" in
@@ -1006,7 +1106,7 @@ let test_reinit_after_reset () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = Room.default_config tmp_dir in
+  let config = room_config tmp_dir in
   let _ = Room.init config ~agent_name:(Some "claude") in
   let _ = Room.reset config in
   (* Reinit should work *)
@@ -1606,6 +1706,14 @@ let () =
     "worktree", [
       Alcotest.test_case "list no git" `Quick test_worktree_list_no_git;
       Alcotest.test_case "create no git" `Quick test_worktree_create_no_git;
+      Alcotest.test_case "project root nested subdir" `Quick
+        test_worktree_project_root_for_nested_subdir;
+      Alcotest.test_case "project root worktree gitfile" `Quick
+        test_worktree_project_root_for_gitfile_worktree;
+      Alcotest.test_case "project root nested worktree gitfile subdir" `Quick
+        test_worktree_project_root_for_nested_gitfile_worktree_subdir;
+      Alcotest.test_case "project root .masc base path" `Quick
+        test_worktree_project_root_for_masc_dir_base;
     ];
     "portal", [
       Alcotest.test_case "open and status" `Quick test_portal_open_and_status;

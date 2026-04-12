@@ -42,17 +42,15 @@ idle 규칙:
 """
 
 room_scope = "current"
-scope_kind = "local"
 mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 
 proactive_enabled = true
 execution_scope = "workspace"
+allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
 
-tool_preset = "social"
-also_allow = ["keeper_github", "keeper_fs_read", "keeper_shell", "keeper_fs_write", "masc_worktree_create", "masc_worktree_list", "masc_code_git", "masc_code_edit", "keeper_pr_submit"]
+tool_preset = "coding"
 
-# Capability-first cascade: glm-5.1(17s) -> 5-turbo -> local
-cascade_name = "coding_first"
+cascade_name = "keeper_unified"
 
 # Telemetry Feedback
 telemetry_feedback_enabled = true

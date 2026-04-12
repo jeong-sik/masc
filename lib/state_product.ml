@@ -29,18 +29,24 @@ module Agent_turn = struct
     | Tools_dispatched -> "tools_dispatched" | Results_collected -> "results_collected"
     | Turn_complete -> "turn_complete" | Turn_error s -> "turn_error:" ^ s
 
+  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+
   let apply_event ~current event =
     match current, event with
-    | Idle, Turn_start -> Prompting
-    | Prompting, Prompt_ready -> Awaiting
-    | Awaiting, Response_received -> Parsing
-    | Parsing, Parse_complete -> Dispatching
-    | Dispatching, Tools_dispatched -> Collecting
-    | Collecting, Results_collected -> Finalizing
-    | Finalizing, Turn_complete -> Idle
-    | _, Turn_error _ -> Idle
-    | _, Turn_complete -> Idle
-    | phase, _ -> phase  (* ignore invalid transitions *)
+    | Idle, Turn_start -> Applied Prompting
+    | Prompting, Prompt_ready -> Applied Awaiting
+    | Awaiting, Response_received -> Applied Parsing
+    | Parsing, Parse_complete -> Applied Dispatching
+    | Dispatching, Tools_dispatched -> Applied Collecting
+    | Collecting, Results_collected -> Applied Finalizing
+    | Finalizing, Turn_complete -> Applied Idle
+    | _, Turn_error _ -> Applied Idle
+    | _, Turn_complete -> Applied Idle
+    | phase, event -> Ignored { phase; event }
+
+  let apply_event_lossy ~current event =
+    match apply_event ~current event with
+    | Applied p | Ignored { phase = p; _ } -> p
 end
 
 (* ── Dimension 3: Tool Validation ───────────────────────── *)
@@ -70,18 +76,28 @@ module Tool_validation = struct
     | Nondet_fixed -> "nondet_fixed" | Nondet_exhausted -> "nondet_exhausted"
     | Skip_validation -> "skip_validation"
 
-  let apply_event ~current event =
+  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+
+  let default_max_nondet_retries = 3
+
+  let apply_event ?(max_nondet_retries = default_max_nondet_retries) ~current event =
     match current, event with
-    | Unchecked, Validate_start -> Det_correcting
-    | Unchecked, Skip_validation -> Valid
-    | Det_correcting, Det_fixed -> Det_valid
-    | Det_correcting, Det_failed -> Det_invalid
-    | Det_valid, Skip_validation -> Valid  (* explicit advance *)
-    | Det_invalid, Nondet_attempt _ -> Nondet_retrying
-    | Nondet_retrying, Nondet_fixed -> Valid
-    | Nondet_retrying, Nondet_exhausted -> Rejected
-    | Nondet_retrying, Nondet_attempt _ -> Nondet_retrying  (* retry loop *)
-    | phase, _ -> phase  (* ignore invalid transitions — no global reset *)
+    | Unchecked, Validate_start -> Applied Det_correcting
+    | Unchecked, Skip_validation -> Applied Valid
+    | Det_correcting, Det_fixed -> Applied Det_valid
+    | Det_correcting, Det_failed -> Applied Det_invalid
+    | Det_valid, Skip_validation -> Applied Valid
+    | Det_invalid, Nondet_attempt _ -> Applied Nondet_retrying
+    | Nondet_retrying, Nondet_fixed -> Applied Valid
+    | Nondet_retrying, Nondet_exhausted -> Applied Rejected
+    | Nondet_retrying, Nondet_attempt n ->
+      if n < max_nondet_retries then Applied Nondet_retrying
+      else Applied Rejected
+    | phase, event -> Ignored { phase; event }
+
+  let apply_event_lossy ?max_nondet_retries ~current event =
+    match apply_event ?max_nondet_retries ~current event with
+    | Applied p | Ignored { phase = p; _ } -> p
 end
 
 (* ── Product State ──────────────────────────────────────── *)
@@ -147,7 +163,7 @@ let check_invariants (state : product) : (unit, string) result =
 (* ── Per-Dimension Event Application ────────────────────── *)
 
 let apply_turn_event state event =
-  let new_turn = Agent_turn.apply_event ~current:state.turn event in
+  let new_turn = Agent_turn.apply_event_lossy ~current:state.turn event in
   (* TLA+ bug fix: TurnError and TurnFinalize must reset validation to
      Unchecked, otherwise orphaned NondetRetrying violates invariant.
      TurnStart also resets validation for the new turn. *)
@@ -161,14 +177,16 @@ let apply_turn_event state event =
   | Ok () -> Ok new_state
   | Error reason -> Error reason
 
-let apply_validation_event state event =
+let apply_validation_event ?max_nondet_retries state event =
   (* Guard: validation events only accepted during Dispatching (TLA+ spec). *)
   if state.turn <> Agent_turn.Dispatching then
     Error (Printf.sprintf "validation event %s rejected: turn=%s (expected Dispatching)"
              (Tool_validation.event_to_string event)
              (Agent_turn.phase_to_string state.turn))
   else
-    let new_validation = Tool_validation.apply_event ~current:state.validation event in
+    let new_validation =
+      Tool_validation.apply_event_lossy ?max_nondet_retries ~current:state.validation event
+    in
     let new_state = { state with validation = new_validation } in
     match check_invariants new_state with
     | Ok () -> Ok new_state

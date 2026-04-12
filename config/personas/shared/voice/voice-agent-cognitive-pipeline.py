@@ -125,7 +125,7 @@ JSON만 반환하고 다른 설명은 하지 마세요."""
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -316,7 +316,7 @@ Return JSON:
 
     try:
         response_a = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt_a}]
         )
@@ -357,7 +357,7 @@ Return JSON:
 
     try:
         response_b = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt_b}]
         )
@@ -392,7 +392,7 @@ Return JSON:
 
     try:
         response_c = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt_c}]
         )
@@ -535,7 +535,7 @@ Return JSON:
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}]
         )

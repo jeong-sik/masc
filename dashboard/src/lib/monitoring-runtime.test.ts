@@ -122,6 +122,22 @@ describe('summarizeKeeperMonitoring', () => {
     )
   })
 
+  it('surfaces autonomous slot wait timeouts as attention', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'busy',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        runtime_blocker_class: 'autonomous_slot_wait_timeout',
+        runtime_blocker_summary:
+          'autonomous turn slot wait timeout after 30.0s (limit=30.0s, wait_ms=30000); skipped cycle before OAS run',
+      }),
+    )
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toContain('slot wait timeout')
+  })
+
   it('keeps never-booted keepers in the offline band', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({

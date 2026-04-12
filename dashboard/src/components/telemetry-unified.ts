@@ -249,6 +249,20 @@ function entryPreview(e: TelemetryEntry): string {
       const caller = normalizeText(e.caller) ?? ''
       return `${caller || 'unknown'} -> ${tool}`
     }
+    case 'oas_event': {
+      const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? 'oas'
+      const agentName = normalizeText(e.agent_name)
+      const toolName = normalizeText(e.tool_name)
+      const turn = typeof e.turn === 'number' ? e.turn : null
+      const taskId = normalizeText(e.task_id)
+      const parts = [
+        agentName,
+        toolName,
+        turn != null ? `turn ${turn}` : null,
+        taskId,
+      ].filter(Boolean)
+      return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
+    }
     case 'tool_metric': {
       const tool = normalizeText(e.tool_name) ?? ''
       const dur = typeof e.duration_ms === 'number' ? e.duration_ms : null
@@ -699,6 +713,7 @@ export function TelemetryUnified() {
 
       <div class="flex items-center gap-3 flex-wrap">
         <select
+          aria-label="텔레메트리 소스 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
@@ -709,6 +724,7 @@ export function TelemetryUnified() {
         <input
           type="text"
           placeholder="키퍼 이름..."
+          aria-label="키퍼 이름 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
@@ -716,6 +732,7 @@ export function TelemetryUnified() {
         <input
           type="text"
           placeholder="session_id"
+          aria-label="session_id 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
           value=${sessionFilter.value}
           onInput=${(e: Event) => { sessionFilter.value = (e.target as HTMLInputElement).value.trim() }}
@@ -723,6 +740,7 @@ export function TelemetryUnified() {
         <input
           type="text"
           placeholder="operation_id"
+          aria-label="operation_id 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
           value=${operationFilter.value}
           onInput=${(e: Event) => { operationFilter.value = (e.target as HTMLInputElement).value.trim() }}
@@ -730,11 +748,13 @@ export function TelemetryUnified() {
         <input
           type="text"
           placeholder="worker_run_id"
+          aria-label="worker_run_id 필터"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-40 font-mono"
           value=${workerRunFilter.value}
           onInput=${(e: Event) => { workerRunFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
         <select
+          aria-label="표시 개수 제한"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
           value=${String(limit.value)}
           onChange=${(e: Event) => { limit.value = Number((e.target as HTMLSelectElement).value) }}

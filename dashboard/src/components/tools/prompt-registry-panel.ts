@@ -9,6 +9,7 @@ import {
   type PromptSource,
 } from '../../api'
 import { Card } from '../common/card'
+import { ErrorState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { TextArea } from '../common/input'
 
@@ -112,11 +113,11 @@ export function PromptRegistryPanel() {
   return html`
     <${Card} title="프롬프트 레지스트리" class="section mb-4">
       <div class="mb-4 text-[12px] text-[var(--text-muted)] leading-relaxed">
-        <div>기준 원문은 <code>config/prompts/*.md</code>입니다.</div>
+        <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
 
-      ${error ? html`<div class="mb-4 rounded-lg border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.08)] px-3 py-2 text-[12px] text-[#fecdd3]">${error}</div>` : null}
+      ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
       ${status ? html`<div class="mb-4 rounded-lg border border-[rgba(56,189,248,0.28)] bg-[rgba(56,189,248,0.08)] px-3 py-2 text-[12px] text-[#bae6fd]">${status}</div>` : null}
 
       <div class="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">

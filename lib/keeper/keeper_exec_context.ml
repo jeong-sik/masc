@@ -70,6 +70,8 @@ let checkpoint_generation = Keeper_context_core.checkpoint_generation
 type handoff_rollover = Keeper_rollover.handoff_rollover = {
   updated_meta : keeper_meta;
   handoff_json : Yojson.Safe.t option;
+  attempted : bool;
+  failure_reason : string option;
   context_ratio : float;
   context_tokens : int;
   context_max : int;
@@ -90,7 +92,9 @@ let compact_if_needed = Keeper_compact_policy.compact_if_needed
 (* ================================================================ *)
 
 type compaction_event = Keeper_post_turn.compaction_event = {
+  attempted : bool;
   applied : bool;
+  failure_reason : string option;
   trigger : string option;
   decision : string;
   before_tokens : int;
@@ -102,6 +106,8 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
   checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
+  handoff_attempted : bool;
+  handoff_failure_reason : string option;
   compaction : compaction_event;
   turn_generation : int;
   context_ratio : float;
@@ -119,6 +125,53 @@ type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
 let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
+
+let dispatch_keeper_phase_event ~(config : Room.config) ~keeper_name event =
+  ignore
+    (Keeper_registry.dispatch_event
+       ~base_path:config.base_path
+       keeper_name
+       event)
+
+let dispatch_post_turn_lifecycle_events
+    ~(config : Room.config)
+    ~keeper_name
+    (lifecycle : post_turn_lifecycle) =
+  if lifecycle.compaction.attempted then
+    if lifecycle.compaction.applied then
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Compaction_completed
+           {
+             before_tokens = lifecycle.compaction.before_tokens;
+             after_tokens = lifecycle.compaction.after_tokens;
+           })
+    else
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Compaction_failed
+           {
+             reason =
+               Option.value lifecycle.compaction.failure_reason
+                 ~default:lifecycle.compaction.decision;
+           });
+  match lifecycle.handoff_attempted, lifecycle.handoff_json with
+  | true, Some _json ->
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Handoff_completed
+           {
+             generation = lifecycle.updated_meta.runtime.generation;
+             new_trace_id =
+               Keeper_id.Trace_id.to_string
+                 lifecycle.updated_meta.runtime.trace_id;
+           })
+  | true, None ->
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Handoff_failed
+           {
+             reason =
+               Option.value lifecycle.handoff_failure_reason
+                 ~default:"handoff_aborted";
+           })
+  | false, _ -> ()
 
 (* ================================================================ *)
 (* Remaining functions (not extracted — small utilities)              *)

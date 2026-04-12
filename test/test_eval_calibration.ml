@@ -277,6 +277,55 @@ let test_calibration_stats () =
   check int "total = 3" 3 total;
   check int "approves = 2" 2 approves;
   check int "rejects = 1" 1 rejects;
+  (* None of the above passed ~gen_cascade, so the cross-model
+     counters should be zero and the rate degenerate to 0.0. *)
+  let with_gen =
+    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_cascade" |> to_int) in
+  let cross_match =
+    Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
+  let cross_rate =
+    Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
+  check int "verdicts_with_generator_cascade = 0 when not recorded" 0 with_gen;
+  check int "cross_model_match_count = 0 when no generator" 0 cross_match;
+  check (float 1e-6) "cross_model_rate = 0.0 when no generator" 0.0 cross_rate;
+  Cal.reset_store_for_testing ()
+
+let test_calibration_stats_cross_model_mix () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  (* Four verdicts:
+     - same cascade (generator = evaluator)     → NOT cross-model
+     - distinct cascade (generator ≠ evaluator) → cross-model
+     - distinct cascade                          → cross-model
+     - no generator recorded                     → excluded from denominator
+     Expected: denominator=3, cross_match=2, rate=2/3 ≈ 0.667. *)
+  let same_cascade =
+    make_result ~cascade:"verifier" ~gen_cascade:"verifier" () in
+  let cross_a =
+    make_result ~cascade:"verifier" ~gen_cascade:"keeper_unified" () in
+  let cross_b =
+    make_result ~cascade:"cross_verifier" ~gen_cascade:"local_only" () in
+  let no_generator = make_result ~cascade:"verifier" () in
+  let req = make_req () in
+  Cal.record_verdict ~task_id:"cm1"
+    ~req:(make_req ~title:"a" ~notes:"na" ()) ~result:same_cascade ();
+  Cal.record_verdict ~task_id:"cm2"
+    ~req:(make_req ~title:"b" ~notes:"nb" ()) ~result:cross_a ();
+  Cal.record_verdict ~task_id:"cm3"
+    ~req:(make_req ~title:"c" ~notes:"nc" ()) ~result:cross_b ();
+  Cal.record_verdict ~task_id:"cm4" ~req ~result:no_generator ();
+  let stats = Cal.calibration_stats () in
+  let with_gen =
+    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_cascade" |> to_int) in
+  let cross_match =
+    Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
+  let cross_rate =
+    Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
+  check int "verdicts_with_generator_cascade = 3 (one was Null)" 3 with_gen;
+  check int "cross_model_match_count = 2 (two distinct)" 2 cross_match;
+  check (float 1e-3) "cross_model_rate ≈ 0.667" (2.0 /. 3.0) cross_rate;
   Cal.reset_store_for_testing ()
 
 (* ================================================================ *)
@@ -288,7 +337,7 @@ let test_to_harness_verdict_approve () =
     record_type = "verdict"; notes_hash = "abc";
     task_id = "t1"; task_title = "Fix login";
     agent_name = "dreamer"; verdict = "approve";
-    gate = "llm"; evaluator_cascade = "glm5";
+    gate = AR.Structured_tool; evaluator_cascade = "glm5";
     generator_cascade = Some "claude"; fallback_reason = None;
     timestamp = 0.0;
   } in
@@ -296,7 +345,7 @@ let test_to_harness_verdict_approve () =
   check bool "passed" true hv.Agent_sdk.Harness.passed;
   check (option (float 0.01)) "score 1.0" (Some 1.0) hv.score;
   check bool "evidence has gate" true
-    (List.exists (fun s -> contains ~sub:"gate=llm" s) hv.evidence);
+    (List.exists (fun s -> contains ~sub:"gate=structured_tool" s) hv.evidence);
   check (option string) "no detail" None hv.detail
 
 let test_to_harness_verdict_reject () =
@@ -304,7 +353,7 @@ let test_to_harness_verdict_reject () =
     record_type = "verdict"; notes_hash = "def";
     task_id = "t2"; task_title = "Deploy fix";
     agent_name = "coder"; verdict = "reject:too short";
-    gate = "length"; evaluator_cascade = "local";
+    gate = AR.Length; evaluator_cascade = "local";
     generator_cascade = None; fallback_reason = None;
     timestamp = 0.0;
   } in
@@ -396,6 +445,7 @@ let () =
     ];
     "stats", [
       test_case "counts" `Quick test_calibration_stats;
+      test_case "cross_model mix" `Quick test_calibration_stats_cross_model_mix;
     ];
     "oas_conversion", [
       test_case "approve verdict" `Quick test_to_harness_verdict_approve;

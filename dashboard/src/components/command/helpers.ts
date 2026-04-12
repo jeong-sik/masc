@@ -5,10 +5,8 @@ import type {
 import {
   commandPlaneActionBusy,
   commandPlaneChainFocusOperationId,
-  commandPlaneSummary,
 } from '../../command-store'
 import { route } from '../../router'
-import type { DashboardWorkflowContext } from '../../workflow-context'
 import { relativeTime, formatElapsed } from '../../lib/format-time'
 import { toneClass, toneBorder, toneBg, chainStatusTone, sessionStatusTone, expiryTone } from '../../lib/tone'
 import { prettyJson, displayStatus } from '../../lib/status-label'
@@ -38,11 +36,6 @@ export function deadlineLabel(iso?: string | null): string {
 type MermaidApi = typeof import('mermaid')['default']
 
 let mermaidConfigured = false
-export let mermaidRenderCount = 0
-
-export function incrementMermaidRenderCount(): number {
-  return ++mermaidRenderCount
-}
 
 let mermaidPromise: Promise<MermaidApi> | null = null
 
@@ -128,16 +121,6 @@ export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string,
   return base
 }
 
-export function chainEventsUrl(): string {
-  const query = new URLSearchParams(window.location.search)
-  const params = new URLSearchParams()
-  const agent = query.get('agent') ?? query.get('agent_name')
-  const token = query.get('token')
-  if (agent) params.set('agent', agent)
-  if (token) params.set('token', token)
-  return params.toString() ? `/api/v1/chains/events?${params.toString()}` : '/api/v1/chains/events'
-}
-
 export function unitKindLabel(kind: string): string {
   switch (kind) {
     case 'company':
@@ -155,20 +138,6 @@ export function unitKindLabel(kind: string): string {
 
 export function actionDisabled(key: string): boolean {
   return commandPlaneActionBusy.value === key
-}
-
-export function currentCommandPlaneSummary() {
-  return commandPlaneSummary.value
-}
-
-export function swarmFocusKey(context: DashboardWorkflowContext | null): string | null {
-  const focus = context?.focus_kind?.toLowerCase() ?? ''
-  if (!focus) return null
-  if (focus.includes('stale_data') || focus.includes('leader_offline') || focus.includes('roster_offline') || focus.includes('managed')) {
-    return 'recommendation'
-  }
-  if (focus.includes('gap')) return 'gaps'
-  return null
 }
 
 export function dashboardLocationParams(): URLSearchParams {

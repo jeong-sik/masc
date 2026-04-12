@@ -72,7 +72,12 @@ let agent_config_of_worker_meta
     temperature = Some Oas_worker_cascade.worker_temperature;
     top_p = Some Oas_worker_cascade.worker_top_p;
     top_k = Some Oas_worker_cascade.worker_top_k;
-    min_p = Some Oas_worker_cascade.worker_min_p;
+    (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
+       cloud providers (Groq, GLM) reject the field itself with
+       "Invalid request: property 'min_p' is unsupported". OAS capability
+       gate in #6653 handles this too, but keeping the send-site explicit
+       avoids ambiguous_partial_commit when the gate has not propagated. *)
+    min_p = None;
     enable_thinking = Some (Option.value ~default:false meta.thinking_enabled);
     tool_choice = Some Oas.Types.Auto;
   }
@@ -257,7 +262,9 @@ let build_agent
     |> Oas.Builder.with_temperature Oas_worker_cascade.worker_temperature
     |> Oas.Builder.with_top_p Oas_worker_cascade.worker_top_p
     |> Oas.Builder.with_top_k Oas_worker_cascade.worker_top_k
-    |> Oas.Builder.with_min_p Oas_worker_cascade.worker_min_p
+    (* with_min_p intentionally omitted — see agent_config_of_worker_meta
+       above for the reason. The worker_min_p constant is 0.0 (a no-op)
+       and cloud providers (Groq, GLM) reject the field itself. *)
     |> Oas.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
     |> Oas.Builder.with_tool_choice Oas.Types.Auto
@@ -659,6 +666,12 @@ and run_existing_worker_agent
           (Oas.Agent.run ~sw agent prompt, None)
       in
       let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
+      let evidence_session_id =
+        Worker_container.evidence_session_id_of_worker_run
+          (Option.map
+             (fun (run_ref : Oas.Raw_trace.run_ref) -> run_ref.worker_run_id)
+             raw_trace_run)
+      in
       let checkpoint = Oas.Agent.checkpoint ~session_id agent in
       let tool_names =
         List.rev !tool_names_ref
@@ -688,7 +701,15 @@ and run_existing_worker_agent
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~worker_name ~prompt ~tool_names
-              ~status:"ok" ~output ()
+              ~status:"ok" ~output
+              ?raw_trace_run
+              ?evidence_session_id
+              ?proof_run_id:(Option.map (fun p -> p.Oas.Cdal_proof.run_id) proof)
+              ?proof_result_status:
+                (Option.map
+                   (fun p -> proof_result_status_to_string p.Oas.Cdal_proof.result_status)
+                   proof)
+              ()
           in
           Ok
             {
@@ -720,7 +741,15 @@ and run_existing_worker_agent
           let* () =
             Worker_container.append_worker_completion_log
               ~base_path ~worker_name ~prompt ~tool_names
-              ~status:"error" ~output:detail ~error:detail ()
+              ~status:"error" ~output:detail ~error:detail
+              ?raw_trace_run
+              ?evidence_session_id
+              ?proof_run_id:(Option.map (fun p -> p.Oas.Cdal_proof.run_id) proof)
+              ?proof_result_status:
+                (Option.map
+                   (fun p -> proof_result_status_to_string p.Oas.Cdal_proof.result_status)
+                   proof)
+              ()
           in
           Error detail)
 

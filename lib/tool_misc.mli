@@ -4,7 +4,7 @@
     dashboard, verify_handoff, gc, cleanup_zombies, tool_stats,
     tool_help, tool_admin, keeper_tool_catalog, deep_review. *)
 
-type result = bool * string
+type tool_result = bool * string
 
 type context = {
   config : Room.config;
@@ -32,9 +32,9 @@ val web_search_simulate_for_test :
      | `Hits of (string * string * string) list
      ])
   list ->
-  result
+  tool_result
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 
 val tool_inventory_json :
   context -> include_hidden:bool -> include_deprecated:bool -> Yojson.Safe.t

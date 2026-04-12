@@ -337,7 +337,7 @@ write_runtime_doctor() {
   local stage="${1:-$CURRENT_STAGE}"
   [ -n "$RUNTIME_DOCTOR_FILE" ] || return 0
   local verify_file
-  verify_file="$(mktemp -t agent-swarm-live-runtime-verify).json"
+  verify_file="$(mcp_mktemp_file "agent-swarm-live-runtime-verify" ".json")"
   runtime_verify_result "" "$MODEL_ID" "$EXPECTED_SLOTS" "$EXPECTED_CTX" >"$verify_file"
 
   python3 - "$verify_file" "$PROVIDER_BASE_URL" "$SLOT_URL" \
@@ -683,7 +683,7 @@ printf "%s" "$MANIFEST_JSON" \
     done
 CURRENT_STAGE="run-harness"
 echo "[9/12] run live harness against local qwen"
-HARNESS_RESULT_FILE="$(mktemp -t agent-swarm-live-result)"
+HARNESS_RESULT_FILE="$(mcp_mktemp_file "agent-swarm-live-result")"
 start_slot_sampler
 run_compat_swarm_harness >"$HARNESS_RESULT_FILE" &
 HARNESS_PID="$!"

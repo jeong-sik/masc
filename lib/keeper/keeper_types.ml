@@ -130,7 +130,6 @@ type keeper_meta =
     policy_voice_enabled : bool
   ; execution_scope : string
   ; allowed_paths : string list
-  ; scope_kind : string
   ; tool_access : tool_access
   ; tool_denylist : string list
   ; room_scope : string
@@ -659,7 +658,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "policy_voice_enabled", `Bool m.policy_voice_enabled
     ; "execution_scope", `String m.execution_scope
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
-    ; "scope_kind", `String m.scope_kind
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
     ; "room_scope", `String m.room_scope
@@ -764,7 +762,6 @@ type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
   ; pp_execution_scope : string
   ; pp_allowed_paths : string list
-  ; pp_scope_kind : string
   ; pp_tool_access : tool_access
   ; pp_tool_denylist : string list
   ; pp_room_scope : string
@@ -793,21 +790,23 @@ type parsed_keeper_state =
   ; ps_runtime : agent_runtime_state
   }
 
-let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
+let parse_keeper_identity (json : Yojson.Safe.t)
+    : (parsed_keeper_identity, string) result =
   let pk_name = Safe_ops.json_string ~default:"" "name" json in
   let pk_agent_name = Safe_ops.json_string ~default:"" "agent_name" json in
   let pk_trace_id_raw = Safe_ops.json_string ~default:"" "trace_id" json in
-  let pk_trace_id =
+  match
     if String.trim pk_trace_id_raw = "" then
-      failwith "keeper meta parse error: missing trace_id in persisted keeper identity"
+      Error "missing trace_id in persisted keeper identity"
     else
       match Keeper_id.Trace_id.of_string pk_trace_id_raw with
-      | Ok x -> x
+      | Ok x -> Ok x
       | Error err ->
-        failwith
-          ("keeper meta parse error: invalid trace_id in persisted keeper identity: "
-           ^ err)
-  in
+        Error
+          ("invalid trace_id in persisted keeper identity: " ^ err)
+  with
+  | Error e -> Error ("keeper meta parse error: " ^ e)
+  | Ok pk_trace_id ->
   let pk_trace_history =
     Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
   in
@@ -843,7 +842,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : parsed_keeper_identity =
   let pk_cascade_name =
     Safe_ops.json_string ~default:Keeper_config.default_cascade_name "cascade_name" json
   in
-  { pk_name
+  Ok { pk_name
   ; pk_agent_name
   ; pk_trace_id
   ; pk_trace_history
@@ -874,9 +873,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
     in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
-    let pp_scope_kind =
-      Safe_ops.json_string ~default:"local" "scope_kind" json |> canonical_scope_kind
-    in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_room_scope =
       Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
@@ -966,7 +962,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       { pp_policy_voice_enabled
       ; pp_execution_scope
       ; pp_allowed_paths
-      ; pp_scope_kind
       ; pp_tool_access
       ; pp_tool_denylist
       ; pp_room_scope
@@ -1140,8 +1135,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       match reject_legacy_keeper_meta_fields json with
       | Error e -> Error e
       | Ok () ->
-      let identity = parse_keeper_identity json in
-      (match parse_keeper_policy json ~keeper_name:identity.pk_name with
+      (match parse_keeper_identity json with
+       | Error _ as e -> e
+       | Ok identity ->
+      match parse_keeper_policy json ~keeper_name:identity.pk_name with
        | Error _ as e -> e
        | Ok policy ->
          let state =
@@ -1174,7 +1171,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; policy_voice_enabled = policy.pp_policy_voice_enabled
              ; execution_scope = policy.pp_execution_scope
              ; allowed_paths = policy.pp_allowed_paths
-             ; scope_kind = policy.pp_scope_kind
              ; tool_access = policy.pp_tool_access
              ; tool_denylist = policy.pp_tool_denylist
              ; room_scope = policy.pp_room_scope
@@ -1243,7 +1239,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "policy_voice_enabled"
   ; "execution_scope"
   ; "allowed_paths"
-  ; "scope_kind"
   ; "tool_access"
   ; "tool_denylist"
   ; "room_scope"

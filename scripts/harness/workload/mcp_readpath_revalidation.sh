@@ -348,8 +348,7 @@ run_mode() {
       "false"
     else
       ([.items[] |
-        has("scope_kind")
-        and has("room_scope")
+        has("room_scope")
         and has("presence_keepalive")
         and has("proactive_enabled")
         and has("initiative_enabled")

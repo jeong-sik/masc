@@ -267,7 +267,6 @@ Keeper 정책/런타임 열거형의 typed 정의. JSON 및 MCP 문자열 표현
 
 | 타입 | 값 | 설명 |
 |------|-----|------|
-| `scope_kind` | Local, Global | 범위 |
 | `room_scope` | Current (`All` legacy alias) | single-room compatibility field |
 
 ---

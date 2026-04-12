@@ -29,14 +29,39 @@ let cached_endpoints : endpoint_info list ref = ref []
 let cache_updated_at : float Atomic.t = Atomic.make 0.0
 let cache_ttl = 30.0
 
-let refresh_cache_unlocked () =
+(* Probe every configured endpoint and install the result under the
+   mutex.  The probe itself ([Llm_provider.Discovery.discover])
+   makes HTTP requests — potentially several seconds of network
+   I/O — so it must NOT be executed while holding [cache_mu].
+
+   The prior version was named [refresh_cache_unlocked] and was
+   called from inside [get_cached_or_refresh]'s [Eio.Mutex.use_rw]
+   block, which meant every dashboard / local-runtime consumer
+   waited on the mutex for the full probe duration.  That is the
+   same drift class as the prompt_registry [_unlocked] variants
+   fixed in PR #6663 — the in-tree API was refactored to keep I/O
+   out of the critical section, but a sibling helper with a
+   misleading "_unlocked" name was left with the old pattern.
+
+   This version splits the work: the HTTP probe runs with no lock
+   held, then the result is installed under the mutex.  Two
+   concurrent refreshers may both probe; that is wasteful but
+   correct.  In practice the 30 s TTL narrows the window. *)
+let refresh_cache () =
   match Atomic.get sw_ref, Atomic.get net_ref with
   | Some sw, Some net ->
-    let endpoints = Llm_provider.Provider_registry.active_llama_endpoints () in
+    let endpoints =
+      Llm_provider.Provider_registry.active_llama_endpoints ()
+    in
+    (* HTTP probes — executed OUTSIDE [cache_mu]. *)
     let results = Llm_provider.Discovery.discover ~sw ~net ~endpoints in
-    cached_endpoints := results;
-    Atomic.set cache_updated_at (Time_compat.now ());
-    (* Persist probe snapshot for time-series history *)
+    (* Install the fresh result under the mutex — no yields inside
+       this critical section. *)
+    Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
+      cached_endpoints := results;
+      Atomic.set cache_updated_at (Time_compat.now ()));
+    (* Persist probe snapshot for time-series history — file I/O,
+       also kept outside the mutex. *)
     (match Atomic.get base_path_ref with
      | Some bp -> Discovery_history.record_probe ~base_path:bp results
      | None -> ())
@@ -44,11 +69,19 @@ let refresh_cache_unlocked () =
     ()
 
 let get_cached_or_refresh () =
-  Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
-    let now = Time_compat.now () in
-    if now -. Atomic.get cache_updated_at > cache_ttl || !cached_endpoints = [] then
-      refresh_cache_unlocked ();
-    !cached_endpoints)
+  (* Cheap staleness check: [cache_updated_at] is [Atomic] so the
+     TTL comparison needs no lock.  Only when the cached list is
+     still empty do we take the mutex to decide. *)
+  let stale_by_ttl =
+    Time_compat.now () -. Atomic.get cache_updated_at > cache_ttl
+  in
+  let need_refresh =
+    stale_by_ttl
+    || Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
+        !cached_endpoints = [])
+  in
+  if need_refresh then refresh_cache ();
+  Eio.Mutex.use_rw ~protect:true cache_mu (fun () -> !cached_endpoints)
 
 let cache_age_seconds () =
   Time_compat.now () -. Atomic.get cache_updated_at

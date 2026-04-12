@@ -63,10 +63,10 @@ let keeper_internal_tools =
        keeper_unified: cascade name, not a tool. *)
   ]
 
-let keeper_internal_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create (List.length keeper_internal_tools) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) keeper_internal_tools;
-  tbl
+(** Immutable alias for keeper-internal tool name membership tests.
+    Replaced mutable Hashtbl with plain list — membership via List.mem
+    is O(n) but the list is <50 elements, so the overhead is negligible. *)
+let keeper_internal_set : string list = keeper_internal_tools
 
 let keeper_internal_replacement = function
   | "keeper_board_get" -> Some "masc_board_get"

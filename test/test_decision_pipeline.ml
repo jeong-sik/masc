@@ -127,6 +127,7 @@ let test_masc_whitelist_blocks_traversal () =
 (* ── E2: Decision Audit ─────────────────────────────── *)
 
 let test_audit_ring_and_flag () =
+  Eio_main.run @@ fun _env ->
   (* Verify audit module is accessible and configured *)
   let cap = DA.ring_capacity () in
   check bool "ring capacity >= 1" true (cap >= 1);

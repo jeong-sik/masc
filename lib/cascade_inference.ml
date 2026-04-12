@@ -72,3 +72,11 @@ let resolve_max_tokens ~(cascade_name : string) ~(fallback : unit -> int) : int 
   match (for_cascade ~name:cascade_name).max_tokens with
   | Some t -> t
   | None -> fallback ()
+
+(** Clamp max_tokens to provider ceiling.
+    Clamping > rejection: a smaller response is better than no response.
+    Mirrors TLA+ KeeperCoreTriad.CapabilityGate action. *)
+let clamp_max_tokens_to_ceiling ~(provider_ceiling : int option) (max_tokens : int) : int =
+  match provider_ceiling with
+  | Some ceiling when max_tokens > ceiling -> ceiling
+  | _ -> max_tokens

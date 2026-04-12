@@ -390,6 +390,7 @@
    ;; Keeper contract
    keeper_schema
    keeper_social_model
+   keeper_cascade_routing
    keeper_config
    keeper_toml_loader
    keeper_contract

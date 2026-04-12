@@ -326,7 +326,9 @@ let bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn =
             let rec try_spawn attempt =
               let result =
                 try Ok (spawn_fn agent prompt)
-                with e -> Error (Printexc.to_string e)
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | e -> Error (Printexc.to_string e)
               in
               match result with
               | Ok spawn_result when spawn_result.success ->

@@ -144,7 +144,9 @@ end = struct
       try
         let r = Httpc.post client ~sw ~headers ~body uri in
         Ok r
-      with e -> Error e
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error e
     in
     match r with
     | Error e ->

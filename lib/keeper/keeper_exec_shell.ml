@@ -134,7 +134,9 @@ let update_playground_repo_cache
     ] in
     ignore (Fs_compat.save_file_atomic cache_path
       (Yojson.Safe.pretty_to_string json ^ "\n"))
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Logs.warn (fun f -> f "playground cache update failed: %s"
       (Printexc.to_string exn))
 

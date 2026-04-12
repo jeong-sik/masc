@@ -442,8 +442,9 @@ let handle_keeper_pr_workflow
                 worktree_path (String.trim out_prune);
             Ok ()
           end
-        with exn ->
-          Error (Printexc.to_string exn)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error (Printexc.to_string exn)
       in
       let branch_exists_locally branch_name =
         let st, out = run_sh ~cwd:repo_root ~timeout_sec:5.0

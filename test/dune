@@ -584,6 +584,7 @@
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_code_write_coverage
         test_tool_repair_loop_containment
+        test_tool_code_read_containment
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)
@@ -620,6 +621,7 @@
         test_tool_suspend_coverage test_tool_code_coverage
         test_tool_code_write_coverage
         test_tool_repair_loop_containment
+        test_tool_code_read_containment
         test_tool_library_coverage test_tool_shard_coverage
         test_context_compact_oas_coverage test_keeper_masc_bridge
         test_anti_rationalization_coverage test_field_validation)

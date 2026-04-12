@@ -95,20 +95,23 @@ let validate_path config path =
    surface (secrets in playground .env files, proprietary code
    mid-work, handoff notes, etc.).
 
-   [validate_read_path] adds the extra gate: if the canonical path
-   lands inside the *.masc/playground/* tree, it must be inside the
-   caller's own playground. Paths outside that tree (i.e. the shared
-   codebase in lib/, test/, config/, etc.) remain readable so keepers
-   can still call the code-read tools on the common source tree.
+   Two-tier gate:
+   1. Run the pre-existing [validate_path] (git-root check, null-byte
+      rejection, canonicalisation).
+   2. If the canonical path is outside the [.masc/playground/] tree,
+      it's the shared codebase (lib/, test/, config/, etc.) — allow.
+   3. If the canonical path is inside the playground tree, require it
+      to be under the caller's own bundle (via [playground_path_of_keeper]).
 
    Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
 let validate_read_path ~agent_name config path =
+  let base_path = config.Room.base_path in
   match validate_path config path with
   | Error e -> Error e
   | Ok canonical ->
       let playground_tree_rel = ".masc/playground" in
       let playground_tree_abs_raw =
-        Filename.concat config.Room.base_path playground_tree_rel
+        Filename.concat base_path playground_tree_rel
       in
       let playground_tree_canonical =
         try Unix.realpath playground_tree_abs_raw
@@ -126,16 +129,16 @@ let validate_read_path ~agent_name config path =
         let own_rel_trailing =
           Keeper_alerting_path.playground_path_of_keeper agent_name
         in
-        (* [playground_path_of_keeper] returns a trailing-slash
-           relative path (".masc/playground/<agent>/"). Strip the
-           trailing slash for prefix comparison. *)
+        (* [playground_path_of_keeper] returns a trailing-slash relative
+           path (".masc/playground/<agent>/"). Strip the trailing slash
+           for the prefix comparison. *)
         let own_rel =
           let n = String.length own_rel_trailing in
           if n > 0 && own_rel_trailing.[n - 1] = '/'
           then String.sub own_rel_trailing 0 (n - 1)
           else own_rel_trailing
         in
-        let own_abs_raw = Filename.concat config.Room.base_path own_rel in
+        let own_abs_raw = Filename.concat base_path own_rel in
         let own_canonical =
           try Unix.realpath own_abs_raw
           with Unix.Unix_error _ -> normalize_path own_abs_raw
@@ -151,6 +154,7 @@ let validate_read_path ~agent_name config path =
              own playground must target the shared codebase (lib/, \
              test/, config/, etc.). See #6527/#6637."
             agent_name path own_rel_trailing))
+
 
 (* Handler: masc_code_search - Search code using ripgrep *)
 let handle_code_search ctx args =

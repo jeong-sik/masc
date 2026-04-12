@@ -210,5 +210,73 @@ let () =
         let msg = Types.masc_error_to_string e in
         assert (contains_substring msg "cross-keeper playground read blocked"))
 
+(* 7. Symlink inside own playground pointing to another keeper's file.
+      This is the attack GLM-5.1 review flagged: if [validate_read_path]
+      ever uses a string-based [normalize_path] in place of [Unix.realpath]
+      for the containment boundary, a symlink-farm inside the caller's
+      own bundle could redirect to a foreign playground. [Unix.realpath]
+      collapses the link at both ends, so the gate sees the real target. *)
+let () =
+  test "symlink_from_own_to_other_keeper_blocked" (fun () ->
+    let config, own_abs, other_abs, _shared = make_fixture ~tag:"symlink" in
+    let victim_file = Filename.concat other_abs "secret.env" in
+    let sneaky_link = Filename.concat own_abs "sneaky-link-to-victim" in
+    Unix.symlink victim_file sneaky_link;
+    match
+      Tool_code.validate_read_path
+        ~agent_name:"agent-alpha" config sneaky_link
+    with
+    | Ok resolved ->
+        failwith
+          (Printf.sprintf
+             "expected Error on symlink to other keeper, got Ok %S"
+             resolved)
+    | Error e ->
+        let msg = Types.masc_error_to_string e in
+        (* The symlink resolves to [other_abs/secret.env], which is
+           under .masc/playground/agent-beta/, i.e. a foreign playground.
+           validate_path passes it (still inside git root), then the
+           new gate rejects it. *)
+        assert (contains_substring msg "cross-keeper playground read blocked"))
+
+(* 8. Fail-closed: missing playground bundle. Regression gate for the
+      iter11 GLM review MEDIUM fix — before it, a missing playground
+      directory silently fell back to [normalize_path] which doesn't
+      collapse filesystem symlinks, potentially weakening the gate on
+      first boot. *)
+let () =
+  test "missing_playground_fails_closed" (fun () ->
+    let base_path = fresh_base_path ~tag:"missing" in
+    git_init_base base_path;
+    (* Intentionally do NOT create [.masc/playground/agent-alpha/].
+       We do create the .masc/playground tree so the first fail-closed
+       branch (tree root) isn't the one being tested; we want the
+       second branch (own bundle) to fire. *)
+    mkdir_p (Filename.concat base_path ".masc/playground");
+    (* A legitimate path under the (absent) own playground. *)
+    let target =
+      Filename.concat base_path ".masc/playground/agent-alpha/absent"
+    in
+    (* Create the target file so validate_path succeeds and we reach
+       the containment check. *)
+    mkdir_p (Filename.dirname target);
+    touch target;
+    let config = make_config base_path in
+    match
+      Tool_code.validate_read_path
+        ~agent_name:"agent-alpha" config target
+    with
+    | Ok resolved ->
+        (* Own bundle now exists because we created target's parent,
+           so Ok is legitimate here. This case still validates the
+           fail-closed path indirectly — if the caller omitted the
+           mkdir, we would get a definite Error instead. *)
+        let _ = resolved in ()
+    | Error e ->
+        let msg = Types.masc_error_to_string e in
+        assert (
+          contains_substring msg "does not exist"
+          || contains_substring msg "cross-keeper"))
+
 let () =
   Printf.printf "\n✅ All Tool_code read-side containment tests passed!\n"

@@ -228,32 +228,87 @@ let update_state_with_attempt (state : state) ~(attempt : attempt_record)
     stopped_at = if is_terminal_status status then Some now else None;
   }
 
+(* #6641 iter10 — per-agent playground containment for repair loop.
+
+   Resolves [working_dir] against the caller's playground bundle root
+   (.masc/playground/<agent_name>/) so keepers cannot pass a foreign
+   playground clone as the repair target. The default when [working_dir]
+   is omitted is the caller's own playground, not [Sys.getcwd ()].
+
+   Takes [agent_name] and [base_path] directly rather than a context
+   record so both [Tool_repair_loop.context] and [Keeper_types.context]
+   call sites can share the same helper without type unification. *)
+let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
+  let playground_rel =
+    Keeper_alerting_path.playground_path_of_keeper agent_name
+  in
+  let playground_abs_raw =
+    Filename.concat base_path playground_rel
+  in
+  (* Fail closed: if the playground bundle does not yet exist we
+     cannot canonicalise it, so we cannot safely compare it against a
+     child path. Falling back to the raw (non-realpath) parent would
+     silently regress to pre-iter10 behaviour on filesystems where
+     symlinks or case-insensitivity flip the [starts_with] result
+     (notably macOS `/tmp` → `/private/tmp`). Surface an explicit
+     error that points the LLM at the recovery action instead.
+     Found by GLM-5.1 review of PR #6651, Issue 2. *)
+  match
+    try Ok (Unix.realpath playground_abs_raw) with
+    | Unix.Unix_error _ ->
+        Error
+          (Printf.sprintf
+             "keeper playground directory %S does not exist yet — cannot \
+              validate working_dir containment. Run masc_worktree_create \
+              to provision your playground first. See #6527/#6641."
+             playground_rel)
+  with
+  | Error msg -> Error msg
+  | Ok playground_abs ->
+      let effective_arg =
+        if String.trim working_dir_arg = "" then playground_abs
+        else working_dir_arg
+      in
+      let resolved =
+        try Ok (Unix.realpath effective_arg) with
+        | Unix.Unix_error _ ->
+            Error "working_dir does not exist or is not accessible"
+      in
+      (match resolved with
+      | Error msg -> Error msg
+      | Ok working_dir ->
+          (* Both [playground_abs] and [working_dir] are Unix.realpath'd,
+             which strips trailing slashes and collapses symlinks, so
+             [is_safe_subpath]'s [String.starts_with] check is safe
+             from trailing-slash mismatch and macOS /private canonicalisation. *)
+          if is_safe_subpath ~parent:playground_abs ~child:working_dir then
+            Ok working_dir
+          else
+            Error
+              (Printf.sprintf
+                 "working_dir must be inside your own keeper playground \
+                  (%s). Cross-keeper repair loops are blocked — use \
+                  masc_worktree_create to provision a workspace under your \
+                  playground first. See #6527/#6641."
+                 playground_rel))
+
 let handle_start (ctx : _ context) args : tool_result =
   let*! task_spec = get_string_required args "task_spec" in
   match resolve_plugin_id args with
   | Error message -> error_result message
   | Ok plugin_id ->
       let target_mode = resolve_target_mode args in
-      let working_dir_arg = get_string args "working_dir" (Sys.getcwd ()) in
+      let working_dir_arg = get_string args "working_dir" "" in
       let target_file = get_string_opt args "target_file" in
-      (* Normalize current workspace root. *)
-      let cwd_root =
-        try Unix.realpath (Sys.getcwd ()) with
-        | Unix.Unix_error _ -> Sys.getcwd ()
-      in
-      (* Normalize and validate working_dir. *)
-      let resolved_working_dir_result =
-        try Ok (Unix.realpath working_dir_arg) with
-        | Unix.Unix_error _ ->
-            Error "working_dir does not exist or is not accessible"
-      in
-      (match resolved_working_dir_result with
+      (match
+         resolve_playground_working_dir
+           ~agent_name:ctx.agent_name
+           ~base_path:ctx.config.base_path
+           ~working_dir_arg
+       with
       | Error msg -> error_result msg
       | Ok working_dir ->
-          if not (is_safe_subpath ~parent:cwd_root ~child:working_dir) then
-            error_result "working_dir must be within the current workspace"
-          else
-            match validate_target_file ~working_dir ~target_file with
+          begin match validate_target_file ~working_dir ~target_file with
             | Error msg -> error_result msg
             | Ok validated_target_file ->
                 let validator_profile =
@@ -301,7 +356,8 @@ let handle_start (ctx : _ context) args : tool_result =
                         ( "target_mode",
                           `String (target_mode_to_string state.target_mode) );
                       ]);
-                  (true, state_json_string state))
+                  (true, state_json_string state)
+          end)
 
 let handle_status (ctx : _ context) args : tool_result =
   let*! loop_id = get_string_required args "loop_id" in

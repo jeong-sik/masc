@@ -204,12 +204,33 @@ let cleanup_expired_events () =
   done;
   !count
 
-(** Format SSE event with optional ID and event type *)
+(** Format SSE event with optional ID and event type.
+
+    When [~id] is supplied the caller has already allocated the event
+    ID (typically via {!next_id}); this function must NOT touch the
+    counter, or the caller's allocation + this call's
+    [fetch_and_add] would leave [event_counter] 2× the number of
+    emitted events.  That drift also widens the window for the
+    broadcast_impl / send_to peek-then-format pattern: two fibers
+    that both peek the counter, both get the same value, and then
+    both pass it as [~id] would emit events with the **same** id,
+    breaking MCP SSE resumability (the [last_event_id] filter in
+    [get_events_after] skips by id, so a duplicate would be
+    dropped).
+
+    When [~id] is omitted (external callers in
+    [server_mcp_transport_http] / [server_mcp_transport_http_agui])
+    this function still allocates a fresh id atomically, preserving
+    their contract. *)
 let format_event ?id ?event_type data =
-  (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
-  let new_id = Atomic.fetch_and_add event_counter 1 + 1 in
-  let id_line = Printf.sprintf "id: %d\n"
-    (match id with Some i -> i | None -> new_id) in
+  let effective_id =
+    match id with
+    | Some i -> i
+    | None ->
+        (* Atomic fetch_and_add: returns old value, we want new value so +1 *)
+        Atomic.fetch_and_add event_counter 1 + 1
+  in
+  let id_line = Printf.sprintf "id: %d\n" effective_id in
   let event_line = match event_type with
     | Some e -> Printf.sprintf "event: %s\n" e
     | None -> ""
@@ -455,7 +476,9 @@ let reap_dead_external_subscribers () =
 let broadcast_impl target json =
   let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
-  let current_event_id = Atomic.get event_counter + 1 in
+  (* Atomically allocate the event id so two concurrent broadcasts
+     cannot observe the same peeked counter value and emit duplicates. *)
+  let current_event_id = next_id () in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
   (* Snapshot under read-lock *)
@@ -513,7 +536,8 @@ let broadcast_to target json = broadcast_impl target json
     Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
   let data = Yojson.Safe.to_string json in
-  let current_event_id = Atomic.get event_counter + 1 in
+  (* Atomic allocation — see [broadcast_impl] for rationale. *)
+  let current_event_id = next_id () in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
   let client_opt =

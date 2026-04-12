@@ -183,17 +183,29 @@ let legacy_audit_path (config : config) =
   Filename.concat masc_dir "audit.jsonl"
 
 (** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
-    Cached per base_dir so all callers share the same Eio.Mutex. *)
+    Cached per base_dir so all callers share the same Eio.Mutex.
+
+    The cache itself is protected by [audit_store_cache_mu] so that
+    two concurrent [get_audit_store] calls for the same base dir
+    cannot install two [Dated_jsonl.t] records with different inner
+    [Eio.Mutex] instances — otherwise file I/O to the same
+    [YYYY-MM/DD.jsonl] path would serialise through two different
+    mutexes and racing appends could interleave on disk.  Under the
+    current single-domain Eio with a non-yielding [Dated_jsonl.create]
+    this race does not fire today, but the fix is cheap and removes a
+    fragile implicit invariant. *)
 let audit_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+let audit_store_cache_mu = Eio.Mutex.create ()
 
 let get_audit_store (config : config) : Dated_jsonl.t =
   let base = Filename.concat (Room_utils.masc_dir config) "audit" in
-  match Hashtbl.find_opt audit_store_cache base with
-  | Some store -> store
-  | None ->
-    let store = Dated_jsonl.create ~base_dir:base () in
-    Hashtbl.replace audit_store_cache base store;
-    store
+  Eio_guard.with_mutex audit_store_cache_mu (fun () ->
+    match Hashtbl.find_opt audit_store_cache base with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:base () in
+      Hashtbl.replace audit_store_cache base store;
+      store)
 
 (** Parse JSON list into audit entries. Logs first 5 failures individually,
     then a summary. Returns only successfully parsed entries. *)

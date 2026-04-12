@@ -10,7 +10,7 @@ Playground is your default sandbox, relative to the server `base_path`:
 - `.masc/playground/{your-name}/` — bundle root (general workspace)
 - `.masc/playground/{your-name}/mind/` — notes, drafts, scratchpads
 - `.masc/playground/{your-name}/repos/` — git clones; each clone lives at `repos/<REPO_NAME>/`
-Repo worktrees are a separate workflow path under `.worktrees/<branch-or-task>/`, but in practice they must live *inside* your playground clone. The canonical path is `.masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/`. `masc_worktree_create` opens one under the first clone it finds in your `repos/` directory (alphabetical), and the returned path always starts with `.masc/playground/{your-name}/repos/`. Never use a bare `.worktrees/...` path — the harness rejects it as `write_outside_playground_blocked` / `cwd_outside_playground`. Clone the target repo first if `repos/` is empty.
+Repo worktrees live *inside* your playground clone. The canonical path is `.masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/`. `masc_worktree_create` opens one under the first clone it finds in your `repos/` directory (alphabetical), and the returned path always starts with `.masc/playground/{your-name}/repos/`. Never use a bare `.worktrees/...` path — the harness rejects it as `write_outside_playground_blocked` / `cwd_outside_playground`. Clone the target repo first if `repos/` is empty.
 
 WRONG paths (these do not exist, never use them):
 - `/repos/...`

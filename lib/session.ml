@@ -544,9 +544,15 @@ let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
-      let removed = McpSessionStore.cleanup_stale () in
-      if removed > 0 then
-        Log.Session.info "Cleaned up %d stale MCP sessions" removed;
+      (try
+        let removed = McpSessionStore.cleanup_stale () in
+        if removed > 0 then
+          Log.Session.info "Cleaned up %d stale MCP sessions" removed
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Session.warn "mcp session cleanup failed: %s"
+           (Printexc.to_string exn));
       loop ()
     in
     loop ()

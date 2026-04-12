@@ -31,6 +31,7 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 - `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md` is the boundary contract SSOT.
 - This spec keeps the implementation map, bridge inventory, and open structural gaps.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
 
 ---
@@ -415,6 +416,9 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | message marker leakage | Open | `[STATE]`, `[GOAL]`, memory-summary markers still carry domain semantics in raw text |
 | memory bridge hooks/callbacks | Open | seeding/flushing remains imperative in `memory_oas_bridge.ml` |
 | team-session bridge fidelity | Open | healthcheck still calls out projection/resource-health gaps |
+
+Checkpoint truth / replay semantics for the first three ledger items are
+further constrained by `docs/design/checkpoint-truth-and-replay-rfc.md`.
 
 ### 12.2 Boundary Audit Snapshot
 

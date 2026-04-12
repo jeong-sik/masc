@@ -4,6 +4,11 @@ open Swarm_status_json
 open Swarm_status_classify
 open Swarm_status_lanes
 
+(* Tail-recursive List.concat_map — avoids Stack_overflow on long
+   lane event lists.  Stdlib's version uses O(N) stack frames. *)
+let concat_map_safe f l =
+  List.rev (List.fold_left (fun acc x -> List.rev_append (f x) acc) [] l)
+
 let build_json_from_inputs ~timeline_limit_override ~now
     ~operations ~detachments ~alerts ~decisions ~traces ~sessions =
   let operation_kinds =
@@ -98,7 +103,7 @@ let build_json_from_inputs ~timeline_limit_override ~now
                   | "managed" -> Managed
                   | "supervised" -> Supervised
                   | _ -> Projected)))
-      |> List.concat_map (fun (lane : lane) ->
+      |> concat_map_safe (fun (lane : lane) ->
              let kind =
                match lane.lane_id with
                | "managed" -> Managed

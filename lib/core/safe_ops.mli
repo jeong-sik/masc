@@ -105,3 +105,11 @@ val json_assoc : string -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
 
 val json_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** Extract any non-null JSON value by key. Returns [None] for [`Null] or missing key. *)
+
+(** {1 Tail-recursive list helpers} *)
+
+val concat_map_safe : ('a -> 'b list) -> 'a list -> 'b list
+(** Tail-recursive [List.concat_map].  Stdlib's version uses O(N) stack. *)
+
+val map_safe : ('a -> 'b) -> 'a list -> 'b list
+(** Tail-recursive [List.map].  Stdlib's version uses O(N) stack. *)

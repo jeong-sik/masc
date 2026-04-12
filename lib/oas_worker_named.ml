@@ -152,19 +152,46 @@ let config_for_label
     approval;
   }
 
-(** Run a single Agent.run() call with cascade model fallback.
+(** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
+    Only API-level errors are cascadeable; agent/config errors are not. *)
+let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
+    : Llm_provider.Cascade_fsm.provider_outcome option =
+  match err with
+  | Oas.Error.Api api_err ->
+    let http_err = match api_err with
+      | Llm_provider.Retry.InvalidRequest { message } ->
+        Llm_provider.Http_client.HttpError { code = 400; body = message }
+      | Llm_provider.Retry.ContextOverflow { message; _ } ->
+        Llm_provider.Http_client.HttpError { code = 400; body = message }
+      | Llm_provider.Retry.RateLimited { message; _ } ->
+        Llm_provider.Http_client.HttpError { code = 429; body = message }
+      | Llm_provider.Retry.ServerError { status; message } ->
+        Llm_provider.Http_client.HttpError { code = status; body = message }
+      | Llm_provider.Retry.AuthError { message } ->
+        Llm_provider.Http_client.HttpError { code = 401; body = message }
+      | Llm_provider.Retry.Overloaded { message } ->
+        Llm_provider.Http_client.HttpError { code = 529; body = message }
+      | Llm_provider.Retry.NetworkError { message }
+      | Llm_provider.Retry.Timeout { message } ->
+        Llm_provider.Http_client.NetworkError { message }
+    in
+    Some (Llm_provider.Cascade_fsm.Call_err http_err)
+  | _ -> None
 
-    Tries each model in cascade order. Falls through to the next model
-    when:
-    - Agent.run() returns an error (model unavailable, network issue)
-    - [accept] returns [false] (response validation failure)
+(** Run a single Agent.run() call with MASC-driven cascade model fallback.
+
+    MASC drives the cascade FSM directly:
+    - Resolves cascade providers from cascade.json
+    - For each provider, runs OAS with a single provider (no named_cascade)
+    - Uses Cascade_fsm.decide to determine next action on failure
+    - Cascade loop runs inside Admission_queue permit
 
     @param accept Optional response validator. Default accepts all.
-    @since Phase 7 — cascade fallback in Oas_worker *)
+    @since Phase 2 — MASC-driven cascade FSM *)
 let run_named
     ~cascade_name
     ~goal
-    ?provider_filter
+    ?provider_filter:_provider_filter
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -221,82 +248,145 @@ let run_named
   in
   let candidate_cfgs = resolve_cascade_providers ~cascade_name in
   let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
-  let named_cascade = Agent_sdk.Api.named_cascade ?config_path
-    ~metrics ?provider_filter ~name:cascade_name ~defaults () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
   | [] ->
     Log.Misc.error "cascade %s: no callable models available" cascade_name;
     Error (Oas.Error.Internal
       (Printf.sprintf "cascade %s: no callable models available" cascade_name))
-  | primary_provider :: _ ->
-  let provider : Agent_sdk.Provider.config =
-    Agent_sdk.Provider.config_of_provider_config primary_provider
-  in
+  | _ ->
   let transport_resolved = match transport with
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
-  let config : Oas_worker_exec.config =
-    { (Oas_worker_exec.default_config ~name ~provider ~model_id:primary_provider.model_id
-      ~system_prompt ~tools)
-    with
-      priority;
-      max_turns; max_tokens; max_input_tokens; max_cost_usd; temperature; max_idle_turns;
-      guardrails; hooks; context_reducer; memory; tool_retry_policy;
-      description = Some (Printf.sprintf "cascade:%s" cascade_name);
-      transport = transport_resolved;
-      allowed_paths;
-      checkpoint_sidecar;
-      session_id;
-      cache_system_prompt;
-      compact_ratio;
-      contract;
-      checkpoint_dir;
-      context_injector;
-      context;
-      slot_id;
-      enable_thinking;
-      event_bus;
-      approval;
-      exit_condition;
-      exit_condition_result;
-    }
-  in
-  let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace; yield_on_tool } in
   let queue_priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
+  in
+  (* MASC-driven cascade FSM: try each provider, decide on failure *)
+  let try_provider (provider_cfg : Llm_provider.Provider_config.t) =
+    let provider : Agent_sdk.Provider.config =
+      Agent_sdk.Provider.config_of_provider_config provider_cfg
+    in
+    let config : Oas_worker_exec.config =
+      { (Oas_worker_exec.default_config ~name ~provider ~model_id:provider_cfg.model_id
+        ~system_prompt ~tools)
+      with
+        priority;
+        max_turns; max_tokens; max_input_tokens; max_cost_usd; temperature; max_idle_turns;
+        guardrails; hooks; context_reducer; memory; tool_retry_policy;
+        description = Some (Printf.sprintf "cascade:%s/%s" cascade_name provider_cfg.model_id);
+        transport = transport_resolved;
+        allowed_paths;
+        checkpoint_sidecar;
+        session_id;
+        cache_system_prompt;
+        compact_ratio;
+        contract;
+        checkpoint_dir;
+        context_injector;
+        context;
+        slot_id;
+        enable_thinking;
+        event_bus;
+        approval;
+        exit_condition;
+        exit_condition_result;
+        named_cascade = None;  (* Phase 2: no OAS-internal cascade *)
+        initial_messages; raw_trace; yield_on_tool;
+      }
+    in
+    Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event
+      ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal
+  in
+  let rec try_cascade remaining last_err =
+    match remaining with
+    | [] ->
+      let err_msg = match last_err with
+        | Some (Llm_provider.Http_client.HttpError { code; body }) ->
+          Printf.sprintf "HTTP %d: %s" code
+            (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
+        | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
+        | Some (Llm_provider.Http_client.NetworkError { message }) -> message
+        | None -> "no providers available"
+      in
+      let observation =
+        Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+          ~candidate_cfgs ~selected_model_raw:None ~capture
+      in
+      Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+      Error (Oas.Error.Internal
+        (Printf.sprintf "cascade %s: all models failed: %s" cascade_name err_msg))
+    | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
+      let is_last = rest = [] in
+      Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
+      match try_provider provider_cfg with
+      | Ok result when accept result.response ->
+        (* FSM: Call_ok → Accept *)
+        let observation =
+          Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+            ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
+        in
+        let result = { result with cascade_observation = Some observation } in
+        Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+        Ok result
+      | Ok result ->
+        (* FSM: Accept_rejected → decide *)
+        let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
+        let outcome = Llm_provider.Cascade_fsm.Accept_rejected
+          { response = result.response; reason } in
+        (match Llm_provider.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+         | Llm_provider.Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+           let observation =
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:(Some response.model) ~capture
+           in
+           let result = { result with cascade_observation = Some observation } in
+           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+           Ok result
+         | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
+           Log.Misc.warn "cascade %s: accept rejected %s, trying next" cascade_name provider_cfg.model_id;
+           metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
+           try_cascade rest new_err
+         | Llm_provider.Cascade_fsm.Exhausted _ ->
+           let observation =
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
+           in
+           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
+           Error (Oas.Error.Internal
+             (Printf.sprintf "cascade %s: %s" cascade_name reason))
+         | Llm_provider.Cascade_fsm.Accept _ -> assert false)
+      | Error sdk_err ->
+        (* FSM: Call_err → decide *)
+        (match sdk_error_to_cascade_outcome sdk_err with
+         | Some outcome ->
+           (match Llm_provider.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+            | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
+              Log.Misc.warn "cascade %s: %s failed, trying next" cascade_name provider_cfg.model_id;
+              metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next"
+                ~reason:(Oas.Error.to_string sdk_err);
+              try_cascade rest new_err
+            | Llm_provider.Cascade_fsm.Exhausted _ ->
+              let observation =
+                Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+                  ~candidate_cfgs ~selected_model_raw:None ~capture
+              in
+              Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+              Error sdk_err
+            | _ -> Error sdk_err)
+         | None ->
+           (* Non-API error (agent, config, etc.) — not cascadeable *)
+           let observation =
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:None ~capture
+           in
+           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+           Error sdk_err)
   in
   try
     Admission_queue.with_permit ?wait_timeout_sec
       ~priority:queue_priority ~keeper_name:name ~cascade_name
-      (fun () ->
-        match Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal with
-        | Ok result when accept result.response ->
-          let observation =
-            Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-              ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
-              ~capture
-          in
-          let result = { result with cascade_observation = Some observation } in
-          Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
-          Ok result
-        | Ok result ->
-          let observation =
-            Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-              ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
-              ~capture
-          in
-          Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
-          Error (Oas.Error.Internal
-            (Printf.sprintf "cascade %s: response rejected by accept" cascade_name))
-        | Error e ->
-          let observation =
-            Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
-              ~candidate_cfgs ~selected_model_raw:None ~capture
-          in
-          Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
-          Error e)
+      (fun () -> try_cascade candidate_cfgs None)
   with
   | Admission_queue.Wait_timeout wait_ms ->
       admission_wait_timeout_error ~keeper_name:name ~cascade_name

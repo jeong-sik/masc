@@ -173,6 +173,76 @@ let test_unknown_provider_is_dropped () =
         true
         (List.length parsed < List.length strings))
 
+(** Semantic contract for the [coding_plan] profile: every entry must
+    resolve to a provider whose endpoint is part of the Z.AI Coding Plan
+    subscription (no pay-per-use general API, no paid Groq hop) or to a
+    free local provider. This keeps the profile honest for operators who
+    are strictly on the Coding Plan — a stray [glm:*] entry would silently
+    bleed into the general API and hit HTTP 429 / code 1113.
+
+    Allowlist is data, not code: the test reads [coding_plan_allowed_providers]
+    from cascade.json if present and falls back to a minimal baseline
+    ({glm-coding, ollama}) otherwise. Adding a new coding-plan-compatible
+    provider is a JSON edit, not an OCaml edit. *)
+let baseline_coding_plan_providers = [ "glm-coding"; "ollama" ]
+
+let load_coding_plan_allowed_providers path : string list =
+  let ic = open_in path in
+  let content =
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let len = in_channel_length ic in
+        let buf = Bytes.create len in
+        really_input ic buf 0 len;
+        Bytes.to_string buf)
+  in
+  let json = Yojson.Safe.from_string content in
+  let open Yojson.Safe.Util in
+  match json |> member "coding_plan_allowed_providers" with
+  | `List items ->
+    List.filter_map
+      (function `String s -> Some (String.trim s) | _ -> None)
+      items
+  | _ -> baseline_coding_plan_providers
+
+let split_provider_model s =
+  (* Mirror OAS split_provider_model without re-exporting it: find the
+     first ':' that does not precede a "custom@" tail. cascade.json
+     entries use "provider:model_id" or "provider:model:with:colons"
+     (e.g. "ollama:qwen3.5:35b-a3b-nvfp4"). We only need the provider
+     prefix, so first ':' is enough. *)
+  match String.index_opt s ':' with
+  | None -> None
+  | Some i ->
+    let provider = String.sub s 0 i |> String.lowercase_ascii |> String.trim in
+    let rest = String.sub s (i + 1) (String.length s - i - 1) in
+    Some (provider, rest)
+
+let test_coding_plan_profile_is_strict () =
+  let path = cascade_path () in
+  let strings = load_profile_strings ~path ~profile:"coding_plan" in
+  check bool "coding_plan profile has entries" true (strings <> []);
+  let allowed = load_coding_plan_allowed_providers path in
+  List.iter
+    (fun s ->
+      match split_provider_model s with
+      | None ->
+        Alcotest.fail
+          (Printf.sprintf
+             "coding_plan: %S has no provider prefix (expected \
+              'provider:model_id')"
+             s)
+      | Some (provider, _model) ->
+        check bool
+          (Printf.sprintf
+             "coding_plan: %S uses an allowed provider (%s)"
+             s
+             (String.concat "|" allowed))
+          true
+          (List.mem provider allowed))
+    strings
+
 let () =
   let path = cascade_path () in
   let profiles = discover_profiles path in
@@ -194,5 +264,12 @@ let () =
             "unknown provider dropped (meta-guard)"
             `Quick
             test_unknown_provider_is_dropped;
+        ] );
+      ( "coding_plan",
+        [
+          test_case
+            "coding_plan profile uses only coding-plan-compatible providers"
+            `Quick
+            test_coding_plan_profile_is_strict;
         ] );
     ]

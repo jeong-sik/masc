@@ -20,9 +20,15 @@
     "groq:qwen/qwen3-32b",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
-  "_comment": "glm-coding = Coding Plan (subscription). glm = general API (pay-per-use). groq = Groq LPU ($0.29/$0.59 per M, GROQ_API_KEY). local last. glm-4.7 dropped 2026-04-11: 100% HTTP 500 on keeper-size bodies (#6567); glm-5.1 succeeds, fallback unchanged.",
+  "coding_plan_models": [
+    "glm-coding:glm-5.1",
+    "ollama:qwen3.5:35b-a3b-nvfp4"
+  ],
+  "_comment": "Profile semantics. glm-coding = Z.AI Coding Plan (subscription, api.z.ai/api/coding/paas/v4, ZAI_API_KEY). glm = Z.AI general API (pay-per-use, api.z.ai/api/paas/v4). groq = Groq LPU ($0.29/$0.59 per M, GROQ_API_KEY). ollama = local MLX. glm-4.7 dropped 2026-04-11: 100% HTTP 500 on keeper-size bodies (#6567); glm-5.1 succeeds. coding_plan profile is the coding-plan-only cascade: no general-API fallback (1113 when the operator has no pay-per-use balance), no paid Groq hop, just coding endpoint then local — use it for keepers whose operator is strictly on the Z.AI Coding Plan subscription. coding_first is the 4-tier safety net that includes paid fallbacks for operators with both plans.",
   "coding_first_temperature": 0.2,
   "coding_first_max_tokens": 65536,
+  "coding_plan_temperature": 0.2,
+  "coding_plan_max_tokens": 65536,
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,

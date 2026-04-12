@@ -234,6 +234,58 @@ let test_summary_with_data () =
     Alcotest.(check bool) "at least 1 entry" true (total >= 1)
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_summary_includes_freshness_metadata () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_freshness" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let recent_ts = Unix.gettimeofday () -. 42.0 in
+  write_jsonl telemetry_dir
+    [ `Assoc [ ("timestamp", `Float recent_ts); ("event", `String "fresh") ] ];
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let source_fields =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "sources" fields with
+        | Some (`List sources) ->
+          List.find_map
+            (function
+              | `Assoc source_fields -> (
+                  match List.assoc_opt "source" source_fields with
+                  | Some (`String "agent_event") -> Some source_fields
+                  | _ -> None)
+              | _ -> None)
+            sources
+        | _ -> None)
+    | _ -> None
+  in
+  match source_fields with
+  | Some fields ->
+    let latest_ts =
+      match List.assoc_opt "latest_ts_unix" fields with
+      | Some (`Float ts) -> ts
+      | Some (`Int ts) -> float_of_int ts
+      | _ -> Alcotest.fail "expected latest_ts_unix"
+    in
+    let latest_iso =
+      match List.assoc_opt "latest_ts_iso" fields with
+      | Some (`String iso) -> iso
+      | _ -> Alcotest.fail "expected latest_ts_iso"
+    in
+    let latest_age =
+      match List.assoc_opt "latest_age_s" fields with
+      | Some (`Float age) -> age
+      | Some (`Int age) -> float_of_int age
+      | _ -> Alcotest.fail "expected latest_age_s"
+    in
+    Alcotest.(check bool) "latest ts close to event" true
+      (abs_float (latest_ts -. recent_ts) < 5.0);
+    Alcotest.(check bool) "latest iso present" true (String.length latest_iso > 0);
+    Alcotest.(check bool) "latest age bounded" true
+      (latest_age >= 0.0 && latest_age < 180.0)
+  | None -> Alcotest.fail "expected agent_event source summary"
+
 let test_summary_counts_all_entries_beyond_recent_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -316,6 +368,8 @@ let () =
         [
           Alcotest.test_case "empty" `Quick test_summary_empty;
           Alcotest.test_case "with data" `Quick test_summary_with_data;
+          Alcotest.test_case "includes freshness metadata" `Quick
+            test_summary_includes_freshness_metadata;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
         ] );

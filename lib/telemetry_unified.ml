@@ -106,6 +106,41 @@ let extract_ts (json : Yojson.Safe.t) : float =
             | _ -> 0.0))
   | _ -> 0.0
 
+let max_ts_opt current candidate =
+  match current with
+  | Some existing when existing >= candidate -> current
+  | _ -> Some candidate
+
+let latest_ts_of_entries (entries : Yojson.Safe.t list) : float option =
+  List.fold_left
+    (fun acc json ->
+      let ts = extract_ts json in
+      if ts > 0.0 then max_ts_opt acc ts else acc)
+    None entries
+
+let latest_store_ts dir label : float option =
+  if not (Sys.file_exists dir) then None
+  else
+    match Dated_jsonl.create ~base_dir:dir () with
+    | store -> latest_ts_of_entries (Dated_jsonl.read_recent store 64)
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      Log.Telemetry.warn "latest_store_ts: %s store open failed: %s" label
+        (Printexc.to_string exn);
+      None
+
+let freshness_fields ~now latest_ts =
+  match latest_ts with
+  | Some ts ->
+    let age = max 0.0 (now -. ts) in
+    [
+      ("latest_ts_unix", `Float ts);
+      ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
+      ("latest_age_s", `Float age);
+    ]
+  | None ->
+    [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
+
 (* ── Entry tagging ──────────────────────────────────── *)
 
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
@@ -238,6 +273,7 @@ let count_fixed_source_entries ~masc_root ~base_path source : int =
          0)
 
 let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
+  let now = Unix.gettimeofday () in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
   let keeper_total =
     List.fold_left (fun acc (name, dir) ->
@@ -251,38 +287,55 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
          0)
     ) 0 keeper_dirs
   in
-  let source_json source =
+  let keeper_latest_ts =
+    List.fold_left
+      (fun acc (name, dir) ->
+        match latest_store_ts dir (Printf.sprintf "keeper %s" name) with
+        | Some ts -> max_ts_opt acc ts
+        | None -> acc)
+      None keeper_dirs
+  in
+  let source_json_and_count source =
     match source with
     | Keeper_metric ->
-      `Assoc [
-        ("source", `String (source_to_string source));
-        ("keepers", `List (List.map (fun (name, dir) ->
-           `Assoc [
-             ("name", `String name);
-             ("path", `String dir);
-           ]) keeper_dirs));
-        ("keeper_count", `Int (List.length keeper_dirs));
-        ("entry_count", `Int keeper_total);
-      ]
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ( "keepers",
+               `List
+                 (List.map
+                    (fun (name, dir) ->
+                      `Assoc [ ("name", `String name); ("path", `String dir) ])
+                    keeper_dirs) );
+             ("keeper_count", `Int (List.length keeper_dirs));
+             ("entry_count", `Int keeper_total);
+           ]
+          @ freshness_fields ~now keeper_latest_ts),
+        keeper_total )
     | _ ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let exists = dir <> "" && Sys.file_exists dir in
       let count = if exists then count_fixed_source_entries ~masc_root ~base_path source else 0 in
-      `Assoc [
-        ("source", `String (source_to_string source));
-        ("path", `String dir);
-        ("exists", `Bool exists);
-        ("entry_count", `Int count);
-      ]
+      let latest_ts =
+        if exists then latest_store_ts dir (source_to_string source) else None
+      in
+      ( `Assoc
+          ([
+             ("source", `String (source_to_string source));
+             ("path", `String dir);
+             ("exists", `Bool exists);
+             ("entry_count", `Int count);
+           ]
+          @ freshness_fields ~now latest_ts),
+        count )
   in
-  let fixed_total =
-    List.fold_left (fun acc s ->
-      acc + count_fixed_source_entries ~masc_root ~base_path s
-    ) 0 (List.filter (fun s -> s <> Keeper_metric) all_sources)
+  let source_summaries = List.map source_json_and_count all_sources in
+  let total_entries =
+    List.fold_left (fun acc (_json, count) -> acc + count) 0 source_summaries
   in
   `Assoc [
     ("generated_at", `String (Types.now_iso ()));
-    ("sources", `List (List.map source_json all_sources));
-    ("total_entries", `Int (keeper_total + fixed_total));
+    ("sources", `List (List.map fst source_summaries));
+    ("total_entries", `Int total_entries);
   ]

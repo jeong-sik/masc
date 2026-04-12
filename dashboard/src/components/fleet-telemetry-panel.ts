@@ -22,6 +22,9 @@ import { isAbortError } from '../lib/async-state'
 const PRESSURE_HOT_RATIO = 0.75
 const PRESSURE_WARN_RATIO = 0.5
 const STALE_ACTIVITY_SEC = 900
+const TELEMETRY_ACTIVITY_FRESH_SEC = 300
+const TELEMETRY_SOURCE_STALE_SEC = 900
+const OAS_EVENT_LAG_WARN_SEC = 600
 
 interface FleetRow {
   name: string
@@ -374,6 +377,77 @@ function formatActivity(seconds: number | null): string {
   return formatElapsedCompact(seconds)
 }
 
+function numericAge(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function formatSourceAge(seconds: number | null | undefined): string | null {
+  const age = numericAge(seconds)
+  return age == null ? null : formatElapsedCompact(age)
+}
+
+function sourceCountClass(source: TelemetrySourceSummary): string {
+  if (source.exists === false) return 'text-red-400'
+  if (source.entry_count <= 0) return 'text-[var(--text-dim)]'
+  const age = numericAge(source.latest_age_s)
+  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-amber-300'
+  return 'text-emerald-400'
+}
+
+function sourceDetail(source: TelemetrySourceSummary): string {
+  const parts: string[] = []
+  if (source.keeper_count != null) {
+    parts.push(`${source.keeper_count} keepers tracked`)
+  } else if (source.exists === false) {
+    parts.push('store missing')
+  } else {
+    parts.push('store available')
+  }
+
+  if (source.entry_count > 0) {
+    const age = formatSourceAge(source.latest_age_s)
+    parts.push(age ? `last ${age} ago` : 'latest ts unavailable')
+  }
+
+  return parts.join(' · ')
+}
+
+function buildTelemetryWarnings(sources: TelemetrySourceSummary[]): string[] {
+  const warnings: string[] = []
+  const bySource = new Map(sources.map(source => [source.source, source]))
+  const oasEvent = bySource.get('oas_event')
+  if (!oasEvent) return warnings
+
+  if (oasEvent.exists === false) {
+    warnings.push('OAS event relay store is missing.')
+    return warnings
+  }
+
+  if (oasEvent.entry_count <= 0) return warnings
+
+  const oasAge = numericAge(oasEvent.latest_age_s)
+  const agentEvent = bySource.get('agent_event')
+  const agentAge = numericAge(agentEvent?.latest_age_s)
+  const oasTs = numericAge(oasEvent.latest_ts_unix)
+  const agentTs = numericAge(agentEvent?.latest_ts_unix)
+
+  if (agentTs != null && oasTs != null) {
+    const lag = agentTs - oasTs
+    if (lag >= OAS_EVENT_LAG_WARN_SEC) {
+      warnings.push(`OAS event relay trails agent events by ${formatElapsedCompact(lag)}.`)
+      return warnings
+    }
+  }
+
+  if (oasAge != null && oasAge >= TELEMETRY_SOURCE_STALE_SEC) {
+    if (agentAge == null || agentAge <= TELEMETRY_ACTIVITY_FRESH_SEC) {
+      warnings.push(`OAS event relay stale: last durable event ${formatElapsedCompact(oasAge)} ago.`)
+    }
+  }
+
+  return warnings
+}
+
 function toolSummary(row: FleetRow): { label: string; title: string } {
   if (row.recent_tools.length > 0) {
     const text = row.recent_tools.join(', ')
@@ -555,17 +629,11 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
         <div class="rounded-lg border border-[var(--card-border)] bg-[rgba(255,255,255,0.02)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-[11px] font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
-            <div class="font-mono text-[11px] ${source.entry_count > 0 ? 'text-emerald-400' : 'text-[var(--text-dim)]'}">
+            <div class="font-mono text-[11px] ${sourceCountClass(source)}">
               ${source.entry_count.toLocaleString()}
             </div>
           </div>
-          <div class="mt-1 text-[10px] text-[var(--text-dim)]">
-            ${source.keeper_count != null
-              ? `${source.keeper_count} keepers tracked`
-              : source.exists === false
-                ? 'store missing'
-                : 'store available'}
-          </div>
+          <div class="mt-1 text-[10px] text-[var(--text-dim)]">${sourceDetail(source)}</div>
         </div>
       `)}
     </div>
@@ -649,6 +717,7 @@ export function FleetTelemetryPanel() {
       if (telemetrySummaryResult.status === 'rejected' && !isAbortError(telemetrySummaryResult.reason)) {
         warnings.push(`Telemetry store summary unavailable: ${errorMessage(telemetrySummaryResult.reason)}`)
       }
+      warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
       const rows = buildFleetRows(keepers, toolQuality)
       const updatedAt =

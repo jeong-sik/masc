@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.5.8] - 2026-04-12
+
+### Fixed
+- SSE: stop double-incrementing event_counter when ~id is passed (#6660)
+- RNG: guard module-level Random.State with Eio.Mutex in 3 modules (#6652)
+- Repair loop: gate working_dir on caller playground (#6651)
+- Local runtime pool: drop dead select_runtime, re-check fingerprint after env load (#6650)
+- Cascade: remove coding_first profile, cap max_tokens to 32768 (#6687)
+- Cascade: clamp keeper_unified + coding_first max_tokens to 32768 (Groq limit) (#6686)
+- Build identity: probe exe_dir before cwd for git commit (#6688)
+- Keeper: masc_* boundary-exempt gap + cascade.json prune (#6681)
+- Worker OAS: stop sending min_p=0.0 to cloud providers (#6672)
+- Keeper checkpoint store: classify Eio.Io Fs Not_found as Not_found (#6655)
+
+### Changed
+- Bump OAS pin for GLM max_tokens clamp (#6689)
+- Improve keeper timeout visibility (#6552)
+
+### Performance
+- Board: move Agent_economy.earn outside store.mutex (#6649)
+
 ## [0.5.7] - 2026-04-12
 
 ### Fixed

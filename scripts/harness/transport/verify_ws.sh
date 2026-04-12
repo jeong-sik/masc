@@ -134,7 +134,39 @@ raise SystemExit(4)
 PY
 ws_client_pid=$!
 
-sleep 1
+# Poll /health for websocket.session_count >= 1 instead of a fixed
+# sleep. The Python client above needs time for:
+#   1. socket connect
+#   2. upgrade request/response (101 Switching Protocols)
+#   3. server-side [create_websocket] callback to run and call
+#      [Sse.subscribe_external] registering this session as an
+#      external broadcast recipient
+# Step 3 happens asynchronously inside the httpun-ws [Wsd.t] setup and
+# is NOT guaranteed to complete before [respond_with_upgrade] returns.
+# The previous fixed [sleep 1] raced this registration: on a loaded CI
+# runner, the subscription could be placed AFTER the mcp_broadcast
+# call, so the broadcast event had no subscriber to deliver to and the
+# Python client's 6-second recv timeout elapsed with zero frames.
+#
+# Polling against the server's own [websocket.session_count] counter
+# provides a deterministic barrier — the server only increments that
+# counter inside [Sse.subscribe_external] (via [set_ws_sessions] in
+# [server_mcp_transport_ws.ml]), so once /health reports >=1 we know
+# the subscriber is registered and ready to receive broadcasts.
+#
+# Falls back to the old 1-second wait if jq is missing or /health does
+# not expose the field.
+ws_ready_deadline=$(( $(date +%s) + 10 ))
+while [[ "$(date +%s)" -lt "$ws_ready_deadline" ]]; do
+  ws_sessions="$(curl -fsS "${MASC_BASE_URL}/health" 2>/dev/null \
+    | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("transport",{}).get("websocket",{}).get("session_count",-1))' \
+    2>/dev/null || echo "-1")"
+  if [[ "$ws_sessions" =~ ^[0-9]+$ ]] && [[ "$ws_sessions" -ge 1 ]]; then
+    break
+  fi
+  sleep 0.2
+done
+
 session_id="$(mcp_initialize_session)"
 mcp_join_agent "$session_id" "transport-harness" >/dev/null
 mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null

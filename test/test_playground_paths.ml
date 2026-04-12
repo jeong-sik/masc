@@ -88,6 +88,59 @@ let test_no_path_escape () =
     ".masc/playground/_/"
     (PP.bundle_root "")
 
+(* Canonical/short name normalization — keeper-X-agent strips to X *)
+
+let test_strip_canonical_to_short () =
+  check string "canonical stripped to short"
+    "masc-improver"
+    (PP.sanitize_keeper_name "keeper-masc-improver-agent");
+  check string "short stays short"
+    "masc-improver"
+    (PP.sanitize_keeper_name "masc-improver");
+  check string "cheolsu canonical"
+    "cheolsu"
+    (PP.sanitize_keeper_name "keeper-cheolsu-agent");
+  check string "sangsu canonical"
+    "sangsu"
+    (PP.sanitize_keeper_name "keeper-sangsu-agent")
+
+let test_canonical_short_path_identity () =
+  check string "repos path identity"
+    (PP.repos_path "masc-improver")
+    (PP.repos_path "keeper-masc-improver-agent");
+  check string "bundle_root identity"
+    (PP.bundle_root "cheolsu")
+    (PP.bundle_root "keeper-cheolsu-agent");
+  check string "mind_path identity"
+    (PP.mind_path "sangsu")
+    (PP.mind_path "keeper-sangsu-agent")
+
+let test_strip_edge_cases () =
+  check string "keeper-agent not stripped (inner would be empty)"
+    "keeper-agent"
+    (PP.sanitize_keeper_name "keeper-agent");
+  check string "single-char inner name"
+    "x"
+    (PP.sanitize_keeper_name "keeper-x-agent");
+  check string "idempotent"
+    (PP.sanitize_keeper_name "masc-improver")
+    (PP.sanitize_keeper_name
+       (PP.sanitize_keeper_name "keeper-masc-improver-agent"));
+  check string "different keepers stay different"
+    "sangsu"
+    (PP.sanitize_keeper_name "keeper-sangsu-agent");
+  check bool "sangsu != cheolsu after normalize"
+    true
+    (PP.sanitize_keeper_name "keeper-sangsu-agent"
+     <> PP.sanitize_keeper_name "keeper-cheolsu-agent")
+
+let test_strip_no_traversal () =
+  let result = PP.sanitize_keeper_name "keeper-../../etc-agent" in
+  check bool "no slash in result" true
+    (not (String.contains result '/'));
+  check bool "no backslash in result" true
+    (not (String.contains result '\\'))
+
 let () =
   run "Playground_paths"
     [
@@ -105,5 +158,11 @@ let () =
       ]);
       ("security", [
         test_case "no path escape" `Quick test_no_path_escape;
+      ]);
+      ("canonical_normalize", [
+        test_case "canonical stripped to short" `Quick test_strip_canonical_to_short;
+        test_case "both forms produce identical paths" `Quick test_canonical_short_path_identity;
+        test_case "edge cases" `Quick test_strip_edge_cases;
+        test_case "strip does not create traversal" `Quick test_strip_no_traversal;
       ]);
     ]

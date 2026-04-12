@@ -262,6 +262,17 @@ let is_main_worktree_boundary_exempt_with_input
     | "keeper_task_claim" | "keeper_task_done" | "keeper_tasks_list"
     | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
     | "keeper_board_list" | "keeper_board_get"
+    (* Board delete and cleanup are MASC-state-only mutations (board
+       post store), not main-worktree writes.  Missing here until #6692
+       caused [janitor] to hit a mutation-boundary block loop at
+       2026-04-12 01:15:25 KST: the first [keeper_board_delete] in a
+       cleanup turn succeeded and opened the boundary, and every
+       subsequent [keeper_board_delete] in the same turn was blocked
+       by the [pre_tool_use_guard], burning the turn budget without
+       progress.  The [masc_board_delete] alias was already exempt at
+       line 283 but its [keeper_*] counterpart had drifted out of this
+       list — same structural gap fixed by #6681 for [masc_claim_next]. *)
+    | "keeper_board_delete" | "keeper_board_cleanup"
     | "keeper_broadcast" -> true
     (* MASC coordination aliases for the [keeper_*] entries above.
        These share the same name with a [masc_] prefix because they are

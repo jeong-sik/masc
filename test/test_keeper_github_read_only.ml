@@ -249,9 +249,13 @@ let test_masc_coordination_aliases_bypass_boundary () =
   List.iter check_pair
     [ "masc_tasks"; "masc_add_task"; "masc_claim_next";
       "masc_batch_add_tasks"; "masc_plan_init"; "masc_plan_set_task";
-      "masc_plan_update"; "masc_transition"; "masc_broadcast";
+      "masc_plan_update"; "masc_plan_get"; "masc_transition";
+      "masc_broadcast"; "masc_messages"; "masc_status";
+      "masc_dashboard"; "masc_agents"; "masc_agent_card";
       "masc_board_post"; "masc_board_comment"; "masc_board_vote";
-      "masc_board_comment_vote"; "masc_board_delete" ]
+      "masc_board_comment_vote"; "masc_board_delete";
+      "masc_board_list"; "masc_board_get"; "masc_board_stats";
+      "masc_board_hearths"; "masc_board_profile" ]
 
 (* ================================================================ *)
 (* Runner                                                            *)

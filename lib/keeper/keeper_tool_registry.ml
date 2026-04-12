@@ -276,9 +276,13 @@ let is_main_worktree_boundary_exempt_with_input
        masc_claim_next". *)
     | "masc_tasks" | "masc_add_task" | "masc_claim_next"
     | "masc_batch_add_tasks" | "masc_plan_init" | "masc_plan_set_task"
-    | "masc_plan_update" | "masc_transition" | "masc_broadcast"
+    | "masc_plan_update" | "masc_plan_get" | "masc_transition"
+    | "masc_broadcast" | "masc_messages" | "masc_status"
+    | "masc_dashboard" | "masc_agents" | "masc_agent_card"
     | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
-    | "masc_board_comment_vote" | "masc_board_delete" -> true
+    | "masc_board_comment_vote" | "masc_board_delete"
+    | "masc_board_list" | "masc_board_get" | "masc_board_stats"
+    | "masc_board_hearths" | "masc_board_profile" -> true
     | "masc_code_edit" | "masc_code_write" | "masc_code_delete"
     | "masc_code_shell" | "masc_code_git" | "masc_worktree_create"
     | "keeper_pr_submit" | "keeper_fs_edit" -> true

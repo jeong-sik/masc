@@ -160,15 +160,15 @@ let format_elapsed now timestamp fallback =
 
 (* ===== Agent Status Translation ===== *)
 
-(** Threshold in seconds for considering an agent "stuck" *)
-let stuck_threshold_sec = 900.0 (* 15 minutes *)
-
-(** Threshold in seconds for "quiet" warning *)
-let quiet_threshold_sec = Env_config.InternalTimers.label_quiet_threshold_sec
-
 (** Translate agent status + elapsed time into operator-readable description. *)
 let translate_agent_status ~(now : float) (status : Types.agent_status)
     (last_seen_iso : string) : string =
+  let quiet_threshold_sec =
+    Runtime_params.get Governance_registry.dashboard_agent_quiet_threshold_sec
+  in
+  let stuck_threshold_sec =
+    Runtime_params.get Governance_registry.dashboard_agent_stuck_threshold_sec
+  in
   let elapsed_opt = parse_iso_timestamp last_seen_iso in
   let elapsed_sec =
     match elapsed_opt with Some ts -> now -. ts | None -> 0.0
@@ -192,6 +192,9 @@ let translate_agent_status ~(now : float) (status : Types.agent_status)
 type agent_group = Working | Stuck | Idle | Offline [@@deriving eq]
 
 let classify_agent ~(now : float) (agent : Types.agent) : agent_group =
+  let stuck_threshold_sec =
+    Runtime_params.get Governance_registry.dashboard_agent_stuck_threshold_sec
+  in
   let elapsed_opt = parse_iso_timestamp agent.last_seen in
   let elapsed_sec =
     match elapsed_opt with Some ts -> now -. ts | None -> 0.0

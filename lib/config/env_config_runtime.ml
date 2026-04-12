@@ -533,6 +533,10 @@ module InternalTimers = struct
   let label_quiet_threshold_sec =
     get_float ~default:300.0 "MASC_LABEL_QUIET_THRESHOLD_SEC"
 
+  (** Dashboard label "stuck" threshold (seconds). Default: 900 (15 min). *)
+  let label_stuck_threshold_sec =
+    get_float ~default:900.0 "MASC_LABEL_STUCK_THRESHOLD_SEC"
+
   (** Dashboard mission briefing cache TTL (seconds). Default: 300 (5 min). *)
   let briefing_cache_ttl_sec =
     get_float ~default:300.0 "MASC_BRIEFING_CACHE_TTL_SEC"

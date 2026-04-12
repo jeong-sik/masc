@@ -1394,6 +1394,8 @@ let run_turn
   in
   let reducer =
     Agent_sdk.Context_reducer.compose [
+      Agent_sdk.Context_reducer.drop_thinking;
+      Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3;
       Agent_sdk.Context_reducer.repair_dangling_tool_calls;
       Agent_sdk.Context_reducer.merge_contiguous;
     ]

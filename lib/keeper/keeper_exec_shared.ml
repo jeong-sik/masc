@@ -74,12 +74,24 @@ let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
+(* Resolve relative paths against the keeper's playground root.
+   Structural containment: relative paths land inside
+   .masc/playground/<name>/ — escape requires an absolute path which
+   is then checked against allowed_paths. *)
+let playground_relative ~(config : Room.config) ~(meta : keeper_meta)
+    (raw : string) : string =
+  let trimmed = String.trim raw in
+  if trimmed = "" || not (Filename.is_relative trimmed) then trimmed
+  else
+    let pg = keeper_playground_root ~config ~meta in
+    Filename.concat pg trimmed
+
 let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path : string)
   =
   resolve_keeper_target_path
     ~config
     ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path
+    ~raw_path:(playground_relative ~config ~meta raw_path)
 ;;
 
 let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
@@ -87,7 +99,7 @@ let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
   Keeper_alerting_path.resolve_keeper_read_path
     ~config
     ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-    ~raw_path
+    ~raw_path:(playground_relative ~config ~meta raw_path)
 ;;
 
 let keeper_agent_sender ~(meta : keeper_meta) =

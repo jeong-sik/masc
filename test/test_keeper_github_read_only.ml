@@ -257,6 +257,31 @@ let test_masc_coordination_aliases_bypass_boundary () =
       "masc_board_list"; "masc_board_get"; "masc_board_stats";
       "masc_board_hearths"; "masc_board_profile" ]
 
+(* Regression: [keeper_board_delete] and [keeper_board_cleanup] were
+   missing from the [keeper_*] side of the exempt list even though
+   their [masc_*] coordination alias [masc_board_delete] was already
+   exempt at line 283 of [keeper_tool_registry.ml].  Observed 2026-04-12
+   01:15:25 KST on janitor: the first [keeper_board_delete] of a cleanup
+   turn succeeded and opened the mutation boundary, and every subsequent
+   [keeper_board_delete] in the same turn was blocked by the
+   [pre_tool_use_guard] — burning janitor's turn budget on a repeating
+   "tool skipped" loop instead of progressing through the cleanup queue.
+   Same structural gap class as #6671 / #6681.
+
+   Board delete and cleanup are MASC-state-only mutations (board post
+   store), not main-worktree writes, so multiple deletes per turn are
+   safe.  This test locks the exemption so the next rename does not
+   silently drift the [keeper_*] side out of sync with [masc_*]. *)
+let test_keeper_board_delete_and_cleanup_bypass_boundary () =
+  let check name =
+    Alcotest.(check bool) (name ^ " is mutating") false
+      (is_ro ~tool_name:name ~input:(`Assoc []));
+    Alcotest.(check bool) (name ^ " bypasses boundary") true
+      (is_boundary_exempt ~tool_name:name ~input:(`Assoc []))
+  in
+  List.iter check
+    [ "keeper_board_delete"; "keeper_board_cleanup" ]
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -310,5 +335,7 @@ let () =
             test_keeper_bash_still_opens_boundary;
           Alcotest.test_case "masc_* coordination aliases bypass boundary" `Quick
             test_masc_coordination_aliases_bypass_boundary;
+          Alcotest.test_case "keeper_board_delete and cleanup bypass boundary" `Quick
+            test_keeper_board_delete_and_cleanup_bypass_boundary;
         ] );
     ]

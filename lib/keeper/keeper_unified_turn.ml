@@ -136,15 +136,6 @@ let summarize_post_commit_failure
         tools
         err_preview
 
-let blocker_class_of_failure_reason = function
-  | Keeper_registry.Ambiguous_partial_commit
-      { kind = Keeper_registry.Post_commit_timeout; _ } ->
-      "ambiguous_post_commit_timeout"
-  | Keeper_registry.Ambiguous_partial_commit
-      { kind = Keeper_registry.Post_commit_failure; _ } ->
-      "ambiguous_post_commit_failure"
-  | _ -> "manual_reconcile_required"
-
 let classify_post_commit_failure
     ~(tool_names : string list)
     ?kind

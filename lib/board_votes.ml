@@ -49,6 +49,16 @@ let rewrite_vote_log store =
      | Error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg)
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
 
+(* [vote_outcome] carries the information needed to run the post-lock
+   [Agent_economy.earn] call.  [earn_upvote_for] is [Some author] only
+   on the fresh-upvote path — a vote flip does not earn credits
+   (prevents down/up alternation abuse), and a downvote does not earn
+   at all. *)
+type vote_outcome = {
+  delta : int;
+  earn_upvote_for : string option;
+}
+
 let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -56,57 +66,71 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-      with_lock store (fun () ->
-        match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-        | None -> Error (Post_not_found post_id)
-        | Some post ->
-            let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
-            let now = Time_compat.now () in
-            match Hashtbl.find_opt store.vote_log vote_key with
-            | Some prev when prev = direction ->
-                Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
-                  voter (vote_direction_to_string direction) post_id))
-            | Some _opposite ->
-                let flipped = match direction with
-                  | Up -> { post with votes_up = post.votes_up + 1;
-                                      votes_down = max 0 (post.votes_down - 1);
-                                      updated_at = now }
-                  | Down -> { post with votes_down = post.votes_down + 1;
-                                        votes_up = max 0 (post.votes_up - 1);
+      let board_result : (vote_outcome, board_error) result =
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | None -> Error (Post_not_found post_id)
+          | Some post ->
+              let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
+              let now = Time_compat.now () in
+              match Hashtbl.find_opt store.vote_log vote_key with
+              | Some prev when prev = direction ->
+                  Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
+                    voter (vote_direction_to_string direction) post_id))
+              | Some _opposite ->
+                  let flipped = match direction with
+                    | Up -> { post with votes_up = post.votes_up + 1;
+                                        votes_down = max 0 (post.votes_down - 1);
                                         updated_at = now }
-                in
-                Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
-                Hashtbl.replace store.vote_log vote_key direction;
-                store.dirty_posts <- true;  (* Deferred flush *)
-                invalidate_post_caches store;
-                append_vote_log ~target:vote_key ~voter ~direction;
-                (* Record vote for Thompson Sampling feedback *)
-                let author_name = Agent_id.to_string post.author in
-                let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
-                (* No economy earn on flip: prevents down/up alternation abuse *)
-                Ok (flipped.votes_up - flipped.votes_down)
-            | None ->
-                let updated = match direction with
-                  | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
-                  | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
-                in
-                Hashtbl.replace store.posts (Post_id.to_string pid) updated;
-                Hashtbl.replace store.vote_log vote_key direction;
-                store.dirty_posts <- true;  (* Deferred flush *)
-                invalidate_post_caches store;
-                append_vote_log ~target:vote_key ~voter ~direction;
-                (* Record vote for Thompson Sampling feedback *)
-                let author_name = Agent_id.to_string post.author in
-                let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
-                (* Agent Economy: earn credits for upvote received *)
-                (if direction = Up then
-                   ignore (Agent_economy.earn
-                     ~base_path:(board_base_path ()) ~agent_name:author_name
-                     ~kind:Earn_upvote ~reason:"upvote on post" ()));
-                Ok (updated.votes_up - updated.votes_down)
-      )
+                    | Down -> { post with votes_down = post.votes_down + 1;
+                                          votes_up = max 0 (post.votes_up - 1);
+                                          updated_at = now }
+                  in
+                  Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
+                  Hashtbl.replace store.vote_log vote_key direction;
+                  store.dirty_posts <- true;  (* Deferred flush *)
+                  invalidate_post_caches store;
+                  append_vote_log ~target:vote_key ~voter ~direction;
+                  (* Record vote for Thompson Sampling feedback *)
+                  let author_name = Agent_id.to_string post.author in
+                  let vote_dir = match direction with Up -> `Up | Down -> `Down in
+                  Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
+                  (* No economy earn on flip: prevents down/up alternation abuse *)
+                  Ok { delta = flipped.votes_up - flipped.votes_down;
+                       earn_upvote_for = None }
+              | None ->
+                  let updated = match direction with
+                    | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
+                    | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
+                  in
+                  Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+                  Hashtbl.replace store.vote_log vote_key direction;
+                  store.dirty_posts <- true;  (* Deferred flush *)
+                  invalidate_post_caches store;
+                  append_vote_log ~target:vote_key ~voter ~direction;
+                  (* Record vote for Thompson Sampling feedback *)
+                  let author_name = Agent_id.to_string post.author in
+                  let vote_dir = match direction with Up -> `Up | Down -> `Down in
+                  Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
+                  let earn =
+                    if direction = Up then Some author_name else None
+                  in
+                  Ok { delta = updated.votes_up - updated.votes_down;
+                       earn_upvote_for = earn })
+      in
+      (* Agent Economy: earn credits for an upvote received.  Moved
+         OUTSIDE the store lock — [Agent_economy.earn] writes its own
+         ledger file on an unrelated path and modifies no board state,
+         so holding [store.mutex] across its disk I/O was gratuitous
+         contention with every other reader/writer. *)
+      (match board_result with
+       | Ok { delta; earn_upvote_for = Some author_name } ->
+           ignore (Agent_economy.earn
+             ~base_path:(board_base_path ()) ~agent_name:author_name
+             ~kind:Earn_upvote ~reason:"upvote on post" ());
+           Ok delta
+       | Ok { delta; earn_upvote_for = None } -> Ok delta
+       | Error _ as e -> e)
 
 (** Vote on a comment *)
 let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result =

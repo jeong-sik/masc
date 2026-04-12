@@ -535,7 +535,7 @@ let test_worker_build_agent_uses_default_internal_retry_policy () =
 let test_build_resume_config_propagates_retry_policy () =
   with_raw_trace "worker_resume_config_retry" @@ fun raw_trace ->
   let provider = make_local_provider () in
-  let (_config, options) =
+  let (config, options) =
     Worker_container.build_resume_config
       ~worker_name:"resume-worker"
       ~provider
@@ -549,6 +549,7 @@ let test_build_resume_config_propagates_retry_policy () =
       ~tool_retry_policy:Oas.Tool_retry_policy.default_internal
       ()
   in
+  Alcotest.(check (option (float 0.000001))) "resume config omits min_p" None config.min_p;
   let policy = options.tool_retry_policy in
   check_policy_matches_default_internal "resume config" policy
 

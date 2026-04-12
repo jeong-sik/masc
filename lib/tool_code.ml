@@ -86,6 +86,72 @@ let validate_path config path =
   | Invalid_argument msg -> Error (IoError msg)
   | exn -> Error (IoError (Printexc.to_string exn))
 
+(* #6637 iter11 — per-agent playground containment for code-read tools.
+
+   [validate_path] guarantees the target is within the git root, but
+   .masc/playground/<other-keeper>/ is also under the git root, so a
+   keeper could historically read another keeper's playground
+   contents via masc_code_search/symbols/read — a data exfiltration
+   surface (secrets in playground .env files, proprietary code
+   mid-work, handoff notes, etc.).
+
+   [validate_read_path] adds the extra gate: if the canonical path
+   lands inside the *.masc/playground/* tree, it must be inside the
+   caller's own playground. Paths outside that tree (i.e. the shared
+   codebase in lib/, test/, config/, etc.) remain readable so keepers
+   can still call the code-read tools on the common source tree.
+
+   Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
+let validate_read_path ~agent_name config path =
+  match validate_path config path with
+  | Error e -> Error e
+  | Ok canonical ->
+      let playground_tree_rel = ".masc/playground" in
+      let playground_tree_abs_raw =
+        Filename.concat config.Room.base_path playground_tree_rel
+      in
+      let playground_tree_canonical =
+        try Unix.realpath playground_tree_abs_raw
+        with Unix.Unix_error _ -> normalize_path playground_tree_abs_raw
+      in
+      let is_under_any_playground =
+        String.starts_with
+          ~prefix:(playground_tree_canonical ^ "/") canonical
+        || String.equal canonical playground_tree_canonical
+      in
+      if not is_under_any_playground then
+        (* Shared codebase read — allow. *)
+        Ok canonical
+      else
+        let own_rel_trailing =
+          Keeper_alerting_path.playground_path_of_keeper agent_name
+        in
+        (* [playground_path_of_keeper] returns a trailing-slash
+           relative path (".masc/playground/<agent>/"). Strip the
+           trailing slash for prefix comparison. *)
+        let own_rel =
+          let n = String.length own_rel_trailing in
+          if n > 0 && own_rel_trailing.[n - 1] = '/'
+          then String.sub own_rel_trailing 0 (n - 1)
+          else own_rel_trailing
+        in
+        let own_abs_raw = Filename.concat config.Room.base_path own_rel in
+        let own_canonical =
+          try Unix.realpath own_abs_raw
+          with Unix.Unix_error _ -> normalize_path own_abs_raw
+        in
+        if String.equal canonical own_canonical
+           || String.starts_with ~prefix:(own_canonical ^ "/") canonical
+        then Ok canonical
+        else
+          Error (IoError (Printf.sprintf
+            "cross-keeper playground read blocked: agent=%S tried to \
+             read path %S which is under another keeper's playground. \
+             Only %s is readable for this caller; reads outside your \
+             own playground must target the shared codebase (lib/, \
+             test/, config/, etc.). See #6527/#6637."
+            agent_name path own_rel_trailing))
+
 (* Handler: masc_code_search - Search code using ripgrep *)
 let handle_code_search ctx args =
   let query = get_string args "query" "" in
@@ -99,7 +165,9 @@ let handle_code_search ctx args =
     (false, "❌ Query required: 'query' parameter")
   else begin
     (* Validate path first *)
-    let search_path_result = validate_path ctx.config path in
+    let search_path_result =
+      validate_read_path ~agent_name:ctx.agent_name ctx.config path
+    in
     match search_path_result with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok search_path ->
@@ -209,7 +277,7 @@ let handle_code_symbols ctx args =
   if path = "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
-    match validate_path ctx.config path with
+    match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
@@ -289,7 +357,7 @@ let handle_code_read ctx args =
   if path = "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
-    match validate_path ctx.config path with
+    match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then

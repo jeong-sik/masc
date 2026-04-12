@@ -167,6 +167,52 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Failure Categories')
   }, 60_000)
 
+  it('warns when keepers are stuck before reaching tool execution', async () => {
+    const fetchDashboardExecution = vi.fn().mockResolvedValue({
+      ...executionResponse,
+      keepers: [
+        {
+          name: 'keeper-alpha',
+          status: 'active',
+          keepalive_running: true,
+          context_ratio: 0.22,
+          total_turns: 48,
+          last_latency_ms: 45_000,
+          last_activity_ago_s: 20,
+          last_model_used: 'gpt-5.4',
+          runtime_blocker_class: 'admission_queue_wait_timeout',
+          runtime_blocker_summary: 'Admission queue wait timeout after 45.0s.',
+          recent_tool_names: [],
+        },
+      ],
+    } satisfies DashboardExecutionResponse)
+    const fetchToolQuality = vi.fn().mockResolvedValue({
+      ...toolQualityResponse,
+      total: 0,
+      success: 0,
+      failure: 0,
+      success_rate: 0,
+      by_keeper: [],
+      failure_categories: [],
+    })
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
+    const { FleetTelemetryPanel } = await loadPanel({
+      fetchDashboardExecution,
+      fetchToolQuality,
+      fetchTelemetrySummary,
+    })
+
+    await act(async () => {
+      render(html`<${FleetTelemetryPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('Partial telemetry')
+    expect(container.textContent).toContain('keepers are blocked in the admission queue')
+    expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
+  })
+
   it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {
     const { buildFleetRows } = await loadPanel({
       fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),

@@ -19,3 +19,7 @@ let on_release ~keeper_name:_ ~cascade_name:_ =
 
 let on_cancelled ~keeper_name:_ ~cascade_name:_ =
   Prometheus.inc_counter "masc_inference_queue_cancelled_total" ()
+
+let set_max_concurrent value =
+  Prometheus.set_gauge "masc_inference_queue_max_concurrent"
+    (float_of_int (max 0 value))

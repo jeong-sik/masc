@@ -39,6 +39,8 @@ interface FleetRow {
   tool_success_pct: number | null
   tool_activity_known: boolean
   recent_tools: string[]
+  runtime_blocker_class: Keeper['runtime_blocker_class'] | null
+  runtime_blocker_summary: string | null
 }
 
 interface FleetTelemetryState {
@@ -235,7 +237,8 @@ function fleetBand(row: FleetRow): FleetBand {
   }
   if (normalizedStatus === 'paused') return 'paused'
   if (
-    row.context_ratio >= PRESSURE_WARN_RATIO
+    row.runtime_blocker_class != null
+    || row.context_ratio >= PRESSURE_WARN_RATIO
     || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
     || (row.tool_success_pct != null && row.tool_success_pct < 90)
   ) {
@@ -254,6 +257,7 @@ function fleetBandScore(row: FleetRow): number {
 
 function rowUrgencyScore(row: FleetRow): number {
   let score = 0
+  if (row.runtime_blocker_class != null) score += 100
   if (row.context_ratio >= PRESSURE_WARN_RATIO) score += row.context_ratio * 100
   if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
     score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
@@ -317,6 +321,9 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             tool_success_pct: toolQualityForKeeper?.success_pct ?? null,
             tool_activity_known: keeperHasToolTelemetry(keeper, toolCalls, recentTools),
             recent_tools: recentTools,
+            runtime_blocker_class: keeper.runtime_blocker_class ?? null,
+            runtime_blocker_summary:
+              firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker) ?? null,
           }
         })
       : toolQuality.by_keeper.map((keeper): FleetRow => ({
@@ -332,6 +339,8 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           tool_success_pct: keeper.success_pct,
           tool_activity_known: keeper.calls > 0,
           recent_tools: [],
+          runtime_blocker_class: null,
+          runtime_blocker_summary: null,
         }))
 
   return [...rows].sort(compareFleetRows)
@@ -357,6 +366,7 @@ function pressureClass(ratio: number): string {
 
 function statusClass(row: FleetRow): string {
   if (!row.keepalive_running || row.status === 'offline' || row.status === 'stopped') return 'text-red-400'
+  if (row.runtime_blocker_class != null) return 'text-yellow-400'
   if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-yellow-400'
   return 'text-emerald-400'
 }
@@ -443,6 +453,25 @@ function buildTelemetryWarnings(sources: TelemetrySourceSummary[]): string[] {
     if (agentAge == null || agentAge <= TELEMETRY_ACTIVITY_FRESH_SEC) {
       warnings.push(`OAS event relay stale: last durable event ${formatElapsedCompact(oasAge)} ago.`)
     }
+  }
+
+  return warnings
+}
+
+function buildRuntimeWarnings(rows: FleetRow[]): string[] {
+  const warnings: string[] = []
+  const admissionBlocked = rows.filter(row => row.runtime_blocker_class === 'admission_queue_wait_timeout')
+  if (admissionBlocked.length > 0) {
+    warnings.push(
+      `${admissionBlocked.length} keepers are blocked in the admission queue; tool telemetry can look stale because turns never reached tool execution.`,
+    )
+  }
+
+  const slotBlocked = rows.filter(row => row.runtime_blocker_class === 'autonomous_slot_wait_timeout')
+  if (slotBlocked.length > 0) {
+    warnings.push(
+      `${slotBlocked.length} keepers skipped their autonomous cycle while waiting for a local keeper slot.`,
+    )
   }
 
   return warnings
@@ -596,6 +625,13 @@ function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
             <tr class="border-b border-[var(--card-border)] border-opacity-30 align-top">
               <td class="py-1.5">
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
+                ${row.runtime_blocker_summary
+                  ? html`
+                    <div class="max-w-[240px] truncate text-[10px] text-amber-300" title=${row.runtime_blocker_summary}>
+                      ${row.runtime_blocker_summary}
+                    </div>
+                  `
+                  : null}
                 <div class="max-w-[240px] truncate text-[10px] text-[var(--text-dim)]" title=${toolInfo.title}>
                   ${toolInfo.label}
                 </div>
@@ -720,6 +756,7 @@ export function FleetTelemetryPanel() {
       warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
       const rows = buildFleetRows(keepers, toolQuality)
+      warnings.push(...buildRuntimeWarnings(rows))
       const updatedAt =
         (executionResult.status === 'fulfilled' ? executionResult.value.generated_at : null)
         || telemetrySummary.generated_at

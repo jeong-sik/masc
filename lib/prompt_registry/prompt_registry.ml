@@ -528,11 +528,15 @@ let default_prompt_value_unlocked key =
   | Some entry -> Some entry.template
   | None -> None
 
-let resolve_prompt_unlocked key =
-  let override_value = Hashtbl.find_opt override_tbl key in
+(* Pure assembly of a [resolved] record from pre-captured values.
+   Invariant: [file_value] must already be read by the caller — this
+   function never touches the filesystem, so it is safe to call from
+   inside a [with_mutex] block without the contention cost of disk
+   I/O under the lock (the original sin that [resolve_prompt] at the
+   bottom of this file was explicitly refactored to avoid, see #3335). *)
+let build_resolved_from_snapshot
+    ~key ~override_value ~default_value ~file_value =
   let file_path = prompt_markdown_path key in
-  let file_value = Option.bind file_path read_file_if_exists in
-  let default_value = default_prompt_value_unlocked key in
   let source, effective =
     match override_value with
     | Some value -> ("override", value)
@@ -555,6 +559,28 @@ let resolve_prompt_unlocked key =
     has_override = Option.is_some override_value;
   }
 
+(* Aggregate snapshot for batch listing APIs.  [list_prompts] and
+   [validate_prompt_templates] gather these under [with_mutex] and
+   then resolve (with disk reads) outside the lock. *)
+type prompt_snapshot = {
+  snap_key : string;
+  snap_meta : prompt_meta;
+  snap_override_value : string option;
+  snap_default_value : string option;
+}
+
+(* Resolve a single prompt by doing the filesystem read OUTSIDE the
+   mutex.  Intended for batch [list_prompts]/[validate_prompt_templates]
+   call sites that previously held [with_mutex] across [read_file_if_exists]. *)
+let resolved_of_snapshot (s : prompt_snapshot) =
+  let file_path = prompt_markdown_path s.snap_key in
+  let file_value = Option.bind file_path read_file_if_exists in
+  build_resolved_from_snapshot
+    ~key:s.snap_key
+    ~override_value:s.snap_override_value
+    ~default_value:s.snap_default_value
+    ~file_value
+
 let unexpected_template_variables meta template =
   let expected = meta.template_variables in
   if expected = [] then []
@@ -562,8 +588,9 @@ let unexpected_template_variables meta template =
     extract_variables template
     |> List.filter (fun variable -> not (List.mem variable expected))
 
-let prompt_item_json key (meta : prompt_meta) =
-  let resolved = resolve_prompt_unlocked key in
+(* Variant that takes a pre-computed [resolved] record.  Used by the
+   batch listing paths that read files outside the mutex. *)
+let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
   `Assoc
     [
       ("key", `String key);
@@ -789,27 +816,68 @@ let validate_required_prompt_files () =
             | None -> (key, "<invalid-key>") :: acc)
         meta_tbl [] |> List.sort compare)
 
+(* [validate_prompt_templates] was doing [read_file_if_exists] inside
+   the [with_mutex] fold via [resolve_prompt_unlocked], holding the
+   registry mutex across every markdown file read.  Two-phase:
+   snapshot under the mutex, then read files + build resolved records
+   outside.  Same refactor pattern as [list_prompts] below. *)
 let validate_prompt_templates () =
-  with_mutex (fun () ->
+  let snapshots =
+    with_mutex (fun () ->
       Hashtbl.fold
         (fun key meta acc ->
-          let issues =
-            match resolve_prompt_unlocked key with
-            | { effective = ""; source = "missing"; _ } -> []
-            | resolved ->
-                unexpected_template_variables meta resolved.effective
-                |> List.map (fun variable -> (key, variable))
-          in
-          issues @ acc)
-        meta_tbl [] |> List.sort compare)
+          { snap_key = key;
+            snap_meta = meta;
+            snap_override_value = Hashtbl.find_opt override_tbl key;
+            snap_default_value = default_prompt_value_unlocked key;
+          } :: acc)
+        meta_tbl [])
+  in
+  List.fold_left
+    (fun acc s ->
+      let resolved = resolved_of_snapshot s in
+      let issues =
+        match resolved with
+        | { effective = ""; source = "missing"; _ } -> []
+        | resolved ->
+            unexpected_template_variables s.snap_meta resolved.effective
+            |> List.map (fun variable -> (s.snap_key, variable))
+      in
+      issues @ acc)
+    [] snapshots
+  |> List.sort compare
 
-(** List all registered prompts with metadata, for API/dashboard *)
+(** List all registered prompts with metadata, for API/dashboard.
+
+    Previously held [with_mutex] across every [read_file_if_exists]
+    call (once per registered prompt), blocking all other prompt
+    registry operations for the full disk scan.  Now:
+
+    1. Snapshot (key, meta, override, default) under [with_mutex].
+    2. Release the lock.
+    3. For each snapshot, read the markdown file and build the
+       [resolved] record outside the lock.
+    4. Sort and return.
+
+    Concurrent callers no longer serialize on disk I/O; the only lock
+    hold is the in-memory Hashtbl fold. *)
 let list_prompts () =
-  with_mutex (fun () ->
+  let snapshots =
+    with_mutex (fun () ->
       Hashtbl.fold
-        (fun key meta acc -> prompt_item_json key meta :: acc)
-        meta_tbl []
-      |> List.sort compare_prompt_items)
+        (fun key meta acc ->
+          { snap_key = key;
+            snap_meta = meta;
+            snap_override_value = Hashtbl.find_opt override_tbl key;
+            snap_default_value = default_prompt_value_unlocked key;
+          } :: acc)
+        meta_tbl [])
+  in
+  snapshots
+  |> List.map (fun s ->
+    let resolved = resolved_of_snapshot s in
+    prompt_item_json_of_resolved s.snap_key s.snap_meta resolved)
+  |> List.sort compare_prompt_items
 
 (** JSON export of all prompts for API *)
 let prompts_json () =

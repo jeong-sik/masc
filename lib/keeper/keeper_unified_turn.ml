@@ -259,6 +259,42 @@ let recover_context_overflow_retry
         meta.name (short_preview (Oas.Error.to_string error));
       None
 
+let resolved_max_context_for_turn
+    ~(meta : keeper_meta)
+    (model_labels : string list) : int =
+  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+  let raw =
+    match meta.max_context_override with
+    | Some v ->
+        Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
+        v
+    | None ->
+        let primary =
+          let resolved =
+            Oas_model_resolve.resolve_primary_max_context model_labels
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:model_labels ~max_context:resolved
+        in
+        let cascade_max =
+          let resolved =
+            Oas_model_resolve.resolve_max_cascade_context model_labels
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:model_labels ~max_context:resolved
+        in
+        if primary < cascade_max then
+          Log.Keeper.info
+            "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
+            meta.name primary cascade_max;
+        primary
+  in
+  if raw < min_keeper_context then begin
+    Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
+      meta.name raw min_keeper_context;
+    min_keeper_context
+  end else raw
+
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
   if observation.pending_mentions <> []
@@ -1094,25 +1130,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Error e -> Error (Oas.Error.Internal e)
   | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
-      let max_cascade_context =
-        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-        let raw =
-          match meta.max_context_override with
-          | Some v ->
-              Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
-              v
-          | None ->
-              let resolved =
-                Oas_model_resolve.resolve_max_cascade_context model_labels
-              in
-              Oas_model_resolve.clamp_context_for_pure_local_labels
-                ~labels:model_labels ~max_context:resolved
-        in
-        if raw < min_keeper_context then begin
-          Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
-            meta.name raw min_keeper_context;
-          min_keeper_context
-        end else raw
+      let max_context =
+        resolved_max_context_for_turn ~meta model_labels
       in
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
@@ -1324,9 +1343,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                     ~is_retry:true ~overflow_retry_used
                 end else if (not overflow_retry_used)
                              && is_context_overflow err then (
-                  match
-                    recover_context_overflow_retry ~meta ~base_dir
-                      ~max_cascade_context ~error:err
+                      match
+                        recover_context_overflow_retry ~meta ~base_dir
+                      ~max_cascade_context:max_context ~error:err
                   with
                   | Some retry_plan ->
                       let retry_meta =
@@ -1353,7 +1372,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           (try
             Eio.Time.with_timeout_exn clock timeout_sec
               (fun () ->
-                retry_loop ~run_meta:meta ~max_context:max_cascade_context
+                retry_loop ~run_meta:meta ~max_context
                   ~run_generation:generation ~attempt:1
                   ~is_retry:false ~overflow_retry_used:false)
           with Eio.Time.Timeout ->
@@ -1425,7 +1444,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
-            meta.name meta.cascade_name max_cascade_context latency_ms
+            meta.name meta.cascade_name max_context latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
              else if is_server_parse_rejection then
@@ -1562,7 +1581,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   Keeper_state_machine.Handoff_started)
               ~meta
               ~model:result.model_used
-              ~primary_model_max_tokens:max_cascade_context
+              ~primary_model_max_tokens:max_context
               ~checkpoint:result.checkpoint
           in
           dispatch_post_turn_lifecycle_events

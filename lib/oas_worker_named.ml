@@ -102,6 +102,17 @@ let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t lis
       Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
       Llm_provider.Cascade_config.parse_model_strings defaults)
 
+(** Resolve from an explicit model string list (user-declared in keeper TOML).
+    MASC passes strings through without interpretation — OAS parses them. *)
+let resolve_providers_from_model_strings (model_strings : string list)
+    : Llm_provider.Provider_config.t list =
+  let specs = Llm_provider.Cascade_config.parse_model_strings model_strings in
+  if specs <> [] then specs
+  else (
+    Log.Misc.warn "direct model strings: no callable models from %d entries"
+      (List.length model_strings);
+    [])
+
 let config_for_label
     ~(name : string)
     ~(model_label : string)
@@ -192,6 +203,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     @since Phase 2 — MASC-driven cascade FSM *)
 let run_named
     ~cascade_name
+    ?model_strings
     ~goal
     ?provider_filter:_provider_filter
     ?priority
@@ -243,13 +255,22 @@ let run_named
   | Error e -> Error (Oas.Error.Internal e)
   | Ok (sw, net) ->
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
-  let configured_labels =
-    Llm_provider.Cascade_config.resolve_model_strings
-      ?config_path ~name:cascade_name ~defaults ()
+  let configured_labels, candidate_cfgs =
+    match model_strings with
+    | Some ms when ms <> [] ->
+      (* Direct model strings from keeper TOML — skip named preset lookup.
+         MASC passes these strings through without interpretation. *)
+      (ms, resolve_providers_from_model_strings ms)
+    | _ ->
+      (* Legacy path: resolve from cascade.json by name *)
+      let defaults = default_model_strings ~cascade_name in
+      let labels =
+        Llm_provider.Cascade_config.resolve_model_strings
+          ?config_path ~name:cascade_name ~defaults ()
+      in
+      (labels, resolve_cascade_providers ~cascade_name)
   in
-  let candidate_cfgs = resolve_cascade_providers ~cascade_name in
   let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with

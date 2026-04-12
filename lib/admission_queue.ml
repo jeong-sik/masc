@@ -56,16 +56,17 @@ let insert_sorted entry ws =
 
 (* ── Core Queue ────────────────────────────────────────── *)
 
+let initial_max_concurrent_of_env getenv =
+  let parse_int raw =
+    Option.bind (getenv raw) (fun value ->
+      int_of_string_opt (String.trim value))
+  in
+  match parse_int "MASC_ADMISSION_MAX_CONCURRENT" with
+  | Some n -> max 1 n
+  | None -> 4
+
 let global : t = {
-  max_slots = (
-    let env_val =
-      try int_of_string (Sys.getenv "MASC_ADMISSION_MAX_CONCURRENT")
-      with Not_found | Failure _ ->
-        try int_of_string (Sys.getenv "OLLAMA_NUM_PARALLEL")
-        with Not_found | Failure _ -> 4
-    in
-    max 1 env_val
-  );
+  max_slots = initial_max_concurrent_of_env Sys.getenv_opt;
   active = 0;
   waiters = [];
   mutex = Eio.Mutex.create ();

@@ -209,6 +209,31 @@ let test_set_max_concurrent_rejects_zero () =
   try AQ.set_max_concurrent 0; fail "should raise"
   with Invalid_argument _ -> ()
 
+let test_initial_max_concurrent_default () =
+  check int "default" 4 (AQ.initial_max_concurrent_of_env (fun _ -> None))
+
+let test_initial_max_concurrent_prefers_masc_env () =
+  let getenv = function
+    | "MASC_ADMISSION_MAX_CONCURRENT" -> Some "8"
+    | "OLLAMA_NUM_PARALLEL" -> Some "1"
+    | _ -> None
+  in
+  check int "uses explicit MASC env" 8 (AQ.initial_max_concurrent_of_env getenv)
+
+let test_initial_max_concurrent_ignores_ollama_parallel () =
+  let getenv = function
+    | "OLLAMA_NUM_PARALLEL" -> Some "1"
+    | _ -> None
+  in
+  check int "ollama env ignored" 4 (AQ.initial_max_concurrent_of_env getenv)
+
+let test_initial_max_concurrent_clamps_min_one () =
+  let getenv = function
+    | "MASC_ADMISSION_MAX_CONCURRENT" -> Some "0"
+    | _ -> None
+  in
+  check int "clamped" 1 (AQ.initial_max_concurrent_of_env getenv)
+
 let test_snapshot_json_shape () =
   Eio_main.run (fun _env ->
     AQ.reset_for_test ~max_slots:4;
@@ -252,6 +277,13 @@ let () =
     "config", [
       test_case "set_max_concurrent" `Quick test_set_max_concurrent;
       test_case "rejects zero" `Quick test_set_max_concurrent_rejects_zero;
+      test_case "initial default" `Quick test_initial_max_concurrent_default;
+      test_case "initial prefers masc env" `Quick
+        test_initial_max_concurrent_prefers_masc_env;
+      test_case "initial ignores ollama env" `Quick
+        test_initial_max_concurrent_ignores_ollama_parallel;
+      test_case "initial clamps min one" `Quick
+        test_initial_max_concurrent_clamps_min_one;
       test_case "snapshot_json shape" `Quick test_snapshot_json_shape;
     ];
   ]

@@ -59,6 +59,41 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let tool_use_message ?(name = "list_files") ~tool_use_id () =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+    content =
+      [
+        Agent_sdk.Types.ToolUse
+          { id = tool_use_id; name; input = `Assoc [] };
+      ];
+    name = None;
+    tool_call_id = None;
+  }
+
+let tool_result_message ?(is_error = false) ~tool_use_id content =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+    content =
+      [
+        Agent_sdk.Types.ToolResult
+          { tool_use_id; content; is_error; json = None };
+      ];
+    name = None;
+    tool_call_id = None;
+  }
+
+let tool_result_content_for_id ~tool_use_id msgs =
+  List.find_map
+    (fun (msg : Agent_sdk.Types.message) ->
+      List.find_map
+        (function
+          | Agent_sdk.Types.ToolResult { tool_use_id = id; content; _ }
+            when String.equal id tool_use_id -> Some content
+          | _ -> None)
+        msg.content)
+    msgs
+
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   match
@@ -799,6 +834,90 @@ let test_save_oas_checkpoint_caps_oversized_text () =
           check bool "text was compacted" true
             (String.length text < String.length oversized_checkpoint_text))
 
+let test_sanitize_checkpoint_message_caps_oversized_tool_result () =
+  let oversized =
+    String.make
+      (KCC.default_max_checkpoint_tool_result_chars + 1024)
+      'x'
+  in
+  let msg = tool_result_message ~tool_use_id:"tool-cap" oversized in
+  match KCC.sanitize_checkpoint_message msg with
+  | None, _ -> fail "expected oversized tool result to survive as capped output"
+  | Some sanitized, stats ->
+      (match sanitized.content with
+       | [ Agent_sdk.Types.ToolResult { content; _ } ] ->
+           check bool "adds truncation marker" true
+             (contains_substring content KCC.checkpoint_text_cap_marker);
+           check bool "tool result was compacted" true
+             (String.length content < String.length oversized);
+           check bool "tool result stays within configured cap" true
+             (String.length content
+              <= KCC.default_max_checkpoint_tool_result_chars
+                 + String.length KCC.checkpoint_text_cap_marker)
+       | _ -> fail "expected a single capped ToolResult block");
+      check int "tool result truncation recorded" 1 stats.truncated_blocks
+
+let test_save_oas_checkpoint_stubs_old_tool_results () =
+  let base_dir = temp_dir "keeper_lifecycle_save_tool_stub" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-tool-stub" ~base_dir
+      in
+      let old_tool_use_id = "tool-old" in
+      let recent_tool_use_id = "tool-recent" in
+      let old_output = String.make 200 'a' in
+      let recent_output = String.make 200 'b' in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx ->
+        KEC.append_many ctx
+          [
+            Agent_sdk.Types.user_msg "inspect the old turn";
+            tool_use_message ~tool_use_id:old_tool_use_id ();
+            tool_result_message ~tool_use_id:old_tool_use_id old_output;
+            Agent_sdk.Types.assistant_msg "old turn summary";
+            Agent_sdk.Types.user_msg "inspect the recent turn";
+            tool_use_message ~tool_use_id:recent_tool_use_id ~name:"grep_search" ();
+            tool_result_message ~tool_use_id:recent_tool_use_id recent_output;
+            Agent_sdk.Types.assistant_msg "recent turn summary";
+          ]
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:120
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          let old_saved =
+            tool_result_content_for_id
+              ~tool_use_id:old_tool_use_id
+              checkpoint.messages
+          in
+          let recent_saved =
+            tool_result_content_for_id
+              ~tool_use_id:recent_tool_use_id
+              checkpoint.messages
+          in
+          (match old_saved with
+           | None -> fail "expected old tool result in saved checkpoint"
+           | Some content ->
+               check bool "old tool result is stubbed" true
+                 (String.starts_with ~prefix:"[tool: list_files," content));
+          (match recent_saved with
+           | None -> fail "expected recent tool result in saved checkpoint"
+           | Some content ->
+               check string "recent tool result stays full" recent_output content))
+
 let test_save_oas_checkpoint_strips_summarized_world_state () =
   let base_dir = temp_dir "keeper_lifecycle_save_summary_strip" in
   Fun.protect
@@ -1223,6 +1342,10 @@ let () =
             test_save_oas_checkpoint_strips_ephemeral_world_state;
           test_case "save caps oversized text" `Quick
             test_save_oas_checkpoint_caps_oversized_text;
+          test_case "save caps oversized tool result" `Quick
+            test_sanitize_checkpoint_message_caps_oversized_tool_result;
+          test_case "save stubs old tool results" `Quick
+            test_save_oas_checkpoint_stubs_old_tool_results;
           test_case "save strips summarized world state" `Quick
             test_save_oas_checkpoint_strips_summarized_world_state;
           test_case "patch replaces last assistant text" `Quick

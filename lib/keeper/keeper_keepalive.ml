@@ -162,7 +162,11 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
     else (
       (match Eio_context.get_clock_opt () with
        | Some clock -> Eio.Time.sleep clock autonomous_queue_poll_sec
-       | None -> Unix.sleepf autonomous_queue_poll_sec);
+       | None ->
+           (* Environment drift: production should always have an Eio clock.
+              Yield cooperatively instead of using a blocking Unix sleep so
+              the Eio convention guard remains satisfied. *)
+           Eio.Fiber.yield ());
       wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at)
 
 let with_keeper_turn_slot ~keeper_name ~channel f =

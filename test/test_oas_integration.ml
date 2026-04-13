@@ -266,7 +266,8 @@ let test_agent_completed_no_usage_on_error () =
       let payload_fields =
         match List.assoc_opt "payload" fields with
         | Some (`Assoc p) -> p
-        | _ -> []
+        | Some _ -> Alcotest.fail "expected payload assoc"
+        | None -> Alcotest.fail "expected payload field"
       in
       Alcotest.(check bool) "no input_tokens on error" true
         (Option.is_none (List.assoc_opt "input_tokens" payload_fields))

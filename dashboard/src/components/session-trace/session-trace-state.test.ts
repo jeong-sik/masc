@@ -248,6 +248,50 @@ describe('getTraceSummary', () => {
     expect(summary.total_cost_usd).toBeCloseTo(0.005)
     expect(summary.lifecycle_count).toBe(2)
   })
+
+  it('counts durable llm_request and error_occurred events', () => {
+    traceSlots.value = {
+      'agent-y': {
+        events: [
+          {
+            id: 'r1',
+            ts: 1000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'LLM 요청',
+            detail: { durable_kind: 'llm_request', turn: 1, model: 'qwen', input_tokens: 100 },
+          },
+          {
+            id: 'r2',
+            ts: 1500,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'LLM 요청',
+            detail: { durable_kind: 'llm_request', turn: 2, model: 'qwen', input_tokens: 200 },
+          },
+          {
+            id: 'e1',
+            ts: 2000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'OAS 에러',
+            detail: { durable_kind: 'error_occurred', turn: 2, error_domain: 'Api', detail: 'timeout' },
+          },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        fetchToken: 0,
+      },
+    }
+
+    const summary = getTraceSummary('agent-y')
+    expect(summary.oas_llm_call_count).toBe(2)
+    expect(summary.oas_error_count).toBe(1)
+  })
 })
 
 describe('getKindCounts', () => {

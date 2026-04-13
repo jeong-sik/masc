@@ -64,6 +64,8 @@ export interface TraceSummary {
   total_cost_usd: number
   oas_input_tokens: number
   oas_output_tokens: number
+  oas_llm_call_count: number
+  oas_error_count: number
 }
 
 interface TraceSlot {
@@ -136,6 +138,8 @@ export function getTraceSummary(agent: string): TraceSummary {
   let total_cost_usd = 0
   let oas_input_tokens = 0
   let oas_output_tokens = 0
+  let oas_llm_call_count = 0
+  let oas_error_count = 0
 
   for (const e of events) {
     switch (e.kind) {
@@ -170,6 +174,9 @@ export function getTraceSummary(agent: string): TraceSummary {
           const outTok = e.detail.output_tokens
           if (typeof inTok === 'number') oas_input_tokens += inTok
           if (typeof outTok === 'number') oas_output_tokens += outTok
+          const durableKind = e.detail.durable_kind
+          if (durableKind === 'llm_request') oas_llm_call_count++
+          if (durableKind === 'error_occurred') oas_error_count++
         }
         break
       case 'thinking':
@@ -192,6 +199,8 @@ export function getTraceSummary(agent: string): TraceSummary {
     total_cost_usd,
     oas_input_tokens,
     oas_output_tokens,
+    oas_llm_call_count,
+    oas_error_count,
   }
 }
 

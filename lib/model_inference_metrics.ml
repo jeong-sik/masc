@@ -381,18 +381,18 @@ let compute ~base_path ~window_minutes : aggregate =
     total_error_entries }
 
 let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate =
+  let bucket_minutes = max 1 bucket_minutes in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
   let entries = read_all_decisions ~base_path ~since_unix in
   let models = aggregate_by_model entries in
-  let bucket_sec =
-    if bucket_minutes <= 0 then 60 else bucket_minutes * 60
-  in
-  (* Reuse parsed entries: re-group per model and bucketize without re-reading. *)
-  let by_model = group_entries_by_model entries in
+  let bucket_sec = bucket_minutes * 60 in
+  let by_model_tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
+  List.iter (fun (model, es) -> Hashtbl.replace by_model_tbl model es)
+    (group_entries_by_model entries);
   let models_with_buckets =
     List.map (fun (s : model_stats) ->
       let model_entries =
-        match List.assoc_opt s.model_id by_model with
+        match Hashtbl.find_opt by_model_tbl s.model_id with
         | Some es -> es
         | None -> []
       in

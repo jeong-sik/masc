@@ -234,7 +234,7 @@ let test_json_roundtrip () =
 
 (* ── Bucket tests ───────────────────────────────── *)
 
-let success_entry_with_cache ~model ~ts ~cache_read () =
+let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
@@ -243,7 +243,7 @@ let success_entry_with_cache ~model ~ts ~cache_read () =
       ("model_used", `String model);
       ("tokens_per_second", `Float 10.0);
       ("request_latency_ms", `Int 500);
-      ("input_tokens", `Int 100);
+      ("input_tokens", `Int input_tokens);
       ("output_tokens", `Int 50);
       ("cache_read_tokens", `Int cache_read);
       ("reasoning_tokens", `Int 0);
@@ -293,7 +293,7 @@ let test_buckets_cache_hit_ratio_zero_denom () =
   let path = make_keeper_dir dir "cache_zero" in
   let now = now_unix () in
   write_decisions path [
-    success_entry_with_cache ~model:"model-c" ~ts:now ~cache_read:0 ();
+    success_entry_with_cache ~model:"model-c" ~ts:now ~input_tokens:0 ~cache_read:0 ();
   ];
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60 in
@@ -302,8 +302,8 @@ let test_buckets_cache_hit_ratio_zero_denom () =
     let b = List.hd m.mb_buckets in
     check bool "cache_hit_ratio not NaN" true
       (not (Float.is_nan b.b_cache_hit_ratio));
-    check bool "cache_hit_ratio = 0.0 when input=100, cache=0"
-      true (b.b_cache_hit_ratio < 0.01))
+    check (float 0.001) "cache_hit_ratio = 0.0 when both tokens=0"
+      0.0 b.b_cache_hit_ratio)
 
 let test_buckets_with_compute () =
   let dir = test_dir () in

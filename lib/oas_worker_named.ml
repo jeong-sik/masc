@@ -182,7 +182,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
 
     MASC drives the cascade FSM directly:
     - Resolves cascade providers from cascade.json
-    - For each provider, runs OAS with a single provider (no named_cascade)
+    - For each provider, runs OAS with a single provider
     - Uses Cascade_fsm.decide to determine next action on failure
     - Cascade loop runs inside Admission_queue permit
 
@@ -291,7 +291,6 @@ let run_named
         approval;
         exit_condition;
         exit_condition_result;
-        named_cascade = None;  (* Phase 2: no OAS-internal cascade *)
         initial_messages; raw_trace; yield_on_tool;
       }
     in

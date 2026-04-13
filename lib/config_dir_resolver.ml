@@ -186,28 +186,29 @@ let config_root_resolution (inputs : inputs) =
       | None ->
           match path_from_home_masc inputs with
           | Some path -> ({ path; exists = true; source = Home_masc }, [])
-          | None when repo_config_fallback_enabled () ->
-              match path_from_cwd inputs.cwd with
-              | Some path -> ({ path; exists = true; source = Cwd }, [])
-              | None ->
-                  match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
-                  | Some path -> ({ path; exists = true; source = Exe_relative }, [])
-                  | None ->
-                      let path = default_missing_root inputs in
-                      missing path
-                        [
-                          Printf.sprintf
-                            "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                            path;
-                        ]
           | None ->
-              let path = default_missing_root inputs in
-              missing path
-                [
-                  Printf.sprintf
-                    "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                    path;
-                ]
+              if repo_config_fallback_enabled () then
+                match path_from_cwd inputs.cwd with
+                | Some path -> ({ path; exists = true; source = Cwd }, [])
+                | None ->
+                    match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
+                    | Some path -> ({ path; exists = true; source = Exe_relative }, [])
+                    | None ->
+                        let path = default_missing_root inputs in
+                        missing path
+                          [
+                            Printf.sprintf
+                              "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                              path;
+                          ]
+              else
+                let path = default_missing_root inputs in
+                missing path
+                  [
+                    Printf.sprintf
+                      "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                      path;
+                  ]
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in

@@ -139,10 +139,11 @@ let handle_listen (ctx : context) : tool_result option =
   let msg_opt = ctx.wait_for_message registry ~agent_name ~timeout in
   (match msg_opt with
    | Some msg ->
-       let from = match Json_util.get_string msg "from" with Some v -> v | None -> raise Not_found in
-       let content = match Json_util.get_string msg "content" with Some v -> v | None -> raise Not_found in
-       let timestamp = match Json_util.get_string msg "timestamp" with Some v -> v | None -> raise Not_found in
-       Some (true, Printf.sprintf {|
+       (match Json_util.get_string msg "from",
+              Json_util.get_string msg "content",
+              Json_util.get_string msg "timestamp" with
+        | Some from, Some content, Some timestamp ->
+            Some (true, Printf.sprintf {|
 MESSAGE RECEIVED
 From: %s
 Time: %s
@@ -151,6 +152,12 @@ Time: %s
 
 Call masc_listen again to continue listening.
 |} from timestamp content)
+        | _ ->
+            Log.Mcp.warn
+              "masc_listen received malformed message (missing from/content/timestamp) for agent %s"
+              agent_name;
+            Some (Tool_args.error_result
+                    "received malformed message (missing from/content/timestamp)"))
    | None ->
        Some (true, Printf.sprintf "Listening timed out after %.0fs. No messages received." timeout))
 

@@ -51,7 +51,13 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   match (name : string) with
   | "masc_recall_search" ->
       let module U = Yojson.Safe.Util in
-      let query = match Json_util.get_string arguments "query" with Some v -> v | None -> raise Not_found in
+      let query =
+        Option.value ~default:""
+          (Json_util.get_string arguments "query")
+      in
+      if String.trim query = "" then
+        Some (Tool_args.error_result "query is required")
+      else begin
       let limit = arguments |> U.member "limit" |> U.to_int_option |> Option.value ~default:5 in
       (* PR#814 Gap 3: format=grep returns compact grep-like output for LLM parsing *)
       let format = arguments |> U.member "format" |> U.to_string_option
@@ -96,6 +102,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             (List.length result.items) query));
         ] in
         Some (true, Yojson.Safe.to_string response)
+      end
 
   | "masc_board_post" ->
       let (success, message) as result = Tool_board.handle_tool name arguments in

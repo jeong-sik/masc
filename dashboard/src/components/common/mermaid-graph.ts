@@ -28,6 +28,26 @@ function nextRenderId(prefix: string): string {
   return `${prefix}-${mermaidRenderCount}`
 }
 
+// mermaid.render() manipulates shared DOM state internally.
+// Concurrent calls produce corrupt SVG for the second caller.
+// Serialize all render calls through a single queue.
+let renderQueue: Promise<void> = Promise.resolve()
+
+function serializedRender(
+  mermaid: MermaidApi,
+  id: string,
+  source: string,
+): Promise<{ svg: string }> {
+  const job = renderQueue.then(() => mermaid.render(id, source))
+  // Update queue tail regardless of success/failure so the next
+  // caller waits for this one to finish (not for it to succeed).
+  renderQueue = job.then(
+    () => {},
+    () => {},
+  )
+  return job
+}
+
 interface MermaidGraphProps {
   source: string
   prefix?: string
@@ -58,19 +78,32 @@ export function MermaidGraph({
     const render = async () => {
       try {
         const mermaid = await getMermaid()
-        const { svg } = await mermaid.render(nextRenderId(prefix), source)
+        const { svg } = await serializedRender(
+          mermaid,
+          nextRenderId(prefix),
+          source,
+        )
         const hostEl = hostRef.current
         if (cancelled || !hostEl) return
         const parser = new DOMParser()
         const doc = parser.parseFromString(svg, 'image/svg+xml')
+        const parseError = doc.querySelector('parsererror')
+        if (parseError) {
+          if (!cancelled) setError('SVG parse failed')
+          return
+        }
         const svgEl = doc.documentElement
         if (svgEl instanceof SVGElement) {
           hostEl.textContent = ''
           hostEl.appendChild(svgEl)
+        } else {
+          if (!cancelled) setError('Mermaid returned non-SVG output')
         }
       } catch (err) {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Mermaid 렌더링에 실패했습니다')
+        setError(
+          err instanceof Error ? err.message : 'Mermaid 렌더링에 실패했습니다',
+        )
       }
     }
 

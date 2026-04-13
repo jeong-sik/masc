@@ -242,3 +242,64 @@ let decision_pipeline_to_mermaid
   p "      Level: %d\n" level;
   p "    end note\n";
   Buffer.contents b
+
+(* ================================================================ *)
+(* Cascade FSM Mermaid diagram                                      *)
+(* ================================================================ *)
+
+let cascade_fsm_to_mermaid
+    ~(models : string list)
+    ~(last_provider_result : string option)
+    : string =
+  let b = Buffer.create 512 in
+  let p fmt = Printf.bprintf b fmt in
+  p "stateDiagram-v2\n";
+  p "    [*] --> SelectProvider\n";
+  (* Provider nodes *)
+  let n = List.length models in
+  List.iteri (fun i label ->
+    let safe = String.map (fun c ->
+      if c = ':' || c = '/' then '_' else c) label
+    in
+    let display = label in
+    if i = 0 then
+      p "    SelectProvider --> P%d: try %s\n" i display
+    else
+      p "    P%d --> P%d: cascade (try %s)\n" (i - 1) i display;
+    p "    state \"%s\" as P%d\n" display i;
+    p "    P%d --> Accept: Call_ok\n" i;
+    if i < n - 1 then begin
+      p "    P%d --> P%d: 429/500/timeout\n" i (i + 1);
+      p "    P%d --> P%d: Slot_full\n" i (i + 1);
+      p "    P%d --> P%d: Accept_rejected\n" i (i + 1)
+    end else begin
+      p "    P%d --> AcceptExhaust: Accept_rejected\\n(accept_on_exhaustion)\n" i;
+      p "    P%d --> Exhausted: non-cascadeable error\n" i
+    end;
+    ignore safe
+  ) models;
+  p "    Accept --> [*]\n";
+  p "    AcceptExhaust --> [*]\n";
+  p "    Exhausted --> [*]\n";
+  p "\n";
+  p "    classDef ok fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
+  p "    classDef warn fill:#f59e0b,stroke:#d97706,color:#fff,stroke-width:3px\n";
+  p "    classDef err fill:#ef4444,stroke:#dc2626,color:#fff,stroke-width:3px\n";
+  p "    classDef dim fill:#6b7280,stroke:#4b5563,color:#fff\n";
+  p "    class Accept ok\n";
+  p "    class AcceptExhaust warn\n";
+  p "    class Exhausted err\n";
+  (* Highlight last result provider *)
+  (match last_provider_result with
+   | Some r when String.length r > 0 ->
+     List.iteri (fun i label ->
+       if label = r then
+         p "    class P%d ok\n" i
+     ) models
+   | _ -> ());
+  p "\n";
+  p "    note right of SelectProvider\n";
+  p "      Models: %d\n" n;
+  p "      Order: %s\n" (String.concat " > " models);
+  p "    end note\n";
+  Buffer.contents b

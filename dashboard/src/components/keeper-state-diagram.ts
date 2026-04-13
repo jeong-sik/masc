@@ -5,18 +5,18 @@ import {
   fetchKeeperStateDiagram,
   fetchKeeperTransitions,
   type KeeperTransition,
+  type KeeperStateDiagramResponse,
 } from '../api/keeper'
 import { EmptyState } from './common/empty-state'
+import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { MermaidGraph } from './common/mermaid-graph'
+import { buildPhaseSpec, buildDecisionPipelineSpec, buildCascadeSpec } from './keeper-fsm-specs'
 import type { KeeperPhase } from '../types'
 
 interface KeeperStateDiagramProps {
   keeperName: string
   currentPhase?: KeeperPhase | string | null
 }
-
-const BUFFER_PHASES = new Set(['Failing', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
-const TERMINAL_PHASES = new Set(['Stopped', 'Dead'])
 
 const PHASE_ID_MAP: Record<string, string> = {
   Offline: 'Offline',
@@ -48,24 +48,6 @@ function normalizePhase(phase: string | null | undefined): string | null {
   return PHASE_ID_MAP[phase] ?? null
 }
 
-function phaseClass(phase: string | null): 'active' | 'buffer' | 'terminal' {
-  if (!phase) return 'active'
-  if (TERMINAL_PHASES.has(phase)) return 'terminal'
-  if (BUFFER_PHASES.has(phase)) return 'buffer'
-  return 'active'
-}
-
-function rewriteMermaidHighlight(source: string, phase: string | null): string {
-  if (!source.trim()) return source
-  const lines = source
-    .split('\n')
-    .filter(line => !/^\s*class\s+[A-Za-z0-9_]+\s+(active|buffer|terminal)\s*$/.test(line))
-  const target = normalizePhase(phase)
-  if (!target) return lines.join('\n')
-  lines.push(`    class ${target} ${phaseClass(target)}`)
-  return lines.join('\n')
-}
-
 function transitionType(selectedEvent: unknown): string {
   if (selectedEvent && typeof selectedEvent === 'object' && 'type' in selectedEvent) {
     const raw = (selectedEvent as { type?: unknown }).type
@@ -80,10 +62,14 @@ function formatPhaseBadgeLabel(phase: string | null | undefined): string {
   return normalizePhase(phase) ?? phase ?? 'unknown'
 }
 
+// Check if API returned structured data for Cytoscape rendering
+function hasStructuredData(data: KeeperStateDiagramResponse): boolean {
+  return typeof data.thompson_alpha === 'number'
+    && Array.isArray(data.cascade_models)
+}
+
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
-  const [mermaid, setMermaid] = useState<string | null>(null)
-  const [pipelineMermaid, setPipelineMermaid] = useState<string | null>(null)
-  const [apiPhase, setApiPhase] = useState<string | null>(null)
+  const [diagramData, setDiagramData] = useState<KeeperStateDiagramResponse | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -100,13 +86,9 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       .then(([diagramResult, transitionsResult]) => {
         if (cancelled) return
         if (diagramResult.status === 'fulfilled') {
-          setMermaid(diagramResult.value.mermaid)
-          setPipelineMermaid(diagramResult.value.decision_pipeline_mermaid ?? null)
-          setApiPhase(diagramResult.value.current_phase)
+          setDiagramData(diagramResult.value)
         } else {
-          setMermaid(null)
-          setPipelineMermaid(null)
-          setApiPhase(null)
+          setDiagramData(null)
           setError(diagramResult.reason instanceof Error ? diagramResult.reason.message : 'state diagram fetch failed')
         }
 
@@ -127,12 +109,41 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
     return () => { cancelled = true }
   }, [keeperName])
 
-  const livePhase = normalizePhase(currentPhase) ?? normalizePhase(apiPhase)
-  const registryPhase = normalizePhase(apiPhase)
+  const livePhase = normalizePhase(currentPhase) ?? normalizePhase(diagramData?.current_phase)
+  const registryPhase = normalizePhase(diagramData?.current_phase)
   const phaseMismatch = Boolean(livePhase && registryPhase && livePhase !== registryPhase)
-  const mermaidSource = useMemo(
-    () => (mermaid ? rewriteMermaidHighlight(mermaid, livePhase) : null),
-    [mermaid, livePhase],
+  const useCytoscape = diagramData != null && hasStructuredData(diagramData)
+
+  const phaseSpec = useMemo(
+    () => buildPhaseSpec(livePhase),
+    [livePhase],
+  )
+
+  const pipelineSpec = useMemo(
+    () => {
+      if (!diagramData || !useCytoscape) return null
+      return buildDecisionPipelineSpec({
+        phase: livePhase,
+        thompsonAlpha: diagramData.thompson_alpha ?? 1,
+        thompsonBeta: diagramData.thompson_beta ?? 1,
+        toolCount: diagramData.tool_count ?? 0,
+        recoveryFloorCount: diagramData.recovery_floor_count ?? 0,
+      })
+    },
+    [diagramData, livePhase, useCytoscape],
+  )
+
+  const cascadeSpec = useMemo(
+    () => {
+      if (!diagramData || !useCytoscape) return null
+      const models = diagramData.cascade_models
+      if (!models || models.length === 0) return null
+      return buildCascadeSpec({
+        models,
+        lastProviderResult: diagramData.last_provider_result ?? null,
+      })
+    },
+    [diagramData, useCytoscape],
   )
 
   if (loading) {
@@ -144,7 +155,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
     `
   }
 
-  if (error || !mermaidSource) {
+  if (error || !diagramData) {
     return html`<${EmptyState} message=${error ?? '다이어그램 없음'} compact />`
   }
 
@@ -164,29 +175,48 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
             observed ${transitions.length} transitions
           </span>
         ` : null}
+        ${useCytoscape ? html`
+          <span class="inline-flex items-center rounded-full border border-[rgba(99,102,241,0.3)] bg-[rgba(99,102,241,0.1)] px-2 py-0.5 text-[#818cf8]">
+            interactive
+          </span>
+        ` : null}
       </div>
 
       ${phaseMismatch ? html`
         <div class="rounded-xl border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
-          Mermaid 강조는 execution projection phase를 기준으로 다시 칠했습니다. registry phase와 다르므로 현재는 다이어그램의 경로보다 아래 observed transition 기록을 더 신뢰하는 편이 안전합니다.
+          Live phase와 registry phase가 다릅니다. observed transition 기록을 참고하세요.
         </div>
       ` : null}
 
-      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-        <${MermaidGraph}
-          source=${mermaidSource}
-          prefix="keeper-state-diagram"
-          diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
-          minHeightClass="min-h-[120px]"
-        />
+      <!-- Phase State Machine -->
+      <div>
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Phase State Machine</div>
+        ${useCytoscape ? html`
+          <${CytoscapeFsm} spec=${phaseSpec} height="320px" />
+        ` : html`
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+            <${MermaidGraph}
+              source=${diagramData.mermaid}
+              prefix="keeper-state-diagram"
+              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
+              minHeightClass="min-h-[120px]"
+            />
+          </div>
+        `}
       </div>
 
-      ${pipelineMermaid ? html`
+      <!-- Decision Pipeline -->
+      ${pipelineSpec ? html`
+        <div class="mt-2">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Decision Pipeline (Guard → Thompson → ToolPolicy)</div>
+          <${CytoscapeFsm} spec=${pipelineSpec} height="240px" />
+        </div>
+      ` : diagramData.decision_pipeline_mermaid ? html`
         <div class="mt-2">
           <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Decision Pipeline (Guard → Thompson → ToolPolicy)</div>
           <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
             <${MermaidGraph}
-              source=${pipelineMermaid}
+              source=${diagramData.decision_pipeline_mermaid}
               prefix="decision-pipeline"
               diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
               minHeightClass="min-h-[120px]"
@@ -195,6 +225,27 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         </div>
       ` : null}
 
+      <!-- Cascade FSM -->
+      ${cascadeSpec ? html`
+        <div class="mt-2">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Cascade FSM (Provider Failover)</div>
+          <${CytoscapeFsm} spec=${cascadeSpec} height="280px" />
+        </div>
+      ` : diagramData.cascade_fsm_mermaid ? html`
+        <div class="mt-2">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Cascade FSM (Provider Failover)</div>
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+            <${MermaidGraph}
+              source=${diagramData.cascade_fsm_mermaid}
+              prefix="cascade-fsm"
+              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
+              minHeightClass="min-h-[120px]"
+            />
+          </div>
+        </div>
+      ` : null}
+
+      <!-- Observed Transitions -->
       ${transitions.length > 0 ? html`
         <div class="grid gap-2">
           <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Observed transitions</div>

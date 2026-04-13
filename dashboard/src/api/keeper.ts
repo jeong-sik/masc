@@ -347,6 +347,14 @@ export interface KeeperStateDiagramResponse {
   current_phase: string
   mermaid: string
   decision_pipeline_mermaid?: string
+  cascade_fsm_mermaid?: string
+  // Structured data for Cytoscape FSM rendering
+  thompson_alpha?: number
+  thompson_beta?: number
+  tool_count?: number
+  recovery_floor_count?: number
+  cascade_models?: string[]
+  last_provider_result?: string | null
 }
 
 export async function fetchKeeperTransitions(name: string, limit = 20): Promise<KeeperTransitionsResponse> {

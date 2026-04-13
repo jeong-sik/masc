@@ -312,7 +312,6 @@
         test_identity_e2e
         test_identity_edge_cases
         test_verification
-        test_lamport
         test_pulse
         test_transport_metrics
         test_adaptive_cache_ttl
@@ -461,7 +460,6 @@
         test_identity_e2e
         test_identity_edge_cases
         test_verification
-        test_lamport
         test_pulse
         test_transport_metrics
         test_adaptive_cache_ttl

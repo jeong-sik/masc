@@ -190,15 +190,6 @@ CPv2 Unit에 적용되는 거버넌스 정책: policy_class, approval_class, too
 **Budget Envelope**
 CPv2 Unit의 자원 제한: headcount_cap, active_operation_cap, max_cost_usd, max_tokens. `-> lib/command_plane/cp_types.ml`
 
-**Trace**
-다중 에이전트 관측성을 위한 구조적 추적. trace_id, span_id, parent_id로 호출 계보를 추적한다. Lamport 타임스탬프를 사용하여 분산 환경에서의 인과 관계를 기록한다. `-> lib/trace.mli`
-
-**Span**
-Trace 내 개별 실행 구간. operation 이름, 에이전트, 시작/종료 시간, 상태(Ok/Error), 속성(key-value), Lamport 타임스탬프를 가진다. `-> lib/trace.mli`
-
-**Lamport Clock**
-분산 시스템의 논리적 시계. Trace에서 에이전트 간 이벤트의 happens-before 관계를 결정한다. `recv` 시 max(local, remote) + 1로 갱신된다. `-> lib/core/lamport.mli`
-
 ---
 
 ## Chain Engine

@@ -17,10 +17,10 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
       { effective_cascade = base_cascade;
         reason = "healthy, using configured cascade" }
   | Failing ->
-      { effective_cascade = "local_recovery";
+      { effective_cascade = Keeper_config.local_recovery_cascade_name;
         reason = "failing phase: cheap local recovery" }
   | Compacting | HandingOff ->
-      { effective_cascade = "local_only";
+      { effective_cascade = Keeper_config.local_only_cascade_name;
         reason = "buffer operation: local model sufficient" }
   | Draining | Paused ->
       { effective_cascade = base_cascade;

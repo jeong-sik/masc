@@ -28,15 +28,18 @@ let test_running_uses_base () =
 
 let test_failing_uses_local_recovery () =
   let r = select SM.Failing in
-  check string "Failing -> local_recovery" "local_recovery" r.effective_cascade
+  check string "Failing -> local_recovery"
+    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
 
 let test_compacting_uses_local_only () =
   let r = select SM.Compacting in
-  check string "Compacting -> local_only" "local_only" r.effective_cascade
+  check string "Compacting -> local_only"
+    Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
 
 let test_handing_off_uses_local_only () =
   let r = select SM.HandingOff in
-  check string "HandingOff -> local_only" "local_only" r.effective_cascade
+  check string "HandingOff -> local_only"
+    Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
 
 let test_draining_uses_base () =
   let r = select SM.Draining in
@@ -69,9 +72,10 @@ let test_restarting_uses_base () =
 (* ── Edge cases ───────────────────────────────────────── *)
 
 let test_failing_with_local_only_base () =
-  let r = Routing.select_cascade ~base_cascade:"local_only" ~phase:SM.Failing in
+  let r = Routing.select_cascade
+    ~base_cascade:Masc_mcp.Keeper_config.local_only_cascade_name ~phase:SM.Failing in
   check string "Failing overrides even local_only base"
-    "local_recovery" r.effective_cascade
+    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
 
 let test_running_with_custom_base () =
   let r = Routing.select_cascade ~base_cascade:"coding_first" ~phase:SM.Running in

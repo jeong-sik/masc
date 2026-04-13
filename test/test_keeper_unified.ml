@@ -2152,6 +2152,23 @@ let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
       check (float 0.01) "remaining budget cap applies" 234.7 timeout_s
   | None -> fail "expected bounded timeout"
 
+let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
+  let max_turns =
+    Env_config.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+  in
+  let expected =
+    Env_config.KeeperKeepalive.oas_timeout_for_context_with_turn_budget
+      ~max_context:262_144 ~max_turns
+  in
+  match
+    UT.bounded_oas_timeout_for_turn_budget_with_turn_budget
+      ~max_turns ~max_context:262_144 ~remaining_turn_budget_s:1200.0
+  with
+  | Some timeout_s ->
+      check (float 0.01) "scheduled autonomous turn budget lowers adaptive timeout"
+        expected timeout_s
+  | None -> fail "expected bounded timeout"
+
 let test_bounded_oas_timeout_refuses_too_little_budget () =
   check (option (float 0.01)) "insufficient budget returns none" None
     (UT.bounded_oas_timeout_for_turn_budget
@@ -3121,6 +3138,8 @@ let () =
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick
             test_bounded_oas_timeout_caps_to_remaining_turn_budget;
+          test_case "bounded OAS timeout respects channel turn budget override" `Quick
+            test_bounded_oas_timeout_uses_channel_turn_budget_override;
           test_case "bounded OAS timeout refuses too little remaining budget" `Quick
             test_bounded_oas_timeout_refuses_too_little_budget;
           test_case "pure local label detection" `Quick

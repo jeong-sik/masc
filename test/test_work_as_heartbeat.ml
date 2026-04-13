@@ -86,6 +86,16 @@ let test_oas_timeout_262k () =
   (* 120 + 262.144*1.5 + min(15,40)*30 = 120+393.216+450 = 963.216 *)
   check bool "262K → [960, 970]" true (v >= 960.0 && v <= 970.0)
 
+let test_oas_timeout_262k_scheduled_autonomous () =
+  let v =
+    Cfg.KeeperKeepalive.oas_timeout_for_context_with_turn_budget
+      ~max_context:262_144
+      ~max_turns:Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+  in
+  (* 120 + 262.144*1.5 + min(5,40)*30 = 120+393.216+150 = 663.216 *)
+  check bool "262K scheduled autonomous → [660, 670]" true
+    (v >= 660.0 && v <= 670.0)
+
 let test_oas_timeout_zero () =
   let v = adaptive ~max_context:0 in
   (* 120 + 0 + min(15,40)*30 = 570 *)
@@ -110,10 +120,20 @@ let test_max_turns_default () =
   check int "default max_turns_per_call 15" 15
     Cfg.KeeperKeepalive.oas_max_turns_per_call
 
+let test_scheduled_autonomous_max_turns_default () =
+  check int "default scheduled autonomous max_turns_per_call 5" 5
+    Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+
 let test_max_turns_range () =
   let v = Cfg.KeeperKeepalive.oas_max_turns_per_call in
   check bool "max_turns >= 1" true (v >= 1);
   check bool "max_turns <= 50" true (v <= 50)
+
+let test_scheduled_autonomous_max_turns_range () =
+  let v = Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous in
+  check bool "scheduled autonomous max_turns >= 1" true (v >= 1);
+  check bool "scheduled autonomous max_turns <= global" true
+    (v <= Cfg.KeeperKeepalive.oas_max_turns_per_call)
 
 let test_oas_timeout_sec_compat () =
   (* Without env override, oas_timeout_sec returns 300.0 default *)
@@ -307,12 +327,18 @@ let () =
       test_case "adaptive 32K context" `Quick test_oas_timeout_32k;
       test_case "adaptive 128K context" `Quick test_oas_timeout_128k;
       test_case "adaptive 262K context" `Quick test_oas_timeout_262k;
+      test_case "adaptive 262K scheduled autonomous context" `Quick
+        test_oas_timeout_262k_scheduled_autonomous;
       test_case "adaptive 0 context" `Quick test_oas_timeout_zero;
       test_case "adaptive monotonic" `Quick test_oas_timeout_monotonic;
       test_case "turn timeout default is 1200" `Quick test_turn_timeout_default;
       test_case "adaptive capped at turn timeout" `Quick test_oas_timeout_cap;
-      test_case "max_turns default is 5" `Quick test_max_turns_default;
+      test_case "max_turns default is 15" `Quick test_max_turns_default;
+      test_case "scheduled autonomous max_turns default is 5" `Quick
+        test_scheduled_autonomous_max_turns_default;
       test_case "max_turns range" `Quick test_max_turns_range;
+      test_case "scheduled autonomous max_turns range" `Quick
+        test_scheduled_autonomous_max_turns_range;
       test_case "oas_timeout_sec backward compat" `Quick test_oas_timeout_sec_compat;
     ];
     "semaphore_wait_timeout", [

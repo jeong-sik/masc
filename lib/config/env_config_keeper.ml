@@ -288,11 +288,12 @@ module KeeperKeepalive = struct
 
       When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
       Otherwise, {!oas_timeout_for_context} computes an adaptive timeout:
-        base + ctx/1K × per_1k + min(oas_max_turns_per_call × 4, 40) × per_turn
+        base + ctx/1K × per_1k + min(max_turns, 40) × per_turn
       References {!oas_max_turns_per_call} (default 15) directly to avoid
       default drift.  Previous formula used 4× headroom on a default of 5,
-      producing min(20, 40)=20 effective turns.  With default 15, the 4×
-      multiplier would always saturate the cap, erasing context differentiation.
+      producing min(5, 40)=5 effective turns.  Using the actual per-call
+      turn budget keeps scheduled-autonomous and reactive channels aligned
+      with the timeout heuristic.
 
       At 262K context, 15 turns/call:
         120 + 393 + min(15,40)×30 = 120+393+450 = 963
@@ -319,7 +320,22 @@ module KeeperKeepalive = struct
   let oas_max_turns_per_call =
     max 1 (min 50 (get_int ~default:15 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
 
-  let oas_timeout_for_context ~(max_context : int) : float =
+  (** Smaller turn budget for scheduled autonomous cycles so one keeper does
+      not monopolize the autonomous semaphore for minutes at a time.
+      Reactive turns keep the general budget because they correspond to
+      explicit external stimuli.
+      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS].
+      Default: min(global, 5). Range: [1, global]. *)
+  let oas_max_turns_per_call_scheduled_autonomous =
+    let default = min oas_max_turns_per_call 5 in
+    max 1
+      (min oas_max_turns_per_call
+         (min 50
+            (get_int ~default
+               "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
+
+  let oas_timeout_for_context_with_turn_budget ~(max_context : int)
+      ~(max_turns : int) : float =
     match oas_timeout_sec_override with
     | Some v -> v
     | None ->
@@ -327,16 +343,21 @@ module KeeperKeepalive = struct
       let per_1k = 1.5 in
       let per_turn = 30.0 in
       let context_time = Float.of_int max_context /. 1000.0 *. per_1k in
-      (* Cap at 40 effective turns even if user sets MASC_KEEPER_OAS_MAX_TURNS_PER_CALL
-         higher.  This is a deliberate safety cap: with per_turn=30s, 40 turns alone
-         consume 1200s — the entire turn_timeout_sec budget.  Users pushing beyond
-         40 turns should instead raise turn_timeout_sec or split the work. *)
+      (* Cap at 40 effective turns even if the configured per-call turn
+         budget is higher. This is a deliberate safety cap: with
+         per_turn=30s, 40 turns alone consume 1200s — the entire
+         turn_timeout_sec budget. Users pushing beyond 40 turns should
+         instead raise turn_timeout_sec or split the work. *)
       let effective_turns =
-        Float.of_int (min oas_max_turns_per_call 40)
+        Float.of_int (min max_turns 40)
       in
       let turn_time = effective_turns *. per_turn in
       Float.max 30.0
         (Float.min turn_timeout_sec (base +. context_time +. turn_time))
+
+  let oas_timeout_for_context ~(max_context : int) : float =
+    oas_timeout_for_context_with_turn_budget ~max_context
+      ~max_turns:oas_max_turns_per_call
 
   (** Backward-compatible accessor: returns the env override or 300s default.
       Prefer {!oas_timeout_for_context} when max_context is available. *)

@@ -70,19 +70,6 @@ let maybe_evict () =
     | None -> ()
   end
 
-(** Remove all fully expired entries (past stale_until).
-    Returns the number of entries removed. *)
-let [@warning "-32"] cleanup_expired () =
-  let now_ts = Time_compat.now () in
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
-    let victims = Hashtbl.fold (fun key slot acc ->
-      match slot with
-      | Ready entry when entry.stale_until <= now_ts -> key :: acc
-      | _ -> acc
-    ) table [] in
-    List.iter (fun key -> Hashtbl.remove table key) victims;
-    List.length victims)
-
 let now () = Time_compat.now ()
 
 (** Default stale grace multiplier: stale data is served for [ttl * stale_factor]

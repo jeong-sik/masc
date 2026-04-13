@@ -135,7 +135,6 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk =
 let risk_overrides : (string * risk_level) list = [
   (* False positives from pattern matching *)
   ("masc_a2a_query_skill", Low);       (* "skill" contains "kill" substring *)
-  ("masc_keeper_tool_catalog", Low);   (* "catalog" is read-only *)
   (* Explicit claim surfaces. *)
   ("masc_claim_next", Medium);
   ("masc_claim_task", Medium);

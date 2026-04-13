@@ -391,7 +391,7 @@ let test_risk_payload_beats_contract_risk () =
 
 let test_risk_payload_beats_low_override () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_keeper_tool_catalog"
+    Gp.assess_risk ~tool_name:"masc_a2a_query_skill"
       ~input:(`Assoc [ ("note", `String "rm -rf /tmp/demo") ])
   in
   Alcotest.(check string) "payload risk beats low override"

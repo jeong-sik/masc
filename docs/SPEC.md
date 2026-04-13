@@ -180,7 +180,7 @@ Client Request
 | Planning & Delivery | plan_*, note_add, deliver, error_add, error_resolve |
 | Execution Memory (Runs) | run_init, run_plan, run_log, run_deliverable, run_get, run_list |
 | Cache | cache_set/get/list/delete/clear/stats (+ internal MODEL response cache metrics) |
-| Relay & Handoff | relay_status, relay_checkpoint, relay_now, relay_smart_check, handover_*, verify_handoff |
+| Relay & Handoff | handover_*, verify_handoff |
 | OAS Lifecycle | memento_mori, compact, keeper OAS checkpoint rollover |
 | Tempo & Dashboard | tempo_get/set/adjust/reset, dashboard |
 | Swarm | swarm_init/join/leave/status/vote/propose/trails/deposit/evolve |
@@ -223,10 +223,6 @@ Client Request
 #### Relay & Handover
 | Tool | Description |
 |------|-------------|
-| `masc_relay_status` | Check context usage and relay readiness (`messages`, `tool_calls` required) |
-| `masc_relay_checkpoint` | Save a relay checkpoint (`summary`, `messages`, `tool_calls` required) |
-| `masc_relay_now` | Trigger immediate relay to successor |
-| `masc_relay_smart_check` | Proactive relay check with task hints |
 
 #### Dashboard
 | Tool | Description |
@@ -236,10 +232,6 @@ Client Request
 #### Relay (Smart Checkpoint)
 | Tool | Description |
 |------|-------------|
-| `masc_relay_status` | Get relay status |
-| `masc_relay_checkpoint` | Create relay checkpoint |
-| `masc_relay_now` | Force immediate relay |
-| `masc_relay_smart_check` | Check if relay needed |
 
 #### Dashboard
 | Tool | Description |

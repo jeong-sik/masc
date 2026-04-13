@@ -524,8 +524,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_status` | 현재 room 상태 조회 |
 | `masc_init` | Room 초기화 (.masc/ 생성) |
 | `masc_reset` | Room 리셋 (.masc/ 삭제, confirm 필수) |
-| `masc_room_strategy_get` | 검색 전략 조회 |
-| `masc_room_strategy_set` | 검색 전략 설정 (best_first_v1, legacy) |
 | `masc_workflow_guide` | 워크플로우 가이드 출력 |
 | `masc_check` | room 건강 상태 점검 |
 
@@ -544,7 +542,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_update_priority` | 태스크 우선순위 변경 |
 | `masc_tasks` | 태스크 목록 조회 |
 | `masc_task_history` | 태스크 이벤트 이력 |
-| `masc_archive_view` | 아카이브된 태스크 조회 |
 
 ### 14.3 Agent Operations (`tool_agent`)
 

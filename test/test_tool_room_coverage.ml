@@ -212,50 +212,6 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_room_strategy_get" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  Room.ensure_room_bootstrap ctx.config;
-  match Tool_room.dispatch ctx ~name:"masc_room_strategy_get" ~args:(`Assoc []) with
-  | Some (success, result) ->
-      assert success;
-      let json = Yojson.Safe.from_string result in
-      ignore (Yojson.Safe.Util.member "cluster" json |> Yojson.Safe.Util.to_string);
-      ignore (Yojson.Safe.Util.member "speculation_enabled" json |> Yojson.Safe.Util.to_bool)
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_room_strategy_set" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let args =
-    `Assoc
-      [
-        ("search_strategy_default", `String "best_first_v1");
-        ("speculation_enabled", `Bool true);
-        ("speculation_budget", `Int 3);
-      ]
-  in
-  match Tool_room.dispatch ctx ~name:"masc_room_strategy_set" ~args with
-  | Some (success, result) ->
-      assert success;
-      assert (str_contains result "\"best_first_v1\"");
-      assert (str_contains result "\"speculation_enabled\": true")
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_room_strategy_set_bad_strategy" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [ ("search_strategy_default", `String "mcts_everywhere") ] in
-  match Tool_room.dispatch ctx ~name:"masc_room_strategy_set" ~args with
-  | Some (success, _result) -> assert (not success)
-  | None -> failwith "dispatch returned None"
-)
-
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in

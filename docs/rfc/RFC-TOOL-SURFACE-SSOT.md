@@ -78,7 +78,7 @@ LLM이 직접 판단하면 위험하거나, 시스템 내부 루프에서만 의
 |----------------|-------|-------|
 | Admin | command plane 31 + operator 2 + collaboration 2 + keeper_create_from_persona 1 | 36 |
 | Public_mcp | verify 5 + episode 2 + board 2 + recall_search + bounded_run | 11 |
-| Spawned_agent | code 5 + plan 3 + portal_close + error 2 + keeper_tool_catalog + workflow_guide + room_strategy 2 + archive_view + update_priority + deliver | 18 |
+| Spawned_agent | code 5 + plan 3 + portal_close + error 2 + workflow_guide + update_priority + deliver | 14 |
 | Local_worker | improve_loop 5 + library 5 + relay 2 | 12 |
 | Keeper_internal | keeper_unified 1 | 1 |
 | Session_min | (없음) | 0 |

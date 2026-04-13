@@ -82,8 +82,7 @@ let test_find_tool_existing () =
   let tools = ["masc_init"; "masc_join"; "masc_leave"; "masc_status";
                "masc_broadcast"; "masc_transition";
                "masc_runtime_verify"; "masc_verify_handoff";
-               "masc_handover_create"; "masc_room_strategy_get";
-               "masc_room_strategy_set"] in
+               "masc_handover_create"] in
   List.iter (fun name ->
     match find_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name
@@ -279,25 +278,6 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
           Alcotest.fail
             (Printf.sprintf "%s should be absent from schema inventory" name))
     retired_tools
-
-let test_masc_room_strategy_get_schema () =
-  match find_tool "masc_room_strategy_get" with
-  | None -> Alcotest.fail "masc_room_strategy_get not found"
-  | Some _ -> ()
-
-let test_masc_room_strategy_set_schema () =
-  match find_tool "masc_room_strategy_set" with
-  | None -> Alcotest.fail "masc_room_strategy_set not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has search_strategy_default" true
-            (List.mem_assoc "search_strategy_default" props);
-          Alcotest.(check bool) "has speculation_enabled" true
-            (List.mem_assoc "speculation_enabled" props);
-          Alcotest.(check bool) "has speculation_budget" true
-            (List.mem_assoc "speculation_budget" props)
-      | None -> Alcotest.fail "masc_room_strategy_set missing properties"
 
 let test_masc_board_post_schema_supports_judgment () =
   let schema = Masc_mcp.Tool_board.tool_post_create in
@@ -795,8 +775,6 @@ let () =
         test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "retired front-door tools absent" `Quick
         test_retired_front_door_tools_absent_from_schema_inventory;
-      Alcotest.test_case "masc_room_strategy_get" `Quick test_masc_room_strategy_get_schema;
-      Alcotest.test_case "masc_room_strategy_set" `Quick test_masc_room_strategy_set_schema;
     ];
     "worktree_tools", [
       Alcotest.test_case "worktree_create" `Quick test_masc_worktree_create_schema;

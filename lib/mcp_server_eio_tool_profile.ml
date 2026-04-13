@@ -175,7 +175,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_claim_next", "Claim Next Task");
   ("masc_update_priority", "Update Task Priority");
   ("masc_task_history", "Task Event History");
-  ("masc_archive_view", "View Task Archive");
   (* Communication *)
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
@@ -215,9 +214,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operation_resume", "Resume Operation");
   ("masc_operation_finalize", "Finalize Operation");
   ("masc_operation_checkpoint", "Operation Checkpoint");
-  (* Room strategy *)
-  ("masc_room_strategy_get", "Get Room Strategy");
-  ("masc_room_strategy_set", "Set Room Strategy");
   (* Worktree *)
   ("masc_worktree_create", "Create Worktree");
   ("masc_worktree_status", "Worktree Status");
@@ -230,7 +226,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
-  ("masc_keeper_tool_catalog", "Keeper Tool Catalog");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
   ("masc_room_status", "Namespace Status");
@@ -382,15 +377,6 @@ let tool_output_schema_field = function
            [
              ("agents", array_schema);
              ("count", int_schema);
-           ])
-  | "masc_room_strategy_get" ->
-      Some
-        (permissive_object_schema
-           [
-             ("room_id", string_schema);
-             ("search_strategy_default", string_schema);
-             ("speculation_enabled", bool_schema);
-             ("speculation_budget", int_schema);
            ])
   | "masc_operator_digest" ->
       Some

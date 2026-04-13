@@ -210,7 +210,7 @@ let test_set_max_concurrent_rejects_zero () =
   with Invalid_argument _ -> ()
 
 let test_initial_max_concurrent_default () =
-  check int "default" 4 (AQ.initial_max_concurrent_of_env (fun _ -> None))
+  check int "default" 1 (AQ.initial_max_concurrent_of_env (fun _ -> None))
 
 let test_initial_max_concurrent_prefers_masc_env () =
   let getenv = function
@@ -225,7 +225,7 @@ let test_initial_max_concurrent_ignores_ollama_parallel () =
     | "OLLAMA_NUM_PARALLEL" -> Some "1"
     | _ -> None
   in
-  check int "ollama env ignored" 4 (AQ.initial_max_concurrent_of_env getenv)
+  check int "ollama env ignored" 1 (AQ.initial_max_concurrent_of_env getenv)
 
 let test_initial_max_concurrent_clamps_min_one () =
   let getenv = function

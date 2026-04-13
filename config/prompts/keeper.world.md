@@ -18,12 +18,23 @@ Repo worktrees live *inside* your playground clone at `.masc/playground/{your-na
 - Never use a server-root-relative worktree path — the harness rejects it as `write_outside_playground_blocked`.
 - Clone the target repo first if `repos/` is empty.
 
-WRONG paths (these do not exist, never use them):
+WRONG paths (these do not exist or cause doubling errors):
 - `/repos/...`
 - `/playground/...`
 - `/home/.../repos/...`
 - `.worktrees/...` (server-root relative — worktrees must live inside your playground clone at `.masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/...`)
+- `.masc/playground/{your-name}/repos/...` as a tool path argument — the tool resolves this prefix automatically, so just use `repos/...`
 - Any guessed absolute path outside the path returned by your tools
+
+## Path Resolution Rule
+
+Tools automatically resolve paths relative to your playground root `.masc/playground/{your-name}/`.
+When passing `path` or `cwd` to keeper tools:
+- Use: `repos/masc-mcp/lib/foo.ml`
+- NOT: `.masc/playground/{your-name}/repos/masc-mcp/lib/foo.ml`
+- NOT: `/Users/.../playground/{your-name}/repos/...`
+
+Including the playground prefix causes path doubling errors. The tool adds the prefix for you.
 
 ## Project
 

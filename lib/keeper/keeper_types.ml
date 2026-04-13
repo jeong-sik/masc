@@ -1427,7 +1427,12 @@ let configured_keeper_names _config =
 ;;
 
 let keeper_names config =
-  persisted_keeper_names config
+  let toml = configured_keeper_names config in
+  if toml <> [] then toml
+  else (
+    Log.Keeper.warn
+      "keeper_names: no TOML keepers found, falling back to persisted JSON";
+    persisted_keeper_names config)
 ;;
 
 let keepalive_keeper_names config =

@@ -242,7 +242,8 @@ let filesystem_tools : Types.tool_schema list = [
     name = "keeper_fs_read";
     description = "Read a file as text (truncated at max_bytes). \
 path is REQUIRED. \
-Good: path='lib/foo.ml'. Bad: path=''. \
+Paths resolve relative to your playground — use 'repos/X/lib/foo.ml' not '.masc/playground/your-name/repos/X/lib/foo.ml'. \
+Good: path='lib/foo.ml', path='repos/masc-mcp/lib/room.ml'. Bad: path=''. \
 For multi-file search, use keeper_shell with op=rg.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -279,6 +280,7 @@ let shell_tools : Types.tool_schema list = [
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
 Read-only ops default to the keeper playground. \
+IMPORTANT: paths resolve automatically — use 'repos/X' not '.masc/playground/your-name/repos/X'. Never include the playground prefix in path or cwd. \
 Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
@@ -313,6 +315,7 @@ NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
 Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
 Runs in the keeper playground by default; use cwd to target an explicit allowed directory. \
+Paths resolve automatically — never include '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
 For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
     input_schema = `Assoc [
       ("type", `String "object");

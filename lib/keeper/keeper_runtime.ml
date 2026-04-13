@@ -14,7 +14,27 @@ let declarative_keeper_names () =
   |> List.map fst
 
 let bootable_keeper_names config =
-  dedupe_keep_order (keeper_names config @ declarative_keeper_names ())
+  let json_names = keeper_names config in
+  let toml_names = declarative_keeper_names () in
+  let toml_set =
+    let tbl = Hashtbl.create (List.length toml_names) in
+    List.iter (fun n -> Hashtbl.replace tbl n ()) toml_names;
+    tbl
+  in
+  (* Filter out "phantom" keepers: discovered only from JSON (no TOML config)
+     AND total_turns = 0 (never actually ran).  These are leftover artifacts
+     from old test runs or experiments that waste autoboot fiber slots. *)
+  let filtered_json =
+    List.filter
+      (fun name ->
+        if Hashtbl.mem toml_set name then true
+        else
+          match read_meta config name with
+          | Ok (Some meta) -> meta.runtime.usage.total_turns > 0
+          | Ok None | Error _ -> false)
+      json_names
+  in
+  dedupe_keep_order (filtered_json @ toml_names)
 
 (** Apply a TOML profile default to a runtime meta value.
     [Some v] from TOML overrides; [None] keeps the current runtime value. *)

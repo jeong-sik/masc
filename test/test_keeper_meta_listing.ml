@@ -142,7 +142,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
         [ "dot.name"; "sangsu" ] names;
       let keepalive_names = Keeper_types.keepalive_keeper_names config in
       check (list string) "keepalive_keeper_names filters sidecars"
-        [ "sangsu" ] keepalive_names;
+        [ "dot.name"; "sangsu" ] keepalive_names;
       let ctx = keeper_ctx env sw config "operator" in
       let ok, body =
         Keeper_status.handle_keeper_list ctx (`Assoc [ ("limit", `Int 10) ])

@@ -478,7 +478,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       name = worker_name;
       model = model_id;
       system_prompt = Some system_prompt;
-      max_tokens = local_worker_max_tokens ();
+      max_tokens = Some (local_worker_max_tokens ());
       max_turns;
       temperature = Some Oas_worker_cascade.worker_temperature;
       top_p = Some Oas_worker_cascade.worker_top_p;

@@ -27,7 +27,6 @@ type eval_snapshot = {
   worker_run_id : string;
   timestamp : float;
   verdict : swiss_verdict_json;
-  coverage : float;
   baseline_status : string option;
 }
 
@@ -88,9 +87,6 @@ let read_snapshot_json ~agent_name (json : Yojson.Safe.t)
             let timestamp =
               Safe_ops.json_float ~default:0.0 "timestamp" json
             in
-            let coverage =
-              Safe_ops.json_float ~default:verdict.coverage "coverage" json
-            in
             let baseline_status =
               Safe_ops.json_string_opt "baseline_status" json
             in
@@ -101,7 +97,6 @@ let read_snapshot_json ~agent_name (json : Yojson.Safe.t)
                 worker_run_id;
                 timestamp;
                 verdict;
-                coverage;
                 baseline_status;
               })
 
@@ -114,36 +109,29 @@ let eval_dir ~base_path ~agent_name =
 
 let read_latest ~base_path ~agent_name ~limit =
   let dir = eval_dir ~base_path ~agent_name in
-  if not (Sys.file_exists dir && Sys.is_directory dir) then []
-  else
-    let files =
-      try
-        Sys.readdir dir
-        |> Array.to_list
-        |> List.filter (fun f -> Filename.check_suffix f ".json")
-        |> List.sort (fun a b -> String.compare b a)
-      with Sys_error _ -> []
-    in
-    let rec collect acc remaining = function
-      | [] -> List.rev acc
-      | _ when remaining <= 0 -> List.rev acc
-      | filename :: rest ->
-          let path = Filename.concat dir filename in
-          let snapshot =
-            try
-              let content =
-                In_channel.with_open_text path In_channel.input_all
-              in
-              let json = Yojson.Safe.from_string content in
-              read_snapshot_json ~agent_name json
-            with
-            | Sys_error _ | Yojson.Json_error _ -> None
-          in
-          (match snapshot with
-          | Some s -> collect (s :: acc) (remaining - 1) rest
-          | None -> collect acc remaining rest)
-    in
-    collect [] limit files
+  let files =
+    try
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".json")
+      |> List.sort (fun a b -> String.compare b a)
+    with Sys_error _ -> []
+  in
+  let rec collect acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | filename :: rest ->
+        let path = Filename.concat dir filename in
+        let snapshot =
+          match Safe_ops.read_json_file_safe path with
+          | Error _ -> None
+          | Ok json -> read_snapshot_json ~agent_name json
+        in
+        (match snapshot with
+        | Some s -> collect (s :: acc) (remaining - 1) rest
+        | None -> collect acc remaining rest)
+  in
+  collect [] limit files
 
 (* ── JSON serialization ──────────────────────────────────────────── *)
 
@@ -175,6 +163,5 @@ let snapshot_to_json (s : eval_snapshot) : Yojson.Safe.t =
       ("worker_run_id", `String s.worker_run_id);
       ("timestamp", `Float s.timestamp);
       ("verdict", verdict_to_json s.verdict);
-      ("coverage", `Float s.coverage);
       ("baseline_status", Json_util.string_opt_to_json s.baseline_status);
     ]

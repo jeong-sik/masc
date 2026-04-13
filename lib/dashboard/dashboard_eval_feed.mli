@@ -27,7 +27,6 @@ type eval_snapshot = {
   worker_run_id : string;
   timestamp : float;
   verdict : swiss_verdict_json;
-  coverage : float;
   baseline_status : string option;
       (** ["Improved"] | ["Regressed"] | ["Unchanged"] *)
 }

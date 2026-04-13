@@ -218,7 +218,7 @@ let test_read_latest_with_files () =
   let first = List.nth results 0 in
   check string "first worker_run_id" "run-002" first.worker_run_id;
   check string "first agent_name" "keeper-a" first.agent_name;
-  check (float 0.001) "first coverage" 0.90 first.coverage;
+  check (float 0.001) "first coverage" 0.85 first.verdict.coverage;
   (match first.session_id with
   | Some sid -> check string "first session_id" "sess-002" sid
   | None -> fail "expected session_id for first snapshot");
@@ -227,7 +227,7 @@ let test_read_latest_with_files () =
   | None -> fail "expected baseline_status for first snapshot");
   let second = List.nth results 1 in
   check string "second worker_run_id" "run-001" second.worker_run_id;
-  check (float 0.001) "second coverage" 0.80 second.coverage
+  check (float 0.001) "second coverage" 0.85 second.verdict.coverage
 
 let test_read_latest_with_limit () =
   let base = tmpdir "eval_limit" in
@@ -270,7 +270,6 @@ let test_snapshot_json_roundtrip () =
           worker_run_id = "run-abc-123";
           timestamp = 1700000000.0;
           verdict;
-          coverage = 0.85;
           baseline_status = Some "Improved";
         }
       in
@@ -279,10 +278,6 @@ let test_snapshot_json_roundtrip () =
         Masc_mcp.Safe_ops.json_string ~default:"" "agent_name" json_out
       in
       check string "agent_name roundtrip" "keeper-a" agent;
-      let cov =
-        Masc_mcp.Safe_ops.json_float ~default:0.0 "coverage" json_out
-      in
-      check (float 0.001) "coverage roundtrip" 0.85 cov;
       let verdict_j = Yojson.Safe.Util.member "verdict" json_out in
       let sv =
         Masc_mcp.Safe_ops.json_int ~default:0 "schema_version" verdict_j

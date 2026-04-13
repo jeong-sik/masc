@@ -182,7 +182,7 @@ rg 'Imperative seeding' docs/OAS-MASC-BOUNDARY.md
 
 | Risk | Mitigation |
 |------|------------|
-| Hook 순서가 memory seeding 시점과 맞지 않음 | OAS `BeforeTurnParams`는 turn 시작 직전이므로 현재 `create_memory_full` 호출 시점과 동등 |
+| Hook 순서가 memory seeding 시점과 맞지 않음 | Phase 1에서 trace-level 검증 필수: (1) `BeforeTurnParams` hook이 context 구성 이전/이후 어느 시점에 호출되는지 OAS 코드에서 확인, (2) hook에서 주입한 memory가 downstream hook(safety filter 등)에 보이는지 확인. 동등성이 증명되지 않으면 OAS에 hook 순서 보장 API 요청 |
 | Incremental flush가 JSONL 파일을 과도하게 open/close | Append-only + buffered write. 매 turn이 아닌 dirty flag 기반 |
 | RFC-MASC-001과의 충돌 | MASC-001은 working_context/[STATE] 경계, 이 RFC는 memory bridge. 파일 겹침은 `keeper_agent_run.ml`만. 병행 가능하되 merge 순서 주의 |
 | 캐시 무효화 로직이 hook context에서 동작하지 않음 | file_stamp 로직은 memory_oas_bridge 내부. hook은 load 결과만 소비하므로 캐시는 투명 |

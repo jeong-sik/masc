@@ -147,6 +147,8 @@ let extract_state checkpoint =
 
 LLM이 자유텍스트로 상태를 보고하는 것 자체를 폐지하고, keeper의 상태는 **코드 로직으로만** 결정한다 (deterministic boundary).
 
+**주의**: 현재 11-state lifecycle의 일부 전이가 `[STATE]` 블록 내용에 의존하는지 Phase 1 전에 반드시 확인해야 한다. 만약 LLM이 `[STATE]` 블록으로 `keeper_phase`를 보고하고 이것이 state transition trigger로 사용된다면, 해당 전이 경로를 코드 기반(tool call result, turn outcome, 외부 이벤트)으로 먼저 전환해야 한다. 이 경우 Phase 0(전이 경로 감사)을 추가한다.
+
 ## Verification
 
 ### 완료 기준
@@ -182,7 +184,12 @@ rg 'VIOLATION\|Partial complete.*working_context\|text marker' docs/OAS-MASC-BOU
 
 ## Implementation Phases
 
-**모든 Phase는 독립 세션에서 수행. 다른 RFC PR과 merge 순서 무관.**
+**모든 Phase는 독립 세션에서 수행. `keeper_agent_run.ml` 수정이 RFC-MASC-004와 겹치므로 merge 순서 조율 필요.**
+
+### Phase 0: 전이 경로 감사 (코드 아님, 1일)
+- `rg 'keeper_phase\|state.*transition\|[STATE].*phase' lib/keeper/` 전수 확인
+- 11-state lifecycle 중 [STATE] 텍스트에 의존하는 전이 경로 목록 작성
+- 의존하는 경로가 있으면 code-based trigger 전환 방안 추가 (Phase 1 전제 조건)
 
 ### Phase 1: Structured working_context (1 PR)
 - Checkpoint.working_context에 structured JSON 저장하는 경로 추가
@@ -219,6 +226,9 @@ rg 'VIOLATION\|Partial complete.*working_context\|text marker' docs/OAS-MASC-BOU
 | OAS Checkpoint.working_context 필드가 변경되면 | OAS Issue #484 Epic과 조율. Checkpoint v4 → v5 migration 필요 시 같이 처리 |
 | Board 기존 데이터에 [STATE]가 남아있음 | 읽기 시 [STATE] 텍스트와 structured JSON 둘 다 파싱 (하위호환) |
 | LLM이 [STATE] 없이 상태를 유지하지 못함 | 상태를 LLM에게 의존하지 않는 설계 (deterministic boundary). keeper 코드가 상태 관리 |
+| [STATE] 제거 시 11-state lifecycle 전이가 깨짐 | Phase 0에서 전이 경로 감사. LLM 텍스트 기반 전이가 있으면 code-based trigger로 먼저 전환 |
+| Concurrent keeper가 같은 Checkpoint.working_context에 쓰면 last-writer-wins | Checkpoint는 session 단위로 격리(session_id별 파일). 동일 session에 복수 keeper가 쓰는 경우는 MASC task claim CAS로 방지. 추가 보호: checkpoint write 시 base_hash 검증(OAS delta protocol) |
+| Phase 1 dual-source (텍스트+JSON) 충돌 | Feature flag ON 시 structured JSON이 primary, [STATE] 텍스트는 read-only fallback. 쓰기는 JSON만 |
 
 ## Scope Exclusion
 

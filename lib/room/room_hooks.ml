@@ -90,6 +90,18 @@ let relation_on_task_done_fn
   : (assignee:string -> active_agents:string list -> unit) ref
   = ref (fun ~assignee:_ ~active_agents:_ -> ())
 
+(** Hebbian learning: strengthen collaboration on task completion. *)
+let hebbian_on_task_done_fn
+  : (Room_utils_backend_setup.config ->
+     assignee:string -> active_agents:string list -> unit) ref
+  = ref (fun _config ~assignee:_ ~active_agents:_ -> ())
+
+(** Hebbian learning: weaken collaboration on task cancellation. *)
+let hebbian_on_task_cancelled_fn
+  : (Room_utils_backend_setup.config ->
+     agent_name:string -> active_agents:string list -> unit) ref
+  = ref (fun _config ~agent_name:_ ~active_agents:_ -> ())
+
 (** Shared observability hook for join/rejoin/leave events.
     Upper layers can mirror state transitions to audit, telemetry, and logs
     without introducing circular dependencies into room sub-modules. *)

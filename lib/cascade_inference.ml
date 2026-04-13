@@ -26,6 +26,7 @@ let of_oas (p : Llm_provider.Cascade_config.inference_params) : t =
 (** Extract inference parameters from a parsed JSON value for a named cascade.
     Exposed for testing without filesystem dependency. *)
 let for_json ~(name : string) (json : Yojson.Safe.t) : t =
+  let name = Keeper_cascade_profile.canonicalize name in
   let read_float key =
     match Yojson.Safe.Util.member key json with
     | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None
@@ -35,12 +36,12 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
     | `Int i -> Some i | `Float f -> Some (int_of_float f) | _ -> None
   in
   let temperature =
-    match read_float (name ^ "_temperature") with
+    match read_float (Keeper_cascade_profile.temperature_key name) with
     | Some _ as v -> v
     | None -> read_float "default_temperature"
   in
   let max_tokens =
-    match read_int (name ^ "_max_tokens") with
+    match read_int (Keeper_cascade_profile.max_tokens_key name) with
     | Some _ as v -> v
     | None -> read_int "default_max_tokens"
   in
@@ -50,6 +51,7 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
     Delegates to OAS Cascade_config.resolve_inference_params.
     Returns [empty] on any error (malformed config, read failure). *)
 let for_cascade ~(name : string) : t =
+  let name = Keeper_cascade_profile.canonicalize name in
   match Oas_worker.default_config_path () with
   | None -> empty
   | Some config_path ->
@@ -72,3 +74,11 @@ let resolve_max_tokens ~(cascade_name : string) ~(fallback : unit -> int) : int 
   match (for_cascade ~name:cascade_name).max_tokens with
   | Some t -> t
   | None -> fallback ()
+
+(** Clamp max_tokens to provider ceiling.
+    Clamping > rejection: a smaller response is better than no response.
+    Mirrors TLA+ KeeperCoreTriad.CapabilityGate action. *)
+let clamp_max_tokens_to_ceiling ~(provider_ceiling : int option) (max_tokens : int) : int =
+  match provider_ceiling with
+  | Some ceiling when max_tokens > ceiling -> max 1 ceiling
+  | _ -> max_tokens

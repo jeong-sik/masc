@@ -130,20 +130,23 @@ let oas_checkpoint_path ~(session_dir : string) ~(session_id : string) =
 
 let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =
+  let fallback () =
+    Keeper_fs.save_atomic
+      (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
+      (Agent_sdk.Checkpoint.to_string ckpt);
+    Ok ()
+  in
   try
     ignore (Keeper_fs.ensure_dir session_dir);
     match Fs_compat.get_fs_opt () with
-    | Some fs ->
+    | Some fs when Eio_guard.is_ready () ->
         let dir = Eio.Path.(fs / session_dir) in
         (match Agent_sdk.Checkpoint_store.create dir with
          | Ok store -> Agent_sdk.Checkpoint_store.save store ckpt
              |> Result.map_error Agent_sdk.Error.to_string
          | Error err -> Error (Agent_sdk.Error.to_string err))
-    | None ->
-        Keeper_fs.save_atomic
-          (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-          (Agent_sdk.Checkpoint.to_string ckpt);
-        Ok ()
+    | Some _ | None ->
+        fallback ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "save_oas: %s" (Printexc.to_string exn))
@@ -215,8 +218,20 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
     (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+  let fallback () =
+    let path = oas_checkpoint_path ~session_dir ~session_id in
+    if Fs_compat.file_exists path then
+      try
+        match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+        | Ok ckpt -> Ok ckpt
+        | Error e -> Error (classify_sdk_error e)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Error (Io_error (Printexc.to_string exn))
+    else Error Not_found
+  in
   match Fs_compat.get_fs_opt () with
-  | Some fs ->
+  | Some fs when Eio_guard.is_ready () ->
       let dir = Eio.Path.(fs / session_dir) in
       (match Agent_sdk.Checkpoint_store.create dir with
        | Ok store -> (
@@ -224,14 +239,5 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
            | Ok ckpt -> Ok ckpt
            | Error e -> Error (classify_sdk_error e))
        | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
-  | None ->
-      let path = oas_checkpoint_path ~session_dir ~session_id in
-      if Fs_compat.file_exists path then
-        try
-          match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
-          | Ok ckpt -> Ok ckpt
-          | Error e -> Error (classify_sdk_error e)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn -> Error (Io_error (Printexc.to_string exn))
-      else Error Not_found
+  | Some _ | None ->
+      fallback ()

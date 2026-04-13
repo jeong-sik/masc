@@ -12,13 +12,21 @@ open Keeper_exec_shared
 include Keeper_tool_registry
 include Keeper_tool_policy
 
+let has_mutating_side_effect_with_input ~(tool_name : string)
+    ~(input : Yojson.Safe.t) : bool =
+  not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+
 let on_keeper_tool_call
   : (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
   =
   ref (fun ~tool_name:_ ~success:_ ~duration_ms:_ -> ())
 
 let tool_call_observers
-  : (tool_name:string -> success:bool -> unit) list ref
+  : (keeper_name:string ->
+     tool_name:string ->
+     input:Yojson.Safe.t ->
+     success:bool ->
+     unit) list ref
   = ref []
 
 let add_tool_call_observer fn =
@@ -27,8 +35,10 @@ let add_tool_call_observer fn =
 let remove_tool_call_observer fn =
   tool_call_observers := List.filter (fun f -> f != fn) !tool_call_observers
 
-let notify_tool_call_observers ~tool_name ~success =
-  List.iter (fun f -> f ~tool_name ~success) !tool_call_observers
+let notify_tool_call_observers ~keeper_name ~tool_name ~input ~success =
+  List.iter
+    (fun f -> f ~keeper_name ~tool_name ~input ~success)
+    !tool_call_observers
 
 let tool_search_fn
   : (query:string -> max_results:int -> Yojson.Safe.t) ref

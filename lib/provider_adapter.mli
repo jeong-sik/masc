@@ -275,12 +275,6 @@ val resolve_gemini_direct_auth : unit -> gemini_direct_auth
 (** Compute the Vertex AI OpenAI-compatible endpoint URL. *)
 val gemini_vertex_openai_base_url : project:string -> location:string -> string
 
-(** {1 Model Family Classification} *)
-
-(** Classify a model into a family bucket based on locality and context window.
-    Returns "small_local", "medium_cloud", or "large_cloud". *)
-val classify_model_family : is_local:bool -> context_window:int -> string
-
 (** {1 Misc} *)
 
 val default_cli_agent_name : unit -> string

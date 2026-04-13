@@ -182,15 +182,11 @@ let publish_verdict_recorded (bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id
 let publish_pre_compact (bus : Agent_sdk.Event_bus.t) ~keeper_name
     ~context_ratio ~strategy_names ~active_agent_count ~context_window
     ~is_local_model =
-  let model_family =
-    Provider_adapter.classify_model_family ~is_local:is_local_model ~context_window
-  in
   let payload = `Assoc [
     ("keeper_name", `String keeper_name);
     ("context_ratio", `Float context_ratio);
     ("strategies", `List (List.map (fun s -> `String s) strategy_names));
     ("active_agent_count", `Int active_agent_count);
-    ("model_family", `String model_family);
     ("context_window", `Int context_window);
     ("is_local_model", `Bool is_local_model);
     ("timestamp", `Float (Time_compat.now ()));

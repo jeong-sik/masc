@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-04-13
+
+### Added
+- MASC-driven cascade FSM Phase 2: direct provider failover from MASC (#6776)
+- Event_bus envelope API adoption: correlation_id + run_id metadata (#6777)
+- Groq cascade fallback restored (#6566)
+- OAS log bridge to masc-mcp structured logging (#6618)
+- Keeper cascade provider allowlist env knob (#6478)
+- Cross-model enforcement rate on dashboard (#6565)
+- Keeper FSM dashboard exposure + TLA+ bug model (#6556)
+- Prometheus llm_provider_http_status metrics (#6514)
+
+### Fixed
+- OAS pin v0.124.2: GLM auth passthrough (static_token) + intra-turn truncation (#6781, #6790)
+- Cascade: add default_api_key_env for GLM providers (#6784)
+- Admission queue: size to actual decode parallelism (#6768), passthrough mode (#6788)
+- Keeper: context compaction in reducer (#6731), unified prompt CI alignment (#6700, #6783)
+- Test: prevent integration tests from leaking real PRs to GitHub (#6756)
+- Test: align admission queue default (#6785)
+- Remove dead blocker_class_of_failure_reason (#6778)
+
+### Refactored
+- Spawn: add mcp_flag/prompt_flag types, replace match tables (#6767)
+- Keeper: immutable string list for keeper_internal_set (#6761)
+
+### Docs
+- RFC-MASC-001 (checkpoint boundary migration), MASC-004 (memory bridge), MASC-005 (dashboard eval consumer) (#6787)
+
 ## [0.5.9] - 2026-04-12
 
 ### Added

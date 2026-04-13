@@ -122,7 +122,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     mid_goal;
     long_goal;
     cascade_name =
-      (if String.trim old.cascade_name <> "" then old.cascade_name
+      (if String.trim old.cascade_name <> "" then
+         Keeper_cascade_profile.canonicalize old.cascade_name
        else Keeper_config.default_cascade_name);
     will =
       Option.value

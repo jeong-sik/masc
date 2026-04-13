@@ -669,6 +669,22 @@ cascade_name = "local_only"
        check (option string) "cascade preserved"
          (Some "local_only") d.cascade_name)
 
+let test_profile_normalizes_legacy_keeper_cascade_alias () =
+  let input = {|
+[keeper]
+goal = "test"
+cascade_name = "oas-coding_first"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option string) "legacy keeper cascade normalized"
+         (Some Masc_mcp.Keeper_config.default_cascade_name)
+         d.cascade_name)
+
 let test_persona_resolver_defaults_to_research_tool_preset () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -765,6 +781,8 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers ignored" `Quick
             test_profile_ignores_legacy_allowed_providers;
+          test_case "legacy keeper cascade alias normalized" `Quick
+            test_profile_normalizes_legacy_keeper_cascade_alias;
         ] );
       ( "file_loading",
         [

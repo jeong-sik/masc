@@ -597,9 +597,43 @@ let restore_tool_usage ~base_path name =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
-(** Thread-safety: same as [set_state] — all operations are non-yielding
-    (StringMap lookup + put, Atomic.set). In single-domain Eio, non-yielding
-    code runs atomically w.r.t. other fibers. No mutex needed. *)
+let execute_entry_action_observability
+    ~(name : string)
+    ~(phase : Keeper_state_machine.phase)
+    ~(ts_unix : float)
+    (action : Keeper_state_machine.entry_action) : unit =
+  match action with
+  | Keeper_state_machine.Publish_lifecycle { event_name; detail } ->
+      Log.Keeper.info
+        "registry: lifecycle name=%s phase=%s event=%s detail=%s"
+        name
+        (Keeper_state_machine.phase_to_string phase)
+        event_name
+        detail;
+      (try
+         Sse.broadcast
+           (`Assoc [
+              "type", `String "keeper_lifecycle";
+              "name", `String name;
+              "phase", `String (Keeper_state_machine.phase_to_string phase);
+              "event", `String event_name;
+              "detail", `String detail;
+              "ts_unix", `Float ts_unix;
+            ])
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | _exn -> ())
+  | Start_compaction
+  | Start_handoff
+  | Start_drain
+  | Schedule_restart _
+  | Mark_dead_tombstone
+  | Cleanup_and_unregister ->
+      ()
+
+(** Registry mutation is still non-yielding (StringMap lookup + put,
+    Atomic.set). Observability-only entry actions run after [put_entry], so
+    any SSE/log side effects happen after the registry state is consistent. *)
 let dispatch_event_with_audit
     ~base_path
     ?snapshot
@@ -684,6 +718,12 @@ let dispatch_event_with_audit
          dead_since_ts;
          transition_seq = new_seq;
        };
+       List.iter
+         (execute_entry_action_observability
+            ~name
+            ~phase:tr.new_phase
+            ~ts_unix:now)
+         tr.entry_actions;
        Ok tr
      | Ok tr ->
        (* No phase change — still update conditions *)

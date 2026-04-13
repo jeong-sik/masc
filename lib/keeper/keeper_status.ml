@@ -261,6 +261,7 @@ let handle_keeper_list ctx args : tool_result =
                 ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
                 ("session_dir", `String (keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id)));
                 ("history", `String (keeper_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id)));
+                ("history_internal", `String (keeper_internal_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id)));
               ]);
             ]))
         ) keeper_names

@@ -111,6 +111,35 @@ let path_from_cwd cwd =
   let candidate = Filename.concat cwd "config" |> absolute_path_from ~cwd in
   if config_signature_exists candidate then Some candidate else None
 
+let repo_config_fallback_enabled () =
+  Env_config_core.get_bool ~default:false "MASC_ALLOW_REPO_CONFIG_FALLBACK"
+
+let disabled_repo_config_fallback_warnings (inputs : inputs) =
+  if repo_config_fallback_enabled () then
+    []
+  else
+    let candidates =
+      [
+        ("cwd", path_from_cwd inputs.cwd);
+        ("exe_relative", path_from_executable ~cwd:inputs.cwd inputs.executable_name);
+      ]
+      |> List.filter_map (fun (label, path_opt) ->
+             Option.map (fun path -> (label, path)) path_opt)
+    in
+    match candidates with
+    | [] -> []
+    | hits ->
+        let rendered =
+          hits
+          |> List.map (fun (label, path) -> Printf.sprintf "%s:%s" label path)
+          |> String.concat ", "
+        in
+        [
+          Printf.sprintf
+            "Repo config fallback is disabled by default; set MASC_ALLOW_REPO_CONFIG_FALLBACK=true to use %s"
+            rendered;
+        ]
+
 let path_from_home_masc (inputs : inputs) =
   match trim_opt inputs.env_home with
   | None -> None
@@ -136,6 +165,10 @@ let default_missing_root (inputs : inputs) =
   | None -> Filename.concat inputs.cwd "config" |> absolute_path_from ~cwd:inputs.cwd
 
 let config_root_resolution (inputs : inputs) =
+  let missing path warnings =
+    ( { path; exists = false; source = Missing },
+      warnings @ disabled_repo_config_fallback_warnings inputs )
+  in
   match trim_opt inputs.env_config_dir with
   | Some raw ->
       let path = absolute_path_from ~cwd:inputs.cwd raw in
@@ -154,17 +187,28 @@ let config_root_resolution (inputs : inputs) =
           match path_from_home_masc inputs with
           | Some path -> ({ path; exists = true; source = Home_masc }, [])
           | None ->
-              match path_from_cwd inputs.cwd with
-              | Some path -> ({ path; exists = true; source = Cwd }, [])
-              | None ->
-                  match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
-                  | Some path -> ({ path; exists = true; source = Exe_relative }, [])
-                  | None ->
-                      let path = default_missing_root inputs in
-                      ( { path; exists = false; source = Missing },
-                        [ Printf.sprintf
-                            "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                            path ] )
+              if repo_config_fallback_enabled () then
+                match path_from_cwd inputs.cwd with
+                | Some path -> ({ path; exists = true; source = Cwd }, [])
+                | None ->
+                    match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
+                    | Some path -> ({ path; exists = true; source = Exe_relative }, [])
+                    | None ->
+                        let path = default_missing_root inputs in
+                        missing path
+                          [
+                            Printf.sprintf
+                              "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                              path;
+                          ]
+              else
+                let path = default_missing_root inputs in
+                missing path
+                  [
+                    Printf.sprintf
+                      "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
+                      path;
+                  ]
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in

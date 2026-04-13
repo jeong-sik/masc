@@ -1,0 +1,7 @@
+(test
+ (name test_session_tracker)
+ (libraries session_tracker alcotest))
+
+(test
+ (name test_session_tracker_qa)
+ (libraries alcotest))

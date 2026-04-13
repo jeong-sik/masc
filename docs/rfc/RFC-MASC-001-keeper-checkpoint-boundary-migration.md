@@ -73,9 +73,17 @@ memory_summary: ...
 
 문제:
 
-1. **LLM context 오염**: [STATE] 블록이 LLM에게 보이면 LLM이 이를 모방하거나 조작할 수 있다.
-2. **Board 데이터 오염**: strip하지 않으면 board post에 [STATE]가 노출.
-3. **구조화되지 않은 데이터**: 텍스트 파싱에 의존하므로 포맷 변경 시 파서 깨짐. OAS Checkpoint의 structured field로 대체하면 타입 안전.
+1. **Context Window 낭비 (4중 중복)**: 동일한 keeper state 정보가 4곳에 중복 저장됨:
+   - 매 turn assistant message 텍스트 ([STATE]...[/STATE])
+   - `Checkpoint.working_context` (structured)
+   - `memory_bank` (goal/progress/next로 파싱 저장)
+   - `meta.continuity_summary` (텍스트 복사)
+   
+   매 turn마다 [STATE] 블록이 message history에 누적되므로, compaction 시 stale한 과거 [STATE]가 context window를 잡아먹는다. 50-turn keeper 세션에서 [STATE] 블록만 ~15-25KB를 소비할 수 있고, 이 중 최신 1건 외에는 전부 stale 데이터다.
+2. **LLM context 오염**: [STATE] 블록이 LLM에게 보이면 LLM이 이를 모방하거나 조작할 수 있다. 또한 오래된 turn의 stale [STATE]가 현재 state와 충돌하여 LLM이 혼란받는다.
+3. **Board 데이터 오염**: strip하지 않으면 board post에 [STATE]가 노출.
+4. **구조화되지 않은 데이터**: 텍스트 파싱에 의존하므로 포맷 변경 시 파서 깨짐. OAS Checkpoint의 structured field로 대체하면 타입 안전.
+5. **Compaction 품질 저하**: context_reducer가 오래된 message를 요약할 때 [STATE] 블록을 "의미 있는 내용"으로 취급하여 ��약에 포함시킬 수 있다. 이는 compaction 결과의 signal-to-noise ratio를 낮춘다.
 
 ## Design
 
@@ -147,7 +155,7 @@ let extract_state checkpoint =
 
 LLM이 자유텍스트로 상태를 보고하는 것 자체를 폐지하고, keeper의 상태는 **코드 로직으로만** 결정한다 (deterministic boundary).
 
-**주의**: 현재 11-state lifecycle의 일부 전이가 `[STATE]` 블록 내용에 의존하는지 Phase 1 전에 반드시 확인해야 한다. 만약 LLM이 `[STATE]` 블록으로 `keeper_phase`를 보고하고 이것이 state transition trigger로 사용된다면, 해당 전이 경로를 코드 기반(tool call result, turn outcome, 외부 이벤트)으로 먼저 전환해야 한다. 이 경우 Phase 0(전이 경로 감사)을 추가한다.
+**Phase 0 감사 결과 (2026-04-13 완료)**: `keeper_state_machine.ml`의 `derive_phase()`는 순수 boolean conditions만 사용. [STATE] 블록은 11-state lifecycle 전이에 **영향 없음**. [STATE]가 사용되는 6개 경로(memory_bank, continuity_summary, prompt injection, checkpoint patching, world_observation, text stripping)는 모두 정보 전달만 수행하고 결정에 관여하지 않음. Phase 1을 안전하게 시작 가능.
 
 ## Verification
 
@@ -186,10 +194,10 @@ rg 'VIOLATION\|Partial complete.*working_context\|text marker' docs/OAS-MASC-BOU
 
 **모든 Phase는 독립 세션에서 수행. `keeper_agent_run.ml` 수정이 RFC-MASC-004와 겹치므로 merge 순서 조율 필요.**
 
-### Phase 0: 전이 경로 감사 (코드 아님, 1일)
-- `rg 'keeper_phase\|state.*transition\|[STATE].*phase' lib/keeper/` 전수 확인
-- 11-state lifecycle 중 [STATE] 텍스트에 의존하는 전이 경로 목록 작성
-- 의존하는 경로가 있으면 code-based trigger 전환 방안 추가 (Phase 1 전제 조건)
+### Phase 0: 전이 경로 감사 — **완료 (2026-04-13)**
+- `derive_phase()`는 순수 boolean conditions만 사용. [STATE] 의존성 없음.
+- [STATE] 사용 6경로 모두 information-only (decision 없음).
+- **결론**: Phase 1 안전. Phase 0 전제 조건 충족.
 
 ### Phase 1: Structured working_context (1 PR)
 - Checkpoint.working_context에 structured JSON 저장하는 경로 추가

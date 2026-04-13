@@ -417,3 +417,45 @@ class GateClientBase:
             self._note_transport_failure(f"stream http error: {e}")
         except Exception as e:  # pragma: no cover
             self._note_transport_failure(f"stream error: {e}")
+
+    # ── Activity Polling ─────────────────────────────────
+
+    async def poll_activity(
+        self,
+        *,
+        after_seq: int = 0,
+        kinds: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Poll recent activity events from the replay API.
+
+        Returns events with seq > after_seq.  Caller tracks the
+        high-water seq for incremental polling.
+        """
+        client = self._get_client()
+        base = self._message_url.rsplit("/api/", 1)[0]
+        url = f"{base}/api/v1/activity/events"
+
+        params: dict[str, str | int] = {
+            "after_seq": after_seq,
+            "limit": limit,
+        }
+        if kinds:
+            params["kinds"] = ",".join(kinds)
+
+        try:
+            resp = await client.get(
+                url,
+                params=params,
+                timeout=httpx.Timeout(timeout=10.0, connect=5.0),
+            )
+            if resp.status_code >= 400:
+                return []
+            data: object = resp.json()
+            if isinstance(data, dict):
+                events = data.get("events", [])
+                if isinstance(events, list):
+                    return [cast(dict[str, Any], e) for e in events if isinstance(e, dict)]
+        except Exception as e:  # pragma: no cover
+            logger.warning("Activity poll error: %s", e)
+        return []

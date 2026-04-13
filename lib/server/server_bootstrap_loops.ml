@@ -78,7 +78,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = match event with
-      | Board_dispatch.Post_created { post_id; author; title; hearth } ->
+      | Board_dispatch.Post_created { post_id; author; title; hearth; _ } ->
           let base = [("type", `String "post_created");
                       ("post_id", `String post_id);
                       ("author", `String author);
@@ -108,7 +108,43 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ("jsonrpc", `String "2.0");
       ("method", `String "notifications/board");
       ("params", params)
-    ]));
+    ]);
+    (* Emit activity event so Discord/external connectors can detect board posts *)
+    let activity_kind, activity_actor, activity_subject, activity_payload = match event with
+      | Board_dispatch.Post_created { post_id; author; title; content; hearth } ->
+          let base = [("post_id", `String post_id); ("title", `String title);
+                      ("content", `String content); ("author", `String author)] in
+          let payload_fields = match hearth with
+            | Some h -> ("hearth", `String h) :: base
+            | None -> base
+          in
+          ("board.posted",
+           Activity_graph.entity ~kind:"agent" author,
+           Some (Activity_graph.entity ~kind:"post" post_id),
+           `Assoc payload_fields)
+      | Board_dispatch.Comment_added { post_id; comment_id; author } ->
+          ("board.commented",
+           Activity_graph.entity ~kind:"agent" author,
+           Some (Activity_graph.entity ~kind:"post" post_id),
+           `Assoc [("post_id", `String post_id); ("comment_id", `String comment_id);
+                   ("author", `String author)])
+      | Board_dispatch.Post_voted { post_id; voter; direction } ->
+          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          ("board.voted",
+           Activity_graph.entity ~kind:"agent" voter,
+           Some (Activity_graph.entity ~kind:"post" post_id),
+           `Assoc [("post_id", `String post_id); ("direction", `String dir)])
+      | Board_dispatch.Comment_voted { comment_id; voter; direction } ->
+          let dir = match direction with Board.Up -> "up" | Board.Down -> "down" in
+          ("board.voted",
+           Activity_graph.entity ~kind:"agent" voter,
+           Some (Activity_graph.entity ~kind:"comment" comment_id),
+           `Assoc [("comment_id", `String comment_id); ("direction", `String dir)])
+    in
+    ignore (Activity_graph.emit state.room_config
+      ~actor:activity_actor ?subject:activity_subject
+      ~kind:activity_kind ~payload:activity_payload
+      ~tags:["board"; activity_kind] ()));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
      can react to new tasks, mentions, or room activity immediately.
      Room_state.on_broadcast_mention is the active path (Room.broadcast uses

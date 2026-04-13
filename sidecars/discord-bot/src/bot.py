@@ -107,6 +107,7 @@ class GateBot(discord.Client):
         self._last_gate_health_at = ""
         self._last_ready_at = ""
         self._status_task: asyncio.Task[None] | None = None
+        self._activity_task: asyncio.Task[None] | None = None
         self._write_runtime_status(connected_override=False)
 
     async def setup_hook(self) -> None:
@@ -119,11 +120,19 @@ class GateBot(discord.Client):
         self.tree.add_command(keeper_audit)  # pyright: ignore[reportUnknownArgumentType]
         await self.tree.sync()
         self._status_task = asyncio.create_task(self._status_heartbeat_loop())
+        self._activity_task = asyncio.create_task(self._activity_subscriber_loop())
         self._write_runtime_status()
         logger.info("Slash commands synced")
 
     async def close(self) -> None:
         """Release resources on shutdown."""
+        if self._activity_task is not None:
+            self._activity_task.cancel()
+            try:
+                await self._activity_task
+            except asyncio.CancelledError:
+                pass
+            self._activity_task = None
         if self._status_task is not None:
             self._status_task.cancel()
             try:
@@ -286,6 +295,118 @@ class GateBot(discord.Client):
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.warning("Discord status heartbeat failed: %s", exc)
             await asyncio.sleep(interval)
+
+    @staticmethod
+    def _normalize_keeper_name(raw: str) -> str:
+        """Normalize keeper name for matching.
+
+        Board authors use 'keeper-sangsu', bindings use 'keeper-sangsu-agent'.
+        Strip the '-agent' suffix and 'keeper-' prefix to get the bare name,
+        then compare bare names.
+        """
+        name = raw.strip().lower()
+        if name.endswith("-agent"):
+            name = name[: -len("-agent")]
+        if name.startswith("keeper-"):
+            name = name[len("keeper-") :]
+        return name
+
+    def _channels_for_keeper(self, keeper_name: str) -> list[int]:
+        """Return Discord channel IDs bound to the given keeper."""
+        self._maybe_reload_bindings()
+        normalized = self._normalize_keeper_name(keeper_name)
+        return [
+            int(ch_id)
+            for ch_id, name in self.keeper_bindings.items()
+            if self._normalize_keeper_name(name) == normalized
+        ]
+
+    async def _activity_subscriber_loop(self) -> None:
+        """Poll MASC activity events and push keeper board posts to Discord."""
+        poll_interval = 10  # seconds
+        last_seq = 0
+        # Start from current high-water mark to avoid replaying old events
+        try:
+            events = await self.gate.poll_activity(
+                kinds=["board.posted", "board.commented"],
+                limit=1,
+            )
+            if events:
+                last_seq = max(int(e.get("seq", 0)) for e in events)
+                logger.info("Activity poller starting from seq %d", last_seq)
+        except Exception:  # pragma: no cover
+            pass
+
+        while True:
+            try:
+                events = await self.gate.poll_activity(
+                    after_seq=last_seq,
+                    kinds=["board.posted", "board.commented"],
+                    limit=50,
+                )
+                for event in events:
+                    seq = int(event.get("seq", 0))
+                    if seq > last_seq:
+                        last_seq = seq
+                    await self._handle_activity_event(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Activity poller error: %s", exc)
+            await asyncio.sleep(poll_interval)
+
+    async def _handle_activity_event(self, event: dict[str, Any]) -> None:
+        """Forward a board event to bound Discord channels."""
+        kind = str(event.get("kind", ""))
+        actor_info = event.get("actor", {})
+        if not isinstance(actor_info, dict):
+            return
+        actor_id = str(actor_info.get("id", ""))
+
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            return
+
+        # Only forward keeper-originated board events
+        if not actor_id.startswith("keeper-"):
+            return
+
+        # Extract keeper name from actor id (e.g., "keeper-sangsu-agent" -> "sangsu")
+        keeper_name = actor_id
+
+        channels = self._channels_for_keeper(keeper_name)
+        if not channels:
+            return
+
+        # Build a concise message from the event
+        text = self._format_board_event(kind, keeper_name, payload)
+        if not text:
+            return
+
+        for ch_id in channels:
+            channel = self.get_channel(ch_id)
+            if channel is None:
+                try:
+                    channel = await self.fetch_channel(ch_id)
+                except discord.HTTPException:
+                    continue
+            if isinstance(channel, discord.abc.Messageable):
+                try:
+                    await channel.send(text[:2000])
+                except discord.HTTPException as exc:
+                    logger.warning("Failed to push to channel %s: %s", ch_id, exc)
+
+    def _format_board_event(
+        self,
+        kind: str,
+        keeper_name: str,
+        payload: dict[str, Any],
+    ) -> str:
+        """Format a board event as a Discord message."""
+        content = str(payload.get("content", ""))
+        if not content:
+            return ""
+        return strip_state_blocks(content)
 
     def is_admin(self, interaction: discord.Interaction) -> bool:
         member = interaction.user

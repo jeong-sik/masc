@@ -29,7 +29,7 @@ type keeper_board_signal = {
 }
 
 type board_sse_event =
-  | Post_created of { post_id : string; author : string; title : string; hearth : string option }
+  | Post_created of { post_id : string; author : string; title : string; content : string; hearth : string option }
   | Comment_added of { post_id : string; comment_id : string; author : string }
   | Post_voted of { post_id : string; voter : string; direction : Board.vote_direction }
   | Comment_voted of { comment_id : string; voter : string; direction : Board.vote_direction }
@@ -172,7 +172,8 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
             };
           emit_board_sse_event
             (Post_created
-               { post_id = pid; author = auth; title = post.title; hearth = post.hearth });
+               { post_id = pid; author = auth; title = post.title;
+                 content = post.content; hearth = post.hearth });
           ok
       | Error _ as err -> err)
 

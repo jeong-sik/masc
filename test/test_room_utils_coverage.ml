@@ -27,12 +27,9 @@ let with_env name value f =
 let with_envs bindings f =
   List.fold_right (fun (name, value) acc -> fun () -> with_env name value acc) bindings f ()
 
-let pg_env_bindings ?masc_storage_type ?masc_postgres_url ?database_url
-    ?supabase_db_url ?sb_pg_url () =
+let pg_env_bindings ?masc_storage_type ?supabase_db_url ?sb_pg_url () =
   [
     ("MASC_STORAGE_TYPE", masc_storage_type);
-    ("MASC_POSTGRES_URL", masc_postgres_url);
-    ("DATABASE_URL", database_url);
     ("SUPABASE_DB_URL", supabase_db_url);
     ("SB_PG_URL", sb_pg_url);
   ]
@@ -447,13 +444,6 @@ let test_storage_type_defaults_to_filesystem () =
       check string "defaults to filesystem" "filesystem"
         (Room_utils.storage_type_from_env ()))
 
-let test_storage_type_explicit_postgres () =
-  with_envs
-    (pg_env_bindings ~masc_storage_type:"postgres" ())
-    (fun () ->
-      check string "explicit postgres coerces to filesystem" "filesystem"
-        (Room_utils.storage_type_from_env ()))
-
 let test_storage_type_legacy_url_does_not_auto_select () =
   let url = "postgresql://supabase.example/test_room_utils" in
   with_envs
@@ -468,50 +458,6 @@ let test_storage_type_auto_is_deprecated () =
     (fun () ->
       check string "auto falls back to filesystem" "filesystem"
         (Room_utils.storage_type_from_env ()))
-
-let test_backend_config_for_requires_explicit_postgres () =
-  let url = "postgresql://sb.example/test_backend_config" in
-  (* Legacy URL alone should NOT select postgres. *)
-  with_envs
-    (pg_env_bindings ~sb_pg_url:url ())
-    (fun () ->
-      let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
-      check bool "legacy url alone defaults to filesystem" true
-        (match cfg.backend_type with
-         | Backend_types.FileSystem -> true
-         | _ -> false));
-  (* Explicit postgres selection is now coerced to filesystem. *)
-  with_envs
-    (pg_env_bindings ~masc_storage_type:"postgres" ~masc_postgres_url:url ())
-    (fun () ->
-      let cfg = Room_utils.backend_config_for "/tmp/test-room-utils" in
-      check bool "explicit postgres still resolves to filesystem" true
-        (match cfg.backend_type with
-         | Backend_types.FileSystem -> true
-         | _ -> false);
-      check (option string) "postgres url ignored" None cfg.postgres_url)
-
-let test_postgres_url_from_env_ignores_legacy_without_masc_url () =
-  let raw_url =
-    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:6543/postgres"
-  in
-  with_envs
-    (pg_env_bindings ~sb_pg_url:raw_url ())
-    (fun () ->
-      check (option string) "returns None without MASC_POSTGRES_URL"
-        None
-        (Room_utils.postgres_url_from_env ()))
-
-let test_postgres_url_from_env_uses_masc_postgres_url () =
-  let url =
-    "postgresql://postgres:secret@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
-  in
-  with_envs
-    (pg_env_bindings ~masc_postgres_url:url ())
-    (fun () ->
-      check (option string) "MASC_POSTGRES_URL ignored"
-        None
-        (Room_utils.postgres_url_from_env ()))
 
 (* ============================================================
    safe_filename Tests
@@ -595,7 +541,6 @@ let make_test_config ~base_path ~cluster_name : Room_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
-    postgres_url = None;
     node_id = "test-node";
     cluster_name;
     pubsub_max_messages = 1000;
@@ -746,16 +691,8 @@ let () =
     ];
     "storage_backend_selection", [
       test_case "defaults to filesystem" `Quick test_storage_type_defaults_to_filesystem;
-      test_case "explicit postgres" `Quick test_storage_type_explicit_postgres;
       test_case "legacy url does not auto select" `Quick test_storage_type_legacy_url_does_not_auto_select;
       test_case "auto is deprecated" `Quick test_storage_type_auto_is_deprecated;
-    ];
-    "backend_config_for", [
-      test_case "requires explicit postgres" `Quick test_backend_config_for_requires_explicit_postgres;
-      test_case "ignores legacy without MASC_POSTGRES_URL" `Quick
-        test_postgres_url_from_env_ignores_legacy_without_masc_url;
-      test_case "uses MASC_POSTGRES_URL" `Quick
-        test_postgres_url_from_env_uses_masc_postgres_url;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

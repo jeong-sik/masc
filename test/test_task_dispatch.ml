@@ -21,7 +21,6 @@ let with_temp_config f =
 
 let test_default_backend_jsonl () =
   Task_dispatch.reset_for_test ();
-  Alcotest.(check bool) "defaults to jsonl" false (Task_dispatch.is_postgres ());
   match Task_dispatch.backend () with
   | Task_dispatch.Jsonl -> ()
 
@@ -42,8 +41,8 @@ let test_reset_clears_pg_state_shape () =
   Task_dispatch.reset_for_test ();
   Task_dispatch.init_jsonl ();
   Task_dispatch.reset_for_test ();
-  Alcotest.(check bool) "reset returns to jsonl default" false
-    (Task_dispatch.is_postgres ())
+  match Task_dispatch.backend () with
+  | Task_dispatch.Jsonl -> ()
 
 let () =
   Alcotest.run "Task_dispatch"

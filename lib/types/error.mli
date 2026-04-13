@@ -40,7 +40,6 @@ type storage_error =
   | FileNotFound of string
   | FilePermissionDenied of string
   | FileLocked of string
-  | PostgresError of string
   | GitError of string
 
 (** MCP Protocol errors *)

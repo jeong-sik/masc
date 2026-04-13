@@ -68,10 +68,6 @@ let run_shell ?(env = []) ~cwd cmd =
   let scrubbed_env =
     [
       "MASC_STORAGE_TYPE";
-      "MASC_POSTGRES_URL";
-      "DATABASE_URL";
-      "SUPABASE_DB_URL";
-      "SB_PG_URL";
       "MASC_KEEPER_BOOTSTRAP_ENABLED";
       "MASC_MCP_PORT";
       "MASC_HOST";
@@ -171,7 +167,7 @@ let test_explicit_env_overrides_repo_env_files () =
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
       write_file (Filename.concat dir ".env.local")
-        "MASC_STORAGE_TYPE=filesystem\nSUPABASE_DB_URL=postgresql://from-env-file/db\n";
+        "MASC_STORAGE_TYPE=memory\n";
       make_fake_eio_exe dir;
       let capture = Filename.concat dir "captured-env.txt" in
       let code, stdout, stderr =
@@ -179,8 +175,7 @@ let test_explicit_env_overrides_repo_env_files () =
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture);
-              ("MASC_STORAGE_TYPE", "postgres");
-              ("SUPABASE_DB_URL", "postgresql://caller-override/db");
+              ("MASC_STORAGE_TYPE", "filesystem");
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", Filename.concat dir "config");
             ]
@@ -191,10 +186,8 @@ let test_explicit_env_overrides_repo_env_files () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
-      check bool "storage coerces to filesystem" true
+      check bool "explicit env wins over env file" true
         (contains_substring captured "MASC_STORAGE_TYPE=filesystem");
-      check bool "PG URL stripped" true
-        (contains_substring captured "SUPABASE_DB_URL=");
       check bool "base path passed through" true
         (contains_substring captured
            ("MASC_BASE_PATH=" ^ canonical_path dir));

@@ -45,9 +45,6 @@ let backend () =
       Log.Task.info "JSONL backend initialized (using Room.* functions).";
       Jsonl
 
-(** Check if PostgreSQL backend is active *)
-let is_postgres () = false
-
 (** {1 Dispatch Functions} *)
 
 (** Add a new task.
@@ -127,7 +124,3 @@ let delete_task config ~task_id =
       Room.write_backlog config new_backlog;
       Ok ()
 
-(** Migrate all tasks from JSONL to PostgreSQL *)
-let migrate_to_pg config =
-  let _ = config in
-  Error (IoError "PostgreSQL task backend removed")

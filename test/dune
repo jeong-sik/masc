@@ -6,12 +6,6 @@
  (_
   (env-vars
    (MASC_STORAGE_TYPE filesystem)
-   ; Unset all PostgreSQL URL env vars to prevent auto-detect PG backend.
-   ; postgres_url_from_env() checks these 4 in cascade order.
-   (MASC_POSTGRES_URL "")
-   (DATABASE_URL "")
-   (SUPABASE_DB_URL "")
-   (SB_PG_URL "")
    ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
    ; Prevent inherited shell MASC_BASE_PATH from binding tests to real
    ; workspace state. Tests that need a base path pass it explicitly.

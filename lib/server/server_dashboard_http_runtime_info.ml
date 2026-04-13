@@ -133,18 +133,6 @@ let runtime_diagnostics_json () =
                      ("kind", `String "agent_state");
                      ("message", `String message);
                    ])
-           | None when contains_substring ~needle:"MaxClientsInSessionMode" message
-                       || contains_substring
-                            ~needle:
-                              "Invalid concurrent usage of PostgreSQL connection"
-                            message ->
-               Some
-                 (`Assoc
-                   [
-                     ("ts", `String entry.ts);
-                     ("kind", `String "backend_pressure");
-                     ("message", `String message);
-                   ])
            | None -> None)
     |> take 8
   in
@@ -159,8 +147,7 @@ let runtime_diagnostics_json () =
   ( `List diagnostics,
     count "external_signal",
     count "state_repair",
-    count "agent_state",
-    count "backend_pressure" )
+    count "agent_state" )
 
 let run_dashboard_runtime_probe () =
   match Atomic.get dashboard_runtime_probe_runner_hook with
@@ -266,7 +253,7 @@ let runtime_resolution_json (config : Room.config) =
     | Some runtime, Some workspace -> not (String.equal runtime workspace)
     | _ -> false
   in
-  let diagnostics, signal_count, repair_count, agent_issue_count, backend_pressure_count =
+  let diagnostics, signal_count, repair_count, agent_issue_count =
     runtime_diagnostics_json ()
   in
   let warnings =
@@ -307,12 +294,7 @@ let runtime_resolution_json (config : Room.config) =
       :: acc
     else acc
     |> fun acc ->
-    if backend_pressure_count > 0 then
-      (Printf.sprintf
-         "Recent PostgreSQL pressure warnings detected (%d)."
-         backend_pressure_count)
-      :: acc
-    else acc
+    acc
     |> List.rev
   in
   let status = if warnings = [] then "ready" else "warn" in

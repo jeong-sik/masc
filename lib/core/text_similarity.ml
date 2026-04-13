@@ -1,3 +1,6 @@
+module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
+
 (** Text_similarity — pure text similarity functions.
 
     Lowercase + strip, word tokenization, byte-level n-gram extraction,
@@ -30,10 +33,10 @@ let normalize_for_similarity (s : string) : string list =
     |> String.split_on_char ' '
     |> List.filter (fun w -> String.length w >= 2)
   in
-  let tbl : (string, unit) Hashtbl.t = Hashtbl.create 32 in
+  let seen = ref StringSet.empty in
   List.filter (fun w ->
-    if Hashtbl.mem tbl w then false
-    else (Hashtbl.add tbl w (); true)
+    if StringSet.mem w !seen then false
+    else (seen := StringSet.add w !seen; true)
   ) words
 
 (** Extract character n-grams from a cleaned string.
@@ -52,12 +55,12 @@ let char_ngrams ~(n : int) (s : string) : string list =
   let len = String.length compact in
   if len < n then (if len > 0 then [compact] else [])
   else
-    let tbl : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+    let seen = ref StringSet.empty in
     let acc = ref [] in
     for i = 0 to len - n do
       let gram = String.sub compact i n in
-      if not (Hashtbl.mem tbl gram) then begin
-        Hashtbl.add tbl gram ();
+      if not (StringSet.mem gram !seen) then begin
+        seen := StringSet.add gram !seen;
         acc := gram :: !acc
       end
     done;
@@ -80,17 +83,13 @@ let jaccard_similarity (a : string) (b : string) : float =
   if ta = [] && tb = [] then 1.0
   else if ta = [] || tb = [] then 0.0
   else
-    let h : (string, bool) Hashtbl.t = Hashtbl.create 128 in
-    List.iter (fun w -> Hashtbl.replace h w false) ta;
-    let inter = ref 0 in
-    let uniq_b = ref 0 in
-    List.iter (fun w ->
-      match Hashtbl.find_opt h w with
-      | Some false ->
-          incr inter;
-          Hashtbl.replace h w true
-      | Some true -> ()
-      | None -> incr uniq_b
-    ) tb;
-    let union = (List.length ta) + !uniq_b in
-    if union = 0 then 0.0 else float_of_int !inter /. float_of_int union
+    let h = List.fold_left (fun m w -> StringMap.add w false m) StringMap.empty ta in
+    let inter, uniq_b =
+      List.fold_left (fun (inter, uniq_b) w ->
+        match StringMap.find_opt w h with
+        | Some false -> (inter + 1, uniq_b)
+        | Some true -> (inter, uniq_b)
+        | None -> (inter, uniq_b + 1)
+      ) (0, 0) tb in
+    let union = (List.length ta) + uniq_b in
+    if union = 0 then 0.0 else float_of_int inter /. float_of_int union

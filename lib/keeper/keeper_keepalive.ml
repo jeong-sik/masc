@@ -792,7 +792,12 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
          Previously, sticky_manual_reconcile retained the blocker even
          when auto-recoverable, causing permanent keeper stall. *)
       if sticky_manual_reconcile then begin
-        Keeper_manual_reconcile.clear ctx.config meta.name;
+        ignore (Keeper_manual_reconcile.clear ctx.config
+          ~keeper_name:meta.name
+          ~actor:"heartbeat_recovery"
+          ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
+          ~evidence_refs:[]
+          ~idempotency_key:None);
         Log.Keeper.info
           "heartbeat recovery: cleared reconcile blocker for %s (auto-recoverable, re-trigger risk low)"
           meta.name

@@ -2977,6 +2977,12 @@ let () =
           test_case "keeper_bash is NOT boring" `Quick (fun () ->
             check bool "keeper_bash"
               false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_bash"));
+          test_case "masc_board_list IS boring" `Quick (fun () ->
+            check bool "masc_board_list"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_board_list"));
+          test_case "keeper_board_list IS boring" `Quick (fun () ->
+            check bool "keeper_board_list"
+              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_board_list"));
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
         ] );

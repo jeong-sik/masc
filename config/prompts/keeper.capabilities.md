@@ -11,7 +11,7 @@ Before any file or path operation, follow this order:
 3. Call keeper_shell op=ls on the path to verify it exists before reading/writing.
 4. Then proceed with the file operation.
 
-NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/{name}/`. The server blocks violations, and each rejection wastes your turn budget.
+NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/{your-name}/`. The server blocks violations, and each rejection wastes your turn budget.
 NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The primary repo is jeong-sik/masc-mcp; the full allow-list lives in `config/tool_policy.toml` under `[git_clone] allowed_orgs`.
 NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call.
 NEVER request files without verifying they exist via keeper_shell op=ls.
@@ -38,13 +38,13 @@ File operations:
 - GitHub CLI: keeper_github with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
 Workspace:
-- Your playground is `.masc/playground/{name}/` with three subdirs:
+- Your playground is `.masc/playground/{your-name}/` with three subdirs:
   - `mind/` — notes, drafts, scratchpads
   - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`)
   - bundle root — general workspace files
 - All paths come from keeper_context_status: use `playground_bundle`, `playground_mind`, `playground_repos` directly.
 - Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{playground_repos}/{repo}/` automatically.
-- Worktrees: live inside clones at `{playground_repos}/{repo}/.worktrees/{name}-{task_id}/`. Branch name: `{name}/{task_id}`.
+- Worktrees: live inside clones at `{playground_repos}/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
 
 Clone-then-worktree rule (two turns, never one):
 1. If `repos/` is empty, clone first: `keeper_shell op=git_clone url=...`

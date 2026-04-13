@@ -48,7 +48,8 @@ Use to timestamp events, check elapsed time, or include current time in reports.
 name (your keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
 message_count, generation, last_model_used, continuity_summary, and your three \
 canonical playground paths (playground_bundle, playground_mind, playground_repos) \
-relative to the server base_path. Use when deciding whether to compact context, \
+relative to the server base_path, plus tool_paths (mind, repos, bundle) which you can pass \
+directly as path or cwd to keeper tools without prefix. Use when deciding whether to compact context, \
 extend turns, hand off to the next generation, or resolve a path without \
 string-interpolating your own keeper name.";
     input_schema = `Assoc [
@@ -242,7 +243,8 @@ let filesystem_tools : Types.tool_schema list = [
     name = "keeper_fs_read";
     description = "Read a file as text (truncated at max_bytes). \
 path is REQUIRED. \
-Good: path='lib/foo.ml'. Bad: path=''. \
+Paths resolve relative to your playground — use 'repos/X/lib/foo.ml' not '.masc/playground/your-name/repos/X/lib/foo.ml'. \
+Good: path='lib/foo.ml', path='repos/masc-mcp/lib/room.ml'. Bad: path=''. \
 For multi-file search, use keeper_shell with op=rg.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -279,6 +281,7 @@ let shell_tools : Types.tool_schema list = [
     description = "Run a safe project shell command. \
 ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone. \
 Read-only ops default to the keeper playground. \
+IMPORTANT: paths resolve automatically — use 'repos/X' not '.masc/playground/your-name/repos/X'. Never include the playground prefix in path or cwd. \
 Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
 bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
@@ -313,6 +316,7 @@ NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
 Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
 Runs in the keeper playground by default; use cwd to target an explicit allowed directory. \
+Paths resolve automatically — never include '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
 For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
     input_schema = `Assoc [
       ("type", `String "object");

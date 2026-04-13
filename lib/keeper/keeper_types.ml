@@ -1427,6 +1427,12 @@ let configured_keeper_names _config =
 ;;
 
 let keeper_names config =
+  (* Discovery uses persisted JSON (.masc/keepers/*.json) as primary source.
+     JSON files are scoped to the server's base_path, so test isolation works.
+     Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
+     JSON at boot by load_or_materialize_boot_meta, so they appear here too.
+     Sidecar files (.dataset, .manual_reconcile) are filtered by
+     is_keeper_meta_file. *)
   persisted_keeper_names config
 ;;
 

@@ -244,6 +244,46 @@ let test_resolve_keeper_path_allows_playground_write_default () =
     | Error err -> fail ("expected playground write path, got error: " ^ err)
     | Ok path -> check string "bare file defaults into playground" expected path)
 
+(* ── Path doubling tests ── *)
+
+(* Test playground_relative_unless_allowed_root directly: it must strip the
+   keeper's own playground prefix from relative paths so that the downstream
+   resolver doesn't double it.  E.g.
+     ".masc/playground/sangsu/repos" → "repos"
+   We test via resolve_keeper_path on a bare filename: if stripping works,
+   a path like ".masc/playground/sangsu/notes.md" becomes "notes.md" and
+   the function appends the playground root once, not twice. *)
+
+let test_playground_prefix_stripped_relative () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
+  with_temp_config (fun config ->
+    ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
+    let pg_root = Filename.concat
+      (KAP.project_root_of_config config)
+      (KAP.playground_path_of_keeper "sangsu") in
+    let target = Filename.concat pg_root "notes.md" in
+    ignore (Fs_compat.save_file_atomic target "test");
+    (* Pass with redundant playground prefix — should still resolve to the
+       same target (prefix stripped, then playground root prepended once). *)
+    match KES.resolve_keeper_path ~config ~meta
+            ~raw_path:".masc/playground/sangsu/notes.md" with
+    | Error err -> fail ("expected stripped path, got error: " ^ err)
+    | Ok path -> check string "prefix stripped" target path)
+
+let test_bare_filename_still_works () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"sangsu" () in
+  with_temp_config (fun config ->
+    ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
+    let pg_root = Filename.concat
+      (KAP.project_root_of_config config)
+      (KAP.playground_path_of_keeper "sangsu") in
+    let target = Filename.concat pg_root "hello.txt" in
+    ignore (Fs_compat.save_file_atomic target "test");
+    match KES.resolve_keeper_path ~config ~meta
+            ~raw_path:"hello.txt" with
+    | Error err -> fail ("bare filename should still work: " ^ err)
+    | Ok path -> check string "bare filename" target path)
+
 (* ── Runner ── *)
 
 let () =
@@ -290,5 +330,12 @@ let () =
             test_resolve_keeper_path_blocks_workspace_repo_write_default;
           test_case "bare writes default into playground" `Quick
             test_resolve_keeper_path_allows_playground_write_default;
+        ] );
+      ( "path_doubling_guard",
+        [
+          test_case "relative playground prefix stripped" `Quick
+            test_playground_prefix_stripped_relative;
+          test_case "bare filename still works after guard" `Quick
+            test_bare_filename_still_works;
         ] );
     ]

@@ -118,10 +118,52 @@ let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
   |> List.exists boundary
 
 (* Bare filenames default to the keeper playground, but rooted-looking relative
-   paths (for example "workspace/..." or "lib/...") keep project-root/boundary semantics. *)
+   paths (for example "workspace/..." or "lib/...") keep project-root/boundary semantics.
+
+   Additionally, strip the keeper's own playground prefix when the path already
+   includes it.  Keeper LLMs sometimes construct paths like
+   ".masc/playground/<name>/repos" (relative) or
+   "<base>/.masc/playground/<name>/.masc/playground/<name>/repos" (absolute,
+   doubled) because they concatenate the playground root they see in tool
+   output with the playground-relative path from the prompt.  Stripping early
+   prevents the downstream resolver from doubling the prefix again. *)
 let playground_relative_unless_allowed_root ~(config : Room.config)
     ~(meta : keeper_meta) (raw : string) : string =
   let trimmed = String.trim raw in
+  (* 1. Strip keeper's playground prefix from relative paths.
+     E.g. ".masc/playground/masc-improver/repos" → "repos" *)
+  let pg_bundle = Playground_paths.bundle_root meta.name in
+  let trimmed =
+    if Filename.is_relative trimmed
+       && String.length trimmed >= String.length pg_bundle
+       && String.starts_with ~prefix:pg_bundle trimmed
+    then
+      let rest = String.sub trimmed (String.length pg_bundle)
+                   (String.length trimmed - String.length pg_bundle) in
+      let stripped = if rest = "" then "." else rest in
+      Log.Keeper.debug "playground_relative: stripped prefix %S → %S"
+        trimmed stripped;
+      stripped
+    else trimmed
+  in
+  (* 2. Fix doubled playground prefix in absolute paths.
+     E.g. "/base/.masc/playground/X/.masc/playground/X/repos" →
+          "/base/.masc/playground/X/repos" *)
+  let trimmed =
+    if not (Filename.is_relative trimmed) then
+      let pg_root = keeper_playground_root ~config ~meta in
+      let doubled_prefix = pg_root ^ "/" ^ pg_bundle in
+      if String.starts_with ~prefix:doubled_prefix trimmed then
+        let rest = String.sub trimmed
+                     (String.length doubled_prefix)
+                     (String.length trimmed - String.length doubled_prefix) in
+        let fixed = Filename.concat pg_root rest in
+        Log.Keeper.debug "playground_relative: fixed doubled abs %S → %S"
+          trimmed fixed;
+        fixed
+      else trimmed
+    else trimmed
+  in
   if trimmed = ""
      || not (Filename.is_relative trimmed)
      || String.contains trimmed '/'

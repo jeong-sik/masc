@@ -15,7 +15,7 @@ Repo worktrees live *inside* your playground clone at `.masc/playground/{your-na
 - Git branch: `{your-name}/<task_id>` (e.g. `sangsu/fix-bug`)
 - `masc_worktree_create` opens one under the first clone it finds in your `repos/` directory (alphabetical), or pass `repo_name=<clone>` to pick a specific one.
 - The returned path always starts with `.masc/playground/{your-name}/repos/`.
-- Never use a bare `.worktrees/...` path — the harness rejects it as `write_outside_playground_blocked`.
+- Never use a server-root-relative worktree path — the harness rejects it as `write_outside_playground_blocked`.
 - Clone the target repo first if `repos/` is empty.
 
 WRONG paths (these do not exist, never use them):

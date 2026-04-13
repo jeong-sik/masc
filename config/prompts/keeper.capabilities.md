@@ -44,7 +44,7 @@ Workspace:
   - bundle root — general workspace files
 - All paths come from keeper_context_status: use `playground_bundle`, `playground_mind`, `playground_repos` directly.
 - Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{playground_repos}/{repo}/` automatically.
-- Worktrees: live inside clones at `{playground_repos}/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
+- Worktrees: live inside clones at `.masc/playground/{your-name}/repos/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
 
 Clone-then-worktree rule (two turns, never one):
 1. If `repos/` is empty, clone first: `keeper_shell op=git_clone url=...`

@@ -790,7 +790,8 @@ let set_agent_shards (agent_name : string) (shards : string list) : unit =
         (List.sort_uniq String.compare shards) !agent_shards)
 
 let remove_agent_shards (agent_name : string) : unit =
-  agent_shards := StringMap.remove agent_name !agent_shards
+  Eio.Mutex.use_rw ~protect:true agent_shards_mutex (fun () ->
+    agent_shards := StringMap.remove agent_name !agent_shards)
 
 (** All predefined shards by name *)
 let all_shards : shard StringMap.t =

@@ -1181,25 +1181,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
       Eio.Fiber.yield ();
-      (* 2. Build unified prompt *)
-      let diversity_hint =
-        let entries =
-          Keeper_registry.tool_usage_of ~base_path:config.base_path meta.name
-        in
-        if entries = [] then None
-        else
-          let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
-          let available_tools =
-            Keeper_tool_policy.keeper_allowed_tool_names meta
-          in
-          let summary =
-            Keeper_tool_diversity.compute_diversity ~available_tools stats
-          in
-          Keeper_tool_diversity.diversity_hint summary
-      in
+      (* 2. Build unified prompt — diversity entropy recorded in decision_audit
+         (keeper_keepalive.ml), not injected into prompt (#6814). *)
       let system_prompt, user_message =
         Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
-          ~observation ?diversity_hint ()
+          ~observation ()
       in
       Eio.Fiber.yield ();
       let base_dir = session_base_dir config in

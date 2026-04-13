@@ -1026,6 +1026,22 @@ let run_keepalive_unified_turn
       (* Phase A2: record decision in audit trail (skip all work when disabled) *)
       if Keeper_decision_audit.audit_enabled () then begin
         let audit_wall_clock = Time_compat.now () in
+        let tool_diversity_entropy =
+          let entries =
+            Keeper_registry.tool_usage_of
+              ~base_path:ctx.config.base_path meta_after_triage.name
+          in
+          if entries = [] then None
+          else
+            let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
+            let available_tools =
+              Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
+            in
+            let summary =
+              Keeper_tool_diversity.compute_diversity ~available_tools stats
+            in
+            Some summary.normalized_entropy
+        in
         Keeper_decision_audit.append
           ~keeper_name:meta_after_triage.name
           (Keeper_decision_audit.make
@@ -1036,7 +1052,8 @@ let run_keepalive_unified_turn
              ~generation:meta_after_triage.runtime.generation
              ~heartbeat_verdict:Heartbeat_smart.Emit
              ~turn_verdict:turn_decision.verdict
-             ~wall_clock:audit_wall_clock ());
+             ~wall_clock:audit_wall_clock
+             ?tool_diversity_entropy ());
         Keeper_decision_audit.flush_if_needed
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name

@@ -30,12 +30,15 @@ type decision_record = {
   heartbeat_verdict : Heartbeat_smart.decision;
   turn_verdict : Keeper_world_observation.turn_verdict;
   wall_clock : float;
+  tool_diversity_entropy : float option;
 }
 
 let make ~cycle_id ~keeper_name ~generation ?snapshot
-    ~heartbeat_verdict ~turn_verdict ~wall_clock () =
+    ~heartbeat_verdict ~turn_verdict ~wall_clock
+    ?tool_diversity_entropy () =
   { cycle_id; keeper_name; generation; snapshot;
-    heartbeat_verdict; turn_verdict; wall_clock }
+    heartbeat_verdict; turn_verdict; wall_clock;
+    tool_diversity_entropy }
 
 (* ================================================================ *)
 (* Serialization                                                    *)
@@ -66,6 +69,9 @@ let to_json (r : decision_record) : Yojson.Safe.t =
       (List.map (fun s -> `String s)
          (Keeper_world_observation.verdict_reasons_to_strings r.turn_verdict));
     "wall_clock", `Float r.wall_clock;
+    "tool_diversity_entropy", (match r.tool_diversity_entropy with
+      | Some e -> `Float e
+      | None -> `Null);
   ]
 
 (* ================================================================ *)

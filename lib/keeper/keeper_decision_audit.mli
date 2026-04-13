@@ -29,6 +29,7 @@ val make :
   heartbeat_verdict:Heartbeat_smart.decision ->
   turn_verdict:Keeper_world_observation.turn_verdict ->
   wall_clock:float ->
+  ?tool_diversity_entropy:float ->
   unit ->
   decision_record
 

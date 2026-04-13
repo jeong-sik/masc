@@ -83,7 +83,7 @@ let create ~config ~task_id ?(scope = Worker_types.Limited_code_change)
     | Some worktree_path ->
       let branch_name =
         extract_branch_name msg
-        |> Option.value ~default:(Printf.sprintf "%s/%s" agent_name task_id)
+        |> Option.value ~default:(Playground_paths.worktree_branch_name agent_name task_id)
       in
       (* Resolve git root for symlink *)
       let repo_root =

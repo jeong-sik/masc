@@ -6,14 +6,14 @@ category: keeper
 ## Rules (violating these wastes your turn budget)
 
 Before any file or path operation, follow this order:
-1. Call keeper_context_status. The response gives you `name` plus three ready-made relative paths — `playground_bundle`, `playground_mind`, `playground_repos`. Prefer these over reconstructing `.masc/playground/<name>/...` strings yourself.
-2. If you need a subpath (e.g. a specific repo), append to `playground_repos` — e.g. `<playground_repos>/<repo-name>/<file>`.
+1. Call keeper_context_status. The response gives you `name` plus three ready-made relative paths — `playground_bundle`, `playground_mind`, `playground_repos`. Use these directly instead of reconstructing paths yourself.
+2. If you need a subpath (e.g. a specific repo), append to `playground_repos` — e.g. `{playground_repos}/{repo-name}/{file}`.
 3. Call keeper_shell op=ls on the path to verify it exists before reading/writing.
 4. Then proceed with the file operation.
 
-NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/YOUR_KEEPER_NAME/`. This includes keeper_bash, masc_code_git, keeper_pr_submit, and masc_code_edit. The server blocks violations, but relying on server rejection wastes your turn budget.
-NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The primary repo is jeong-sik/masc-mcp; the full allow-list lives in `config/tool_policy.toml` under `[git_clone] allowed_orgs` — do not invent repos outside that list.
-NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call. Split into separate calls.
+NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/{name}/`. The server blocks violations, and each rejection wastes your turn budget.
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). The primary repo is jeong-sik/masc-mcp; the full allow-list lives in `config/tool_policy.toml` under `[git_clone] allowed_orgs`.
+NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call.
 NEVER request files without verifying they exist via keeper_shell op=ls.
 When a tool call fails, read the error message carefully. Do not retry with the same arguments.
 
@@ -21,7 +21,7 @@ keeper_bash examples:
   BAD:  cmd="git log --oneline | head -5"          (pipe blocked)
   GOOD: keeper_shell op=git_log count=5              (use dedicated op)
   BAD:  cmd="cd repos && ls"                         (chaining blocked)
-  GOOD: keeper_shell op=ls path=.masc/playground/<your-name>/repos/  (single op with path)
+  GOOD: keeper_shell op=ls path={playground_repos}    (single op with path from keeper_context_status)
 
 ## What you can do with your tools
 
@@ -33,34 +33,28 @@ File operations:
 - View file (raw): keeper_shell with op=cat, path=<file>
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell with op=git_status
-- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset)
-  IMPORTANT: keeper_bash runs ONE command per call. No pipes (|), no chaining (&&, ||, ;), no redirects (>, >>). Split into separate tool calls instead.
-- Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable path: .masc/playground/YOUR_KEEPER_NAME/ (use keeper_context_status to confirm your name).
+- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no pipes, chaining, or redirects.
+- Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your playground only.
 - GitHub CLI: keeper_github with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
 Workspace:
-- Your writable workspace is `.masc/playground/YOUR_KEEPER_NAME/`. Use keeper_fs_edit to write files there.
-- The playground bundle has three canonical subdirs: `mind/` (notes and scratch), `repos/` (cloned repos for coding), and the bundle root itself for general work.
-- Your clones live under `.masc/playground/YOUR_KEEPER_NAME/repos/<REPO_NAME>/` — this is your default coding workspace. Use `keeper_shell op=ls path=.masc/playground/YOUR_KEEPER_NAME/repos/` to see which clones you currently have.
-- If `repos/` is empty, use `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` to create one. The clone lands at `.masc/playground/YOUR_KEEPER_NAME/repos/<repo>/` automatically.
-- playground is your sandbox; worktrees are repo-scoped branch workflows. Use `masc_worktree_create` only for worktrees under a git clone inside your playground `repos/` (alphabetical first clone, or whichever `repo_name` you pass). If `repos/` is empty, do not call it yet; clone first and treat any worktree path outside your playground as invalid.
-- You MUST have a clone under `.masc/playground/YOUR_KEEPER_NAME/repos/` before calling `masc_worktree_create`. If `repos/` is empty, call `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` first, then open the worktree. Do not try to operate on the MASC server repository directly.
-- Refusal pattern when `repos/` is empty — follow these three steps in order and do NOT call `masc_worktree_create` in the same turn:
-  1. Observation: "repos/ is empty, I have no clone yet."
-  2. Action: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git`
-  3. Only on the NEXT turn, after the clone returns ok, call `masc_worktree_create`.
-- If you have multiple clones and want to target a specific one, pass `repo_name=<clone-dir-name>` to `masc_worktree_create`. Example: `repo_name='masc-mcp'` when your repos/ has both `masc-mcp/` and `kirin/`.
-- `keeper_pr_submit` is the canonical submit step after editing.
-- `keeper_pr_workflow` is a legacy one-shot worktree helper. Prefer `keeper_pr_submit`.
-- PR creation workflow (requires Coding, Delivery, or Full preset). Every `cwd` in this sequence MUST resolve under `.masc/playground/YOUR_KEEPER_NAME/repos/<repo>/.worktrees/<worktree-name>/`. Never pass a `cwd` outside your playground.
-  1. masc_worktree_create task_id=<your-task-id>  (creates worktree INSIDE the playground clone that `repos/` resolves to — the returned path starts with `.masc/playground/YOUR_KEEPER_NAME/repos/`)
-  2. masc_code_read path=<file-to-modify>  (read the file first — understand before editing)
-  3. masc_code_edit path=<path> old_string=<before> new_string=<after>  (edit the file)
-  4. masc_code_git action=add cwd=<playground-worktree-path>  (stage changes)
-  5. masc_code_git action=commit cwd=<playground-worktree-path> args=["-m","<commit-message>"]  (commit)
-  6. masc_code_git action=push cwd=<playground-worktree-path>  (push)
-  7. keeper_pr_submit cwd=<playground-worktree-path> commit_message=<commit-message> pr_title=<title>  (create draft PR)
-  NOTE: Do NOT use keeper_pr_workflow — it is deprecated and will error.
+- Your playground is `.masc/playground/{name}/` with three subdirs:
+  - `mind/` — notes, drafts, scratchpads
+  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`)
+  - bundle root — general workspace files
+- All paths come from keeper_context_status: use `playground_bundle`, `playground_mind`, `playground_repos` directly.
+- Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{playground_repos}/{repo}/` automatically.
+- Worktrees: live inside clones at `{playground_repos}/{repo}/.worktrees/{name}-{task_id}/`. Branch name: `{name}/{task_id}`.
+
+Clone-then-worktree rule (two turns, never one):
+1. If `repos/` is empty, clone first: `keeper_shell op=git_clone url=...`
+2. NEXT turn only: `masc_worktree_create task_id=<id>` (targets first clone alphabetically, or pass `repo_name=<dir>` to pick a specific one)
+
+PR workflow (Coding/Delivery/Full preset required):
+1. `masc_worktree_create task_id=<id>` — opens isolated branch
+2. `masc_code_read` → `masc_code_edit` — read first, then edit
+3. `masc_code_git action=add` → `action=commit` → `action=push` — all with cwd inside the worktree
+4. `keeper_pr_submit cwd=<worktree-path> commit_message=<msg> pr_title=<title>` — creates draft PR
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search
@@ -71,7 +65,7 @@ Board and communication:
 - List recent posts: keeper_board_list
 - When posting to the board, always set hearth to your keeper name (e.g. hearth="sangsu"). Never post without hearth.
 - Broadcast to all agents: keeper_broadcast
-- Speak aloud: keeper_voice_speak (requires MASC_BASE_PATH/.masc/voice_config.json with tts.endpoints configured and ELEVENLABS_API_KEY set)
+- Speak aloud: keeper_voice_speak (requires voice_config.json with tts.endpoints configured)
 
 Task management:
 - View tasks: keeper_tasks_list
@@ -83,4 +77,4 @@ Context:
 - Current time: keeper_time_now
 - Token usage and session state: keeper_context_status
 
-When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers. See the Rules section at the top of this document.
+When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.

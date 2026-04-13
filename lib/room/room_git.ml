@@ -127,9 +127,9 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
     match git_root ~base_path with
     | None -> Error (IoError "Cannot determine git root")
     | Some root ->
-        let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in
+        let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
         let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
-        let branch_name = Printf.sprintf "%s/%s" agent_name task_id in
+        let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
 
         (* Create .worktrees directory if not exists *)
         let worktrees_dir = Filename.concat root ".worktrees" in
@@ -178,9 +178,9 @@ let remove ~base_path ~agent_name ~task_id : string masc_result =
   match git_root ~base_path with
   | None -> Error (IoError "Cannot determine git root")
   | Some root ->
-      let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in
+      let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
       let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
-      let branch_name = Printf.sprintf "%s/%s" agent_name task_id in
+      let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
 
       if not (Sys.file_exists worktree_path) then
         Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))
@@ -248,7 +248,7 @@ let get_info ~base_path ~agent_name ~task_id =
   match git_root ~base_path with
   | None -> None
   | Some root ->
-      let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in
+      let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
       let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
-      let branch_name = Printf.sprintf "%s/%s" agent_name task_id in
+      let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
       if Sys.file_exists worktree_path then Some (worktree_path, branch_name) else None

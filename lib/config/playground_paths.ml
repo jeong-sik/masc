@@ -83,3 +83,24 @@ let repos_path (name : string) : string =
 (** All three bundle subdirs in canonical order. *)
 let bundle_paths (name : string) : string list =
   [ bundle_root name; mind_path name; repos_path name ]
+
+(** {1 Worktree Naming}
+
+    Worktree directory names and git branch names for keeper task
+    isolation.  [room_worktree.ml] and [worktree_remove_r] delegate
+    here so the naming convention exists in one place. *)
+
+(** Worktree directory name under [.worktrees/]:
+    ["<agent_name>-<task_id>"].  The caller is responsible for passing
+    either a raw or sanitized agent name — this function formats only.
+
+    Example: [worktree_dir_name "sangsu" "fix-bug"] -> ["sangsu-fix-bug"]. *)
+let worktree_dir_name (agent_name : string) (task_id : string) : string =
+  Printf.sprintf "%s-%s" agent_name task_id
+
+(** Git branch name for a keeper worktree:
+    ["<agent_name>/<task_id>"].
+
+    Example: [worktree_branch_name "sangsu" "fix-bug"] -> ["sangsu/fix-bug"]. *)
+let worktree_branch_name (agent_name : string) (task_id : string) : string =
+  Printf.sprintf "%s/%s" agent_name task_id

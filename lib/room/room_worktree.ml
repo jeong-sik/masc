@@ -209,11 +209,11 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
     match resolve_keeper_repo_root () with
     | Error e -> Error e
     | Ok root -> begin
-        let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in
+        let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
         match ensure_worktree_path root worktree_name with
         | Error e -> Error e
         | Ok (worktree_path, worktrees_dir) ->
-          let branch_name = Printf.sprintf "%s/%s" agent_name task_id in
+          let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
           let repo_name = Filename.basename root in
 
           (* Build worktree_info for task linking *)
@@ -321,7 +321,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
         Filename.concat config.base_path
           (Playground_paths.repos_path agent_name)
       in
-      let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in
+      let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
       let safe_is_dir path =
         try Sys.file_exists path && Sys.is_directory path
         with Sys_error _ -> false
@@ -363,11 +363,11 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
     match resolve_existing_worktree_root () with
     | Error e -> Error e
     | Ok root ->
-        let worktree_name = Printf.sprintf "%s-%s" agent_name task_id in
+        let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
         match ensure_worktree_path root worktree_name with
         | Error e -> Error e
         | Ok (worktree_path, _) -> begin
-            let branch_name = Printf.sprintf "%s/%s" agent_name task_id in
+            let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
 
             if not (Sys.file_exists worktree_path) then
               Error (IoError (Printf.sprintf "Worktree not found: %s" worktree_path))

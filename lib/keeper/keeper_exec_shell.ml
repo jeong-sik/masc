@@ -253,7 +253,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   match try_strip "repos/" (playground ^ "/repos/") with
   | Some _ as r -> r
   | None ->
-  match try_strip "playground/" ".masc/playground/" with
+  match try_strip "playground/" (Playground_paths.all_playgrounds_prefix ^ "/") with
   | Some _ as r -> r
   | None -> None
 
@@ -296,7 +296,7 @@ let resolve_keeper_shell_read_path
            (e.g. ".masc/playground/keeper/repos"), concatenating would
            produce a doubled path.  Detect and resolve against project
            root instead. *)
-        let pg = ".masc/playground" in
+        let pg = Playground_paths.all_playgrounds_prefix in
         let contains s sub =
           let sl = String.length s and nl = String.length sub in
           if nl > sl then false

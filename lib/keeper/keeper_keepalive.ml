@@ -1885,23 +1885,8 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     let live_meta = bootstrap_live_keeper_meta ~ctx m in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
     publish_keeper_started ~live_meta;
-    (* Start telemetry feedback proactive cache refresh loop *)
-    (match live_meta.telemetry_feedback_enabled with
-     | Some true ->
-       let window =
-         Option.value ~default:24 live_meta.telemetry_feedback_window_hours
-       in
-       let decision_log_path =
-         Keeper_types_support.keeper_decision_log_path ctx.config live_meta.name
-       in
-       Keeper_telemetry_feedback.start_refresh_loop
-         ~sw:ctx.sw ~clock:ctx.clock
-         ~keeper_name:live_meta.name
-         ~decision_log_path
-         ~window_hours:window
-         ~interval_sec:60
-         ~stop
-     | _ -> ());
+    (* Telemetry feedback refresh loop removed in #6814:
+       behavioral_stats no longer consumed by build_prompt. *)
     dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =

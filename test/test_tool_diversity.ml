@@ -28,27 +28,6 @@ let test_normalized_uniform () =
   let h = Masc_mcp.Keeper_tool_diversity.normalized_entropy ~n_categories:4 raw in
   check (float 0.001) "uniform = 1.0" 1.0 h
 
-let test_diversity_hint_low_entropy () =
-  let summary : Masc_mcp.Keeper_tool_diversity.diversity_summary = {
-    total_calls = 200; unique_tools = 2; available_tools = 20;
-    entropy = 0.5; normalized_entropy = 0.12;
-    underused_tools = ["web_search"; "fs_edit"; "bash"];
-    overused_tools = ["heartbeat"; "board_list"];
-  } in
-  let hint = Masc_mcp.Keeper_tool_diversity.diversity_hint summary in
-  check bool "low entropy triggers hint" true (Option.is_some hint);
-  let text = Option.get hint in
-  check bool "hint is non-empty" true (String.length text > 0)
-
-let test_diversity_hint_high_entropy () =
-  let summary : Masc_mcp.Keeper_tool_diversity.diversity_summary = {
-    total_calls = 200; unique_tools = 15; available_tools = 20;
-    entropy = 3.5; normalized_entropy = 0.81;
-    underused_tools = []; overused_tools = [];
-  } in
-  check (option string) "high entropy no hint" None
-    (Masc_mcp.Keeper_tool_diversity.diversity_hint summary)
-
 let test_stats_of_registry () =
   let entries : (string * Masc_mcp.Keeper_types.tool_call_entry) list = [
     ("tool_a", { count = 50; successes = 45; failures = 5; last_used_at = 0.0 });
@@ -104,8 +83,6 @@ let () =
           test_case "shannon_entropy single" `Quick test_shannon_entropy_single;
           test_case "shannon_entropy empty" `Quick test_shannon_entropy_empty;
           test_case "normalized uniform" `Quick test_normalized_uniform;
-          test_case "diversity_hint low entropy" `Quick test_diversity_hint_low_entropy;
-          test_case "diversity_hint high entropy" `Quick test_diversity_hint_high_entropy;
           test_case "stats_of_registry" `Quick test_stats_of_registry;
         ] );
       ( "qcheck",

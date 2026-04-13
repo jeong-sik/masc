@@ -105,12 +105,9 @@ let base_observation : WO.world_observation =
     unclaimed_task_count = 0;
     failed_task_count = 0;
     active_agent_count = 0;
-    room_signal_interpretation = None;
-    room_signal_digest_ref = None;
     last_turn_budget = None;
     last_tools_used = [];
     work_discovery_due = false;
-    behavioral_stats = None;
   }
 
 let sample_board_event : WO.pending_board_event =
@@ -306,56 +303,6 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
           check string "latest external author" "bob"
             (Option.value ~default:"" event.latest_external_author)
       | _ -> fail "expected one follow-up board event")
-
-let test_observe_collects_room_signal_when_enabled () =
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Unix.putenv "MASC_BASE_PATH" base_dir;
-      Masc_mcp.Board.reset_global_for_test ();
-      Masc_mcp.Board_dispatch.reset_for_test ();
-      Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
-      let create_post ~author ~title ~content =
-        match
-          Masc_mcp.Board_dispatch.create_post ~author ~title ~content
-            ~post_kind:Masc_mcp.Board.Human_post ~hearth:"ops" ()
-        with
-        | Ok post -> post
-        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
-      in
-      let root =
-        create_post ~author:"admin-keeper" ~title:"RBAC blockage"
-          ~content:
-            "All masc_* tools tested return unregistered_masc_tool. \
-             Operator intervention needed. keeper_* tools function normally."
-      in
-      (match
-         Masc_mcp.Board_dispatch.add_comment
-           ~post_id:(Masc_mcp.Board.Post_id.to_string root.id)
-           ~author:"keeper-a"
-           ~content:
-             "This contradicts the uniform block hypothesis. Access may be per-agent."
-           ()
-       with
-      | Ok _ -> ()
-      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
-      let obs =
-        WO.observe ~pending_board_events:(Some [])
-          ~config ~meta:room_signal_meta
-      in
-      match obs.room_signal_interpretation with
-      | Some interpretation ->
-          check string "primary room signal" "contested_belief"
-            (Masc_mcp.Meta_cognition.salience_to_string
-               interpretation.primary_salience);
-          check bool "room signal carries evidence refs" true
-            (interpretation.evidence_refs <> [])
-      | None -> fail "expected room signal interpretation")
 
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
@@ -2671,8 +2618,6 @@ let () =
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
-          test_case "collects room signal when enabled" `Quick
-            test_observe_collects_room_signal_when_enabled;
           test_case "scheduled turn uses cooldown only" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn respects cooldown" `Quick

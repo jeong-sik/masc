@@ -114,30 +114,6 @@ let compute_diversity ~(available_tools : string list)
     allow some specialization while catching extreme loops. *)
 let default_entropy_threshold = 0.35
 
-(** Generate a diversity hint string from entropy analysis.
-    Returns [None] when entropy is above threshold (no intervention needed).
-    Returns [Some hint] with specific tool suggestions otherwise.
-
-    NOTE: No longer injected into keeper prompt (#6814). Retained for
-    test coverage and potential future use. Entropy value is recorded
-    in decision_audit via [normalized_entropy] instead. *)
-let diversity_hint ?(threshold = default_entropy_threshold)
-    (summary : diversity_summary) : string option =
-  if summary.normalized_entropy >= threshold then None
-  else if summary.total_calls < 10 then None  (* too few calls to judge *)
-  else
-    let suggestions =
-      summary.underused_tools
-      |> List.filteri (fun i _ -> i < 5)
-    in
-    if suggestions = [] then None
-    else
-      let suggestion_str = String.concat ", " suggestions in
-      Some (Printf.sprintf
-        "[Tool Diversity: your recent tool usage is concentrated on a few tools \
-         (entropy=%.2f/1.0). Consider using: %s]"
-        summary.normalized_entropy suggestion_str)
-
 (** Convert in-memory tool_call_entry list (from Keeper_registry.tool_usage_of)
     into tool_stat list. This avoids file I/O and uses the live data. *)
 let stats_of_registry_entries

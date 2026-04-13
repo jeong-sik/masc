@@ -192,8 +192,8 @@ let test_parse_special_chars_password () =
 (* ============================================ *)
 (* Query generation snapshot tests              *)
 (* These verify the SQL that sprintf produces    *)
-*  so refactoring to parameterized queries can  *
-*  verify equivalence afterward                 *)
+(* so refactoring to parameterized queries can   *)
+(* verify equivalence afterward                  *)
 (* ============================================ *)
 
 let test_register_query_snapshot () =

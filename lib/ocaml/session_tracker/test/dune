@@ -1,6 +1,4 @@
-(test
- (name test_session_tracker)
- (libraries session_tracker alcotest))
+(include_subdirs no)
 
 (test
  (name test_session_tracker_qa)

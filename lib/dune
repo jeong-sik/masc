@@ -399,7 +399,6 @@
    keeper_cdal_contract
    proof_artifact_reader
    violation_record
-   token_usage_record
    cdal_types
    cdal_loader
    cdal_judge

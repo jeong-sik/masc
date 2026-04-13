@@ -1679,7 +1679,7 @@ let test_run_unified_turn_skips_non_executable_phase () =
           ()
       with
       | Error err ->
-          fail ("expected paused-phase skip, got error: " ^ Oas.Error.to_string err)
+          fail ("expected paused-phase skip, got error: " ^ Agent_sdk.Error.to_string err)
       | Ok updated ->
           check string "keeper name preserved" meta.name updated.name;
           check (option string) "phase remains paused after skipped turn"

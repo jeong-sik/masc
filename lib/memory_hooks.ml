@@ -1,7 +1,7 @@
 (** Memory_hooks — OAS hook adapter for hook-first memory injection.
 
-    RFC-MASC-004 Phase 1: Instead of imperatively pushing memory into
-    OAS [Memory.t] tiers before [Agent.run], this module injects memory
+    RFC-MASC-004: Instead of imperatively pushing memory into OAS
+    [Memory.t] tiers before [Agent.run], this module injects memory
     as text via [extra_system_context] in the [BeforeTurnParams] hook
     and flushes incrementally in the [AfterTurn] hook.
 
@@ -11,10 +11,12 @@
     The hook is composed (via [Hooks.compose]) with existing keeper hooks
     so existing safety/cost/tool-disclosure hooks remain untouched.
 
-    Feature flag: [MASC_MEMORY_HOOK_FIRST] (default false).
-    When false, the legacy [create_memory_full] / [flush_all] path is used.
+    Phase 1 introduced this as an opt-in path behind
+    [MASC_MEMORY_HOOK_FIRST]. Phase 2 made it the only path and
+    removed the feature flag and the legacy imperative code path.
 
-    @since v2.265.0 (RFC-MASC-004 Phase 1) *)
+    @since v2.265.0 (RFC-MASC-004 Phase 1)
+    @since v2.266.0 (RFC-MASC-004 Phase 2 — imperative path removed) *)
 
 (** Build an [extra_system_context] string from episodic, procedural,
     and institutional memory.

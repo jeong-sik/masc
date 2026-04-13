@@ -1,12 +1,12 @@
 (** Memory_hooks — OAS hook adapter for hook-first memory injection.
 
-    RFC-MASC-004 Phase 1: Injects memory as text via
-    [extra_system_context] in [BeforeTurnParams] and flushes
-    incrementally in [AfterTurn].
+    RFC-MASC-004: Injects memory as text via [extra_system_context]
+    in [BeforeTurnParams] and flushes incrementally in [AfterTurn].
 
-    Feature flag: [MASC_MEMORY_HOOK_FIRST] (default false).
+    This is the sole memory injection path since Phase 2 (v2.266.0).
 
-    @since v2.265.0 (RFC-MASC-004 Phase 1) *)
+    @since v2.265.0 (RFC-MASC-004 Phase 1)
+    @since v2.266.0 (RFC-MASC-004 Phase 2 — sole path) *)
 
 (** Create OAS hooks for hook-first memory injection.
 

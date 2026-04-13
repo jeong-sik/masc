@@ -31,6 +31,7 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 - `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md` is the boundary contract SSOT.
 - This spec keeps the implementation map, bridge inventory, and open structural gaps.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
 
 ---
@@ -415,6 +416,33 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | message marker leakage | Open | `[STATE]`, `[GOAL]`, memory-summary markers still carry domain semantics in raw text |
 | memory bridge hooks/callbacks | Open | seeding/flushing remains imperative in `memory_oas_bridge.ml` |
 | team-session bridge fidelity | Open | healthcheck still calls out projection/resource-health gaps |
+
+Checkpoint truth / replay semantics for the first three ledger items are
+further constrained by `docs/design/checkpoint-truth-and-replay-rfc.md`.
+
+### 12.1.1 Checkpoint Truth / Replay Phases
+
+Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
+
+| Phase | Scope | Primary modules | Expected output |
+|------|-------|-----------------|-----------------|
+| A | truth surface cleanup | `keeper_checkpoint_store`, `keeper_agent_run`, `keeper_post_turn` | native OAS checkpoint is documented and treated as runtime truth |
+| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `keeper_exec_shell`, `tool_code_write` | typed replay target facts and mutation-boundary rules |
+| C | wrapper reduction | `keeper_exec_context`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
+| D | optional delta path | `keeper_checkpoint_store`, `delta-checkpoint-read-path` | delta restore remains subordinate to full checkpoint truth |
+
+### 12.1.2 Active Tasks
+
+- **A1** native OAS checkpoint truth wording and fallback ordering
+- **A2** canonical vs derived continuity read-surface labeling
+- **B1** mutation-boundary typed fact inventory
+- **B2** side-effect class mapping against current write-gate behavior
+- **C1** `working_context` dependency inventory
+- **C2** raw marker leakage inventory (`[STATE]`, `[GOAL]`, memory-summary)
+- **D1** delta restore remains optimization-only
+
+Detailed implementation checklist lives in
+`docs/design/checkpoint-truth-replay-implementation-checklist.md`.
 
 ### 12.2 Boundary Audit Snapshot
 

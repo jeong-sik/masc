@@ -94,6 +94,7 @@
    dashboard_http_tool_quality
    dashboard_http_autoresearch
    dashboard_harness_health
+   dashboard_eval_feed
    dashboard_goals
    dashboard_feature_health
    dashboard_http_repo_synthesis

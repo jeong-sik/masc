@@ -1,3 +1,6 @@
+module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
+
 (** Drift Guard - truthful handoff integrity verification.
 
     Public tool surfaces should use this module directly so the product exposes
@@ -118,44 +121,36 @@ let tokenize (s : string) : string list =
     |> List.filter (fun token -> token <> "")
 
 let jaccard_similarity a b =
-  let set_a = Hashtbl.create 128 in
-  let set_b = Hashtbl.create 128 in
-  List.iter (fun token -> Hashtbl.replace set_a token ()) a;
-  List.iter (fun token -> Hashtbl.replace set_b token ()) b;
+  let set_a = List.fold_left (fun m t -> StringSet.add t m) StringSet.empty a in
+  let set_b = List.fold_left (fun m t -> StringSet.add t m) StringSet.empty b in
   let intersection =
-    Hashtbl.fold
-      (fun token () acc -> if Hashtbl.mem set_b token then acc + 1 else acc)
+    StringSet.fold
+      (fun token acc -> if StringSet.mem token set_b then acc + 1 else acc)
       set_a 0
   in
-  let union = Hashtbl.length set_a + Hashtbl.length set_b - intersection in
+  let union = StringSet.cardinal set_a + StringSet.cardinal set_b - intersection in
   if union = 0 then 1.0
   else float_of_int intersection /. float_of_int union
 
 let cosine_similarity a b =
-  let freq tbl token =
-    let count =
-      match Hashtbl.find_opt tbl token with
-      | Some n -> n
-      | None -> 0
-    in
-    Hashtbl.replace tbl token (count + 1)
+  let freq_add m token =
+    let prev = match StringMap.find_opt token m with Some n -> n | None -> 0 in
+    StringMap.add token (prev + 1) m
   in
-  let fa = Hashtbl.create 128 in
-  let fb = Hashtbl.create 128 in
-  List.iter (freq fa) a;
-  List.iter (freq fb) b;
+  let fa = List.fold_left freq_add StringMap.empty a in
+  let fb = List.fold_left freq_add StringMap.empty b in
   let dot =
-    Hashtbl.fold
+    StringMap.fold
       (fun token count acc ->
-        match Hashtbl.find_opt fb token with
+        match StringMap.find_opt token fb with
         | Some rhs -> acc +. float_of_int (count * rhs)
         | None -> acc)
       fa 0.0
   in
-  let norm tbl =
-    Hashtbl.fold
+  let norm m =
+    StringMap.fold
       (fun _token count acc -> acc +. float_of_int (count * count))
-      tbl 0.0
+      m 0.0
     |> sqrt
   in
   let na = norm fa in
@@ -163,12 +158,10 @@ let cosine_similarity a b =
   if na = 0.0 || nb = 0.0 then 0.0 else dot /. (na *. nb)
 
 let intersection_size a b =
-  let set_a = Hashtbl.create 128 in
-  let set_b = Hashtbl.create 128 in
-  List.iter (fun token -> Hashtbl.replace set_a token ()) a;
-  List.iter (fun token -> Hashtbl.replace set_b token ()) b;
-  Hashtbl.fold
-    (fun token () acc -> if Hashtbl.mem set_b token then acc + 1 else acc)
+  let set_a = List.fold_left (fun m t -> StringSet.add t m) StringSet.empty a in
+  let set_b = List.fold_left (fun m t -> StringSet.add t m) StringSet.empty b in
+  StringSet.fold
+    (fun token acc -> if StringSet.mem token set_b then acc + 1 else acc)
     set_a 0
 
 let classify_drift ~tokens_a ~tokens_b ~jacc ~cos =

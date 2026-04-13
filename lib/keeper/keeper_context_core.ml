@@ -930,7 +930,15 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     |> Option.map (fun checkpoint ->
       let sanitized, stats = sanitize_oas_checkpoint checkpoint in
       if checkpoint_sanitize_changed stats then begin
-        Log.Keeper.warn
+        let has_data_loss =
+          stats.dropped_blocks > 0
+          || stats.dropped_messages > 0
+          || stats.dropped_chars > 0
+        in
+        (if has_data_loss then
+           Log.Keeper.warn
+         else
+           Log.Keeper.debug)
           "keeper:%s checkpoint migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
           trace_id
           stats.dropped_blocks

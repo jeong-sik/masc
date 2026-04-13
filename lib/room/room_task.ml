@@ -908,9 +908,12 @@ let complete_task config ~agent_name ~task_id ~notes =
             (* Record task collaboration via hook (async, non-blocking) *)
             (try
                let active = (Room_state.read_state config).active_agents in
-               !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active
+               !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+               (* Hebbian: strengthen collaboration pattern *)
+               !Room_hooks.hebbian_on_task_done_fn config
+                 ~assignee:agent_name ~active_agents:active
              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-               Log.RoomTask.error "relation-materializer task hook error: %s"
+               Log.RoomTask.error "relation/hebbian task hook error: %s"
                  (Printexc.to_string exn));
             Printf.sprintf "✅ %s completed %s" agent_name task_id
           end
@@ -1096,6 +1099,14 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                               -. task_started_at_unix task.task_status)
                              *. 1000.0)))
                      ());
+              (* Hebbian: weaken collaboration pattern on cancellation *)
+              (try
+                 let active = (Room_state.read_state config).active_agents in
+                 !Room_hooks.hebbian_on_task_cancelled_fn config
+                   ~agent_name ~active_agents:active
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                 Log.RoomTask.error "hebbian task_cancelled hook error: %s"
+                   (Printexc.to_string exn));
               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
             end
       with

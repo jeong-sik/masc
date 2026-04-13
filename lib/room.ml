@@ -183,6 +183,26 @@ let () = Room_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
 (* Relation materializer — task done *)
 let () = Room_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
 
+(* Hebbian learning — strengthen on task completion *)
+let () = Room_hooks.hebbian_on_task_done_fn :=
+  (fun config ~assignee ~active_agents ->
+    List.iter (fun peer ->
+      if peer <> assignee then
+        (try Hebbian_eio.strengthen config ~from_agent:assignee ~to_agent:peer ()
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Log.Room.warn "hebbian strengthen failed: %s" (Printexc.to_string exn))
+    ) active_agents)
+
+(* Hebbian learning — weaken on task cancellation *)
+let () = Room_hooks.hebbian_on_task_cancelled_fn :=
+  (fun config ~agent_name ~active_agents ->
+    List.iter (fun peer ->
+      if peer <> agent_name then
+        (try Hebbian_eio.weaken config ~from_agent:agent_name ~to_agent:peer ()
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Log.Room.warn "hebbian weaken failed: %s" (Printexc.to_string exn))
+    ) active_agents)
+
 let () = Room_hooks.observe_agent_lifecycle_fn :=
   (fun config ~agent_id ~event_kind ~details ->
     observe_agent_lifecycle config ~agent_id ~event_kind ~details)

@@ -1754,7 +1754,38 @@ let run_turn
                "keeper:%s memory_write failed: %s"
                meta.name
                (Printexc.to_string exn));
-          (* Phase 2: Post-turn quality metrics — goal alignment + memory recall.
+          (* Episodic memory: create OAS episode from [STATE] snapshot.
+             Populates Memory.t so flush_episodes (AfterTurn hook)
+             persists to institution_episodes.jsonl. *)
+          (try
+             (match
+                Keeper_memory_policy.parse_state_snapshot_from_reply
+                  response_text
+              with
+             | Some snap ->
+               Memory_oas_bridge.store_episode_from_snapshot ~memory
+                 ~keeper_name:meta.name ~turn:result.turns
+                 ~trace_id:
+                   (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                 snap
+             | None -> ())
+           with exn ->
+             Log.Keeper.warn "keeper:%s episode_create failed: %s"
+               meta.name (Printexc.to_string exn));
+          (* Memory bank compaction: dedup + consolidate if over threshold. *)
+          (try
+             let compaction =
+               Keeper_memory_bank.compact_memory_bank_if_needed config meta
+             in
+             if compaction.performed then
+               Log.Keeper.info
+                 "keeper:%s memory_compacted before=%d after=%d dropped=%d"
+                 meta.name compaction.before_notes compaction.after_notes
+                 compaction.dropped_notes
+           with exn ->
+             Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
+               (Printexc.to_string exn));
+          (* Post-turn quality metrics — goal alignment + memory recall.
             Logged to decisions.jsonl for feedback loop analysis. *)
           (try
              let goal_score =

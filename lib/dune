@@ -433,6 +433,7 @@
    keeper_tool_affinity
    keeper_tag_dispatch
    keeper_exec_shared
+   keeper_failure_circuit_breaker
    keeper_exec_board
    keeper_exec_fs
    keeper_exec_shell

@@ -24,11 +24,7 @@ type error_class =
 let classify_error (error_msg : string) : error_class =
   if String.length error_msg = 0 then Other
   else
-    let contains sub = try
-      let _ = Str.search_forward (Str.regexp_string sub) error_msg 0 in
-      true
-    with Not_found -> false
-    in
+    let contains sub = String_util.contains_substring error_msg sub in
     if contains "path_not_found" then Path_not_found
     else if contains "path_not_in_allowed" then Path_not_allowed
     else if contains "cwd_not_directory" then Cwd_not_directory
@@ -74,7 +70,7 @@ let record_success ~keeper_name =
   let s = get_or_create keeper_name in
   s.consecutive_count <- 0
 
-let record_failure ~keeper_name ~(error_msg : string) : string option =
+let rec record_failure ~keeper_name ~(error_msg : string) : string option =
   let cls = classify_error error_msg in
   let s = get_or_create keeper_name in
   if cls = s.consecutive_class then

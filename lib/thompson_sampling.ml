@@ -1,5 +1,3 @@
-module StringMap = Map.Make (String)
-
 (** Thompson Sampling — Agent Selection with Fairness Guarantees
 
     Implements agent selection using Thompson Sampling
@@ -158,20 +156,19 @@ let priority_score ~trigger ~signal =
   float_of_int (trigger_priority trigger) +. normalized_subscore signal
 
 let best_pending_triggers pending_triggers =
-  let table =
-    List.fold_left
-      (fun (idx, table) (name, trigger) ->
-         match StringMap.find_opt name table with
-         | Some (_, existing)
-           when trigger_priority existing >= trigger_priority trigger ->
-             (idx + 1, table)
-         | Some _ | None ->
-             (idx + 1, StringMap.add name (idx, trigger) table))
-      (0, StringMap.empty) pending_triggers
-    |> snd
-  in
-  StringMap.bindings table
-  |> List.map (fun (name, (first_idx, trigger)) -> (first_idx, name, trigger))
+  let table = Hashtbl.create (List.length pending_triggers) in
+  List.iteri
+    (fun idx (name, trigger) ->
+       match Hashtbl.find_opt table name with
+       | Some (_, existing)
+         when trigger_priority existing >= trigger_priority trigger ->
+           ()
+       | Some _ | None ->
+           Hashtbl.replace table name (idx, trigger))
+    pending_triggers;
+  Hashtbl.fold
+    (fun name (selected_idx, trigger) acc -> (selected_idx, name, trigger) :: acc)
+    table []
   |> List.sort (fun (idx1, _, trigger1) (idx2, _, trigger2) ->
     match Int.compare (trigger_priority trigger2) (trigger_priority trigger1) with
     | 0 -> Int.compare idx1 idx2

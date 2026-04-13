@@ -802,6 +802,25 @@ let transition_task_r config ~agent_name ~task_id ~action
                ?notes:(if notes = "" then None else Some notes)
                ?reason:(if reason = "" then None else Some reason)
                ?duration_ms ~forced:force ());
+        (match action with
+         | Types.Done_action ->
+           (try
+              let active = (Room_state.read_state config).active_agents in
+              !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+              !Room_hooks.hebbian_on_task_done_fn config
+                ~assignee:agent_name ~active_agents:active
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+              Log.RoomTask.error "transition relation/hebbian done hook: %s"
+                (Printexc.to_string exn))
+         | Types.Cancel ->
+           (try
+              let active = (Room_state.read_state config).active_agents in
+              !Room_hooks.hebbian_on_task_cancelled_fn config
+                ~agent_name ~active_agents:active
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+              Log.RoomTask.error "transition hebbian cancel hook: %s"
+                (Printexc.to_string exn))
+         | Types.Claim | Types.Start | Types.Release -> ());
         Ok (Printf.sprintf "✅ %s %s → %s" task_id
               (task_status_to_string task.task_status)
               (task_status_to_string new_status))

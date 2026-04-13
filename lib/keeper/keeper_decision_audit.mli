@@ -61,3 +61,12 @@ val decision_pipeline_to_mermaid :
   tool_count:int ->
   recovery_floor_count:int ->
   string
+
+(** Generate a Mermaid stateDiagram-v2 for the Cascade FSM.
+    Shows the provider failover chain with accept/reject/exhaustion
+    transitions. [last_provider_result] highlights the provider that
+    served the most recent successful response. *)
+val cascade_fsm_to_mermaid :
+  models:string list ->
+  last_provider_result:string option ->
+  string

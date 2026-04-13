@@ -615,11 +615,28 @@ let handle_keeper_get_subroutes state req request reqd =
           ~tool_count
           ~recovery_floor_count
       in
+      let cascade_fsm_mermaid =
+        match meta with
+        | Ok (Some m) ->
+          let models = Oas_worker_named.default_model_strings
+            ~cascade_name:m.cascade_name
+          in
+          let last_model = m.runtime.usage.last_model_used in
+          let last_provider_result =
+            if last_model <> "" then Some last_model else None
+          in
+          Keeper_decision_audit.cascade_fsm_to_mermaid
+            ~models ~last_provider_result
+        | _ ->
+          Keeper_decision_audit.cascade_fsm_to_mermaid
+            ~models:["(unknown)"] ~last_provider_result:None
+      in
       let json = `Assoc [
         "keeper", `String name;
         "current_phase", `String phase_str;
         "mermaid", `String mermaid;
         "decision_pipeline_mermaid", `String decision_pipeline_mermaid;
+        "cascade_fsm_mermaid", `String cascade_fsm_mermaid;
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd

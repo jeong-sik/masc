@@ -347,6 +347,7 @@ export interface KeeperStateDiagramResponse {
   current_phase: string
   mermaid: string
   decision_pipeline_mermaid?: string
+  cascade_fsm_mermaid?: string
 }
 
 export async function fetchKeeperTransitions(name: string, limit = 20): Promise<KeeperTransitionsResponse> {

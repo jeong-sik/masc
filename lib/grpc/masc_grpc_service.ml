@@ -242,7 +242,12 @@ let compute_directives
       (match Yojson.Safe.Util.member "paused" json with
        | `Bool true -> directives := "pause" :: !directives
        | _ -> ())
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Transport.warn
+          "compute_directives: failed to parse agent file %s: %s"
+          agent_file (Printexc.to_string exn));
   (* 2. Task assignment: find first unclaimed task for idle agent *)
   let tasks_dir = Filename.concat masc_dir "tasks" in
   (if Sys.file_exists tasks_dir then
@@ -257,7 +262,13 @@ let compute_directives
               (match Yojson.Safe.Util.member "status" task_json with
                | `String "todo" -> Some (Filename.chop_suffix f ".json")
                | _ -> None)
-            with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Transport.debug
+                  "compute_directives: task parse skip %s: %s"
+                  f (Printexc.to_string exn);
+                None
           else None)
     in
     match unclaimed with

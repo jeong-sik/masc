@@ -840,6 +840,8 @@ let test_entries =
 
 let timeout_entries =
   [
+    entry ~default:"300" "MASC_A2A_DELEGATION_TIMEOUT_SEC"
+      "A2A task delegation timeout (seconds)";
     entry ~default:"100" "MASC_EVENT_BUFFER_SIZE"
       "A2A event buffer size per subscription";
     entry ~default:"30.0" "MASC_SSE_KEEPALIVE_SEC"

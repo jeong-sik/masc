@@ -36,7 +36,6 @@ type config = {
   session_id : string option;
   description : string option;
   memory : Oas.Memory.t option;
-  named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
   raw_trace : Oas.Raw_trace.t option;
   tool_retry_policy : Oas.Tool_retry_policy.t option;
@@ -72,7 +71,6 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     session_id = None;
     description = None;
     memory = None;
-    named_cascade = None;
     initial_messages = [];
     raw_trace = None;
     tool_retry_policy = None;
@@ -261,10 +259,6 @@ let build
     | Some policy -> Oas.Builder.with_tool_retry_policy policy builder
     | None -> builder
   in
-  let builder = match config.named_cascade with
-    | Some nc -> Oas.Builder.with_named_cascade nc builder
-    | None -> builder
-  in
   let builder = match config.enable_thinking with
     | Some enabled -> Oas.Builder.with_enable_thinking enabled builder
     | None -> builder
@@ -419,7 +413,7 @@ let resume_from_checkpoint
     name = config.name;
     model = config.model_id;
     system_prompt = Some config.system_prompt;
-    max_tokens = config.max_tokens;
+    max_tokens = Some config.max_tokens;
     max_turns = effective_max_turns;
     temperature = Some config.temperature;
     enable_thinking = config.enable_thinking;
@@ -456,7 +450,7 @@ let resume_from_checkpoint
     description = config.description;
   } in
   Oas.Agent.resume ~net ~checkpoint:patched_checkpoint ~tools:config.tools
-    ?context:config.context ?named_cascade:config.named_cascade
+    ?context:config.context
     ~options ~config:agent_config ()
 
 (* ================================================================ *)

@@ -1058,18 +1058,13 @@ let run_turn
                          Oas_worker.default_model_strings ~cascade_name:rerank_cascade
                        in
                        let config_path = Oas_worker.default_config_path () in
-                       let named_cascade =
-                         Agent_sdk.Api.named_cascade
-                           ?config_path
-                           ~name:rerank_cascade
-                           ~defaults
-                           ()
-                       in
                        let rerank_fn =
                          Agent_sdk.Tool_selector.default_rerank_fn
                            ~sw
                            ~net
-                           ~named_cascade
+                           ?config_path
+                           ~cascade_name:rerank_cascade
+                           ~defaults
                            ~k:selection_limit
                            ()
                        in

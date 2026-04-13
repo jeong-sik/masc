@@ -414,7 +414,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                      `Assoc [("has_checkpoint", `Bool false)]
                  | _ ->
                      let primary_max_context =
-                       (match cfgs with c :: _ -> c.Llm_provider.Provider_config.max_tokens | [] -> 128_000)
+                       (match cfgs with c :: _ -> Option.value ~default:128_000 c.Llm_provider.Provider_config.max_tokens | [] -> 128_000)
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =

@@ -98,8 +98,7 @@ let deprecation_warned = Hashtbl.create 8
 let warn_deprecated ~old_name ~new_name =
   if not (Hashtbl.mem deprecation_warned old_name) then begin
     Hashtbl.replace deprecation_warned old_name true;
-    Printf.eprintf
-      "[WARN] env %s is deprecated; use %s instead. Support will be removed in a future release.\n%!"
+    Log.Misc.warn "env %s is deprecated; use %s instead. Support will be removed in a future release."
       old_name new_name
   end
 

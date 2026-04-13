@@ -632,41 +632,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      | `GET, "/api/v1/dashboard/repo-synthesis" ->
-          let state = get_server_state () in
-          let base_path = state.Mcp_server.room_config.base_path in
-          let limit =
-            match Server_utils.query_param httpun_request "limit" with
-            | Some raw -> (Option.value ~default:20 (int_of_string_opt raw))
-            | None -> 20
-          in
-          let json =
-            Dashboard_http_repo_synthesis.repo_synthesis_benchmarks_json
-              ~base_path ~limit ()
-          in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
-      | `GET, p when String.length p > 34
-                   && String.sub p 0 34 = "/api/v1/repo-synthesis/benchmarks/" ->
-          let state = get_server_state () in
-          let base_path = state.Mcp_server.room_config.base_path in
-          let run_id = String.trim (String.sub p 34 (String.length p - 34)) in
-          if String.length run_id = 0 then
-            h2_respond_json h2_reqd {|{"error":"run_id is required"}|}
-              ~status:`Bad_request ~extra_headers:cors
-          else
-            (match
-               Dashboard_http_repo_synthesis
-               .repo_synthesis_benchmark_detail_json ~base_path ~run_id
-             with
-             | Ok json ->
-                 h2_respond_json h2_reqd (Yojson.Safe.to_string json)
-                   ~extra_headers:cors
-             | Error msg ->
-                 h2_respond_json h2_reqd
-                   (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-                   ~status:`Not_found ~extra_headers:cors)
-
       | `GET, p when String.length p > 27
                    && String.sub p 0 27 = "/api/v1/autoresearch/loops/" ->
           let state = get_server_state () in

@@ -557,25 +557,3 @@ let run_summary_json ~base_path (run : run_record) score_opt =
           `Null );
     ]
 
-let bench_summary_json ~base_path ?(limit = 20) () =
-  let rows =
-    list_runs ~base_path
-    |> (fun rows ->
-         if limit <= 0 then rows else
-         rows |> List.filteri (fun idx _ -> idx < limit))
-  in
-  `Assoc
-    [
-      ("runs", `List (List.map (fun (run, score) -> run_summary_json ~base_path run score) rows));
-      ("total", `Int (List.length rows));
-    ]
-
-let bench_detail_json ~base_path ~run_id =
-  match validate_run_id run_id with
-  | Error msg ->
-      Error (Printf.sprintf "invalid repo synthesis benchmark run id: %s" msg)
-  | Ok run_id -> (
-      match load_run ~base_path run_id with
-      | None -> Error (Printf.sprintf "repo synthesis benchmark run not found: %s" run_id)
-      | Some run ->
-          Ok (run_summary_json ~base_path run (load_score ~base_path run_id)))

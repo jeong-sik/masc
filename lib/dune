@@ -97,7 +97,6 @@
    dashboard_eval_feed
    dashboard_goals
    dashboard_feature_health
-   dashboard_http_repo_synthesis
    dashboard_provider_runs
    proactive_refresh
    server_dashboard_http_runtime_support

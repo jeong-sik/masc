@@ -481,7 +481,6 @@ let rec add_routes ~sw ~clock router =
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes
   |> add_autoresearch_routes
-  |> add_repo_synthesis_routes
 
 (* ── Autoresearch routes ───────────────────────────────────────── *)
 
@@ -630,53 +629,6 @@ and add_autoresearch_routes router =
                {|{"ok":false,"error":"invalid request: requires {\"loop_id\":\"...\"}"}|}
                reqd
          )
-       ) request reqd)
-
-(* ── Repo synthesis routes ─────────────────────────────────────── *)
-
-and add_repo_synthesis_routes router =
-  router
-  |> Http.Router.get "/api/v1/dashboard/repo-synthesis" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let limit =
-           match Server_utils.query_param req "limit" with
-           | Some raw -> (Option.value ~default:20 (int_of_string_opt raw))
-           | None -> 20
-         in
-         let json =
-           Dashboard_http_repo_synthesis.repo_synthesis_benchmarks_json
-             ~base_path ~limit ()
-         in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
-
-  |> Http.Router.prefix_get "/api/v1/repo-synthesis/benchmarks/" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
-         let req_path = Http.Request.path req in
-         let prefix = "/api/v1/repo-synthesis/benchmarks/" in
-         let run_id =
-           String.trim
-             (String.sub req_path (String.length prefix)
-                (String.length req_path - String.length prefix))
-         in
-         if String.length run_id = 0 then
-           Http.Response.json ~status:`Bad_request
-             {|{"error":"run_id is required"}|} reqd
-         else
-           match
-             Dashboard_http_repo_synthesis.repo_synthesis_benchmark_detail_json
-               ~base_path ~run_id
-           with
-           | Ok json ->
-               Http.Response.json ~compress:true ~request:req
-                 (Yojson.Safe.to_string json) reqd
-           | Error msg ->
-               Http.Response.json ~status:`Not_found
-                 (Printf.sprintf {|{"error":"%s"}|} (String.escaped msg))
-                 reqd
        ) request reqd)
 
   (* ── Keeper cascade config API ──────────────────────────────── *)

@@ -64,12 +64,6 @@ work_discovery_sources = ["stale_tasks", "board_cleanup"]
 work_discovery_interval_sec = 1800
 work_discovery_guidance = "Look for zombie board posts, orphan tasks, and stale data to clean up."
 
-# Model cascade — janitor uses coding plan + local fallback
-models = [
-  "glm-coding:glm-5.1",
-  "ollama:qwen3.5:35b-a3b-nvfp4",
-]
-
 # Telemetry Feedback
 telemetry_feedback_enabled = true
 telemetry_feedback_window_hours = 24

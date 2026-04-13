@@ -744,6 +744,7 @@ let test_escalation_state_mod_in_trifecta () =
       ~trifecta_active:true
       ~tool_name:"keeper_fs_edit"
       ~base_risk:Gp.Medium
+      ~input:`Null
   in
   Alcotest.(check string) "escalated to high"
     "high" (Gp.risk_level_to_string escalated)
@@ -755,6 +756,7 @@ let test_escalation_keeps_higher_risk () =
       ~trifecta_active:true
       ~tool_name:"keeper_fs_edit"
       ~base_risk:Gp.Critical
+      ~input:`Null
   in
   Alcotest.(check string) "stays critical"
     "critical" (Gp.risk_level_to_string escalated)
@@ -765,6 +767,7 @@ let test_escalation_no_trifecta_no_change () =
       ~trifecta_active:false
       ~tool_name:"keeper_fs_edit"
       ~base_risk:Gp.Low
+      ~input:`Null
   in
   Alcotest.(check string) "stays low without trifecta"
     "low" (Gp.risk_level_to_string unchanged)
@@ -776,8 +779,20 @@ let test_escalation_non_state_mod_unchanged () =
       ~trifecta_active:true
       ~tool_name:"keeper_fs_read"
       ~base_risk:Gp.Low
+      ~input:`Null
   in
   Alcotest.(check string) "read-only stays low"
+    "low" (Gp.risk_level_to_string unchanged)
+
+let test_escalation_read_only_keeper_github_unchanged () =
+  let unchanged =
+    Gp.combinatorial_risk_escalation
+      ~trifecta_active:true
+      ~tool_name:"keeper_github"
+      ~input:(`Assoc [("cmd", `String "pr view 123")])
+      ~base_risk:Gp.Low
+  in
+  Alcotest.(check string) "read-only keeper_github stays low"
     "low" (Gp.risk_level_to_string unchanged)
 
 let test_tool_capabilities_known () =
@@ -877,6 +892,8 @@ let () =
         test_escalation_no_trifecta_no_change;
       Alcotest.test_case "escalation: non-state_mod unchanged" `Quick
         test_escalation_non_state_mod_unchanged;
+      Alcotest.test_case "escalation: read-only keeper_github unchanged" `Quick
+        test_escalation_read_only_keeper_github_unchanged;
       Alcotest.test_case "capabilities: known tool" `Quick
         test_tool_capabilities_known;
       Alcotest.test_case "capabilities: unknown tool" `Quick

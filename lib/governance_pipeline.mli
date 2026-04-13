@@ -30,11 +30,18 @@ val confirm_threshold : string -> risk_level option
 (** Minimum risk level that requires confirmation for the given governance level.
     Returns [None] for "development" (no confirmation needed). *)
 
+val keeper_confirm_threshold : string -> risk_level option
+(** Keeper-specific confirmation threshold.
+    Keepers are more autonomous than front-door tool dispatch, so production
+    keepers confirm from High upward while the generic production surface
+    confirms only Critical. *)
+
 val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
 (** Classify tool risk using, in order:
     - tool metadata overrides (readonly/destructive)
     - payload-sensitive destructive semantics for selected mutation fields
     - name/action heuristics as a deterministic fallback
+    - keeper mutation floor: keeper file/PR mutations are elevated to at least High
 
     Result classes:
     - Critical: destructive ops or destructive payload semantics
@@ -91,9 +98,12 @@ val combinatorial_risk_escalation :
   trifecta_active:bool ->
   tool_name:string ->
   base_risk:risk_level ->
+  input:Yojson.Safe.t ->
   risk_level
 (** If trifecta is active and the tool is a state_modification tool,
-    escalate risk to at least High. Otherwise return base_risk unchanged. *)
+    escalate risk to at least High. Read-only keeper_github subcommands remain
+    at [base_risk] even though the top-level tool can mutate. Otherwise return
+    base_risk unchanged. *)
 
 val to_oas_approval_callback :
   governance_level:string ->

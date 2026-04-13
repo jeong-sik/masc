@@ -187,6 +187,28 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
   check bool "does not mention masc_heartbeat" false
     (has_in prompt "masc_heartbeat")
 
+let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
+  let prompt =
+    KP.build_keeper_system_prompt
+      ~goal:"Keep keeper guidance aligned with runtime behavior"
+      ~short_goal:"verify approval wording"
+      ~mid_goal:"ship coherent keeper guidance"
+      ~long_goal:"avoid approval-policy drift"
+      ~will:"maintain coherent identity"
+      ~needs:"factual grounding"
+      ~desires:"safe execution"
+      ~instructions:""
+      ()
+  in
+  let has_in s needle =
+    try ignore (Str.search_forward (Str.regexp_string needle) s 0); true
+    with Not_found -> false
+  in
+  check bool "mentions operator approval" true
+    (has_in prompt "operator approval may be required by the runtime");
+  check bool "does not claim no permission is needed" false
+    (has_in prompt "You do not need permission to act")
+
 let test_token_report () =
   (* Emit a structured report for A/B comparison *)
   let tp = build_separated () in
@@ -232,6 +254,8 @@ let () =
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt matches server-managed heartbeat policy" `Quick
             test_direct_reply_prompt_matches_server_managed_heartbeat_policy;
+          test_case "prompt mentions runtime operator approval for risky actions" `Quick
+            test_prompt_mentions_runtime_operator_approval_for_risky_actions;
         ] );
       ( "metrics_report",
         [

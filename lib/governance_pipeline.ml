@@ -109,10 +109,14 @@ let assess_trifecta ~active_tool_names =
 (** When trifecta is active (all 3 classes present), escalate risk
     of state_modification tools to at least High.
     This ensures HITL gates fire at lower governance levels. *)
-let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk =
+let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input =
   if trifecta_active then
     let caps = tool_capabilities tool_name in
-    if has_capability State_modification caps then
+    let read_only_keeper_github =
+      String.equal tool_name "keeper_github"
+      && Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
+    in
+    if has_capability State_modification caps && not read_only_keeper_github then
       max_risk_level base_risk High
     else
       base_risk
@@ -289,14 +293,27 @@ let baseline_risk ~tool_name ~input =
           else
             classify_name tool_name)
 
+let keeper_mutation_requires_high_floor ~tool_name ~input =
+  match tool_name with
+  | "keeper_fs_edit" | "keeper_write"
+  | "keeper_pr_submit" | "keeper_pr_workflow" -> true
+  | "keeper_github" ->
+    not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+  | _ -> false
+
 let assess_risk ~tool_name ~input =
-  match classify_with_payload ~tool_name ~input with
-  | Some level -> level
-  | None -> (
+  let base_risk =
+    match classify_with_payload ~tool_name ~input with
+    | Some level -> level
+    | None -> (
       let baseline = baseline_risk ~tool_name ~input in
       match classify_with_contract_risk ~tool_name ~input with
       | Some level -> max_risk_level baseline level
       | None -> baseline)
+  in
+  if keeper_mutation_requires_high_floor ~tool_name ~input
+  then max_risk_level base_risk High
+  else base_risk
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 
@@ -313,6 +330,10 @@ let confirm_threshold = function
   | "enterprise" -> Some High
   | "production" -> Some Critical
   | "development" | _ -> None
+
+let keeper_confirm_threshold = function
+  | "production" -> Some High
+  | other -> confirm_threshold other
 
 (** Minimum risk level that triggers audit logging. *)
 let audit_threshold = function
@@ -446,10 +467,10 @@ let to_oas_approval_callback
     let trifecta_active = trifecta_count >= 3 in
     let base_risk = assess_risk ~tool_name ~input in
     let risk =
-      combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk
+      combinatorial_risk_escalation ~trifecta_active ~tool_name ~input ~base_risk
     in
     let needs_approval =
-      match confirm_threshold governance_level with
+      match keeper_confirm_threshold governance_level with
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
       | None -> false
     in

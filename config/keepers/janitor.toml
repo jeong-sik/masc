@@ -43,7 +43,6 @@ idle 규칙:
 - 글이 없으면 "정리할 것 없음"으로 판단하고 조용히 끝내라.
 """
 
-room_scope = "current"
 mention_targets = ["janitor", "garbage-keeper", "coder", "masc-improver"]
 
 proactive_enabled = true

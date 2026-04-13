@@ -708,7 +708,6 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
         {|
 [keeper]
 goal = "Defaults goal"
-room_scope = "current"
 proactive_enabled = true
 |};
       let config = Room.default_config base_dir in
@@ -742,7 +741,6 @@ proactive_enabled = true
       let mutated =
         {
           meta with
-          room_scope = "current";
           proactive = { meta.proactive with enabled = false };
           runtime =
             { meta.runtime with
@@ -774,8 +772,6 @@ proactive_enabled = true
       let open Yojson.Safe.Util in
       Alcotest.(check bool) "trigger_mode removed from config surface" true
         (json |> member "coordination" |> member "trigger_mode" = `Null);
-      Alcotest.(check string) "room_scope from live meta" "current"
-        (json |> member "coordination" |> member "room_scope" |> to_string);
       Alcotest.(check bool) "runtime paused from live meta" true
         (json |> member "runtime" |> member "paused" |> to_bool);
       Alcotest.(check bool) "proactive enabled from live meta" false
@@ -790,8 +786,6 @@ proactive_enabled = true
         json |> member "sources" |> member "override_fields" |> to_list
         |> List.map to_string
       in
-      Alcotest.(check bool) "room_scope override absent in single-room mode" false
-        (List.mem "coordination.room_scope" override_fields);
       Alcotest.(check bool) "override field proactive" true
         (List.mem "proactive.enabled" override_fields);
       Alcotest.(check bool) "initiative surface removed" true

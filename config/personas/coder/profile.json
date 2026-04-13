@@ -29,7 +29,6 @@
     "needs": "task board의 coding task, GitHub issue 목록, 코드베이스 현황",
     "desires": "깨끗하고 검증된 PR을 꾸준히 생성한다.",
     "instructions": "코드 품질 개선 keeper. AGENT.md의 coding workflow를 따른다. 항상 worktree에서 작업하고, 빌드 통과 후 draft PR을 생성한다.",
-    "room_scope": "all",
     "mention_targets": [
       "coder",
       "코더",

@@ -133,7 +133,6 @@ type keeper_meta =
   ; allowed_paths : string list
   ; tool_access : tool_access
   ; tool_denylist : string list
-  ; room_scope : string
   ; mention_targets : string list
   ; room_signal_prompt_enabled : bool
   ; joined_room_ids : string list
@@ -662,7 +661,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
-    ; "room_scope", `String m.room_scope
     ; "mention_targets", `List (List.map (fun s -> `String s) m.mention_targets)
     ; "room_signal_prompt_enabled", `Bool m.room_signal_prompt_enabled
     ; "joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids)
@@ -767,7 +765,6 @@ type parsed_keeper_policy =
   ; pp_allowed_paths : string list
   ; pp_tool_access : tool_access
   ; pp_tool_denylist : string list
-  ; pp_room_scope : string
   ; pp_mention_targets : string list
   ; pp_room_signal_prompt_enabled : bool
   ; pp_joined_room_ids : string list
@@ -887,9 +884,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
-    let pp_room_scope =
-      Safe_ops.json_string ~default:"current" "room_scope" json |> canonical_room_scope
-    in
     let pp_mention_targets =
       Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
     in
@@ -977,7 +971,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_allowed_paths
       ; pp_tool_access
       ; pp_tool_denylist
-      ; pp_room_scope
       ; pp_mention_targets
       ; pp_room_signal_prompt_enabled
       ; pp_joined_room_ids
@@ -1187,7 +1180,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; allowed_paths = policy.pp_allowed_paths
              ; tool_access = policy.pp_tool_access
              ; tool_denylist = policy.pp_tool_denylist
-             ; room_scope = policy.pp_room_scope
              ; mention_targets = policy.pp_mention_targets
              ; room_signal_prompt_enabled = policy.pp_room_signal_prompt_enabled
              ; joined_room_ids = policy.pp_joined_room_ids
@@ -1256,7 +1248,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "allowed_paths"
   ; "tool_access"
   ; "tool_denylist"
-  ; "room_scope"
   ; "mention_targets"
   ; "room_signal_prompt_enabled"
   ; "joined_room_ids"

@@ -14,7 +14,6 @@ type keeper_policy_observation = {
   total_turns: int;
   active_goal_count: int;
   joined_room_count: int;
-  room_scope: Keeper_contract.room_scope;
   last_turn_ago_s: float;
 }
 
@@ -43,7 +42,6 @@ let keeper_policy_observation_of_room_message
     total_turns = meta.runtime.usage.total_turns;
     active_goal_count = List.length meta.active_goal_ids;
     joined_room_count = List.length meta.joined_room_ids;
-    room_scope = Keeper_contract.room_scope_of_string meta.room_scope;
     last_turn_ago_s;
   }
 

@@ -77,9 +77,6 @@ let normalize_tool_preset_raw raw =
 
 let first_some = Dashboard_utils.first_some
 
-let canonical_room_scope = function
-  | _ -> "current"
-
 let canonical_voice_channel = function
   | "voice_only" -> "voice_only"
   | "text_only" -> "text_only"
@@ -134,7 +131,6 @@ type keeper_profile_defaults = {
   desires : string option;
   instructions : string option;
   policy_voice_enabled : bool option;
-  room_scope : string option;
   mention_targets : string list;
   proactive_enabled : bool option;
   proactive_idle_sec : int option;
@@ -178,7 +174,6 @@ let empty_keeper_profile_defaults = {
   desires = None;
   instructions = None;
   policy_voice_enabled = None;
-  room_scope = None;
   mention_targets = [];
   proactive_enabled = None;
   proactive_idle_sec = None;
@@ -286,9 +281,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         desires = str "desires";
         instructions = str "instructions";
         policy_voice_enabled = bool_ "policy_voice_enabled";
-        room_scope =
-          str "room_scope"
-          |> Option.map canonical_room_scope;
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
         proactive_idle_sec = int_ "proactive_idle_sec";
@@ -405,7 +397,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Yojson.Safe.Util.member "policy_voice_enabled" keeper_json with
                   | `Bool flag -> Some flag
                   | _ -> None);
-                room_scope = Safe_ops.json_string_opt "room_scope" keeper_json;
                 mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
                 proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;

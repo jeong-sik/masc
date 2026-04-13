@@ -137,7 +137,6 @@ type keeper_meta = {
   allowed_paths: string list;
   tool_access: tool_access;
   tool_denylist: string list;
-  room_scope: string;
   mention_targets: string list;
   room_signal_prompt_enabled: bool;
   joined_room_ids: string list;

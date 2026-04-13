@@ -41,7 +41,6 @@ idle 규칙:
 - 없는 파일을 요청하면 에러가 난다. 에러가 나면 같은 경로를 재시도하지 말고 대안을 찾아라.
 """
 
-room_scope = "current"
 mention_targets = ["cheolsu", "철수", "sangsu", "coder"]
 
 proactive_enabled = true

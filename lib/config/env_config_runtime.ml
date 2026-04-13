@@ -290,15 +290,6 @@ module Transport = struct
 end
 
 module TeamSession = struct
-  let model_35b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_35B" |> trim_opt
-
-  let model_27b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_27B" |> trim_opt
-
-  let model_9b_opt () =
-    Sys.getenv_opt "MASC_TEAM_SESSION_MODEL_9B" |> trim_opt
-
   (** Enable routing judge in team session dispatch. Default: true. *)
   let router_judge_enabled () =
     Feature_flag_registry.get_bool "MASC_TEAM_SESSION_ROUTER_JUDGE"

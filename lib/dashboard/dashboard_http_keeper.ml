@@ -731,6 +731,36 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("last_compaction_event", match last_compaction_event with Some j -> j | None -> `Null);
               ("context", context);
               ("context_source", context_source);
+              (* Eval feed: latest verdict snapshot for this keeper (RFC-MASC-005) *)
+              ("eval_latest",
+                let base_path = config.base_path in
+                let try_name agent_name =
+                  Dashboard_eval_feed.read_latest ~base_path ~agent_name ~limit:1
+                in
+                let snapshots =
+                  match try_name m.name with
+                  | (_ :: _) as ss -> ss
+                  | [] when m.agent_name <> m.name -> try_name m.agent_name
+                  | other -> other
+                in
+                match snapshots with
+                | s :: _ ->
+                    `Assoc [
+                      ("coverage", `Float s.verdict.coverage);
+                      ("all_passed", `Bool s.verdict.all_passed);
+                      ("layer_count", `Int (List.length s.verdict.layer_results));
+                      ("passed_count",
+                        `Int (List.length (List.filter
+                          (fun (lr : Dashboard_eval_feed.layer_result_json) -> lr.passed)
+                          s.verdict.layer_results)));
+                      ("failed_count",
+                        `Int (List.length (List.filter
+                          (fun (lr : Dashboard_eval_feed.layer_result_json) -> not lr.passed)
+                          s.verdict.layer_results)));
+                      ("timestamp", `Float s.timestamp);
+                      ("baseline_status", Json_util.string_opt_to_json s.baseline_status);
+                    ]
+                | [] -> `Null);
             ] @ detail_fields)
           in
           Some summary)

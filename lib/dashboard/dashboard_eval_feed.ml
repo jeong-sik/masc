@@ -102,10 +102,21 @@ let read_snapshot_json ~agent_name (json : Yojson.Safe.t)
 
 (* ── File system reading ─────────────────────────────────────────── *)
 
+let eval_base ~base_path =
+  Filename.concat (Filename.concat base_path ".oas") "eval"
+
 let eval_dir ~base_path ~agent_name =
-  Filename.concat
-    (Filename.concat (Filename.concat base_path ".oas") "eval")
-    agent_name
+  Filename.concat (eval_base ~base_path) agent_name
+
+let list_agents ~base_path =
+  let dir = eval_base ~base_path in
+  try
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+         Sys.is_directory (Filename.concat dir name))
+    |> List.sort String.compare
+  with Sys_error _ -> []
 
 let read_latest ~base_path ~agent_name ~limit =
   let dir = eval_dir ~base_path ~agent_name in

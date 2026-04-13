@@ -36,6 +36,11 @@ val read_verdict_json : Yojson.Safe.t -> (swiss_verdict_json, string) result
     Returns [Error] if [schema_version] is not [1] or required fields are
     missing. *)
 
+val list_agents : base_path:string -> string list
+(** Return sorted agent names that have eval data under
+    [<base_path>/.oas/eval/].  Returns an empty list when the
+    directory does not exist.  Never raises. *)
+
 val read_latest :
   base_path:string -> agent_name:string -> limit:int -> eval_snapshot list
 (** Read the most recent [limit] eval snapshots for [agent_name].

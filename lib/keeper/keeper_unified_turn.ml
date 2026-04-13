@@ -873,7 +873,13 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
-      last_blocker = Option.value ~default:"" social_state.blocker;
+      (* A successful turn means the keeper is not blocked.
+         Clear unconditionally so stale error strings from previous
+         failures do not persist in the runtime JSON and mislead the
+         dashboard into showing BLOCKED status.  The social model's
+         blocker field is a protocol-level signal; runtime last_blocker
+         tracks whether the keeper can make progress. *)
+      last_blocker = "";
       last_need = Option.value ~default:"" social_state.need;
     };
   }

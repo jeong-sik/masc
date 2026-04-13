@@ -181,14 +181,29 @@ let test_weaken_nonexistent () =
   print_endline "✓ test_weaken_nonexistent passed"
 
 let () =
-  print_endline "\n=== Hebbian_eio Tests (Pure Sync) ===\n";
-  test_strengthen ();
-  test_weaken ();
-  test_get_preferred_partner ();
-  test_no_preferred_partner ();
-  test_consolidate ();
-  test_multiple_agents ();
-  test_custom_params ();
-  test_lock_stats ();
-  test_weaken_nonexistent ();
-  print_endline "\n✅ All 9 Hebbian_eio tests passed!\n"
+  Alcotest.run "Hebbian_eio"
+    [
+      ( "synapse",
+        [
+          Alcotest.test_case "strengthen" `Quick test_strengthen;
+          Alcotest.test_case "weaken" `Quick test_weaken;
+          Alcotest.test_case "weaken nonexistent" `Quick
+            test_weaken_nonexistent;
+        ] );
+      ( "queries",
+        [
+          Alcotest.test_case "get preferred partner" `Quick
+            test_get_preferred_partner;
+          Alcotest.test_case "no preferred partner" `Quick
+            test_no_preferred_partner;
+          Alcotest.test_case "multiple agents network" `Quick
+            test_multiple_agents;
+        ] );
+      ( "maintenance",
+        [
+          Alcotest.test_case "consolidate" `Quick test_consolidate;
+          Alcotest.test_case "custom learning params" `Quick
+            test_custom_params;
+          Alcotest.test_case "lock stats" `Quick test_lock_stats;
+        ] );
+    ]

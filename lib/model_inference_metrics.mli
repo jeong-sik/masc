@@ -25,6 +25,7 @@ type model_stats = {
   total_cost_usd : float;
   avg_tool_calls_per_turn : float;
   total_tool_calls : int;
+  top_tools : (string * int) list;
 }
 
 type aggregate = {

@@ -29,6 +29,7 @@ type model_stats = {
   total_cost_usd : float;
   avg_tool_calls_per_turn : float;
   total_tool_calls : int;
+  top_tools : (string * int) list;
 }
 
 type aggregate = {
@@ -63,6 +64,7 @@ type raw_entry = {
   fallback_applied : bool;
   cost_usd : float;
   tool_call_count : int;
+  tools_used : string list;
   is_error : bool;
 }
 
@@ -76,6 +78,14 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
       let outer_tool_call_count =
         match List.assoc_opt "tool_call_count" fields with
         | Some (`Int n) -> n | _ -> 0
+      in
+      let outer_tools_used =
+        match List.assoc_opt "tools_used" fields with
+        | Some (`List xs) ->
+          List.filter_map (function
+            | `String s when String.length s > 0 -> Some s
+            | _ -> None) xs
+        | _ -> []
       in
       (match List.assoc_opt "telemetry" fields with
        | Some (`Assoc tfields) ->
@@ -99,6 +109,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                   cache_read_tokens = 0; reasoning_tokens = 0;
                   fallback_applied = false; cost_usd = 0.0;
                   tool_call_count = outer_tool_call_count;
+                  tools_used = outer_tools_used;
                   is_error = true }
          else
            (* Success turns: full telemetry parsing *)
@@ -145,7 +156,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
            Some { model; tok_per_sec; latency_ms; input_tokens; output_tokens;
                   cache_read_tokens; reasoning_tokens; fallback_applied;
                   cost_usd; tool_call_count = outer_tool_call_count;
-                  is_error = false }
+                  tools_used = outer_tools_used; is_error = false }
        | _ -> None)
     | _ -> None
 
@@ -237,6 +248,17 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       avg_tool_calls_per_turn =
         if n = 0 then 0.0
         else Float.of_int total_tool_calls /. Float.of_int n;
+      top_tools =
+        let tool_tbl : (string, int) Hashtbl.t = Hashtbl.create 16 in
+        List.iter (fun e ->
+          List.iter (fun t ->
+            let prev = match Hashtbl.find_opt tool_tbl t with Some c -> c | None -> 0 in
+            Hashtbl.replace tool_tbl t (prev + 1)
+          ) e.tools_used
+        ) entries;
+        Hashtbl.fold (fun tool count acc -> (tool, count) :: acc) tool_tbl []
+        |> List.sort (fun (_, a) (_, b) -> compare b a)
+        |> (fun l -> if List.length l > 10 then List.filteri (fun i _ -> i < 10) l else l);
     } in
     stats :: acc
   ) tbl []
@@ -276,6 +298,9 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ; ("total_cost_usd", `Float s.total_cost_usd)
     ; ("avg_tool_calls_per_turn", `Float s.avg_tool_calls_per_turn)
     ; ("total_tool_calls", `Int s.total_tool_calls)
+    ; ("top_tools", `List (List.map (fun (tool, count) ->
+        `Assoc [("tool", `String tool); ("count", `Int count)]
+      ) s.top_tools))
     ]
 
 let to_json (agg : aggregate) : Yojson.Safe.t =

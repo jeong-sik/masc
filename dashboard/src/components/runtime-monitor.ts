@@ -224,6 +224,15 @@ export function RuntimeMonitor() {
                   ${(metric.error_count ?? 0) > 0
                     ? html`<div class="text-[11px] text-[var(--status-bad)] mt-1">errors ${fmtNumber(metric.error_count)} / success ${fmtNumber(metric.success_count)}</div>`
                     : null}
+                  ${(metric.top_tools ?? []).length > 0
+                    ? html`<div class="flex flex-wrap gap-1 mt-1">
+                        ${metric.top_tools?.slice(0, 5).map(t => html`
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-panel-hover)] text-[var(--text-muted)]">
+                            ${t.tool} <span class="ml-0.5 text-[var(--text-strong)]">${t.count}</span>
+                          </span>
+                        `)}
+                      </div>`
+                    : null}
                 </article>
               `)
             : html`<${EmptyState} message="최근 model inference metrics가 없습니다." compact />`}

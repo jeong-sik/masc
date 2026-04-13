@@ -62,6 +62,8 @@ export interface TraceSummary {
   lifecycle_count: number
   thinking_count: number
   total_cost_usd: number
+  oas_input_tokens: number
+  oas_output_tokens: number
 }
 
 interface TraceSlot {
@@ -132,6 +134,8 @@ export function getTraceSummary(agent: string): TraceSummary {
   let lifecycle_count = 0
   let thinking_count = 0
   let total_cost_usd = 0
+  let oas_input_tokens = 0
+  let oas_output_tokens = 0
 
   for (const e of events) {
     switch (e.kind) {
@@ -160,6 +164,13 @@ export function getTraceSummary(agent: string): TraceSummary {
         break
       case 'lifecycle':
         lifecycle_count++
+        total_cost_usd += e.cost_usd ?? 0
+        {
+          const inTok = e.detail.input_tokens
+          const outTok = e.detail.output_tokens
+          if (typeof inTok === 'number') oas_input_tokens += inTok
+          if (typeof outTok === 'number') oas_output_tokens += outTok
+        }
         break
       case 'thinking':
         thinking_count++
@@ -179,6 +190,8 @@ export function getTraceSummary(agent: string): TraceSummary {
     lifecycle_count,
     thinking_count,
     total_cost_usd,
+    oas_input_tokens,
+    oas_output_tokens,
   }
 }
 

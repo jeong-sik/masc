@@ -209,6 +209,45 @@ describe('getTraceSummary', () => {
     expect(summary.broadcast_count).toBe(1)
     expect(summary.total_cost_usd).toBeCloseTo(0.03)
   })
+
+  it('accumulates OAS tokens and cost from lifecycle events', () => {
+    traceSlots.value = {
+      'agent-x': {
+        events: [
+          {
+            id: 'a',
+            ts: 1000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'agent completed',
+            detail: { input_tokens: 500, output_tokens: 150 },
+            cost_usd: 0.003,
+          },
+          {
+            id: 'b',
+            ts: 2000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'agent completed',
+            detail: { input_tokens: 300, output_tokens: 80 },
+            cost_usd: 0.002,
+          },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        fetchToken: 0,
+      },
+    }
+
+    const summary = getTraceSummary('agent-x')
+    expect(summary.oas_input_tokens).toBe(800)
+    expect(summary.oas_output_tokens).toBe(230)
+    expect(summary.total_cost_usd).toBeCloseTo(0.005)
+    expect(summary.lifecycle_count).toBe(2)
+  })
 })
 
 describe('getKindCounts', () => {

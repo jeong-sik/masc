@@ -687,13 +687,22 @@ function handleEvent(event: SSEEvent): void {
       )
       if (agentName) {
         const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+        const inputTokens = asNumber(p.input_tokens)
+        const outputTokens = asNumber(p.output_tokens)
+        const costUsd = asNumber(p.cost_usd)
         appendLiveOasEvent(agentName, {
           id: `live-oas-agent-${phase}-${tsMs}-${agentName}`,
           ts: tsMs,
           ts_iso: new Date(tsMs).toISOString(),
           kind: 'lifecycle',
-          summary: `agent ${phase}`,
-          detail: { task_id: taskId ?? null, elapsed_s: elapsed ?? null },
+          summary: `agent ${phase}${inputTokens != null || outputTokens != null ? ` · ${inputTokens ?? 0}→${outputTokens ?? 0}tok` : ''}`,
+          detail: {
+            task_id: taskId ?? null,
+            elapsed_s: elapsed ?? null,
+            input_tokens: inputTokens ?? null,
+            output_tokens: outputTokens ?? null,
+          },
+          cost_usd: costUsd ?? undefined,
         })
       }
       break

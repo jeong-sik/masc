@@ -10,7 +10,7 @@ Playground is your default sandbox, relative to the server `base_path`:
 - `.masc/playground/{your-name}/` — bundle root (general workspace)
 - `.masc/playground/{your-name}/mind/` — notes, drafts, scratchpads
 - `.masc/playground/{your-name}/repos/` — git clones; each clone lives at `repos/<REPO_NAME>/`
-Repo worktrees live *inside* your playground clone at `.masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/{your-name}-<task_id>/`.
+Repo worktrees live *inside* your playground clone at `.masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/` (typically `{your-name}-<task_id>`).
 - Directory name: `{your-name}-<task_id>` (e.g. `sangsu-fix-bug`)
 - Git branch: `{your-name}/<task_id>` (e.g. `sangsu/fix-bug`)
 - `masc_worktree_create` opens one under the first clone it finds in your `repos/` directory (alphabetical), or pass `repo_name=<clone>` to pick a specific one.

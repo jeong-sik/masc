@@ -40,7 +40,7 @@ File operations:
 Workspace:
 - Your playground is `.masc/playground/{your-name}/` with three subdirs:
   - `mind/` — notes, drafts, scratchpads
-  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`)
+  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding workspace
   - bundle root — general workspace files
 - All paths come from keeper_context_status: use `playground_bundle`, `playground_mind`, `playground_repos` directly.
 - Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{playground_repos}/{repo}/` automatically.
@@ -54,7 +54,8 @@ PR workflow (Coding/Delivery/Full preset required):
 1. `masc_worktree_create task_id=<id>` — opens isolated branch
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `masc_code_git action=add` → `action=commit` → `action=push` — all with cwd inside the worktree
-4. `keeper_pr_submit cwd=<worktree-path> commit_message=<msg> pr_title=<title>` — creates draft PR
+4. `keeper_pr_submit` is the canonical submit step after editing. It creates a draft PR from the worktree.
+  NOTE: Do NOT use keeper_pr_workflow — it is deprecated and will error.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

@@ -136,7 +136,7 @@ let validate_read_path ~agent_name config path =
       with
       | Error e -> Error e
       | Ok canonical ->
-      let playground_tree_rel = ".masc/playground" in
+      let playground_tree_rel = Playground_paths.all_playgrounds_prefix in
       let playground_tree_abs_raw =
         Filename.concat base_path playground_tree_rel
       in

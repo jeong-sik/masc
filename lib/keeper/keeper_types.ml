@@ -1428,11 +1428,13 @@ let configured_keeper_names _config =
 
 let keeper_names config =
   let toml = configured_keeper_names config in
-  if toml <> [] then toml
-  else (
-    Log.Keeper.warn
-      "keeper_names: no TOML keepers found, falling back to persisted JSON";
-    persisted_keeper_names config)
+  let json = persisted_keeper_names config in
+  (* Union: repo TOML keepers + overlay-materialized keepers (JSON).
+     Overlay keepers (e.g. from .masc/config/keepers/) are materialized to
+     .masc/keepers/*.json at server boot.  When MASC_CONFIG_DIR shadows the
+     overlay, configured_keeper_names only sees repo TOML.  Including JSON
+     ensures overlay keepers are still discovered. *)
+  dedupe_keep_order (toml @ json)
 ;;
 
 let keepalive_keeper_names config =

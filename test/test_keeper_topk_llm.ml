@@ -224,10 +224,10 @@ let test_selection_boundary_preserves_deterministic_floor () =
     board_post_count;
   Alcotest.(check (list string))
     "deterministic floor survives even when llm omits most tools"
-    [ "keeper_context_status";
-      "keeper_fs_read";
+    [ "keeper_fs_read";
       "keeper_board_post";
       "keeper_tool_search";
+      "keeper_context_status";
     ]
     merged
 
@@ -255,9 +255,9 @@ let test_selection_boundary_appends_llm_only_extras () =
      | _ -> false);
   Alcotest.(check (list string))
     "llm extras append after deterministic floor without duplicates"
-    [ "keeper_context_status";
-      "keeper_fs_read";
+    [ "keeper_fs_read";
       "keeper_tool_search";
+      "keeper_context_status";
       "keeper_bash";
       "keeper_board_post";
     ]
@@ -284,8 +284,8 @@ let test_selection_boundary_sorts_discovered () =
     "discovered order is stable regardless of input order"
     merged_ab merged_ba;
   Alcotest.(check (list string))
-    "discovered is sorted alphabetically after core"
-    ["core_tool"; "tool_a"; "tool_b"]
+    "discovered is sorted alphabetically before core"
+    ["tool_a"; "tool_b"; "core_tool"]
     merged_ab
 
 let test_deterministic_prefilter_surfaces_code_tools () =

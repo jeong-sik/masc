@@ -250,8 +250,14 @@ let merge_tool_selection_boundary
     ~(llm_selected : string list)
     ~(discovered : string list) : string list =
   let sorted_discovered = List.sort String.compare discovered in
+  (* BM25-relevant tools first: when downstream truncation caps at
+     max_tools, the tail is dropped.  Placing deterministic_prefilter
+     and discovered before core ensures context-relevant tools survive
+     while generic core tools are truncated first.
+     Core tools that also appear in deterministic_prefilter are deduped
+     (first occurrence wins), so they naturally keep their BM25 rank. *)
   let deterministic_floor =
     Keeper_types.dedupe_keep_order
-      (core @ deterministic_prefilter @ sorted_discovered)
+      (deterministic_prefilter @ sorted_discovered @ core)
   in
   Keeper_types.dedupe_keep_order (deterministic_floor @ llm_selected)

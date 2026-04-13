@@ -849,4 +849,145 @@ let () =
             Alcotest.(check bool) "legacy override normalized to direct" true
               (contains_substring msg {|"post_kind": "direct"|}));
         ] );
+      ( "board_list_cache",
+        [
+          Alcotest.test_case "cache hit returns same result" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            (* Create a post so list is non-empty *)
+            let (_ok, _msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "cached"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            (* Invalidation from the post already happened, so the first list
+               call populates the cache *)
+            let args = make_args [("limit", `Int 10)] in
+            let (ok1, body1) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "first list ok" true ok1;
+            (* Second call with same args should return identical result *)
+            let (ok2, body2) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "second list ok" true ok2;
+            Alcotest.(check string) "cache hit returns identical body" body1 body2);
+          Alcotest.test_case "mutation invalidates cache" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            let (_ok, _msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "first"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            let args = make_args [("limit", `Int 50)] in
+            let (_ok1, body1) = dispatch "masc_board_list" args in
+            (* Add another post — this invalidates the cache *)
+            let (_ok, _msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "second"); ("content", `String "world");
+              ("author", `String "tester")
+            ]) in
+            let (_ok2, body2) = dispatch "masc_board_list" args in
+            (* body2 should include the new post, so it differs from body1 *)
+            Alcotest.(check bool) "cache invalidated — different result"
+              true (body1 <> body2));
+          Alcotest.test_case "different args produce independent entries" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            let (_ok, _msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            let args_recent = make_args [("limit", `Int 10); ("sort_by", `String "recent")] in
+            let args_hot = make_args [("limit", `Int 10); ("sort_by", `String "hot")] in
+            let (_ok1, body_recent) = dispatch "masc_board_list" args_recent in
+            let (_ok2, body_hot) = dispatch "masc_board_list" args_hot in
+            (* Cache key differs, so the hot call recomputes *)
+            Alcotest.(check bool) "recent result non-empty" true
+              (String.length body_recent > 0);
+            Alcotest.(check bool) "hot result non-empty" true
+              (String.length body_hot > 0));
+          Alcotest.test_case "random=true bypasses cache" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            (* Create multiple posts so random shuffle can differ *)
+            List.iter (fun i ->
+              let (_ok, _msg) = dispatch "masc_board_post" (make_args [
+                ("title", `String (Printf.sprintf "post-%d" i));
+                ("content", `String "content");
+                ("author", `String "tester")
+              ]) in ()) [1; 2; 3; 4; 5];
+            let args = make_args [("random", `Bool true); ("limit", `Int 5)] in
+            let (ok1, _body1) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "random list ok" true ok1);
+          Alcotest.test_case "delete invalidates cache" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "to-delete"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            let args = make_args [("limit", `Int 50)] in
+            let (_ok1, body1) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "list has post" true
+              (contains_substring body1 "to-delete");
+            (* Extract post_id from creation response *)
+            let json = parse_create_response_json create_msg in
+            let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
+            let (_ok, _msg) = dispatch "masc_board_delete" (make_args [
+              ("post_id", `String post_id)
+            ]) in
+            let (_ok2, body2) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "cache invalidated after delete" true
+              (not (contains_substring body2 "to-delete")));
+          Alcotest.test_case "comment invalidates cache" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "for-comment"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            let args = make_args [("limit", `Int 50)] in
+            let (_ok1, body1) = dispatch "masc_board_list" args in
+            let json = parse_create_response_json create_msg in
+            let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
+            let (_ok, _msg) = dispatch "masc_board_comment" (make_args [
+              ("post_id", `String post_id);
+              ("content", `String "a comment");
+              ("author", `String "tester")
+            ]) in
+            (* After comment, cache should be invalidated.
+               The reply count will differ. *)
+            let (_ok2, body2) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "cache invalidated after comment" true
+              (body1 <> body2));
+          Alcotest.test_case "vote invalidates cache" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Tool_board.invalidate_board_list_cache ();
+            let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "for-vote"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            let args = make_args [("limit", `Int 50)] in
+            let (_ok1, body1) = dispatch "masc_board_list" args in
+            let json = parse_create_response_json create_msg in
+            let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
+            let (_ok, _msg) = dispatch "masc_board_vote" (make_args [
+              ("post_id", `String post_id);
+              ("voter", `String "voter1");
+              ("direction", `String "up")
+            ]) in
+            let (_ok2, body2) = dispatch "masc_board_list" args in
+            Alcotest.(check bool) "cache invalidated after vote" true
+              (body1 <> body2));
+        ] );
     ]

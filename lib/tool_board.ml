@@ -11,6 +11,48 @@
 
 open Tool_args
 
+(** {1 Board list TTL cache}
+
+    Reduces redundant JSONL reads when multiple keepers poll board_list
+    in the same analysis window.  Invalidated on any board mutation
+    (post, comment, vote, delete, cleanup). *)
+
+type board_list_cache = {
+  mutable key : string option;
+  mutable value : (bool * string) option;
+  mutable expires_at : float;
+}
+
+let _board_list_cache : board_list_cache =
+  { key = None; value = None; expires_at = 0.0 }
+
+let board_list_cache_ttl_s () =
+  match Sys.getenv_opt "MASC_KEEPER_BOARD_LIST_CACHE_TTL_S" with
+  | Some raw ->
+    (match Float.of_string_opt (String.trim raw) with
+     | Some v when v >= 0.0 -> v
+     | _ -> 30.0)
+  | None -> 30.0
+
+let invalidate_board_list_cache () =
+  _board_list_cache.key <- None;
+  _board_list_cache.value <- None;
+  _board_list_cache.expires_at <- 0.0
+
+let cached_board_list ~key compute =
+  let now = Time_compat.now () in
+  let ttl_s = board_list_cache_ttl_s () in
+  match _board_list_cache.key, _board_list_cache.value with
+  | Some cached_key, Some value
+    when String.equal cached_key key && now < _board_list_cache.expires_at ->
+    value
+  | _ ->
+    let value = compute () in
+    _board_list_cache.key <- Some key;
+    _board_list_cache.value <- Some value;
+    _board_list_cache.expires_at <- now +. ttl_s;
+    value
+
 (** Strip [STATE]...[/STATE] blocks from text (inlined to avoid
     Keeper_prompt dependency which creates a cycle via Keeper_alerting). *)
 let strip_state_blocks_text (s : string) : string =
@@ -322,7 +364,12 @@ let dispatch_sort_of sort_by =
   | Updated -> Board_dispatch.Updated
   | Discussed -> Board_dispatch.Discussed
 
-let handle_post_list args =
+(** Deterministic cache key from board_list args.  Serializes the
+    normalized JSON so identical parameter sets hit the same entry. *)
+let board_list_cache_key args =
+  Yojson.Safe.to_string args
+
+let handle_post_list_uncached args =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
@@ -407,6 +454,15 @@ let handle_post_list args =
         let mode_label = if compact then " (compact)" else "" in
         let header = Printf.sprintf "📋 Posts (%d) — %s%s:" (List.length posts) sort_label mode_label in
         (true, header ^ "\n" ^ String.concat separator formatted)
+
+let handle_post_list args =
+  (* Skip cache for random=true — non-deterministic by definition *)
+  let random = get_bool args "random" false in
+  if random then
+    handle_post_list_uncached args
+  else
+    let key = board_list_cache_key args in
+    cached_board_list ~key (fun () -> handle_post_list_uncached args)
 
 let handle_post_get args =
   let post_id = get_string args "post_id" "" in
@@ -863,21 +919,41 @@ let tools = [
   tool_delete;
 ]
 
-(** Tool dispatcher *)
+(** Tool dispatcher.
+    Mutation tools (post, comment, vote, delete, cleanup) invalidate
+    the board_list TTL cache so the next read sees fresh data. *)
 let handle_tool name args =
   match name with
-  | "masc_board_post" -> handle_post_create args
+  | "masc_board_post" ->
+    let result = handle_post_create args in
+    invalidate_board_list_cache ();
+    result
   | "masc_board_list" -> handle_post_list args
   | "masc_board_get" -> handle_post_get args
-  | "masc_board_comment" -> handle_comment_add args
-  | "masc_board_vote" -> handle_vote args
+  | "masc_board_comment" ->
+    let result = handle_comment_add args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_vote" ->
+    let result = handle_vote args in
+    invalidate_board_list_cache ();
+    result
   | "masc_board_stats" -> handle_stats args
   | "masc_board_search" -> handle_search args
-  | "masc_board_comment_vote" -> handle_comment_vote args
+  | "masc_board_comment_vote" ->
+    let result = handle_comment_vote args in
+    invalidate_board_list_cache ();
+    result
   | "masc_board_profile" -> handle_profile args
   | "masc_board_hearths" -> handle_hearth_list args
-  | "masc_board_delete" -> handle_delete args
-  | "masc_board_cleanup" -> handle_board_cleanup args
+  | "masc_board_delete" ->
+    let result = handle_delete args in
+    invalidate_board_list_cache ();
+    result
+  | "masc_board_cleanup" ->
+    let result = handle_board_cleanup args in
+    invalidate_board_list_cache ();
+    result
   | _ -> (false, Printf.sprintf "Unknown tool: %s" name)
 
 let tool_spec_read_only =

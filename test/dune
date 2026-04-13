@@ -667,6 +667,12 @@
  (name test_cp_unit_descendant_ids)
  (libraries masc_test_deps))
 
+; RFC-MASC-001 Phase 1: structured working_context in Checkpoint.
+; Round-trip, envelope, patch_checkpoint, dual-source read.
+(test
+ (name test_keeper_state_snapshot_json)
+ (libraries masc_test_deps))
+
 ; Keeper_checkpoint_store.is_not_found_detail classifier
 ; regression (observed 334-retry loop on trace-1775487505102-6a347
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)

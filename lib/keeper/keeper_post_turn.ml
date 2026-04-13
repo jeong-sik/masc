@@ -54,8 +54,25 @@ let apply_post_turn_lifecycle
   let no_checkpoint_decision = "skipped:no_checkpoint" in
   let apply_continuity_summary
       ~(meta : keeper_meta)
-      ~(ctx : working_context) : keeper_meta =
-    match latest_state_snapshot_from_messages ctx.messages with
+      ~(ctx : working_context)
+      ~(oas_checkpoint : Agent_sdk.Checkpoint.t option) : keeper_meta =
+    (* RFC-MASC-001 Phase 1: try structured working_context first,
+       then fall back to text-based [STATE] parsing from messages. *)
+    let structured_snapshot =
+      match oas_checkpoint with
+      | Some cp -> (
+        match cp.Agent_sdk.Checkpoint.working_context with
+        | Some json ->
+          Keeper_memory_policy.snapshot_of_structured_working_context json
+        | None -> None)
+      | None -> None
+    in
+    let snapshot =
+      match structured_snapshot with
+      | Some _ as s -> s
+      | None -> latest_state_snapshot_from_messages ctx.messages
+    in
+    match snapshot with
     | None -> meta
     | Some snapshot ->
         {
@@ -188,6 +205,7 @@ let apply_post_turn_lifecycle
         apply_continuity_summary
           ~meta:rollover.updated_meta
           ~ctx:effective_ctx
+          ~oas_checkpoint:checkpoint
       in
       {
         updated_meta = continuity_meta;

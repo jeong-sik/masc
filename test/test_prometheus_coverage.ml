@@ -232,6 +232,25 @@ let test_keeper_metrics_registered () =
   check bool "has keeper heartbeat failures counter" true
     (has "masc_keeper_heartbeat_failures_total")
 
+let test_histogram_exported_as_summary () =
+  let name = "test_hist_export_fmt" in
+  Prometheus.register_histogram ~name ~help:"export format test" ();
+  Prometheus.observe_histogram name 1.5;
+  Prometheus.observe_histogram name 2.5;
+  let text = Prometheus.to_prometheus_text () in
+  let has pat =
+    try ignore (Str.search_forward (Str.regexp_string pat) text 0); true
+    with Not_found -> false
+  in
+  check bool "TYPE summary" true
+    (has (Printf.sprintf "# TYPE %s summary" name));
+  check bool "has _sum" true
+    (has (Printf.sprintf "%s_sum" name));
+  check bool "has _count" true
+    (has (Printf.sprintf "%s_count" name));
+  check bool "no standalone _count TYPE" false
+    (has (Printf.sprintf "# TYPE %s_count" name))
+
 (* ============================================================
    Convenience Functions Tests
    ============================================================ *)
@@ -383,6 +402,8 @@ let () =
       test_case "has uptime" `Quick test_to_prometheus_text_has_uptime;
       test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics;
       test_case "keeper metrics registered" `Quick test_keeper_metrics_registered;
+      test_case "histogram exported as summary with _sum/_count"
+        `Quick test_histogram_exported_as_summary;
     ];
     "convenience", [
       test_case "record_request" `Quick test_record_request;

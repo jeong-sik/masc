@@ -112,6 +112,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
+      Config_dir_resolver.reset ();
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
@@ -120,6 +121,8 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       ignore (Room.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_toml_exn config ~name:"dot.name";
+      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
       write_keeper_meta_exn config ~name:"dot.name" ~trace_id:"trace-dot-name";
@@ -261,10 +264,12 @@ let test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback () =
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
+      Config_dir_resolver.reset ();
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
@@ -272,6 +277,8 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
+      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn
         ~autoboot_enabled:false config ~name:"sangsu" ~trace_id:"trace-sangsu";

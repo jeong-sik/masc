@@ -165,6 +165,11 @@ let relay_event ?store evt =
   match json with
   | None -> ()
   | Some j ->
+      (* OAS event payloads may carry tool output or user-facing text that
+         contains invalid UTF-8 bytes (e.g. truncated multi-byte sequences
+         from subprocess captures).  Scrub before persisting or broadcasting
+         so that JSONL consumers and SSE clients receive well-formed UTF-8. *)
+      let j = Inference_utils.sanitize_json_utf8 j in
       (match store with
        | Some store ->
            (try Dated_jsonl.append store j

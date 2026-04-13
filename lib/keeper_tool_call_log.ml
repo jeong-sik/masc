@@ -152,7 +152,12 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
             @ thinking_enabled_field @ thinking_budget_field
             @ result_bytes_field @ truncated_to_field)
       in
-      (try Dated_jsonl.append store json
+      (* Sanitize UTF-8 before persisting.  Tool output may contain invalid
+         byte sequences (truncated UTF-8, binary output from subprocess
+         captures) that would corrupt the JSONL file and cause downstream
+         readers — including the dashboard — to silently skip entire rows. *)
+      let safe_json = Inference_utils.sanitize_json_utf8 json in
+      (try Dated_jsonl.append store safe_json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "keeper_tool_call_log: append failed for %s/%s: %s"
            keeper_name tool_name (Printexc.to_string exn))

@@ -256,6 +256,62 @@ let test_dashboard_hourly_trend_numeric_ts () =
     Alcotest.(check int) "hour bucket success" 1
       (Safe_ops.json_int ~default:0 "success" bucket))
 
+(* ── UTF-8 sanitization ────────────────────────────── *)
+
+(* Regression guard: tool output may contain invalid UTF-8 bytes from
+   subprocess captures or truncated multi-byte sequences. Without the
+   writer-side sanitize, Python / dashboard readers fail to decode the
+   entire JSONL file and silently drop rows. *)
+let test_output_invalid_utf8_sanitized () =
+  with_tmp_log_dir (fun dir ->
+    let raw_output = "prefix\xecsuffix" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_bin"
+      ~input:(`Assoc []) ~output_text:raw_output
+      ~success:true ~duration_ms:1.0 ();
+    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length results);
+    let today =
+      let open Unix in
+      let tm = gmtime (gettimeofday ()) in
+      Printf.sprintf "%04d-%02d/%02d.jsonl"
+        (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+    in
+    let file =
+      Filename.concat dir (Filename.concat ".masc/tool_calls" today)
+    in
+    let contents =
+      let ic = open_in_bin file in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+    in
+    let len = String.length contents in
+    let rec scan i =
+      if i >= len then true
+      else
+        let dec = String.get_utf_8_uchar contents i in
+        let dlen = Uchar.utf_decode_length dec in
+        if dlen > 0 && Uchar.utf_decode_is_valid dec then scan (i + dlen)
+        else false
+    in
+    Alcotest.(check bool) "persisted file is valid UTF-8" true (scan 0))
+
+let test_output_valid_utf8_untouched () =
+  with_tmp_log (fun () ->
+    let korean = "한글 메시지" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_ok"
+      ~input:(`Assoc []) ~output_text:korean
+      ~success:true ~duration_ms:1.0 ();
+    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length results);
+    match results with
+    | [ json ] ->
+        let output = Safe_ops.json_string ~default:"" "output" json in
+        Alcotest.(check string) "valid UTF-8 preserved verbatim" korean output
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "read_recent",
@@ -274,5 +330,11 @@ let () =
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
+        ] )
+    ; ( "utf8_sanitize",
+        [ eio_test "invalid UTF-8 bytes scrubbed before persist"
+            test_output_invalid_utf8_sanitized
+        ; eio_test "valid UTF-8 preserved verbatim"
+            test_output_valid_utf8_untouched
         ] )
     ]

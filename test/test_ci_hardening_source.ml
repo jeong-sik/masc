@@ -347,18 +347,15 @@ let test_root_redirect_contracts () =
 
 
 let test_dashboard_component_split_contracts () =
-  check bool "proof helpers export verdict reasons" true
+  check bool "proof helpers export verdict tone" true
     (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
-       "export function verdictReasonLines");
-  check bool "proof helpers export timeline dedupe" true
+       "export function verdictTone");
+  check bool "proof helpers export worker run evidence tone" true
     (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
-       "export function dedupeTimeline");
-  check bool "proof sections export selection card" true
+       "export function workerRunEvidenceTone");
+  check bool "proof sections export worker run evidence row" true
     (file_contains_pattern "dashboard/src/components/proof-sections.ts"
-       "export function SelectionCard");
-  check bool "proof sections export actor contribution row" true
-    (file_contains_pattern "dashboard/src/components/proof-sections.ts"
-       "export function ActorContributionRow");
+       "export function WorkerRunEvidenceRow");
   check bool "mission cards re-export briefing card" true
     (file_contains_pattern "dashboard/src/components/mission-cards.ts"
        "export { MissionBriefingCard } from './mission-briefing-card'");

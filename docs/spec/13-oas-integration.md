@@ -124,7 +124,6 @@ type config = {
   session_id : string option;
   description : string option;
   memory : Agent_sdk.Memory.t option;
-  named_cascade : Agent_sdk.Api.named_cascade option;
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
   transport : Masc_grpc_transport.t;
@@ -166,8 +165,8 @@ type run_result = {
 
 1. `cascade.json`에서 `{name}_models` 목록 조회 (hot-reloadable)
 2. `Cascade_config.parse_model_strings`로 `Provider_config.t list` 생성
-3. 첫 번째 available provider를 primary로 Agent 구성
-4. OAS `named_cascade`가 내부적으로 fallback 처리
+3. MASC가 `Cascade_fsm.decide`로 cascade FSM을 직접 구동
+4. 각 provider에 대해 OAS single-provider `Agent.run` 호출
 5. `accept` 콜백으로 응답 유효성 검증
 
 관측 경계:

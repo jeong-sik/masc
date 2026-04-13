@@ -61,7 +61,7 @@ let effective_max_turns (meta : Worker_container_types.worker_container_meta) : 
 let agent_config_of_worker_meta
     (meta : Worker_container_types.worker_container_meta)
     ~(system_prompt : string) : Oas.Types.agent_config =
-  let max_tokens = Worker_container_types.local_worker_max_tokens () in
+  let max_tokens = Some (Worker_container_types.local_worker_max_tokens ()) in
   {
     Oas.Types.default_config with
     name = meta.worker_name;
@@ -257,7 +257,7 @@ let build_agent
     Oas.Builder.create ~net ~model:config.model
     |> Oas.Builder.with_name config.name
     |> Oas.Builder.with_system_prompt system_prompt
-    |> Oas.Builder.with_max_tokens config.max_tokens
+    |> (fun b -> match config.max_tokens with Some n -> Oas.Builder.with_max_tokens n b | None -> b)
     |> Oas.Builder.with_max_turns config.max_turns
     |> Oas.Builder.with_temperature Oas_worker_cascade.worker_temperature
     |> Oas.Builder.with_top_p Oas_worker_cascade.worker_top_p

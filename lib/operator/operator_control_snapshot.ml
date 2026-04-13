@@ -312,6 +312,40 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  let keepalive_started_at =
                    Keeper_status_bridge.runtime_keepalive_started_at config meta
                  in
+                 let created_ts =
+                   Resilience.Time.parse_iso8601_opt meta.created_at
+                   |> Option.value ~default:0.0
+                 in
+                 let last_turn_ago_s =
+                   if meta.runtime.usage.last_turn_ts <= 0.0 then 0.0
+                   else now_ts -. meta.runtime.usage.last_turn_ts
+                 in
+                 let last_handoff_ago_s =
+                   if meta.runtime.last_handoff_ts <= 0.0 then 0.0
+                   else now_ts -. meta.runtime.last_handoff_ts
+                 in
+                 let last_compaction_ago_s =
+                   if meta.runtime.compaction_rt.last_ts <= 0.0 then 0.0
+                   else now_ts -. meta.runtime.compaction_rt.last_ts
+                 in
+                 let last_proactive_ago_s =
+                   if meta.runtime.proactive_rt.last_ts <= 0.0 then 0.0
+                   else now_ts -. meta.runtime.proactive_rt.last_ts
+                 in
+                 let last_activity_ts =
+                   List.fold_left max 0.0
+                     [
+                       meta.runtime.usage.last_turn_ts;
+                       meta.runtime.proactive_rt.last_ts;
+                       meta.runtime.last_handoff_ts;
+                       meta.runtime.compaction_rt.last_ts;
+                       created_ts;
+                     ]
+                 in
+                 let last_activity_ago_s =
+                   if last_activity_ts <= 0.0 then 0.0
+                   else now_ts -. last_activity_ts
+                 in
                  let diagnostic =
                    Keeper_exec_status.keeper_diagnostic_json ~meta
                      ~agent_status:agent_json ~keepalive_running ~history_items:[]
@@ -348,7 +382,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  in
                  Some
                    (`Assoc
-                     [
+                     ([
                        ("runtime_class", `String "keeper");
                        ("pipeline_stage", `String pipeline_stage);
                        ("phase", phase_str);
@@ -368,6 +402,11 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                           | Some r -> `Float r
                           | None -> `Null));
                        ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                       ("last_turn_ago_s", `Float last_turn_ago_s);
+                       ("last_handoff_ago_s", `Float last_handoff_ago_s);
+                       ("last_compaction_ago_s", `Float last_compaction_ago_s);
+                       ("last_proactive_ago_s", `Float last_proactive_ago_s);
+                       ("last_activity_ago_s", `Float last_activity_ago_s);
                        ("last_model_used", `String meta.runtime.usage.last_model_used);
                        ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
                        ("keepalive_running", `Bool keepalive_running);
@@ -397,6 +436,18 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("proactive_enabled", `Bool meta.proactive.enabled);
                        ("proactive_idle_sec", `Int meta.proactive.idle_sec);
                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+                       ("last_proactive_reason",
+                         string_option_to_json
+                           (let value = String.trim meta.runtime.proactive_rt.last_reason in
+                            if value = "" then None else Some value));
+                       ("last_proactive_preview",
+                         string_option_to_json
+                           (let value = String.trim meta.runtime.proactive_rt.last_preview in
+                            if value = "" then None else Some value));
+                       ("last_blocker",
+                         string_option_to_json
+                           (let value = String.trim meta.runtime.last_blocker in
+                            if value = "" then None else Some value));
                        ("updated_at", `String meta.updated_at);
                        ("created_at", `String meta.created_at);
                        ("recent_activity",
@@ -415,7 +466,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                              with Yojson.Json_error _ -> None) lines)
                          else
                            `List []);
-                     ])
+                     ]
+                     @ Keeper_status_bridge.runtime_blocker_fields_json config meta))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Dashboard.error "keepers_json fiber error (%s): %s"
                name (Printexc.to_string exn);

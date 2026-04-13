@@ -28,10 +28,10 @@ let dedup_strings (xs : string list) : string list =
   let rec go seen acc = function
     | [] -> List.rev acc
     | x :: rest ->
-      if Base.String.Set.mem x seen then go seen acc rest
-      else go (Base.String.Set.add x seen) (x :: acc) rest
+      if Base.Set.mem seen x then go seen acc rest
+      else go (Base.Set.add seen x) (x :: acc) rest
   in
-  go Base.String.Set.empty [] xs
+  go (Base.Set.empty (module Base.String)) [] xs
 
 let string_list_of_json json =
   match json with

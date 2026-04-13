@@ -166,7 +166,9 @@ let config_for_label
   }
 
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
-    Only API-level errors are cascadeable; agent/config errors are not. *)
+    API-level errors and model-capability-dependent agent errors are
+    cascadeable (a different provider may succeed).  Structural agent
+    errors (budget, idle, exit) are not — they would recur on any model. *)
 let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     : Llm_provider.Cascade_fsm.provider_outcome option =
   match err with
@@ -189,6 +191,17 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
         Llm_provider.Http_client.NetworkError { message }
     in
     Some (Llm_provider.Cascade_fsm.Call_err http_err)
+  (* Model-capability errors: the next provider may handle these.
+     CompletionContractViolation: model returned text when tool_use was
+     required — a different model with better tool calling may succeed.
+     UnrecognizedStopReason: model returned a non-standard stop reason
+     that this provider does not map — another provider may not. *)
+  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { reason; _ }) ->
+    Some (Llm_provider.Cascade_fsm.Call_err
+      (Llm_provider.Http_client.AcceptRejected { reason }))
+  | Oas.Error.Agent (Oas.Error.UnrecognizedStopReason { reason }) ->
+    Some (Llm_provider.Cascade_fsm.Call_err
+      (Llm_provider.Http_client.AcceptRejected { reason }))
   | _ -> None
 
 (** Run a single Agent.run() call with MASC-driven cascade model fallback.

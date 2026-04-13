@@ -694,6 +694,11 @@
 (test
  (name test_keeper_semaphore_fairness)
  (libraries masc_test_deps))
+
+; Dashboard_governance_metrics — tool rejection ring + approval queue
+(test
+ (name test_dashboard_governance_metrics)
+ (libraries masc_test_deps))
 ; Operator Control (7 modules)
 (test
  (name test_operator_control)

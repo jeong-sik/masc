@@ -6,10 +6,10 @@
        [record_tool_skipped]. Called from [Keeper_hooks_oas.broadcast_tool_skipped]
        to capture the same (tool_name, reason_code) emitted on SSE. The ring
        gives operators a "last N minutes" view without tailing JSONL.
-    2. Approval queue audit log under
-       [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl] (written by
-       [Keeper_approval_queue.audit_approval_event]) plus the live pending
-       hashtbl ([Keeper_approval_queue.list_pending_dashboard_json]).
+    2. Live approval queue state returned by
+       [Keeper_approval_queue.list_pending_json ()]. Approval queue metrics
+       are computed from the current pending set; this module does not parse
+       the approval audit JSONL.
 
     Window for tool-rejection counts is configurable per-request via the
     HTTP [?window=<minutes>] query param.
@@ -26,10 +26,10 @@ type rejection_event = {
   keeper_name : string;
 }
 
-let max_ring_size = 5000
+let max_ring_size = 43200
 (** Bounded ring buffer to prevent unbounded memory growth.
-    5000 events at the assumed worst case (~1 skip/sec sustained) covers
-    ~83 minutes — comfortably above the default 60 min window. *)
+    43200 events at ~1 skip/sec sustained covers 12 hours, matching
+    the largest dashboard window (720m). *)
 
 let ring_mu = Eio.Mutex.create ()
 let ring : rejection_event list ref = ref []
@@ -60,15 +60,15 @@ let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
 let reset_for_testing () =
-  try
-    Eio.Mutex.use_rw ~protect:true ring_mu (fun () -> ring := [])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> ()
+  ring := []
 
 let snapshot_ring () =
   try Eio.Mutex.use_ro ring_mu (fun () -> !ring)
   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+
+let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
+  let event = { ts; tool_name; reason_code; keeper_name } in
+  ring := event :: !ring
 
 (** Aggregate [(tool_name, reason_code) -> count] over the supplied window.
     [now_ts] is injectable for testing.  Returns a deterministic ordering:

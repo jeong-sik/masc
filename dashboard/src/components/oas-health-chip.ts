@@ -3,10 +3,11 @@
 
 import { html } from 'htm/preact'
 import { useComputed } from '@preact/signals'
-import { oasHealthSummary } from '../store'
+import { oasHealthSummary, oasAgentEvents } from '../store'
 import { Card } from './common/card'
 import { StatCell } from './common/stat-cell'
 import { EmptyState } from './common/empty-state'
+import type { OasAgentEvent } from '../types/oas'
 
 const STALE_MS = 60_000
 
@@ -19,8 +20,25 @@ function formatLastTick(tick: number | null): string {
   return `${Math.floor(delta / 3_600_000)}시간 전`
 }
 
+const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {
+  selected: '선택',
+  decision: '결정',
+  action_executed: '실행',
+  keeper_lifecycle: '생명주기',
+  trust_updated: '신뢰도',
+  reputation_changed: '평판',
+}
+
+function describeAgentEvent(evt: OasAgentEvent): string {
+  const label = EVENT_TYPE_LABELS[evt.type]
+  const action = evt.action ?? evt.event ?? evt.trigger
+  const target = evt.secondary_agent ? ` → ${evt.secondary_agent}` : ''
+  return `${label}${action ? ` · ${action}` : ''}${target}`
+}
+
 export function OasHealthChip() {
   const summary = useComputed(() => oasHealthSummary.value)
+  const recentEvents = useComputed(() => oasAgentEvents.value.slice(0, 3))
   const isStale = useComputed(() => {
     const tick = summary.value.lastKeeperTick
     return tick == null || Date.now() - tick > STALE_MS
@@ -74,6 +92,27 @@ export function OasHealthChip() {
           tone=${isStale.value ? 'text-[var(--warn)]' : 'text-[var(--ok)]'}
         />
       </div>
+      ${recentEvents.value.length > 0 ? html`
+        <div class="mt-3 pt-3 border-t border-[var(--white-6)]">
+          <div class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+            최근 자율성 이벤트
+          </div>
+          <ul class="space-y-1">
+            ${recentEvents.value.map(evt => html`
+              <li class="flex items-baseline justify-between gap-2 text-[11px]">
+                <span class="text-[var(--text-body)] truncate">
+                  <span class="font-mono text-[var(--text-dim)]">${evt.agent_name}</span>
+                  <span class="text-[var(--text-muted)]"> · </span>
+                  ${describeAgentEvent(evt)}
+                </span>
+                <span class="text-[var(--text-muted)] tabular-nums shrink-0">
+                  ${formatLastTick(evt.timestamp * 1000)}
+                </span>
+              </li>
+            `)}
+          </ul>
+        </div>
+      ` : null}
     </${Card}>
   `
 }

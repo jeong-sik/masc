@@ -347,11 +347,10 @@ let test_record_error () =
   | Some e ->
     check (option string) "error recorded" (Some "something broke") e.last_error
 
-let test_get_exn_not_found () =
+let test_get_returns_none_for_missing () =
   R.clear ();
-  match R.get_exn ~base_path:bp "nonexistent" with
-  | _ -> fail "expected Not_found"
-  | exception Not_found -> ()
+  check (option reject) "nonexistent returns None" None
+    (R.get ~base_path:bp "nonexistent")
 
 let test_noop_on_missing () =
   R.clear ();
@@ -486,7 +485,7 @@ let test_fiber_health_dead_state () =
 let test_shared_refs () =
   R.clear ();
   let entry = R.register ~base_path:bp "ref1" (make_meta "ref1") in
-  let entry_via_get = R.get_exn ~base_path:bp "ref1" in
+  let entry_via_get = match R.get ~base_path:bp "ref1" with Some e -> e | None -> fail "expected ref1" in
   Atomic.set entry.fiber_wakeup true;
   check bool "shared wakeup atomic" true (Atomic.get entry_via_get.fiber_wakeup);
   Atomic.set entry_via_get.fiber_stop true;
@@ -705,7 +704,7 @@ let () =
           eio_test "record restart" test_record_restart;
           eio_test "is_registered" test_is_registered;
           eio_test "record error" test_record_error;
-          eio_test "get_exn not found" test_get_exn_not_found;
+          eio_test "get returns None for missing" test_get_returns_none_for_missing;
           eio_test "noop on missing keys" test_noop_on_missing;
           eio_test "register replaces existing" test_register_replaces;
         ] );

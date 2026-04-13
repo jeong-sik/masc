@@ -94,9 +94,6 @@ val unregister : base_path:string -> string -> unit
 (** Look up a keeper by name. *)
 val get : base_path:string -> string -> registry_entry option
 
-(** Look up a keeper by name, raising [Not_found] if absent. *)
-val get_exn : base_path:string -> string -> registry_entry
-
 (** Return all registered keepers. *)
 val all : ?base_path:string -> unit -> registry_entry list
 

@@ -374,17 +374,16 @@ let manual_reconcile_skip_log_last_ts : (string, float) Hashtbl.t =
 
 let should_log_manual_reconcile_skip ~(now : float) keeper_name =
   Mutex.lock manual_reconcile_skip_log_mutex;
-  let result =
-    match
-      Hashtbl.find_opt manual_reconcile_skip_log_last_ts keeper_name
-    with
-    | Some last when now -. last < skip_log_throttle_sec -> false
-    | _ ->
-        Hashtbl.replace manual_reconcile_skip_log_last_ts keeper_name now;
-        true
-  in
-  Mutex.unlock manual_reconcile_skip_log_mutex;
-  result
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock manual_reconcile_skip_log_mutex)
+    (fun () ->
+      match
+        Hashtbl.find_opt manual_reconcile_skip_log_last_ts keeper_name
+      with
+      | Some last when now -. last < skip_log_throttle_sec -> false
+      | _ ->
+          Hashtbl.replace manual_reconcile_skip_log_last_ts keeper_name now;
+          true)
 ;;
 
 (** Test-only reset for the throttle table. Clears every [(keeper, ts)]
@@ -393,8 +392,9 @@ let should_log_manual_reconcile_skip ~(now : float) keeper_name =
     flood the log on the next tick. *)
 let reset_skip_log_throttle () =
   Mutex.lock manual_reconcile_skip_log_mutex;
-  Hashtbl.clear manual_reconcile_skip_log_last_ts;
-  Mutex.unlock manual_reconcile_skip_log_mutex
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock manual_reconcile_skip_log_mutex)
+    (fun () -> Hashtbl.clear manual_reconcile_skip_log_last_ts)
 ;;
 
 let format_since_last_scheduled_autonomous = function

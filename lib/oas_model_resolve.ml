@@ -271,6 +271,7 @@ let cascade_config_path () : string option =
     Delegates to OAS Cascade_config for JSON loading and profile resolution.
     Falls back to "default_models" then preferred_execution_model_labels if absent. *)
 let models_of_cascade_name (cascade_name : string) : string list =
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults =
     match Provider_adapter.preferred_execution_model_labels () with
     | [] -> [Provider_adapter.default_local_fallback_label ()]
@@ -292,6 +293,13 @@ let models_of_cascade_name (cascade_name : string) : string list =
       "cascade config resolve failed for %s, using defaults: %s"
       cascade_name (Printexc.to_string exn);
     defaults
+
+(** Read the default model string list from cascade config (user-declared JSON).
+    Returns the "default_models" entry. MASC does not interpret these strings —
+    it passes them through to OAS. Used as fallback when a keeper TOML does
+    not declare its own [models] field. *)
+let default_model_strings_from_config () : string list =
+  models_of_cascade_name "default"
 
 (* filter_by_providers removed — provider filtering now handled by
    OAS Cascade_config.complete_named ~provider_filter parameter.

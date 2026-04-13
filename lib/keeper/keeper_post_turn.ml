@@ -265,7 +265,29 @@ let recover_latest_checkpoint_for_overflow_retry
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d
    | Error Not_found | Ok _ -> ());
-  let oas_checkpoint = Result.to_option oas_result in
+  let oas_checkpoint =
+    Result.to_option oas_result
+    |> Option.map (fun checkpoint ->
+      let sanitized, stats = sanitize_oas_checkpoint checkpoint in
+      if checkpoint_sanitize_changed stats then begin
+        Log.Keeper.warn
+          "keeper:%s overflow-retry migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
+          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          stats.dropped_blocks
+          stats.dropped_messages
+          stats.dropped_chars
+          stats.truncated_blocks
+          stats.truncated_chars;
+        (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
+         | Ok () -> ()
+         | Error detail ->
+             Log.Keeper.error
+               "keeper:%s overflow-retry migration save failed: %s"
+               (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+               detail)
+      end;
+      sanitized)
+  in
   let legacy_checkpoint =
     (try load_latest_checkpoint session
      with

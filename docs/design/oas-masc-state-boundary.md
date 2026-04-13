@@ -9,6 +9,7 @@ Issue: #1736
 
 ## Related
 
+- [Checkpoint Truth and Replay RFC](./checkpoint-truth-and-replay-rfc.md)
 - [Contract-Driven Agent Loop RFC](./contract-driven-agent-loop-rfc.md)
 - [Labeling and Judging Protocol](./contract-driven-agent-loop-labeling-protocol.md)
 - [Implementation Checklist](./contract-driven-agent-loop-implementation-checklist.md)

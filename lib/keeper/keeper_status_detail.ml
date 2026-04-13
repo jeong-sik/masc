@@ -216,7 +216,10 @@ let handle_keeper_status ctx args : tool_result =
                ("provider", `String provider_name);
                ("model_id", `String cfg.model_id);
                ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
-               ("max_output_tokens", `Int cfg.max_tokens);
+               ( "max_output_tokens",
+                 Option.fold ~none:`Null ~some:(fun tokens -> `Int tokens)
+                   cfg.max_tokens );
+               ("max_output_tokens", match cfg.max_tokens with Some n -> `Int n | None -> `Null);
                ("api_key_env", if cfg.api_key <> "" then `String "(set)" else `Null);
                ("cost_per_million_input", `Float pricing.input_per_million);
                ("cost_per_million_output", `Float pricing.output_per_million);
@@ -228,6 +231,10 @@ let handle_keeper_status ctx args : tool_result =
          let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
          let session_dir = keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
          let history_path = keeper_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
+         let internal_history_path =
+           keeper_internal_history_path ctx.config
+             (Keeper_id.Trace_id.to_string m.runtime.trace_id)
+         in
 
          let metrics_tail =
            let lines =
@@ -344,6 +351,10 @@ let handle_keeper_status ctx args : tool_result =
                        else None
                      in
                      let role_lc = String.lowercase_ascii role in
+                     let is_internal =
+                       Keeper_types.is_internal_history_source source
+                       || Keeper_context_core.has_world_state_signature content
+                     in
                      let entry_kind =
                        match source, role_lc with
                        | "direct_user", _ | "direct_assistant", _ ->
@@ -362,7 +373,9 @@ let handle_keeper_status ctx args : tool_result =
                        role_lc = "assistant"
                        && looks_fragmentary_history_text content
                      in
-                     let should_filter = history_filter_fragments && is_fragment in
+                     let should_filter =
+                       is_internal || (history_filter_fragments && is_fragment)
+                     in
                      let preview =
                        if String.length content > 200 then
                          utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
@@ -699,6 +712,7 @@ let handle_keeper_status ctx args : tool_result =
              ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
              ("session_dir", `String session_dir);
              ("history", `String history_path);
+             ("history_internal", `String internal_history_path);
              ("evidence_dir", `String
                (Filename.concat ctx.config.base_path
                  (Printf.sprintf ".masc/evidence/%s/%s"

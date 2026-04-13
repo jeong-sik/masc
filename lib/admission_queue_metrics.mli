@@ -22,3 +22,6 @@ val on_release : keeper_name:string -> cascade_name:string -> unit
 val on_cancelled : keeper_name:string -> cascade_name:string -> unit
 (** Called when a wait is cancelled by fiber cancellation.
     Increments cancelled counter. *)
+
+val set_max_concurrent : int -> unit
+(** Syncs the configured admission queue capacity into Prometheus. *)

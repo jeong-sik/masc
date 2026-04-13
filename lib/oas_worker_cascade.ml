@@ -1,8 +1,9 @@
 (** Oas_worker_cascade — Cascade metrics types, observation building, and recording.
 
     Tracks per-cascade call counts, model selection distribution, fallback
-    hops, and per-attempt latency/error detail. All state is in-process
-    (mutable Hashtbl); no external persistence.
+    hops, and per-attempt latency/error detail. Aggregate counters stay
+    in-process (mutable Hashtbl), while per-call observations are also
+    appended to a dated JSONL audit log under [.masc/cascade_audit].
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
@@ -84,13 +85,66 @@ type cascade_counter = {
   mutable last_fallback_events : cascade_fallback_event list;
   mutable last_attempt_details_available : bool;
   mutable last_attempt_details_source : string option;
+  mutable last_used_at : float;
   selected_models : (string, int) Hashtbl.t;
   attempted_models : (string, int) Hashtbl.t;
   errored_models : (string, int) Hashtbl.t;
 }
 
 let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
+let cascade_counters_mu = Eio.Mutex.create ()
 let cascade_max_keys = 256
+let cascade_audit_store_ref : Dated_jsonl.t option ref = ref None
+
+let create_cascade_counter ~now () =
+  {
+    calls = 0;
+    successes = 0;
+    failures = 0;
+    rejected = 0;
+    fallback_calls = 0;
+    total_attempts = 0;
+    total_fallback_events = 0;
+    last_selected_model = None;
+    last_selected_index = None;
+    last_candidate_models = [];
+    last_attempts = [];
+    last_fallback_events = [];
+    last_attempt_details_available = false;
+    last_attempt_details_source = None;
+    last_used_at = now;
+    selected_models = Hashtbl.create 8;
+    attempted_models = Hashtbl.create 8;
+    errored_models = Hashtbl.create 8;
+  }
+
+type cascade_eviction = {
+  name : string;
+  calls : int;
+  last_used_at : float;
+}
+
+let find_cascade_eviction_candidate () =
+  Hashtbl.fold
+    (fun name (counter : cascade_counter) best ->
+      match best with
+      | None ->
+          Some { name; calls = counter.calls; last_used_at = counter.last_used_at }
+      | Some current ->
+          if counter.calls < current.calls
+             || (counter.calls = current.calls
+                 && counter.last_used_at < current.last_used_at)
+          then
+            Some
+              { name; calls = counter.calls; last_used_at = counter.last_used_at }
+          else
+            best)
+    cascade_counters None
+
+let reset_cascade_counters_for_test () =
+  Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
+    Hashtbl.clear cascade_counters);
+  cascade_audit_store_ref := None
 
 (* ================================================================ *)
 (* Provider label helpers                                            *)
@@ -373,6 +427,52 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
       ("attempt_details_source", `String obs.attempt_details_source);
     ]
 
+let get_cascade_audit_store () =
+  match !cascade_audit_store_ref with
+  | Some store -> Some store
+  | None ->
+      let base_path = Env_config_core.base_path () in
+      let dir = Filename.concat base_path ".masc/cascade_audit" in
+      (match Dated_jsonl.create ~base_dir:dir () with
+      | store ->
+          cascade_audit_store_ref := Some store;
+          Some store
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+      | exception exn ->
+          Log.Misc.warn "cascade audit store creation failed: %s"
+            (Printexc.to_string exn);
+          None)
+
+let cascade_outcome_to_string = function
+  | `Success -> "success"
+  | `Failure -> "failure"
+  | `Rejected -> "rejected"
+
+let cascade_audit_json ~now ~cascade_name ~observation ~outcome =
+  `Assoc
+    [
+      ("ts", `Float now);
+      ("cascade_name", `String cascade_name);
+      ("outcome", `String (cascade_outcome_to_string outcome));
+      ( "observation",
+        match observation with
+        | Some obs -> cascade_observation_to_json obs
+        | None -> `Null );
+    ]
+
+let record_cascade_audit ~now ~cascade_name ~observation ~outcome =
+  match get_cascade_audit_store () with
+  | None -> ()
+  | Some store ->
+      (try
+         Dated_jsonl.append store
+           (cascade_audit_json ~now ~cascade_name ~observation ~outcome)
+       with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Misc.warn "cascade audit append failed cascade=%s error=%s"
+            cascade_name (Printexc.to_string exn))
+
 (* ================================================================ *)
 (* Aggregate metrics recording                                       *)
 (* ================================================================ *)
@@ -402,118 +502,119 @@ let attempt_model_display (attempt : cascade_attempt) =
   | _ -> attempt.model_id
 
 let record_cascade ~observation ~cascade_name ~outcome =
-  let c = match Hashtbl.find_opt cascade_counters cascade_name with
-    | Some c -> c
-    | None ->
-      if Hashtbl.length cascade_counters >= cascade_max_keys then
-        {
-          calls = 0;
-          successes = 0;
-          failures = 0;
-          rejected = 0;
-          fallback_calls = 0;
-          total_attempts = 0;
-          total_fallback_events = 0;
-          last_selected_model = None;
-          last_selected_index = None;
-          last_candidate_models = [];
-          last_attempts = [];
-          last_fallback_events = [];
-          last_attempt_details_available = false;
-          last_attempt_details_source = None;
-          selected_models = Hashtbl.create 8;
-          attempted_models = Hashtbl.create 8;
-          errored_models = Hashtbl.create 8;
-        }
-      else begin
-        let c =
-          {
-            calls = 0;
-            successes = 0;
-            failures = 0;
-            rejected = 0;
-            fallback_calls = 0;
-            total_attempts = 0;
-            total_fallback_events = 0;
-            last_selected_model = None;
-            last_selected_index = None;
-            last_candidate_models = [];
-            last_attempts = [];
-            last_fallback_events = [];
-            last_attempt_details_available = false;
-            last_attempt_details_source = None;
-            selected_models = Hashtbl.create 8;
-            attempted_models = Hashtbl.create 8;
-            errored_models = Hashtbl.create 8;
-          }
-        in
-        Hashtbl.replace cascade_counters cascade_name c; c
-      end
+  let now = Time_compat.now () in
+  let evicted =
+    Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
+      let counter, evicted =
+        match Hashtbl.find_opt cascade_counters cascade_name with
+        | Some c -> (c, None)
+        | None ->
+            let evicted =
+              if Hashtbl.length cascade_counters >= cascade_max_keys then
+                match find_cascade_eviction_candidate () with
+                | Some candidate ->
+                    Hashtbl.remove cascade_counters candidate.name;
+                    Some candidate
+                | None -> None
+              else
+                None
+            in
+            let c = create_cascade_counter ~now () in
+            Hashtbl.replace cascade_counters cascade_name c;
+            (c, evicted)
+      in
+      counter.calls <- counter.calls + 1;
+      counter.last_used_at <- now;
+      (match observation with
+      | Some obs ->
+          counter.last_candidate_models <- obs.candidate_models;
+          counter.last_selected_model <- obs.selected_model;
+          counter.last_selected_index <- obs.selected_index;
+          counter.last_attempts <- obs.attempts;
+          counter.last_fallback_events <- obs.fallback_events;
+          counter.last_attempt_details_available <- obs.attempt_details_available;
+          counter.last_attempt_details_source <- Some obs.attempt_details_source;
+          if obs.fallback_applied then
+            counter.fallback_calls <- counter.fallback_calls + 1;
+          counter.total_attempts <- counter.total_attempts + List.length obs.attempts;
+          counter.total_fallback_events <-
+            counter.total_fallback_events + List.length obs.fallback_events;
+          (match obs.selected_model with
+          | Some model when String.trim model <> "" ->
+              increment_counter counter.selected_models model
+          | _ -> ());
+          List.iter
+            (fun attempt ->
+              increment_counter
+                counter.attempted_models
+                (attempt_model_display attempt);
+              match attempt.error with
+              | Some _ ->
+                  increment_counter
+                    counter.errored_models
+                    (attempt_model_display attempt)
+              | None -> ())
+            obs.attempts
+      | None -> ());
+      (match outcome with
+      | `Success -> counter.successes <- counter.successes + 1
+      | `Failure -> counter.failures <- counter.failures + 1
+      | `Rejected -> counter.rejected <- counter.rejected + 1);
+      evicted)
   in
-  c.calls <- c.calls + 1;
-  (match observation with
-  | Some obs ->
-      c.last_candidate_models <- obs.candidate_models;
-      c.last_selected_model <- obs.selected_model;
-      c.last_selected_index <- obs.selected_index;
-      c.last_attempts <- obs.attempts;
-      c.last_fallback_events <- obs.fallback_events;
-      c.last_attempt_details_available <- obs.attempt_details_available;
-      c.last_attempt_details_source <- Some obs.attempt_details_source;
-      if obs.fallback_applied then c.fallback_calls <- c.fallback_calls + 1;
-      c.total_attempts <- c.total_attempts + List.length obs.attempts;
-      c.total_fallback_events <-
-        c.total_fallback_events + List.length obs.fallback_events;
-      (match obs.selected_model with
-      | Some model when String.trim model <> "" ->
-          increment_counter c.selected_models model
-      | _ -> ());
-      List.iter
-        (fun attempt ->
-          increment_counter c.attempted_models (attempt_model_display attempt);
-          match attempt.error with
-          | Some _ -> increment_counter c.errored_models (attempt_model_display attempt)
-          | None -> ())
-        obs.attempts
-  | None -> ());
-  (match outcome with
-  | `Success -> c.successes <- c.successes + 1
-  | `Failure -> c.failures <- c.failures + 1
-  | `Rejected -> c.rejected <- c.rejected + 1)
+  Option.iter
+    (fun candidate ->
+      Log.Misc.warn
+        "cascade metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
+        candidate.name candidate.calls candidate.last_used_at cascade_name
+        cascade_max_keys)
+    evicted;
+  record_cascade_audit ~now ~cascade_name ~observation ~outcome
 
 let cascade_metrics_json () : Yojson.Safe.t =
-  let entries = Hashtbl.fold (fun name c acc ->
-    let error_rate = if c.calls > 0
-      then float_of_int (c.failures + c.rejected) /. float_of_int c.calls
-      else 0.0 in
-    `Assoc [
-      ("cascade_name", `String name);
-      ("calls", `Int c.calls);
-      ("successes", `Int c.successes);
-      ("failures", `Int c.failures);
-      ("rejected", `Int c.rejected);
-      ("fallback_calls", `Int c.fallback_calls);
-      ("total_attempts", `Int c.total_attempts);
-      ("total_fallback_events", `Int c.total_fallback_events);
-      ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
-      ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
-      ( "last_candidate_models",
-        `List (List.map (fun model -> `String model) c.last_candidate_models) );
-      ( "last_attempts",
-        `List (List.map cascade_attempt_to_json c.last_attempts) );
-      ( "last_fallback_events",
-        `List
-          (List.map cascade_fallback_event_to_json c.last_fallback_events) );
-      ("last_attempt_details_available", `Bool c.last_attempt_details_available);
-      ( "last_attempt_details_source",
-        Json_util.string_opt_to_json c.last_attempt_details_source );
-      ("selected_models", `List (distribution_json c.selected_models));
-      ("attempted_models", `List (distribution_json c.attempted_models));
-      ("errored_models", `List (distribution_json c.errored_models));
-      ("error_rate", `Float error_rate);
-      ] :: acc
-    ) cascade_counters [] in
-    `List (List.sort (fun a b ->
-      let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
-      Int.compare (get_calls b) (get_calls a)
-    ) entries)
+  Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
+    let entries =
+      Hashtbl.fold
+        (fun name (c : cascade_counter) acc ->
+          let error_rate =
+            if c.calls > 0 then
+              float_of_int (c.failures + c.rejected) /. float_of_int c.calls
+            else
+              0.0
+          in
+          `Assoc
+            [
+              ("cascade_name", `String name);
+              ("calls", `Int c.calls);
+              ("successes", `Int c.successes);
+              ("failures", `Int c.failures);
+              ("rejected", `Int c.rejected);
+              ("fallback_calls", `Int c.fallback_calls);
+              ("total_attempts", `Int c.total_attempts);
+              ("total_fallback_events", `Int c.total_fallback_events);
+              ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
+              ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
+              ( "last_candidate_models",
+                `List (List.map (fun model -> `String model) c.last_candidate_models) );
+              ( "last_attempts",
+                `List (List.map cascade_attempt_to_json c.last_attempts) );
+              ( "last_fallback_events",
+                `List
+                  (List.map cascade_fallback_event_to_json c.last_fallback_events) );
+              ("last_attempt_details_available", `Bool c.last_attempt_details_available);
+              ( "last_attempt_details_source",
+                Json_util.string_opt_to_json c.last_attempt_details_source );
+              ("selected_models", `List (distribution_json c.selected_models));
+              ("attempted_models", `List (distribution_json c.attempted_models));
+              ("errored_models", `List (distribution_json c.errored_models));
+              ("error_rate", `Float error_rate);
+            ]
+          :: acc)
+        cascade_counters []
+    in
+    `List
+      (List.sort
+         (fun a b ->
+           let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
+           Int.compare (get_calls b) (get_calls a))
+         entries))

@@ -127,6 +127,7 @@ type keeper_meta = {
   long_goal: string;
   social_model: string;
   cascade_name: string;
+  models: string list;
   will: string;
   needs: string;
   desires: string;

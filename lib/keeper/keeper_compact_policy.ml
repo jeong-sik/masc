@@ -136,7 +136,6 @@ let compact_if_needed
                          (List.map
                             (fun value -> `String value)
                             pre_compact_event.strategies) );
-                     ("model_family", `String pre_compact_event.model_family);
                      ("context_window", `Int pre_compact_event.context_window);
                      ("is_local_model", `Bool pre_compact_event.is_local_model);
                      ("trigger", `String pre_compact_event.trigger);

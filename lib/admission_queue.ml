@@ -76,6 +76,8 @@ let global : t = {
   mutex = Eio.Mutex.create ();
 }
 
+let () = Admission_queue_metrics.set_max_concurrent global.max_slots
+
 let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
@@ -201,7 +203,8 @@ let set_max_concurrent n =
     invalid_arg
       (Printf.sprintf "Admission_queue.set_max_concurrent: must be >= 1, got %d" n);
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.max_slots <- n)
+    global.max_slots <- n);
+  Admission_queue_metrics.set_max_concurrent n
 
 let max_concurrent () = global.max_slots
 
@@ -210,4 +213,5 @@ let reset_for_test ~max_slots =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
     global.max_slots <- max_slots;
     global.active <- 0;
-    global.waiters <- [])
+    global.waiters <- []);
+  Admission_queue_metrics.set_max_concurrent max_slots

@@ -306,6 +306,24 @@ let test_load_history_user_messages () =
     check string "first" "hello world" (List.hd result);
     check string "last" "third question" (List.nth result 2))
 
+let test_load_history_user_messages_ignores_internal_prompt_entries () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "history.jsonl" in
+    let lines = [
+      {|{"role":"user","source":"world_state_prompt","content":"## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
+      {|{"role":"user","content":"real user question"}|};
+      {|{"role":"user","content":"[Summary]\n[User] ## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
+      {|{"role":"user","content":"second real question"}|};
+    ] in
+    let oc = open_out path in
+    List.iter (fun l -> output_string oc (l ^ "\n")) lines;
+    close_out oc;
+    let result = Keeper_memory_recall.load_history_user_messages ~path ~max_n:10 in
+    check int "only real user messages kept" 2 (List.length result);
+    check string "first real" "real user question" (List.hd result);
+    check string "second real" "second real question" (List.nth result 1))
+
 let test_recall_candidates_with_history_dedup () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
@@ -775,6 +793,8 @@ let () =
         [
           test_case "load_history_user_messages from jsonl" `Quick
             test_load_history_user_messages;
+          test_case "load_history_user_messages ignores internal prompt entries" `Quick
+            test_load_history_user_messages_ignores_internal_prompt_entries;
           test_case "recall_candidates_with_history deduplicates" `Quick
             test_recall_candidates_with_history_dedup;
           test_case "recall_candidates_with_history appends history" `Quick

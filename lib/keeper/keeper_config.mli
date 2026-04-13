@@ -12,6 +12,14 @@
     @since v2.128.0 *)
 val default_cascade_name : string
 
+(** Cascade name for recovery turns (Failing phase).
+    @since Core Triad *)
+val local_recovery_cascade_name : string
+
+(** Cascade name for buffer operations (Compacting, HandingOff).
+    @since Core Triad *)
+val local_only_cascade_name : string
+
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int
 

@@ -1058,18 +1058,13 @@ let run_turn
                          Oas_worker.default_model_strings ~cascade_name:rerank_cascade
                        in
                        let config_path = Oas_worker.default_config_path () in
-                       let named_cascade =
-                         Agent_sdk.Api.named_cascade
-                           ?config_path
-                           ~name:rerank_cascade
-                           ~defaults
-                           ()
-                       in
                        let rerank_fn =
                          Agent_sdk.Tool_selector.default_rerank_fn
                            ~sw
                            ~net
-                           ~named_cascade
+                           ?config_path
+                           ~cascade_name:rerank_cascade
+                           ~defaults
                            ~k:selection_limit
                            ()
                        in
@@ -1302,15 +1297,21 @@ let run_turn
                 else all_allowed
               in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Tool choice: graduated by turn budget.
-           Normal turns: tool_choice=Any forces tool call format (deterministic
-           at API level). WHICH tool is called is non-deterministic (model decides).
-           Last turn: Auto allows [STATE] text block.
-           See #5566 for tool_choice=Any rationale. *)
+              (* Tool choice: Auto on all turns.
+           Previous design forced tool_choice=Any on non-last turns
+           (#5566) to prevent text-only "chatting" responses, but this
+           caused fatal interactions with providers that ignore
+           tool_choice (GLM, some Ollama models):
+             1. Provider returns text → OAS contract violation
+             2. Mutating tools already committed → reconcile block
+             3. sticky_reconcile retained → keeper permanently dead
+             4. All keepers stall within ~10 minutes (#6801)
+           Auto lets the model decide; tool use is guided by the system
+           prompt instruction "always call a tool" instead. *)
               let tool_choice =
                 if is_last_turn || List.length all_allowed = 0
-                then current_params.tool_choice (* last turn: Auto for [STATE] block *)
-                else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
+                then current_params.tool_choice (* last turn: preserve caller's choice *)
+                else Some Agent_sdk.Types.Auto (* all other turns: model decides *)
               in
               completion_contract_ref :=
                 Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
@@ -1426,6 +1427,7 @@ let run_turn
       Agent_sdk.Context_reducer.drop_thinking;
       Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3;
       Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
+      Agent_sdk.Context_reducer.cap_message_tokens ~max_tokens:32000 ~keep_recent:3;
       Agent_sdk.Context_reducer.repair_dangling_tool_calls;
       Agent_sdk.Context_reducer.merge_contiguous;
     ]
@@ -1473,6 +1475,7 @@ let run_turn
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
            ~cascade_name
+           ~model_strings:meta.models
            ?provider_filter
            ~goal:user_message
            ~priority

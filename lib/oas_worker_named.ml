@@ -18,7 +18,7 @@ let default_config_path () : string option =
     Convention: any name containing "local" restricts defaults to
     self-hosted providers so that cloud models never leak in via fallback. *)
 let is_local_only_cascade name =
-  let lc = String.lowercase_ascii name in
+  let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
   let pattern = "local" in
   let plen = String.length pattern in
   let slen = String.length lc in
@@ -40,6 +40,7 @@ let is_local_label label =
     returned to prevent cloud models from leaking into local-only cascades.
     All profiles are now in config/cascade.json (hot-reloadable). *)
 let default_model_strings ~cascade_name =
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let all_labels =
     match Provider_adapter.explicit_llama_model_label_result () with
     | Ok label -> [ label ]
@@ -85,6 +86,7 @@ let admission_wait_timeout_error
 (** Resolve cascade provider configs via OAS Cascade_config.
     Returns OAS Provider_config.t list directly, bypassing the old Model_spec facade. *)
 let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t list =
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
   let configured =
@@ -99,6 +101,17 @@ let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t lis
     else (
       Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
       Llm_provider.Cascade_config.parse_model_strings defaults)
+
+(** Resolve from an explicit model string list (user-declared in keeper TOML).
+    MASC passes strings through without interpretation — OAS parses them. *)
+let resolve_providers_from_model_strings (model_strings : string list)
+    : Llm_provider.Provider_config.t list =
+  let specs = Llm_provider.Cascade_config.parse_model_strings model_strings in
+  if specs <> [] then specs
+  else (
+    Log.Misc.warn "direct model strings: no callable models from %d entries"
+      (List.length model_strings);
+    [])
 
 let config_for_label
     ~(name : string)
@@ -182,7 +195,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
 
     MASC drives the cascade FSM directly:
     - Resolves cascade providers from cascade.json
-    - For each provider, runs OAS with a single provider (no named_cascade)
+    - For each provider, runs OAS with a single provider
     - Uses Cascade_fsm.decide to determine next action on failure
     - Cascade loop runs inside Admission_queue permit
 
@@ -190,6 +203,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     @since Phase 2 — MASC-driven cascade FSM *)
 let run_named
     ~cascade_name
+    ?model_strings
     ~goal
     ?provider_filter:_provider_filter
     ?priority
@@ -240,13 +254,23 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok (sw, net) ->
-  let defaults = default_model_strings ~cascade_name in
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let config_path = default_config_path () in
-  let configured_labels =
-    Llm_provider.Cascade_config.resolve_model_strings
-      ?config_path ~name:cascade_name ~defaults ()
+  let configured_labels, candidate_cfgs =
+    match model_strings with
+    | Some ms when ms <> [] ->
+      (* Direct model strings from keeper TOML — skip named preset lookup.
+         MASC passes these strings through without interpretation. *)
+      (ms, resolve_providers_from_model_strings ms)
+    | _ ->
+      (* Legacy path: resolve from cascade.json by name *)
+      let defaults = default_model_strings ~cascade_name in
+      let labels =
+        Llm_provider.Cascade_config.resolve_model_strings
+          ?config_path ~name:cascade_name ~defaults ()
+      in
+      (labels, resolve_cascade_providers ~cascade_name)
   in
-  let candidate_cfgs = resolve_cascade_providers ~cascade_name in
   let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
@@ -262,8 +286,15 @@ let run_named
   let queue_priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
-  (* MASC-driven cascade FSM: try each provider, decide on failure *)
-  let try_provider (provider_cfg : Llm_provider.Provider_config.t) =
+  (* MASC-driven cascade FSM: try each provider, decide on failure.
+     Mid-turn resume: when a provider fails after completing some turns,
+     the next provider resumes from the failed agent's checkpoint instead
+     of restarting from scratch.
+
+     Immutable checkpoint threading: try_provider returns both the result
+     and the agent's checkpoint (if progress was made). try_cascade
+     threads this checkpoint to the next provider without mutable state. *)
+  let try_provider ?resume_checkpoint (provider_cfg : Llm_provider.Provider_config.t) =
     let provider : Agent_sdk.Provider.config =
       Agent_sdk.Provider.config_of_provider_config provider_cfg
     in
@@ -291,14 +322,33 @@ let run_named
         approval;
         exit_condition;
         exit_condition_result;
-        named_cascade = None;  (* Phase 2: no OAS-internal cascade *)
         initial_messages; raw_trace; yield_on_tool;
       }
     in
-    Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint ?on_event
-      ?on_yield ?on_resume ?agent_ref ?proof_ref ?contract goal
+    let effective_checkpoint = match resume_checkpoint with
+      | Some _ -> resume_checkpoint
+      | None -> oas_checkpoint
+    in
+    let local_agent_ref : Oas.Agent.t option ref = ref None in
+    let result =
+      Oas_worker_exec.run ~sw ~net ~config ?oas_checkpoint:effective_checkpoint ?on_event
+        ?on_yield ?on_resume ~agent_ref:local_agent_ref ?proof_ref ?contract goal
+    in
+    (* Extract checkpoint from the agent if it made progress.
+       The agent's mutable state reflects all completed turns even on Error. *)
+    let checkpoint_after = match !local_agent_ref with
+      | Some agent when (Oas.Agent.state agent).turn_count > 0 ->
+        (* Also propagate to caller's agent_ref for final result *)
+        (match agent_ref with Some r -> r := Some agent | None -> ());
+        Some (Oas.Agent.checkpoint agent)
+      | Some agent ->
+        (match agent_ref with Some r -> r := Some agent | None -> ());
+        None
+      | None -> None
+    in
+    (result, checkpoint_after)
   in
-  let rec try_cascade remaining last_err =
+  let rec try_cascade ?resume_checkpoint remaining last_err =
     match remaining with
     | [] ->
       let err_msg = match last_err with
@@ -319,7 +369,14 @@ let run_named
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
-      match try_provider provider_cfg with
+      let (result, checkpoint_after) = try_provider ?resume_checkpoint provider_cfg in
+      (* Thread checkpoint forward: if this provider made progress,
+         the next provider can resume from where this one left off. *)
+      let next_resume = match checkpoint_after with
+        | Some _ -> checkpoint_after
+        | None -> resume_checkpoint
+      in
+      (match result with
       | Ok result when accept result.response ->
         (* FSM: Call_ok → Accept *)
         let observation =
@@ -346,7 +403,7 @@ let run_named
          | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
            Log.Misc.warn "cascade %s: accept rejected %s, trying next" cascade_name provider_cfg.model_id;
            metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
-           try_cascade rest new_err
+           try_cascade ?resume_checkpoint:next_resume rest new_err
          | Llm_provider.Cascade_fsm.Exhausted _ ->
            let observation =
              Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
@@ -365,7 +422,7 @@ let run_named
               Log.Misc.warn "cascade %s: %s failed, trying next" cascade_name provider_cfg.model_id;
               metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(Oas.Error.to_string sdk_err);
-              try_cascade rest new_err
+              try_cascade ?resume_checkpoint:next_resume rest new_err
             | Llm_provider.Cascade_fsm.Exhausted _ ->
               let observation =
                 Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
@@ -381,7 +438,7 @@ let run_named
                ~candidate_cfgs ~selected_model_raw:None ~capture
            in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
-           Error sdk_err)
+           Error sdk_err))
   in
   try
     Admission_queue.with_permit ?wait_timeout_sec

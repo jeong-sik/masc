@@ -436,18 +436,34 @@ let write_heartbeat_snapshot
     | Some c -> c.messages
     | None ->
       let history_path =
-        Filename.concat
-          (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id))
-          "history.jsonl"
+        Keeper_types.keeper_history_path ctx.config
+          (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
+      in
+      let internal_history_path =
+        Keeper_types.keeper_internal_history_path ctx.config
+          (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
       in
       (let parse_errors = ref 0 in
        let messages =
          try
-           read_file_tail_lines history_path ~max_bytes:max_history_read_bytes ~max_lines:max_history_read_lines
+           [ history_path; internal_history_path ]
+           |> List.concat_map (fun path ->
+                read_file_tail_lines path
+                  ~max_bytes:max_history_read_bytes
+                  ~max_lines:max_history_read_lines)
            |> List.filter_map (fun line ->
              try
                let json = Yojson.Safe.from_string line in
-               Some (Keeper_context_core.message_of_json json)
+               let source =
+                 Safe_ops.json_string ~default:"" "source" json |> String.trim
+               in
+               let content =
+                 Safe_ops.json_string ~default:"" "content" json |> String.trim
+               in
+               if Keeper_types.is_prompt_history_source source
+                  || Keeper_context_core.has_world_state_signature content
+               then None
+               else Some (Keeper_context_core.message_of_json json)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | _exn ->
@@ -462,8 +478,10 @@ let write_heartbeat_snapshot
        in
        if !parse_errors > 0 then
          Log.Keeper.warn
-           "write_heartbeat_snapshot: failed to parse %d message(s) from history.jsonl for keeper=%s trace_id=%s path=%s"
-           !parse_errors meta_current.name (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id) history_path;
+           "write_heartbeat_snapshot: failed to parse %d message(s) from history logs for keeper=%s trace_id=%s path=%s"
+           !parse_errors meta_current.name
+           (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
+           history_path;
        messages)
   in
   let c_messages = messages_for_continuity in
@@ -766,34 +784,47 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
       | `Pending _ | `Legacy_pending _ -> true
       | `Cleared | `Absent -> false
     in
-    if sticky_manual_reconcile then begin
-      let reason_str =
-        match blocker_detail with
-        | `Pending detail | `Legacy_pending detail -> detail
-        | `Cleared -> "cleared"
-        | `Absent -> "none"
-      in
+    (* When the system already classified the partial commit as
+       auto-recoverable ("cursors already advanced, re-trigger risk is
+       low"), clear the reconcile blocker too.  Retaining a sticky
+       blocker after an auto-recoverable judgment is contradictory and
+       causes all keepers to stall within ~10 minutes of server start.
+       See #6801 for the full failure chain. *)
+    let reason_str =
+      match blocker_detail with
+      | `Pending detail | `Legacy_pending detail -> detail
+      | `Cleared -> "cleared"
+      | `Absent -> "none"
+    in
+    if sticky_manual_reconcile then
       Log.Keeper.warn
-        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — re-trigger risk is low."
-        stale_turn_failures meta.name reason_str
-    end;
+        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — clearing reconcile blocker."
+        stale_turn_failures meta.name reason_str;
     begin
       Keeper_registry.reset_turn_failures
         ~base_path:ctx.config.base_path meta.name;
       ignore (Keeper_registry.dispatch_event
         ~base_path:ctx.config.base_path meta.name
         Keeper_state_machine.Heartbeat_ok);
-      if sticky_manual_reconcile
-      then
+      (* Always dispatch Turn_succeeded to unblock the keeper.
+         Previously, sticky_manual_reconcile retained the blocker even
+         when auto-recoverable, causing permanent keeper stall. *)
+      if sticky_manual_reconcile then begin
+        ignore (Keeper_manual_reconcile.clear ctx.config
+          ~keeper_name:meta.name
+          ~actor:"heartbeat_recovery"
+          ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
+          ~evidence_refs:[]
+          ~idempotency_key:None);
         Log.Keeper.info
-          "heartbeat recovery: reset %d stale turn failures for %s but retained manual reconcile blocker"
-          stale_turn_failures meta.name
-      else (
-        dispatch_keepalive_event ~ctx ~keeper_name:meta.name
-          Keeper_state_machine.Turn_succeeded;
-        Log.Keeper.info
-          "heartbeat recovery: reset %d stale turn failures for %s"
-          stale_turn_failures meta.name)
+          "heartbeat recovery: cleared reconcile blocker for %s (auto-recoverable, re-trigger risk low)"
+          meta.name
+      end;
+      dispatch_keepalive_event ~ctx ~keeper_name:meta.name
+        Keeper_state_machine.Turn_succeeded;
+      Log.Keeper.info
+        "heartbeat recovery: reset %d stale turn failures for %s"
+        stale_turn_failures meta.name
     end
   end
 

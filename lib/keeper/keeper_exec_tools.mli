@@ -53,6 +53,11 @@ val is_effectively_read_only_tool : string -> bool
     Used by the side-effect observer to block retry after committed mutations. *)
 val has_mutating_side_effect : string -> bool
 
+(** Input-aware mutation check for mixed tools such as [keeper_github] where
+    read-only and mutating subcommands share the same tool name. *)
+val has_mutating_side_effect_with_input :
+  tool_name:string -> input:Yojson.Safe.t -> bool
+
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Types.tool_schema
 
@@ -96,17 +101,32 @@ val on_keeper_tool_call :
   (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
 
 (** Register a per-turn observer for tool call events.
-    Observers are independent — concurrent keepers do not interfere. *)
+    Notifications are process-global, so observers that care about a specific
+    keeper turn must filter on [keeper_name]. *)
 val add_tool_call_observer :
-  (tool_name:string -> success:bool -> unit) -> unit
+  (keeper_name:string ->
+   tool_name:string ->
+   input:Yojson.Safe.t ->
+   success:bool ->
+   unit) ->
+  unit
 
 (** Remove a previously registered observer (physical equality). *)
 val remove_tool_call_observer :
-  (tool_name:string -> success:bool -> unit) -> unit
+  (keeper_name:string ->
+   tool_name:string ->
+   input:Yojson.Safe.t ->
+   success:bool ->
+   unit) ->
+  unit
 
 (** Notify all registered observers of a tool call event. *)
 val notify_tool_call_observers :
-  tool_name:string -> success:bool -> unit
+  keeper_name:string ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  success:bool ->
+  unit
 
 (** Callback for keeper_tool_search BM25 search.
     Process-global fallback; prefer passing [~search_fn] to

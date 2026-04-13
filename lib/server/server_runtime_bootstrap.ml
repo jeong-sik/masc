@@ -573,6 +573,49 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
      Log.Misc.error "startup checkpoint prune failed: %s"
        (Printexc.to_string exn))
 
+let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
+  (try
+     let traces_dir =
+       Filename.concat (Room.masc_root_dir state.room_config) "traces"
+     in
+     if Sys.file_exists traces_dir then begin
+       let moved_total = ref 0 in
+       let dropped_total = ref 0 in
+       let sessions_migrated = ref 0 in
+       Array.iter
+         (fun trace_name ->
+            let trace_dir = Filename.concat traces_dir trace_name in
+            if Sys.is_directory trace_dir then
+              let stats =
+                Keeper_context_core.migrate_session_history_logs
+                  ~session_dir:trace_dir
+              in
+              if stats.moved_lines > 0 || stats.dropped_lines > 0 then begin
+                incr sessions_migrated;
+                moved_total := !moved_total + stats.moved_lines;
+                dropped_total := !dropped_total + stats.dropped_lines;
+                Log.Misc.info
+                  "startup history migration: trace=%s moved=%d dropped=%d kept=%d malformed=%d"
+                  trace_name
+                  stats.moved_lines
+                  stats.dropped_lines
+                  stats.kept_lines
+                  stats.malformed_lines
+              end)
+         (Sys.readdir traces_dir);
+       if !sessions_migrated > 0 then
+         Log.Misc.info
+           "startup history migration: migrated %d session(s), moved %d internal line(s), dropped %d prompt line(s)"
+           !sessions_migrated
+           !moved_total
+           !dropped_total
+     end
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Misc.error "startup history migration failed: %s"
+         (Printexc.to_string exn))
+
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
    fiber with a 5-second delay, avoiding PG pool contention with
@@ -710,6 +753,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("prompt_bootstrap", fun () -> bootstrap_prompt_state state);
           ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
           ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
+          ("keeper_history_migration", fun () -> startup_migrate_keeper_histories state);
         ]
         @ (if has_legacy_traces then
              [("legacy_trace_dir_migration", fun () ->

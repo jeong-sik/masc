@@ -119,6 +119,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_toml_exn config ~name:"dot.name";
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
       write_keeper_meta_exn config ~name:"dot.name" ~trace_id:"trace-dot-name";

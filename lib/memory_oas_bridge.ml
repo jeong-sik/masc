@@ -397,6 +397,71 @@ let institution_episode_of_oas ~(agent_name : string)
     context;
   }
 
+(** Create an OAS episode from a keeper [STATE] snapshot and store it
+    in [Memory.t].  The episode is later flushed to institution JSONL by
+    the AfterTurn hook's [flush_episodes].
+
+    Metadata keys match what [institution_episode_of_oas] expects, so
+    the round-trip Institution_eio -> OAS -> Institution_eio is lossless. *)
+let store_episode_from_snapshot
+    ~(memory : Agent_sdk.Memory.t)
+    ~(keeper_name : string)
+    ~(turn : int)
+    ~(trace_id : string)
+    (snapshot : Keeper_memory_policy.keeper_state_snapshot) : unit =
+  let parts =
+    List.filter_map Fun.id
+      [
+        Option.map (fun g -> "Goal: " ^ g) snapshot.goal;
+        Option.map (fun p -> "Progress: " ^ p) snapshot.progress;
+        Option.map (fun d -> "Done: " ^ d) snapshot.done_summary;
+      ]
+  in
+  let summary =
+    match parts with
+    | [] -> "keeper turn " ^ string_of_int turn
+    | _ -> String.concat "; " parts
+  in
+  let learnings =
+    (snapshot.decisions @ snapshot.constraints)
+    |> List.filter (fun s -> String.trim s <> "")
+  in
+  let outcome_str, outcome =
+    if snapshot.done_summary <> None then
+      ("success", Agent_sdk.Memory.Success summary)
+    else ("partial", Agent_sdk.Memory.Neutral)
+  in
+  let ts = Time_compat.now () in
+  let episode_id =
+    Printf.sprintf "keeper-%s-t%d-%d" keeper_name turn
+      (int_of_float (ts *. 1000.0) mod 1_000_000)
+  in
+  let episode : Agent_sdk.Memory.episode =
+    {
+      id = episode_id;
+      timestamp = ts;
+      participants = [ keeper_name ];
+      action = summary;
+      outcome;
+      salience = 0.6;
+      metadata =
+        [
+          ("event_type", `String "keeper_turn");
+          ("institution_summary", `String summary);
+          ("institution_outcome", `String outcome_str);
+          ( "learnings",
+            `List (List.map (fun l -> `String l) learnings) );
+          ( "context",
+            `Assoc
+              [
+                ("trace_id", `String trace_id);
+                ("turn", `String (string_of_int turn));
+              ] );
+        ];
+    }
+  in
+  Agent_sdk.Memory.store_episode memory episode
+
 let persisted_episode_ids () =
   Hashtbl.copy (load_all_episodes_cached ()).ids
 

@@ -34,12 +34,12 @@ describe('oasHealthSummary', () => {
   })
 
   it('reflects agent event buffer length', () => {
-    const evt: OasAgentEvent = {
-      type: 'agent_action_executed',
+    const evt = {
+      type: 'action_executed',
       agent_name: 'dreamer',
       timestamp: 1,
       action: 'ponder',
-    } as OasAgentEvent
+    } as unknown as OasAgentEvent
     pushOasAgentEvent(evt)
     pushOasAgentEvent({ ...evt, timestamp: 2 })
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)
@@ -47,12 +47,12 @@ describe('oasHealthSummary', () => {
   })
 
   it('dedups identical consecutive agent events', () => {
-    const evt: OasAgentEvent = {
-      type: 'agent_action_executed',
+    const evt = {
+      type: 'action_executed',
       agent_name: 'dreamer',
       timestamp: 1,
       action: 'ponder',
-    } as OasAgentEvent
+    } as unknown as OasAgentEvent
     pushOasAgentEvent(evt)
     pushOasAgentEvent(evt) // same type+agent+timestamp → should be dropped
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)

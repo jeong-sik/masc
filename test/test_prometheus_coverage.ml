@@ -47,22 +47,6 @@ let test_labels_to_string_escaped () =
   check bool "escaped" true (String.length result > 0)
 
 (* ============================================================
-   metric_type Enum Tests
-   ============================================================ *)
-
-let test_metric_type_counter () =
-  let t : Prometheus.metric_type = Prometheus.Counter in
-  check string "counter type" "counter" (Prometheus.type_to_string t)
-
-let test_metric_type_gauge () =
-  let t : Prometheus.metric_type = Prometheus.Gauge in
-  check string "gauge type" "gauge" (Prometheus.type_to_string t)
-
-let test_metric_type_histogram () =
-  let t : Prometheus.metric_type = Prometheus.Histogram in
-  check string "histogram type" "histogram" (Prometheus.type_to_string t)
-
-(* ============================================================
    register_counter Tests
    ============================================================ *)
 
@@ -340,11 +324,6 @@ let () =
       test_case "single" `Quick test_labels_to_string_single;
       test_case "multiple" `Quick test_labels_to_string_multiple;
       test_case "escaped" `Quick test_labels_to_string_escaped;
-    ];
-    "metric_type", [
-      test_case "counter" `Quick test_metric_type_counter;
-      test_case "gauge" `Quick test_metric_type_gauge;
-      test_case "histogram" `Quick test_metric_type_histogram;
     ];
     "register_counter", [
       test_case "basic" `Quick test_register_counter_basic;

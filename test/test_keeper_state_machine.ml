@@ -1745,6 +1745,230 @@ let test_mermaid_terminal_class () =
       true (List.mem (Printf.sprintf "    class %s terminal" id) cls)
   ) terminal_phases
 
+(* ── Set/Clear Coverage ────────────────────────────────── *)
+
+(** Static verification that every boolean condition field in the FSM
+    has both a setter event (false->true) and a clearer event (true->false).
+
+    Motivation: bug where manual_reconcile_required could be set but
+    recovery code forgot to dispatch Manual_reconcile_cleared.
+
+    Approach: for each field, iterate ALL events and call update_conditions
+    on two base states (all-false, all-true) to detect which events set
+    and which events clear each field. Assert every non-exempt field has
+    at least one clearer. *)
+
+let test_setclear_coverage () =
+  (* All boolean fields: (name, getter) pairs.
+     Source of truth: conditions record in keeper_state_machine.ml *)
+  let fields : (string * (SM.conditions -> bool)) list = [
+    "launch_pending",            (fun c -> c.launch_pending);
+    "fiber_alive",               (fun c -> c.fiber_alive);
+    "heartbeat_healthy",         (fun c -> c.heartbeat_healthy);
+    "turn_healthy",              (fun c -> c.turn_healthy);
+    "manual_reconcile_required", (fun c -> c.manual_reconcile_required);
+    "context_within_budget",     (fun c -> c.context_within_budget);
+    "context_handoff_needed",    (fun c -> c.context_handoff_needed);
+    "compaction_active",         (fun c -> c.compaction_active);
+    "handoff_active",            (fun c -> c.handoff_active);
+    "operator_paused",           (fun c -> c.operator_paused);
+    "stop_requested",            (fun c -> c.stop_requested);
+    "restart_budget_remaining",  (fun c -> c.restart_budget_remaining);
+    "backoff_elapsed",           (fun c -> c.backoff_elapsed);
+    "guardrail_triggered",       (fun c -> c.guardrail_triggered);
+    "drain_complete",            (fun c -> c.drain_complete);
+  ] in
+  (* Conditions with all booleans false *)
+  let all_false : SM.conditions = {
+    launch_pending = false;
+    fiber_alive = false;
+    heartbeat_healthy = false;
+    turn_healthy = false;
+    manual_reconcile_required = false;
+    context_within_budget = false;
+    context_handoff_needed = false;
+    compaction_active = false;
+    handoff_active = false;
+    operator_paused = false;
+    stop_requested = false;
+    restart_budget_remaining = false;
+    backoff_elapsed = false;
+    guardrail_triggered = false;
+    drain_complete = false;
+  } in
+  (* Conditions with all booleans true *)
+  let all_true : SM.conditions = {
+    launch_pending = true;
+    fiber_alive = true;
+    heartbeat_healthy = true;
+    turn_healthy = true;
+    manual_reconcile_required = true;
+    context_within_budget = true;
+    context_handoff_needed = true;
+    compaction_active = true;
+    handoff_active = true;
+    operator_paused = true;
+    stop_requested = true;
+    restart_budget_remaining = true;
+    backoff_elapsed = true;
+    guardrail_triggered = true;
+    drain_complete = true;
+  } in
+  (* auto_rules with all flags false *)
+  let auto_rules_clean : SM.auto_rule_summary = {
+    reflect = false; plan = false; compact = false;
+    handoff = false; guardrail_stop = false;
+    guardrail_reason = None; goal_drift = 0.0;
+  } in
+  (* Every event variant with representative payloads.
+     Context_measured needs two variants to cover both true/false
+     for guardrail_stop and handoff flags. *)
+  let all_events : (string * SM.event) list = [
+    "Heartbeat_ok",
+      SM.Heartbeat_ok;
+    "Heartbeat_failed",
+      SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 };
+    "Turn_succeeded",
+      SM.Turn_succeeded;
+    "Turn_failed",
+      SM.Turn_failed { consecutive = 3; max_allowed = 10 };
+    "Manual_reconcile_required",
+      SM.Manual_reconcile_required { reason = "test" };
+    "Manual_reconcile_cleared",
+      SM.Manual_reconcile_cleared;
+    "Context_measured(guardrail+handoff)",
+      SM.Context_measured {
+        context_ratio = 0.95; message_count = 100; token_count = 50000;
+        auto_rules = { auto_rules_clean with
+          guardrail_stop = true; handoff = true };
+      };
+    "Context_measured(clean)",
+      SM.Context_measured {
+        context_ratio = 0.2; message_count = 5; token_count = 1000;
+        auto_rules = auto_rules_clean;
+      };
+    "Compaction_started",
+      SM.Compaction_started;
+    "Compaction_completed",
+      SM.Compaction_completed { before_tokens = 100; after_tokens = 50 };
+    "Compaction_failed",
+      SM.Compaction_failed { reason = "test" };
+    "Handoff_started",
+      SM.Handoff_started;
+    "Handoff_completed",
+      SM.Handoff_completed { new_trace_id = "x"; generation = 99 };
+    "Handoff_failed",
+      SM.Handoff_failed { reason = "test" };
+    "Operator_pause",
+      SM.Operator_pause;
+    "Operator_resume",
+      SM.Operator_resume;
+    "Operator_stop",
+      SM.Operator_stop { remove_meta = true };
+    "Stop_requested",
+      SM.Stop_requested;
+    "Drain_complete",
+      SM.Drain_complete;
+    "Fiber_started",
+      SM.Fiber_started;
+    "Fiber_terminated",
+      SM.Fiber_terminated { outcome = "test" };
+    "Supervisor_restart_attempt",
+      SM.Supervisor_restart_attempt { attempt = 1 };
+    "Restart_budget_exhausted",
+      SM.Restart_budget_exhausted;
+    "Guardrail_stop",
+      SM.Guardrail_stop { reason = "test" };
+  ] in
+  (* Build coverage map: for each field, which events set it and clear it *)
+  let setters = Hashtbl.create 16 in
+  let clearers = Hashtbl.create 16 in
+  List.iter (fun (field_name, _) ->
+    Hashtbl.replace setters field_name [];
+    Hashtbl.replace clearers field_name [];
+  ) fields;
+  List.iter (fun (ev_name, ev) ->
+    List.iter (fun (field_name, getter) ->
+      (* Detect setter: field was false, event makes it true *)
+      let after_from_false = SM.update_conditions all_false ev in
+      if not (getter all_false) && (getter after_from_false) then
+        Hashtbl.replace setters field_name
+          (ev_name :: (Hashtbl.find setters field_name));
+      (* Detect clearer: field was true, event makes it false *)
+      let after_from_true = SM.update_conditions all_true ev in
+      if (getter all_true) && not (getter after_from_true) then
+        Hashtbl.replace clearers field_name
+          (ev_name :: (Hashtbl.find clearers field_name));
+    ) fields
+  ) all_events;
+  (* Fields exempt from the "must have clearer" requirement:
+     - context_within_budget: never modified by update_conditions (external)
+     - launch_pending: only cleared by Fiber_started, never set by events
+     - restart_budget_remaining: supervisor-managed, only cleared by
+       Restart_budget_exhausted, never set by events.
+     These fields are managed by external code, not the FSM event loop. *)
+  let exempt_from_clearer = [
+    "context_within_budget";  (* external: never touched by update_conditions *)
+  ] in
+  let exempt_from_setter = [
+    "context_within_budget";  (* external *)
+    "launch_pending";         (* set externally before Fiber_started *)
+    "restart_budget_remaining"; (* supervisor-managed budget *)
+  ] in
+  (* Print coverage report for diagnostics *)
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf "\n--- Set/Clear Coverage Report ---\n";
+  List.iter (fun (field_name, _) ->
+    let s = Hashtbl.find setters field_name in
+    let c = Hashtbl.find clearers field_name in
+    Buffer.add_string buf (Printf.sprintf "  %-30s setters=%d clearers=%d\n"
+      field_name (List.length s) (List.length c));
+    List.iter (fun ev ->
+      Buffer.add_string buf (Printf.sprintf "    SET by: %s\n" ev)
+    ) (List.rev s);
+    List.iter (fun ev ->
+      Buffer.add_string buf (Printf.sprintf "    CLR by: %s\n" ev)
+    ) (List.rev c);
+  ) fields;
+  Buffer.add_string buf "--- End Report ---\n";
+  (* Use Alcotest check with diagnostic message *)
+  let report = Buffer.contents buf in
+  (* Assert: every non-exempt field has at least one clearer *)
+  let missing_clearers = List.filter (fun (field_name, _) ->
+    not (List.mem field_name exempt_from_clearer) &&
+    List.length (Hashtbl.find clearers field_name) = 0
+  ) fields in
+  if missing_clearers <> [] then begin
+    let names = String.concat ", "
+      (List.map (fun (n, _) -> n) missing_clearers) in
+    fail (Printf.sprintf
+      "Fields with no clearer event (stuck-true bug risk): [%s]%s"
+      names report)
+  end;
+  (* Assert: every non-exempt field has at least one setter *)
+  let missing_setters = List.filter (fun (field_name, _) ->
+    not (List.mem field_name exempt_from_setter) &&
+    List.length (Hashtbl.find setters field_name) = 0
+  ) fields in
+  if missing_setters <> [] then begin
+    let names = String.concat ", "
+      (List.map (fun (n, _) -> n) missing_setters) in
+    fail (Printf.sprintf
+      "Fields with no setter event (dead-flag risk): [%s]%s"
+      names report)
+  end;
+  (* Verify field count matches conditions record (structural guard).
+     If someone adds a new field to conditions but forgets to add it here,
+     this check catches it by comparing against conditions_to_json output. *)
+  let json_field_count = match SM.conditions_to_json SM.default_conditions with
+    | `Assoc pairs -> List.length pairs
+    | _ -> fail "conditions_to_json did not return Assoc"
+  in
+  check int "field count matches conditions_to_json"
+    json_field_count (List.length fields);
+  (* Print report on success for visibility *)
+  Printf.printf "%s" report
+
 (* ── Test suite ────────────────────────────────────────── *)
 
 let () =
@@ -1878,5 +2102,9 @@ let () =
       test_case "active phases get active class only" `Quick test_mermaid_active_class;
       test_case "buffer phases get buffer class only" `Quick test_mermaid_buffer_class;
       test_case "terminal phases get terminal class only" `Quick test_mermaid_terminal_class;
+    ];
+    "setclear_coverage", [
+      test_case "every condition field has setter and clearer" `Quick
+        test_setclear_coverage;
     ];
   ]

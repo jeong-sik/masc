@@ -663,7 +663,7 @@ let append_decision_record
               (* Partial telemetry for error turns: record what we know.
                  Without this, 90%+ of turns have no telemetry at all. *)
               let cascade_models =
-                Oas_model_resolve.models_of_cascade_name meta.cascade_name
+                Keeper_model_labels.configured_model_labels_of_meta meta
               in
               let error_category =
                 match error with
@@ -723,7 +723,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       then String.sub s 0 (String.length s - 7) else s
     in
     let used = strip_latest result.model_used in
-    let cascade_models = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+    let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
     let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
     match List.find_opt (fun (c : Llm_provider.Provider_config.t) ->
       c.model_id = result.model_used || c.model_id = used
@@ -1649,7 +1649,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             let used = strip_latest result.model_used in
             let cascade_models =
-              Oas_model_resolve.models_of_cascade_name effective_cascade_name
+              match dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models) with
+              | _ :: _ as explicit -> explicit
+              | [] -> Oas_model_resolve.models_of_cascade_name effective_cascade_name
             in
             let cfgs =
               Llm_provider.Cascade_config.parse_model_strings cascade_models

@@ -106,7 +106,11 @@ let compact_if_needed
         "[pre_compact] keeper=%s ratio=%.4f messages=%d tokens=%d trigger=%s"
         meta.name ratio msg_count tok_count reason;
       let model_meta =
-        let model_labels = Oas_model_resolve.models_of_cascade_name meta.cascade_name in
+        let model_labels =
+          match dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models) with
+          | _ :: _ as explicit -> explicit
+          | [] -> Oas_model_resolve.models_of_cascade_name meta.cascade_name
+        in
         let primary_id = match Llm_provider.Cascade_config.parse_model_strings model_labels with
           | c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto" in
         Llm_provider.Model_meta.for_model_id primary_id

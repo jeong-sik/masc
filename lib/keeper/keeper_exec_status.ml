@@ -7,14 +7,14 @@ open Keeper_types
 let active_model_of_meta (m : keeper_meta) : string =
   if m.runtime.usage.last_model_used <> "" then m.runtime.usage.last_model_used
   else
-    match Oas_model_resolve.models_of_cascade_name m.cascade_name with
+    match Keeper_model_labels.configured_model_labels_of_meta m with
     | model :: _ -> model
     | [] -> ""
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
   let active = active_model_of_meta m in
   let pool =
-    dedupe_keep_order (Oas_model_resolve.models_of_cascade_name m.cascade_name)
+    Keeper_model_labels.configured_model_labels_of_meta m
   in
   match List.filter (fun model -> model <> active) pool with
   | next_model :: _ -> Some next_model

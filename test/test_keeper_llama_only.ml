@@ -27,8 +27,9 @@ let labels_for_turn meta =
   with_worktree_config_root @@ fun () ->
   Eio_main.run @@ fun _env -> KEC.effective_model_labels_for_turn meta
 
-let make_meta ?(last_model_used = "glm-5.1") () =
-  match
+let make_meta ?(last_model_used = "glm-5.1") ?(models = []) () =
+  let base =
+    match
     KT.meta_of_json
       (`Assoc
         [
@@ -38,9 +39,11 @@ let make_meta ?(last_model_used = "glm-5.1") () =
           ("cascade_name", `String "keeper_unified");
           ("last_model_used", `String last_model_used);
         ])
-  with
+    with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
+  in
+  { base with models }
 
 (* Behavioral: stale model from a different provider is excluded from result.
    MASC does not assert specific vendor labels — only cascade behavior.
@@ -48,7 +51,7 @@ let make_meta ?(last_model_used = "glm-5.1") () =
 let test_stale_last_model_is_not_reused_outside_current_cascade () =
   let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   check bool "baseline is non-empty" true (baseline <> []);
-  let labels = labels_for_turn (make_meta ~last_model_used:"glm-5.1" ()) in
+  let labels = labels_for_turn (make_meta ~last_model_used:"glm:glm-5.1" ()) in
   check (list string) "stale pin has no effect on cascade labels" baseline labels
 
 (* Behavioral: when last_model_used matches a configured cascade model,
@@ -64,6 +67,15 @@ let test_matching_last_model_is_preserved_when_still_in_cascade () =
     | actual_first :: _ ->
       check string "matching model stays first" first actual_first
 
+let test_explicit_models_override_cascade_resolution () =
+  let explicit =
+    [ "ollama:qwen3.5:35b-a3b-nvfp4"; "glm-coding:glm-5.1" ]
+  in
+  let labels =
+    labels_for_turn (make_meta ~last_model_used:"" ~models:explicit ())
+  in
+  check (list string) "explicit models are used as configured" explicit labels
+
 let () =
   run "keeper_llama_only"
     [
@@ -73,5 +85,7 @@ let () =
             test_stale_last_model_is_not_reused_outside_current_cascade;
           test_case "keeps llama pin when still allowed" `Quick
             test_matching_last_model_is_preserved_when_still_in_cascade;
+          test_case "prefers explicit models over cascade defaults" `Quick
+            test_explicit_models_override_cascade_resolution;
         ] );
     ]

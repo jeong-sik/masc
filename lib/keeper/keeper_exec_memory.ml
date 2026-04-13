@@ -268,6 +268,14 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
         ; "playground_bundle", `String playground_bundle
         ; "playground_mind", `String playground_mind
         ; "playground_repos", `String playground_repos
+        (* Tool-ready short paths: use these directly as path/cwd arguments
+           in keeper_shell, keeper_bash, keeper_fs_read.  The tool handler
+           resolves them relative to your playground root. *)
+        ; "tool_paths", `Assoc
+            [ "mind", `String "mind"
+            ; "repos", `String "repos"
+            ; "bundle", `String "."
+            ]
         ; ( "continuity_state"
           , match continuity with
             | None -> `Null

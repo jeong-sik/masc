@@ -48,7 +48,8 @@ Use to timestamp events, check elapsed time, or include current time in reports.
 name (your keeper name), context_ratio (0.0-1.0), context_tokens, context_max, \
 message_count, generation, last_model_used, continuity_summary, and your three \
 canonical playground paths (playground_bundle, playground_mind, playground_repos) \
-relative to the server base_path. Use when deciding whether to compact context, \
+relative to the server base_path, plus tool_paths (mind, repos, bundle) which you can pass \
+directly as path or cwd to keeper tools without prefix. Use when deciding whether to compact context, \
 extend turns, hand off to the next generation, or resolve a path without \
 string-interpolating your own keeper name.";
     input_schema = `Assoc [

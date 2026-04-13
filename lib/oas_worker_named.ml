@@ -401,7 +401,7 @@ let run_named
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
            Ok result
          | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
-           Log.Misc.warn "cascade %s: accept rejected %s, trying next" cascade_name provider_cfg.model_id;
+           Log.Misc.warn "cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
            metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
            try_cascade ?resume_checkpoint:next_resume rest new_err
          | Llm_provider.Cascade_fsm.Exhausted _ ->
@@ -419,7 +419,7 @@ let run_named
          | Some outcome ->
            (match Llm_provider.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
             | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
-              Log.Misc.warn "cascade %s: %s failed, trying next" cascade_name provider_cfg.model_id;
+              Log.Misc.warn "cascade %s: %s failed (%s), trying next" cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
               metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(Oas.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err

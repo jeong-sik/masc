@@ -2059,6 +2059,14 @@ let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
   check bool "server parse rejection is auto-recoverable" true
     (UT.is_auto_recoverable_turn_error err)
 
+let test_auto_recoverable_turn_error_includes_required_tool_contract_violation () =
+  let err =
+    Agent_sdk.Error.Internal
+      "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
+  in
+  check bool "tool-choice contract violation is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
 let test_auto_recoverable_turn_error_excludes_persistent_errors () =
   let err =
     Agent_sdk.Error.Api
@@ -3046,10 +3054,12 @@ let () =
             test_server_rejected_parse_error_network_error;
           test_case "auto-recoverable includes transient network" `Quick
             test_auto_recoverable_turn_error_includes_transient_network;
-          test_case "auto-recoverable includes server parse rejection" `Quick
-            test_auto_recoverable_turn_error_includes_server_parse_rejection;
-          test_case "auto-recoverable excludes persistent errors" `Quick
-            test_auto_recoverable_turn_error_excludes_persistent_errors;
+            test_case "auto-recoverable includes server parse rejection" `Quick
+              test_auto_recoverable_turn_error_includes_server_parse_rejection;
+            test_case "auto-recoverable includes tool-choice contract violation" `Quick
+              test_auto_recoverable_turn_error_includes_required_tool_contract_violation;
+            test_case "auto-recoverable excludes persistent errors" `Quick
+              test_auto_recoverable_turn_error_excludes_persistent_errors;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick

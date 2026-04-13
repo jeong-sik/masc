@@ -117,49 +117,6 @@ let runtime_keepalive_started_at (config : Room_utils.config)
     (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 
-let runtime_blocker_surface_of_registry_entry
-    (entry_opt : Keeper_registry.registry_entry option) =
-  match entry_opt with
-  | Some
-      {
-        last_failure_reason =
-          Some
-            ((Keeper_registry.Ambiguous_partial_commit { kind; detail }) as reason);
-        _;
-      } ->
-      let manual_reconcile =
-        Keeper_registry.failure_reason_requires_manual_reconcile reason
-      in
-      let blocker_class, default_summary =
-        match kind with
-        | Keeper_registry.Post_commit_timeout ->
-            ( "ambiguous_post_commit_timeout",
-              if manual_reconcile
-              then
-                "Mutating tools committed before the turn timed out. Retry stayed disabled and manual reconcile is required."
-              else
-                "Mutating tools committed before the turn timed out. Retry stayed disabled, but the committed tools are reconcile-safe so manual reconcile is not required." )
-        | Keeper_registry.Post_commit_failure ->
-            ( "ambiguous_post_commit_failure",
-              if manual_reconcile
-              then
-                "Mutating tools committed before the turn failed. Retry stayed disabled and manual reconcile is required."
-              else
-                "Mutating tools committed before the turn failed. Retry stayed disabled, but the committed tools are reconcile-safe so manual reconcile is not required." )
-      in
-      let summary =
-        let trimmed = String.trim detail in
-        if trimmed = ""
-        then default_summary
-        else if (not manual_reconcile)
-                && (String_util.contains_substring_ci trimmed
-                      "manual reconcile is required")
-        then default_summary
-        else trimmed
-      in
-      Some (blocker_class, summary, manual_reconcile)
-  | _ -> None
-
 let runtime_blocker_surface_of_reason (reason : string) =
   let trimmed = String.trim reason in
   if trimmed = "" then
@@ -201,37 +158,26 @@ let runtime_blocker_fields_json
         ("runtime_blocker_manual_reconcile", `Null);
       ]
   | None ->
-      (match
-         runtime_blocker_surface_of_registry_entry
-           (runtime_registry_entry config meta.name)
-       with
-       | Some (blocker_class, summary, manual_reconcile) ->
-           [
-             ("runtime_blocker_class", `String blocker_class);
-             ("runtime_blocker_summary", `String summary);
-             ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
-           ]
-       | None ->
-           let derived =
-             match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
-             | Some blocker -> Some blocker
-             | None ->
-                 runtime_blocker_surface_of_reason
-                   meta.runtime.proactive_rt.last_reason
-           in
-           match derived with
-           | Some (blocker_class, summary, manual_reconcile) ->
-               [
-                 ("runtime_blocker_class", `String blocker_class);
-                 ("runtime_blocker_summary", `String summary);
-                 ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
-               ]
-           | None ->
-               [
-                 ("runtime_blocker_class", `Null);
-                 ("runtime_blocker_summary", `Null);
-                 ("runtime_blocker_manual_reconcile", `Null);
-               ])
+      let derived =
+        match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
+        | Some blocker -> Some blocker
+        | None ->
+            runtime_blocker_surface_of_reason
+              meta.runtime.proactive_rt.last_reason
+      in
+      match derived with
+      | Some (blocker_class, summary, manual_reconcile) ->
+          [
+            ("runtime_blocker_class", `String blocker_class);
+            ("runtime_blocker_summary", `String summary);
+            ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
+          ]
+      | None ->
+          [
+            ("runtime_blocker_class", `Null);
+            ("runtime_blocker_summary", `Null);
+            ("runtime_blocker_manual_reconcile", `Null);
+          ]
 
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in

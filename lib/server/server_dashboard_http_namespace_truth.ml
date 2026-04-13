@@ -223,9 +223,6 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
       in
       Sse.broadcast_to Observers namespace_sse_json;
       Sse.broadcast_to Observers legacy_sse_json;
-      ignore
-        (Server_meta_cognition_feedback.maybe_post_digest
-           ~config:state.Mcp_server.room_config snapshot);
       (* Demote the "pushed via SSE" log to DEBUG when no SSE client is
          connected. With zero observers, the broadcast still runs (for
          the replay buffer and external subscribers) but the log line

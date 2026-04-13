@@ -550,15 +550,6 @@ let handle_keeper_reconcile ctx args : tool_result =
              in
              let evidence_refs = get_string_list args "evidence_refs" in
              let idempotency_key = get_string_opt args "idempotency_key" in
-             let legacy_pending =
-               match Keeper_registry.get ~base_path:ctx.config.base_path name with
-               | Some entry ->
-                   (match entry.last_failure_reason with
-                    | Some reason ->
-                        Keeper_registry.failure_reason_requires_manual_reconcile reason
-                    | None -> false)
-               | None -> false
-             in
              let body =
                match
                  Keeper_manual_reconcile.clear
@@ -577,7 +568,6 @@ let handle_keeper_reconcile ctx args : tool_result =
                        ("action", `String "clear");
                        ("cleared", `Bool true);
                        ("already_cleared", `Bool false);
-                       ("legacy_only", `Bool false);
                        ("record", Keeper_manual_reconcile.record_to_yojson record);
                      ]
                | Keeper_manual_reconcile.Already_cleared record ->
@@ -588,19 +578,7 @@ let handle_keeper_reconcile ctx args : tool_result =
                        ("action", `String "clear");
                        ("cleared", `Bool true);
                        ("already_cleared", `Bool true);
-                       ("legacy_only", `Bool false);
                        ("record", Keeper_manual_reconcile.record_to_yojson record);
-                     ]
-               | Keeper_manual_reconcile.No_record when legacy_pending ->
-                   clear_registry_manual_reconcile ~ctx ~name;
-                   `Assoc
-                     [
-                       ("name", `String name);
-                       ("action", `String "clear");
-                       ("cleared", `Bool true);
-                       ("already_cleared", `Bool false);
-                       ("legacy_only", `Bool true);
-                       ("record", `Null);
                      ]
                | Keeper_manual_reconcile.No_record ->
                    clear_registry_manual_reconcile ~ctx ~name;
@@ -610,7 +588,6 @@ let handle_keeper_reconcile ctx args : tool_result =
                        ("action", `String "clear");
                        ("cleared", `Bool true);
                        ("already_cleared", `Bool false);
-                       ("legacy_only", `Bool false);
                        ("record", `Null);
                      ]
              in

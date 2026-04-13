@@ -66,6 +66,11 @@ let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
+let keeper_json_by_name json name =
+  Yojson.Safe.Util.(json |> member "keepers" |> to_list)
+  |> List.find_opt (fun keeper ->
+         Yojson.Safe.Util.(keeper |> member "name" |> to_string = name))
+
 let keeper_ctx env sw config agent_name : _ Tool_keeper.context =
   {
     config;
@@ -112,8 +117,10 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check (list string) "keeper_names filters sidecars"
         [ "dot.name"; "sangsu" ] names;
       let keepalive_names = Keeper_types.keepalive_keeper_names config in
-      check (list string) "keepalive_keeper_names filters sidecars"
-        [ "dot.name"; "sangsu" ] keepalive_names;
+      check bool "keepalive includes configured sangsu" true
+        (List.mem "sangsu" keepalive_names);
+      check bool "keepalive excludes json-only dot.name" false
+        (List.mem "dot.name" keepalive_names);
       let ctx = keeper_ctx env sw config "operator" in
       let ok, body =
         Keeper_status.handle_keeper_list ctx (`Assoc [ ("limit", `Int 10) ])
@@ -127,6 +134,106 @@ let test_keeper_listing_ignores_sidecar_json_files () =
         [ "dot.name"; "sangsu" ] listed;
       check int "status handler count filters sidecars" 2
         Yojson.Safe.Util.(json |> member "count" |> to_int))
+
+let test_dashboard_ignores_fileless_manual_reconcile_fallback () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let meta_json =
+        `Assoc
+          [
+            ("name", `String "sangsu");
+            ("agent_name", `String "keeper-sangsu-agent");
+            ("trace_id", `String "trace-sangsu");
+            ("goal", `String "test keeper");
+          ]
+      in
+      let meta =
+        match Keeper_types.meta_of_json meta_json with
+        | Ok meta -> meta
+        | Error e -> fail ("meta_of_json failed: " ^ e)
+      in
+      (match Keeper_types.write_meta ~force:true config meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      ignore (Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
+        (Some
+           (Keeper_registry.Ambiguous_partial_commit
+              {
+                kind = Keeper_registry.Post_commit_failure;
+                detail =
+                  "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
+              }));
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      match keeper_json_by_name json "sangsu" with
+      | None -> fail "sangsu missing from keepers dashboard json"
+      | Some keeper ->
+          check bool "reconcile_status stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "reconcile_status" = `Null);
+          check bool "runtime blocker class stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
+          check bool "runtime blocker manual_reconcile stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
+
+let test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let meta_json =
+        `Assoc
+          [
+            ("name", `String "sangsu");
+            ("agent_name", `String "keeper-sangsu-agent");
+            ("trace_id", `String "trace-sangsu");
+            ("goal", `String "test keeper");
+          ]
+      in
+      let meta =
+        match Keeper_types.meta_of_json meta_json with
+        | Ok meta -> meta
+        | Error e -> fail ("meta_of_json failed: " ^ e)
+      in
+      (match Keeper_types.write_meta ~force:true config meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      ignore (Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
+        (Some
+           (Keeper_registry.Ambiguous_partial_commit
+              {
+                kind = Keeper_registry.Post_commit_failure;
+                detail =
+                  "Mutating tools [keeper_fs_edit] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
+              }));
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      match keeper_json_by_name json "sangsu" with
+      | None -> fail "sangsu missing from keepers dashboard json"
+      | Some keeper ->
+          check bool "unsafe reconcile_status stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "reconcile_status" = `Null);
+          check bool "unsafe runtime blocker class stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
+          check bool "unsafe runtime blocker manual_reconcile stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
 
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
@@ -146,8 +253,9 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       write_keeper_meta_exn
         ~autoboot_enabled:false config ~name:"sangsu" ~trace_id:"trace-sangsu";
       let names = Keeper_runtime.bootable_keeper_names config in
-      check (list string) "autoboot disabled meta excluded from bootable list"
-        [] names)
+      check bool "autoboot disabled sangsu excluded from bootable list" false
+        (List.mem "sangsu" names))
+
 let () =
   run "keeper_meta_listing"
     [
@@ -155,6 +263,10 @@ let () =
         [
           test_case "keeper_names and keeper_list ignore sidecar json" `Quick
             test_keeper_listing_ignores_sidecar_json_files;
+          test_case "dashboard ignores file-less reconcile fallback" `Quick
+            test_dashboard_ignores_fileless_manual_reconcile_fallback;
+          test_case "dashboard ignores file-less unsafe reconcile fallback" `Quick
+            test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
         ] );

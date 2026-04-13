@@ -445,6 +445,50 @@ let test_dashboard_namespace_truth_exposes_latest_meta_digest () =
            |> member "hearth" |> to_string);
       ))
 
+let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let module Mcp_server = Lib.Mcp_server in
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let config = state.Mcp_server.room_config in
+      ignore (Lib.Room.init config ~agent_name:None);
+      let masc_dir = Lib.Room.masc_dir config in
+      save_jsonl
+        (Filename.concat masc_dir "board_posts.jsonl")
+        [
+          post_json ~id:"p-root" ~author:"admin-keeper"
+            ~title:"RBAC blockage"
+            ~body:
+              "All masc_* tools tested return unregistered_masc_tool. \
+               Operator intervention needed. keeper_* tools function normally."
+            ~hearth:"ops" ~created_at:1000.0 ();
+        ];
+      save_jsonl
+        (Filename.concat masc_dir "board_comments.jsonl")
+        [
+          comment_json ~id:"c-1" ~post_id:"p-root" ~author:"keeper-a"
+            ~content:
+              "This contradicts the uniform block hypothesis. Access may be per-agent."
+            ~created_at:1010.0 ();
+        ];
+      warm_execution_cache ();
+      Eio.Switch.run (fun sw ->
+        ignore
+          (Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+             ~state ~sw ~clock:(Eio.Stdenv.clock env)
+             (request "/api/v1/dashboard/namespace-truth"));
+        let posts =
+          Lib.Board_dispatch.list_posts ~hearth:"meta-cognition"
+            ~post_kind_filter:Lib.Board.Automation_post
+            ~sort_by:Lib.Board_dispatch.Recent ~limit:10 ()
+        in
+        check int "namespace-truth leaves meta-cognition board empty" 0
+          (List.length posts)))
+
 let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
   let dir = test_dir () in
   Fun.protect
@@ -597,6 +641,8 @@ let () =
           test_case "operator digest shape matches namespace-truth" `Quick test_operator_digest_shape_matches_namespace_truth;
           test_case "meta cognition can drive namespace-truth focus" `Quick
             test_dashboard_namespace_truth_promotes_meta_cognition_focus;
+          test_case "namespace-truth does not auto-post meta digest" `Quick
+            test_dashboard_namespace_truth_does_not_auto_post_meta_digest;
           test_case "meta cognition exposes latest digest" `Quick
             test_dashboard_namespace_truth_exposes_latest_meta_digest;
           test_case "cached snapshot matches HTTP projection blocks" `Quick

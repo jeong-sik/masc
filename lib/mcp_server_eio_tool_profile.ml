@@ -36,16 +36,18 @@ let managed_agent_passthrough_tool_names =
                 "masc_a2a_delegate";
               ]))
 
+module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
+
 let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
-  let seen = Hashtbl.create (List.length schemas) in
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
-        false
-      else (
-        Hashtbl.add seen schema.name ();
-        true))
-    schemas
+  let _, result =
+    List.fold_left
+      (fun (seen, acc) (schema : Types.tool_schema) ->
+        if StringSet.mem schema.name seen then (seen, acc)
+        else (StringSet.add schema.name seen, schema :: acc))
+      (StringSet.empty, []) schemas
+  in
+  List.rev result
 
 let default_instructions =
   "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
@@ -243,13 +245,13 @@ let custom_tool_titles : (string * string) list = [
   ("masc_compact_context", "Compact Context");
 ]
 
-let custom_title_table : (string, string) Hashtbl.t =
-  let table = Hashtbl.create (List.length custom_tool_titles) in
-  List.iter (fun (name, title) -> Hashtbl.replace table name title) custom_tool_titles;
-  table
+let custom_title_table : string StringMap.t =
+  List.fold_left
+    (fun acc (name, title) -> StringMap.add name title acc)
+    StringMap.empty custom_tool_titles
 
 let tool_title_of_name name =
-  match Hashtbl.find_opt custom_title_table name with
+  match StringMap.find_opt name custom_title_table with
   | Some title -> title
   | None ->
     let trimmed =

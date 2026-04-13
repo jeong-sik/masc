@@ -48,6 +48,32 @@ let raw_schema_by_name name =
   all
   |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_clean_base_path_env f =
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_TEST_SYNCED_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
+
+let run_with_isolated_base_path f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_clean_base_path_env f
+
 (* ============================================================
    1. write_done isolation
    ============================================================ *)
@@ -313,18 +339,16 @@ let cleanup_path_test_dir dir =
 let test_path_relative_within_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
-    check bool "relative path within root ok" true (Result.is_ok result))
+    check bool "relative path within root ok" true (Result.is_ok result)))
 
 let test_path_absolute_outside_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
@@ -334,7 +358,7 @@ let test_path_absolute_outside_root () =
       (String.length err > 0
        && try let _ = Str.search_forward
          (Str.regexp_string "path_outside_project_root") err 0 in true
-       with Not_found -> false))
+       with Not_found -> false)))
 
 let test_path_traversal_attack () =
   (* Use a deep nested dir so ../../ reliably escapes root on any CI *)
@@ -345,19 +369,17 @@ let test_path_traversal_attack () =
   (try Unix.mkdir deep 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir base) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config deep in
     (* ../../../../etc/passwd should escape any reasonable root *)
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"../../../../etc/passwd" in
-    check bool "traversal attack rejected" true (Result.is_error result))
+    check bool "traversal attack rejected" true (Result.is_error result)))
 
 let test_path_allowed_paths_filter () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     (* lib is allowed, src is not *)
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
@@ -370,18 +392,17 @@ let test_path_allowed_paths_filter () =
     check bool "error mentions allowed_paths" true
       (try let _ = Str.search_forward
         (Str.regexp_string "path_not_in_allowed_paths") err 0 in true
-       with Not_found -> false))
+       with Not_found -> false)))
 
 let test_path_allowed_paths_filter_strips_all_trailing_slashes () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib//"] ~raw_path:"lib/foo.ml" in
     check bool "lib path allowed with repeated trailing slash" true
-      (Result.is_ok ok_result))
+      (Result.is_ok ok_result)))
 
 let test_path_absolute_allowed_paths_filter () =
   let dir = make_path_test_dir () in
@@ -389,15 +410,14 @@ let test_path_absolute_allowed_paths_filter () =
   (try Unix.mkdir lib_dir 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[lib_dir] ~raw_path:"lib/foo.ml" in
     check bool "absolute lib path allowed" true (Result.is_ok ok_result);
     let err_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[lib_dir] ~raw_path:"src/bar.ml" in
-    check bool "absolute lib still rejects src" true (Result.is_error err_result))
+    check bool "absolute lib still rejects src" true (Result.is_error err_result)))
 
 let test_absolute_allowed_paths_normalization () =
   let dir = make_path_test_dir () in
@@ -408,8 +428,7 @@ let test_absolute_allowed_paths_normalization () =
   (try Unix.mkdir docs_dir 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let normalized =
       Keeper_alerting_path.absolute_allowed_paths
@@ -418,13 +437,12 @@ let test_absolute_allowed_paths_normalization () =
     in
     check (list string) "normalized absolute allowed paths"
       [Unix.realpath lib_dir; Unix.realpath docs_dir]
-      normalized)
+      normalized))
 
 let test_absolute_allowed_paths_slashes_only_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let normalized =
       Keeper_alerting_path.absolute_allowed_paths
@@ -435,13 +453,12 @@ let test_absolute_allowed_paths_slashes_only_rejected () =
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["////"] ~raw_path:"lib/foo.ml" in
     check bool "slashes-only allow path does not allow all" true
-      (Result.is_error result))
+      (Result.is_error result)))
 
 let test_absolute_allowed_paths_result_rejects_invalid_explicit_allowlist () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result =
       Keeper_alerting_path.absolute_allowed_paths_result
@@ -449,13 +466,12 @@ let test_absolute_allowed_paths_result_rejects_invalid_explicit_allowlist () =
         ~allowed_paths:["////"]
     in
     check bool "explicit invalid allowlist is rejected" true
-      (Result.is_error result))
+      (Result.is_error result)))
 
 let test_path_allowed_paths_single_trailing_slash () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let exact_match = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib/"] ~raw_path:"lib" in
@@ -464,33 +480,30 @@ let test_path_allowed_paths_single_trailing_slash () =
     let subpath_match = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib/"] ~raw_path:"lib/foo.ml" in
     check bool "subpath match with single trailing slash" true
-      (Result.is_ok subpath_match))
+      (Result.is_ok subpath_match)))
 
 let test_path_empty_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"" in
-    check bool "empty path rejected" true (Result.is_error result))
+    check bool "empty path rejected" true (Result.is_error result)))
 
 let test_path_whitespace_only_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"   " in
-    check bool "whitespace path rejected" true (Result.is_error result))
+    check bool "whitespace path rejected" true (Result.is_error result)))
 
 let test_path_empty_allowed_permits_all_within_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     (* Empty allowed_paths = permit all within root *)
     let r1 = Keeper_alerting_path.resolve_keeper_target_path
@@ -498,7 +511,7 @@ let test_path_empty_allowed_permits_all_within_root () =
     let r2 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"src/b.ml" in
     check bool "lib ok with empty allowed" true (Result.is_ok r1);
-    check bool "src ok with empty allowed" true (Result.is_ok r2))
+    check bool "src ok with empty allowed" true (Result.is_ok r2)))
 
 (* ============================================================
    10b. Read-path: resolve_keeper_read_path respects allowlists
@@ -507,44 +520,40 @@ let test_path_empty_allowed_permits_all_within_root () =
 let test_read_path_empty_allowlist_permits_full_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let read_lib = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"src/bar.ml" in
     check bool "read lib ok" true (Result.is_ok read_lib);
-    check bool "read src ok" true (Result.is_ok read_src))
+    check bool "read src ok" true (Result.is_ok read_src)))
 
 let test_read_path_respects_allowed_paths () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let read_lib = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
     check bool "read lib ok" true (Result.is_ok read_lib);
-    check bool "read src rejected" true (Result.is_error read_src))
+    check bool "read src rejected" true (Result.is_error read_src)))
 
 let test_read_path_rejects_outside_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
-    check bool "read outside root rejected" true (Result.is_error result))
+    check bool "read outside root rejected" true (Result.is_error result)))
 
 let test_read_vs_write_path_alignment () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     (* Write: lib allowed, src rejected *)
     let write_lib = Keeper_alerting_path.resolve_keeper_target_path
@@ -559,7 +568,7 @@ let test_read_vs_write_path_alignment () =
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["lib"] ~raw_path:"src/bar.ml" in
     check bool "read lib ok" true (Result.is_ok read_lib);
-    check bool "read src rejected like write" true (Result.is_error read_src))
+    check bool "read src rejected like write" true (Result.is_error read_src)))
 
 (* ============================================================
    10c. Read-path: resolve_keeper_read_path bounded suffix resolution
@@ -568,8 +577,7 @@ let test_read_vs_write_path_alignment () =
 let test_read_path_rejects_nonexistent () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     (* Path within root but does not exist on disk *)
     let result = Keeper_alerting_path.resolve_keeper_read_path
@@ -577,7 +585,7 @@ let test_read_path_rejects_nonexistent () =
     check bool "nonexistent path rejected" true (Result.is_error result);
     let err = Result.get_error result in
     check bool "error mentions allowed roots miss" true
-      (String_util.contains_substring_ci err "path_not_found_under_allowed_roots"))
+      (String_util.contains_substring_ci err "path_not_found_under_allowed_roots")))
 
 let test_read_path_resolves_unique_nested_repo_suffix () =
   let dir = make_path_test_dir () in
@@ -593,8 +601,7 @@ let test_read_path_resolves_unique_nested_repo_suffix () =
     mkdir owner;
     mkdir repo;
     mkdir lib_dir;
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["workspace"] ~raw_path:"masc-mcp/lib" in
@@ -603,7 +610,7 @@ let test_read_path_resolves_unique_nested_repo_suffix () =
       try Unix.realpath lib_dir with Unix.Unix_error _ -> lib_dir
     in
     check string "resolved to discovered repo lib" expected_lib_dir
-      (Result.get_ok result))
+      (Result.get_ok result)))
 
 let test_read_path_rejects_ambiguous_nested_repo_suffix () =
   let dir = make_path_test_dir () in
@@ -621,15 +628,14 @@ let test_read_path_rejects_ambiguous_nested_repo_suffix () =
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     make_repo "workspace-a";
     make_repo "workspace-b";
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["workspace-a"; "workspace-b"] ~raw_path:"masc-mcp/lib" in
     check bool "ambiguous nested repo suffix rejected" true (Result.is_error result);
     let err = Result.get_error result in
     check bool "error mentions ambiguity" true
-      (String_util.contains_substring_ci err "ambiguous_relative_read_path"))
+      (String_util.contains_substring_ci err "ambiguous_relative_read_path")))
 
 let test_read_path_does_not_follow_symlink_outside_root () =
   let dir = make_path_test_dir () in
@@ -653,15 +659,14 @@ let test_read_path_does_not_follow_symlink_outside_root () =
       mkdir outside_repo;
       mkdir outside_lib;
       Unix.symlink outside link_path;
-      Eio_main.run @@ fun env ->
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
+      run_with_isolated_base_path (fun () ->
       let config = Room.default_config dir in
       let result = Keeper_alerting_path.resolve_keeper_read_path
         ~config ~allowed_paths:[] ~raw_path:"masc-mcp/lib" in
       check bool "symlink escape is rejected" true (Result.is_error result);
       let err = Result.get_error result in
       check bool "symlink escape does not resolve outside root" true
-        (String_util.contains_substring_ci err "path_not_found_under_allowed_roots"))
+        (String_util.contains_substring_ci err "path_not_found_under_allowed_roots")))
 
 (* ============================================================
    11. Keeper-reported allowed_paths symlink bug
@@ -696,8 +701,7 @@ let make_masc_path_test_dir () =
 let test_keeper_reported_nonexistent_subdir () =
   let dir = make_masc_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let allowed = [
       ".masc/playground/goal-default-demo/";
@@ -716,13 +720,12 @@ let test_keeper_reported_nonexistent_subdir () =
     let r3 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
       ~raw_path:"lib/foo.ml" in
-    check bool "project file via allowed explicit path" true (Result.is_ok r3))
+    check bool "project file via allowed explicit path" true (Result.is_ok r3)))
 
 let test_keeper_reported_observe_only_scope () =
   let dir = make_masc_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+    run_with_isolated_base_path (fun () ->
     let config = Room.default_config dir in
     let allowed = [
       ".masc/playground/observer/";
@@ -736,7 +739,7 @@ let test_keeper_reported_observe_only_scope () =
     let r2 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:allowed
       ~raw_path:"lib/foo.ml" in
-    check bool "observer blocked from lib/" true (Result.is_error r2))
+    check bool "observer blocked from lib/" true (Result.is_error r2)))
 
 (* ============================================================
    Runner

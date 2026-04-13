@@ -27,7 +27,7 @@ let keeper_masc_path_blocked
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
-  let effective_paths = keeper_effective_allowed_paths ~meta in
+  let effective_paths = keeper_effective_write_allowed_paths ~meta in
   if effective_paths = [] && meta.execution_scope <> "observe_only"
   then None
   else if meta.execution_scope = "observe_only" && effective_paths = []
@@ -114,4 +114,3 @@ let handle_keeper_masc_tool
 ;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
-

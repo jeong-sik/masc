@@ -180,6 +180,7 @@ val playground_path_of_keeper : string -> string
 val playground_mind_path : string -> string
 val playground_repos_path : string -> string
 val effective_allowed_paths : meta:keeper_meta -> string list
+val effective_write_allowed_paths : meta:keeper_meta -> string list
 val resolve_keeper_read_path :
   config:Room.config ->
   allowed_paths:string list ->

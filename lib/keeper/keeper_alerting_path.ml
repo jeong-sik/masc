@@ -202,11 +202,29 @@ let resolve_keeper_target_path ~(config : Room.config)
              "path_not_in_allowed_paths: %s (allowed: [%s])"
              raw (String.concat ", " allowed_norms))
 
-(** Compute effective allowed_paths from keeper meta.
+(** Workspace-scoped state dirs that remain writable outside the playground.
+    These are keeper-private metadata / trace surfaces under [.masc]. *)
+let workspace_state_defaults (safe_name : string) : string list =
+  [ Printf.sprintf ".masc/keepers/%s/" safe_name;
+    ".masc/traces/" ]
+
+(** Additional workspace-scoped read-only repo roots. Keepers may read these
+    when operating in workspace scope, but write containment should stay inside
+    the playground unless the operator explicitly adds extra allowlist entries. *)
+let workspace_repo_read_defaults : string list =
+  [ "lib/";
+    "test/";
+    "config/";
+    "bin/";
+    "scripts/";
+    "docs/" ]
+
+(** Compute effective read allowed_paths from keeper meta.
     Always prepends the keeper's playground path and, for workspace scope,
-    the workspace default dirs:
+    the workspace read defaults:
     - `.masc/keepers/<name>/`
     - `.masc/traces/`
+    - `lib/`, `test/`, `config/`, `bin/`, `scripts/`, `docs/`
     (project root `.` is no longer included by default; set
      [`allowed_paths`] explicitly if needed.)
     - [`*`] → [] (full access, explicit opt-in bypasses path checks)
@@ -247,15 +265,25 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
          Keepers that genuinely need access to a specific worktree can
          still add it via explicit `allowed_paths` on their keeper
          meta. *)
-      [ Printf.sprintf ".masc/keepers/%s/" safe_name;
-        ".masc/traces/";
-        (* Main repo source for read access *)
-        "lib/";
-        "test/";
-        "config/";
-        "bin/";
-        "scripts/";
-        "docs/" ]
+      workspace_state_defaults safe_name @ workspace_repo_read_defaults
+    | _ -> []
+  in
+  match meta.allowed_paths with
+  | ["*"] -> []
+  | explicit -> playground_paths @ workspace_defaults @ explicit
+
+(** Compute effective write allowed_paths from keeper meta.
+    This keeps the default write sandbox inside the keeper playground plus
+    keeper-private [.masc] state directories. Workspace repo roots remain
+    read-only by default; operators must opt in explicitly via [allowed_paths]
+    or [`*`] to allow writes there. *)
+let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+  let playground_paths = playground_bundle_paths meta.name in
+  let workspace_defaults =
+    match String.lowercase_ascii meta.execution_scope with
+    | "workspace" ->
+      let safe_name = sanitize_keeper_name meta.name in
+      workspace_state_defaults safe_name
     | _ -> []
   in
   match meta.allowed_paths with

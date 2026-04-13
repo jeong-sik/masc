@@ -352,8 +352,7 @@ let all_tools_reconcile_safe (names : string list) : bool =
 let boring_tools =
   [ "masc_status"; "keeper_tasks_list";
     "keeper_context_status"; "keeper_tools_list";
-    "keeper_stay_silent"; "keeper_board_list";
-    "masc_board_list" ]
+    "keeper_stay_silent"; "keeper_board_list" ]
 
 let boring_tools_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length boring_tools) in

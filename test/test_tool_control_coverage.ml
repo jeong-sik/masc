@@ -4,8 +4,6 @@ open Masc_mcp
 
 let () = Random.self_init ()
 
-let () = Printf.printf "\n=== Tool_control Coverage Tests ===\n"
-
 let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
@@ -34,13 +32,12 @@ let with_isolated_runtime_env f =
             with_env "SUPABASE_DB_URL" None (fun () ->
               with_env "SB_PG_URL" None f))))))
 
+(* Test registry — each [test] call appends; final [let ()] dispatches
+   via Alcotest.run. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
-    with_isolated_runtime_env f;
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+  test_cases := (name, fun () -> with_isolated_runtime_env f) :: !test_cases
 
 let test_counter = ref 0
 
@@ -173,4 +170,10 @@ let () =
       let args = `Assoc [] in
       assert (Tool_args.get_string args "key" "default" = "default"))
 
-let () = Printf.printf "\n✅ All Tool_control tests passed!\n"
+let () =
+  Alcotest.run "Tool_control"
+    [
+      ( "coverage",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]

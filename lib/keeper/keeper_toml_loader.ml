@@ -504,7 +504,13 @@ let atomic_write_file ~(path : string) (content : string) : (unit, string) resul
     Fs_compat.save_file tmp content;
     Fs_compat.rename tmp path;
     Ok ()
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    (* Fiber cancellation must propagate — never convert it to an Error result.
+       Cleanup is best-effort, itself guarded against swallowing the cancel. *)
+    (try Sys.remove tmp with Eio.Cancel.Cancelled _ as ce -> raise ce | _ -> ());
+    raise e
+  | exn ->
     (try Sys.remove tmp with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
     Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
 

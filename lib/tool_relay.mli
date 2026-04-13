@@ -1,4 +1,4 @@
-(** Relay tools - Infinite context via handoff *)
+(** Tool_relay — retired hidden relay surface. *)
 
 type context = {
   config: Room.config;
@@ -8,11 +8,6 @@ type context = {
 }
 
 type tool_result = bool * string
-
-val handle_relay_status : context -> Yojson.Safe.t -> tool_result
-val handle_relay_checkpoint : context -> Yojson.Safe.t -> tool_result
-val handle_relay_now : context -> Yojson.Safe.t -> tool_result
-val handle_relay_smart_check : context -> Yojson.Safe.t -> tool_result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 

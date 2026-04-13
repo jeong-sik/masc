@@ -252,31 +252,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
     ];
   };
   {
-    name = "masc_keeper_tool_catalog";
-    description = "List visible masc_* tools with keeper wrapper coverage, filterable by visibility.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("include_hidden", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include hidden tools in the catalog");
-        ]);
-        ("include_deprecated", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include deprecated tools in the catalog");
-        ]);
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max tools per page (default 50, max 500)");
-        ]);
-        ("offset", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Skip first N tools for pagination (default 0)");
-        ]);
-      ]);
-    ];
-  };
-  {
     name = "masc_feature_flags";
     description = "List all boolean feature flags with their canonical defaults, runtime values, \
 lifecycle state, and source (env or default). Flags are grouped by category: transport, tool, \

@@ -254,15 +254,10 @@ let system_internal_surface_tools =
     (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
     "masc_webrtc_offer"; "masc_webrtc_answer";
     (* Hidden callable tools pruned from user-facing surfaces in #5011. *)
-    "masc_archive_view";
     "masc_error_add"; "masc_error_resolve";
     "masc_find_by_capability";
-    "masc_keeper_tool_catalog";
     "masc_library_add"; "masc_library_list"; "masc_library_promote";
     "masc_library_read"; "masc_library_search";
-    "masc_relay_checkpoint"; "masc_relay_now";
-    "masc_relay_smart_check"; "masc_relay_status";
-    "masc_room_strategy_get"; "masc_room_strategy_set";
   ]
 
 (* ================================================================ *)

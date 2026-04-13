@@ -42,7 +42,6 @@ idle 규칙:
 - 없는 파일을 요청하면 에러가 난다. 같은 경로를 재시도하지 말고 ls로 실제 구조를 확인하라.
 """
 
-room_scope = "current"
 mention_targets = ["masc-improver", "improver", "refactorer"]
 
 proactive_enabled = true

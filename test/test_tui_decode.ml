@@ -59,7 +59,6 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
        ("last_turn_ts", last_turn_ts);
        ("compaction_count", `Int 1);
        ("compaction_ratio_gate", `Float 0.8);
-       ("room_scope", `String "masc");
        ("trigger_mode", `String "mention");
        ("context_budget", `Int 32000);
        ("handoff_threshold", `Float 0.85);

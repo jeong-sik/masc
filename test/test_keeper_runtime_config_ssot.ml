@@ -111,10 +111,9 @@ let test_policy_resync () =
   Unix.mkdir keepers_toml_dir 0o755;
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
-    {|[keeper]
+{|[keeper]
 goal = "test"
 execution_scope = "playground"
-room_scope = "current"
 policy_voice_enabled = false
 |};
   let config = Room.default_config room_dir in
@@ -127,7 +126,6 @@ policy_voice_enabled = false
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-policy-resync");
             ("execution_scope", `String "standard");
-            ("room_scope", `String "all");
             ("policy_voice_enabled", `Bool true);
           ])
     with
@@ -141,7 +139,6 @@ policy_voice_enabled = false
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       check string "execution_scope" "playground" updated.Keeper_types.execution_scope;
-      check string "room_scope" "current" updated.room_scope;
       check bool "policy_voice_enabled" false updated.policy_voice_enabled
 
 (** Test: TOML tool policy and allowed_paths overwrite stale runtime JSON values. *)

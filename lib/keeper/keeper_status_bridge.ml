@@ -39,7 +39,6 @@ let auto_execution_session_surface_json () =
 let coordination_surface_json (meta : keeper_meta) =
   `Assoc
     [
-      ("room_scope", `String meta.room_scope);
       ("mention_targets", string_list_to_json meta.mention_targets);
       ("joined_room_ids", string_list_to_json meta.joined_room_ids);
     ]
@@ -84,12 +83,6 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
   |> add_if "prompt.instructions"
        (match defaults.instructions with
         | Some value -> value <> meta.instructions
-        | None -> false)
-  |> add_if "coordination.room_scope"
-       (match defaults.room_scope with
-        | Some value ->
-            let authored = String.trim value in
-            authored <> "" && authored <> meta.room_scope
         | None -> false)
   |> add_if "coordination.mention_targets"
        (defaults.mention_targets <> [] && defaults.mention_targets <> meta.mention_targets)

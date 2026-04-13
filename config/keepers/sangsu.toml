@@ -53,7 +53,6 @@ idle 규칙:
 - 네트워크 에러는 네 잘못이 아니다. 재시도해도 같은 결과다. 조용히 턴을 종료하라.
 """
 
-room_scope = "current"
 mention_targets = ["sangsu", "상수", "홍상수", "cheolsu", "uranium666"]
 
 proactive_enabled = true

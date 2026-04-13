@@ -95,7 +95,6 @@ let ensure_keeper_meta config name =
     (* --- Policy --- *)
     let target_policy_voice_enabled =
       apply_default defaults.policy_voice_enabled meta.policy_voice_enabled in
-    let target_room_scope = apply_default defaults.room_scope meta.room_scope in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     let target_execution_scope =
@@ -139,7 +138,6 @@ let ensure_keeper_meta config name =
       || meta.instructions <> target_instructions in
     let policy_changed =
       meta.policy_voice_enabled <> target_policy_voice_enabled
-      || meta.room_scope <> target_room_scope
       || meta.mention_targets <> target_mention_targets
       || meta.tool_access <> target_tool_access
       || meta.execution_scope <> target_execution_scope
@@ -190,7 +188,6 @@ let ensure_keeper_meta config name =
         desires = target_desires;
         instructions = target_instructions;
         policy_voice_enabled = target_policy_voice_enabled;
-        room_scope = target_room_scope;
         mention_targets = target_mention_targets;
         tool_access = target_tool_access;
         execution_scope = target_execution_scope;

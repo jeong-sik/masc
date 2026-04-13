@@ -421,7 +421,6 @@ will = "detect issues"
 needs = "log access"
 desires = "low false positives"
 instructions = "You are a log analyzer."
-room_scope = "all"
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 room_signal_prompt_enabled = true
@@ -435,8 +434,6 @@ policy_voice_enabled = false
     | Ok d ->
       check (option string) "goal" (Some "analyze logs") d.goal;
       check (option string) "will" (Some "detect issues") d.will;
-      check (option string) "room_scope canonicalized to current"
-        (Some "current") d.room_scope;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)

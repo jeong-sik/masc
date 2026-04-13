@@ -25,12 +25,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         p.profile_defaults.goal |> Option.value ~default:""
         |> normalize_goal_horizon_text
   in
-  let room_scope =
-    p.room_scope_opt
-    |> first_some p.profile_defaults.room_scope
-    |> Option.value ~default:"current"
-    |> canonical_room_scope
-  in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -259,7 +253,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         allowed_paths;
         tool_access;
         tool_denylist;
-        room_scope;
         voice_enabled;
         voice_channel;
         voice_agent_id;

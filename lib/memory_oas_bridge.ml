@@ -621,6 +621,78 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
   !flushed
 
 (* ================================================================ *)
+(* Pure-read functions for hook-first memory injection               *)
+(* (RFC-MASC-004: no side effects, no OAS Memory.t push)            *)
+(* ================================================================ *)
+
+(** Load recent episodes as a text block suitable for system context injection.
+
+    Returns [None] when no episodes are available.  The returned string
+    is a compact summary — one line per episode — designed to fit inside
+    [extra_system_context] without blowing up token count.
+
+    Pure read: does not touch OAS [Memory.t].
+
+    @since v2.265.0 (RFC-MASC-004 Phase 1) *)
+let load_episodes_text ~(agent_name : string) ~(limit : int) : string option =
+  ignore agent_name;
+  let episodes = cached_recent_episodes ~limit in
+  match episodes with
+  | [] -> None
+  | eps ->
+    let lines = List.map (fun (ep : Institution_eio.episode) ->
+      Printf.sprintf "- [%s] %s (%s)"
+        ep.event_type ep.summary
+        (institution_outcome_to_string ep.outcome)
+    ) eps in
+    Some (Printf.sprintf "[episodic memory: %d episodes]\n%s"
+      (List.length eps) (String.concat "\n" lines))
+
+(** Load crystallized procedures as a text block for system context injection.
+
+    Returns [None] when no procedures pass the crystallization threshold.
+    Pure read: does not touch OAS [Memory.t].
+
+    @since v2.265.0 (RFC-MASC-004 Phase 1) *)
+let load_procedures_text ~(agent_name : string) ~(limit : int) : string option =
+  let procs = top_procedures_cached ~agent_name ~limit in
+  match procs with
+  | [] -> None
+  | ps ->
+    let lines = List.map (fun (p : Procedural_memory.procedure) ->
+      Printf.sprintf "- [%.0f%% confidence] %s" (p.confidence *. 100.0) p.pattern
+    ) ps in
+    Some (Printf.sprintf "[procedural memory: %d procedures]\n%s"
+      (List.length ps) (String.concat "\n" lines))
+
+(** Load institutional memory as a text block for system context injection.
+
+    Returns [None] when no institution config is available.
+    Pure read: does not touch OAS [Memory.t].
+
+    @since v2.265.0 (RFC-MASC-004 Phase 1) *)
+let load_institution_text ~(config : Room_utils.config) : string option =
+  let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
+  if welcome = "" then None
+  else Some (Printf.sprintf "[institutional memory]\n%s" welcome)
+
+(** Incrementally flush episodes and procedures after a single turn.
+
+    Unlike [flush_all] which is called once at agent termination, this
+    function is designed to be called from an [AfterTurn] hook on every
+    turn boundary.  JSONL append-only semantics make repeated calls
+    idempotent — already-persisted entries are skipped via ID check.
+
+    @since v2.265.0 (RFC-MASC-004 Phase 1) *)
+let flush_incremental ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
+    : int * int =
+  (* Reuse existing flush logic which is already incremental
+     (skips persisted episode IDs, only writes changed procedures). *)
+  let ep = flush_episodes ~memory ~agent_name in
+  let pr = flush_procedures ~memory ~agent_name in
+  (ep, pr)
+
+(* ================================================================ *)
 (* Full 5-tier memory constructor                                    *)
 (* ================================================================ *)
 

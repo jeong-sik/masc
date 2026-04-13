@@ -108,7 +108,8 @@
         test_keeper_reconcile_tool
         test_telemetry_unified
         test_keeper_topk_llm
-        test_warn_root_causes)
+        test_warn_root_causes
+        test_memory_hooks)
  (modules test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -184,7 +185,8 @@
           test_keeper_reconcile_tool
           test_telemetry_unified
           test_keeper_topk_llm
-          test_warn_root_causes)
+          test_warn_root_causes
+          test_memory_hooks)
  (libraries masc_test_deps))
 
 ; ============================================================

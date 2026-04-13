@@ -201,6 +201,12 @@ let all_flags : flag list = [
     default = true; category = "runtime";
     lifecycle = Active; since = "2.162.0" };
 
+  (* ── Memory ────────────────────────────────────────────────── *)
+  { env_name = "MASC_MEMORY_HOOK_FIRST";
+    description = "Hook-first memory injection: inject memory via BeforeTurnParams hook instead of imperative OAS Memory.t seeding (RFC-MASC-004)";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.265.0" };
+
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

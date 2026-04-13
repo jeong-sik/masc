@@ -836,7 +836,7 @@ let test_create_server_state_preserves_raw_input_base_path () =
       Alcotest.(check string) "normalized env remains effective workspace root"
         dir (Sys.getenv "MASC_BASE_PATH"))
 
-let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
+let test_prompt_markdown_dir_falls_back_to_resolved_config_dir_with_repo_fallback_opt_in () =
   with_temp_dir "startup-prompts" (fun dir ->
       let config_root = Filename.concat dir "config" in
       let expected = Filename.concat config_root "prompts" in
@@ -845,6 +845,7 @@ let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" (Some "true") @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
       let resolved =
@@ -856,6 +857,33 @@ let test_prompt_markdown_dir_falls_back_to_resolved_config_dir () =
       in
       Alcotest.(check string) "temp room falls back to resolved prompt dir"
         (canonical_path expected) (canonical_path resolved))
+
+let test_prompt_markdown_dir_does_not_use_repo_fallback_without_opt_in () =
+  with_temp_dir "startup-prompts-no-opt-in" (fun dir ->
+      let config_root = Filename.concat dir "config" in
+      let repo_prompts = Filename.concat config_root "prompts" in
+      let home = Filename.concat dir "home" in
+      let expected = Filename.concat home ".masc/config/prompts" in
+      Fs_compat.mkdir_p repo_prompts;
+      write_file (Filename.concat config_root "cascade.json") "{}";
+      write_file (Filename.concat config_root "tool_policy.toml")
+        "[groups.base]\ntools = [\"keeper_time_now\"]\n[presets.minimal]\ngroups = [\"base\"]\n";
+      Fs_compat.mkdir_p home;
+      with_env "HOME" (Some home) @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" None @@ fun () ->
+      with_cwd dir @@ fun () ->
+      Config_dir_resolver.reset ();
+      let resolved =
+        Fun.protect
+          ~finally:(fun () -> Config_dir_resolver.reset ())
+          (fun () ->
+             Prompt_defaults.resolve_prompt_markdown_dir
+               ~workspace_path:dir ~base_path:dir)
+      in
+      Alcotest.(check string)
+        "temp room keeps resolved default prompt dir without repo fallback opt-in"
+        expected resolved)
 
 let test_prompt_markdown_dir_honors_masc_config_dir_override () =
   with_temp_dir "startup-prompts-override" (fun dir ->
@@ -1044,8 +1072,14 @@ let () =
           Alcotest.test_case
             "create_server_state preserves raw input base path"
             `Quick test_create_server_state_preserves_raw_input_base_path;
-          Alcotest.test_case "prompt markdown dir falls back to resolved config dir"
-            `Quick test_prompt_markdown_dir_falls_back_to_resolved_config_dir;
+          Alcotest.test_case
+            "prompt markdown dir falls back to resolved config dir with repo fallback opt-in"
+            `Quick
+            test_prompt_markdown_dir_falls_back_to_resolved_config_dir_with_repo_fallback_opt_in;
+          Alcotest.test_case
+            "prompt markdown dir does not use repo fallback without opt-in"
+            `Quick
+            test_prompt_markdown_dir_does_not_use_repo_fallback_without_opt_in;
           Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"
             `Quick test_prompt_markdown_dir_honors_masc_config_dir_override;
           Alcotest.test_case

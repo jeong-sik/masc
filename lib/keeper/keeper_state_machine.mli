@@ -215,6 +215,11 @@ val transition_error_to_string : transition_error -> string
     12. Running (fiber_alive) *)
 val derive_phase : conditions -> phase
 
+(** Pure condition updater: given current conditions and an event,
+    return the new conditions. No phase derivation or transition checks.
+    Exposed for structural testing (set/clear coverage). *)
+val update_conditions : conditions -> event -> conditions
+
 (** Apply an event to the current state: update conditions, derive new phase.
     Returns [Error] for events on terminal states (Stopped, Dead).
     Pure function — no I/O, no clock. [now] is passed as argument. *)

@@ -18,13 +18,28 @@ let resolve_loop_id args =
 let lesson_pattern (state : Autoresearch.loop_state) =
   Printf.sprintf "autoresearch %s %s" state.target_file state.goal
 
+(* Cache Memory.t per loop_id so that lessons recorded in one cycle are
+   visible to subsequent cycles within the same loop.  Without this,
+   each call to [Memory_oas_bridge.create_memory] returns a fresh
+   in-memory Context and procedural data written by [persist_failure_feedback]
+   is invisible to [build_goal_with_feedback].  #6831 *)
+let loop_memory_cache : (string, Agent_sdk.Memory.t) Hashtbl.t =
+  Hashtbl.create 8
+
 let make_loop_memory (ctx : Tool_autoresearch_context.t)
     (state : Autoresearch.loop_state) =
-  Memory_oas_bridge.create_memory
-    ~agent_name:autoresearch_lesson_agent_name
-    ~base_dir:(Filename.concat ctx.base_path ".masc")
-    ~session_id:("autoresearch-" ^ state.loop_id)
-    ()
+  match Hashtbl.find_opt loop_memory_cache state.loop_id with
+  | Some mem -> mem
+  | None ->
+    let mem =
+      Memory_oas_bridge.create_memory
+        ~agent_name:autoresearch_lesson_agent_name
+        ~base_dir:(Filename.concat ctx.base_path ".masc")
+        ~session_id:("autoresearch-" ^ state.loop_id)
+        ()
+    in
+    Hashtbl.replace loop_memory_cache state.loop_id mem;
+    mem
 
 let flush_loop_memory memory =
   ignore

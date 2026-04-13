@@ -9,12 +9,13 @@ import { Activity } from './activity'
 import { RuntimeMonitor } from './runtime-monitor'
 import { TelemetryUnified } from './telemetry-unified'
 import { GovernanceMonitor } from './governance-monitor'
+import { MemorySubsystems } from './memory-subsystems'
 
-type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance'
+type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
-  if (section === 'agents' || section === 'activity' || section === 'runtime' || section === 'telemetry' || section === 'governance') return section
+  if (section === 'agents' || section === 'activity' || section === 'runtime' || section === 'telemetry' || section === 'governance' || section === 'memory-subsystems') return section
   return 'sessions'
 }
 
@@ -34,6 +35,8 @@ export function Status() {
               ? html`<${TelemetryUnified} />`
             : section === 'governance'
               ? html`<${GovernanceMonitor} />`
+            : section === 'memory-subsystems'
+              ? html`<${MemorySubsystems} />`
               : html`<${Mission} />`}
       </div>
     </div>

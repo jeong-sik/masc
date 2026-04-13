@@ -68,6 +68,43 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
       ("sort_by", `String (board_sort_label sort_by));
     ]
 
+let dashboard_memory_subsystems_http_json ~(config : Room_utils.config) request
+    : Yojson.Safe.t =
+  let limit =
+    int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200
+  in
+  let episodes =
+    try Institution_eio.load_recent_episodes_jsonl ~limit
+    with _ -> []
+  in
+  let hebbian =
+    try
+      let g = Hebbian_eio.load_graph config in
+      Hebbian_eio.graph_to_json g
+    with _ -> `Assoc [ ("synapses", `List []); ("last_consolidation", `Float 0.0) ]
+  in
+  let episode_count =
+    try
+      let path = Institution_eio.episodes_jsonl_path () in
+      let jsons = Fs_compat.load_jsonl path in
+      List.length jsons
+    with _ -> 0
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ( "hebbian", hebbian );
+      ( "episodes",
+        `Assoc
+          [
+            ("total", `Int episode_count);
+            ("shown", `Int (List.length episodes));
+            ( "items",
+              `List
+                (List.map Institution_eio.episode_to_json episodes) );
+          ] );
+    ]
+
 let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in

@@ -19,6 +19,7 @@ export type SurfaceSectionId =
   | 'tool-quality'
   | 'fleet'
   | 'connectors'
+  | 'memory-subsystems'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -149,6 +150,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'tool 이벤트',
       description: 'tool rejection 집계 + approval queue depth/latency.',
       params: { section: 'governance' },
+    },
+    {
+      id: 'memory-subsystems',
+      label: '기억 서브시스템',
+      description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
+      params: { section: 'memory-subsystems' },
     },
   ],
   command: [

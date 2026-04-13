@@ -39,14 +39,11 @@ type world_observation = {
   unclaimed_task_count : int;
   failed_task_count : int;
   active_agent_count : int;
-  room_signal_interpretation : Meta_cognition.interpretation option;
-  room_signal_digest_ref : Meta_cognition.digest_ref option;
   last_turn_budget : (int * int) option;
   last_tools_used : string list;
     (** Tools used in the previous cycle. Empty on first cycle.
         Used by the unified prompt to generate data-driven anti-repetition hints. *)
   work_discovery_due : bool;
-  behavioral_stats : Keeper_telemetry_feedback.behavioral_stats option;
 }
 
 type unified_turn_channel =
@@ -447,21 +444,6 @@ let check_self_comment_status ~self_tokens ~(post_id : string)
               Board.Agent_id.to_string latest.author,
               short_preview ~max_len:60 latest.content )
 
-let read_room_signal ~(config : Room.config) ~(meta : keeper_meta) =
-  if not meta.room_signal_prompt_enabled then
-    (None, None)
-  else
-    let summary_json = Meta_cognition.summary_json config in
-    match Meta_cognition.parse_summary summary_json with
-    | Ok summary ->
-        let interpretation = Meta_cognition.interpret summary in
-        let digest_ref = Meta_cognition.latest_digest_ref ~summary () in
-        (Some interpretation, digest_ref)
-    | Error err ->
-        Log.Keeper.warn "room signal interpretation parse failed for %s: %s"
-          meta.name err;
-        (None, None)
-
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
@@ -656,9 +638,6 @@ let observe ~(pending_board_events : pending_board_event list option)
     Agent_economy.economic_pressure ~base_path:config.base_path
       ~agent_name:meta.name
   in
-  let room_signal_interpretation, room_signal_digest_ref =
-    read_room_signal ~config ~meta
-  in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
@@ -681,13 +660,6 @@ let observe ~(pending_board_events : pending_board_event list option)
       since_last >= float_of_int interval
     | _ -> false
   in
-  (* Telemetry Feedback: read cached behavioral stats (proactive refresh) *)
-  let behavioral_stats =
-    match meta.telemetry_feedback_enabled with
-    | Some true ->
-      Keeper_telemetry_feedback.get_cached_stats ~keeper_name:meta.name
-    | _ -> None
-  in
   {
     pending_mentions;
     pending_board_events;
@@ -702,12 +674,9 @@ let observe ~(pending_board_events : pending_board_event list option)
     unclaimed_task_count;
     failed_task_count;
     active_agent_count;
-    room_signal_interpretation;
-    room_signal_digest_ref;
     last_turn_budget = None;
     last_tools_used = [];
     work_discovery_due;
-    behavioral_stats;
   }
 
 let actionable_signal_present (observation : world_observation) =

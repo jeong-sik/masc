@@ -91,7 +91,6 @@ let tool_query_text_of_user_message (text : string) : string =
     ; "### Active Goals"
     ; "### Namespace State"
     ; "### Board Activity"
-    ; "### Actionable Routes"
     ; "### Live Worktree Delta"
     ]
   in

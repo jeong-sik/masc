@@ -215,45 +215,5 @@ let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
         Eio.Time.sleep clock (float_of_int interval_sec)
     done)
 
-(* ------------------------------------------------------------------ *)
-(* Prompt rendering                                                    *)
-(* ------------------------------------------------------------------ *)
-
-let format_age_sec (sec : int) : string =
-  if sec < 60 then Printf.sprintf "%ds" sec
-  else if sec < 3600 then Printf.sprintf "%dm %ds" (sec / 60) (sec mod 60)
-  else
-    let h = sec / 3600 in
-    let m = (sec mod 3600) / 60 in
-    Printf.sprintf "%dh %dm" h m
-
-let render_feedback_block ~(stats : behavioral_stats) =
-  if stats.total_turns = 0 then
-    Printf.sprintf
-      "### Behavioral Self-Assessment (last %dh)\n\
-       - No turns recorded in this window.\n\n"
-      stats.window_hours
-  else
-    let tools_str =
-      match stats.unique_tools_used with
-      | [] -> "none"
-      | ts -> String.concat ", " ts
-    in
-    Printf.sprintf
-      "### Behavioral Self-Assessment (last %dh)\n\
-       - Turns: %d total (%d silent, %d active)\n\
-       - Silent ratio: %.1f%%\n\
-       - Tool use turns: %d (utilization: %.1f%%)\n\
-       - Text-only response turns: %d\n\
-       - Last visible action: %s ago\n\
-       - PR workflow attempts: %d\n\
-       - Unique tools used: %s\n\n"
-      stats.window_hours
-      stats.total_turns stats.silent_turns
-      (stats.total_turns - stats.silent_turns)
-      (stats.silent_ratio *. 100.0)
-      stats.tool_use_turns (stats.tool_utilization_rate *. 100.0)
-      stats.text_response_turns
-      (format_age_sec stats.last_visible_action_age_sec)
-      stats.pr_workflow_attempts
-      tools_str
+(* render_feedback_block + format_age_sec removed in #6814:
+   behavioral self-assessment no longer injected into keeper prompt. *)

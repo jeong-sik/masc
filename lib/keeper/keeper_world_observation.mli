@@ -72,12 +72,6 @@ type world_observation = {
   active_agent_count : int;
   (** Number of agents currently active in the room. *)
 
-  room_signal_interpretation : Meta_cognition.interpretation option;
-  (** Optional room-level derived signal interpretation for prompt context. *)
-
-  room_signal_digest_ref : Meta_cognition.digest_ref option;
-  (** Latest board digest ref associated with the current room signal, if any. *)
-
   last_turn_budget : (int * int) option;
   (** Previous generation's turn usage as [(used, total)], if available. *)
 
@@ -86,7 +80,6 @@ type world_observation = {
       Used by the prompt builder to generate data-driven anti-repetition hints. *)
 
   work_discovery_due : bool;
-  behavioral_stats : Keeper_telemetry_feedback.behavioral_stats option;
 }
 
 type unified_turn_channel =

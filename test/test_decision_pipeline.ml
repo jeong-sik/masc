@@ -134,6 +134,10 @@ let test_audit_ring_and_flag () =
   let level = DA.decision_layer_level () in
   check bool "level in 0-4 range" true (level >= 0 && level <= 4)
 
+(* entropy serialization test deferred: DA.make requires Heartbeat_smart
+   which lives in masc_room. Test will be added when Heartbeat_smart
+   moves to masc_core (room cleanup issue). Verified locally. *)
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =

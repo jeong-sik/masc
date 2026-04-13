@@ -105,12 +105,9 @@ let base_observation : WO.world_observation =
     unclaimed_task_count = 0;
     failed_task_count = 0;
     active_agent_count = 0;
-    room_signal_interpretation = None;
-    room_signal_digest_ref = None;
     last_turn_budget = None;
     last_tools_used = [];
     work_discovery_due = false;
-    behavioral_stats = None;
   }
 
 let sample_board_event : WO.pending_board_event =
@@ -306,56 +303,6 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
           check string "latest external author" "bob"
             (Option.value ~default:"" event.latest_external_author)
       | _ -> fail "expected one follow-up board event")
-
-let test_observe_collects_room_signal_when_enabled () =
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Unix.putenv "MASC_BASE_PATH" base_dir;
-      Masc_mcp.Board.reset_global_for_test ();
-      Masc_mcp.Board_dispatch.reset_for_test ();
-      Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
-      let create_post ~author ~title ~content =
-        match
-          Masc_mcp.Board_dispatch.create_post ~author ~title ~content
-            ~post_kind:Masc_mcp.Board.Human_post ~hearth:"ops" ()
-        with
-        | Ok post -> post
-        | Error e -> fail ("create_post failed: " ^ Masc_mcp.Board.show_board_error e)
-      in
-      let root =
-        create_post ~author:"admin-keeper" ~title:"RBAC blockage"
-          ~content:
-            "All masc_* tools tested return unregistered_masc_tool. \
-             Operator intervention needed. keeper_* tools function normally."
-      in
-      (match
-         Masc_mcp.Board_dispatch.add_comment
-           ~post_id:(Masc_mcp.Board.Post_id.to_string root.id)
-           ~author:"keeper-a"
-           ~content:
-             "This contradicts the uniform block hypothesis. Access may be per-agent."
-           ()
-       with
-      | Ok _ -> ()
-      | Error e -> fail ("add_comment failed: " ^ Masc_mcp.Board.show_board_error e));
-      let obs =
-        WO.observe ~pending_board_events:(Some [])
-          ~config ~meta:room_signal_meta
-      in
-      match obs.room_signal_interpretation with
-      | Some interpretation ->
-          check string "primary room signal" "contested_belief"
-            (Masc_mcp.Meta_cognition.salience_to_string
-               interpretation.primary_salience);
-          check bool "room signal carries evidence refs" true
-            (interpretation.evidence_refs <> [])
-      | None -> fail "expected room signal interpretation")
 
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
@@ -851,137 +798,6 @@ let test_prompt_room_state_section () =
          true
        with Not_found -> false
      in found)
-
-let test_prompt_includes_actionable_routes_for_operational_signals () =
-  let obs =
-    {
-      base_observation with
-      failed_task_count = 2;
-      worktree_change_summary =
-        Some
-          "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
-    }
-  in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs () in
-  check bool "has actionable routes section" true
-    (contains_substring user "Actionable Routes");
-  check bool "includes task audit route" true
-    (contains_substring user "keeper_tasks_audit");
-  check bool "includes worktree inspection route" true
-    (contains_substring user "inspect changed files with");
-  check bool "includes fs inspection route" true
-    (contains_substring user "keeper_fs_read")
-
-let test_prompt_actionable_routes_respect_tool_policy () =
-  let obs =
-    {
-      base_observation with
-      failed_task_count = 2;
-      worktree_change_summary =
-        Some
-          "<git_status_change>\nWorking tree changed since last keeper turn (1 files):\n?? lib/example.ml\n</git_status_change>";
-    }
-  in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_policy_meta ~observation:obs () in
-  check bool "keeps actionable routes section" true
-    (contains_substring user "Actionable Routes");
-  check bool "does not recommend unavailable task audit tool" false
-    (contains_substring user "keeper_tasks_audit");
-  check bool "does not recommend unavailable file inspection tool" false
-    (contains_substring user "keeper_fs_read");
-  check bool "explains task audit unavailable" true
-    (contains_substring user "task-audit tooling is unavailable");
-  check bool "explains file inspection unavailable" true
-    (contains_substring user "file-inspection tools are unavailable")
-
-let test_prompt_no_actionable_work_fallback () =
-  (* Custom empty tool list — no tools at all means no proactive routes,
-     so the "No actionable work" fallback fires. *)
-  let empty_tools_meta =
-    { minimal_meta with tool_access = Custom [] }
-  in
-  let obs = base_observation in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:empty_tools_meta ~observation:obs () in
-  check bool "has actionable routes section" true
-    (contains_substring user "Actionable Routes");
-  check bool "has no-actionable-work fallback" true
-    (contains_substring user "No actionable work")
-
-let test_prompt_omits_room_signal_when_flag_disabled () =
-  let interpretation : Masc_mcp.Meta_cognition.interpretation =
-    {
-      primary_salience = Masc_mcp.Meta_cognition.Contested_belief;
-      secondary_saliences = [ Masc_mcp.Meta_cognition.Operator_tension ];
-      reason = "집단 인식에 이견이 있습니다.";
-      target_id = Some "belief:masc_tools_blocked";
-      evidence_refs = [ "post:p-root"; "comment:c-1" ];
-    }
-  in
-  let obs =
-    {
-      base_observation with
-      room_signal_interpretation = Some interpretation;
-      room_signal_digest_ref =
-        Some
-          {
-            Masc_mcp.Meta_cognition.post_id = "post-digest-1";
-            title = "Digest title";
-            created_at = "2026-04-02T00:00:00Z";
-            updated_at = Some "2026-04-02T00:01:00Z";
-            hearth = Some "meta-cognition";
-            digest_key = "abc123";
-            matches_summary = true;
-          };
-    }
-  in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs () in
-  check bool "namespace signal section omitted" true
-    (not (contains_substring user "Namespace Signal Interpretation"))
-
-let test_prompt_includes_room_signal_when_flag_enabled () =
-  let interpretation : Masc_mcp.Meta_cognition.interpretation =
-    {
-      primary_salience = Masc_mcp.Meta_cognition.Contested_belief;
-      secondary_saliences =
-        [
-          Masc_mcp.Meta_cognition.Operator_tension;
-          Masc_mcp.Meta_cognition.Stagnant_room;
-        ];
-      reason = "집단 인식에 이견이 있습니다.";
-      target_id = Some "belief:masc_tools_blocked";
-      evidence_refs = [ "post:p-root"; "comment:c-1" ];
-    }
-  in
-  let obs =
-    {
-      base_observation with
-      room_signal_interpretation = Some interpretation;
-      room_signal_digest_ref =
-        Some
-          {
-            Masc_mcp.Meta_cognition.post_id = "post-digest-1";
-            title = "Digest title";
-            created_at = "2026-04-02T00:00:00Z";
-            updated_at = Some "2026-04-02T00:01:00Z";
-            hearth = Some "meta-cognition";
-            digest_key = "abc123";
-            matches_summary = true;
-          };
-    }
-  in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:room_signal_meta ~observation:obs () in
-  check bool "namespace signal section included" true
-    (contains_substring user "Namespace Signal Interpretation");
-  check bool "namespace signal primary included" true
-    (contains_substring user "namespace_signal_primary: contested_belief");
-  check bool "namespace signal secondary included" true
-    (contains_substring user "namespace_signal_secondary: operator_tension, stagnant_room");
-  check bool "namespace signal evidence refs included" true
-    (contains_substring user "namespace_signal_evidence_refs: post:p-root, comment:c-1");
-  check bool "namespace signal guard included" true
-    (contains_substring user "namespace_signal_guard:");
-  check bool "namespace digest ref included" true
-    (contains_substring user "namespace_digest_post_id: post-digest-1")
 
 (* ---------- Config tests ---------- *)
 
@@ -2381,7 +2197,7 @@ let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
 
 let test_tool_query_text_of_user_message_strips_continuity_noise () =
   let user_message =
-    "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Actionable Routes\n- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
+    "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
   in
   let query = KTD.tool_query_text_of_user_message user_message in
   check bool "continuity heading stripped" false
@@ -2390,8 +2206,6 @@ let test_tool_query_text_of_user_message_strips_continuity_noise () =
     (contains_substring query "하트비트 갱신");
   check bool "autonomous trigger stripped" false
     (contains_substring query "Autonomous Trigger");
-  check bool "actionable routes preserved" true
-    (contains_substring query "keeper_tasks_audit");
   check bool "worktree section preserved" true
     (contains_substring query "Live Worktree Delta")
 
@@ -2677,33 +2491,6 @@ let test_normalize_override_passthrough () =
 
 (* ---------- Metacognition tests ---------- *)
 
-let meta_with_proactive_history outcome count visible =
-  let rt = minimal_meta.runtime in
-  let prt = { rt.proactive_rt with
-    last_outcome = outcome;
-    count_total = count;
-    visible_count_total = visible;
-    last_reason = "test-reason";
-  } in
-  { minimal_meta with runtime = { rt with proactive_rt = prt } }
-
-let test_prompt_includes_last_cycle_outcome () =
-  let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_tool_use 5 3 in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation () in
-  check bool "has Last Cycle Outcome section"
-    true (contains_substring user "### Last Cycle Outcome");
-  check bool "shows tool_use result"
-    true (contains_substring user "tool_use");
-  check bool "shows cycle counts"
-    true (contains_substring user "Cycles total: 5")
-
-let test_prompt_no_self_check_in_prompt () =
-  (* SELF-CHECK cues were removed; per-turn correction is done via OAS on_idle Nudge *)
-  let meta = meta_with_proactive_history Masc_mcp.Keeper_types.Proactive_silent 3 1 in
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:base_observation () in
-  check bool "no SELF-CHECK in prompt (moved to OAS hook)"
-    false (contains_substring user "SELF-CHECK")
-
 let test_on_idle_nudge_at_first_idle () =
   (* Use an explicit skip_at=3 to exercise the pure helper at a chosen
      threshold, independent of any global/default configuration. *)
@@ -2814,11 +2601,6 @@ let test_should_not_block_cross_turn_polling_without_prior_match () =
     (HK.should_block_cross_turn_polling ~within_sec:900.0 ~threshold:2
        ~tool_name:"masc_status" ~recent_entries)
 
-let test_prompt_no_outcome_for_fresh_keeper () =
-  let _sys, user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
-  check bool "no Last Cycle Outcome for fresh keeper"
-    false (contains_substring user "### Last Cycle Outcome")
-
 (* ---------- Test runner ---------- *)
 
 let () =
@@ -2834,8 +2616,6 @@ let () =
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
-          test_case "collects room signal when enabled" `Quick
-            test_observe_collects_room_signal_when_enabled;
           test_case "scheduled turn uses cooldown only" `Quick
             test_scheduled_turn_uses_cooldown_only;
           test_case "scheduled turn respects cooldown" `Quick
@@ -2896,16 +2676,6 @@ let () =
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "room state section" `Quick test_prompt_room_state_section;
-          test_case "includes actionable routes for operational signals" `Quick
-            test_prompt_includes_actionable_routes_for_operational_signals;
-          test_case "actionable routes respect tool policy" `Quick
-            test_prompt_actionable_routes_respect_tool_policy;
-          test_case "no actionable work fallback" `Quick
-            test_prompt_no_actionable_work_fallback;
-          test_case "omits room signal when disabled" `Quick
-            test_prompt_omits_room_signal_when_flag_disabled;
-          test_case "includes room signal when enabled" `Quick
-            test_prompt_includes_room_signal_when_flag_enabled;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
           test_case "sanitize_text_utf8 replaces control chars" `Quick
@@ -2919,12 +2689,6 @@ let () =
         ] );
       ( "metacognition",
         [
-          test_case "includes last cycle outcome" `Quick
-            test_prompt_includes_last_cycle_outcome;
-          test_case "no SELF-CHECK in prompt (OAS hook)" `Quick
-            test_prompt_no_self_check_in_prompt;
-          test_case "no outcome for fresh keeper" `Quick
-            test_prompt_no_outcome_for_fresh_keeper;
           test_case "on_idle nudge at first idle" `Quick
             test_on_idle_nudge_at_first_idle;
           test_case "on_idle final warning before skip" `Quick

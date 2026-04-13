@@ -62,6 +62,3 @@ val start_refresh_loop :
     [Eio.Cancel.Cancelled] is re-raised; other exceptions are logged and the
     loop continues. *)
 
-val render_feedback_block : stats:behavioral_stats -> string
-(** Render a "### Behavioral Self-Assessment" prompt block.
-    Presents data without judgment — the model interprets the numbers. *)

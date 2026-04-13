@@ -76,6 +76,15 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset
     ~status_filter
 
+(** Read the optional [?window=<minutes>] query param.
+    Defaults to 60 minutes; clamped to [5..1440]. *)
+let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
+  let window =
+    int_query_param request "window" ~default:60 |> clamp ~min_v:5 ~max_v:1440
+  in
+  Dashboard_governance_metrics.governance_tool_events_json
+    ~window_minutes:window ()
+
 let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
     (Yojson.Safe.t, string) result =
   match Safe_ops.json_string_opt "id" args with

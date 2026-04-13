@@ -56,8 +56,13 @@ let render_inline_skip_reason ~tool_name ~reason_code ~reason_text : string =
     (escape_field reason_text)
     replacement_hint
 
-(** Broadcast a tool skip event via SSE for dashboard visibility. *)
+(** Broadcast a tool skip event via SSE for dashboard visibility.
+    Also records the event in [Dashboard_governance_metrics] so the
+    governance monitor endpoint can aggregate (tool, reason) counts
+    without tailing the SSE stream. *)
 let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
+  Dashboard_governance_metrics.record_tool_skipped
+    ~keeper_name ~tool_name ~reason_code;
   (try
     Sse.broadcast
       (`Assoc [

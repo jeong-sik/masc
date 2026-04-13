@@ -224,6 +224,12 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_governance_http_json req ~base_path in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/governance/tool-events" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = dashboard_governance_tool_events_http_json req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/resolve" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm" (fun _state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

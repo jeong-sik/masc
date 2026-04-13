@@ -165,15 +165,18 @@ let latest_heartbeat_results : heartbeat_result_snapshot SMap.t ref = ref SMap.e
 
 let heartbeat_mutex = Eio.Mutex.create ()
 
-let heartbeat_snapshot_seq = ref 0
+(** Monotonic sequence for heartbeat snapshots.
+    Uses [Atomic.t] so the counter stays correct even if a future caller
+    forgets to take [heartbeat_mutex], or the function is invoked from a
+    different domain (e.g. Executor_pool workers). *)
+let heartbeat_snapshot_seq : int Atomic.t = Atomic.make 0
 
 (** Maximum agent entries in heartbeat snapshot maps.
     Beyond this, oldest entries (by timestamp) are evicted on write. *)
 let max_heartbeat_agents = 128
 
 let next_heartbeat_snapshot_seq () =
-  heartbeat_snapshot_seq := !heartbeat_snapshot_seq + 1;
-  !heartbeat_snapshot_seq
+  Atomic.fetch_and_add heartbeat_snapshot_seq 1 + 1
 
 (** Evict oldest entries from a heartbeat SMap when it exceeds [max_heartbeat_agents].
     [get_ts] extracts the ISO8601 timestamp string from a snapshot value.
@@ -195,7 +198,7 @@ let clear_transient_state () =
   Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
     latest_heartbeat_tasks := SMap.empty;
     latest_heartbeat_results := SMap.empty;
-    heartbeat_snapshot_seq := 0);
+    Atomic.set heartbeat_snapshot_seq 0);
   Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
     event_buffers := SMap.empty)
 

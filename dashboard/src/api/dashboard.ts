@@ -575,11 +575,26 @@ export interface DashboardRuntimeModelMetric {
   total_cache_read_tokens?: number | null
   total_reasoning_tokens?: number | null
   fallback_count?: number | null
+  success_count?: number | null
+  error_count?: number | null
+  total_cost_usd?: number | null
+  avg_tool_calls_per_turn?: number | null
+  total_tool_calls?: number | null
+  top_tools?: Array<{ tool: string; count: number }> | null
+  recent_entries?: Array<{
+    ts_unix: number
+    input_tokens: number
+    output_tokens: number
+    latency_ms: number
+    cost_usd: number
+    tools_count: number
+  }> | null
 }
 
 export interface DashboardRuntimeModelMetricsResponse {
   window_minutes?: number
   total_entries?: number
+  total_error_entries?: number
   models: DashboardRuntimeModelMetric[]
 }
 
@@ -653,6 +668,29 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
     total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
     fallback_count: asNumber(raw.fallback_count) ?? null,
+    success_count: asNumber(raw.success_count) ?? null,
+    error_count: asNumber(raw.error_count) ?? null,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
+    avg_tool_calls_per_turn: asNumber(raw.avg_tool_calls_per_turn) ?? null,
+    total_tool_calls: asNumber(raw.total_tool_calls) ?? null,
+    top_tools: Array.isArray(raw.top_tools)
+      ? (raw.top_tools as unknown[])
+          .filter(isRecord)
+          .map(t => ({ tool: asString(t.tool) ?? '', count: asNumber(t.count) ?? 0 }))
+          .filter(t => t.tool.length > 0)
+      : null,
+    recent_entries: Array.isArray(raw.recent_entries)
+      ? (raw.recent_entries as unknown[])
+          .filter(isRecord)
+          .map(r => ({
+            ts_unix: asNumber(r.ts_unix) ?? 0,
+            input_tokens: asNumber(r.input_tokens) ?? 0,
+            output_tokens: asNumber(r.output_tokens) ?? 0,
+            latency_ms: asNumber(r.latency_ms) ?? 0,
+            cost_usd: asNumber(r.cost_usd) ?? 0,
+            tools_count: asNumber(r.tools_count) ?? 0,
+          }))
+      : null,
   }
 }
 
@@ -661,6 +699,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
   return {
     window_minutes: asNumber(raw.window_minutes),
     total_entries: asNumber(raw.total_entries),
+    total_error_entries: asNumber(raw.total_error_entries),
     models: asRecordArray(raw.models)
       .map(decodeRuntimeModelMetric)
       .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),

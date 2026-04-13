@@ -3,7 +3,17 @@
     Reads keeper decisions.jsonl files and computes per-model aggregates
     within a configurable time window.
 
-    @since 2.259.0 *)
+    @since 2.259.0
+    Extended with cost/tool/error metrics: @since 2.270.0 *)
+
+type recent_entry = {
+  re_ts_unix : float;
+  re_input_tokens : int;
+  re_output_tokens : int;
+  re_latency_ms : float;
+  re_cost_usd : float;
+  re_tools_count : int;
+}
 
 type model_stats = {
   model_id : string;
@@ -19,18 +29,27 @@ type model_stats = {
   total_cache_read_tokens : int;
   total_reasoning_tokens : int;
   fallback_count : int;
+  success_count : int;
+  error_count : int;
+  total_cost_usd : float;
+  avg_tool_calls_per_turn : float;
+  total_tool_calls : int;
+  top_tools : (string * int) list;
+  recent_entries : recent_entry list;
 }
 
 type aggregate = {
   window_minutes : int;
   models : model_stats list;
   total_entries : int;
+  total_error_entries : int;
 }
 
 val compute : base_path:string -> window_minutes:int -> aggregate
 (** [compute ~base_path ~window_minutes] reads all keeper decisions.jsonl
     files, filters entries within the last [window_minutes], and returns
-    per-model aggregate statistics sorted by entry count descending. *)
+    per-model aggregate statistics sorted by entry count descending.
+    Error turns (outcome="error") are counted separately per model. *)
 
 val to_json : aggregate -> Yojson.Safe.t
 (** Serialize [aggregate] to JSON for API responses. *)

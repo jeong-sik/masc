@@ -10,4 +10,4 @@ let mint_with ~validate ~name =
   else
     Error (Printf.sprintf "not in current tool set: %s" name)
 
-let mint ~tbl ~name = mint_with ~validate:(Hashtbl.mem tbl) ~name
+

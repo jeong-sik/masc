@@ -11,10 +11,6 @@ type t = private { name : string; minted_at : float }
 (** Immutable token. [name] is the validated tool name.
     [minted_at] is [Unix.gettimeofday ()] at mint time (diagnostic). *)
 
-val mint : tbl:(string, 'a) Hashtbl.t -> name:string -> (t, string) result
-(** [mint ~tbl ~name] returns [Ok token] when [name] is a key in [tbl],
-    [Error "not in current tool set: <name>"] otherwise. *)
-
 val mint_with : validate:(string -> bool) -> name:string -> (t, string) result
 (** [mint_with ~validate ~name] returns [Ok token] when [validate name] is
     [true]. Use when the validation source is not a single Hashtbl

@@ -20,21 +20,21 @@ let full_tbl = make_tbl [ "masc_status"; "masc_heartbeat"; "masc_tasks" ]
 (* ================================================================ *)
 
 let test_mint_success () =
-  match Tool_token.mint ~tbl:full_tbl ~name:"masc_status" with
+  match Tool_token.mint_with ~validate:(Hashtbl.mem full_tbl) ~name:"masc_status" with
   | Ok token ->
     check string "name preserved" "masc_status" token.name;
     check bool "minted_at > 0" true (token.minted_at > 0.0)
   | Error e -> fail e
 
 let test_mint_failure () =
-  match Tool_token.mint ~tbl:empty_tbl ~name:"any" with
+  match Tool_token.mint_with ~validate:(Hashtbl.mem empty_tbl) ~name:"any" with
   | Error msg ->
     check bool "contains tool name" true
       (String.length msg > 0 && Astring.String.is_infix ~affix:"any" msg)
   | Ok _ -> fail "expected Error for empty table"
 
 let test_mint_unknown_tool () =
-  match Tool_token.mint ~tbl:full_tbl ~name:"masc_nonexistent_xyz" with
+  match Tool_token.mint_with ~validate:(Hashtbl.mem full_tbl) ~name:"masc_nonexistent_xyz" with
   | Error _ -> ()
   | Ok _ -> fail "expected Error for unknown tool"
 

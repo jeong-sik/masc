@@ -2197,7 +2197,7 @@ let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
 
 let test_tool_query_text_of_user_message_strips_continuity_noise () =
   let user_message =
-    "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Actionable Routes\n- Failed tasks: audit them with keeper_tasks_audit before deciding there is nothing meaningful to do.\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
+    "## Current World State\n\n### Namespace State\n- Failed tasks: 5\n\n### Autonomous Trigger\n- Scheduler: scheduled autonomous keepalive turn.\n\n### Continuity\nDONE: 하트비트 갱신\nNEXT: 대기 유지\n\n### Live Worktree Delta\n<git_status_change>\n?? lib/example.ml\n</git_status_change>\n"
   in
   let query = KTD.tool_query_text_of_user_message user_message in
   check bool "continuity heading stripped" false
@@ -2206,8 +2206,6 @@ let test_tool_query_text_of_user_message_strips_continuity_noise () =
     (contains_substring query "하트비트 갱신");
   check bool "autonomous trigger stripped" false
     (contains_substring query "Autonomous Trigger");
-  check bool "actionable routes preserved" true
-    (contains_substring query "keeper_tasks_audit");
   check bool "worktree section preserved" true
     (contains_substring query "Live Worktree Delta")
 

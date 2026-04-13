@@ -655,12 +655,11 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  (* The current prompt frames `.worktrees/` as a separate workflow path that
-     still must stay inside the playground clone. Keep the containment clause
-     asserted so bare server-root `.worktrees/...` paths cannot drift back in. *)
+  (* Keep the containment clause asserted so bare server-root `.worktrees/...`
+     paths cannot drift back in. *)
   check bool "world prompt names worktree workflow inside playground" true
     (contains_substring prompt
-       "must live *inside* your playground clone");
+       "Repo worktrees live *inside* your playground clone");
   check bool "world prompt names canonical playground-rooted worktree path" true
     (contains_substring prompt
        ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")

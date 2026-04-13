@@ -38,6 +38,8 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
+  (caqti (>= 2.0))
+  (caqti-eio (>= 2.0))
   (agent_sdk (>= 0.132.0))
   (uri (>= 4.4))
   (tls (>= 2.0))

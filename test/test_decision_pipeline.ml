@@ -134,6 +134,47 @@ let test_audit_ring_and_flag () =
   let level = DA.decision_layer_level () in
   check bool "level in 0-4 range" true (level >= 0 && level <= 4)
 
+let test_audit_entropy_serialization () =
+  (* Verify tool_diversity_entropy appears in to_json output *)
+  let record_with =
+    DA.make ~cycle_id:"c-1" ~keeper_name:"test"
+      ~generation:1
+      ~heartbeat_verdict:Masc_mcp.Heartbeat_smart.Emit
+      ~turn_verdict:(WO.Run { reasons = (WO.Mention_pending, []) })
+      ~wall_clock:1000.0
+      ~tool_diversity_entropy:0.75
+      ()
+  in
+  let json_with = DA.to_json record_with in
+  let entropy_value =
+    match json_with with
+    | `Assoc fields ->
+      (match List.assoc_opt "tool_diversity_entropy" fields with
+       | Some (`Float f) -> Some f
+       | _ -> None)
+    | _ -> None
+  in
+  check (option (float 0.001)) "entropy present in JSON" (Some 0.75) entropy_value;
+  (* Verify None case produces null *)
+  let record_without =
+    DA.make ~cycle_id:"c-2" ~keeper_name:"test"
+      ~generation:1
+      ~heartbeat_verdict:Masc_mcp.Heartbeat_smart.Emit
+      ~turn_verdict:(WO.Run { reasons = (WO.Mention_pending, []) })
+      ~wall_clock:1000.0
+      ()
+  in
+  let json_without = DA.to_json record_without in
+  let entropy_null =
+    match json_without with
+    | `Assoc fields ->
+      (match List.assoc_opt "tool_diversity_entropy" fields with
+       | Some `Null -> true
+       | _ -> false)
+    | _ -> false
+  in
+  check bool "entropy null when absent" true entropy_null
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -162,5 +203,6 @@ let () =
     ];
     "decision_audit", [
       test_case "ring capacity and feature flag" `Quick test_audit_ring_and_flag;
+      test_case "entropy serialization" `Quick test_audit_entropy_serialization;
     ];
   ]

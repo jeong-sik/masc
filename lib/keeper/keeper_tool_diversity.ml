@@ -114,12 +114,13 @@ let compute_diversity ~(available_tools : string list)
     allow some specialization while catching extreme loops. *)
 let default_entropy_threshold = 0.35
 
-(** Generate a diversity hint for inclusion in the system prompt.
+(** Generate a diversity hint string from entropy analysis.
     Returns [None] when entropy is above threshold (no intervention needed).
     Returns [Some hint] with specific tool suggestions otherwise.
 
-    This is a deterministic gate: the hint content is computed from
-    pure data.  The LLM (non-deterministic) decides how to respond. *)
+    NOTE: No longer injected into keeper prompt (#6814). Retained for
+    test coverage and potential future use. Entropy value is recorded
+    in decision_audit via [normalized_entropy] instead. *)
 let diversity_hint ?(threshold = default_entropy_threshold)
     (summary : diversity_summary) : string option =
   if summary.normalized_entropy >= threshold then None

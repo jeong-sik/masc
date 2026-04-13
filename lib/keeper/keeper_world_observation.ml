@@ -656,9 +656,10 @@ let observe ~(pending_board_events : pending_board_event list option)
     Agent_economy.economic_pressure ~base_path:config.base_path
       ~agent_name:meta.name
   in
-  let room_signal_interpretation, room_signal_digest_ref =
-    read_room_signal ~config ~meta
-  in
+  (* Room signal interpretation removed from prompt in #6814.
+     Skip I/O; field retained in record for type compatibility. *)
+  let room_signal_interpretation = None in
+  let room_signal_digest_ref = None in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
@@ -681,13 +682,10 @@ let observe ~(pending_board_events : pending_board_event list option)
       since_last >= float_of_int interval
     | _ -> false
   in
-  (* Telemetry Feedback: read cached behavioral stats (proactive refresh) *)
-  let behavioral_stats =
-    match meta.telemetry_feedback_enabled with
-    | Some true ->
-      Keeper_telemetry_feedback.get_cached_stats ~keeper_name:meta.name
-    | _ -> None
-  in
+  (* Behavioral stats removed from prompt in #6814.
+     Stats still collected via telemetry_feedback refresh loop;
+     skip per-observe lookup. Field retained for type compatibility. *)
+  let behavioral_stats = None in
   {
     pending_mentions;
     pending_board_events;

@@ -61,7 +61,7 @@ let effective_max_turns (meta : Worker_container_types.worker_container_meta) : 
 let agent_config_of_worker_meta
     (meta : Worker_container_types.worker_container_meta)
     ~(system_prompt : string) : Oas.Types.agent_config =
-  let max_tokens = Some (Worker_container_types.local_worker_max_tokens ()) in
+  let max_tokens = Worker_container_types.local_worker_max_tokens () in
   {
     Oas.Types.default_config with
     name = meta.worker_name;

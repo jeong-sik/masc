@@ -294,6 +294,13 @@ let models_of_cascade_name (cascade_name : string) : string list =
       cascade_name (Printexc.to_string exn);
     defaults
 
+(** Read the default model string list from cascade config (user-declared JSON).
+    Returns the "default_models" entry. MASC does not interpret these strings —
+    it passes them through to OAS. Used as fallback when a keeper TOML does
+    not declare its own [models] field. *)
+let default_model_strings_from_config () : string list =
+  models_of_cascade_name "default"
+
 (* filter_by_providers removed — provider filtering now handled by
    OAS Cascade_config.complete_named ~provider_filter parameter.
    See masc-mcp#6001. *)

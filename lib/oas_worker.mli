@@ -78,6 +78,7 @@ val default_model_strings : cascade_name:string -> string list
 
 val run_named :
   cascade_name:string ->
+  ?model_strings:string list ->
   goal:string ->
   ?provider_filter:string list ->
   ?priority:Llm_provider.Request_priority.t ->

@@ -3,21 +3,26 @@
 
     Tier mapping:
     - {b Long_term} — JSONL files under [.masc/memory/<agent>/<session>.jsonl]
-    - {b Episodic}  — [seed_episodes] loads recent [Institution_eio] JSONL
-                       episodes and [flush_episodes] writes new OAS episodes back
-    - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
+    - {b Episodic}  — [load_episodes_text] reads recent [Institution_eio] JSONL
+                       episodes; [flush_episodes] writes new OAS episodes back
+    - {b Procedural} — [load_procedures_text] reads [Procedural_memory] entries;
                         [flush_procedures] writes back
     - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
 
-    OAS stays generic here: this module chooses how MASC institutional,
-    episodic, and procedural stores seed/flush the SDK memory runtime.
+    Memory injection follows the hook-first pattern (RFC-MASC-004):
+    pure-read [load_*_text] functions provide text for system context
+    injection via hooks, and [flush_incremental] persists new data
+    after each turn.  The imperative seeding functions
+    ([seed_episodes], [seed_procedures_as_oas], [create_memory_full])
+    were removed in Phase 3.
 
     Filesystem-first policy: Long_term always uses JSONL, regardless of
     whether a PG pool is available.  PG long_term was removed in 2.140.0.
 
     @since 2.122.0 (long_term only)
     @since 2.124.0 (5-tier: episodic + procedural seeding/flushing)
-    @since 2.140.0 (filesystem-first: JSONL long_term_backend always) *)
+    @since 2.140.0 (filesystem-first: JSONL long_term_backend always)
+    @since 2.266.0 (RFC-MASC-004 Phase 3: imperative seeding removed) *)
 
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
@@ -104,7 +109,7 @@ let build_episode_cache_from_disk path =
 
    Previously held [episode_cache_mu] across
    [Institution_eio.load_recent_episodes_jsonl] on every cache miss,
-   meaning all concurrent [seed_episodes] / [persisted_episode_ids]
+   meaning all concurrent [persisted_episode_ids]
    / [cached_recent_episodes] callers serialised on a single JSONL
    read of up to [episode_cache_limit = 500] records.  Same drift
    class as the [Prompt_registry] / [Discovery_cache] siblings fixed
@@ -256,50 +261,10 @@ let create_memory ~(agent_name : string) ?(base_dir : string option)
   Agent_sdk.Memory.create ~long_term:backend ()
 
 (** Load and return the institution welcome text, or [None] when empty.
-    Shared by [institution_as_json] and [load_institution_text]. *)
+    Used by [load_institution_text]. *)
 let read_institution_welcome (config : Room_utils.config) : string option =
   let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
   if welcome = "" then None else Some welcome
-
-(** Format institutional memory as a JSON value suitable for
-    [Memory.store ~tier:Long_term "institution" value].
-
-    Loads from institution.json if present, returns None otherwise. *)
-let institution_as_json (config : Room_utils.config) : Yojson.Safe.t option =
-  Option.map (fun w -> `String w) (read_institution_welcome config)
-
-(** Pre-seed institutional memory into a [Memory.t] instance.
-
-    Loads institution context and stores it via [Memory.store ~tier:Long_term].
-    This makes institutional guidelines available for cross-agent recall and
-    future auto-injection hooks.  Returns [true] if institution was seeded. *)
-let seed_institution ~(memory : Agent_sdk.Memory.t) ~(config : Room_utils.config) : bool =
-  match institution_as_json config with
-  | Some json ->
-    (match Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "institution" json with
-     | Ok () -> ()
-     | Error msg -> Logs.warn (fun m -> m "Failed to store institution memory: %s" msg));
-    true
-  | None -> false
-
-(** Pre-seed crystallized procedural memory into a [Memory.t] instance.
-
-    Loads top-N procedures (adaptive threshold: standard 3+/70% OR rare 2+/100%)
-    and stores as a single Long_term entry.  Returns the number of procedures seeded. *)
-let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
-  let procs = top_procedures_cached ~agent_name ~limit in
-  if procs = [] then 0
-  else begin
-    let json = `Assoc [
-      ("agent_name", `String agent_name);
-      ("procedures", `List (List.map Procedural_memory.to_json procs));
-      ("count", `Int (List.length procs));
-    ] in
-    (match Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "procedures" json with
-    | Ok () -> ()
-    | Error msg -> Logs.warn (fun m -> m "Failed to store procedures memory: %s" msg));
-    List.length procs
-  end
 
 (* ================================================================ *)
 (* Episodic tier: Institution_eio JSONL <-> OAS episodes            *)
@@ -435,20 +400,6 @@ let institution_episode_of_oas ~(agent_name : string)
 let persisted_episode_ids () =
   Hashtbl.copy (load_all_episodes_cached ()).ids
 
-(** Pre-seed the Episodic tier.
-
-    Loads recent institution episodes from JSONL and projects them into
-    OAS episodic memory. *)
-let seed_episodes ~(memory : Agent_sdk.Memory.t)
-    ~(limit : int) : int =
-  let episodes = cached_recent_episodes ~limit in
-  List.iter
-    (fun episode ->
-      (try Agent_sdk.Memory.store_episode memory (oas_episode_of_institution episode)
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Logs.warn (fun m -> m "Failed to store episode memory: %s" (Printexc.to_string exn))))
-    episodes;
-  List.length episodes
-
 (** Flush new OAS episodes.
 
     Appends newly created OAS episodes to the institution JSONL store,
@@ -496,32 +447,6 @@ let oas_procedure_of_masc (p : Procedural_memory.procedure) :
       ("evidence_count", `Int (List.length p.evidence));
     ];
   }
-
-(** Pre-seed the Procedural tier from [Procedural_memory].
-
-    Loads crystallized procedures (adaptive threshold: 3+/70% OR 2+/100%)
-    and stores them as OAS procedures with confidence tracking.
-    Returns the number of procedures seeded. *)
-let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
-    ~(agent_name : string) ~(limit : int) : int =
-  let procs = top_procedures_cached ~agent_name ~limit in
-  List.iter (fun p ->
-    (try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Logs.warn (fun m -> m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
-  ) procs;
-  List.length procs
-
-let seed_all_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
-    ~(agent_name : string) : int =
-  let procs = load_procedures_cached ~agent_name in
-  List.iter
-    (fun p ->
-      try Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Logs.warn (fun m ->
-          m "Failed to store procedure memory: %s" (Printexc.to_string exn)))
-    procs;
-  List.length procs
 
 let render_lesson_prompt_context ~(memory : Agent_sdk.Memory.t)
     ~(pattern : string) ~(limit : int) =
@@ -677,12 +602,11 @@ let load_institution_text ~(config : Room_utils.config) : string option =
     (fun w -> Printf.sprintf "[institutional memory]\n%s" w)
     (read_institution_welcome config)
 
-(** Incrementally flush episodes and procedures after a single turn.
+(** Incrementally flush episodes and procedures.
 
-    Unlike [flush_all] which is called once at agent termination, this
-    function is designed to be called from an [AfterTurn] hook on every
-    turn boundary.  JSONL append-only semantics make repeated calls
-    idempotent — already-persisted entries are skipped via ID check.
+    Designed to be called from an [AfterTurn] hook on every turn boundary.
+    JSONL append-only semantics make repeated calls idempotent —
+    already-persisted entries are skipped via ID check.
 
     @since v2.265.0 (RFC-MASC-004 Phase 1) *)
 let flush_incremental ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
@@ -693,59 +617,3 @@ let flush_incremental ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
   let pr = flush_procedures ~memory ~agent_name in
   (ep, pr)
 
-(* ================================================================ *)
-(* Full 5-tier memory constructor                                    *)
-(* ================================================================ *)
-
-(** Create an OAS [Memory.t] with all 5 tiers populated.
-
-    Seeds:
-    - Long_term: JSONL files (filesystem-first, PG not used)
-    - Episodic: recent institution episodes from JSONL
-    - Procedural: top [procedure_limit] crystallized procedures
-    - Working/Scratchpad: empty (managed by OAS at runtime)
-
-    Optionally seeds institution to Long_term if [config] is provided.
-
-    @param episode_limit default 50
-    @param procedure_limit default 20 *)
-let create_memory_full ~(agent_name : string)
-    ?(base_dir : string option)
-    ?(session_id : string option)
-    ?(config : Room_utils.config option)
-    ?(episode_limit = 50) ?(procedure_limit = 20)
-    ?(global_procedure_limit = 0)
-    () : Agent_sdk.Memory.t =
-  let base_dir =
-    match base_dir with
-    | Some _ -> base_dir
-    | None -> Some (resolve_base_dir ?config ())
-  in
-  let memory = create_memory ~agent_name ?base_dir ?session_id () in
-  let _episode_count =
-    seed_episodes ~memory ~limit:episode_limit
-  in
-  (* Procedural tier *)
-  let _proc_count =
-    seed_procedures_as_oas ~memory ~agent_name ~limit:procedure_limit
-  in
-  (* Global procedures as Long_term JSON (keeper pattern) *)
-  if global_procedure_limit > 0 then
-    ignore (seed_procedures ~memory ~agent_name:"_global" ~limit:global_procedure_limit);
-  (* Optional Long_term seeds *)
-  (match config with
-   | Some cfg ->
-     let _inst = seed_institution ~memory ~config:cfg in
-     ()
-   | None -> ());
-  memory
-
-(** Flush all mutable tiers back to MASC persistent storage.
-
-    Call after [Agent.run] completes to persist updated procedures.
-    Returns [(episodes_flushed, procedures_flushed)]. *)
-let flush_all ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
-    : int * int =
-  let ep = flush_episodes ~memory ~agent_name in
-  let pr = flush_procedures ~memory ~agent_name in
-  (ep, pr)

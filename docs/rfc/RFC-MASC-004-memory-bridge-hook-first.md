@@ -164,21 +164,23 @@ rg 'Imperative seeding' docs/OAS-MASC-BOUNDARY.md
 
 ## Implementation Phases
 
-### Phase 1: Hook Adapter (병행 운영, 1 PR)
+### Phase 1: Hook Adapter (병행 운영, 1 PR) -- DONE (#6795)
 - `memory_hooks.ml` 생성 (hook registration)
 - `memory_oas_bridge.ml`에 `load_*` pure read 함수 추가
 - `keeper_hooks_oas.ml`에서 hook 등록 통합
 - Feature flag: `MASC_MEMORY_HOOK_FIRST=true` (기본 false)
 
-### Phase 2: Imperative 경로 제거 (1 PR)
-- `MASC_MEMORY_HOOK_FIRST` 기본 true
+### Phase 2: Imperative 경로 제거 (1 PR) -- DONE (#6817)
+- `MASC_MEMORY_HOOK_FIRST` flag 제거 + 기본 hook-first
 - `keeper_agent_run.ml`에서 `create_memory_full`/`flush_all` 호출 제거
 - `docs/OAS-MASC-BOUNDARY.md` P4 항목 업데이트
 
-### Phase 3: Dead Code 정리 (1 PR)
-- `MASC_MEMORY_HOOK_FIRST` flag 제거
-- `seed_*` 함수 삭제, `create_memory_full` 삭제
-- `memory_oas_bridge.ml` 크기 목표: 679줄 → ~400줄
+### Phase 3: Dead Code 정리 (1 PR) -- DONE
+- `seed_episodes`, `seed_procedures_as_oas`, `seed_all_procedures_as_oas` 삭제
+- `seed_institution`, `institution_as_json`, `seed_procedures` 삭제
+- `create_memory_full`, `flush_all` 삭제
+- `tool_autoresearch_cycle.ml` imperative seeding 제거, `flush_incremental` 전환
+- `memory_oas_bridge.ml` 크기: 751줄 → 619줄 (-132줄)
 
 ## Risks
 

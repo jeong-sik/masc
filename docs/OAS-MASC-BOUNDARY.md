@@ -73,7 +73,7 @@ OAS  ──does not know──→ MASC
 
 - keeper runtime still uses a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives
 - keeper continuity still leaks domain semantics through raw message text (`[STATE]`, goal/memory markers)
-- `memory_oas_bridge.ml` imperative seeding removed (RFC-MASC-004 Phase 2); `create_memory_full` and `seed_*` functions remain for Phase 3 dead-code cleanup
+- `memory_oas_bridge.ml` imperative seeding fully removed (RFC-MASC-004 Phase 2-3); hook-first is the sole path
 - team-session bridge fidelity and runtime-health signaling are still incomplete
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
 

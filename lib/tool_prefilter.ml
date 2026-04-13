@@ -1,3 +1,6 @@
+module StringMap = Map.Make (String)
+module StringSet = Set.Make (String)
+
 (** Tool_prefilter — TF-IDF cosine similarity for tool relevance scoring.
 
     Pure-functional, stateless module. No external dependencies beyond stdlib.
@@ -264,13 +267,11 @@ let synonyms : (string * string list) list =
      [ "find tool"; "discover tool"; "search tools"; "what tool"; "tool for"; "which tool" ]);
   ]
 
-let synonym_lookup =
-  let tbl = Hashtbl.create 32 in
-  List.iter (fun (name, kws) -> Hashtbl.replace tbl name kws) synonyms;
-  tbl
+let synonym_lookup : string list StringMap.t =
+  List.fold_left (fun m (name, kws) -> StringMap.add name kws m) StringMap.empty synonyms
 
 let synonym_text name =
-  match Hashtbl.find_opt synonym_lookup name with
+  match StringMap.find_opt name synonym_lookup with
   | Some kws -> String.concat " " kws
   | None -> ""
 
@@ -338,58 +339,53 @@ let build_document (schema : Types.tool_schema) : string list =
     | _ -> []
   in
   let syn_tokens =
-    match Hashtbl.find_opt synonym_lookup schema.name with
+    match StringMap.find_opt schema.name synonym_lookup with
     | Some phrases -> List.concat_map tokenize phrases
     | None -> []
   in
   name_words @ desc_tokens @ param_tokens @ syn_tokens
 
 (** Count term frequency in a token list. *)
-let term_freq (tokens : string list) : (string, int) Hashtbl.t =
-  let tbl = Hashtbl.create 32 in
-  List.iter (fun t ->
-    let prev = match Hashtbl.find_opt tbl t with Some n -> n | None -> 0 in
-    Hashtbl.replace tbl t (prev + 1)
-  ) tokens;
-  tbl
+let term_freq (tokens : string list) : int StringMap.t =
+  List.fold_left (fun m t ->
+    let prev = match StringMap.find_opt t m with Some n -> n | None -> 0 in
+    StringMap.add t (prev + 1) m
+  ) StringMap.empty tokens
 
 (** Compute IDF values from a collection of documents. *)
-let compute_idf (docs : string list list) : (string, float) Hashtbl.t =
+let compute_idf (docs : string list list) : float StringMap.t =
   let n = List.length docs in
-  let df = Hashtbl.create 64 in
-  List.iter (fun doc ->
-    let seen = Hashtbl.create 16 in
-    List.iter (fun t ->
-      if not (Hashtbl.mem seen t) then begin
-        Hashtbl.replace seen t ();
-        let prev = match Hashtbl.find_opt df t with Some v -> v | None -> 0 in
-        Hashtbl.replace df t (prev + 1)
-      end
-    ) doc
-  ) docs;
-  let idf = Hashtbl.create 64 in
-  Hashtbl.iter (fun term doc_freq ->
-    let value = log (float_of_int (n + 1) /. float_of_int (doc_freq + 1)) +. 1.0 in
-    Hashtbl.replace idf term value
-  ) df;
-  idf
+  let df = List.fold_left (fun df doc ->
+    let seen = List.fold_left (fun seen t ->
+      if not (StringSet.mem t seen) then
+        StringSet.add t seen
+      else
+        seen
+    ) StringSet.empty doc in
+    StringSet.fold (fun t acc ->
+      let prev = match StringMap.find_opt t acc with Some v -> v | None -> 0 in
+      StringMap.add t (prev + 1) acc
+    ) seen df
+  ) StringMap.empty docs in
+  StringMap.map (fun doc_freq ->
+    log (float_of_int (n + 1) /. float_of_int (doc_freq + 1)) +. 1.0
+  ) df
 
 (** Build TF-IDF sparse vector for a document given IDF table. *)
-let tfidf_vector (tokens : string list) (idf : (string, float) Hashtbl.t) : sparse_vec =
+let tfidf_vector (tokens : string list) (idf : float StringMap.t) : sparse_vec =
   let tf = term_freq tokens in
   let doc_len = max (List.length tokens) 1 in
-  Hashtbl.fold (fun term count acc ->
+  StringMap.fold (fun term count acc ->
     let tf_val = float_of_int count /. float_of_int doc_len in
-    let idf_val = match Hashtbl.find_opt idf term with Some v -> v | None -> 1.0 in
+    let idf_val = match StringMap.find_opt term idf with Some v -> v | None -> 1.0 in
     (term, tf_val *. idf_val) :: acc
   ) tf []
 
 (** Cosine similarity between two sparse vectors. *)
 let cosine (a : sparse_vec) (b : sparse_vec) : float =
-  let b_tbl = Hashtbl.create 16 in
-  List.iter (fun (t, w) -> Hashtbl.replace b_tbl t w) b;
+  let b_tbl = List.fold_left (fun m (t, w) -> StringMap.add t w m) StringMap.empty b in
   let dot = List.fold_left (fun acc (t, wa) ->
-    match Hashtbl.find_opt b_tbl t with
+    match StringMap.find_opt t b_tbl with
     | Some wb -> acc +. (wa *. wb)
     | None -> acc
   ) 0.0 a in

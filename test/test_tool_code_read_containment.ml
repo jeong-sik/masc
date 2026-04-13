@@ -70,13 +70,12 @@ let touch path =
 let make_config base_path : Room.config =
   { (Room.default_config base_path) with base_path }
 
+(* Test registry — each [test] call appends; final [let ()] dispatches
+   via Alcotest.run. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
-    f ();
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+  test_cases := (name, f) :: !test_cases
 
 (* Shared fixture builder: tmp base_path with git init, two
    playground bundles, a `lib/` subdir representing the shared
@@ -279,4 +278,9 @@ let () =
           || contains_substring msg "cross-keeper"))
 
 let () =
-  Printf.printf "\n✅ All Tool_code read-side containment tests passed!\n"
+  Alcotest.run "Tool_code_read_containment"
+    [
+      ( "containment",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]

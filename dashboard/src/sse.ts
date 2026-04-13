@@ -337,6 +337,21 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
+    case 'keeper_turn_complete':
+      addTypedJournalEntry(
+        event.name ?? agent,
+        `Turn ${event.turn ?? '?'} model=${event.model_used ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
+        'keepers',
+        'unknown',
+        {
+          severity: 'info',
+          source: event.source,
+          narrativeText:
+            `${actorLabel(event.name ?? agent)} turn ${event.turn ?? '?'}`
+            + ` (${event.model_used ?? '?'}, $${(event.cost_usd ?? 0).toFixed(4)}, tools=${event.tool_calls_made ?? 0})`,
+        },
+      )
+      break
     case 'keeper_heartbeat':
       addTypedJournalEntry(
         event.name ?? agent,

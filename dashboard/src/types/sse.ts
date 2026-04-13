@@ -105,6 +105,13 @@ export interface SSEEvent {
   session_id?: string
   operation_id?: string
   worker_run_id?: string
+  // Keeper turn complete enrichment
+  model_used?: string
+  input_tokens?: number
+  output_tokens?: number
+  cost_usd?: number
+  tool_calls_made?: number
+  total_turns?: number
   // OAS bridge payload (generic container for Event_bus events)
   payload?: Record<string, unknown>
 }

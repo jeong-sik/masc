@@ -280,6 +280,9 @@ let make_hooks
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
   in
   let tool_start_time = ref 0.0 in
+  (* Per-turn tool call counter for SSE enrichment.
+     Incremented in post_tool_use, reset in after_turn. *)
+  let tool_call_count_ref = ref 0 in
   (* Same-name streak gate: track consecutive calls to the same tool
      name (regardless of args). OAS idle detection requires exact
      name+args match, so board_get("a") → board_get("b") is never
@@ -348,6 +351,9 @@ let make_hooks
                  ("input_tokens", `Int input_tok);
                  ("output_tokens", `Int output_tok);
                  ("has_state_block", `Bool has_state_block);
+                 ("cost_usd", `Float turn_cost_usd);
+                 ("tool_calls_made", `Int !tool_call_count_ref);
+                 ("total_turns", `Int meta.runtime.usage.total_turns);
                  ("ts_unix", `Float (Unix.gettimeofday ()));
                ])
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
@@ -355,12 +361,14 @@ let make_hooks
            carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
            should not hit threshold 5). *)
         tool_name_streak := ("", 0);
+        tool_call_count_ref := 0;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
+        incr tool_call_count_ref;
         let output_text = match output with
           | Ok { Agent_sdk.Types.content; _ } -> content
           | Error { Agent_sdk.Types.message; _ } -> message

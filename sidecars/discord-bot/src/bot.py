@@ -296,13 +296,29 @@ class GateBot(discord.Client):
                 logger.warning("Discord status heartbeat failed: %s", exc)
             await asyncio.sleep(interval)
 
+    @staticmethod
+    def _normalize_keeper_name(raw: str) -> str:
+        """Normalize keeper name for matching.
+
+        Board authors use 'keeper-sangsu', bindings use 'keeper-sangsu-agent'.
+        Strip the '-agent' suffix and 'keeper-' prefix to get the bare name,
+        then compare bare names.
+        """
+        name = raw.strip().lower()
+        if name.endswith("-agent"):
+            name = name[: -len("-agent")]
+        if name.startswith("keeper-"):
+            name = name[len("keeper-") :]
+        return name
+
     def _channels_for_keeper(self, keeper_name: str) -> list[int]:
         """Return Discord channel IDs bound to the given keeper."""
         self._maybe_reload_bindings()
+        normalized = self._normalize_keeper_name(keeper_name)
         return [
             int(ch_id)
             for ch_id, name in self.keeper_bindings.items()
-            if name == keeper_name
+            if self._normalize_keeper_name(name) == normalized
         ]
 
     async def _activity_subscriber_loop(self) -> None:

@@ -130,18 +130,37 @@ let decr_running_count_clamped () =
   in
   loop ()
 
+(** Serializes every writer path into [registry] so concurrent
+    [update_entry]/[put_entry]/[unregister] calls cannot lose each other's
+    updates via stale-snapshot read-modify-write.
+
+    Readers still dereference [!registry] without the lock — [StringMap] is
+    immutable, so a reader always sees a consistent snapshot (either the
+    pre- or post-update map). *)
+let registry_mutex = Eio.Mutex.create ()
+
+
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
 let put_entry key entry =
-  registry := StringMap.add key entry !registry
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+    registry := StringMap.add key entry !registry)
 
-(** Apply [f entry] and write back.  No-op if key absent. *)
+(** Apply [f entry] and write back.  No-op if key absent.
+
+    The find + apply + write is a single critical section so that
+    concurrent [update_entry] calls on the same key cannot both operate on
+    a stale [entry] and overwrite each other's changes.
+
+    [f] runs under the mutex, so it must stay pure / fast — no I/O,
+    no nested calls back into the registry. *)
 let update_entry ~base_path name f =
   let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
-  | Some entry -> put_entry key (f entry)
-  | None -> ()
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+    match StringMap.find_opt key !registry with
+    | Some entry -> registry := StringMap.add key (f entry) !registry
+    | None -> ())
 
 let max_crash_log_entries = 5
 
@@ -221,17 +240,18 @@ let register_restarting ~base_path name meta =
 let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
   let key = registry_key ~base_path name in
-  (match StringMap.find_opt key !registry with
-   | Some entry when entry.phase = Running ->
-       decr_running_count_clamped ();
-       Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
-         name (Atomic.get running_count_atomic)
-   | Some entry ->
-       Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
-         name (Keeper_state_machine.phase_to_string entry.phase)
-   | None ->
-       Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name);
-  registry := StringMap.remove key !registry
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+    (match StringMap.find_opt key !registry with
+     | Some entry when entry.phase = Running ->
+         decr_running_count_clamped ();
+         Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
+           name (Atomic.get running_count_atomic)
+     | Some entry ->
+         Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
+           name (Keeper_state_machine.phase_to_string entry.phase)
+     | None ->
+         Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name);
+    registry := StringMap.remove key !registry)
 
 let get ~base_path name =
   let result = StringMap.find_opt (registry_key ~base_path name) !registry in
@@ -433,8 +453,9 @@ let cleanup_tracking ~base_path name =
   | None -> ()
 
 let clear () =
-  registry := StringMap.empty;
-  Atomic.set running_count_atomic 0
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+    registry := StringMap.empty;
+    Atomic.set running_count_atomic 0)
 
 (* -- Board cursor -------------------------------------------------- *)
 

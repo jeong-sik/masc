@@ -949,9 +949,11 @@ let handle_keeper_pr_submit
               "created_at", `String (Printf.sprintf "%.0f" (Unix.gettimeofday ()));
             ] in
             Fs_compat.append_jsonl history_path entry
-          with exn ->
-            Log.Keeper.warn "pr_history append failed: %s (keeper=%s)"
-              (Printexc.to_string exn) meta.name
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Keeper.warn "pr_history append failed: %s (keeper=%s)"
+                (Printexc.to_string exn) meta.name
         end;
         Yojson.Safe.to_string
           (`Assoc

@@ -1778,9 +1778,11 @@ let run_turn
                    "keeper:%s post-run flush episodes=%d procedures=%d"
                    meta.name ep pr
              | None -> ())
-           with exn ->
-             Log.Keeper.warn "keeper:%s episode_create failed: %s"
-               meta.name (Printexc.to_string exn));
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn "keeper:%s episode_create failed: %s"
+                 meta.name (Printexc.to_string exn));
           (* Memory bank compaction: dedup + consolidate if over threshold. *)
           (try
              let compaction =
@@ -1791,9 +1793,11 @@ let run_turn
                  "keeper:%s memory_compacted before=%d after=%d dropped=%d"
                  meta.name compaction.before_notes compaction.after_notes
                  compaction.dropped_notes
-           with exn ->
-             Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
-               (Printexc.to_string exn));
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
+                 (Printexc.to_string exn));
           (* Post-turn quality metrics — goal alignment + memory recall.
             Logged to decisions.jsonl for feedback loop analysis. *)
           (try

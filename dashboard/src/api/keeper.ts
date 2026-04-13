@@ -376,3 +376,47 @@ export async function fetchKeeperStateDiagram(name: string): Promise<KeeperState
   if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`)
   return resp.json() as Promise<KeeperStateDiagramResponse>
 }
+
+// --- Eval Quality (RFC-MASC-005 Phase 3) ---
+
+export interface EvalLayerResult {
+  layer_name: string
+  passed: boolean
+  score: number | null
+  evidence: string[]
+  detail: string | null
+}
+
+export interface EvalVerdict {
+  schema_version: number
+  all_passed: boolean
+  coverage: number
+  layer_results: EvalLayerResult[]
+}
+
+export interface EvalSnapshot {
+  agent_name: string
+  session_id: string | null
+  worker_run_id: string
+  timestamp: number
+  verdict: EvalVerdict
+  baseline_status: string | null
+}
+
+export interface KeeperEvalResponse {
+  keeper: string
+  count: number
+  latest_coverage: number | null
+  latest_all_passed: boolean | null
+  snapshots: EvalSnapshot[]
+}
+
+export async function fetchKeeperEval(name: string, limit = 10): Promise<KeeperEvalResponse> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/eval?limit=${limit}`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`eval fetch failed: ${resp.status}`)
+  return resp.json() as Promise<KeeperEvalResponse>
+}

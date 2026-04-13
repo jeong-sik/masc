@@ -195,16 +195,25 @@ let oas_timeout_guard_sec = 1.0
 
 let min_oas_timeout_budget_sec = 30.0
 
-let bounded_oas_timeout_for_turn_budget ~(max_context : int)
+let bounded_oas_timeout_for_turn_budget_with_turn_budget ~(max_context : int)
+    ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : float option =
   let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
   if usable_budget < min_oas_timeout_budget_sec
   then None
   else
+    let adaptive_timeout =
+      Env_config_keeper.KeeperKeepalive.oas_timeout_for_context_with_turn_budget
+        ~max_context ~max_turns
+    in
     Some
-      (Float.min
-         (Env_config_keeper.KeeperKeepalive.oas_timeout_for_context ~max_context)
-         usable_budget)
+      (Float.min adaptive_timeout usable_budget)
+
+let bounded_oas_timeout_for_turn_budget ~(max_context : int)
+    ~(remaining_turn_budget_s : float) : float option =
+  bounded_oas_timeout_for_turn_budget_with_turn_budget ~max_context
+    ~max_turns:Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+    ~remaining_turn_budget_s
 
 (** Detect context overflow errors via structured OAS error types.
     Matches [ContextOverflow] (API-level) and [TokenBudgetExceeded]
@@ -1265,18 +1274,21 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           let do_run ~run_meta ~max_context ~run_generation ~is_retry
               ~oas_timeout_s =
-            let max_idle_turns =
+            let max_idle_turns, max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
-                  Env_config_keeper.KeeperKeepalive.max_idle_turns_reactive
+                  ( Env_config_keeper.KeeperKeepalive.max_idle_turns_reactive,
+                    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call )
               | Keeper_world_observation.Scheduled_autonomous ->
-                  Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous
+                  ( Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous,
+                    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous )
             in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:effective_cascade_name
               ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
               ~generation:run_generation
+              ~max_turns
               ~max_idle_turns
               ~history_user_source:"world_state_prompt"
               ~history_assistant_source:"internal_assistant"
@@ -1291,9 +1303,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry
               ~overflow_retry_used =
+            let max_turns =
+              match channel with
+              | Keeper_world_observation.Reactive ->
+                  Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+              | Keeper_world_observation.Scheduled_autonomous ->
+                  Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+            in
             let attempt_result =
               match
-                bounded_oas_timeout_for_turn_budget
+                bounded_oas_timeout_for_turn_budget_with_turn_budget
+                  ~max_turns
                   ~max_context
                   ~remaining_turn_budget_s:(remaining_turn_budget_s ())
               with

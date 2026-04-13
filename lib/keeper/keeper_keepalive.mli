@@ -56,6 +56,16 @@ exception Semaphore_wait_timeout of float
     re-reading the env var. Callers should treat this as "skip this
     turn, retry on next heartbeat" rather than a keeper failure. *)
 
+(** Test-only reset for the autonomous FIFO wait queue. *)
+val reset_autonomous_turn_queue_for_test : unit -> unit
+
+(** Test-only snapshot of keeper names currently queued for an autonomous turn. *)
+val autonomous_waiter_snapshot_for_test : unit -> string list
+
+(** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
+val enqueue_autonomous_waiter_for_test : string -> int
+val drop_autonomous_waiter_for_test : int -> unit
+
 val wakeup_relevant_keeper_for_board_signal :
   config:Room.config -> Board_dispatch.keeper_board_signal -> unit
 

@@ -81,6 +81,12 @@ val is_transient_network_error : Oas.Error.sdk_error -> bool
 val bounded_oas_timeout_for_turn_budget :
   max_context:int -> remaining_turn_budget_s:float -> float option
 
+val bounded_oas_timeout_for_turn_budget_with_turn_budget :
+  max_context:int ->
+  max_turns:int ->
+  remaining_turn_budget_s:float ->
+  float option
+
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
     rejecting a malformed request body).  The LLM never
     processed the request, so committed tool results are not at risk

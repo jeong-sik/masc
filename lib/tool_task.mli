@@ -19,7 +19,6 @@ val handle_transition : context -> Yojson.Safe.t -> tool_result
 val handle_update_priority : context -> Yojson.Safe.t -> tool_result
 val handle_tasks : context -> Yojson.Safe.t -> tool_result
 val handle_task_history : context -> Yojson.Safe.t -> tool_result
-val handle_archive_view : context -> Yojson.Safe.t -> tool_result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 

@@ -1,11 +1,9 @@
 (** Tool_room - Room management operations
 
-    Handles: status, reset, init, room_strategy, workflow_guide, check
+    Handles: status, reset, init, workflow_guide, check
 
     Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
 *)
-
-open Yojson.Safe.Util
 
 type tool_result = bool * string
 
@@ -63,34 +61,10 @@ let cached_text_by_key cache ~key ~ttl_s compute =
       cache.expires_at <- now +. ttl_s;
       value
 
-let normalize_search_strategy value =
-  match String.trim value with
-  | "" -> Ok None
-  | "legacy" | "best_first_v1" as strategy -> Ok (Some strategy)
-  | other -> Error ("❌ search_strategy_default must be legacy or best_first_v1, got: " ^ other)
-
-let normalize_speculation_budget value =
-  match value with
-  | None -> Ok None
-  | Some v when v <= 0 -> Error "❌ speculation_budget must be > 0"
-  | Some v -> Ok (Some v)
-
 let effective_cluster_name (config : Room.config) =
   match String.trim config.backend_config.Backend_types.cluster_name with
   | "" -> Env_config_core.cluster_name ()
   | name -> name
-
-let room_strategy_json config =
-  let state = Room.read_state config in
-  `Assoc
-    [
-      ("cluster", `String (effective_cluster_name config));
-      ("search_strategy_default",
-       Json_util.string_opt_to_json state.search_strategy_default);
-      ("speculation_enabled", `Bool state.speculation_enabled);
-      ("speculation_budget",
-       Json_util.int_opt_to_json state.speculation_budget);
-    ]
 
 (* Handlers *)
 
@@ -397,53 +371,6 @@ let handle_reset ctx args =
     (true, Room.reset ctx.config)
   end
 
-let handle_room_strategy_get ctx _args =
-  (true, Yojson.Safe.to_string (room_strategy_json ctx.config))
-
-let handle_room_strategy_set ctx args =
-  let search_strategy_raw = get_string_opt args "search_strategy_default" in
-  let search_strategy_default =
-    match search_strategy_raw with
-    | Some value -> normalize_search_strategy value
-    | None -> Ok None
-  in
-  let speculation_enabled = get_bool_opt args "speculation_enabled" in
-  let speculation_budget =
-    match args |> member "speculation_budget" with
-    | `Int value -> normalize_speculation_budget (Some value)
-    | `Null -> Ok None
-    | _ -> Ok None
-  in
-  match search_strategy_default, speculation_budget with
-  | Error e, _ -> (false, e)
-  | _, Error e -> (false, e)
-  | Ok search_strategy_default, Ok speculation_budget ->
-      let updated =
-        Room.update_state ctx.config (fun state ->
-            {
-              state with
-              search_strategy_default =
-                (match search_strategy_raw with Some _ -> search_strategy_default | None -> state.search_strategy_default);
-              speculation_enabled =
-                Option.value ~default:state.speculation_enabled speculation_enabled;
-              speculation_budget =
-                (match args |> member "speculation_budget" with
-                | `Null -> None
-                | `Int _ -> speculation_budget
-                | _ -> state.speculation_budget);
-            })
-      in
-      invalidate_status_cache ();
-      ( true,
-        Yojson.Safe.pretty_to_string
-          (`Assoc
-            [
-              ("status", `String "ok");
-              ("room_strategy", room_strategy_json ctx.config);
-              ("updated_at", `String (Types.now_iso ()));
-              ("project", `String updated.project);
-            ]) )
-
 (* ── State inspection (shared by workflow_guide and check) ──────── *)
 
 type agent_state = {
@@ -582,8 +509,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_status" -> Some (handle_status ctx args)
   | "masc_init" -> Some (handle_init ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
-  | "masc_room_strategy_get" -> Some (handle_room_strategy_get ctx args)
-  | "masc_room_strategy_set" -> Some (handle_room_strategy_set ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
   | "masc_check" -> Some (handle_check ctx args)
   | _ -> None
@@ -598,8 +523,7 @@ let _tool_spec_read_only = [ "masc_status" ]
 let _tool_spec_system_internal = [ "masc_init"; "masc_reset" ]
 
 let tool_required_permission = function
-  | "masc_status" | "masc_room_strategy_get" | "masc_workflow_guide"
-  | "masc_check" ->
+  | "masc_status" | "masc_workflow_guide" | "masc_check" ->
       Some Types.CanReadState
   | "masc_init" ->
       Some Types.CanInit

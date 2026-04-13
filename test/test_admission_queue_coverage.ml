@@ -78,27 +78,14 @@ let test_initial_max_concurrent_clamps_min_one () =
   in
   check int "clamped" 1 (AQ.initial_max_concurrent_of_env getenv)
 
-let test_wait_timeout_no_leak () =
-  Eio_main.run (fun env ->
+let test_wait_timeout_passthrough_no_leak () =
+  Eio_main.run (fun _env ->
     AQ.reset_for_test ~max_slots:1;
-    Eio_context.set_clock (Eio.Stdenv.clock env);
-    let hold, release_hold = Eio.Promise.create () in
-    let timeout_seen = ref None in
-    Eio.Fiber.both
-      (fun () ->
-        AQ.with_permit ~priority:Interactive
-          ~keeper_name:"blocker" ~cascade_name:"test"
-          (fun () -> Eio.Promise.await hold))
-      (fun () ->
-        Eio.Fiber.yield ();
-        (try
-           AQ.with_permit ~wait_timeout_sec:0.01 ~priority:Background
-             ~keeper_name:"timed-out" ~cascade_name:"test"
-             (fun () -> ())
-         with AQ.Wait_timeout wait_ms ->
-           timeout_seen := Some wait_ms);
-        Eio.Promise.resolve release_hold ());
-    check bool "wait timeout raised" true (Option.is_some !timeout_seen);
+    let ran = ref false in
+    AQ.with_permit ~wait_timeout_sec:0.01 ~priority:Background
+      ~keeper_name:"timed-out" ~cascade_name:"test"
+      (fun () -> ran := true);
+    check bool "wait timeout ignored in passthrough" true !ran;
     let s = AQ.snapshot () in
     check int "no leaked slots" 0 s.active;
     check int "queue cleared" 0 s.queue_depth)
@@ -157,7 +144,8 @@ let () =
       test_case "propagates exception" `Quick test_with_permit_propagates_exception;
       test_case "try always succeeds" `Quick test_try_always_succeeds;
       test_case "concurrent all run" `Quick test_concurrent_all_run;
-      test_case "wait timeout no leak" `Quick test_wait_timeout_no_leak;
+      test_case "wait timeout passthrough no leak" `Quick
+        test_wait_timeout_passthrough_no_leak;
     ];
     "config", [
       test_case "initial default" `Quick test_initial_max_concurrent_default;

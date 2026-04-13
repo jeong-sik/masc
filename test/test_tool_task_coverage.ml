@@ -548,15 +548,6 @@ let () = test "dispatch_task_history" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch archive_view *)
-let () = test "dispatch_archive_view" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [("limit", `Int 10)] in
-  match Tool_task.dispatch ctx ~name:"masc_archive_view" ~args with
-  | Some (success, _result) -> assert success
-  | None -> failwith "dispatch returned None"
-)
-
 (* Test batch_add_tasks *)
 let () = test "handle_batch_add_tasks" (fun () ->
   let ctx = make_test_ctx () in

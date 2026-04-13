@@ -2,7 +2,7 @@
 
     Dispatches: transport_status, websocket_discovery, webrtc,
     dashboard, verify_handoff, gc, cleanup_zombies, tool_stats,
-    tool_help, tool_admin, keeper_tool_catalog, deep_review. *)
+    tool_help, tool_admin, deep_review. *)
 
 type tool_result = bool * string
 

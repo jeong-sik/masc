@@ -328,6 +328,57 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
 
+  (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
+  |> Http.Router.get "/api/v1/dashboard/eval-feed" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let agent_name = Server_utils.query_param req "agent_name" in
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:10
+           |> max 1 |> min 100
+         in
+         let json =
+           match agent_name with
+           | Some name when String.trim name <> "" ->
+               let snapshots =
+                 Dashboard_eval_feed.read_latest ~base_path
+                   ~agent_name:(String.trim name) ~limit
+               in
+               `Assoc [
+                 ("generated_at", `String (Types.now_iso ()));
+                 ("agent_name", `String (String.trim name));
+                 ("count", `Int (List.length snapshots));
+                 ("snapshots", `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
+               ]
+           | _ ->
+               let agents = Dashboard_eval_feed.list_agents ~base_path in
+               let per_agent =
+                 List.map (fun name ->
+                   let snapshots =
+                     Dashboard_eval_feed.read_latest ~base_path
+                       ~agent_name:name ~limit:1
+                   in
+                   let latest =
+                     match snapshots with
+                     | s :: _ -> Dashboard_eval_feed.snapshot_to_json s
+                     | [] -> `Null
+                   in
+                   `Assoc [
+                     ("agent_name", `String name);
+                     ("latest", latest);
+                   ]
+                 ) agents
+               in
+               `Assoc [
+                 ("generated_at", `String (Types.now_iso ()));
+                 ("agent_count", `Int (List.length agents));
+                 ("agents", `List per_agent);
+               ]
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   (* ── Telemetry unified view ── *)
   |> Http.Router.get "/api/v1/dashboard/telemetry" (fun request reqd ->
        with_public_read (fun state req reqd ->

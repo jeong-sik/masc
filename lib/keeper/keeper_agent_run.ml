@@ -1446,6 +1446,7 @@ let run_turn
        Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
          Oas_worker.run_named
            ~cascade_name
+           ~model_strings:meta.models
            ?provider_filter
            ~goal:user_message
            ~priority

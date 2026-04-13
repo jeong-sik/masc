@@ -5,7 +5,7 @@
     - Tool_misc_admin: auth, config, tool inventory, feature flag handlers
 
     Retains: dashboard, verify_handoff, gc, cleanup_zombies,
-    tool_stats, tool_help, keeper_tool_catalog.
+    tool_stats, tool_help.
 
     @since 2.187.0 — Decomposed from monolithic tool_misc.ml *)
 
@@ -108,75 +108,6 @@ let handle_tool_help _ctx args =
 let handle_web_search _ctx args =
   Tool_misc_web_search.handle args
 
-let handle_keeper_tool_catalog _ctx args =
-  let include_hidden = get_bool args "include_hidden" false in
-  let include_deprecated = get_bool args "include_deprecated" false in
-  let limit = max 1 (min 500 (get_int args "limit" 50)) in
-  let offset = max 0 (get_int args "offset" 0) in
-  let server_tools =
-    (if include_hidden || include_deprecated then
-       Config.all_tool_schemas
-       |> List.filter (fun schema ->
-              Tool_catalog.is_visible
-                ~include_hidden
-                ~include_deprecated
-                schema.Types.name)
-     else
-       Config.visible_tool_schemas ())
-    |> List.filter (fun schema -> String.length schema.Types.name >= 5
-                                 && String.equal (String.sub schema.Types.name 0 5) "masc_")
-  in
-  let tool_json (schema : Types.tool_schema) =
-    `Assoc
-      (("name", `String schema.name)
-       :: Tool_catalog.metadata_to_fields schema.name)
-  in
-  let wrapped_internal_tools =
-    Capability_registry.keeper_wrapped_internal_tools
-  in
-  let wrapped_server_names =
-    Capability_registry.keeper_wrapped_server_tools
-  in
-  let server_only_tools =
-    server_tools
-    |> List.map (fun schema -> schema.Types.name)
-    |> List.filter (fun name -> not (List.mem name wrapped_server_names))
-  in
-  let total_count = List.length server_tools in
-  let paged_server_tools =
-    server_tools
-    |> List.filteri (fun i _ -> i >= offset && i < offset + limit)
-  in
-  let json =
-    `Assoc
-      [
-        ("count", `Int total_count);
-        ("limit", `Int limit);
-        ("offset", `Int offset);
-        ("server_tools", `List (List.map tool_json paged_server_tools));
-        ("wrapped_internal_tools",
-          `List (List.map (fun name -> `String name) wrapped_internal_tools));
-        ("wrapped_server_tools",
-          `List (List.map (fun name -> `String name) wrapped_server_names));
-        ("server_only_tools",
-          `List (List.map (fun name -> `String name) server_only_tools));
-        ( "keeper_standard_tools",
-          `List
-            (List.map
-               (fun name -> `String name)
-               Capability_registry.keeper_safe_tool_names) );
-        ( "keeper_privileged_tools",
-          `List
-            (List.map
-               (fun name -> `String name)
-               Capability_registry.keeper_privileged_tool_names) );
-        ( "surface_snapshot",
-          Capability_registry.surface_snapshot_json
-            Config.raw_all_tool_schemas );
-      ]
-  in
-  (true, Yojson.Safe.to_string json)
-
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)
 (* ================================================================ *)
@@ -209,7 +140,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_web_search" -> Some (handle_web_search ctx args)
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
-  | "masc_keeper_tool_catalog" -> Some (handle_keeper_tool_catalog ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
   | "masc_feature_flags" -> Some (Tool_misc_admin.handle_feature_flags args)
   | _ -> None
@@ -231,8 +161,7 @@ let _tool_spec_read_only =
 let tool_required_permission = function
   | "masc_config" | "masc_dashboard" | "masc_verify_handoff"
   | "masc_tool_stats" | "masc_tool_help" | "masc_web_search"
-  | "masc_tool_admin_snapshot" | "masc_keeper_tool_catalog"
-  | "masc_feature_flags" ->
+  | "masc_tool_admin_snapshot" | "masc_feature_flags" ->
       Some Types.CanReadState
   | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
       Some Types.CanBroadcast

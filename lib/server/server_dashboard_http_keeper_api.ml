@@ -536,6 +536,55 @@ let handle_keeper_get_subroutes state req request reqd =
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd
+  else if ends_with "/eval" then
+    let name = extract_name "/eval" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let base_path = state.Mcp_server.room_config.base_path in
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:10
+        |> max 1 |> min 100
+      in
+      (* Use keeper name as agent_name for eval lookup.
+         Keepers may also have a separate agent_name — look up both. *)
+      let config = state.Mcp_server.room_config in
+      let agent_name_opt =
+        match Keeper_types.read_meta config name with
+        | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
+        | _ -> None
+      in
+      let snapshots_by_name =
+        Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
+      in
+      let snapshots =
+        match agent_name_opt with
+        | Some agent_name when snapshots_by_name = [] ->
+            Dashboard_eval_feed.read_latest ~base_path ~agent_name ~limit
+        | _ -> snapshots_by_name
+      in
+      let latest_verdict =
+        match snapshots with
+        | s :: _ -> Some s.Dashboard_eval_feed.verdict
+        | [] -> None
+      in
+      let json = `Assoc [
+        ("keeper", `String name);
+        ("count", `Int (List.length snapshots));
+        ("latest_coverage",
+          match latest_verdict with
+          | Some v -> `Float v.Dashboard_eval_feed.coverage
+          | None -> `Null);
+        ("latest_all_passed",
+          match latest_verdict with
+          | Some v -> `Bool v.Dashboard_eval_feed.all_passed
+          | None -> `Null);
+        ("snapshots",
+          `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
+      ] in
+      Http.Response.json ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
   else if ends_with "/state-diagram" then
     let name = extract_name "/state-diagram" in
     if String.length name = 0 then

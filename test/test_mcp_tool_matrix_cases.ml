@@ -697,8 +697,6 @@ let field_value fixture ~tool_name field_name schema =
   | "offer_id" -> `String (ensure_webrtc_offer fixture)
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
   | "tool_name" -> `String "masc_status"
-  | "target_agent" when tool_name = "masc_relay_now" ->
-      `String "definitely-missing-agent"
   | "subscription_id" -> `String "subscription-001"
   | "events" -> `List [ `String "agent.joined" ]
   | "worker_name" -> `String "tool-matrix-worker"
@@ -788,7 +786,6 @@ let tool_arguments fixture (schema : Types.tool_schema) =
           [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" ->
           [ "timeout_sec" ]
-      | "masc_relay_now" -> [ "target_agent" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)

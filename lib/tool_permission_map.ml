@@ -46,7 +46,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_meta_cognition_snapshot", CanReadState);
     ("masc_poll_events", CanReadState);
     ("masc_recall_search", CanReadState);
-    ("masc_room_strategy_get", CanReadState);
     ("masc_select_agent", CanReadState);
     ("masc_auth_list", CanReadState);
     ("masc_verify_auto", CanReadState);
@@ -128,7 +127,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_auth_refresh", CanReadState);
     ("masc_tool_stats", CanReadState);
     ("masc_tool_help", CanReadState);
-    ("masc_keeper_tool_catalog", CanReadState);
     ("masc_tool_list", CanReadState);
     ("masc_tool_grant", CanAdmin);
     ("masc_tool_revoke", CanAdmin);

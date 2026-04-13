@@ -149,19 +149,6 @@ Tip: Look for status='todo' tasks to claim.";
     ];
   };
   {
-    name = "masc_archive_view";
-    description = "View archived tasks from tasks-archive.json. Shows tasks that were completed and cleaned up by gc.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max number of archived tasks to show (default: 20)");
-        ]);
-      ]);
-    ];
-  };
-  {
     name = "masc_claim_next";
     description = "Automatically claim the highest priority unclaimed task. Use this when you want to pick up the most important available work without manually checking the task board. Returns the claimed task details including priority level.";
     input_schema = `Assoc [

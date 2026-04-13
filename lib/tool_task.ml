@@ -799,41 +799,6 @@ let handle_task_history ctx args =
   let events = parsed |> List.filter matches_task |> take limit in
   (true, Yojson.Safe.to_string (`List events))
 
-let handle_archive_view ctx args =
-  let limit = get_int args "limit" 20 in
-  let archive_path = Room_utils.archive_path ctx.config in
-  if not (Room_utils.path_exists ctx.config archive_path) then
-    (true, Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("tasks", `List [])]))
-  else
-    let json = Room_utils.read_json ctx.config archive_path in
-    let tasks =
-      match json with
-      | `List items -> items
-      | `Assoc _ ->
-          (match json |> member "tasks" with
-           | `List items -> items
-           | _ -> [])
-      | _ -> []
-    in
-    let total = List.length tasks in
-    let tasks =
-      if total <= limit then tasks
-      else
-        let rec drop n xs =
-          match xs with
-          | [] -> []
-          | _ when n <= 0 -> xs
-          | _ :: rest -> drop (n - 1) rest
-        in
-        drop (total - limit) tasks
-    in
-    let response = `Assoc [
-      ("count", `Int (List.length tasks));
-      ("total", `Int total);
-      ("tasks", `List tasks);
-    ] in
-    (true, Yojson.Safe.to_string response)
-
 include Tool_task_schemas
 (* Dispatch function *)
 let dispatch ctx ~name ~args : tool_result option =
@@ -845,7 +810,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_update_priority" -> Some (handle_update_priority ctx args)
   | "masc_tasks" -> Some (handle_tasks ctx args)
   | "masc_task_history" -> Some (handle_task_history ctx args)
-  | "masc_archive_view" -> Some (handle_archive_view ctx args)
   | _ -> None
 
 (* ================================================================ *)
@@ -856,7 +820,7 @@ let _tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
 let _tool_spec_requires_join = [ "masc_add_task"; "masc_claim_next"; "masc_transition" ]
 
 let tool_required_permission = function
-  | "masc_tasks" | "masc_task_history" | "masc_archive_view" ->
+  | "masc_tasks" | "masc_task_history" ->
       Some Types.CanReadState
   | "masc_add_task" | "masc_batch_add_tasks" ->
       Some Types.CanAddTask

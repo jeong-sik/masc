@@ -131,23 +131,40 @@ let runtime_blocker_surface_of_registry_entry
       {
         last_failure_reason =
           Some
-            (Keeper_registry.Ambiguous_partial_commit { kind; detail });
+            ((Keeper_registry.Ambiguous_partial_commit { kind; detail }) as reason);
         _;
       } ->
+      let manual_reconcile =
+        Keeper_registry.failure_reason_requires_manual_reconcile reason
+      in
       let blocker_class, default_summary =
         match kind with
         | Keeper_registry.Post_commit_timeout ->
             ( "ambiguous_post_commit_timeout",
-              "Mutating tools committed before the turn timed out. Retry stayed disabled and manual reconcile is required." )
+              if manual_reconcile
+              then
+                "Mutating tools committed before the turn timed out. Retry stayed disabled and manual reconcile is required."
+              else
+                "Mutating tools committed before the turn timed out. Retry stayed disabled, but the committed tools are reconcile-safe so manual reconcile is not required." )
         | Keeper_registry.Post_commit_failure ->
             ( "ambiguous_post_commit_failure",
-              "Mutating tools committed before the turn failed. Retry stayed disabled and manual reconcile is required." )
+              if manual_reconcile
+              then
+                "Mutating tools committed before the turn failed. Retry stayed disabled and manual reconcile is required."
+              else
+                "Mutating tools committed before the turn failed. Retry stayed disabled, but the committed tools are reconcile-safe so manual reconcile is not required." )
       in
       let summary =
         let trimmed = String.trim detail in
-        if trimmed = "" then default_summary else trimmed
+        if trimmed = ""
+        then default_summary
+        else if (not manual_reconcile)
+                && (String_util.contains_substring_ci trimmed
+                      "manual reconcile is required")
+        then default_summary
+        else trimmed
       in
-      Some (blocker_class, summary, true)
+      Some (blocker_class, summary, manual_reconcile)
   | _ -> None
 
 let runtime_blocker_surface_of_reason (reason : string) =

@@ -457,11 +457,6 @@ let test_permission_for_tool_help () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-let test_permission_for_keeper_tool_catalog () =
-  match Auth.permission_for_tool "masc_keeper_tool_catalog" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
 let test_permission_for_tool_list () =
   match Auth.permission_for_tool "masc_tool_list" with
   | Some Types.CanReadState -> ()
@@ -740,7 +735,6 @@ let () =
       test_case "auth_status" `Quick test_permission_for_tool_auth_status;
       test_case "tool_stats" `Quick test_permission_for_tool_stats;
       test_case "tool_help" `Quick test_permission_for_tool_help;
-      test_case "keeper_tool_catalog" `Quick test_permission_for_keeper_tool_catalog;
       test_case "tool_list" `Quick test_permission_for_tool_list;
       test_case "tool_grant" `Quick test_permission_for_tool_grant;
       test_case "tool_revoke" `Quick test_permission_for_tool_revoke;

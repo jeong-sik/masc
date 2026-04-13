@@ -36,16 +36,18 @@ let managed_agent_passthrough_tool_names =
                 "masc_a2a_delegate";
               ]))
 
+module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
+
 let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
-  let seen = Hashtbl.create (List.length schemas) in
-  List.filter
-    (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
-        false
-      else (
-        Hashtbl.add seen schema.name ();
-        true))
-    schemas
+  let _, result =
+    List.fold_left
+      (fun (seen, acc) (schema : Types.tool_schema) ->
+        if StringSet.mem schema.name seen then (seen, acc)
+        else (StringSet.add schema.name seen, schema :: acc))
+      (StringSet.empty, []) schemas
+  in
+  List.rev result
 
 let default_instructions =
   "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
@@ -175,7 +177,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_claim_next", "Claim Next Task");
   ("masc_update_priority", "Update Task Priority");
   ("masc_task_history", "Task Event History");
-  ("masc_archive_view", "View Task Archive");
   (* Communication *)
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
@@ -215,9 +216,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operation_resume", "Resume Operation");
   ("masc_operation_finalize", "Finalize Operation");
   ("masc_operation_checkpoint", "Operation Checkpoint");
-  (* Room strategy *)
-  ("masc_room_strategy_get", "Get Room Strategy");
-  ("masc_room_strategy_set", "Set Room Strategy");
   (* Worktree *)
   ("masc_worktree_create", "Create Worktree");
   ("masc_worktree_status", "Worktree Status");
@@ -230,7 +228,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
-  ("masc_keeper_tool_catalog", "Keeper Tool Catalog");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
   ("masc_room_status", "Namespace Status");
@@ -248,13 +245,13 @@ let custom_tool_titles : (string * string) list = [
   ("masc_compact_context", "Compact Context");
 ]
 
-let custom_title_table : (string, string) Hashtbl.t =
-  let table = Hashtbl.create (List.length custom_tool_titles) in
-  List.iter (fun (name, title) -> Hashtbl.replace table name title) custom_tool_titles;
-  table
+let custom_title_table : string StringMap.t =
+  List.fold_left
+    (fun acc (name, title) -> StringMap.add name title acc)
+    StringMap.empty custom_tool_titles
 
 let tool_title_of_name name =
-  match Hashtbl.find_opt custom_title_table name with
+  match StringMap.find_opt name custom_title_table with
   | Some title -> title
   | None ->
     let trimmed =
@@ -382,15 +379,6 @@ let tool_output_schema_field = function
            [
              ("agents", array_schema);
              ("count", int_schema);
-           ])
-  | "masc_room_strategy_get" ->
-      Some
-        (permissive_object_schema
-           [
-             ("room_id", string_schema);
-             ("search_strategy_default", string_schema);
-             ("speculation_enabled", bool_schema);
-             ("speculation_budget", int_schema);
            ])
   | "masc_operator_digest" ->
       Some

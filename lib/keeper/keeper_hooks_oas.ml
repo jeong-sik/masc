@@ -320,6 +320,14 @@ let make_hooks
                "masc_provider_prefix_cache_read_tokens_total"
                ~delta:(Float.of_int cr) ()
          | None -> ());
+        (* Inference latency histogram for /metrics endpoint. *)
+        (match response.telemetry with
+         | Some t when t.request_latency_ms > 0 ->
+           Prometheus.observe_histogram
+             "masc_llm_inference_duration_seconds"
+             ~labels:[("model", model)]
+             (Float.of_int t.request_latency_ms /. 1000.0)
+         | _ -> ());
         Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.

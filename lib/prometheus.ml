@@ -133,6 +133,7 @@ let init () =
       Hashtbl.add metrics key { name; help; metric_type = mt; value = 0.0; labels = [] }
   in
   add "masc_mcp_requests_total" "Total MCP requests received" Counter;
+  add "masc_llm_inference_duration_seconds" "LLM inference request duration in seconds" Histogram;
   add "masc_tasks_total" "Total tasks processed" Counter;
   add "masc_errors_total" "Total errors" Counter;
   add "masc_active_agents" "Currently active agents" Gauge;

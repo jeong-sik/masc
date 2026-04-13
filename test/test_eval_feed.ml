@@ -275,12 +275,12 @@ let test_snapshot_json_roundtrip () =
       in
       let json_out = Eval_feed.snapshot_to_json snapshot in
       let agent =
-        Masc_mcp.Safe_ops.json_string ~default:"" "agent_name" json_out
+        Safe_ops.json_string ~default:"" "agent_name" json_out
       in
       check string "agent_name roundtrip" "keeper-a" agent;
       let verdict_j = Yojson.Safe.Util.member "verdict" json_out in
       let sv =
-        Masc_mcp.Safe_ops.json_int ~default:0 "schema_version" verdict_j
+        Safe_ops.json_int ~default:0 "schema_version" verdict_j
       in
       check int "schema_version in output" 1 sv
 
@@ -303,9 +303,9 @@ let test_verdict_to_json () =
     }
   in
   let json = Eval_feed.verdict_to_json verdict in
-  let ap = Masc_mcp.Safe_ops.json_bool ~default:true "all_passed" json in
+  let ap = Safe_ops.json_bool ~default:true "all_passed" json in
   check bool "all_passed false" false ap;
-  let cov = Masc_mcp.Safe_ops.json_float ~default:0.0 "coverage" json in
+  let cov = Safe_ops.json_float ~default:0.0 "coverage" json in
   check (float 0.001) "coverage" 0.42 cov
 
 (* ── Test suite ──────────────────────────────────────────────────── *)

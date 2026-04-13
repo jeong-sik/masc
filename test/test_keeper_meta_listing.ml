@@ -66,6 +66,11 @@ let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
+let keeper_json_by_name json name =
+  Yojson.Safe.Util.(json |> member "keepers" |> to_list)
+  |> List.find_opt (fun keeper ->
+         Yojson.Safe.Util.(keeper |> member "name" |> to_string = name))
+
 let keeper_ctx env sw config agent_name : _ Tool_keeper.context =
   {
     config;
@@ -128,6 +133,147 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check int "status handler count filters sidecars" 2
         Yojson.Safe.Util.(json |> member "count" |> to_int))
 
+let test_dashboard_ignores_fileless_manual_reconcile_fallback () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let meta_json =
+        `Assoc
+          [
+            ("name", `String "sangsu");
+            ("agent_name", `String "keeper-sangsu-agent");
+            ("trace_id", `String "trace-sangsu");
+            ("goal", `String "test keeper");
+          ]
+      in
+      let meta =
+        match Keeper_types.meta_of_json meta_json with
+        | Ok meta -> meta
+        | Error e -> fail ("meta_of_json failed: " ^ e)
+      in
+      (match Keeper_types.write_meta ~force:true config meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      ignore (Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
+        (Some
+           (Keeper_registry.Ambiguous_partial_commit
+              {
+                kind = Keeper_registry.Post_commit_failure;
+                detail =
+                  "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
+              }));
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      match keeper_json_by_name json "sangsu" with
+      | None -> fail "sangsu missing from keepers dashboard json"
+      | Some keeper ->
+          check bool "reconcile_status stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "reconcile_status" = `Null);
+          check bool "runtime blocker class stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
+          check bool "runtime blocker manual_reconcile stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
+
+(** bootable_keeper_names excludes JSON-only keepers with total_turns=0
+    (phantom keepers from old test runs) but keeps JSON-only keepers
+    that have actually run (total_turns > 0). *)
+let test_bootable_keeper_names_filters_phantom_keepers () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      write_keeper_meta_exn config ~name:"phantom-test" ~trace_id:"trace-phantom";
+      write_keeper_meta_exn config ~name:"real-test" ~trace_id:"trace-real";
+      (match Keeper_types.read_meta config "real-test" with
+       | Ok (Some meta) ->
+           let updated =
+             Keeper_types.map_usage
+               (fun u -> { u with total_turns = 5 })
+               meta
+           in
+           (match Keeper_types.write_meta ~force:true config updated with
+            | Ok () -> ()
+            | Error e -> fail ("write_meta for real-test failed: " ^ e))
+       | Ok None -> fail "real-test meta not found"
+       | Error e -> fail ("read_meta for real-test failed: " ^ e));
+      let all_names = Keeper_types.keeper_names config in
+      check bool "keeper_names includes phantom-test" true
+        (List.mem "phantom-test" all_names);
+      check bool "keeper_names includes real-test" true
+        (List.mem "real-test" all_names);
+      let bootable = Keeper_runtime.bootable_keeper_names config in
+      check bool "bootable excludes phantom-test (total_turns=0, no TOML)" false
+        (List.mem "phantom-test" bootable);
+      check bool "bootable includes real-test (total_turns>0)" true
+        (List.mem "real-test" bootable))
+
+let test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let meta_json =
+        `Assoc
+          [
+            ("name", `String "sangsu");
+            ("agent_name", `String "keeper-sangsu-agent");
+            ("trace_id", `String "trace-sangsu");
+            ("goal", `String "test keeper");
+          ]
+      in
+      let meta =
+        match Keeper_types.meta_of_json meta_json with
+        | Ok meta -> meta
+        | Error e -> fail ("meta_of_json failed: " ^ e)
+      in
+      (match Keeper_types.write_meta ~force:true config meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      ignore (Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
+        (Some
+           (Keeper_registry.Ambiguous_partial_commit
+              {
+                kind = Keeper_registry.Post_commit_failure;
+                detail =
+                  "Mutating tools [keeper_fs_edit] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
+              }));
+      let json = Dashboard_http_keeper.keepers_dashboard_json config in
+      match keeper_json_by_name json "sangsu" with
+      | None -> fail "sangsu missing from keepers dashboard json"
+      | Some keeper ->
+          check bool "unsafe reconcile_status stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "reconcile_status" = `Null);
+          check bool "unsafe runtime blocker class stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
+          check bool "unsafe runtime blocker manual_reconcile stays null without record" true
+            Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
+
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -148,6 +294,7 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       let names = Keeper_runtime.bootable_keeper_names config in
       check (list string) "autoboot disabled meta excluded from bootable list"
         [] names)
+
 let () =
   run "keeper_meta_listing"
     [
@@ -155,6 +302,12 @@ let () =
         [
           test_case "keeper_names and keeper_list ignore sidecar json" `Quick
             test_keeper_listing_ignores_sidecar_json_files;
+          test_case "dashboard ignores file-less reconcile fallback" `Quick
+            test_dashboard_ignores_fileless_manual_reconcile_fallback;
+          test_case "dashboard ignores file-less unsafe reconcile fallback" `Quick
+            test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback;
+          test_case "bootable_keeper_names filters phantom keepers" `Quick
+            test_bootable_keeper_names_filters_phantom_keepers;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
         ] );

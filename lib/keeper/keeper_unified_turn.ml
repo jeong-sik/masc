@@ -180,6 +180,10 @@ let classify_post_commit_failure
         Keeper_registry.Ambiguous_partial_commit
           { kind = resolved_kind; detail } )
 
+let blocker_class_of_post_commit_kind = function
+  | Keeper_registry.Post_commit_timeout -> "ambiguous_post_commit_timeout"
+  | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
+
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
     provider; this outer retry covers cases where all providers fail
@@ -1529,12 +1533,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_transient ~social_state ()
           in
           if is_ambiguous_partial then begin
-            (* Log the partial commit but do NOT block the keeper with
-               a manual_reconcile file. Keeper tools (board_vote,
-               board_comment, broadcast) are safe to re-encounter —
-               duplicates are tolerable, but a stuck keeper is not.
-               The failure is still recorded in decisions.jsonl and
-               failure_reason for observability. *)
+            (* Reconcile-safe partial commits stay file-less; unsafe ones
+               open a manual_reconcile record immediately so keepalive and
+               status surfaces share one blocker truth source. *)
             let failure_reason =
               Option.value
                 ~default:
@@ -1551,14 +1552,40 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
               (Some failure_reason);
-            if manual_reconcile_required then
+            if manual_reconcile_required then begin
+              let blocker_class =
+                match failure_reason with
+                | Keeper_registry.Ambiguous_partial_commit { kind; _ } ->
+                    blocker_class_of_post_commit_kind kind
+                | _ -> "ambiguous_post_commit_failure"
+              in
+              let committed_tools =
+                committed_mutating_tools !mutating_tools_committed
+              in
+              let summary =
+                match failure_reason with
+                | Keeper_registry.Ambiguous_partial_commit { detail; _ } -> detail
+                | _ -> e_str
+              in
+              ignore
+                (Keeper_manual_reconcile.open_pending
+                   config
+                   ~keeper_name:meta.name
+                   ~blocker_class
+                   ~summary
+                   ~failure_reason:
+                     (Some
+                        (Keeper_registry.failure_reason_to_string failure_reason))
+                   ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                   ~generation:(Some meta.runtime.generation)
+                   ~committed_tools);
               Log.Keeper.error
                 "%s: ambiguous partial commit retained manual reconcile \
                  blocker (tools=[%s])"
                 meta.name
                 (String.concat ", "
-                   (committed_mutating_tools !mutating_tools_committed))
-            else
+                   committed_tools)
+            end else
               Log.Keeper.warn
                 "%s: auto-recoverable partial commit (tools=[%s]); \
                  continuing without manual reconcile block"

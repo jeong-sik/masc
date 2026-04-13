@@ -222,8 +222,6 @@ let test_keeper_reconcile_clear_without_record_clears_runtime_blocker () =
         Yojson.Safe.Util.(clear_json |> member "cleared" |> to_bool);
       check bool "not already cleared" false
         Yojson.Safe.Util.(clear_json |> member "already_cleared" |> to_bool);
-      check bool "not legacy only" false
-        Yojson.Safe.Util.(clear_json |> member "legacy_only" |> to_bool);
       check bool "record null" true
         Yojson.Safe.Util.(clear_json |> member "record" = `Null);
       let ok, status_body_after =

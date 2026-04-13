@@ -315,17 +315,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
           let reconcile_status =
             if Keeper_manual_reconcile.is_pending config m.name then
-                Some "manual_reconcile_required"
-            else
-              match registry_entry with
-              | Some entry when
-                  entry.turn_consecutive_failures > 0
-                  && (match entry.last_failure_reason with
-                      | Some reason ->
-                          Keeper_registry.failure_reason_requires_manual_reconcile reason
-                      | None -> false) ->
-                  Some "manual_reconcile_required"
-              | _ -> None
+              Some "manual_reconcile_required"
+            else None
           in
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m

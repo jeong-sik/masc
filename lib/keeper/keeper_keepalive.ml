@@ -845,15 +845,7 @@ let manual_reconcile_blocker_detail (config : Room.config) keeper_name =
       in
       `Pending detail
   | Some { status = Keeper_manual_reconcile.Cleared; _ } -> `Cleared
-  | None ->
-      (match Keeper_registry.get ~base_path:config.base_path keeper_name with
-       | Some entry ->
-           (match entry.last_failure_reason with
-            | Some reason
-              when Keeper_registry.failure_reason_requires_manual_reconcile reason ->
-                `Legacy_pending (Keeper_registry.failure_reason_to_string reason)
-            | _ -> `Absent)
-       | None -> `Absent)
+  | None -> `Absent
 
 let sync_manual_reconcile_condition ~(config : Room.config) ~(keeper_name : string) =
   match
@@ -880,18 +872,18 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
     let blocker_detail = manual_reconcile_blocker_detail ctx.config meta.name in
     let sticky_manual_reconcile =
       match blocker_detail with
-      | `Pending _ | `Legacy_pending _ -> true
+      | `Pending _ -> true
       | `Cleared | `Absent -> false
     in
     (* When the system already classified the partial commit as
        auto-recoverable ("cursors already advanced, re-trigger risk is
-       low"), clear the reconcile blocker too.  Retaining a sticky
+       low"), clear the reconcile blocker too. Retaining a sticky
        blocker after an auto-recoverable judgment is contradictory and
        causes all keepers to stall within ~10 minutes of server start.
        See #6801 for the full failure chain. *)
     let reason_str =
       match blocker_detail with
-      | `Pending detail | `Legacy_pending detail -> detail
+      | `Pending detail -> detail
       | `Cleared -> "cleared"
       | `Absent -> "none"
     in
@@ -915,10 +907,8 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
           ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
           ~evidence_refs:[]
           ~idempotency_key:None);
-        (* Clear the FSM condition — Turn_succeeded alone does NOT reset
-           manual_reconcile_required (only Manual_reconcile_cleared does).
-           Without this, derive_phase stays Failing and the keeper can
-           never take another turn.  See the one-way trap analysis. *)
+        (* Turn_succeeded alone does NOT reset manual_reconcile_required;
+           Manual_reconcile_cleared is still required to exit Failing. *)
         ignore (Keeper_registry.dispatch_event
           ~base_path:ctx.config.base_path meta.name
           Keeper_state_machine.Manual_reconcile_cleared);
@@ -937,7 +927,7 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
 let keeper_requires_manual_reconcile ~(config : Room.config) ~keeper_name =
   sync_manual_reconcile_condition ~config ~keeper_name;
   match manual_reconcile_blocker_detail config keeper_name with
-  | `Pending _ | `Legacy_pending _ -> true
+  | `Pending _ -> true
   | `Cleared | `Absent -> false
 
 let sync_keeper_presence

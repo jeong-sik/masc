@@ -9,8 +9,6 @@ let () =
   let base_path = Masc_test_deps.find_project_root () in
   ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path))
 
-let () = Printf.printf "\n=== Tool_misc Coverage Tests ===\n"
-
 let str_contains s sub =
   let len_s = String.length s in
   let len_sub = String.length sub in
@@ -51,16 +49,15 @@ let with_isolated_runtime_env f =
             with_env "SUPABASE_DB_URL" None (fun () ->
               with_env "SB_PG_URL" None f))))))
 
-(* Test helper — runs inside Eio context for code paths that use Eio.Mutex *)
+(* Test registry — each [test] call appends; final [let ()] dispatches
+   via Alcotest.run.  Per-test Eio scope for code paths that use Eio.Mutex. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
+  test_cases := (name, fun () ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      with_isolated_runtime_env f);
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+      with_isolated_runtime_env f)) :: !test_cases
 
 (* Create test context *)
 let test_counter = ref 0
@@ -743,6 +740,12 @@ let () = test "get_string_missing" (fun () ->
   assert (Tool_args.get_string args "key" "default" = "default")
 )
 
-let () = Printf.printf "\n✅ All Tool_misc tests passed!\n"
+let () =
+  Alcotest.run "Tool_misc"
+    [
+      ( "coverage",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]
 
 let () = exit 0

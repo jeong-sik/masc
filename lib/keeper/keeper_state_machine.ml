@@ -166,6 +166,10 @@ let event_to_string = function
 
 (* ── Entry Actions ─────────────────────────────────────── *)
 
+(** Runtime contract mirrors [.mli]:
+    - [Publish_lifecycle] is the only entry action currently executed.
+    - The remaining variants describe supervisor-owned work and are kept as
+      explicit phase-entry intent until that integration is unified. *)
 type entry_action =
   | Start_compaction
   | Start_handoff
@@ -237,6 +241,11 @@ let can_transition ~from_phase ~to_phase =
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
   | Restarting, (Running | Crashed | Dead | Draining | Paused) -> true
   | Restarting, _ -> false
+
+let can_execute_turn = function
+  | Running | Failing -> true
+  | Offline | Compacting | HandingOff | Draining | Paused
+  | Stopped | Crashed | Restarting | Dead -> false
 
 (* ── derive_phase ──────────────────────────────────────── *)
 
@@ -371,7 +380,10 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Guardrail_stop _ ->
     { c with guardrail_triggered = true }
 
-(** Compute entry actions for a phase transition. *)
+(** Compute entry actions for a phase transition.
+    Only [Publish_lifecycle] is consumed by the current registry runtime.
+    Other variants remain intentional no-ops here because the underlying
+    side effects are owned elsewhere (post-turn lifecycle or supervisor). *)
 let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action list =
   let lifecycle name detail =
     Publish_lifecycle { event_name = name; detail }

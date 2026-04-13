@@ -966,17 +966,6 @@ let auth_detail_of_provider provider =
         endpoint_url = endpoint_url_of_adapter adapter;
         note = None }
 
-(** Classify a model into a family bucket based on locality and context window.
-    Shared SSOT to avoid duplication across oas_events and dashboard modules. *)
-
-let small_local_context_ceiling = 64_000
-let large_cloud_context_floor = 200_000
-
-let classify_model_family ~is_local ~context_window =
-  if is_local && context_window < small_local_context_ceiling then "small_local"
-  else if context_window >= large_cloud_context_floor then "large_cloud"
-  else "medium_cloud"
-
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind) : string list =
   match kind with
   | Llm_provider.Provider_config.Anthropic -> [ "ANTHROPIC_API_KEY" ]

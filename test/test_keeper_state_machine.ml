@@ -525,6 +525,20 @@ let test_can_transition_paused_to_draining () =
 let test_can_transition_paused_to_stopped () =
   check bool "-> Stopped" true (SM.can_transition ~from_phase:SM.Paused ~to_phase:SM.Stopped)
 
+let test_can_execute_turn_running_and_failing_only () =
+  check bool "Running executes turns" true (SM.can_execute_turn SM.Running);
+  check bool "Failing executes turns" true (SM.can_execute_turn SM.Failing)
+
+let test_can_execute_turn_blocks_other_phases () =
+  List.iter
+    (fun phase ->
+      check bool
+        ("blocked phase " ^ SM.phase_to_string phase)
+        false
+        (SM.can_execute_turn phase))
+    [ SM.Offline; SM.Compacting; SM.HandingOff; SM.Draining; SM.Paused;
+      SM.Stopped; SM.Crashed; SM.Restarting; SM.Dead ]
+
 (* ── Guard evaluation tests ────────────────────────────── *)
 
 let base_thresholds : Meas.threshold_params = {
@@ -1801,6 +1815,10 @@ let () =
       test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead;
       test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining;
       test_case "Paused -> Stopped" `Quick test_can_transition_paused_to_stopped;
+      test_case "Running|Failing execute turns" `Quick
+        test_can_execute_turn_running_and_failing_only;
+      test_case "other phases skip turns" `Quick
+        test_can_execute_turn_blocks_other_phases;
     ];
     "guard", [
       test_case "healthy = no action events" `Quick test_guard_healthy_no_crash_events;

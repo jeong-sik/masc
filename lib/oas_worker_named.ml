@@ -18,7 +18,7 @@ let default_config_path () : string option =
     Convention: any name containing "local" restricts defaults to
     self-hosted providers so that cloud models never leak in via fallback. *)
 let is_local_only_cascade name =
-  let lc = String.lowercase_ascii name in
+  let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
   let pattern = "local" in
   let plen = String.length pattern in
   let slen = String.length lc in
@@ -40,6 +40,7 @@ let is_local_label label =
     returned to prevent cloud models from leaking into local-only cascades.
     All profiles are now in config/cascade.json (hot-reloadable). *)
 let default_model_strings ~cascade_name =
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let all_labels =
     match Provider_adapter.explicit_llama_model_label_result () with
     | Ok label -> [ label ]
@@ -85,6 +86,7 @@ let admission_wait_timeout_error
 (** Resolve cascade provider configs via OAS Cascade_config.
     Returns OAS Provider_config.t list directly, bypassing the old Model_spec facade. *)
 let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t list =
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
   let configured =
@@ -240,6 +242,7 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (Oas.Error.Internal e)
   | Ok (sw, net) ->
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
   let configured_labels =

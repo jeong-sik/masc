@@ -1124,31 +1124,37 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
-  (* 0. State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade) *)
-  let effective_cascade_name =
-    let phase =
-      match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
-      | Some p -> p
-      | None ->
-          (* Safe default: if registry lookup fails, assume degraded state.
-             Running would skip local_recovery; Failing triggers cheap cascade. *)
-          Log.Keeper.warn "%s: registry phase lookup returned None, defaulting to Failing"
-            meta.name;
-          Keeper_state_machine.Failing
-    in
-    let routing = Keeper_cascade_routing.select_cascade
-      ~base_cascade:meta.cascade_name ~phase
-    in
-    Log.Keeper.debug "%s: cascade routing: %s -> %s (reason: %s)"
-      meta.name meta.cascade_name routing.effective_cascade routing.reason;
-    routing.effective_cascade
-  in
-  (* 1. Check API keys *)
-  let meta_for_cascade = { meta with cascade_name = effective_cascade_name } in
-  let model_labels = Keeper_coordination.effective_model_labels_for_turn meta_for_cascade in
-  match ensure_api_keys_for_labels model_labels with
-  | Error e -> Error (Oas.Error.Internal e)
-  | Ok () ->
+  (* 0. Phase gate + state-aware cascade routing *)
+  let registry_base_path = config.base_path in
+  match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
+  | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
+      Log.Keeper.info
+        "%s: unified turn skipped in non-executable phase=%s"
+        meta.name (Keeper_state_machine.phase_to_string phase);
+      Ok meta
+  | phase_opt ->
+      (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade) *)
+      let effective_cascade_name =
+        let phase = match phase_opt with
+          | Some p -> p
+          | None ->
+              Log.Keeper.warn "%s: registry phase lookup returned None, defaulting to Failing"
+                meta.name;
+              Keeper_state_machine.Failing
+        in
+        let routing = Keeper_cascade_routing.select_cascade
+          ~base_cascade:meta.cascade_name ~phase
+        in
+        Log.Keeper.debug "%s: cascade routing: %s -> %s (reason: %s)"
+          meta.name meta.cascade_name routing.effective_cascade routing.reason;
+        routing.effective_cascade
+      in
+      (* 1. Check API keys *)
+      let meta_for_cascade = { meta with cascade_name = effective_cascade_name } in
+      let model_labels = Keeper_coordination.effective_model_labels_for_turn meta_for_cascade in
+      match ensure_api_keys_for_labels model_labels with
+      | Error e -> Error (Oas.Error.Internal e)
+      | Ok () ->
       ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
       let max_context =
         resolved_max_context_for_turn ~meta model_labels
@@ -1214,13 +1220,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          retrying.
 
          Uses a per-turn observer via [add_tool_call_observer] instead of
-         wrapping the global [on_keeper_tool_call] ref. Each keeper registers
-         an independent observer, so concurrent keepers cannot interfere
-         with each other's save/restore lifecycle. *)
+         wrapping the global [on_keeper_tool_call] ref. Observer delivery is
+         process-global, so the callback must filter on [keeper_name] to avoid
+         cross-turn contamination when multiple keepers execute concurrently. *)
       let mutating_tools_committed = ref [] in
       let post_commit_failure_reason = ref None in
-      let side_effect_observer ~tool_name ~success =
-        if success && Keeper_exec_tools.has_mutating_side_effect tool_name then
+      let side_effect_observer ~keeper_name ~tool_name ~input ~success =
+        if success
+           && String.equal keeper_name meta.name
+           && Keeper_exec_tools.has_mutating_side_effect_with_input
+                ~tool_name ~input
+        then
           mutating_tools_committed := tool_name :: !mutating_tools_committed
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;

@@ -90,4 +90,35 @@ describe('buildFleetRows sort order', () => {
       'inactive-heavy-tools',
     ])
   })
+
+  it('treats runtime blockers as top-priority attention signals', () => {
+    const keepers = [
+      {
+        name: 'queue-blocked',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.1,
+        total_turns: 12,
+        runtime_blocker_class: 'admission_queue_wait_timeout',
+        runtime_blocker_summary: 'Admission queue wait timeout after 45.0s.',
+      },
+      {
+        name: 'healthy-busy',
+        status: 'active',
+        keepalive_running: true,
+        context_ratio: 0.4,
+        total_turns: 50,
+      },
+    ] satisfies Keeper[]
+
+    const rows = buildFleetRows(
+      keepers,
+      toolQualityByKeeper([
+        { name: 'queue-blocked', calls: 0, success_pct: 100 },
+        { name: 'healthy-busy', calls: 20, success_pct: 100 },
+      ]),
+    )
+
+    expect(rows.map(row => row.name)).toEqual(['queue-blocked', 'healthy-busy'])
+  })
 })

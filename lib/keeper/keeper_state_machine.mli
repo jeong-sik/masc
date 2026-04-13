@@ -164,7 +164,11 @@ val event_to_string : event -> string
 (** {1 Transition} *)
 
 (** Entry actions — side-effect descriptors emitted on state entry.
-    The caller (registry integration) interprets and executes them. *)
+    Runtime contract:
+    - [Publish_lifecycle] is executed by the registry integration as an
+      observability-only SSE/log side effect.
+    - All other variants remain descriptive placeholders for
+      supervisor-owned work and are intentionally ignored by the registry. *)
 type entry_action =
   | Start_compaction
   | Start_handoff
@@ -223,6 +227,13 @@ val apply_event :
 
 (** Check if a direct transition from one phase to another is valid. *)
 val can_transition : from_phase:phase -> to_phase:phase -> bool
+
+(** [true] when a keeper phase is allowed to execute a unified turn.
+    Runtime contract:
+    - [Running] and [Failing] may execute turns.
+    - All other phases must skip OAS turn execution until the keeper
+      re-enters an executable phase. *)
+val can_execute_turn : phase -> bool
 
 (** {1 JSON Serialization} *)
 

@@ -4,7 +4,7 @@ open Tool_args
 
 (** Default cascade name for keeper turns. SSOT — all keeper code must
     reference this constant instead of using the string literal. *)
-let default_cascade_name = "keeper_unified"
+let default_cascade_name = Keeper_cascade_profile.default_name
 
 (** Cascade name for recovery turns when keeper is in Failing phase.
     Maps to local_recovery_* entries in cascade.json. *)

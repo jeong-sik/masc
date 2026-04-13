@@ -5,6 +5,7 @@ module Keeper_types = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
 module Audit = Masc_mcp.Keeper_transition_audit
 module Meas = Masc_mcp.Keeper_measurement
+module Json = Yojson.Safe.Util
 
 let bp = "/tmp/test"
 
@@ -23,6 +24,31 @@ let make_meta name =
 let eio_test name fn =
   test_case name `Quick (fun () -> Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
+
+let sse_payload_json (event : string) : Yojson.Safe.t =
+  let prefix = "data: " in
+  let prefix_len = String.length prefix in
+  let rec find_data_line = function
+    | [] -> fail "expected SSE data line"
+    | line :: rest ->
+        if String.length line >= prefix_len
+           && String.sub line 0 prefix_len = prefix
+        then
+          Yojson.Safe.from_string
+            (String.sub line prefix_len (String.length line - prefix_len))
+        else
+          find_data_line rest
+  in
+  find_data_line (String.split_on_char '\n' event)
+
+let keeper_lifecycle_events received_events =
+  received_events
+  |> List.rev
+  |> List.filter_map (fun raw_event ->
+         let payload = sse_payload_json raw_event in
+         match Json.member "type" payload |> Json.to_string_option with
+         | Some "keeper_lifecycle" -> Some payload
+         | _ -> None)
 
 (* ── Basic registry operations ─────────────────────────── *)
 
@@ -193,6 +219,31 @@ let test_set_state () =
   | None -> fail "expected k4"
   | Some e -> check string "state" "paused" (KSM.phase_to_string e.phase)
 
+let test_dispatch_event_emits_lifecycle_sse () =
+  R.clear ();
+  let received_events = ref [] in
+  Masc_mcp.Sse.subscribe_external ~id:"keeper-registry-lifecycle"
+    ~callback:(fun event -> received_events := event :: !received_events) ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Sse.unsubscribe_external "keeper-registry-lifecycle")
+    (fun () ->
+      ignore (R.register ~base_path:bp "k4-lifecycle" (make_meta "k4-lifecycle"));
+      ignore (R.dispatch_event ~base_path:bp "k4-lifecycle" KSM.Operator_pause);
+      match keeper_lifecycle_events !received_events with
+      | [] -> fail "expected keeper_lifecycle SSE event"
+      | payload :: _ ->
+          check string "lifecycle type" "keeper_lifecycle"
+            (Json.member "type" payload |> Json.to_string);
+          check string "keeper name" "k4-lifecycle"
+            (Json.member "name" payload |> Json.to_string);
+          check string "phase" "paused"
+            (Json.member "phase" payload |> Json.to_string);
+          check string "event" "paused"
+            (Json.member "event" payload |> Json.to_string);
+          check string "detail" "operator request"
+            (Json.member "detail" payload |> Json.to_string))
+
 let test_extended_states () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
@@ -207,6 +258,34 @@ let test_extended_states () =
   | Some e ->
       check string "dead string" "dead" (KSM.phase_to_string e.phase);
       check (option (float 0.01)) "dead_since set" (Some 123.0) e.dead_since_ts
+
+let test_stopped_entry_action_is_observability_only () =
+  R.clear ();
+  let received_events = ref [] in
+  Masc_mcp.Sse.subscribe_external ~id:"keeper-registry-stopped"
+    ~callback:(fun event -> received_events := event :: !received_events) ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Sse.unsubscribe_external "keeper-registry-stopped")
+    (fun () ->
+      ignore (R.register ~base_path:bp "k4-stop" (make_meta "k4-stop"));
+      ignore (R.dispatch_event ~base_path:bp "k4-stop" KSM.Stop_requested);
+      ignore (R.dispatch_event ~base_path:bp "k4-stop" KSM.Drain_complete);
+      match R.get ~base_path:bp "k4-stop" with
+      | None -> fail "expected stopped keeper to remain registered"
+      | Some entry ->
+          check string "stopped phase" "stopped"
+            (KSM.phase_to_string entry.phase);
+          let stopped_payload =
+            keeper_lifecycle_events !received_events
+            |> List.find_opt (fun payload ->
+                   Json.member "event" payload |> Json.to_string = "stopped")
+          in
+          (match stopped_payload with
+           | None -> fail "expected stopped lifecycle SSE event"
+           | Some payload ->
+               check string "stopped detail" "drain_complete"
+                 (Json.member "detail" payload |> Json.to_string)))
 
 let test_count_running () =
   R.clear ();
@@ -616,7 +695,11 @@ let () =
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;
           eio_test "set state" test_set_state;
+          eio_test "dispatch event emits lifecycle SSE"
+            test_dispatch_event_emits_lifecycle_sse;
           eio_test "extended states" test_extended_states;
+          eio_test "stopped entry action is observability-only"
+            test_stopped_entry_action_is_observability_only;
           eio_test "count running" test_count_running;
           eio_test "count running atomic transitions" test_count_running_atomic_transitions;
           eio_test "record restart" test_record_restart;

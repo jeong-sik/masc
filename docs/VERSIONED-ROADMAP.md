@@ -170,7 +170,6 @@ Includes:
 
 - automatic checkpointing
 - schema-based message validation
-- Lamport timestamps for ordering-sensitive analysis
 - keeper timeout persistence across restart
 
 User-visible effect:

@@ -123,13 +123,9 @@ Init ==
 \* heartbeat events are dispatched at loop boundaries, not during OAS calls).
 \* Guard: turn_status must be "idle" or "done" for phase to change.
 
-BecomeRunning ==
-    /\ phase \in {"Failing", "Compacting", "Draining"}
-    /\ turn_status \in {"idle", "done"}
-    /\ phase' = "Running"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
-                   requested_max_tokens, provider_result, has_side_effect,
-                   retry_count, turn_outcome>>
+\* BecomeRunning is removed as a standalone action — it is driven by
+\* TurnComplete feedback (turn success in Failing -> Running).
+\* This mirrors OCaml: derive_phase returns Running when turn_healthy=true.
 
 BecomeFailing ==
     /\ phase \in {"Running", "Compacting"}
@@ -266,7 +262,9 @@ TransientRetry ==
                    requested_max_tokens, has_side_effect, retry_count,
                    turn_outcome>>
 
-\* Turn completion: reset for next cycle
+\* Turn completion: reset for next cycle + phase feedback.
+\* Mirrors OCaml: TurnSucceeded -> turn_healthy=true -> derive_phase -> Running
+\*                TurnFailed -> turn_healthy=false -> derive_phase -> Failing
 TurnComplete ==
     /\ turn_status = "done"
     /\ turn_status' = "idle"
@@ -276,14 +274,19 @@ TurnComplete ==
     /\ provider_result' = "pending"
     /\ has_side_effect' = FALSE
     /\ retry_count' = 0
-    \* Cascade outcome feeds back to phase via separate phase transitions
-    /\ UNCHANGED <<phase, turn_outcome>>
+    \* Phase feedback: turn outcome drives phase transitions (derive_phase)
+    /\ phase' =
+        IF turn_outcome = "success" /\ phase = "Failing"
+        THEN "Running"             \* Recovery: successful turn clears failure
+        ELSE IF turn_outcome \in {"error", "partial_commit"} /\ phase = "Running"
+        THEN "Failing"             \* Degradation: failed turn triggers failure
+        ELSE phase                 \* No change for other combinations
+    /\ UNCHANGED turn_outcome
 
 \* ── Next-State Relation ──────────────────────────────────
 
 Next ==
-    \* Phase transitions
-    \/ BecomeRunning
+    \* Phase transitions (external events; BecomeRunning via TurnComplete)
     \/ BecomeFailing
     \/ BecomeCompacting
     \/ BecomeDraining
@@ -348,7 +351,11 @@ RunningEventuallyCompletes ==
     (phase = "Running" /\ turn_status /= "idle") ~>
         (turn_status = "done" \/ phase /= "Running")
 
-\* L2: Failing phase eventually resolves
+\* L2: Failing phase eventually resolves — DELEGATED to KeeperStateMachine.tla.
+\* This property requires operator intervention (manual_reconcile_clear) which
+\* is outside cascade routing scope. The counterexample: partial_commit in
+\* Failing creates a cycle only breakable by operator action + next success.
+\* Retained as definition for documentation; removed from cfg PROPERTIES.
 FailingResolves ==
     phase = "Failing" ~> phase /= "Failing"
 
@@ -386,7 +393,6 @@ BugAttemptProvider ==
                    retry_count, turn_outcome>>
 
 NextBuggy ==
-    \/ BecomeRunning
     \/ BecomeFailing
     \/ BecomeCompacting
     \/ BecomeDraining

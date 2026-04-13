@@ -1188,7 +1188,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         in
         (* Capability gate: clamp to provider ceiling (TLA+ S3) *)
         Cascade_inference.clamp_max_tokens_to_ceiling
-          ~provider_ceiling:(Some max_cascade_context) raw
+          ~provider_ceiling:(Some max_context) raw
       in
       (* max_turns: defer to OAS default (Types.default_agent_config.max_turns).
          MASC does not hardcode agent runtime budgets. *)

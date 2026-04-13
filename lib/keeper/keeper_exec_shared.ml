@@ -11,6 +11,35 @@ let error_json ?(fields = []) (message : string) =
 
 let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
 
+(** Actionable error for path resolution failures.
+    Follows Samchon harness pattern: field-level diagnostics with
+    exact path, expected constraint, and concrete next action.
+    Claude Code pattern: validateInput returns actionable guidance. *)
+let actionable_path_error ~(op : string) ~(keeper_name : string)
+      ~(raw_path : string) ~(error : string) =
+  let playground = Printf.sprintf ".masc/playground/%s/" keeper_name in
+  let contains sub = String_util.contains_substring error sub in
+  let action = match () with
+    | () when String.length raw_path = 0 ->
+      "Provide a path. Your playground root is " ^ playground
+    | () when contains "path_not_found" ->
+      Printf.sprintf "File does not exist. Run `keeper_shell op=ls path=%s` first to see available files." playground
+    | () when contains "path_not_in_allowed" ->
+      Printf.sprintf "Path is outside your allowed roots. Stay inside %s or use keeper_context_status to see allowed paths." playground
+    | () when contains "cwd_not_directory" ->
+      "The cwd is not a directory. Omit cwd to use your default playground root."
+    | () ->
+      Printf.sprintf "Check the path. Your playground: %s" playground
+  in
+  Yojson.Safe.to_string (`Assoc [
+    "ok", `Bool false;
+    "op", `String op;
+    "error", `String error;
+    "tried", `String raw_path;
+    "your_playground", `String playground;
+    "action", `String action;
+  ])
+
 let max_suggested_entries = 12
 
 let file_not_found_prefix = "File not found:"

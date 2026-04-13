@@ -62,7 +62,29 @@ let execute_keeper_tool_call
   =
   let args = input in
   let now_ts = Time_compat.now () in
+  let apply_circuit_breaker result =
+    (* Detect error in JSON result and enrich with corrective hint
+       if the same error class has repeated [threshold] times. *)
+    let is_error =
+      try
+        match Yojson.Safe.from_string result with
+        | `Assoc fields ->
+          (match List.assoc_opt "ok" fields with
+           | Some (`Bool false) -> true
+           | _ -> List.mem_assoc "error" fields)
+        | _ -> false
+      with _ -> false
+    in
+    if is_error then
+      Keeper_failure_circuit_breaker.maybe_enrich_error
+        ~keeper_name:meta.name ~error_msg:result
+    else begin
+      Keeper_failure_circuit_breaker.record_success ~keeper_name:meta.name;
+      result
+    end
+  in
   let lookup = tool_access_lookup_of_meta meta in
+  apply_circuit_breaker (
   if not (can_execute ~lookup name)
   then
     let reason, hint =
@@ -216,4 +238,4 @@ let execute_keeper_tool_call
              [ ("did_you_mean", `List (List.map enrich_suggestion names));
                ("hint", `String "Call one of these tools with the correct parameters.") ])
       in
-      Yojson.Safe.to_string (`Assoc fields))
+      Yojson.Safe.to_string (`Assoc fields)))

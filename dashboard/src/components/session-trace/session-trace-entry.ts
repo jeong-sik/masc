@@ -41,6 +41,23 @@ function toolStyle(name: string): { icon: string; color: string } {
   return toolCategory(name)
 }
 
+// Durable_event projections carry durable_kind in detail; give each
+// a distinct icon/tone so LLM, error, and agent lifecycle events
+// are visually separable in the trace timeline.
+function durableStyle(kind: unknown): { icon: string; color: string } | null {
+  switch (kind) {
+    case 'llm_request':      return { icon: '>', color: 'text-[#38bdf8]' }
+    case 'llm_response':     return { icon: '<', color: 'text-[#22d3ee]' }
+    case 'error_occurred':   return { icon: '!', color: 'text-[var(--bad)]' }
+    case 'tool_called':      return { icon: 't', color: 'text-[var(--ok)]' }
+    case 'tool_completed':   return { icon: 'x', color: 'text-[var(--ok)]' }
+    case 'state_transition': return { icon: '>', color: 'text-[var(--accent)]' }
+    case 'checkpoint_saved': return { icon: '*', color: 'text-[#94a3b8]' }
+    case 'turn_started':     return { icon: 'r', color: 'text-[var(--warn)]' }
+    default: return null
+  }
+}
+
 // ── Formatters ─────────────────────────────────────────
 
 // formatArgs delegated to shared module (SSOT: tool-call-shared.ts)
@@ -269,9 +286,14 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
 export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
   const kindStyle = KIND_STYLES[event.kind]
   // For tool_call, use tool-specific icon/color
+  // For lifecycle + durable_kind, use durable-specific icon/color
+  const durable =
+    event.kind === 'lifecycle'
+      ? durableStyle(event.detail.durable_kind)
+      : null
   const style = event.kind === 'tool_call' && event.toolName
     ? toolStyle(event.toolName)
-    : kindStyle
+    : durable ?? kindStyle
 
   const gateRejected = event.kind === 'tool_call' && event.gate?.status === 'reject'
 

@@ -27,6 +27,12 @@ val timed : (unit -> 'a) -> 'a * int
     control characters with spaces (except LF/CR/TAB). *)
 val sanitize_text_utf8 : string -> string
 
+(** Recursively scrub every {!Yojson.Safe.t} string node through
+    {!sanitize_text_utf8}.  Used by telemetry writers before persisting or
+    broadcasting JSON that may have absorbed invalid UTF-8 from tool output
+    or LLM-provided text. *)
+val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
+
 (** Sanitize text content blocks in a message. *)
 val sanitize_message_utf8 : Agent_sdk.Types.message -> Agent_sdk.Types.message
 

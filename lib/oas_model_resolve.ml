@@ -271,6 +271,7 @@ let cascade_config_path () : string option =
     Delegates to OAS Cascade_config for JSON loading and profile resolution.
     Falls back to "default_models" then preferred_execution_model_labels if absent. *)
 let models_of_cascade_name (cascade_name : string) : string list =
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults =
     match Provider_adapter.preferred_execution_model_labels () with
     | [] -> [Provider_adapter.default_local_fallback_label ()]

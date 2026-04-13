@@ -303,6 +303,26 @@ let test_cascade_names_produce_models () =
     Alcotest.(check bool) (name ^ " has models") true (models <> [])
   ) cascades
 
+let test_cascade_inference_normalizes_keeper_aliases () =
+  let json =
+    `Assoc
+      [
+        ("keeper_unified_temperature", `Float 0.2);
+        ("keeper_unified_max_tokens", `Int 16384);
+      ]
+  in
+  let canonical = Cascade_inference.for_json ~name:"keeper_unified" json in
+  let legacy_oas = Cascade_inference.for_json ~name:"oas-keeper_unified" json in
+  let legacy_removed = Cascade_inference.for_json ~name:"oas-coding_first" json in
+  Alcotest.(check (option (float 0.0001))) "canonical temp"
+    canonical.temperature legacy_oas.temperature;
+  Alcotest.(check (option int)) "canonical max_tokens"
+    canonical.max_tokens legacy_oas.max_tokens;
+  Alcotest.(check (option (float 0.0001))) "removed alias temp"
+    canonical.temperature legacy_removed.temperature;
+  Alcotest.(check (option int)) "removed alias max_tokens"
+    canonical.max_tokens legacy_removed.max_tokens
+
 let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Oas_worker.cascade_observation =
     {
@@ -1677,6 +1697,8 @@ let () =
         test_default_config_path;
       Alcotest.test_case "all cascade names produce models" `Quick
         test_cascade_names_produce_models;
+      Alcotest.test_case "cascade inference normalizes keeper aliases" `Quick
+        test_cascade_inference_normalizes_keeper_aliases;
       Alcotest.test_case "cascade observation json includes fallback fields" `Quick
         test_cascade_observation_json_includes_fallback_fields;
       Alcotest.test_case "cascade metrics concurrent recording" `Quick

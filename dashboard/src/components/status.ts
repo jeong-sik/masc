@@ -7,6 +7,7 @@ import { Mission } from './mission'
 import { AgentsUnified } from './agents-unified'
 import { Activity } from './activity'
 import { RuntimeMonitor } from './runtime-monitor'
+import { OasHealthChip } from './oas-health-chip'
 import { TelemetryUnified } from './telemetry-unified'
 import { GovernanceMonitor } from './governance-monitor'
 
@@ -29,7 +30,12 @@ export function Status() {
           : section === 'activity'
             ? html`<${Activity} />`
             : section === 'runtime'
-              ? html`<${RuntimeMonitor} />`
+              ? html`
+                <div class="grid gap-4">
+                  <${OasHealthChip} />
+                  <${RuntimeMonitor} />
+                </div>
+              `
             : section === 'telemetry'
               ? html`<${TelemetryUnified} />`
             : section === 'governance'

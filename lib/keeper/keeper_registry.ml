@@ -229,11 +229,6 @@ let get ~base_path name =
    | Some _ -> ());
   result
 
-let get_exn ~base_path name =
-  match get ~base_path name with
-  | Some e -> e
-  | None -> raise Not_found
-
 let all ?base_path () =
   StringMap.fold
     (fun _k v acc ->

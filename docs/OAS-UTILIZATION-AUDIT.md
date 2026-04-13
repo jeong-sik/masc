@@ -2,7 +2,7 @@
 
 Date: 2026-04-09
 <!-- BEGIN GENERATED: oas-pin-audit-header -->
-OAS Pin Snapshot: dependency floor `0.126.0`, runtime pin `main@v0.126.0`, declared base version `v0.126.0`
+OAS Pin Snapshot: dependency floor `0.129.0`, runtime pin `main@v0.129.0`, declared base version `v0.129.0`
 <!-- END GENERATED: oas-pin-audit-header -->
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 

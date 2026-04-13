@@ -6,6 +6,7 @@
 #   make check-bug-models   Bug models only
 #   make check-keeper       Keeper state machine only
 #   make check-ecosystem    MASC ecosystem only
+#   make check-boundary     Cross-domain boundary specs only
 #   make list               List all discoverable specs
 
 JAVA      ?= java
@@ -37,7 +38,7 @@ TLC = $(JAVA) $(JAVA_OPTS) \
 CLEAN_CFGS := $(shell find . -name '*.cfg' ! -name '*-buggy.cfg' ! -name '*-ci.cfg' | sort)
 BUGGY_CFGS := $(shell find . -name '*-buggy.cfg' | sort)
 
-.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem list
+.PHONY: check-all check-clean check-buggy check-bug-models check-keeper check-ecosystem check-boundary list
 
 check-all: check-clean check-buggy
 	@echo "=== All TLA+ specs passed ==="
@@ -97,6 +98,11 @@ check-ecosystem:
 	@$(MAKE) --no-print-directory \
 	  CLEAN_CFGS="$$(find masc-ecosystem/ -name '*.cfg' ! -name '*-buggy.cfg' | sort)" \
 	  BUGGY_CFGS="" check-all
+
+check-boundary:
+	@$(MAKE) --no-print-directory \
+	  CLEAN_CFGS="$$(find boundary/ -name '*.cfg' ! -name '*-buggy.cfg' | sort)" \
+	  BUGGY_CFGS="$$(find boundary/ -name '*-buggy.cfg' | sort)" check-all
 
 list:
 	@echo "Clean specs ($(words $(CLEAN_CFGS))):"; \

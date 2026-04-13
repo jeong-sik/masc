@@ -8,7 +8,7 @@
     loop integration tests (which require Eio fibers + Room I/O). *)
 
 open Alcotest
-module HS = Heartbeat_smart
+module HS = Masc_mcp.Heartbeat_smart
 
 (* ── agent_status derivation from keeper_meta fields ─── *)
 

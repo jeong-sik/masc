@@ -476,6 +476,7 @@
    keeper_execution
    keeper_event_bus
    keeper_keepalive
+   heartbeat_smart
    keeper_crash_persistence
    keeper_chat_store
    keeper_recurring

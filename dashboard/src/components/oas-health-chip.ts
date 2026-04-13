@@ -3,11 +3,11 @@
 
 import { html } from 'htm/preact'
 import { useComputed } from '@preact/signals'
-import { oasHealthSummary, oasAgentEvents } from '../store'
+import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
 import { Card } from './common/card'
 import { StatCell } from './common/stat-cell'
 import { EmptyState } from './common/empty-state'
-import type { OasAgentEvent } from '../types/oas'
+import type { OasAgentEvent, OasKeeperSnapshot } from '../types/oas'
 
 const STALE_MS = 60_000
 
@@ -36,9 +36,19 @@ function describeAgentEvent(evt: OasAgentEvent): string {
   return `${label}${action ? ` · ${action}` : ''}${target}`
 }
 
+function topKeepers(
+  snapshots: Map<string, OasKeeperSnapshot>,
+  limit: number,
+): OasKeeperSnapshot[] {
+  return Array.from(snapshots.values())
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, limit)
+}
+
 export function OasHealthChip() {
   const summary = useComputed(() => oasHealthSummary.value)
   const recentEvents = useComputed(() => oasAgentEvents.value.slice(0, 3))
+  const recentKeepers = useComputed(() => topKeepers(oasKeeperSnapshots.value, 3))
   const isStale = useComputed(() => {
     const tick = summary.value.lastKeeperTick
     return tick == null || Date.now() - tick > STALE_MS
@@ -92,25 +102,49 @@ export function OasHealthChip() {
           tone=${isStale.value ? 'text-[var(--warn)]' : 'text-[var(--ok)]'}
         />
       </div>
-      ${recentEvents.value.length > 0 ? html`
-        <div class="mt-3 pt-3 border-t border-[var(--white-6)]">
-          <div class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
-            최근 자율성 이벤트
-          </div>
-          <ul class="space-y-1">
-            ${recentEvents.value.map(evt => html`
-              <li class="flex items-baseline justify-between gap-2 text-[11px]">
-                <span class="text-[var(--text-body)] truncate">
-                  <span class="font-mono text-[var(--text-dim)]">${evt.agent_name}</span>
-                  <span class="text-[var(--text-muted)]"> · </span>
-                  ${describeAgentEvent(evt)}
-                </span>
-                <span class="text-[var(--text-muted)] tabular-nums shrink-0">
-                  ${formatLastTick(evt.timestamp * 1000)}
-                </span>
-              </li>
-            `)}
-          </ul>
+      ${recentEvents.value.length > 0 || recentKeepers.value.length > 0 ? html`
+        <div class="mt-3 pt-3 border-t border-[var(--white-6)] grid md:grid-cols-2 gap-4">
+          ${recentEvents.value.length > 0 ? html`
+            <div>
+              <div class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+                최근 자율성 이벤트
+              </div>
+              <ul class="space-y-1">
+                ${recentEvents.value.map(evt => html`
+                  <li class="flex items-baseline justify-between gap-2 text-[11px]">
+                    <span class="text-[var(--text-body)] truncate">
+                      <span class="font-mono text-[var(--text-dim)]">${evt.agent_name}</span>
+                      <span class="text-[var(--text-muted)]"> · </span>
+                      ${describeAgentEvent(evt)}
+                    </span>
+                    <span class="text-[var(--text-muted)] tabular-nums shrink-0">
+                      ${formatLastTick(evt.timestamp * 1000)}
+                    </span>
+                  </li>
+                `)}
+              </ul>
+            </div>
+          ` : null}
+          ${recentKeepers.value.length > 0 ? html`
+            <div>
+              <div class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
+                활성 Keeper
+              </div>
+              <ul class="space-y-1">
+                ${recentKeepers.value.map(snap => html`
+                  <li class="flex items-baseline justify-between gap-2 text-[11px]">
+                    <span class="text-[var(--text-body)] truncate">
+                      <span class="font-mono text-[var(--text-dim)]">${snap.keeper_name}</span>
+                      <span class="text-[var(--text-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>
+                    </span>
+                    <span class="text-[var(--text-muted)] tabular-nums shrink-0">
+                      ${formatLastTick(snap.timestamp * 1000)}
+                    </span>
+                  </li>
+                `)}
+              </ul>
+            </div>
+          ` : null}
         </div>
       ` : null}
     </${Card}>

@@ -2059,12 +2059,20 @@ let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
   check bool "server parse rejection is auto-recoverable" true
     (UT.is_auto_recoverable_turn_error err)
 
-let test_auto_recoverable_turn_error_includes_required_tool_contract_violation () =
+let test_required_tool_contract_violation_detected () =
   let err =
     Agent_sdk.Error.Internal
       "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
   in
-  check bool "tool-choice contract violation is auto-recoverable" true
+  check bool "tool-choice contract violation detected" true
+    (UT.is_required_tool_contract_violation err)
+
+let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
+  let err =
+    Agent_sdk.Error.Internal
+      "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
+  in
+  check bool "tool-choice contract violation is not globally auto-recoverable" false
     (UT.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_excludes_persistent_errors () =
@@ -3056,8 +3064,10 @@ let () =
             test_auto_recoverable_turn_error_includes_transient_network;
             test_case "auto-recoverable includes server parse rejection" `Quick
               test_auto_recoverable_turn_error_includes_server_parse_rejection;
-            test_case "auto-recoverable includes tool-choice contract violation" `Quick
-              test_auto_recoverable_turn_error_includes_required_tool_contract_violation;
+            test_case "required tool contract violation detected" `Quick
+              test_required_tool_contract_violation_detected;
+            test_case "auto-recoverable excludes tool-choice contract violation" `Quick
+              test_auto_recoverable_turn_error_excludes_required_tool_contract_violation;
             test_case "auto-recoverable excludes persistent errors" `Quick
               test_auto_recoverable_turn_error_excludes_persistent_errors;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick

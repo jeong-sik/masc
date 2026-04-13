@@ -319,14 +319,10 @@ let is_main_worktree_boundary_exempt_with_input
 let reconcile_safe_tools =
   [ "keeper_board_post"; "keeper_board_comment";
     "keeper_board_vote"; "keeper_board_comment_vote";
-    (* Repeated deletes/cleanup may hit "not found", but that is still
-       preferable to wedging a janitor keeper behind manual reconcile. *)
-    "keeper_board_delete"; "keeper_board_cleanup";
     "keeper_broadcast";
     "keeper_task_done";
     "masc_board_post"; "masc_board_comment";
     "masc_board_vote"; "masc_board_comment_vote";
-    "masc_board_delete"; "masc_board_cleanup";
     "masc_broadcast" ]
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =

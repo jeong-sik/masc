@@ -82,18 +82,17 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
       || string_contains_substring ~needle:"parse error" lower
   | _ -> false
 
-let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
+let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
   let lower = String.lowercase_ascii (Oas.Error.to_string err) in
-  let is_required_tool_contract_violation =
-    string_contains_substring
-      ~needle:"completion contract [require_tool_use] violated"
-      lower
-    || ( string_contains_substring ~needle:"tool_choice requested tool use" lower
-         && string_contains_substring ~needle:"no tooluse block" lower )
-  in
+  string_contains_substring
+    ~needle:"completion contract [require_tool_use] violated"
+    lower
+  || ( string_contains_substring ~needle:"tool_choice requested tool use" lower
+       && string_contains_substring ~needle:"no tooluse block" lower )
+
+let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
-  || is_required_tool_contract_violation
 
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
@@ -1295,7 +1294,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
                         committed_tools
-                   && is_auto_recoverable_turn_error err
+                   && (is_auto_recoverable_turn_error err
+                       || is_required_tool_contract_violation err)
                 then begin
                   (* All committed tools are board-like (duplicate-tolerant)
                      AND the failure is transient or the server rejected the
@@ -1306,6 +1306,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   let err_preview = short_preview (Oas.Error.to_string err) in
                   let reason =
                     if is_server_rejected_parse_error err then "server parse rejection"
+                    else if is_required_tool_contract_violation err then
+                      "required tool contract violation"
                     else "transient error"
                   in
                   Log.Keeper.warn

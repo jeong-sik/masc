@@ -92,6 +92,10 @@ val is_server_rejected_parse_error : Oas.Error.sdk_error -> bool
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Oas.Error.sdk_error -> bool
 
+(** [true] when the provider/tooling violated a required tool-use contract
+    by returning text/no-op where a ToolUse block was required. *)
+val is_required_tool_contract_violation : Oas.Error.sdk_error -> bool
+
 (** Reclassify any post-commit turn error as a persistent integrity error when
     mutating tool calls already committed in the same turn. *)
 val reclassify_error_after_side_effect :

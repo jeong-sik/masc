@@ -279,7 +279,7 @@ let test_runtime_surface_marks_reconcile_safe_post_commit_as_non_blocking () =
           {
             kind = KR.Post_commit_failure;
             detail =
-              "Mutating tools [keeper_board_comment, keeper_board_delete] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
+              "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
           }));
   let runtime = KSB.runtime_surface_json config meta in
   let open Yojson.Safe.Util in

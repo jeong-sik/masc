@@ -689,6 +689,11 @@
 (test
  (name test_keeper_keepalive_skip_log_throttle)
  (libraries masc_test_deps))
+
+; Keeper autonomous semaphore fairness cooldown (#6810)
+(test
+ (name test_keeper_semaphore_fairness)
+ (libraries masc_test_deps))
 ; Operator Control (7 modules)
 (test
  (name test_operator_control)

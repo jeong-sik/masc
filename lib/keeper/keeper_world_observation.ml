@@ -318,7 +318,7 @@ let board_signal_match
 let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   try
     let cascade_models =
-      Oas_model_resolve.models_of_cascade_name meta.cascade_name
+      Keeper_model_labels.configured_model_labels_of_meta meta
     in
     let primary_max_context =
       let min_keeper_context = Keeper_config.min_keeper_context_tokens in
@@ -353,7 +353,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
     : string =
   try
     let cascade_models =
-      Oas_model_resolve.models_of_cascade_name meta.cascade_name
+      Keeper_model_labels.configured_model_labels_of_meta meta
     in
     let primary_max_context =
       let min_keeper_context = Keeper_config.min_keeper_context_tokens in

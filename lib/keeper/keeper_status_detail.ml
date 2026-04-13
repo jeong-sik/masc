@@ -112,7 +112,7 @@ let handle_keeper_status ctx args : tool_result =
       let include_compaction_history =
         get_bool args "include_compaction_history" (not fast)
       in
-      let models = Oas_model_resolve.models_of_cascade_name m.cascade_name in
+      let models = Keeper_model_labels.configured_model_labels_of_meta m in
       let primary_max_context =
         let min_keeper_context = Keeper_config.min_keeper_context_tokens in
         let raw =

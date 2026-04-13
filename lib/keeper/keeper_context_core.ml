@@ -810,7 +810,7 @@ let context_of_legacy_checkpoint
 let checkpoint_model_of_meta (meta : keeper_meta) =
   let candidates =
     meta.runtime.usage.last_model_used
-    :: Oas_model_resolve.models_of_cascade_name meta.cascade_name
+    :: Keeper_model_labels.configured_model_labels_of_meta meta
   in
   List.find_opt (fun value -> String.trim value <> "") candidates
   |> Option.value ~default:(Provider_adapter.default_local_fallback_label ())

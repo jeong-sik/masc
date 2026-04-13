@@ -33,7 +33,7 @@ let resolved_model_id_for_result ~(meta : keeper_meta)
   in
   let used = strip_latest result.model_used in
   let cascade_models =
-    Oas_model_resolve.models_of_cascade_name meta.cascade_name
+    Keeper_model_labels.configured_model_labels_of_meta meta
   in
   let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
   match

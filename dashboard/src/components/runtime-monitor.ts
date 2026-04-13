@@ -76,6 +76,12 @@ function fmtNumber(value?: number | null, digits = 0): string {
   })
 }
 
+function fmtTime(tsUnix: number): string {
+  if (tsUnix <= 0) return '--'
+  const d = new Date(tsUnix * 1000)
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export function RuntimeMonitor() {
   const resourceRef = useRef<ManagedAsyncResource<RuntimeData> | null>(null)
   if (resourceRef.current === null) {
@@ -83,6 +89,7 @@ export function RuntimeMonitor() {
   }
   const resource = resourceRef.current
   const windowMinutes = useSignal(30)
+  const expandedModel = useSignal<string | null>(null)
 
   const load = () => loadRuntimeData(resource, windowMinutes.value)
 
@@ -232,6 +239,33 @@ export function RuntimeMonitor() {
                           </span>
                         `)}
                       </div>`
+                    : null}
+                  ${(metric.recent_entries ?? []).length > 0
+                    ? html`
+                      <button
+                        class="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-strong)] mt-1 text-left"
+                        onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
+                      >
+                        ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns
+                      </button>
+                      ${expandedModel.value === metric.model_id
+                        ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
+                            <div class="grid grid-cols-6 gap-1 text-[10px] text-[var(--text-muted)] font-medium mb-1">
+                              <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>cost</div><div>tools</div>
+                            </div>
+                            ${metric.recent_entries?.map(re => html`
+                              <div class="grid grid-cols-6 gap-1 text-[11px] text-[var(--text-body)]">
+                                <div>${fmtTime(re.ts_unix)}</div>
+                                <div>${fmtNumber(re.input_tokens)}</div>
+                                <div>${fmtNumber(re.output_tokens)}</div>
+                                <div>${fmtNumber(re.latency_ms, 0)}ms</div>
+                                <div>${fmtCost(re.cost_usd)}</div>
+                                <div>${re.tools_count}</div>
+                              </div>
+                            `)}
+                          </div>`
+                        : null}
+                    `
                     : null}
                 </article>
               `)

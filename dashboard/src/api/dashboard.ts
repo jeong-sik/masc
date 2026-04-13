@@ -581,6 +581,14 @@ export interface DashboardRuntimeModelMetric {
   avg_tool_calls_per_turn?: number | null
   total_tool_calls?: number | null
   top_tools?: Array<{ tool: string; count: number }> | null
+  recent_entries?: Array<{
+    ts_unix: number
+    input_tokens: number
+    output_tokens: number
+    latency_ms: number
+    cost_usd: number
+    tools_count: number
+  }> | null
 }
 
 export interface DashboardRuntimeModelMetricsResponse {
@@ -670,6 +678,18 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
           .filter(isRecord)
           .map(t => ({ tool: asString(t.tool) ?? '', count: asNumber(t.count) ?? 0 }))
           .filter(t => t.tool.length > 0)
+      : null,
+    recent_entries: Array.isArray(raw.recent_entries)
+      ? (raw.recent_entries as unknown[])
+          .filter(isRecord)
+          .map(r => ({
+            ts_unix: asNumber(r.ts_unix) ?? 0,
+            input_tokens: asNumber(r.input_tokens) ?? 0,
+            output_tokens: asNumber(r.output_tokens) ?? 0,
+            latency_ms: asNumber(r.latency_ms) ?? 0,
+            cost_usd: asNumber(r.cost_usd) ?? 0,
+            tools_count: asNumber(r.tools_count) ?? 0,
+          }))
       : null,
   }
 }

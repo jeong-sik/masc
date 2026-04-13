@@ -6,6 +6,15 @@
     @since 2.259.0
     Extended with cost/tool/error metrics: @since 2.270.0 *)
 
+type recent_entry = {
+  re_ts_unix : float;
+  re_input_tokens : int;
+  re_output_tokens : int;
+  re_latency_ms : float;
+  re_cost_usd : float;
+  re_tools_count : int;
+}
+
 type model_stats = {
   model_id : string;
   entry_count : int;
@@ -26,6 +35,7 @@ type model_stats = {
   avg_tool_calls_per_turn : float;
   total_tool_calls : int;
   top_tools : (string * int) list;
+  recent_entries : recent_entry list;
 }
 
 type aggregate = {

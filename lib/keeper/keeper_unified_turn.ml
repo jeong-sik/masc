@@ -88,9 +88,18 @@ let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
 
-let committed_mutating_tools tool_names =
-  tool_names
+type committed_tool_call = {
+  tool_name : string;
+}
+
+let committed_tool_names tool_calls =
+  tool_calls
+  |> List.map (fun (tool_call : committed_tool_call) -> tool_call.tool_name)
   |> dedupe_keep_order
+
+let committed_mutating_tool_names tool_calls =
+  tool_calls
+  |> committed_tool_names
   |> List.filter Keeper_exec_tools.has_mutating_side_effect
 
 let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
@@ -103,7 +112,9 @@ let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
     (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
-  let committed_tools = committed_mutating_tools tool_names in
+  let committed_tools = committed_mutating_tool_names
+      (List.map (fun tool_name -> { tool_name }) tool_names)
+  in
   if committed_tools = [] || is_ambiguous_side_effect_error err then err
   else
     let tools = String.concat ", " committed_tools in
@@ -122,7 +133,11 @@ let summarize_post_commit_failure
     ~(tool_names : string list)
     ~(kind : Keeper_registry.ambiguous_partial_commit_kind)
     (err : Oas.Error.sdk_error) =
-  let tools = String.concat ", " (committed_mutating_tools tool_names) in
+  let tools =
+    String.concat ", "
+      (committed_mutating_tool_names
+         (List.map (fun tool_name -> { tool_name }) tool_names))
+  in
   let err_preview = short_preview (Oas.Error.to_string err) in
   match kind with
   | Keeper_registry.Post_commit_timeout ->
@@ -149,7 +164,10 @@ let classify_post_commit_failure
     ~(tool_names : string list)
     ?kind
     (err : Oas.Error.sdk_error) =
-  let committed_tools = committed_mutating_tools tool_names in
+  let committed_tools =
+    committed_mutating_tool_names
+      (List.map (fun tool_name -> { tool_name }) tool_names)
+  in
   if committed_tools = []
   then None
   else
@@ -1203,14 +1221,19 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          retrying.
 
          Uses a per-turn observer via [add_tool_call_observer] instead of
-         wrapping the global [on_keeper_tool_call] ref. Each keeper registers
-         an independent observer, so concurrent keepers cannot interfere
-         with each other's save/restore lifecycle. *)
+         wrapping the global [on_keeper_tool_call] ref. Observer delivery is
+         process-global, so the callback must filter on [keeper_name] to avoid
+         cross-turn contamination when multiple keepers execute concurrently. *)
       let mutating_tools_committed = ref [] in
       let post_commit_failure_reason = ref None in
-      let side_effect_observer ~tool_name ~success =
-        if success && Keeper_exec_tools.has_mutating_side_effect tool_name then
-          mutating_tools_committed := tool_name :: !mutating_tools_committed
+      let side_effect_observer ~keeper_name ~tool_name ~input ~success =
+        if success
+           && String.equal keeper_name meta.name
+           && Keeper_exec_tools.has_mutating_side_effect_with_input
+                ~tool_name ~input
+        then
+          mutating_tools_committed :=
+            { tool_name } :: !mutating_tools_committed
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
       let evidence_before_hash =
@@ -1283,7 +1306,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             | Ok _ as ok -> ok
             | Error err ->
                 let committed_tools =
-                  committed_mutating_tools !mutating_tools_committed
+                  committed_mutating_tool_names !mutating_tools_committed
                 in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1396,7 +1419,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             Log.Keeper.error "%s: %s" meta.name msg;
             let committed_tools =
-              committed_mutating_tools !mutating_tools_committed
+              committed_mutating_tool_names !mutating_tools_committed
             in
             if committed_tools <> []
                && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1497,7 +1520,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                  ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                  ~generation:(Some meta.runtime.generation)
                  ~committed_tools:
-                   (committed_mutating_tools !mutating_tools_committed));
+                   (committed_tool_names !mutating_tools_committed));
             ignore (Keeper_registry.dispatch_event
               ~base_path:config.base_path meta.name
               (Keeper_state_machine.Manual_reconcile_required {

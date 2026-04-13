@@ -61,13 +61,13 @@ let effective_max_turns (meta : Worker_container_types.worker_container_meta) : 
 let agent_config_of_worker_meta
     (meta : Worker_container_types.worker_container_meta)
     ~(system_prompt : string) : Oas.Types.agent_config =
-  let max_tokens = Some (Worker_container_types.local_worker_max_tokens ()) in
+  let max_tokens = Worker_container_types.local_worker_max_tokens () in
   {
     Oas.Types.default_config with
     name = meta.worker_name;
     model = oas_model_of_effective_model meta.effective_model;
     system_prompt = Some system_prompt;
-    max_tokens;
+    max_tokens = Some max_tokens;
     max_turns = effective_max_turns meta;
     temperature = Some Oas_worker_cascade.worker_temperature;
     top_p = Some Oas_worker_cascade.worker_top_p;

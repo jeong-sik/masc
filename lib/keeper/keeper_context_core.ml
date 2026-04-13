@@ -21,6 +21,13 @@ open Keeper_types
     Per-keeper override via [compaction_policy.max_checkpoint_messages]. *)
 let default_max_checkpoint_messages = 120
 
+(** Hard caps for checkpoint payload hygiene.
+    Message-count capping alone is insufficient when a single message
+    accumulates hundreds of text blocks or multi-MB synthetic context. *)
+let default_max_checkpoint_text_blocks_per_message = 32
+let default_max_checkpoint_text_chars_per_message = 16 * 1024
+let checkpoint_text_cap_marker = "\n[capped]"
+
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
@@ -205,24 +212,203 @@ let create_session ~session_id ~base_dir =
   ensure_dir session_dir;
   { session_id; session_dir; checkpoints = [] }
 
+type history_migration_stats = {
+  moved_lines : int;
+  dropped_lines : int;
+  kept_lines : int;
+  malformed_lines : int;
+}
+
+let empty_history_migration_stats =
+  { moved_lines = 0; dropped_lines = 0; kept_lines = 0; malformed_lines = 0 }
+
+let split_jsonl_lines (content : string) : string list =
+  content
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+
+let normalize_system_context_prefix (text : string) : string =
+  let trimmed = String.trim text in
+  let prefix = "[system context]" in
+  if String.starts_with ~prefix trimmed then
+    let prefix_len = String.length prefix in
+    let rest_len = String.length trimmed - prefix_len in
+    if rest_len <= 0 then ""
+    else String.trim (String.sub trimmed prefix_len rest_len)
+  else trimmed
+
+let has_world_state_signature (text : string) : bool =
+  let trimmed = normalize_system_context_prefix text in
+  String_util.contains_substring_ci trimmed "## Current World State"
+  &&
+  (String_util.contains_substring_ci trimmed "### Namespace State"
+   || String_util.contains_substring_ci trimmed "### Available Tools"
+   || String_util.contains_substring_ci trimmed "### Continuity")
+
+type history_line_action =
+  | Keep_main
+  | Move_internal
+  | Drop_line
+
+let classify_history_entry ~(source : string) ~(content : string) :
+    history_line_action =
+  if Keeper_types.is_prompt_history_source source
+     || has_world_state_signature content
+  then Drop_line
+  else if Keeper_types.is_internal_history_source source then
+    Move_internal
+  else Keep_main
+
+let classify_history_jsonl_line (line : string) : history_line_action option =
+  try
+    let json = Yojson.Safe.from_string line in
+    let source =
+      Yojson.Safe.Util.(json |> member "source" |> to_string_option)
+      |> Option.value ~default:""
+      |> String.trim
+    in
+    let content =
+      Yojson.Safe.Util.(json |> member "content" |> to_string_option)
+      |> Option.value ~default:""
+      |> String.trim
+    in
+    Some (classify_history_entry ~source ~content)
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
+let render_jsonl_lines (lines : string list) : string =
+  match lines with
+  | [] -> ""
+  | _ -> String.concat "\n" lines ^ "\n"
+
+let dedupe_preserve_order (lines : string list) : string list =
+  let seen : (string, unit) Hashtbl.t = Hashtbl.create (List.length lines) in
+  List.filter
+    (fun line ->
+       if Hashtbl.mem seen line then false
+       else (
+         Hashtbl.add seen line ();
+         true))
+    lines
+
+let migrate_session_history_logs
+    ~(session_dir : string) : history_migration_stats =
+  let main_path = Filename.concat session_dir "history.jsonl" in
+  let internal_path = Filename.concat session_dir "history.internal.jsonl" in
+  if not (Fs_compat.file_exists main_path) && not (Fs_compat.file_exists internal_path) then
+    empty_history_migration_stats
+  else
+    let main_lines =
+      if Fs_compat.file_exists main_path then
+        split_jsonl_lines (Fs_compat.load_file main_path)
+      else []
+    in
+    let existing_internal =
+      if Fs_compat.file_exists internal_path then
+        split_jsonl_lines (Fs_compat.load_file internal_path)
+      else []
+    in
+    let kept_rev, moved_rev, dropped_main, malformed_main =
+      List.fold_left
+        (fun (kept_rev, moved_rev, dropped_lines, malformed_lines) line ->
+           match classify_history_jsonl_line line with
+           | Some Keep_main ->
+               (line :: kept_rev, moved_rev, dropped_lines, malformed_lines)
+           | Some Move_internal ->
+               (kept_rev, line :: moved_rev, dropped_lines, malformed_lines)
+           | Some Drop_line ->
+               (kept_rev, moved_rev, dropped_lines + 1, malformed_lines)
+           | None ->
+               (line :: kept_rev, moved_rev, dropped_lines, malformed_lines + 1))
+        ([], [], 0, 0)
+        main_lines
+    in
+    let kept_lines = List.rev kept_rev in
+    let moved_lines = List.rev moved_rev in
+    let internal_kept_rev, dropped_internal, malformed_internal =
+      List.fold_left
+        (fun (kept_rev, dropped_lines, malformed_lines) line ->
+           match classify_history_jsonl_line line with
+           | Some Drop_line -> (kept_rev, dropped_lines + 1, malformed_lines)
+           | Some _ -> (line :: kept_rev, dropped_lines, malformed_lines)
+           | None -> (line :: kept_rev, dropped_lines, malformed_lines + 1))
+        ([], 0, 0)
+        existing_internal
+    in
+    let sanitized_internal = List.rev internal_kept_rev in
+    let total_dropped = dropped_main + dropped_internal in
+    let malformed_lines = malformed_main + malformed_internal in
+    if moved_lines = [] && total_dropped = 0 then
+      {
+        moved_lines = 0;
+        dropped_lines = 0;
+        kept_lines = List.length kept_lines;
+        malformed_lines;
+      }
+    else
+      let merged_internal =
+        dedupe_preserve_order (sanitized_internal @ moved_lines)
+      in
+      (match Fs_compat.save_file_atomic main_path (render_jsonl_lines kept_lines) with
+       | Ok () -> ()
+       | Error detail ->
+           raise (Failure (Printf.sprintf "save main history failed: %s" detail)));
+      (match
+         Fs_compat.save_file_atomic internal_path
+           (render_jsonl_lines merged_internal)
+       with
+       | Ok () -> ()
+       | Error detail ->
+           raise (Failure
+                    (Printf.sprintf "save internal history failed: %s" detail)));
+      {
+        moved_lines = List.length moved_lines;
+        dropped_lines = total_dropped;
+        kept_lines = List.length kept_lines;
+        malformed_lines;
+      }
+
+let history_path_for_source
+    ~(session_dir : string)
+    ~(source : string option) : string =
+  match source with
+  | Some source when Keeper_types.is_internal_history_source source ->
+      Filename.concat session_dir "history.internal.jsonl"
+  | _ ->
+      Filename.concat session_dir "history.jsonl"
+
 let persist_message ?source session msg =
   let msg = Inference_utils.sanitize_message_utf8 msg in
-  let path = Filename.concat session.session_dir "history.jsonl" in
-  let now_ts = Time_compat.now () in
-  let payload =
-    match message_to_json msg with
-    | `Assoc fields ->
-      let fields =
-        match source with
-        | Some source when String.trim source <> "" ->
-            ("source", `String source) :: fields
-        | _ -> fields
-      in
-      `Assoc (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
-    | j -> j
+  let source_text =
+    source |> Option.value ~default:"" |> String.trim
   in
-  let line = Yojson.Safe.to_string payload ^ "\n" in
-  Fs_compat.append_file path line
+  let content_text =
+    msg.content
+    |> List.filter_map (function
+         | Agent_sdk.Types.Text text -> Some text
+         | _ -> None)
+    |> String.concat "\n"
+  in
+  if classify_history_entry ~source:source_text ~content:content_text = Drop_line then
+    ()
+  else
+    let path = history_path_for_source ~session_dir:session.session_dir ~source in
+    let now_ts = Time_compat.now () in
+    let payload =
+      match message_to_json msg with
+      | `Assoc fields ->
+        let fields =
+          match source with
+          | Some source when String.trim source <> "" ->
+              ("source", `String source) :: fields
+          | _ -> fields
+        in
+        `Assoc
+          (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
+      | j -> j
+    in
+    let line = Yojson.Safe.to_string payload ^ "\n" in
+    Fs_compat.append_file path line
 
 (* ================================================================ *)
 (* End of inlined Keeper_working_context operations                  *)
@@ -258,6 +444,256 @@ let log_keeper_exn ~label exn =
 
 let checkpoint_generation_key = "keeper_generation"
 
+type checkpoint_sanitize_stats = {
+  dropped_messages : int;
+  dropped_blocks : int;
+  dropped_chars : int;
+  truncated_blocks : int;
+  truncated_chars : int;
+}
+
+let empty_checkpoint_sanitize_stats =
+  {
+    dropped_messages = 0;
+    dropped_blocks = 0;
+    dropped_chars = 0;
+    truncated_blocks = 0;
+    truncated_chars = 0;
+  }
+
+let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
+  stats.dropped_messages > 0
+  || stats.dropped_blocks > 0
+  || stats.dropped_chars > 0
+  || stats.truncated_blocks > 0
+  || stats.truncated_chars > 0
+
+let add_checkpoint_sanitize_stats
+    (a : checkpoint_sanitize_stats)
+    (b : checkpoint_sanitize_stats) : checkpoint_sanitize_stats =
+  {
+    dropped_messages = a.dropped_messages + b.dropped_messages;
+    dropped_blocks = a.dropped_blocks + b.dropped_blocks;
+    dropped_chars = a.dropped_chars + b.dropped_chars;
+    truncated_blocks = a.truncated_blocks + b.truncated_blocks;
+    truncated_chars = a.truncated_chars + b.truncated_chars;
+  }
+
+let truncate_checkpoint_text ~max_chars (text : string) : string * int =
+  let len = String.length text in
+  if len <= max_chars then (text, 0)
+  else if max_chars <= 0 then ("", len)
+  else
+    let marker_len = String.length checkpoint_text_cap_marker in
+    if max_chars <= marker_len then
+      (String.sub checkpoint_text_cap_marker 0 max_chars, len)
+    else
+      let kept = max_chars - marker_len in
+      ( String.sub text 0 kept ^ checkpoint_text_cap_marker,
+        len - kept )
+
+let find_substring_from
+    ~(haystack : string)
+    ~(needle : string)
+    ~(start : int) : int option =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 || start < 0 || start >= hay_len || needle_len > hay_len
+  then None
+  else
+    let rec loop idx =
+      if idx + needle_len > hay_len then None
+      else if String.sub haystack idx needle_len = needle then Some idx
+      else loop (idx + 1)
+    in
+    loop start
+
+let strip_world_state_segments (text : string) : string =
+  let needle = "## Current World State" in
+  let rec loop current =
+    match find_substring_from ~haystack:current ~needle ~start:0 with
+    | None -> String.trim current
+    | Some idx ->
+        let seg_start =
+          match String.rindex_from_opt current idx '\n' with
+          | Some newline_idx -> newline_idx + 1
+          | None -> 0
+        in
+        let current_len = String.length current in
+        let seg_end =
+          let rec scan i =
+            if i >= current_len - 1 then current_len
+            else if current.[i] = '\n' && current.[i + 1] = '[' then i + 1
+            else scan (i + 1)
+          in
+          scan idx
+        in
+        let before = String.sub current 0 seg_start in
+        let after = String.sub current seg_end (current_len - seg_end) in
+        let combined =
+          if before = "" then after
+          else if after = "" then before
+          else before ^ "\n" ^ after
+        in
+        loop combined
+  in
+  loop text
+
+let is_ephemeral_system_context_text (text : string) : bool =
+  let trimmed = String.trim text in
+  String.starts_with ~prefix:"[system context]" trimmed
+
+let sanitize_checkpoint_text_block (text : string)
+  : string option * checkpoint_sanitize_stats =
+  if is_ephemeral_system_context_text text then
+    ( None,
+      {
+        empty_checkpoint_sanitize_stats with
+        dropped_blocks = 1;
+        dropped_chars = String.length text;
+      } )
+  else if has_world_state_signature text then
+    let stripped = strip_world_state_segments text in
+    if stripped = "" then
+      ( None,
+        {
+          empty_checkpoint_sanitize_stats with
+          dropped_blocks = 1;
+          dropped_chars = String.length text;
+        } )
+    else if String.equal stripped text then
+      (Some text, empty_checkpoint_sanitize_stats)
+    else
+      ( Some stripped,
+        {
+          empty_checkpoint_sanitize_stats with
+          truncated_blocks = 1;
+          truncated_chars = String.length text - String.length stripped;
+        } )
+  else (Some text, empty_checkpoint_sanitize_stats)
+
+let sanitize_checkpoint_message
+    (msg : Agent_sdk.Types.message)
+  : Agent_sdk.Types.message option * checkpoint_sanitize_stats =
+  let kept_rev, _, _, stats =
+    List.fold_left
+      (fun (kept_rev, kept_text_blocks, kept_text_chars, stats) block ->
+         match block with
+         | Agent_sdk.Types.Text text ->
+             let sanitized_text, text_stats =
+               sanitize_checkpoint_text_block text
+             in
+             (match sanitized_text with
+              | None ->
+                  ( kept_rev,
+                    kept_text_blocks,
+                    kept_text_chars,
+                    add_checkpoint_sanitize_stats stats text_stats )
+              | Some text ->
+                  if kept_text_blocks
+                     >= default_max_checkpoint_text_blocks_per_message
+                  then
+                    ( kept_rev,
+                      kept_text_blocks,
+                      kept_text_chars,
+                      add_checkpoint_sanitize_stats
+                        (add_checkpoint_sanitize_stats stats text_stats)
+                        {
+                          empty_checkpoint_sanitize_stats with
+                          dropped_blocks = 1;
+                          dropped_chars = String.length text;
+                        } )
+                  else
+                    let remaining =
+                      default_max_checkpoint_text_chars_per_message
+                      - kept_text_chars
+                    in
+                    if remaining <= 0 then
+                      ( kept_rev,
+                        kept_text_blocks,
+                        kept_text_chars,
+                        add_checkpoint_sanitize_stats
+                          (add_checkpoint_sanitize_stats stats text_stats)
+                          {
+                            empty_checkpoint_sanitize_stats with
+                            dropped_blocks = 1;
+                            dropped_chars = String.length text;
+                          } )
+                    else
+                      let capped_text, truncated_chars =
+                        truncate_checkpoint_text ~max_chars:remaining text
+                      in
+                      let block_stats =
+                        if truncated_chars > 0 then
+                          {
+                            empty_checkpoint_sanitize_stats with
+                            truncated_blocks = 1;
+                            truncated_chars;
+                          }
+                        else empty_checkpoint_sanitize_stats
+                      in
+                      ( Agent_sdk.Types.Text capped_text :: kept_rev,
+                        kept_text_blocks + 1,
+                        kept_text_chars + String.length capped_text,
+                        add_checkpoint_sanitize_stats
+                          (add_checkpoint_sanitize_stats stats text_stats)
+                          block_stats ))
+         | Agent_sdk.Types.Thinking { content; _ } ->
+             ( kept_rev,
+               kept_text_blocks,
+               kept_text_chars,
+               add_checkpoint_sanitize_stats stats
+                 {
+                   empty_checkpoint_sanitize_stats with
+                   dropped_blocks = 1;
+                   dropped_chars = String.length content;
+                 } )
+         | Agent_sdk.Types.RedactedThinking text ->
+             ( kept_rev,
+               kept_text_blocks,
+               kept_text_chars,
+               add_checkpoint_sanitize_stats stats
+                 {
+                   empty_checkpoint_sanitize_stats with
+                   dropped_blocks = 1;
+                   dropped_chars = String.length text;
+                 } )
+         | _ ->
+             (block :: kept_rev, kept_text_blocks, kept_text_chars, stats))
+      ([], 0, 0, empty_checkpoint_sanitize_stats)
+      msg.content
+  in
+  let kept = List.rev kept_rev in
+  if kept = [] then
+    ( None,
+      add_checkpoint_sanitize_stats stats
+        { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
+  else (Some { msg with content = kept }, stats)
+
+let sanitize_checkpoint_messages
+    (messages : Agent_sdk.Types.message list)
+  : Agent_sdk.Types.message list * checkpoint_sanitize_stats =
+  List.fold_right
+    (fun msg (acc, stats) ->
+       let sanitized_opt, msg_stats = sanitize_checkpoint_message msg in
+       let acc =
+         match sanitized_opt with
+         | Some sanitized -> sanitized :: acc
+         | None -> acc
+       in
+       let stats =
+         add_checkpoint_sanitize_stats stats msg_stats
+       in
+       (acc, stats))
+    messages
+    ([], empty_checkpoint_sanitize_stats)
+
+let sanitize_oas_checkpoint
+    (cp : Agent_sdk.Checkpoint.t)
+  : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
+  let messages, stats = sanitize_checkpoint_messages cp.messages in
+  ({ cp with messages }, stats)
+
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
   match cp.max_total_tokens with
@@ -273,6 +709,7 @@ let context_of_oas_checkpoint
     ~(max_checkpoint_messages : int)
     (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
+  let cp, _ = sanitize_oas_checkpoint cp in
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
@@ -326,6 +763,7 @@ let save_oas_checkpoint
       let drop = n - max_checkpoint_messages in
       List.filteri (fun i _ -> i >= drop) ctx.messages
   in
+  let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
   let state =
     {
       Agent_sdk.Types.config =
@@ -402,9 +840,31 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     | _ -> false
   in
   if prefer_legacy then
-    Log.Keeper.info
+       Log.Keeper.info
       "keeper:%s checkpoint migration fallback: legacy newer than OAS"
       trace_id;
+  let oas_checkpoint =
+    Result.to_option oas_result
+    |> Option.map (fun checkpoint ->
+      let sanitized, stats = sanitize_oas_checkpoint checkpoint in
+      if checkpoint_sanitize_changed stats then begin
+        Log.Keeper.warn
+          "keeper:%s checkpoint migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
+          trace_id
+          stats.dropped_blocks
+          stats.dropped_messages
+          stats.dropped_chars
+          stats.truncated_blocks
+          stats.truncated_chars;
+        (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
+         | Ok () -> ()
+         | Error detail ->
+             Log.Keeper.error
+               "keeper:%s checkpoint migration save failed: %s"
+               trace_id detail)
+      end;
+      sanitized)
+  in
   match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
   | (false, Some checkpoint, _) ->
       let ctx =
@@ -453,7 +913,8 @@ let patch_checkpoint_last_assistant
           else msg)
         cp.messages
   in
-  { cp with Agent_sdk.Checkpoint.session_id; messages }
+  let sanitized_messages, _ = sanitize_checkpoint_messages messages in
+  { cp with Agent_sdk.Checkpoint.session_id; messages = sanitized_messages }
 
 let save_checkpoint session (ctx : working_context) ~generation =
   let ckpt = create_checkpoint ctx ~generation in

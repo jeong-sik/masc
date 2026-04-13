@@ -36,7 +36,9 @@ function describeAgentEvent(evt: OasAgentEvent): string {
   return `${label}${action ? ` · ${action}` : ''}${target}`
 }
 
-function topKeepers(
+/** Pick the N most recently updated keepers from a snapshot map.
+ *  Exposed for unit testing. */
+export function topKeepers(
   snapshots: Map<string, OasKeeperSnapshot>,
   limit: number,
 ): OasKeeperSnapshot[] {

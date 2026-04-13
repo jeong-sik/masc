@@ -29,6 +29,31 @@ let write_file path content =
   output_string oc content;
   close_out oc
 
+let with_env name value f =
+  let saved = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match saved with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
+
+let string_contains ~needle haystack =
+  let needle_len = String.length needle in
+  let hay_len = String.length haystack in
+  let rec loop idx =
+    if idx + needle_len > hay_len then
+      false
+    else if String.sub haystack idx needle_len = needle then
+      true
+    else
+      loop (idx + 1)
+  in
+  if needle_len = 0 then true else loop 0
+
 let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
@@ -78,9 +103,27 @@ let test_env_override_invalid_no_fallback () =
   check bool "cascade missing" false resolution.cascade.exists;
   check bool "warnings present" true (resolution.warnings <> [])
 
-let test_cwd_fallback () =
+let test_cwd_fallback_disabled_by_default () =
   with_temp_dir "config-dir-cwd" @@ fun cwd ->
   let _config = make_config_root cwd in
+  with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" None @@ fun () ->
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~cwd ~executable_name:"/tmp/nonexistent-masc" ())
+  in
+  check string "status" "missing"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "root source" "missing"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "warning mentions opt-in" true
+    (List.exists
+       (string_contains ~needle:"MASC_ALLOW_REPO_CONFIG_FALLBACK=true")
+       resolution.warnings)
+
+let test_cwd_fallback_opt_in () =
+  with_temp_dir "config-dir-cwd-opt-in" @@ fun cwd ->
+  let _config = make_config_root cwd in
+  with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" (Some "true") @@ fun () ->
   let resolution =
     Lib.Config_dir_resolver.resolve_with
       (make_inputs ~cwd ~executable_name:"/tmp/nonexistent-masc" ())
@@ -90,6 +133,25 @@ let test_cwd_fallback () =
   check string "root source" "cwd"
     (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
   check bool "keepers exists" true resolution.keepers.exists
+
+let test_executable_relative_fallback_opt_in () =
+  with_temp_dir "config-dir-exe" @@ fun root ->
+  let repo = Filename.concat root "repo" in
+  let _config = make_config_root repo in
+  let bin_dir = Filename.concat repo "bin" in
+  mkdir_p bin_dir;
+  let executable_name = Filename.concat bin_dir "masc-mcp" in
+  write_file executable_name "#!/bin/sh\n";
+  with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" (Some "true") @@ fun () ->
+  let resolution =
+    Lib.Config_dir_resolver.resolve_with
+      (make_inputs ~cwd:"/tmp/nonexistent-cwd" ~executable_name ())
+  in
+  check string "status" "ready"
+    (Lib.Config_dir_resolver.status_to_string resolution.status);
+  check string "root source" "exe_relative"
+    (Lib.Config_dir_resolver.source_to_string resolution.config_root.source);
+  check bool "personas exists" true resolution.personas.exists
 
 let test_home_masc_fallback () =
   with_temp_dir "config-dir-home" @@ fun home ->
@@ -221,7 +283,12 @@ let () =
           test_case "env override valid" `Quick test_env_override_valid;
           test_case "env override invalid does not fallback" `Quick
             test_env_override_invalid_no_fallback;
-          test_case "cwd fallback" `Quick test_cwd_fallback;
+          test_case "cwd fallback disabled by default" `Quick
+            test_cwd_fallback_disabled_by_default;
+          test_case "cwd fallback opt-in" `Quick
+            test_cwd_fallback_opt_in;
+          test_case "exe-relative fallback opt-in" `Quick
+            test_executable_relative_fallback_opt_in;
           test_case "local masc fallback precedes home masc" `Quick
             test_local_masc_fallback_precedes_home_masc;
           test_case "local masc fallback collapses explicit .masc dir"

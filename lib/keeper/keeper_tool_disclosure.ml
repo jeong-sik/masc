@@ -170,6 +170,80 @@ let prune_boring_tools_after_recent_polling
       visible_tools
 ;;
 
+(** Extract tool names from recent assistant messages (most recent last).
+    Scans content blocks for [ToolUse] entries and returns tool names
+    in chronological order.  Only looks at the last [n] assistant messages
+    to bound the scan. *)
+let recent_tool_names_from_messages
+    ?(max_messages = 3)
+    (messages : Agent_sdk.Types.message list)
+  : string list =
+  messages
+  |> List.rev
+  |> List.filter (fun (m : Agent_sdk.Types.message) ->
+       m.role = Agent_sdk.Types.Assistant)
+  |> List.filteri (fun i _ -> i < max_messages)
+  |> List.rev
+  |> List.concat_map (fun (m : Agent_sdk.Types.message) ->
+       List.filter_map
+         (function
+           | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+           | _ -> None)
+         m.content)
+;;
+
+(** Prune boring tools from the visible set based on recent tool call
+    history extracted from messages.  Delegates to
+    [prune_boring_tools_after_recent_polling] for single-call pruning,
+    then applies a consecutive boring streak detector:
+
+    If the last [consecutive_boring_threshold] tool calls are ALL boring
+    (excluding [keeper_stay_silent] itself), force [keeper_stay_silent]
+    as the only visible tool to break the polling loop.
+
+    A single boring call is normal (first board_list check is expected);
+    only repeated boring-only turns trigger forced silence. *)
+let prune_boring_tools_from_messages
+    ~(visible_tools : string list)
+    ~(messages : Agent_sdk.Types.message list)
+    ?(consecutive_boring_threshold = 3)
+    ()
+  : string list =
+  let recent_names = recent_tool_names_from_messages ~max_messages:4 messages in
+  (* Build JSON entries for the existing prune function *)
+  let recent_entries =
+    List.map
+      (fun name -> `Assoc [ ("tool", `String name) ])
+      recent_names
+  in
+  let after_single_prune =
+    prune_boring_tools_after_recent_polling ~visible_tools ~recent_entries
+  in
+  (* Consecutive boring streak detection: if the last N tool calls
+     (excluding keeper_stay_silent) are all boring, force silence.
+     This catches loops where the keeper alternates between status
+     checks without doing productive work. *)
+  let non_silent_recent =
+    List.filter
+      (fun name -> not (String.equal name "keeper_stay_silent"))
+      recent_names
+  in
+  let streak_len = min consecutive_boring_threshold (List.length non_silent_recent) in
+  if streak_len >= consecutive_boring_threshold then
+    let last_n =
+      let rev = List.rev non_silent_recent in
+      List.filteri (fun i _ -> i < consecutive_boring_threshold) rev
+    in
+    let all_boring = List.for_all Keeper_tool_registry.is_boring_tool last_n in
+    if all_boring then
+      (* Force keeper_stay_silent only to break the loop *)
+      List.filter (fun name -> String.equal name "keeper_stay_silent") after_single_prune
+    else
+      after_single_prune
+  else
+    after_single_prune
+;;
+
 let merge_tool_selection_boundary
     ~(core : string list)
     ~(deterministic_prefilter : string list)

@@ -34,7 +34,12 @@ let run_cmd base_path =
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);
   Fun.protect
     ~finally:(fun () ->
-      (try Board_dispatch.flush () with _ -> ());
+      (try Board_dispatch.flush ()
+       with
+       | Eio.Cancel.Cancelled _ -> ()
+       | exn ->
+           Log.Misc.warn "shutdown: board flush failed: %s"
+             (Printexc.to_string exn));
       Shutdown_hooks.run_all ())
     (fun () -> Mcp_eio.run_stdio ~sw ~env state)
 

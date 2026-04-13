@@ -236,6 +236,7 @@
         test_dashboard_http_core
         test_dashboard_autoresearch
         test_dashboard_harness_health
+        test_eval_feed
         test_dashboard_repo_synthesis
         test_dashboard_tools
         test_tool_quality_classify
@@ -384,6 +385,7 @@
         test_dashboard_http_core
         test_dashboard_autoresearch
         test_dashboard_harness_health
+        test_eval_feed
         test_dashboard_repo_synthesis
         test_dashboard_tools
         test_tool_quality_classify

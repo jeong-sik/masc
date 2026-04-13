@@ -890,10 +890,22 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          Non-trivial OAS errors were already logged above at error level. *)
       (session, None)
 
+(** Feature flag: when true, store structured JSON in
+    [Checkpoint.working_context] alongside the text [STATE] block.
+    Default false — existing behavior preserved. RFC-MASC-001 Phase 1. *)
+let structured_state_enabled () =
+  match Sys.getenv_opt "MASC_STRUCTURED_STATE" with
+  | Some ("true" | "1" | "yes") -> true
+  | _ -> false
+
 (** Patch an OAS checkpoint: unify session_id and replace the last
     assistant message's text content with [response_text] (which includes
     MASC's [STATE] synthesis).  This ensures read_continuity_summary can
-    find the [STATE] block in checkpoint messages on the next turn.  #5431 *)
+    find the [STATE] block in checkpoint messages on the next turn.  #5431
+
+    When [MASC_STRUCTURED_STATE=true], also stores the parsed state
+    snapshot as structured JSON in [Checkpoint.working_context].
+    RFC-MASC-001 Phase 1: dual-write (text + structured). *)
 let patch_checkpoint_last_assistant
     (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
   : Agent_sdk.Checkpoint.t =
@@ -914,7 +926,21 @@ let patch_checkpoint_last_assistant
         cp.messages
   in
   let sanitized_messages, _ = sanitize_checkpoint_messages messages in
-  { cp with Agent_sdk.Checkpoint.session_id; messages = sanitized_messages }
+  (* RFC-MASC-001 Phase 1: when structured state is enabled, parse the
+     [STATE] block from response_text and store as structured JSON in
+     Checkpoint.working_context.  This runs alongside the existing text
+     path — dual-write for safe migration. *)
+  let working_context =
+    if structured_state_enabled () then
+      match Keeper_memory_policy.parse_state_snapshot_from_reply response_text with
+      | Some snapshot ->
+        Some (Keeper_memory_policy.structured_working_context_of_snapshot snapshot)
+      | None -> cp.working_context
+    else cp.working_context
+  in
+  { cp with Agent_sdk.Checkpoint.session_id;
+            messages = sanitized_messages;
+            working_context }
 
 let save_checkpoint session (ctx : working_context) ~generation =
   let ckpt = create_checkpoint ctx ~generation in

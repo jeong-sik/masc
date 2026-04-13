@@ -319,6 +319,70 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
     ("constraints", `List (List.map (fun s -> `String s) snapshot.constraints));
   ]
 
+(** Deserialize a [keeper_state_snapshot] from JSON produced by
+    [keeper_state_snapshot_to_json].  Returns [None] if the JSON is
+    malformed or represents an empty snapshot (all fields absent/empty).
+    RFC-MASC-001 Phase 1: structured working_context in Checkpoint. *)
+let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot option =
+  try
+    let open Yojson.Safe.Util in
+    let string_opt key = json |> member key |> to_string_option in
+    let string_list key =
+      match json |> member key with
+      | `List items ->
+        List.filter_map (function `String s -> Some s | _ -> None) items
+      | _ -> []
+    in
+    let snapshot =
+      { goal = string_opt "goal"
+      ; progress = string_opt "progress"
+      ; done_summary = string_opt "done_summary"
+      ; next_summary = string_opt "next_summary"
+      ; next_items = string_list "next_items"
+      ; decisions = string_list "decisions"
+      ; open_questions = string_list "open_questions"
+      ; constraints = string_list "constraints"
+      }
+    in
+    if snapshot.goal = None
+       && snapshot.progress = None
+       && snapshot.done_summary = None
+       && snapshot.next_summary = None
+       && snapshot.next_items = []
+       && snapshot.decisions = []
+       && snapshot.open_questions = []
+       && snapshot.constraints = []
+    then None
+    else Some snapshot
+  with
+  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+
+(** Structured JSON wrapper for Checkpoint.working_context.
+    Embeds the snapshot under a "state_snapshot" key alongside a
+    "version" tag so future schema evolution is backward-compatible. *)
+let structured_working_context_of_snapshot
+    (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
+  `Assoc [
+    ("version", `Int 1);
+    ("state_snapshot", keeper_state_snapshot_to_json snapshot);
+  ]
+
+(** Extract a [keeper_state_snapshot] from the structured JSON stored in
+    [Checkpoint.working_context].  Returns [None] if the JSON does not
+    contain a valid version-1 state_snapshot. *)
+let snapshot_of_structured_working_context
+    (json : Yojson.Safe.t) : keeper_state_snapshot option =
+  try
+    let open Yojson.Safe.Util in
+    let version = json |> member "version" |> to_int_option in
+    match version with
+    | Some 1 ->
+      let snapshot_json = json |> member "state_snapshot" in
+      keeper_state_snapshot_of_json snapshot_json
+    | _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+
 let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
     keeper_state_snapshot option =
   let rec loop (msgs : Agent_sdk.Types.message list) =

@@ -40,6 +40,32 @@ let available_cascade_profiles () : string list =
        Log.Keeper.warn "cascade config read error: %s" msg;
        ["default"])
 
+(** Broadcast handler: parse JSON body, extract "message" string field, and
+    relay via Room.broadcast.  Error responses are encoded through Yojson so
+    exception messages cannot break JSON framing via embedded quotes. *)
+let handle_broadcast state agent_name reqd body_str =
+  let reply ok error_opt =
+    let fields = [ ("ok", `Bool ok) ] in
+    let fields = match error_opt with
+      | Some msg -> fields @ [ ("error", `String msg) ]
+      | None -> fields
+    in
+    Http.Response.json (Yojson.Safe.to_string (`Assoc fields)) reqd
+  in
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match Yojson.Safe.Util.member "message" json with
+    | `String message ->
+        let config = state.Mcp_server.room_config in
+        let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
+        reply true None
+    | `Null -> reply false (Some "missing required field: message")
+    | _ -> reply false (Some "field 'message' must be a string")
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Yojson.Json_error msg -> reply false (Some ("invalid JSON: " ^ msg))
+  | e -> reply false (Some (Printexc.to_string e))
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -47,18 +73,7 @@ let rec add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Types.CanBroadcast
          (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             let message = json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
-             let config = state.Mcp_server.room_config in
-             let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
-             Http.Response.json {|{"ok":true}|} reqd
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | e ->
-             Http.Response.json
-               (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
-               reqd
+           handle_broadcast state agent_name reqd body_str
          )
        ) request reqd)
   |> Http.Router.post "/broadcast" (fun request reqd ->
@@ -66,18 +81,7 @@ let rec add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Types.CanBroadcast
          (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             let message = json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
-             let config = state.Mcp_server.room_config in
-             let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
-             Http.Response.json {|{"ok":true}|} reqd
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | e ->
-             Http.Response.json
-               (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
-               reqd
+           handle_broadcast state agent_name reqd body_str
          )
        ) request reqd)
 

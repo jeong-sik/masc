@@ -249,6 +249,50 @@ describe('getTraceSummary', () => {
     expect(summary.lifecycle_count).toBe(2)
   })
 
+  it('accumulates oas_tokens_saved from context compactions', () => {
+    traceSlots.value = {
+      'agent-z': {
+        events: [
+          {
+            id: 'c1',
+            ts: 1000,
+            ts_iso: '',
+            kind: 'oas_context',
+            sourceLane: 'oas',
+            summary: 'compact',
+            detail: { before_tokens: 1000, after_tokens: 400 },
+          },
+          {
+            id: 'c2',
+            ts: 2000,
+            ts_iso: '',
+            kind: 'oas_context',
+            sourceLane: 'oas',
+            summary: 'compact',
+            detail: { before_tokens: 600, after_tokens: 300 },
+          },
+          {
+            id: 'c3',
+            ts: 3000,
+            ts_iso: '',
+            kind: 'oas_context',
+            sourceLane: 'oas',
+            summary: 'compact (no-op)',
+            detail: { before_tokens: 200, after_tokens: 200 },
+          },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        fetchToken: 0,
+      },
+    }
+
+    const summary = getTraceSummary('agent-z')
+    expect(summary.oas_context_count).toBe(3)
+    expect(summary.oas_tokens_saved).toBe(900) // 600 + 300 + 0
+  })
+
   it('counts durable llm_request and error_occurred events', () => {
     traceSlots.value = {
       'agent-y': {

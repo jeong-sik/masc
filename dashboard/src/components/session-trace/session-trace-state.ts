@@ -66,6 +66,7 @@ export interface TraceSummary {
   oas_output_tokens: number
   oas_llm_call_count: number
   oas_error_count: number
+  oas_tokens_saved: number
 }
 
 interface TraceSlot {
@@ -140,6 +141,7 @@ export function getTraceSummary(agent: string): TraceSummary {
   let oas_output_tokens = 0
   let oas_llm_call_count = 0
   let oas_error_count = 0
+  let oas_tokens_saved = 0
 
   for (const e of events) {
     switch (e.kind) {
@@ -153,9 +155,15 @@ export function getTraceSummary(agent: string): TraceSummary {
       case 'oas_turn':
         oas_turn_count++
         break
-      case 'oas_context':
+      case 'oas_context': {
         oas_context_count++
+        const before = e.detail.before_tokens
+        const after = e.detail.after_tokens
+        if (typeof before === 'number' && typeof after === 'number' && before > after) {
+          oas_tokens_saved += before - after
+        }
         break
+      }
       case 'broadcast':
         broadcast_count++
         break
@@ -201,6 +209,7 @@ export function getTraceSummary(agent: string): TraceSummary {
     oas_output_tokens,
     oas_llm_call_count,
     oas_error_count,
+    oas_tokens_saved,
   }
 }
 

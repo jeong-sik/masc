@@ -41,6 +41,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.oas_tool_count > 0) items.push(`OAS 도구 ${s.oas_tool_count}회`)
   if (s.oas_turn_count > 0) items.push(`OAS 턴 ${s.oas_turn_count}건`)
   if (s.oas_context_count > 0) items.push(`OAS 압축 ${s.oas_context_count}건`)
+  if (s.oas_tokens_saved > 0) items.push(`절약 ${s.oas_tokens_saved}tok`)
   if (s.oas_input_tokens > 0 || s.oas_output_tokens > 0) {
     items.push(`OAS 토큰 ${s.oas_input_tokens}→${s.oas_output_tokens}`)
   }

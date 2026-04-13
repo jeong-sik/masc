@@ -413,7 +413,7 @@ let resume_from_checkpoint
     name = config.name;
     model = config.model_id;
     system_prompt = Some config.system_prompt;
-    max_tokens = config.max_tokens;
+    max_tokens = Some config.max_tokens;
     max_turns = effective_max_turns;
     temperature = Some config.temperature;
     enable_thinking = config.enable_thinking;

@@ -8,9 +8,14 @@ open Keeper_exec_shared
       (cat, rg, head, tail, find, git_log, tree).
     - [user_timeout_max_sec]: upper bound for user-provided timeout_sec
       in keeper_bash (prevents indefinite blocking). *)
-let io_timeout_sec = 30.0
-let read_timeout_sec = 15.0
-let user_timeout_max_sec = 180.0
+let env_float name default =
+  match Sys.getenv_opt name with
+  | Some s -> (match float_of_string_opt s with Some f -> f | None -> default)
+  | None -> default
+
+let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
+let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
+let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
 let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args

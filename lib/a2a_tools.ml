@@ -372,7 +372,9 @@ let query_skill config ~schemas ~agent_name ~skill_id : (Yojson.Safe.t, string) 
 let delegate config ~agent_name ~target ~message
     ?(task_type_str = "async")
     ?(artifacts : artifact list = [])
-    ?(timeout = 300)
+    ?(timeout = match Sys.getenv_opt "MASC_A2A_DELEGATION_TIMEOUT_SEC" with
+                | Some s -> (match int_of_string_opt s with Some n -> n | None -> 300)
+                | None -> 300)
     () : (Yojson.Safe.t, string) result =
   (* BUG: Prevent self-delegation — creates blocking self-portal *)
   if String.equal agent_name target then

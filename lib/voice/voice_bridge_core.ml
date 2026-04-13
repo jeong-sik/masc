@@ -176,64 +176,92 @@ let local_playback_argv ?path_value ~audio_file () =
   in
   pick commands
 
-let run_local_playback ~sw:_ ~agent_id ~audio_file =
+(** Runs local playback with mutex-protected dedup check.
+    Returns:
+    - [`Dedup_hit] if another fiber already played this same message recently
+      (check happens INSIDE the mutex to close the check-then-act race where two
+      fibers both pass the outer [is_dedup_hit] before either records).
+    - [`Played None] if playback was disabled, unavailable, or failed.
+    - [`Played (Some dur)] if playback succeeded with the given duration.
+
+    When [message] is [None] the dedup re-check is skipped (legacy callers that
+    do not propagate the message string). *)
+let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
   match load_voice_config () with
   | Error e ->
     Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id e;
-    None
+    `Played None
   | Ok config ->
     if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
-      None
+      `Played None
     else
       match local_playback_argv ~audio_file () with
       | None ->
         log_error
           "local voice playback unavailable: no ffplay/mpg123/play/open executable found";
-        None
+        `Played None
       | Some argv ->
         Eio.Mutex.use_rw ~protect:true playback_mu (fun () ->
-          let t0 = Unix.gettimeofday () in
-          try
-            match Process_eio.run_argv_with_status ~timeout_sec:60.0 argv with
-            | Unix.WEXITED 0, _ ->
-              let dur = Unix.gettimeofday () -. t0 in
-              log_info
-                (Printf.sprintf
-                   "local voice playback finished: agent=%s file=%s via=%s duration=%.1fs"
-                   agent_id audio_file
-                   (match argv with h :: _ -> h | [] -> "unknown")
-                   dur);
-              Some dur
-            | Unix.WEXITED code, output ->
-              log_error
-                (Printf.sprintf
-                   "local voice playback failed (exit=%d): %s%s"
-                   code (String.concat " " argv)
-                   (if String.trim output = "" then "" else " :: " ^ String.trim output));
-              None
-            | Unix.WSTOPPED signal, output ->
-              log_error
-                (Printf.sprintf
-                   "local voice playback stopped (sig=%d): %s%s"
-                   signal (String.concat " " argv)
-                   (if String.trim output = "" then "" else " :: " ^ String.trim output));
-              None
-            | Unix.WSIGNALED signal, output ->
-              log_error
-                (Printf.sprintf
-                   "local voice playback signaled (sig=%d): %s%s"
-                   signal (String.concat " " argv)
-                   (if String.trim output = "" then "" else " :: " ^ String.trim output));
-              None
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            log_error (Printf.sprintf "voice playback exception: %s"
-              (Printexc.to_string exn));
-            None)
+          let dedup_hit =
+            match message with
+            | Some m -> is_dedup_hit ~agent_id ~message:m
+            | None -> false
+          in
+          if dedup_hit then begin
+            log_info (Printf.sprintf
+              "voice dedup skip inside mutex: agent=%s (same message within %.0fs window)"
+              agent_id playback_dedup_window_sec);
+            `Dedup_hit
+          end
+          else begin
+            (* Record BEFORE playing so concurrent callers waiting on this mutex
+               will observe the in-flight playback when they acquire it. *)
+            (match message with
+             | Some m -> record_playback ~agent_id ~message:m
+             | None -> ());
+            let t0 = Unix.gettimeofday () in
+            try
+              match Process_eio.run_argv_with_status ~timeout_sec:60.0 argv with
+              | Unix.WEXITED 0, _ ->
+                let dur = Unix.gettimeofday () -. t0 in
+                log_info
+                  (Printf.sprintf
+                     "local voice playback finished: agent=%s file=%s via=%s duration=%.1fs"
+                     agent_id audio_file
+                     (match argv with h :: _ -> h | [] -> "unknown")
+                     dur);
+                `Played (Some dur)
+              | Unix.WEXITED code, output ->
+                log_error
+                  (Printf.sprintf
+                     "local voice playback failed (exit=%d): %s%s"
+                     code (String.concat " " argv)
+                     (if String.trim output = "" then "" else " :: " ^ String.trim output));
+                `Played None
+              | Unix.WSTOPPED signal, output ->
+                log_error
+                  (Printf.sprintf
+                     "local voice playback stopped (sig=%d): %s%s"
+                     signal (String.concat " " argv)
+                     (if String.trim output = "" then "" else " :: " ^ String.trim output));
+                `Played None
+              | Unix.WSIGNALED signal, output ->
+                log_error
+                  (Printf.sprintf
+                     "local voice playback signaled (sig=%d): %s%s"
+                     signal (String.concat " " argv)
+                     (if String.trim output = "" then "" else " :: " ^ String.trim output));
+                `Played None
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              log_error (Printf.sprintf "voice playback exception: %s"
+                (Printexc.to_string exn));
+              `Played None
+          end)
 
 let start_local_playback ~sw ~agent_id ~audio_file =
-  ignore (run_local_playback ~sw ~agent_id ~audio_file : float option)
+  ignore (run_local_playback ~sw ~agent_id ~audio_file () : [`Dedup_hit | `Played of float option])
 
 (** Get voice for agent, defaults to "Sarah" if config is unavailable *)
 let get_voice_for_agent agent_id =

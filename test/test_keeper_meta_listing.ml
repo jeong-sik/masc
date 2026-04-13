@@ -31,6 +31,8 @@ let with_env name value_opt f =
 let with_clean_base_path_env f =
   with_env "MASC_BASE_PATH" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_PERSONAS_DIR" None @@ fun () ->
   with_env "MASC_TEST_SYNCED_BASE_PATH" None @@ fun () ->
   with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
 
@@ -117,7 +119,6 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
-      write_keeper_toml_exn config ~name:"dot.name";
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
       write_keeper_meta_exn config ~name:"dot.name" ~trace_id:"trace-dot-name";

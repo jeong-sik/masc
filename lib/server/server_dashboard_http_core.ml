@@ -68,27 +68,8 @@ let _dashboard_mission_timeout_s =
   float_of_env_default "MASC_DASHBOARD_MISSION_TIMEOUT_S"
     ~default:25.0 ~min_v:10.0 ~max_v:120.0
 
-let _dashboard_proof_cache_ttl_s =
-  float_of_env_default "MASC_DASHBOARD_PROOF_CACHE_TTL_S"
-    ~default:5.0 ~min_v:1.0 ~max_v:30.0
-
 let _session_list_timeout_s =
   dashboard_session_list_timeout_s ()
-
-let normalized_query_value = function
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
-let dashboard_proof_cache_selector ?session_id ?operation_id () =
-  let value_or_star = function
-    | Some value -> value
-    | None -> "*"
-  in
-  Printf.sprintf "session=%s|operation=%s"
-    (value_or_star session_id)
-    (value_or_star operation_id)
 
 let attach_projection_diagnostics json diagnostics =
   match json with
@@ -777,24 +758,6 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
       ~clock ~timeout_sec:_dashboard_mission_timeout_s compute
-
-let dashboard_proof_http_json ~state request =
-  let session_id =
-    query_param request "session_id" |> normalized_query_value
-  in
-  let operation_id =
-    query_param request "operation_id" |> normalized_query_value
-  in
-  let cache_key =
-    room_scoped_cache_key state.Mcp_server.room_config "proof"
-      (dashboard_proof_cache_selector ?session_id ?operation_id ())
-  in
-  Dashboard_cache.get_or_compute cache_key ~ttl:_dashboard_proof_cache_ttl_s
-    (fun () ->
-      (* Dashboard_proof removed — return empty *)
-      ignore (operator_actor_hint request, session_id, operation_id,
-              state.Mcp_server.room_config);
-      `Assoc [("status", `String "removed"); ("reason", `String "team session layer removed")])
 
 let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in

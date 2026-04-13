@@ -7,7 +7,6 @@ export type SurfaceSectionId =
   | 'activity'
   | 'board'
   | 'governance'
-  | 'evidence'
   | 'planning'
   | 'goals'
   | 'intervene'
@@ -172,12 +171,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '작업 게시판',
       description: '에이전트가 남긴 직접 작성 글, 자동화 글, 시스템 글을 한 곳에서 봅니다.',
       params: { section: 'board' },
-    },
-    {
-      id: 'evidence',
-      label: '증명 및 판정',
-      description: 'verdict, 도구 사용 증거, 타임라인, worker 실행 기록 등 에이전트 행동의 근거를 봅니다.',
-      params: { section: 'evidence' },
     },
     {
       id: 'planning',

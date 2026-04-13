@@ -22,7 +22,6 @@ module Operator_control = Operator_control
 module Command_plane_v2 = Command_plane_v2
 module Dashboard_execution = Dashboard_execution
 module Dashboard_mission = Dashboard_mission
-(* module Dashboard_proof removed *)
 module Dashboard_mission_briefing = Dashboard_mission_briefing
 module Build_identity = Build_identity
 module Graphql_api = Graphql_api

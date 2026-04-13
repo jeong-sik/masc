@@ -34,11 +34,11 @@ const FOCUS_SURFACES: FocusSurface[] = [
     params: { section: 'intervene' },
   },
   {
-    title: 'Board & Evidence',
-    description: '실제 협업 근거와 게시판 흐름을 확인해 운영 판단을 뒷받침합니다.',
+    title: 'Board',
+    description: '에이전트 게시판 흐름을 확인해 운영 판단을 뒷받침합니다.',
     action: '작업 화면으로 이동',
     tab: 'workspace',
-    params: { section: 'evidence' },
+    params: { section: 'board' },
   },
   {
     title: 'Harness',

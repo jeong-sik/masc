@@ -51,10 +51,6 @@ allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
 tool_preset = "coding"
 
 cascade_name = "keeper_unified"
-models = [
-  "glm-coding:glm-5.1",
-  "ollama:qwen3.5:35b-a3b-nvfp4",
-]
 
 # Telemetry Feedback
 telemetry_feedback_enabled = true

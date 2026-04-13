@@ -65,12 +65,7 @@ execution_scope = "workspace"
 tool_preset = "social"
 also_allow = ["keeper_voice_speak", "keeper_voice_listen"]
 
-# GLM Coding Plan first, Ollama fallback (oas#786 relaxes tool_choice)
 cascade_name = "keeper_unified"
-models = [
-  "glm-coding:glm-5.1",
-  "ollama:qwen3.5:35b-a3b-nvfp4",
-]
 
 # Telemetry Feedback
 telemetry_feedback_enabled = true

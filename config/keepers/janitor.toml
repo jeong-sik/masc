@@ -48,7 +48,7 @@ mention_targets = ["janitor", "garbage-keeper", "coder", "masc-improver"]
 proactive_enabled = true
 execution_scope = "workspace"
 
-tool_preset = "social"
+tool_preset = "delivery"
 tool_also_allow = [
   "keeper_board_delete",
   "keeper_board_cleanup",

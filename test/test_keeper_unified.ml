@@ -1653,12 +1653,17 @@ let test_run_unified_turn_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
+  let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
+      (match old_base_path with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
       KR.clear ();
+      Unix.putenv "MASC_BASE_PATH" base_dir;
       let meta = make_meta "phase-gated-keeper" in
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (KR.register ~base_path:base_dir meta.name meta);

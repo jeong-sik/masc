@@ -135,11 +135,6 @@ val dashboard_mission_briefing_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
-val dashboard_proof_http_json :
-  state:Mcp_server.server_state ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
-
 (** {1 Shell and Data Helpers} *)
 
 val dashboard_shell_status_json : Room.config -> Yojson.Safe.t

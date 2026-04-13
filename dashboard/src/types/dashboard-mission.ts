@@ -273,26 +273,6 @@ export interface DashboardMissionBriefingResponse {
 
 export type DashboardProofVerdict = 'proven' | 'partial' | 'insufficient' | string
 
-export interface DashboardProofSummary {
-  headline?: string
-  detail?: string
-  session_id?: string
-  goal?: string
-  verdict?: DashboardProofVerdict
-  live_verdict?: DashboardProofVerdict
-  historical_verdict?: DashboardProofVerdict | null
-  verdict_basis?: 'live' | 'live_and_historical' | 'historical_only' | string
-  actors_count?: number
-  planned_actor_count?: number
-  mentioned_actor_count?: number
-  unanswered_actor_count?: number
-  interaction_count?: number
-  evidence_count?: number
-  cp_trace_count?: number
-  raw_trace_run_count?: number
-  validated_worker_run_count?: number
-}
-
 export interface DashboardProofSelection {
   mode?: 'explicit' | 'latest_auto_selected' | 'requested_not_found' | 'none' | string
   reason?: string
@@ -407,35 +387,6 @@ export interface DashboardProofArtifactRef {
   kind: string
   path: string
   exists: boolean
-}
-
-export interface DashboardProofBackingEvidence {
-  operation_id?: string
-  detachment_id?: string
-  traces?: Record<string, unknown>
-  detachments?: Record<string, unknown>
-  summary?: Record<string, unknown>
-  swarm_proof?: Record<string, unknown> | null
-}
-
-export interface DashboardProofResponse {
-  schema_version?: string
-  generated_at?: string
-  namespace?: Record<string, unknown>
-  room?: Record<string, unknown>
-  selection?: DashboardProofSelection
-  session_id?: string | null
-  operation_id?: string | null
-  proof_verdict?: DashboardProofVerdict
-  summary?: DashboardProofSummary
-  timeline?: DashboardProofTimelineItem[]
-  actor_contributions?: DashboardProofActorContribution[]
-  goal_binding?: Record<string, unknown>
-  tool_evidence?: DashboardProofToolEvidence[]
-  worker_run_evidence?: DashboardProofWorkerRunEvidence[]
-  cp_backing_evidence?: DashboardProofBackingEvidence | null
-  artifacts?: DashboardProofArtifactRef[]
-  raw_proof?: Record<string, unknown> | null
 }
 
 export interface OperatorNamespaceSnapshot {

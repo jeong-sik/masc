@@ -275,11 +275,6 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_mission_briefing_http_json ~state ~sw ~clock req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let json = dashboard_proof_http_json ~state req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/surface-readiness" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let surface_id = Server_utils.query_param req "surface_id" in

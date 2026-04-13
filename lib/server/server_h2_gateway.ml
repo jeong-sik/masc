@@ -606,11 +606,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
-      | `GET, "/api/v1/dashboard/proof" ->
-          let state = get_server_state () in
-          let json = dashboard_proof_http_json ~state httpun_request in
-          h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
-
       | `GET, "/api/v1/dashboard/transport-health" ->
           let state = get_server_state () in
           let json =

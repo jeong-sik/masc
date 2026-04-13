@@ -347,12 +347,6 @@ let test_root_redirect_contracts () =
 
 
 let test_dashboard_component_split_contracts () =
-  check bool "proof view imports proof helpers" true
-    (file_contains_pattern "dashboard/src/components/proof.ts"
-       {|from './proof-helpers'|});
-  check bool "proof view imports proof sections" true
-    (file_contains_pattern "dashboard/src/components/proof.ts"
-       {|from './proof-sections'|});
   check bool "proof helpers export verdict reasons" true
     (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
        "export function verdictReasonLines");

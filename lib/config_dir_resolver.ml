@@ -42,6 +42,54 @@ let trim_opt = Env_config_core.trim_opt
 let existing_dir = Env_config_core.existing_dir
 let existing_file = Env_config_core.existing_file
 
+let running_under_test_executable executable_name =
+  executable_name
+  |> Filename.basename
+  |> String.lowercase_ascii
+  |> String.starts_with ~prefix:"test_"
+
+let allow_inherited_test_config_paths () =
+  Env_config_core.get_bool ~default:false
+    "MASC_TEST_ALLOW_INHERITED_CONFIG_PATHS"
+
+let initial_env_config_dir = Env_config_core.config_dir_opt ()
+let initial_env_personas_dir = Env_config_core.personas_dir_opt ()
+let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
+
+let sanitize_inherited_test_env_opt ~running_under_test_executable ~allow_inherited
+    ~initial ~current =
+  if running_under_test_executable && not allow_inherited then
+    match current, initial with
+    | Some current_value, Some initial_value
+      when String.equal current_value initial_value -> None
+    | _ -> current
+  else
+    current
+
+let current_env_config_dir_opt () =
+  sanitize_inherited_test_env_opt
+    ~running_under_test_executable:
+      (running_under_test_executable Sys.executable_name)
+    ~allow_inherited:(allow_inherited_test_config_paths ())
+    ~initial:initial_env_config_dir
+    ~current:(Env_config_core.config_dir_opt ())
+
+let current_env_personas_dir_opt () =
+  sanitize_inherited_test_env_opt
+    ~running_under_test_executable:
+      (running_under_test_executable Sys.executable_name)
+    ~allow_inherited:(allow_inherited_test_config_paths ())
+    ~initial:initial_env_personas_dir
+    ~current:(Env_config_core.personas_dir_opt ())
+
+let current_env_home_opt () =
+  sanitize_inherited_test_env_opt
+    ~running_under_test_executable:
+      (running_under_test_executable Sys.executable_name)
+    ~allow_inherited:(allow_inherited_test_config_paths ())
+    ~initial:initial_env_home
+    ~current:(Sys.getenv_opt "HOME" |> trim_opt)
+
 let absolute_path path =
   if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
@@ -237,9 +285,9 @@ let inputs_from_env () =
     cwd = Sys.getcwd ();
     executable_name = Sys.executable_name;
     env_base_path = Env_config_core.base_path_opt ();
-    env_config_dir = Env_config_core.config_dir_opt ();
-    env_personas_dir = Env_config_core.personas_dir_opt ();
-    env_home = Sys.getenv_opt "HOME";
+    env_config_dir = current_env_config_dir_opt ();
+    env_personas_dir = current_env_personas_dir_opt ();
+    env_home = current_env_home_opt ();
   }
 
 let resolve_with inputs =

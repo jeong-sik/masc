@@ -75,6 +75,35 @@ let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
       env_home;
     }
 
+let test_sanitize_inherited_test_env_opt_drops_inherited_value () =
+  let actual =
+    Lib.Config_dir_resolver.sanitize_inherited_test_env_opt
+      ~running_under_test_executable:true ~allow_inherited:false
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+  in
+  check (option string) "same inherited value ignored" None actual
+
+let test_sanitize_inherited_test_env_opt_keeps_runtime_override () =
+  let actual =
+    Lib.Config_dir_resolver.sanitize_inherited_test_env_opt
+      ~running_under_test_executable:true ~allow_inherited:false
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~current:(Some "/tmp/test-config-root")
+  in
+  check (option string) "runtime override preserved"
+    (Some "/tmp/test-config-root") actual
+
+let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
+  let actual =
+    Lib.Config_dir_resolver.sanitize_inherited_test_env_opt
+      ~running_under_test_executable:true ~allow_inherited:true
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+  in
+  check (option string) "opt-in preserves inherited value"
+    (Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config") actual
+
 let test_env_override_valid () =
   with_temp_dir "config-dir-env" @@ fun root ->
   let config = make_config_root root in
@@ -307,5 +336,14 @@ let () =
             test_personas_dirs_env_override_is_sole_source;
           test_case "ignores base_path .masc/personas fallback" `Quick
             test_personas_dirs_ignores_base_path_fallback;
+        ] );
+      ( "test_env_sanitization",
+        [
+          test_case "drops inherited config env by default" `Quick
+            test_sanitize_inherited_test_env_opt_drops_inherited_value;
+          test_case "keeps runtime override" `Quick
+            test_sanitize_inherited_test_env_opt_keeps_runtime_override;
+          test_case "opt-in preserves inherited value" `Quick
+            test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in;
         ] );
     ]

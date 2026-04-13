@@ -59,7 +59,7 @@ let test_mint_with_failure () =
 (* ================================================================ *)
 
 let test_token_name_readable () =
-  match Tool_token.mint ~tbl:full_tbl ~name:"masc_heartbeat" with
+  match Tool_token.mint_with ~validate:(Hashtbl.mem full_tbl) ~name:"masc_heartbeat" with
   | Ok token ->
     (* Private type: fields are readable *)
     check string "name field" "masc_heartbeat" token.name;

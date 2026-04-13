@@ -55,6 +55,7 @@ import { SessionTraceView } from './session-trace/session-trace-view'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
+import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -559,6 +560,9 @@ export function KeeperDetailOverlay() {
         <${InferenceTelemetryPanel} keeper=${keeper} />
         ${'' /* ── Per-keeper tool telemetry ── */}
         <${KeeperToolTelemetry} keeperName=${keeper.name} />
+
+        ${'' /* ── Eval Quality (RFC-MASC-005 Phase 3) ── */}
+        <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />

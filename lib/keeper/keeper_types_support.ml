@@ -57,6 +57,20 @@ let keeper_session_dir config trace_id =
 let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"
 
+let keeper_internal_history_path config trace_id =
+  Filename.concat (keeper_session_dir config trace_id) "history.internal.jsonl"
+
+let normalize_history_source (source : string) =
+  source |> String.trim |> String.lowercase_ascii
+
+let is_prompt_history_source (source : string) =
+  String.equal (normalize_history_source source) "world_state_prompt"
+
+let is_internal_history_source (source : string) =
+  match normalize_history_source source with
+  | "world_state_prompt" | "internal_assistant" -> true
+  | _ -> false
+
 let keeper_policy_log_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".policy.jsonl")
 

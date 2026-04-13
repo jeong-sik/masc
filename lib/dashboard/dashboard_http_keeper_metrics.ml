@@ -309,11 +309,15 @@ let keeper_history_summary_json
         let role = Safe_ops.json_string ~default:"" "role" j |> String.trim in
         let role_lc = String.lowercase_ascii role in
         let content = Safe_ops.json_string ~default:"" "content" j |> String.trim in
+        let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
         let ts_unix =
           let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
           if ts0 > 0.0 then ts0 else Safe_ops.json_float ~default:0.0 "timestamp" j
         in
-        if role = "" || content = "" then
+        if role = "" || content = ""
+           || Keeper_types.is_internal_history_source source
+           || Keeper_context_core.has_world_state_signature content
+        then
           (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
         else
           let is_fragment =

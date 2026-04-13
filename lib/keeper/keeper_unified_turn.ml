@@ -1124,6 +1124,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
+  (* 0. Phase gate + state-aware cascade routing *)
   let registry_base_path = config.base_path in
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
@@ -1131,9 +1132,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         "%s: unified turn skipped in non-executable phase=%s"
         meta.name (Keeper_state_machine.phase_to_string phase);
       Ok meta
-  | _ ->
+  | phase_opt ->
+      (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade) *)
+      let effective_cascade_name =
+        let phase = match phase_opt with
+          | Some p -> p
+          | None ->
+              Log.Keeper.warn "%s: registry phase lookup returned None, defaulting to Failing"
+                meta.name;
+              Keeper_state_machine.Failing
+        in
+        let routing = Keeper_cascade_routing.select_cascade
+          ~base_cascade:meta.cascade_name ~phase
+        in
+        Log.Keeper.debug "%s: cascade routing: %s -> %s (reason: %s)"
+          meta.name meta.cascade_name routing.effective_cascade routing.reason;
+        routing.effective_cascade
+      in
       (* 1. Check API keys *)
-      let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
+      let meta_for_cascade = { meta with cascade_name = effective_cascade_name } in
+      let model_labels = Keeper_coordination.effective_model_labels_for_turn meta_for_cascade in
       match ensure_api_keys_for_labels model_labels with
       | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
@@ -1171,13 +1189,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
-          ~cascade_name:meta.cascade_name
+          ~cascade_name:effective_cascade_name
           ~fallback:Keeper_config.keeper_unified_temperature
       in
       let max_tokens =
-        Cascade_inference.resolve_max_tokens
-          ~cascade_name:meta.cascade_name
+        let raw = Cascade_inference.resolve_max_tokens
+          ~cascade_name:effective_cascade_name
           ~fallback:Keeper_config.keeper_unified_max_tokens
+        in
+        (* Capability gate: clamp to provider ceiling (TLA+ S3) *)
+        Cascade_inference.clamp_max_tokens_to_ceiling
+          ~provider_ceiling:(Some max_context) raw
       in
       (* max_turns: defer to OAS default (Types.default_agent_config.max_turns).
          MASC does not hardcode agent runtime budgets. *)
@@ -1241,7 +1263,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
-              ~user_message ~cascade_name:meta.cascade_name
+              ~user_message ~cascade_name:effective_cascade_name
               ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
               ~generation:run_generation
               ~max_idle_turns
@@ -1346,7 +1368,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   let delay = transient_backoff_sec attempt in
                   Log.Keeper.warn
                     "%s: transient network error cascade=%s max_context=%d retry=%d/%d backoff=%.0fs: %s"
-                    meta.name meta.cascade_name max_context
+                    meta.name effective_cascade_name max_context
                     attempt max_transient_retries delay
                     (short_preview (Oas.Error.to_string err));
                   Eio.Time.sleep clock delay;
@@ -1456,7 +1478,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
-            meta.name meta.cascade_name max_context latency_ms
+            meta.name effective_cascade_name max_context latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
              else if is_server_parse_rejection then
@@ -1554,7 +1576,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             let used = strip_latest result.model_used in
             let cascade_models =
-              Oas_model_resolve.models_of_cascade_name meta.cascade_name
+              Oas_model_resolve.models_of_cascade_name effective_cascade_name
             in
             let cfgs =
               Llm_provider.Cascade_config.parse_model_strings cascade_models

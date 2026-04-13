@@ -585,6 +585,254 @@ let make_test_checkpoint ?(session_id = "old-session")
     working_context = None;
   }
 
+let contaminated_world_state_text =
+  "## Current World State\n\n\
+   ### Namespace State\n- Unclaimed tasks: 22\n- Active agents: 6\n\n\
+   ### Available Tools\n- keeper_board_list\n- keeper_task_claim\n\n\
+   ### Continuity\nGoal: keep going\nDone: none\n"
+
+let contaminated_user_message ?(prompt = "짧게 ping만 해봐") () :
+    Agent_sdk.Types.message =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.User;
+    content =
+      [
+        Agent_sdk.Types.Text prompt;
+        Agent_sdk.Types.Text contaminated_world_state_text;
+        Agent_sdk.Types.Text ("[system context] " ^ contaminated_world_state_text);
+      ];
+    name = None;
+    tool_call_id = None;
+  }
+
+let oversized_checkpoint_text =
+  String.make 20_000 'x'
+
+let oversized_user_message ?(prompt = "긴 텍스트도 저장되면 안 돼") () :
+    Agent_sdk.Types.message =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.User;
+    content =
+      [
+        Agent_sdk.Types.Text prompt;
+        Agent_sdk.Types.Text oversized_checkpoint_text;
+      ];
+    name = None;
+    tool_call_id = None;
+  }
+
+let summarized_contaminated_text =
+  "[Summary of 2 earlier messages]\n\
+   [User] ## Current World State\n\n\
+   ### Namespace State\n- Unclaimed tasks: 22\n\n\
+   ### Available Tools\n- keeper_board_list\n\n\
+   ### Continuity\nGoal: keep going\nDone: none\n\
+   [Assistant] 이 줄은 남아야 한다.\n"
+
+let summarized_contaminated_message () : Agent_sdk.Types.message =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.User;
+    content = [Agent_sdk.Types.Text summarized_contaminated_text];
+    name = None;
+    tool_call_id = None;
+  }
+
+let test_persist_message_drops_world_state_and_separates_internal_history () =
+  let base_dir = temp_dir "keeper_lifecycle_history_split" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-history-split" ~base_dir
+      in
+      KEC.persist_message
+        ~source:"direct_user"
+        session
+        (Agent_sdk.Types.user_msg "real conversation");
+      KEC.persist_message
+        ~source:"world_state_prompt"
+        session
+        (Agent_sdk.Types.user_msg contaminated_world_state_text);
+      KEC.persist_message
+        ~source:"internal_assistant"
+        session
+        (Agent_sdk.Types.assistant_msg "internal reply");
+      let main_history =
+        Fs_compat.load_file
+          (Filename.concat session.session_dir "history.jsonl")
+      in
+      let internal_history =
+        Fs_compat.load_file
+          (Filename.concat session.session_dir "history.internal.jsonl")
+      in
+      check bool "main history keeps direct conversation" true
+        (contains_substring main_history "real conversation");
+      check bool "main history excludes world state prompt" false
+        (contains_substring main_history "Current World State");
+      check bool "main history excludes internal assistant" false
+        (contains_substring main_history "internal reply");
+      check bool "internal history drops world state prompt" false
+        (contains_substring internal_history "Current World State");
+      check bool "internal history stores internal assistant" true
+        (contains_substring internal_history "internal reply"))
+
+let test_migrate_session_history_logs_moves_internal_entries () =
+  let base_dir = temp_dir "keeper_lifecycle_history_migrate" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-history-migrate" ~base_dir
+      in
+      let history_path = Filename.concat session.session_dir "history.jsonl" in
+      let internal_history_path =
+        Filename.concat session.session_dir "history.internal.jsonl"
+      in
+      let payload =
+        String.concat "\n"
+          [
+            {|{"role":"user","content":"real conversation"}|};
+            {|{"role":"user","source":"world_state_prompt","content":"## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
+            {|{"role":"assistant","source":"internal_assistant","content":"internal reply"}|};
+            {|{"role":"user","content":"[Summary]\n[User] ## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
+          ]
+        ^ "\n"
+      in
+      Fs_compat.save_file history_path payload;
+      Fs_compat.save_file
+        internal_history_path
+        (String.concat "\n"
+           [
+             {|{"role":"user","source":"world_state_prompt","content":"## Current World State\n\n### Namespace State\n- Unclaimed tasks: 9\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
+             {|{"role":"assistant","source":"internal_assistant","content":"existing internal reply"}|};
+           ]
+         ^ "\n");
+      let stats =
+        KCC.migrate_session_history_logs ~session_dir:session.session_dir
+      in
+      check int "moved internal lines" 1 stats.moved_lines;
+      check int "dropped prompt lines" 3 stats.dropped_lines;
+      let main_history = Fs_compat.load_file history_path in
+      let internal_history =
+        Fs_compat.load_file internal_history_path
+      in
+      check bool "main history keeps real conversation" true
+        (contains_substring main_history "real conversation");
+      check bool "main history excludes world state" false
+        (contains_substring main_history "Current World State");
+      check bool "main history excludes internal assistant" false
+        (contains_substring main_history "internal reply");
+      check bool "internal history drops world state" false
+        (contains_substring internal_history "Current World State");
+      check bool "internal history keeps moved internal assistant" true
+        (contains_substring internal_history "internal reply"))
+
+let test_save_oas_checkpoint_strips_ephemeral_world_state () =
+  let base_dir = temp_dir "keeper_lifecycle_save_strip" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-strip" ~base_dir
+      in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx -> KEC.append ctx (contaminated_user_message ())
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:120
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          check int "saved message count" 1
+            (List.length checkpoint.messages);
+          let text =
+            Agent_sdk.Types.text_of_message (List.hd checkpoint.messages)
+          in
+          check bool "preserves actual prompt" true
+            (contains_substring text "짧게 ping만 해봐");
+          check bool "drops world state snapshot" false
+            (contains_substring text "Current World State"))
+
+let test_save_oas_checkpoint_caps_oversized_text () =
+  let base_dir = temp_dir "keeper_lifecycle_save_cap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-cap" ~base_dir
+      in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx -> KEC.append ctx (oversized_user_message ())
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:120
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          let text =
+            Agent_sdk.Types.text_of_message (List.hd checkpoint.messages)
+          in
+          check bool "keeps prompt prefix" true
+            (contains_substring text "긴 텍스트도 저장되면 안 돼");
+          check bool "adds truncation marker" true
+            (contains_substring text "[capped]");
+          check bool "text was compacted" true
+            (String.length text < String.length oversized_checkpoint_text))
+
+let test_save_oas_checkpoint_strips_summarized_world_state () =
+  let base_dir = temp_dir "keeper_lifecycle_save_summary_strip" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-summary-strip" ~base_dir
+      in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx -> KEC.append ctx (summarized_contaminated_message ())
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:120
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          let text =
+            Agent_sdk.Types.text_of_message (List.hd checkpoint.messages)
+          in
+          check bool "drops embedded world state from summary" false
+            (contains_substring text "Current World State");
+          check bool "preserves assistant summary text" true
+            (contains_substring text "이 줄은 남아야 한다."))
+
 let test_patch_checkpoint_replaces_last_assistant () =
   let msgs =
     [ Agent_sdk.Types.user_msg "hello";
@@ -643,6 +891,172 @@ let test_patch_checkpoint_no_assistant_noop () =
   check int "message count unchanged" 1 (List.length patched.messages);
   let text = Agent_sdk.Types.text_of_message (List.hd patched.messages) in
   check string "user msg unchanged" "only user" text
+
+let test_patch_checkpoint_strips_ephemeral_world_state () =
+  let msgs =
+    [
+      contaminated_user_message ~prompt:"지금 상태 한 줄로만 말해." ();
+      Agent_sdk.Types.assistant_msg "raw response";
+    ]
+  in
+  let cp = make_test_checkpoint msgs in
+  let patched =
+    KCC.patch_checkpoint_last_assistant cp
+      ~session_id:"patched-session"
+      ~response_text:"clean response"
+  in
+  let first_text = Agent_sdk.Types.text_of_message (List.hd patched.messages) in
+  check bool "keeps user prompt" true
+    (contains_substring first_text "지금 상태 한 줄로만 말해.");
+  check bool "removes world state from prior user message" false
+    (contains_substring first_text "Current World State")
+
+let test_load_context_migrates_ephemeral_world_state_checkpoint () =
+  let base_dir = temp_dir "keeper_lifecycle_load_migrate" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-migrate" in
+      let session = KEC.create_session ~session_id:trace_id ~base_dir in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [ contaminated_user_message ~prompt:"짧게 ping만 해봐" () ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "seed save_oas failed: %s" e));
+      let loaded_opt = load_context ~base_dir ~trace_id ~max_tokens:64_000 in
+      let loaded =
+        match loaded_opt with
+        | Some ctx -> ctx
+        | None -> Alcotest.fail "expected migrated context"
+      in
+      let loaded_text =
+        String.concat "\n"
+          (List.map Agent_sdk.Types.text_of_message loaded.messages)
+      in
+      check bool "loaded prompt preserved" true
+        (contains_substring loaded_text "짧게 ping만 해봐");
+      check bool "loaded world state removed" false
+        (contains_substring loaded_text "Current World State");
+      match
+        Masc_mcp.Keeper_checkpoint_store.load_oas
+          ~session_dir:session.session_dir
+          ~session_id:trace_id
+      with
+      | Error _ -> Alcotest.fail "expected migrated checkpoint on disk"
+      | Ok migrated ->
+          let migrated_text =
+            String.concat "\n"
+              (List.map Agent_sdk.Types.text_of_message migrated.messages)
+          in
+          check bool "migrated checkpoint persists cleanup" false
+            (contains_substring migrated_text "Current World State"))
+
+let test_load_context_migrates_oversized_text_checkpoint () =
+  let base_dir = temp_dir "keeper_lifecycle_load_cap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-cap" in
+      let session = KEC.create_session ~session_id:trace_id ~base_dir in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [ oversized_user_message ~prompt:"짧게 요약해" () ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "seed save_oas failed: %s" e));
+      let loaded_opt = load_context ~base_dir ~trace_id ~max_tokens:64_000 in
+      let loaded =
+        match loaded_opt with
+        | Some ctx -> ctx
+        | None -> Alcotest.fail "expected migrated capped context"
+      in
+      let loaded_text =
+        String.concat "\n"
+          (List.map Agent_sdk.Types.text_of_message loaded.messages)
+      in
+      check bool "loaded prompt preserved" true
+        (contains_substring loaded_text "짧게 요약해");
+      check bool "loaded checkpoint capped" true
+        (contains_substring loaded_text "[capped]");
+      check bool "loaded text reduced" true
+        (String.length loaded_text < String.length oversized_checkpoint_text);
+      match
+        Masc_mcp.Keeper_checkpoint_store.load_oas
+          ~session_dir:session.session_dir
+          ~session_id:trace_id
+      with
+      | Error _ -> Alcotest.fail "expected capped checkpoint on disk"
+      | Ok migrated ->
+          let migrated_text =
+            String.concat "\n"
+              (List.map Agent_sdk.Types.text_of_message migrated.messages)
+          in
+          check bool "migrated checkpoint persists cap" true
+            (contains_substring migrated_text "[capped]");
+          check bool "migrated text reduced" true
+            (String.length migrated_text < String.length oversized_checkpoint_text))
+
+let test_load_context_migrates_summarized_world_state_checkpoint () =
+  let base_dir = temp_dir "keeper_lifecycle_load_summary_strip" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-summary-strip" in
+      let session = KEC.create_session ~session_id:trace_id ~base_dir in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [ summarized_contaminated_message () ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "seed save_oas failed: %s" e));
+      let loaded_opt = load_context ~base_dir ~trace_id ~max_tokens:64_000 in
+      let loaded =
+        match loaded_opt with
+        | Some ctx -> ctx
+        | None -> Alcotest.fail "expected migrated summarized context"
+      in
+      let loaded_text =
+        String.concat "\n"
+          (List.map Agent_sdk.Types.text_of_message loaded.messages)
+      in
+      check bool "loaded summary drops world state" false
+        (contains_substring loaded_text "Current World State");
+      check bool "loaded summary keeps assistant text" true
+        (contains_substring loaded_text "이 줄은 남아야 한다.");
+      match
+        Masc_mcp.Keeper_checkpoint_store.load_oas
+          ~session_dir:session.session_dir
+          ~session_id:trace_id
+      with
+      | Error _ -> Alcotest.fail "expected migrated summary checkpoint on disk"
+      | Ok migrated ->
+          let migrated_text =
+            String.concat "\n"
+              (List.map Agent_sdk.Types.text_of_message migrated.messages)
+          in
+          check bool "migrated summary strips world state" false
+            (contains_substring migrated_text "Current World State");
+          check bool "migrated summary keeps assistant text" true
+            (contains_substring migrated_text "이 줄은 남아야 한다."))
 
 (* Regression tests for compaction gate fixes introduced in #5599:
    - ts=0.0 must not block compaction via the cooldown gate
@@ -799,6 +1213,18 @@ let () =
         ] );
       ( "checkpoint_patch",
         [
+          test_case
+            "persist_message drops world state and separates internal history"
+            `Quick
+            test_persist_message_drops_world_state_and_separates_internal_history;
+          test_case "migrate_session_history_logs moves internal entries" `Quick
+            test_migrate_session_history_logs_moves_internal_entries;
+          test_case "save strips ephemeral world state" `Quick
+            test_save_oas_checkpoint_strips_ephemeral_world_state;
+          test_case "save caps oversized text" `Quick
+            test_save_oas_checkpoint_caps_oversized_text;
+          test_case "save strips summarized world state" `Quick
+            test_save_oas_checkpoint_strips_summarized_world_state;
           test_case "patch replaces last assistant text" `Quick
             test_patch_checkpoint_replaces_last_assistant;
           test_case "patch preserves non-assistant messages" `Quick
@@ -807,6 +1233,14 @@ let () =
             test_patch_checkpoint_updates_session_id;
           test_case "patch with no assistant is noop" `Quick
             test_patch_checkpoint_no_assistant_noop;
+          test_case "patch strips ephemeral world state" `Quick
+            test_patch_checkpoint_strips_ephemeral_world_state;
+          test_case "load migrates ephemeral world state checkpoint" `Quick
+            test_load_context_migrates_ephemeral_world_state_checkpoint;
+          test_case "load migrates oversized text checkpoint" `Quick
+            test_load_context_migrates_oversized_text_checkpoint;
+          test_case "load migrates summarized world state checkpoint" `Quick
+            test_load_context_migrates_summarized_world_state_checkpoint;
         ] );
       ( "compact_policy",
         [

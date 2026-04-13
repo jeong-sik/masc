@@ -63,7 +63,11 @@ let initial_max_concurrent_of_env getenv =
   in
   match parse_int "MASC_ADMISSION_MAX_CONCURRENT" with
   | Some n -> max 1 n
-  | None -> 4
+  | None ->
+      (* Default 1: Ollama MLX decode is serial regardless of
+         OLLAMA_NUM_PARALLEL (prefill pipelining, not decode).
+         Override with MASC_ADMISSION_MAX_CONCURRENT for multi-GPU. *)
+      1
 
 let global : t = {
   max_slots = initial_max_concurrent_of_env Sys.getenv_opt;

@@ -20,6 +20,7 @@ export type SurfaceSectionId =
   | 'fleet'
   | 'connectors'
   | 'memory-subsystems'
+  | 'metrics'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -156,6 +157,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '기억 서브시스템',
       description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
       params: { section: 'memory-subsystems' },
+    },
+    {
+      id: 'metrics',
+      label: 'Prometheus',
+      description: 'counter, gauge, summary 원시 메트릭 (/metrics endpoint).',
+      params: { section: 'metrics' },
     },
   ],
   command: [

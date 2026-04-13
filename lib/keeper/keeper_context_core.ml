@@ -682,16 +682,18 @@ let sanitize_checkpoint_message
                    > default_max_checkpoint_tool_result_total_chars
              then
                (* Over count or aggregate budget: stub the result *)
+               let stub_content = "[tool result cleared]" in
                let stub =
                  Agent_sdk.Types.ToolResult
                    { tool_use_id;
-                     content = "[tool result cleared]";
+                     content = stub_content;
                      is_error;
                      json = None }
                in
                ( stub :: kept_rev,
                  kept_text_blocks, kept_text_chars,
-                 kept_tool_results + 1, kept_tool_result_chars,
+                 kept_tool_results + 1,
+                 kept_tool_result_chars + String.length stub_content,
                  add_checkpoint_sanitize_stats stats
                    { empty_checkpoint_sanitize_stats with
                      dropped_blocks = 1;

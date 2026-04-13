@@ -857,6 +857,59 @@ let test_sanitize_checkpoint_message_caps_oversized_tool_result () =
        | _ -> fail "expected a single capped ToolResult block");
       check int "tool result truncation recorded" 1 stats.truncated_blocks
 
+let test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget () =
+  let oversized = String.make 190_000 'z' in
+  let msg =
+    {
+      Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+      content =
+        [
+          Agent_sdk.Types.ToolResult
+            {
+              tool_use_id = "tool-agg-1";
+              content = oversized;
+              is_error = false;
+              json = None;
+            };
+          Agent_sdk.Types.ToolResult
+            {
+              tool_use_id = "tool-agg-2";
+              content = oversized;
+              is_error = false;
+              json = None;
+            };
+          Agent_sdk.Types.ToolResult
+            {
+              tool_use_id = "tool-agg-3";
+              content = oversized;
+              is_error = false;
+              json = None;
+            };
+        ];
+      name = None;
+      tool_call_id = None;
+    }
+  in
+  match KCC.sanitize_checkpoint_message msg with
+  | None, _ -> fail "expected aggregate-budgeted tool results to survive"
+  | Some sanitized, stats ->
+      (match sanitized.content with
+       | [
+           Agent_sdk.Types.ToolResult { content = first; _ };
+           Agent_sdk.Types.ToolResult { content = second; _ };
+           Agent_sdk.Types.ToolResult { content = third; _ };
+         ] ->
+           check bool "first tool result truncated" true
+             (contains_substring first KCC.checkpoint_text_cap_marker);
+           check bool "second tool result truncated" true
+             (contains_substring second KCC.checkpoint_text_cap_marker);
+           check string "aggregate overflow gets stubbed"
+             "[tool result cleared]" third
+       | _ -> fail "expected three ToolResult blocks after aggregate cap");
+      check int "aggregate cap records truncated blocks" 2
+        stats.truncated_blocks;
+      check int "aggregate cap records dropped block" 1 stats.dropped_blocks
+
 let test_save_oas_checkpoint_stubs_old_tool_results () =
   let base_dir = temp_dir "keeper_lifecycle_save_tool_stub" in
   Fun.protect
@@ -911,8 +964,12 @@ let test_save_oas_checkpoint_stubs_old_tool_results () =
           (match old_saved with
            | None -> fail "expected old tool result in saved checkpoint"
            | Some content ->
-               check bool "old tool result is stubbed" true
-                 (String.starts_with ~prefix:"[tool: list_files," content));
+               check bool "old tool result is compacted" true
+                 (not (String.equal old_output content));
+               check bool "old tool result stays structured" true
+                 (String.starts_with ~prefix:"[tool:" content);
+               check bool "old tool result keeps tool name" true
+                 (contains_substring content "list_files"));
           (match recent_saved with
            | None -> fail "expected recent tool result in saved checkpoint"
            | Some content ->
@@ -1344,6 +1401,8 @@ let () =
             test_save_oas_checkpoint_caps_oversized_text;
           test_case "save caps oversized tool result" `Quick
             test_sanitize_checkpoint_message_caps_oversized_tool_result;
+          test_case "save caps aggregate tool result budget" `Quick
+            test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget;
           test_case "save stubs old tool results" `Quick
             test_save_oas_checkpoint_stubs_old_tool_results;
           test_case "save strips summarized world state" `Quick

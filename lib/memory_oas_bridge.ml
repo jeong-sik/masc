@@ -141,17 +141,16 @@ let load_all_episodes_cached () =
         Hashtbl.replace episode_file_cache_tbl path fresh);
       fresh
 
+let rec drop_list n = function
+  | [] -> []
+  | remaining when n <= 0 -> remaining
+  | _ :: rest -> drop_list (n - 1) rest
+
 let cached_recent_episodes ~limit =
   let cache = load_all_episodes_cached () in
   let total = List.length cache.episodes in
   if total <= limit then cache.episodes
-  else
-    let rec drop n = function
-      | [] -> []
-      | remaining when n <= 0 -> remaining
-      | _ :: rest -> drop (n - 1) rest
-    in
-    drop (total - limit) cache.episodes
+  else drop_list (total - limit) cache.episodes
 
 (* Record an episode that was just appended to the JSONL file.
 
@@ -180,14 +179,14 @@ let note_episode_flush (episode : Institution_eio.episode) =
         let episodes =
           if total > episode_cache_limit then
             let drop_n = total - episode_cache_limit in
-            let rec drop n = function
+            let rec drop_with_evict n = function
               | [] -> []
               | remaining when n <= 0 -> remaining
               | (ep : Institution_eio.episode) :: rest ->
                   Hashtbl.remove cache.ids ep.id;
-                  drop (n - 1) rest
+                  drop_with_evict (n - 1) rest
             in
-            drop drop_n episodes
+            drop_with_evict drop_n episodes
           else
             episodes
         in
@@ -256,14 +255,18 @@ let create_memory ~(agent_name : string) ?(base_dir : string option)
   let backend = make_backend ?base_dir ~agent_name ~session_id:sid () in
   Agent_sdk.Memory.create ~long_term:backend ()
 
+(** Load and return the institution welcome text, or [None] when empty.
+    Shared by [institution_as_json] and [load_institution_text]. *)
+let read_institution_welcome (config : Room_utils.config) : string option =
+  let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
+  if welcome = "" then None else Some welcome
+
 (** Format institutional memory as a JSON value suitable for
     [Memory.store ~tier:Long_term "institution" value].
 
     Loads from institution.json if present, returns None otherwise. *)
 let institution_as_json (config : Room_utils.config) : Yojson.Safe.t option =
-  let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
-  if welcome = "" then None
-  else Some (`String welcome)
+  Option.map (fun w -> `String w) (read_institution_welcome config)
 
 (** Pre-seed institutional memory into a [Memory.t] instance.
 
@@ -436,9 +439,8 @@ let persisted_episode_ids () =
 
     Loads recent institution episodes from JSONL and projects them into
     OAS episodic memory. *)
-let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
+let seed_episodes ~(memory : Agent_sdk.Memory.t)
     ~(limit : int) : int =
-  ignore agent_name;
   let episodes = cached_recent_episodes ~limit in
   List.iter
     (fun episode ->
@@ -634,8 +636,7 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
     Pure read: does not touch OAS [Memory.t].
 
     @since v2.265.0 (RFC-MASC-004 Phase 1) *)
-let load_episodes_text ~(agent_name : string) ~(limit : int) : string option =
-  ignore agent_name;
+let load_episodes_text ~(limit : int) : string option =
   let episodes = cached_recent_episodes ~limit in
   match episodes with
   | [] -> None
@@ -672,9 +673,9 @@ let load_procedures_text ~(agent_name : string) ~(limit : int) : string option =
 
     @since v2.265.0 (RFC-MASC-004 Phase 1) *)
 let load_institution_text ~(config : Room_utils.config) : string option =
-  let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
-  if welcome = "" then None
-  else Some (Printf.sprintf "[institutional memory]\n%s" welcome)
+  Option.map
+    (fun w -> Printf.sprintf "[institutional memory]\n%s" w)
+    (read_institution_welcome config)
 
 (** Incrementally flush episodes and procedures after a single turn.
 
@@ -722,7 +723,7 @@ let create_memory_full ~(agent_name : string)
   in
   let memory = create_memory ~agent_name ?base_dir ?session_id () in
   let _episode_count =
-    seed_episodes ~memory ~agent_name ~limit:episode_limit
+    seed_episodes ~memory ~limit:episode_limit
   in
   (* Procedural tier *)
   let _proc_count =

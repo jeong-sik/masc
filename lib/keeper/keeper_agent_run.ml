@@ -1545,11 +1545,12 @@ let run_turn
            checkpoint messages and returns empty — causing keepers to lose
            context across turns.  See #5431. *)
        (* When hook-first is enabled, AfterTurn hooks already flush
-          incrementally on every turn. Final flush here catches any
-          remaining data from the last turn (AfterTurn fires before
-          Agent.run returns the result).
+          incrementally on every turn. Skip the redundant final flush
+          since flush_incremental is idempotent and the AfterTurn hook
+          already ran for the last turn before Agent.run returned.
           When hook-first is disabled, this is the only flush point. *)
-       let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
+       if not memory_hook_first then
+         ignore (Memory_oas_bridge.flush_all ~memory ~agent_name);
        let text = Agent_sdk.Types.text_of_content result.response.content in
        let model = result.response.model in
        (* Extract and persist thinking blocks to trajectory JSONL.

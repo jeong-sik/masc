@@ -482,7 +482,7 @@ let test_seed_episodes_loads_recent_jsonl () =
       ~learnings:["rollback path healthy"]
   in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-seed" () in
-  let count = Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-seed" ~limit:10 in
+  let count = Memory_oas_bridge.seed_episodes ~memory ~limit:10 in
   Alcotest.(check int) "seed_episodes loads both records" 2 count;
   let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
   let ids = List.map (fun (episode : Oas.Memory.episode) -> episode.id) recalled in
@@ -514,7 +514,7 @@ let test_seed_episodes_respects_limit () =
        ~outcome:`Failure
        ~learnings:["inspect retry budget"]);
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-limit" () in
-  let count = Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-limit" ~limit:2 in
+  let count = Memory_oas_bridge.seed_episodes ~memory ~limit:2 in
   Alcotest.(check int) "seed_episodes limit applied" 2 count;
   let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
   Alcotest.(check int) "only 2 episodes recalled" 2 (List.length recalled);
@@ -531,7 +531,7 @@ let test_flush_episodes_appends_only_new_records () =
       ~learnings:["persist once"]
   in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
-  ignore (Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-flush" ~limit:10);
+  ignore (Memory_oas_bridge.seed_episodes ~memory ~limit:10);
   Oas.Memory.store_episode memory
     {
       Oas.Memory.id = "new-episode-id";
@@ -557,7 +557,7 @@ let test_flush_episodes_appends_only_new_records () =
   Alcotest.(check bool) "new record appended" true (List.mem "new-episode-id" ids);
   let memory_reseed = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
   let reseeded =
-    Memory_oas_bridge.seed_episodes ~memory:memory_reseed ~agent_name:"test-ep-flush"
+    Memory_oas_bridge.seed_episodes ~memory:memory_reseed
       ~limit:10
   in
   Alcotest.(check int) "reseed count stays deduped" 2 reseeded;

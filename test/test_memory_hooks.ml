@@ -48,7 +48,7 @@ let make_before_turn_params_event ?(extra_ctx = None) ~turn () =
 
 let test_load_episodes_text_empty () =
   (* No episodes cached -> None *)
-  let result = Memory_oas_bridge.load_episodes_text ~agent_name:"test" ~limit:10 in
+  let result = Memory_oas_bridge.load_episodes_text ~limit:10 in
   check (option string) "no episodes returns None" None result
 
 let test_load_procedures_text_empty () =

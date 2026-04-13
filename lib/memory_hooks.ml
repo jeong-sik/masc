@@ -32,7 +32,7 @@ let render_memory_context
     () : string option =
   let sections =
     [ Memory_oas_bridge.load_institution_text ~config
-    ; Memory_oas_bridge.load_episodes_text ~agent_name ~limit:episode_limit
+    ; Memory_oas_bridge.load_episodes_text ~limit:episode_limit
     ; Memory_oas_bridge.load_procedures_text ~agent_name ~limit:procedure_limit
     ]
     |> List.filter_map Fun.id

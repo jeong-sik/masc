@@ -30,7 +30,6 @@ let make_loop_memory (ctx : Tool_autoresearch_context.t)
   ignore
     (Memory_oas_bridge.seed_episodes
        ~memory
-       ~agent_name:autoresearch_lesson_agent_name
        ~limit:20);
   (* Load ALL procedures without threshold — autoresearch needs recent
      lessons that may not yet meet top_procedures' adaptive threshold. *)

@@ -1096,6 +1096,8 @@ let sync_keeper_presence
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->
+        Prometheus.inc_counter "masc_keeper_write_meta_failures_total"
+          ~labels:[("keeper", synced.name); ("phase", "heartbeat")] ();
         Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
         synced
     with
@@ -1261,6 +1263,8 @@ let run_keepalive_unified_turn
         match write_meta ctx.config meta_after_observe with
         | Ok () -> ()
         | Error e ->
+            Prometheus.inc_counter "masc_keeper_write_meta_failures_total"
+              ~labels:[("keeper", meta_after_observe.name); ("phase", "cursor_update")] ();
             Log.Keeper.warn "write_meta failed (message cursor update): %s" e);
       if Atomic.get stop
       then meta_after_triage
@@ -1973,7 +1977,10 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     let synced = ensure_keeper_room_presence ctx.config m in
     (match write_meta ctx.config synced with
      | Ok () -> ()
-     | Error e -> Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
+     | Error e ->
+       Prometheus.inc_counter "masc_keeper_write_meta_failures_total"
+         ~labels:[("keeper", synced.name); ("phase", "bootstrap")] ();
+       Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
     synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

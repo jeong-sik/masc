@@ -63,30 +63,32 @@ MASC는 OAS hook을 통해 memory를 주입한다. OAS가 제공하는 `BeforeTu
 
 ### Part A: Hook Registration
 
-keeper가 OAS agent를 생성할 때 hook을 등록한다:
+keeper가 OAS agent를 생성할 때 hook을 등록한다.
+
+**OAS Hook API 실측 결과 (2026-04-13)**: `BeforeTurnParams` hook은 `AdjustParams of turn_params`만 반환 가능. `Context.inject_memory` 같은 tier 직접 조작 API는 존재하지 않음. 유일한 injection point는 `turn_params.extra_system_context: string option`. 따라서 memory를 텍스트로 직렬화하여 system context에 주입하는 방식을 사용한다.
 
 ```ocaml
-(* keeper_hooks_oas.ml에서 *)
+(* memory_hooks.ml — 신규 모듈, 102줄 *)
 
-let memory_hooks ~bridge =
-  let before_turn_params = fun event ->
-    (* OAS가 turn 시작 전 호출 *)
-    let episodes = Memory_oas_bridge.load_episodes bridge in
-    let procedures = Memory_oas_bridge.load_procedures bridge in
-    (* AdjustParams로 context에 memory 주입 *)
-    AdjustParams {
-      event with
-      context = Context.inject_memory event.context
-        ~episodes ~procedures
-    }
+let render_memory_context ~bridge =
+  let episodes = Memory_oas_bridge.load_episodes_text bridge in
+  let procedures = Memory_oas_bridge.load_procedures_text bridge in
+  let institution = Memory_oas_bridge.load_institution_text bridge in
+  String.concat "\n" [episodes; procedures; institution]
+
+let make ~bridge =
+  let before_turn_params _event =
+    let memory_text = render_memory_context ~bridge in
+    AdjustParams { extra_system_context = Some memory_text }
   in
-  let after_turn = fun event ->
-    (* OAS가 turn 완료 후 호출 *)
-    Memory_oas_bridge.flush_incremental bridge event.response;
+  let after_turn _event =
+    Memory_oas_bridge.flush_incremental bridge;
     Continue
   in
-  Hooks.{ before_turn_params; after_turn; ... }
+  { before_turn_params; after_turn }
 ```
+
+**한계**: memory가 구조화된 tier(Episodic/Procedural)가 아닌 plain text로 주입되므로 OAS의 memory retrieval 기능(예: 관련성 기반 episode 선택)을 활용하지 못한다. 장기적으로 OAS에 `BeforeTurnParams`에서 Memory.t tier를 조작하는 API를 추가하는 것이 바람직하다.
 
 ### Part B: memory_oas_bridge.ml 리팩토링
 

@@ -1382,16 +1382,45 @@ let run_turn
   in
   let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
   let base_dir = Filename.concat config.base_path ".masc" in
+  let memory_hook_first =
+    Feature_flag_registry.get_bool "MASC_MEMORY_HOOK_FIRST"
+  in
   let memory =
-    Memory_oas_bridge.create_memory_full
-      ~agent_name
-      ~base_dir
-      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~config
-      ~episode_limit:30
-      ~procedure_limit:10
-      ~global_procedure_limit:5
-      ()
+    if memory_hook_first then
+      (* RFC-MASC-004: Hook-first path. Create bare memory (no seeding).
+         Memory content is injected via BeforeTurnParams hook instead of
+         imperatively pushing into OAS Memory.t tiers.
+         The memory instance is still needed for AfterTurn flush. *)
+      Memory_oas_bridge.create_memory
+        ~agent_name
+        ~base_dir
+        ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ()
+    else
+      (* Legacy path: imperative seeding into OAS Memory.t tiers *)
+      Memory_oas_bridge.create_memory_full
+        ~agent_name
+        ~base_dir
+        ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~config
+        ~episode_limit:30
+        ~procedure_limit:10
+        ~global_procedure_limit:5
+        ()
+  in
+  (* RFC-MASC-004: Compose memory hooks when hook-first is enabled.
+     Memory_hooks provides before_turn_params (text injection) and
+     after_turn (incremental flush). Composed as outermost layer so
+     memory context is available to all downstream hooks. *)
+  let hooks =
+    if memory_hook_first then
+      let mem_hooks =
+        Memory_hooks.make
+          ~agent_name ~config ~memory
+          ~episode_limit:30 ~procedure_limit:10 ()
+      in
+      Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
+    else hooks
   in
   let reducer =
     Agent_sdk.Context_reducer.compose [
@@ -1518,7 +1547,13 @@ let run_turn
            Without this, read_continuity_summary finds no [STATE] in the
            checkpoint messages and returns empty — causing keepers to lose
            context across turns.  See #5431. *)
-       let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
+       (* When hook-first is enabled, AfterTurn hooks already flush
+          incrementally on every turn. Skip the redundant final flush
+          since flush_incremental is idempotent and the AfterTurn hook
+          already ran for the last turn before Agent.run returned.
+          When hook-first is disabled, this is the only flush point. *)
+       if not memory_hook_first then
+         ignore (Memory_oas_bridge.flush_all ~memory ~agent_name);
        let text = Agent_sdk.Types.text_of_content result.response.content in
        let model = result.response.model in
        (* Extract and persist thinking blocks to trajectory JSONL.

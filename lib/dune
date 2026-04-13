@@ -197,6 +197,7 @@
    thompson_sampling
    memory_jsonl
    memory_oas_bridge
+   memory_hooks
    meta_cognition
    meta_cognition_types
    meta_cognition_rules

@@ -754,7 +754,15 @@ let shard_autoresearch : shard = {
   description = "Autonomous experiment loop: start, cycle, status, inject, stop";
 }
 
+(** Per-agent shard overrides.  Read-modify-write is serialised by
+    [agent_shards_mutex] so concurrent keeper setup calls cannot lose updates.
+
+    Callers on different domains are rare (keeper spin-up + persona load are
+    both on the main Eio domain), but nothing in the API prevents a future
+    executor-pool worker from calling these — Eio.Mutex keeps the contract
+    explicit either way. *)
 let agent_shards : string list StringMap.t ref = ref StringMap.empty
+let agent_shards_mutex = Eio.Mutex.create ()
 
 (** Default shards for a new keeper.
     All keepers get all shards unconditionally. Safety is handled by
@@ -771,11 +779,15 @@ let default_shard_names : string list = [
 ]
 
 let get_agent_shards (agent_name : string) : string list =
-  StringMap.find_opt agent_name !agent_shards
-  |> Option.value ~default:default_shard_names
+  Eio.Mutex.use_ro agent_shards_mutex (fun () ->
+    StringMap.find_opt agent_name !agent_shards
+    |> Option.value ~default:default_shard_names)
 
 let set_agent_shards (agent_name : string) (shards : string list) : unit =
-  agent_shards := StringMap.add agent_name (List.sort_uniq String.compare shards) !agent_shards
+  Eio.Mutex.use_rw ~protect:true agent_shards_mutex (fun () ->
+    agent_shards :=
+      StringMap.add agent_name
+        (List.sort_uniq String.compare shards) !agent_shards)
 
 let remove_agent_shards (agent_name : string) : unit =
   agent_shards := StringMap.remove agent_name !agent_shards

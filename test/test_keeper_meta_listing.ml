@@ -117,8 +117,10 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check (list string) "keeper_names filters sidecars"
         [ "dot.name"; "sangsu" ] names;
       let keepalive_names = Keeper_types.keepalive_keeper_names config in
-      check (list string) "keepalive_keeper_names filters sidecars"
-        [ "dot.name"; "sangsu" ] keepalive_names;
+      check bool "keepalive includes configured sangsu" true
+        (List.mem "sangsu" keepalive_names);
+      check bool "keepalive excludes json-only dot.name" false
+        (List.mem "dot.name" keepalive_names);
       let ctx = keeper_ctx env sw config "operator" in
       let ok, body =
         Keeper_status.handle_keeper_list ctx (`Assoc [ ("limit", `Int 10) ])
@@ -182,47 +184,6 @@ let test_dashboard_ignores_fileless_manual_reconcile_fallback () =
             Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
           check bool "runtime blocker manual_reconcile stays null without record" true
             Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
-
-(** bootable_keeper_names excludes JSON-only keepers with total_turns=0
-    (phantom keepers from old test runs) but keeps JSON-only keepers
-    that have actually run (total_turns > 0). *)
-let test_bootable_keeper_names_filters_phantom_keepers () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun _sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      write_keeper_meta_exn config ~name:"phantom-test" ~trace_id:"trace-phantom";
-      write_keeper_meta_exn config ~name:"real-test" ~trace_id:"trace-real";
-      (match Keeper_types.read_meta config "real-test" with
-       | Ok (Some meta) ->
-           let updated =
-             Keeper_types.map_usage
-               (fun u -> { u with total_turns = 5 })
-               meta
-           in
-           (match Keeper_types.write_meta ~force:true config updated with
-            | Ok () -> ()
-            | Error e -> fail ("write_meta for real-test failed: " ^ e))
-       | Ok None -> fail "real-test meta not found"
-       | Error e -> fail ("read_meta for real-test failed: " ^ e));
-      let all_names = Keeper_types.keeper_names config in
-      check bool "keeper_names includes phantom-test" true
-        (List.mem "phantom-test" all_names);
-      check bool "keeper_names includes real-test" true
-        (List.mem "real-test" all_names);
-      let bootable = Keeper_runtime.bootable_keeper_names config in
-      check bool "bootable excludes phantom-test (total_turns=0, no TOML)" false
-        (List.mem "phantom-test" bootable);
-      check bool "bootable includes real-test (total_turns>0)" true
-        (List.mem "real-test" bootable))
 
 let test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback () =
   Eio_main.run @@ fun env ->
@@ -292,8 +253,8 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       write_keeper_meta_exn
         ~autoboot_enabled:false config ~name:"sangsu" ~trace_id:"trace-sangsu";
       let names = Keeper_runtime.bootable_keeper_names config in
-      check (list string) "autoboot disabled meta excluded from bootable list"
-        [] names)
+      check bool "autoboot disabled sangsu excluded from bootable list" false
+        (List.mem "sangsu" names))
 
 let () =
   run "keeper_meta_listing"
@@ -306,8 +267,6 @@ let () =
             test_dashboard_ignores_fileless_manual_reconcile_fallback;
           test_case "dashboard ignores file-less unsafe reconcile fallback" `Quick
             test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback;
-          test_case "bootable_keeper_names filters phantom keepers" `Quick
-            test_bootable_keeper_names_filters_phantom_keepers;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
         ] );

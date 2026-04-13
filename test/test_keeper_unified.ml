@@ -8,6 +8,7 @@ module KAR = Masc_mcp.Keeper_agent_run
 module KTD = Masc_mcp.Keeper_tool_disclosure
 module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
+module KP = Masc_mcp.Keeper_state_machine
 module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
@@ -165,15 +166,18 @@ let test_observation_economic_modes () =
 
 (* ---------- Unified Prompt tests ---------- *)
 
-let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
+let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
   let json = `Assoc [
-    ("name", `String "test-keeper");
-    ("trace_id", `String "test-trace-001");
+    ("name", `String name);
+    ("trace_id", `String ("test-trace-" ^ name));
     ("goal", `String "test goal");
   ] in
   match Masc_mcp.Keeper_types.meta_of_json json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
+
+let minimal_meta : Masc_mcp.Keeper_types.keeper_meta =
+  make_meta "test-keeper"
 
 let minimal_policy_meta =
   {
@@ -1646,6 +1650,43 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
 
+let test_run_unified_turn_skips_non_executable_phase () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      KR.clear ();
+      let meta = make_meta "phase-gated-keeper" in
+      let config = Masc_mcp.Room.default_config base_dir in
+      ignore (KR.register ~base_path:base_dir meta.name meta);
+      (match KR.dispatch_event ~base_path:base_dir meta.name KP.Operator_pause with
+       | Ok _ -> ()
+       | Error err -> fail (KP.transition_error_to_string err));
+      check (option string) "phase paused before run"
+        (Some "paused")
+        (Option.map KP.phase_to_string
+           (KR.get_phase ~base_path:base_dir meta.name));
+      match
+        UT.run_unified_turn
+          ~config
+          ~meta
+          ~observation:base_observation
+          ~generation:meta.runtime.generation
+          ()
+      with
+      | Error err ->
+          fail ("expected paused-phase skip, got error: " ^ Oas.Error.to_string err)
+      | Ok updated ->
+          check string "keeper name preserved" meta.name updated.name;
+          check (option string) "phase remains paused after skipped turn"
+            (Some "paused")
+            (Option.map KP.phase_to_string
+               (KR.get_phase ~base_path:base_dir meta.name)))
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -3075,6 +3116,11 @@ let () =
             test_context_overflow_limit_parses_common_oas_errors;
           test_case "is_context_overflow only matches ContextOverflow" `Quick
             test_is_context_overflow_only_for_overflow_errors;
+        ] );
+      ( "phase_gate",
+        [
+          test_case "run_unified_turn skips paused keeper" `Quick
+            test_run_unified_turn_skips_non_executable_phase;
         ] );
       ( "boring_tools",
         [

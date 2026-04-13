@@ -127,11 +127,19 @@ let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
 let dispatch_keeper_phase_event ~(config : Room.config) ~keeper_name event =
-  ignore
-    (Keeper_registry.dispatch_event
-       ~base_path:config.base_path
-       keeper_name
-       event)
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.base_path
+      keeper_name
+      event
+  with
+  | Ok _ -> ()
+  | Error err ->
+      Log.Keeper.warn
+        "%s: post-turn lifecycle dispatch failed event=%s error=%s"
+        keeper_name
+        (Keeper_state_machine.event_to_string event)
+        (Keeper_state_machine.transition_error_to_string err)
 
 let dispatch_post_turn_lifecycle_events
     ~(config : Room.config)

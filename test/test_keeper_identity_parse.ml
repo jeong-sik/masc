@@ -21,6 +21,23 @@ let test_valid_trace_id () =
       check string "agent_name" "keeper-alice-agent" meta.agent_name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
+let test_legacy_keeper_cascade_alias_normalized () =
+  let json =
+    `Assoc
+      [
+        ("name", `String "alice");
+        ("agent_name", `String "keeper-alice-agent");
+        ("trace_id", `String "alice-001");
+        ("goal", `String "test");
+        ("cascade_name", `String "oas-keeper_unified");
+      ]
+  in
+  match Keeper_types.meta_of_json json with
+  | Ok meta ->
+      check string "legacy alias normalized"
+        Keeper_config.default_cascade_name meta.cascade_name
+  | Error e -> fail ("expected Ok, got Error: " ^ e)
+
 let test_missing_trace_id () =
   let json =
     `Assoc
@@ -62,6 +79,8 @@ let () =
   run "keeper_identity_parse"
     [ ( "parse_keeper_identity"
       , [ test_case "valid trace_id" `Quick test_valid_trace_id
+        ; test_case "legacy keeper cascade alias normalized" `Quick
+            test_legacy_keeper_cascade_alias_normalized
         ; test_case "missing trace_id field" `Quick test_missing_trace_id
         ; test_case "empty trace_id" `Quick test_empty_trace_id
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id

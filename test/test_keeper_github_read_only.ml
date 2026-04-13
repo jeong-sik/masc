@@ -15,6 +15,9 @@ open Masc_mcp
 let is_ro ~tool_name ~input =
   Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
 
+let has_side_effect ~tool_name ~input =
+  Keeper_exec_tools.has_mutating_side_effect_with_input ~tool_name ~input
+
 let is_boundary_exempt ~tool_name ~input =
   Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
     ~tool_name ~input
@@ -203,6 +206,46 @@ let test_api_via_args () =
     (is_ro ~tool_name:"keeper_github"
        ~input:(mk_args ["api"; "-X"; "POST"; "/repos/o/r/pulls/1/merge"]))
 
+let test_input_aware_mutation_detection () =
+  Alcotest.(check bool) "keeper_github read-only cmd is not mutating"
+    false
+    (has_side_effect ~tool_name:"keeper_github" ~input:(mk_cmd "pr list"));
+  Alcotest.(check bool) "keeper_github merge cmd is mutating"
+    true
+    (has_side_effect ~tool_name:"keeper_github" ~input:(mk_cmd "pr merge 123"));
+  Alcotest.(check bool) "masc_code_git status is not mutating"
+    false
+    (has_side_effect ~tool_name:"masc_code_git" ~input:(mk_action "status"));
+  Alcotest.(check bool) "masc_code_git commit is mutating"
+    true
+    (has_side_effect ~tool_name:"masc_code_git" ~input:(mk_action "commit"))
+
+let test_tool_call_observer_receives_keeper_context () =
+  let seen = ref None in
+  let observer ~keeper_name ~tool_name ~input ~success =
+    seen := Some (keeper_name, tool_name, input, success)
+  in
+  Keeper_exec_tools.add_tool_call_observer observer;
+  Fun.protect
+    ~finally:(fun () -> Keeper_exec_tools.remove_tool_call_observer observer)
+    (fun () ->
+      let input = mk_cmd "pr list" in
+      Keeper_exec_tools.notify_tool_call_observers
+        ~keeper_name:"keeper-a"
+        ~tool_name:"keeper_github"
+        ~input
+        ~success:true;
+      match !seen with
+      | Some (keeper_name, tool_name, observed_input, success) ->
+          Alcotest.(check string) "keeper name" "keeper-a" keeper_name;
+          Alcotest.(check string) "tool name" "keeper_github" tool_name;
+          Alcotest.(check bool) "success flag" true success;
+          Alcotest.(check string) "input payload"
+            (Yojson.Safe.to_string input)
+            (Yojson.Safe.to_string observed_input)
+      | None ->
+          Alcotest.fail "expected observer notification")
+
 (* ================================================================ *)
 (* Main-worktree mutation-boundary exemptions                        *)
 (* ================================================================ *)
@@ -327,6 +370,10 @@ let () =
             test_non_keeper_github_tool;
           Alcotest.test_case "api via args" `Quick
             test_api_via_args;
+          Alcotest.test_case "input-aware mutation detection" `Quick
+            test_input_aware_mutation_detection;
+          Alcotest.test_case "tool observer receives keeper context" `Quick
+            test_tool_call_observer_receives_keeper_context;
           Alcotest.test_case "task claim mutating but boundary exempt" `Quick
             test_task_claim_is_mutating_but_boundary_exempt;
           Alcotest.test_case "masc_code_git write actions bypass boundary" `Quick

@@ -1427,14 +1427,13 @@ let configured_keeper_names _config =
 ;;
 
 let keeper_names config =
-  let toml = configured_keeper_names config in
-  let json = persisted_keeper_names config in
-  (* Union: repo TOML keepers + overlay-materialized keepers (JSON).
-     Overlay keepers (e.g. from .masc/config/keepers/) are materialized to
-     .masc/keepers/*.json at server boot.  When MASC_CONFIG_DIR shadows the
-     overlay, configured_keeper_names only sees repo TOML.  Including JSON
-     ensures overlay keepers are still discovered. *)
-  dedupe_keep_order (toml @ json)
+  (* Discovery uses persisted JSON (.masc/keepers/*.json) as primary source.
+     JSON files are scoped to the server's base_path, so test isolation works.
+     Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
+     JSON at boot by load_or_materialize_boot_meta, so they appear here too.
+     Sidecar files (.dataset, .manual_reconcile) are filtered by
+     is_keeper_meta_file. *)
+  persisted_keeper_names config
 ;;
 
 let keepalive_keeper_names config =

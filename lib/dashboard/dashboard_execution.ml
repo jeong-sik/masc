@@ -70,8 +70,13 @@ let task_json (task : Types.task) =
   in
   `Assoc (base @ extra)
 
-let agent_json (agent : Types.agent) =
+let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Types.agent) =
   let (emoji, korean_name) = get_agent_identity agent.name in
+  let model_value =
+    match Hashtbl.find_opt model_map agent.name with
+    | Some m when m <> "" -> `String m
+    | _ -> `Null
+  in
   `Assoc
     [
       ("name", `String agent.name);
@@ -86,7 +91,7 @@ let agent_json (agent : Types.agent) =
       ("capabilities", `List (List.map (fun value -> `String value) agent.capabilities));
       ("emoji", `String emoji);
       ("koreanName", `String korean_name);
-      ("model", `Null);
+      ("model", model_value);
     ]
 
 let message_json (message : Types.message) =
@@ -193,7 +198,16 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ("worker_support_briefs", `List (List.map (fun (row : worker_context) -> row.json) worker_support_briefs));
           ("continuity_briefs", `List (List.map (fun (row : continuity_context) -> row.json) continuity_rows));
           ("offline_worker_briefs", `List (List.map (fun (row : worker_context) -> row.json) offline_worker_briefs));
-          ("agents", `List (List.map agent_json agents));
+          ("agents",
+           let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
+           List.iter (fun name ->
+             match Keeper_types.read_meta config name with
+             | Ok (Some m) ->
+               Hashtbl.replace model_map name
+                 (Keeper_exec_status.active_model_of_meta m)
+             | _ -> ()
+           ) (Keeper_types.keeper_names config);
+           `List (List.map (agent_json ~model_map) agents));
           (* pipeline_stage is now included in the snapshot keepers_json,
              so no redundant read_meta + parse_agent_status needed here. *)
           ("keepers", `List keepers);

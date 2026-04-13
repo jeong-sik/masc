@@ -855,23 +855,71 @@ let handle_keeper_pr_submit
             else Ok "pushed"
           end
         ) in
+        (* Sanitize PR body: strip control characters (0x00-0x1F except tab/newline) *)
+        let sanitize_for_gh body =
+          let buf = Buffer.create (String.length body) in
+          String.iter (fun ch ->
+            let code = Char.code ch in
+            if code > 0x1F || ch = '\t' || ch = '\n'
+            then Buffer.add_char buf ch
+          ) body;
+          Buffer.contents buf
+        in
         (* Step 5: create PR *)
         let pr_url = ref "" in
         let _s5 = run_step "gh_pr_create" (fun () ->
-          let body = if pr_body = "" then pr_title else pr_body in
+          let body = if pr_body = "" then pr_title else sanitize_for_gh pr_body in
           let draft_flag = if draft then " --draft" else "" in
           let pr_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
           let gh_cmd = Printf.sprintf
             "gh pr create%s --title %s --body %s --base %s"
             draft_flag
-            (Filename.quote pr_title) (Filename.quote body)
+            (Filename.quote (sanitize_for_gh pr_title))
+            (Filename.quote body)
             (Filename.quote base_branch) in
           let st, out = run_sh_in_cwd ~timeout_sec:pr_timeout gh_cmd in
-          if st <> Unix.WEXITED 0 then Error (Printf.sprintf "gh pr create: %s" out)
+          if st <> Unix.WEXITED 0 then Error (Printf.sprintf "gh pr create (exit %d): %s"
+            (match st with Unix.WEXITED n -> n | Unix.WSIGNALED n -> -(n) | Unix.WSTOPPED n -> -(n)) out)
           else begin
-            pr_url := String.trim out;
-            Ok (Printf.sprintf "PR created: %s" (String.trim out))
+            (* Extract PR URL from potentially multi-line output (stdout+stderr merged via 2>&1).
+               Search all lines for the first matching https://github.com/.../pull/N pattern. *)
+            let url_re = Str.regexp {|https://github\.com/[^ \t\r\n'"\\]+/pull/[0-9]+|} in
+            let lines = String.split_on_char '\n' out in
+            let found_url = ref "" in
+            (try
+               List.iter (fun line ->
+                 let trimmed = String.trim line in
+                 if !found_url = "" && Str.string_match url_re trimmed 0 then
+                   found_url := Str.matched_string trimmed
+               ) lines
+             with _ -> ());
+            if !found_url <> "" then begin
+              pr_url := !found_url;
+              Ok (Printf.sprintf "PR created: %s" !found_url)
+            end else
+              Error (Printf.sprintf
+                "gh pr create returned exit 0 but no PR URL found in output: %.200s"
+                (String.trim out))
           end
+        ) in
+        (* Step 6: verify PR actually exists on remote *)
+        let _s6 = run_step "pr_verify" (fun () ->
+          if !pr_url = "" then Error "pr_url is empty — skipping verify"
+          else
+            let verify_timeout = 15.0 in
+            let verify_cmd = Printf.sprintf
+              "gh pr view %s --json number,url --jq .url 2>/dev/null"
+              (Filename.quote !pr_url) in
+            let st, out = run_sh_in_cwd ~timeout_sec:verify_timeout verify_cmd in
+            if st <> Unix.WEXITED 0 then
+              Error (Printf.sprintf "PR verify failed — PR may not exist: %s"
+                (String.trim out))
+            else
+              let verified = String.trim out in
+              if verified = "" then
+                Error "PR verify returned empty — PR may not exist"
+              else
+                Ok (Printf.sprintf "PR verified: %s" verified)
         ) in
         (* Record PR in playground history (best-effort, JSONL append) *)
         if !step_ok && !pr_url <> "" then begin

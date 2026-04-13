@@ -1,3 +1,5 @@
+module StringSet = Set.Make (String)
+
 type source =
   | Env
   | Local_masc
@@ -342,11 +344,13 @@ let personas_dir_opt () =
   if resolution.personas.exists then Some resolution.personas.path else None
 
 let dedupe_paths paths =
-  let seen = Hashtbl.create 8 in
-  List.filter (fun p ->
-      if Hashtbl.mem seen p then false
-      else (Hashtbl.add seen p (); true))
-    paths
+  let rec go seen acc = function
+    | [] -> List.rev acc
+    | p :: rest ->
+      if StringSet.mem p seen then go seen acc rest
+      else go (StringSet.add p seen) (p :: acc) rest
+  in
+  go StringSet.empty [] paths
 
 let personas_dirs_with inputs resolution =
   let primary =

@@ -99,6 +99,13 @@ HeartbeatFailed ==
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete, restart_count>>
 
+\* NOTE: This action clears manual_reconcile_required, which DIFFERS from
+\* the OCaml code (Turn_succeeded only sets turn_healthy=true, not
+\* manual_reconcile_required=false).  Only Manual_reconcile_cleared and
+\* Fiber_started clear it in OCaml.  The accurate model is in
+\* KeeperReconcileLiveness.tla.  This spec retains the clearing behavior
+\* to preserve backwards compatibility with existing property proofs
+\* (RunningClearsManualReconcile + FailingResolves).
 TurnSucceeded ==
     /\ NotTerminal /\ fiber_alive
     /\ turn_healthy' = TRUE

@@ -18,7 +18,6 @@ const shellConfigResolution = { value: null as Record<string, unknown> | null }
 const shellRuntimeResolution = { value: null as Record<string, unknown> | null }
 const serverStatus = { value: null as Record<string, unknown> | null }
 const navigate = vi.fn()
-const navigateToPost = vi.fn()
 const connected = { value: true }
 const eventCount = { value: 0 }
 const lastEvent = { value: null as { ts_unix?: number } | null }
@@ -57,7 +56,6 @@ async function loadOverview() {
   }))
   vi.doMock('../../router', () => ({
     navigate,
-    navigateToPost,
     hashForRoute: vi.fn().mockReturnValue('#'),
   }))
   vi.doMock('./situation-banner', () => ({
@@ -303,15 +301,6 @@ describe('Overview freshness strip', () => {
   it('renders the meta-cognition summary card when shell data is available', async () => {
     namespaceTruth.value = {
       generated_at: '2026-03-26T12:08:00Z',
-      meta_cognition: {
-        latest_digest: {
-          post_id: 'post-meta-1',
-          title: '[meta-cognition] contested belief requires follow-up',
-          created_at: '2026-03-26T12:07:30Z',
-          matches_summary: true,
-          provenance: 'board',
-        },
-      },
       focus: {
         label: '주의 필요',
         reason: '집단 인식에 이견이 있습니다: keepers believe masc_* tools are blocked',
@@ -350,20 +339,53 @@ describe('Overview freshness strip', () => {
     expect(container.textContent).toContain('집단 메타인지')
     expect(container.textContent).toContain('정체 72%')
     expect(container.textContent).toContain('이견 1')
-    expect(container.textContent).toContain('최근 board digest')
-    expect(container.textContent).toContain('게시물 열기')
     expect(container.textContent).toContain('공감대')
     expect(container.textContent).toContain('긴장')
     expect(container.textContent).toContain('욕구')
     expect(container.textContent).toContain('namespace-truth focus')
     expect(container.textContent).toContain('집단 인식에 이견이 있습니다')
     expect(container.textContent).toContain('운영자 개입 필요')
+  }, 15000)
 
-    const digestButton = Array.from(container.querySelectorAll('button'))
-      .find(candidate => candidate.textContent?.includes('게시물 열기'))
-    digestButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  it('hides the meta-cognition summary card when namespace-truth focus is elsewhere', async () => {
+    namespaceTruth.value = {
+      generated_at: '2026-03-26T12:08:00Z',
+      focus: {
+        label: '주의 필요',
+        reason: 'command lane needs attention',
+        source: 'command',
+        provenance: 'derived',
+        suggested_tab: 'command',
+      },
+    }
+    shellMetaCognition.value = {
+      stagnation_score: 0.72,
+      belief_count: 2,
+      contested_belief_count: 1,
+      dominant_belief: {
+        id: 'belief:masc_tools_blocked',
+        claim: 'keepers believe masc_* tools are blocked',
+        status: 'contested',
+        support_agent_count: 2,
+      },
+      top_tension: {
+        id: 'tension:masc_tool_blockage',
+        topic: 'keeper-facing masc_* tool blockage',
+        severity: 'high',
+        needs_operator: true,
+      },
+      top_desire: {
+        id: 'desire:operator_guidance',
+        desired_state: 'get operator guidance to unblock current work',
+        actionability: 'operator',
+      },
+    }
 
-    expect(navigateToPost).toHaveBeenCalledWith('post-meta-1')
+    const { Overview } = await loadOverview()
+    render(html`<${Overview} />`, container)
+    await flushUi()
+
+    expect(container.textContent).not.toContain('집단 메타인지')
   }, 15000)
 })
 

@@ -23,7 +23,6 @@ import {
   shellConfigResolution,
   shellRuntimeResolution,
 } from '../../store'
-import { navigateToPost } from '../../router'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type {
   DashboardConfigResolutionItem,
@@ -230,7 +229,10 @@ function desireActionabilityLabel(actionability?: string | null): string {
 
 function MetaCognitionCard() {
   const summary = shellMetaCognition.value
-  if (!summary) return null
+  const focus = namespaceTruth.value?.focus?.source === 'meta_cognition'
+    ? namespaceTruth.value.focus
+    : null
+  if (!summary || !focus) return null
 
   const tone = metaCognitionTone(summary)
   const stagnationPct = Math.round(summary.stagnation_score * 100)
@@ -238,10 +240,6 @@ function MetaCognitionCard() {
   const tension = summary.top_tension
   const desire = summary.top_desire
   const hasNarrative = Boolean(belief || tension || desire)
-  const focus = namespaceTruth.value?.focus?.source === 'meta_cognition'
-    ? namespaceTruth.value.focus
-    : null
-  const latestDigest = namespaceTruth.value?.meta_cognition?.latest_digest ?? null
 
   return html`
     <div class="rounded-xl border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8">
@@ -274,36 +272,6 @@ function MetaCognitionCard() {
             <div class="mb-3 rounded-xl border border-accent/20 bg-accent/8 px-3 py-2 text-[12px] text-[var(--text-body)]">
               <span class="font-semibold text-[var(--text-strong)]">namespace-truth focus</span>
               <span class="ml-2">${focus.reason}</span>
-            </div>
-          `
-        : null}
-
-      ${latestDigest
-        ? html`
-            <div class="mb-3 rounded-xl border border-card-border/50 bg-card/40 px-3 py-3">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                    최근 board digest
-                  </div>
-                  <div class="mt-1 truncate text-[13px] font-semibold text-[var(--text-strong)]">
-                    ${latestDigest.title}
-                  </div>
-                  <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
-                    <span><${TimeAgo} timestamp=${latestDigest.created_at} /></span>
-                    <span>
-                      ${latestDigest.matches_summary ? '현재 summary 반영됨' : '현재 summary 반영 대기'}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  class="rounded-lg border border-accent/25 bg-[var(--accent-10)] px-3 py-1.5 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/18"
-                  onClick=${() => navigateToPost(latestDigest.post_id)}
-                >
-                  게시물 열기
-                </button>
-              </div>
             </div>
           `
         : null}

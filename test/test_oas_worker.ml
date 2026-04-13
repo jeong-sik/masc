@@ -411,7 +411,7 @@ let test_cascade_metrics_concurrent_recording () =
         find_cascade_metric_entry "concurrent-cascade"
           (Oas_worker.cascade_metrics_json ())
       with
-      | None -> fail "expected concurrent-cascade metrics"
+      | None -> Alcotest.fail "expected concurrent-cascade metrics"
       | Some entry ->
           Alcotest.(check int) "calls aggregated" 200
             Yojson.Safe.Util.(entry |> member "calls" |> to_int);
@@ -479,7 +479,7 @@ let test_cascade_audit_persists_observation () =
       cleanup_dir base)
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base;
-      let observation : Oas_worker.cascade_observation =
+      let observation : Masc_mcp.Oas_worker_cascade.cascade_observation =
         {
           cascade_name = "audit-cascade";
           configured_labels = [ "glm:auto"; "openai:auto" ];

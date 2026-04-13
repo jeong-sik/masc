@@ -659,12 +659,11 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
   check bool "world prompt names playground sandbox" true
     (contains_substring prompt "Playground is your default sandbox");
-  (* The current prompt frames `.worktrees/` as a separate workflow path that
-     still must stay inside the playground clone. Keep the containment clause
-     asserted so bare server-root `.worktrees/...` paths cannot drift back in. *)
+  (* Keep the containment clause asserted so bare server-root `.worktrees/...`
+     paths cannot drift back in. *)
   check bool "world prompt names worktree workflow inside playground" true
     (contains_substring prompt
-       "live *inside* your playground clone");
+       "Repo worktrees live *inside* your playground clone");
   check bool "world prompt names canonical playground-rooted worktree path" true
     (contains_substring prompt
        ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
@@ -1654,12 +1653,17 @@ let test_run_unified_turn_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
+  let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
+      (match old_base_path with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
       KR.clear ();
+      Unix.putenv "MASC_BASE_PATH" base_dir;
       let meta = make_meta "phase-gated-keeper" in
       let config = Masc_mcp.Room.default_config base_dir in
       ignore (KR.register ~base_path:base_dir meta.name meta);
@@ -1679,7 +1683,9 @@ let test_run_unified_turn_skips_non_executable_phase () =
           ()
       with
       | Error err ->
-          fail ("expected paused-phase skip, got error: " ^ Oas.Error.to_string err)
+          Alcotest.fail
+            ("expected paused-phase skip, got error: "
+            ^ Agent_sdk.Error.to_string err)
       | Ok updated ->
           check string "keeper name preserved" meta.name updated.name;
           check (option string) "phase remains paused after skipped turn"
@@ -2098,6 +2104,22 @@ let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
       (InvalidRequest { message = "Parse error at position 42" })
   in
   check bool "server parse rejection is auto-recoverable" true
+    (UT.is_auto_recoverable_turn_error err)
+
+let test_required_tool_contract_violation_detected () =
+  let err =
+    Agent_sdk.Error.Internal
+      "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
+  in
+  check bool "tool-choice contract violation detected" true
+    (UT.is_required_tool_contract_violation err)
+
+let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
+  let err =
+    Agent_sdk.Error.Internal
+      "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
+  in
+  check bool "tool-choice contract violation is not globally auto-recoverable" false
     (UT.is_auto_recoverable_turn_error err)
 
 let test_auto_recoverable_turn_error_excludes_persistent_errors () =
@@ -3087,10 +3109,14 @@ let () =
             test_server_rejected_parse_error_network_error;
           test_case "auto-recoverable includes transient network" `Quick
             test_auto_recoverable_turn_error_includes_transient_network;
-          test_case "auto-recoverable includes server parse rejection" `Quick
-            test_auto_recoverable_turn_error_includes_server_parse_rejection;
-          test_case "auto-recoverable excludes persistent errors" `Quick
-            test_auto_recoverable_turn_error_excludes_persistent_errors;
+            test_case "auto-recoverable includes server parse rejection" `Quick
+              test_auto_recoverable_turn_error_includes_server_parse_rejection;
+            test_case "required tool contract violation detected" `Quick
+              test_required_tool_contract_violation_detected;
+            test_case "auto-recoverable excludes tool-choice contract violation" `Quick
+              test_auto_recoverable_turn_error_excludes_required_tool_contract_violation;
+            test_case "auto-recoverable excludes persistent errors" `Quick
+              test_auto_recoverable_turn_error_excludes_persistent_errors;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick

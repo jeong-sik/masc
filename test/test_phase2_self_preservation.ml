@@ -127,6 +127,14 @@ let test_failure_reason_manual_reconcile_required () =
             kind = R.Post_commit_failure;
             detail = "turn outcome ambiguous";
           }));
+  check bool "reconcile-safe ambiguous partial commit does not require manual reconcile" false
+    (R.failure_reason_requires_manual_reconcile
+       (R.Ambiguous_partial_commit
+          {
+            kind = R.Post_commit_failure;
+            detail =
+              "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required (error: Completion contract [require_tool_use] violated)";
+          }));
   check bool "turn failures do not require manual reconcile" false
     (R.failure_reason_requires_manual_reconcile
        (R.Turn_consecutive_failures 2))

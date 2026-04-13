@@ -320,7 +320,10 @@ let reconcile_safe_tools =
   [ "keeper_board_post"; "keeper_board_comment";
     "keeper_board_vote"; "keeper_board_comment_vote";
     "keeper_broadcast";
-    "keeper_task_done" ]
+    "keeper_task_done";
+    "masc_board_post"; "masc_board_comment";
+    "masc_board_vote"; "masc_board_comment_vote";
+    "masc_broadcast" ]
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length reconcile_safe_tools) in

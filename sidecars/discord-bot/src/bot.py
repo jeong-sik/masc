@@ -312,7 +312,7 @@ class GateBot(discord.Client):
         # Start from current high-water mark to avoid replaying old events
         try:
             events = await self.gate.poll_activity(
-                kinds=["board.commented"],
+                kinds=["board.posted", "board.commented"],
                 limit=1,
             )
             if events:
@@ -325,7 +325,7 @@ class GateBot(discord.Client):
             try:
                 events = await self.gate.poll_activity(
                     after_seq=last_seq,
-                    kinds=["board.commented"],
+                    kinds=["board.posted", "board.commented"],
                     limit=50,
                 )
                 for event in events:

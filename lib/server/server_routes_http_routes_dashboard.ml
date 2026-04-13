@@ -218,6 +218,12 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_memory_http_json req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/memory-subsystems" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let json = dashboard_memory_subsystems_http_json ~config req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in

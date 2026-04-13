@@ -1705,6 +1705,52 @@ export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: b
   return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
 }
 
+// --- Memory Subsystems ---
+
+export interface MemorySubsystemsSynapse {
+  from_agent: string
+  to_agent: string
+  weight: number
+  success_count: number
+  failure_count: number
+  last_updated: number
+  created_at: number
+}
+
+export interface MemorySubsystemsEpisode {
+  id: string
+  timestamp: number
+  participants: string[]
+  event_type: string
+  summary: string
+  outcome: string
+  learnings: string[]
+  context: Record<string, string>
+}
+
+export interface MemorySubsystemsResponse {
+  generated_at: string
+  hebbian: {
+    synapses: MemorySubsystemsSynapse[]
+    last_consolidation: number
+  }
+  episodes: {
+    total: number
+    shown: number
+    items: MemorySubsystemsEpisode[]
+  }
+}
+
+export function fetchMemorySubsystems(
+  opts?: { limit?: number; signal?: AbortSignal },
+): Promise<MemorySubsystemsResponse> {
+  const params = opts?.limit ? `?limit=${opts.limit}` : ''
+  return get<MemorySubsystemsResponse>(
+    `/api/v1/dashboard/memory-subsystems${params}`,
+    { signal: opts?.signal },
+  )
+}
+
 // --- Keeper Cascade Config ---
 
 export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {

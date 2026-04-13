@@ -348,105 +348,6 @@ let test_prune_boring_tools_keeps_set_when_last_tool_productive () =
     "productive last tool does not hide boring tools"
     visible_tools pruned
 
-let test_masc_board_list_is_boring () =
-  Alcotest.(check bool) "masc_board_list is boring"
-    true (Keeper_tool_registry.is_boring_tool "masc_board_list")
-
-(** Build a minimal assistant message with ToolUse content blocks. *)
-let assistant_msg_with_tools (tool_names : string list) : Agent_sdk.Types.message =
-  let content =
-    List.map
-      (fun name ->
-        Agent_sdk.Types.ToolUse { id = "id_" ^ name; name; input = `Assoc [] })
-      tool_names
-  in
-  { role = Agent_sdk.Types.Assistant; content; name = None; tool_call_id = None }
-
-let test_prune_boring_tools_from_messages_single_boring () =
-  (* A single boring tool call should not trigger forced silence *)
-  let messages = [ assistant_msg_with_tools [ "keeper_board_list" ] ] in
-  let visible_tools =
-    [ "masc_status"; "keeper_stay_silent"; "keeper_fs_edit"; "keeper_board_list" ]
-  in
-  let pruned =
-    Keeper_tool_disclosure.prune_boring_tools_from_messages
-      ~visible_tools ~messages ()
-  in
-  (* Single boring call prunes boring tools but keeps productive ones *)
-  Alcotest.(check bool) "productive tools still visible"
-    true (List.mem "keeper_fs_edit" pruned);
-  Alcotest.(check bool) "keeper_stay_silent still visible"
-    true (List.mem "keeper_stay_silent" pruned)
-
-let test_prune_boring_tools_from_messages_consecutive_streak () =
-  (* 3 consecutive boring-only turns should force keeper_stay_silent *)
-  let messages = [
-    assistant_msg_with_tools [ "keeper_board_list" ];
-    assistant_msg_with_tools [ "masc_status" ];
-    assistant_msg_with_tools [ "keeper_tasks_list" ];
-  ] in
-  let visible_tools =
-    [ "masc_status"; "keeper_stay_silent"; "keeper_fs_edit";
-      "keeper_board_list"; "keeper_tasks_list" ]
-  in
-  let pruned =
-    Keeper_tool_disclosure.prune_boring_tools_from_messages
-      ~visible_tools ~messages ()
-  in
-  Alcotest.(check (list string))
-    "consecutive boring streak forces silence-only"
-    [ "keeper_stay_silent" ] pruned
-
-let test_prune_boring_tools_from_messages_mixed_breaks_streak () =
-  (* A productive tool in the middle breaks the streak *)
-  let messages = [
-    assistant_msg_with_tools [ "keeper_board_list" ];
-    assistant_msg_with_tools [ "keeper_fs_edit" ];
-    assistant_msg_with_tools [ "masc_status" ];
-  ] in
-  let visible_tools =
-    [ "masc_status"; "keeper_stay_silent"; "keeper_fs_edit";
-      "keeper_board_list" ]
-  in
-  let pruned =
-    Keeper_tool_disclosure.prune_boring_tools_from_messages
-      ~visible_tools ~messages ()
-  in
-  (* Last tool is boring so single-call pruning fires, but streak is
-     broken by keeper_fs_edit so forced-silence does NOT apply *)
-  Alcotest.(check bool) "productive tools still visible after broken streak"
-    true (List.mem "keeper_fs_edit" pruned);
-  Alcotest.(check bool) "keeper_stay_silent visible"
-    true (List.mem "keeper_stay_silent" pruned)
-
-let test_prune_boring_tools_from_messages_no_history () =
-  (* No messages: no pruning *)
-  let visible_tools =
-    [ "masc_status"; "keeper_stay_silent"; "keeper_fs_edit" ]
-  in
-  let pruned =
-    Keeper_tool_disclosure.prune_boring_tools_from_messages
-      ~visible_tools ~messages:[] ()
-  in
-  Alcotest.(check (list string))
-    "no message history means no pruning"
-    visible_tools pruned
-
-let test_recent_tool_names_from_messages () =
-  let messages = [
-    assistant_msg_with_tools [ "keeper_board_list"; "keeper_fs_edit" ];
-    { role = Agent_sdk.Types.User;
-      content = [ Agent_sdk.Types.Text "hello" ];
-      name = None; tool_call_id = None };
-    assistant_msg_with_tools [ "masc_status" ];
-  ] in
-  let names =
-    Keeper_tool_disclosure.recent_tool_names_from_messages ~max_messages:3 messages
-  in
-  Alcotest.(check (list string))
-    "extracts tool names from assistant messages in order"
-    [ "keeper_board_list"; "keeper_fs_edit"; "masc_status" ] names
-
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -487,20 +388,6 @@ let () =
         test_prune_boring_tools_after_recent_polling;
       Alcotest.test_case "productive last tool keeps boring tools visible" `Quick
         test_prune_boring_tools_keeps_set_when_last_tool_productive;
-      Alcotest.test_case "masc_board_list is boring" `Quick
-        test_masc_board_list_is_boring;
-    ];
-    "boring_tools_from_messages", [
-      Alcotest.test_case "single boring call prunes but keeps productive" `Quick
-        test_prune_boring_tools_from_messages_single_boring;
-      Alcotest.test_case "consecutive boring streak forces silence" `Quick
-        test_prune_boring_tools_from_messages_consecutive_streak;
-      Alcotest.test_case "mixed history breaks streak" `Quick
-        test_prune_boring_tools_from_messages_mixed_breaks_streak;
-      Alcotest.test_case "no history means no pruning" `Quick
-        test_prune_boring_tools_from_messages_no_history;
-      Alcotest.test_case "recent_tool_names_from_messages extracts correctly" `Quick
-        test_recent_tool_names_from_messages;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

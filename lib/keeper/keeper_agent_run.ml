@@ -1296,18 +1296,6 @@ let run_turn
                   essential @ List.filteri (fun i _ -> i < budget) non_essential)
                 else all_allowed
               in
-              (* Boring-tool pruning: hide status-polling tools when the
-                 keeper has been repeatedly calling them without productive
-                 work.  Single boring calls are fine (first board_list is
-                 normal); only consecutive boring streaks get pruned.
-                 Applied after the overflow cap so the pruned set is
-                 already within budget. *)
-              let all_allowed =
-                Keeper_tool_disclosure.prune_boring_tools_from_messages
-                  ~visible_tools:all_allowed
-                  ~messages
-                  ()
-              in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
               (* Tool choice: Auto on all turns.
            Previous design forced tool_choice=Any on non-last turns

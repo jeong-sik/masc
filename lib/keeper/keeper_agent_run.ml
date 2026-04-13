@@ -1529,10 +1529,9 @@ let run_turn
            Without this, read_continuity_summary finds no [STATE] in the
            checkpoint messages and returns empty — causing keepers to lose
            context across turns.  See #5431. *)
-       (* RFC-MASC-004: AfterTurn hooks flush incrementally on every
-          turn via flush_incremental. No separate final flush needed —
-          the AfterTurn hook already ran for the last turn before
-          Agent.run returned. *)
+       (* RFC-MASC-004: AfterTurn hooks flush incrementally during
+          Agent.run. Post-run episode creation requires an explicit
+          flush_incremental call since AfterTurn already fired. *)
        let text = Agent_sdk.Types.text_of_content result.response.content in
        let model = result.response.model in
        (* Extract and persist thinking blocks to trajectory JSONL.
@@ -1755,8 +1754,10 @@ let run_turn
                meta.name
                (Printexc.to_string exn));
           (* Episodic memory: create OAS episode from [STATE] snapshot.
-             Populates Memory.t so flush_episodes (AfterTurn hook)
-             persists to institution_episodes.jsonl. *)
+             store_episode adds to Memory.t, then flush_incremental
+             persists to institution_episodes.jsonl. The explicit flush
+             is required because this runs AFTER Agent.run returns, so
+             the AfterTurn hook has already fired for the last turn. *)
           (try
              (match
                 Keeper_memory_policy.parse_state_snapshot_from_reply
@@ -1767,7 +1768,15 @@ let run_turn
                  ~keeper_name:meta.name ~turn:result.turns
                  ~trace_id:
                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                 snap
+                 snap;
+               let ep, pr =
+                 Memory_oas_bridge.flush_incremental ~memory
+                   ~agent_name:meta.name
+               in
+               if ep > 0 || pr > 0 then
+                 Log.Keeper.debug
+                   "keeper:%s post-run flush episodes=%d procedures=%d"
+                   meta.name ep pr
              | None -> ())
            with exn ->
              Log.Keeper.warn "keeper:%s episode_create failed: %s"

@@ -142,6 +142,91 @@ let semaphore_wait_timeout_sec =
     not a keeper failure in the unified-turn sense. *)
 exception Semaphore_wait_timeout of float
 
+(** Per-keeper record of the last autonomous turn completion timestamp.
+    Used by the fairness cooldown to prevent a fast-cycling keeper from
+    monopolizing the autonomous slot when peers are waiting.
+
+    Closes #6810: janitor was observed to complete 9 consecutive ~20s
+    turns while cheolsu/sangsu/masc-improver/uranium666 all hit the 60s
+    wait timeout. The queue is FIFO-fair in isolation, but a keeper that
+    re-enters the queue immediately after releasing the semaphore can
+    outpace peers whose heartbeat intervals are longer or whose fibers
+    yield less aggressively. *)
+let last_autonomous_completion : (string, float) Hashtbl.t = Hashtbl.create 16
+
+let last_autonomous_completion_mutex = Mutex.create ()
+
+let with_completion_table f =
+  Mutex.lock last_autonomous_completion_mutex;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock last_autonomous_completion_mutex)
+    f
+
+let record_autonomous_completion ~(keeper_name : string) : unit =
+  with_completion_table (fun () ->
+    Hashtbl.replace last_autonomous_completion keeper_name
+      (Time_compat.now ()))
+
+let reset_autonomous_completion_for_test () : unit =
+  with_completion_table (fun () ->
+    Hashtbl.reset last_autonomous_completion)
+
+(** Test-only: stamp a completion time directly without going through
+    [Time_compat.now].  Allows deterministic fairness-cooldown scenarios. *)
+let record_autonomous_completion_at_for_test ~(keeper_name : string) ~(ts : float) : unit =
+  with_completion_table (fun () ->
+    Hashtbl.replace last_autonomous_completion keeper_name ts)
+
+(** Minimum gap between consecutive autonomous turns from the same keeper
+    when other keepers are waiting in the FIFO queue. 0 disables fairness
+    cooldown entirely (pre-#6810 behavior).
+
+    Default 5s gives peers a chance to win head-of-queue after a fast
+    keeper releases the semaphore, even when the fast keeper's heartbeat
+    immediately loops back.
+
+    Env: [MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC]. Range [0, 60]. *)
+let autonomous_fairness_cooldown_sec =
+  Keeper_config.float_of_env_default
+    "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC"
+    ~default:5.0 ~min_v:0.0 ~max_v:60.0
+
+let others_waiting_in_queue ~(keeper_name : string) : bool =
+  with_autonomous_wait_queue (fun () ->
+    List.exists (fun w -> w.keeper_name <> keeper_name)
+      !autonomous_wait_queue)
+
+(** Pure computation: how many seconds [keeper_name] should yield before
+    re-entering the queue at time [now].  Returns [0.0] when no yield is
+    needed.  Extracted so the delay logic is testable without Eio. *)
+let fairness_delay_sec_at ~(now : float) ~(keeper_name : string) : float =
+  if autonomous_fairness_cooldown_sec <= 0.0 then 0.0
+  else if not (others_waiting_in_queue ~keeper_name) then 0.0
+  else
+    match
+      with_completion_table (fun () ->
+        Hashtbl.find_opt last_autonomous_completion keeper_name)
+    with
+    | None -> 0.0
+    | Some last_done ->
+      Float.max 0.0 (autonomous_fairness_cooldown_sec -. (now -. last_done))
+
+(** Enforce fairness cooldown before re-entering the autonomous queue.
+    If this keeper just completed a turn AND other keepers are waiting,
+    yield for the remainder of [autonomous_fairness_cooldown_sec] before
+    appending our ticket. Called from [with_keeper_turn_slot] before
+    [enqueue_autonomous_waiter]. *)
+let maybe_yield_for_fairness ~(keeper_name : string) : unit =
+  let remaining = fairness_delay_sec_at ~now:(Time_compat.now ()) ~keeper_name in
+  if remaining > 0.0 then begin
+    Log.Keeper.info
+      "fairness_cooldown: keeper=%s yielding %.2fs (queue has other waiters)"
+      keeper_name remaining;
+    match Eio_context.get_clock_opt () with
+    | Some clock -> Eio.Time.sleep clock remaining
+    | None -> Eio.Fiber.yield ()
+  end
+
 let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
     ~(started_at : float) : unit =
   if Option.equal Int.equal (autonomous_waiter_head_ticket ()) (Some ticket)
@@ -221,9 +306,20 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
       (* Release exactly what we acquired. Order does not matter because
          these two semaphores do not contend with each other. *)
       if !acquired_turn then Eio.Semaphore.release turn_semaphore;
-      if !acquired_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
+      if !acquired_autonomous then begin
+        (* Stamp completion time BEFORE releasing the semaphore so that
+           [maybe_yield_for_fairness] can measure the correct interval
+           when this keeper's heartbeat loops back immediately. *)
+        record_autonomous_completion ~keeper_name;
+        Eio.Semaphore.release autonomous_turn_semaphore
+      end)
     (fun () ->
       if is_autonomous then begin
+        (* Fairness cooldown: if this keeper recently completed a turn and
+           other keepers are waiting, yield before re-entering the FIFO
+           queue to give peers a chance to reach head-of-queue first.
+           See [maybe_yield_for_fairness] and #6810. *)
+        maybe_yield_for_fairness ~keeper_name;
         let ticket = enqueue_autonomous_waiter ~keeper_name in
         autonomous_ticket := Some ticket;
         wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0;

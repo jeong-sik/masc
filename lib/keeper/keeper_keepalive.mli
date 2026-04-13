@@ -66,6 +66,17 @@ val autonomous_waiter_snapshot_for_test : unit -> string list
 val enqueue_autonomous_waiter_for_test : string -> int
 val drop_autonomous_waiter_for_test : int -> unit
 
+(** Pure computation: seconds keeper should yield before re-entering queue
+    at time [now].  0.0 = no yield needed.  Exposed for unit testing. *)
+val fairness_delay_sec_at : now:float -> keeper_name:string -> float
+
+(** Test-only: stamp a completion time directly (bypasses [Time_compat.now]).
+    Use to set up deterministic fairness-cooldown scenarios. *)
+val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float -> unit
+
+(** Test-only: clear all per-keeper completion timestamps. *)
+val reset_autonomous_completion_for_test : unit -> unit
+
 val wakeup_relevant_keeper_for_board_signal :
   config:Room.config -> Board_dispatch.keeper_board_signal -> unit
 

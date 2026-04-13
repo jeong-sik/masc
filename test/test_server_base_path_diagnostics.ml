@@ -230,7 +230,7 @@ let test_to_yojson_exposes_resolution_source () =
   Alcotest.(check string) "resolution source" "explicit_cli"
     (json |> member "resolution_source" |> to_string)
 
-let test_default_base_path_preserves_explicit_parent_root () =
+let test_default_base_path_ignores_inherited_parent_root_in_tests () =
   with_temp_dir "base-path-default" @@ fun root ->
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
@@ -239,12 +239,13 @@ let test_default_base_path_preserves_explicit_parent_root () =
   Unix.mkdir (Filename.concat repo ".masc") 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  Alcotest.(check string) "default base path preserves explicit parent root"
-    (canonical_path base_path)
+  Alcotest.(check string) "default base path ignores inherited parent root in tests"
+    (canonical_path repo)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
-let test_default_base_path_preserves_explicit_root_without_opt_in () =
+let test_default_base_path_preserves_explicit_root_with_opt_in () =
   with_temp_dir "base-path-default-optin" @@ fun root ->
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
@@ -253,12 +254,13 @@ let test_default_base_path_preserves_explicit_root_without_opt_in () =
   Unix.mkdir (Filename.concat repo ".masc") 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH" (Some "true") @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  Alcotest.(check string) "explicit root preserved without opt-in"
+  Alcotest.(check string) "explicit root preserved with opt-in"
     (canonical_path base_path)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
-let test_default_base_path_keeps_inherited_root_without_local_masc () =
+let test_default_base_path_ignores_inherited_root_without_local_masc () =
   with_temp_dir "base-path-default-no-local-masc" @@ fun root ->
   let base_path = Filename.concat root "base" in
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
@@ -266,9 +268,10 @@ let test_default_base_path_keeps_inherited_root_without_local_masc () =
   Unix.mkdir (Filename.concat base_path ".masc") 0o755;
   with_cwd repo @@ fun () ->
   with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+  with_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
-  Alcotest.(check string) "default base path keeps inherited root without local .masc"
-    (canonical_path base_path)
+  Alcotest.(check string) "default base path ignores inherited root without local .masc"
+    (canonical_path repo)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let () =
@@ -292,13 +295,13 @@ let () =
             test_to_yojson_exposes_effective_paths;
           Alcotest.test_case "json exposes resolution source" `Quick
             test_to_yojson_exposes_resolution_source;
-          Alcotest.test_case "default base path preserves explicit parent root"
-            `Quick test_default_base_path_preserves_explicit_parent_root;
+          Alcotest.test_case "default base path ignores inherited parent root in tests"
+            `Quick test_default_base_path_ignores_inherited_parent_root_in_tests;
           Alcotest.test_case
-            "default base path preserves explicit root without opt-in"
-            `Quick test_default_base_path_preserves_explicit_root_without_opt_in;
+            "default base path preserves explicit root with opt-in"
+            `Quick test_default_base_path_preserves_explicit_root_with_opt_in;
           Alcotest.test_case
-            "default base path keeps inherited root without local .masc"
-            `Quick test_default_base_path_keeps_inherited_root_without_local_masc;
+            "default base path ignores inherited root without local .masc"
+            `Quick test_default_base_path_ignores_inherited_root_without_local_masc;
         ] );
     ]

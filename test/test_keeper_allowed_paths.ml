@@ -50,6 +50,10 @@ let workspace_defaults name =
     ".masc/traces/";
     "lib/"; "test/"; "config/"; "bin/"; "scripts/"; "docs/" ]
 
+let workspace_write_defaults name =
+  [ Printf.sprintf ".masc/keepers/%s/" name;
+    ".masc/traces/" ]
+
 (* ── observe_only scope ── *)
 
 let test_observe_only_empty_paths () =
@@ -80,6 +84,21 @@ let test_workspace_explicit_paths () =
   let effective = KAP.effective_allowed_paths ~meta in
   check (list string) "workspace + explicit = playground bundle + ws defaults + explicit"
     (playground_bundle "t" @ workspace_defaults "t" @ ["src/"; "docs/"]) effective
+
+let test_workspace_write_paths_keep_playground_and_state_only () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~name:"sangsu" () in
+  let effective = KAP.effective_write_allowed_paths ~meta in
+  check (list string) "workspace write defaults exclude repo roots"
+    (playground_bundle "sangsu" @ workspace_write_defaults "sangsu") effective
+
+let test_workspace_write_paths_preserve_explicit_overrides () =
+  let meta = make_meta ~execution_scope:"workspace"
+      ~allowed_paths:["workspace/yousleepwhen/oas/"] ~name:"t" () in
+  let effective = KAP.effective_write_allowed_paths ~meta in
+  check (list string) "explicit write override preserved"
+    (playground_bundle "t" @ workspace_write_defaults "t"
+     @ ["workspace/yousleepwhen/oas/"]) effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -202,6 +221,29 @@ let test_default_roots_use_playground_with_full_access () =
       ~allowed_paths:["*"] ~name:"keeper" () in
   check_default_roots_use_playground meta
 
+let test_resolve_keeper_path_blocks_workspace_repo_write_default () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"keeper" () in
+  with_temp_config (fun config ->
+    match KES.resolve_keeper_path ~config ~meta ~raw_path:"lib/foo.ml" with
+    | Ok path -> fail ("expected write rejection, got: " ^ path)
+    | Error err ->
+      check bool "rejects repo-root write outside playground" true
+        (String.starts_with ~prefix:"path_not_in_allowed_paths:" err))
+
+let test_resolve_keeper_path_allows_playground_write_default () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"keeper" () in
+  with_temp_config (fun config ->
+    let expected =
+      Filename.concat
+        (Filename.concat
+           (KAP.project_root_of_config config)
+           (KAP.playground_path_of_keeper meta.name))
+        "notes.md"
+    in
+    match KES.resolve_keeper_path ~config ~meta ~raw_path:"notes.md" with
+    | Error err -> fail ("expected playground write path, got error: " ^ err)
+    | Ok path -> check string "bare file defaults into playground" expected path)
+
 (* ── Runner ── *)
 
 let () =
@@ -217,6 +259,10 @@ let () =
             test_workspace_empty_paths_computed_default;
           test_case "workspace + explicit = playground + explicit" `Quick
             test_workspace_explicit_paths;
+          test_case "workspace write defaults stay in playground/state only" `Quick
+            test_workspace_write_paths_keep_playground_and_state_only;
+          test_case "workspace write defaults preserve explicit overrides" `Quick
+            test_workspace_write_paths_preserve_explicit_overrides;
           test_case "workspace + [*] = full access" `Quick
             test_workspace_star_wildcard;
           test_case "local + [] = [playground]" `Quick
@@ -240,5 +286,9 @@ let () =
             test_default_roots_use_playground_with_explicit_paths;
           test_case "default roots stay in playground with full access" `Quick
             test_default_roots_use_playground_with_full_access;
+          test_case "workspace repo writes blocked by default" `Quick
+            test_resolve_keeper_path_blocks_workspace_repo_write_default;
+          test_case "bare writes default into playground" `Quick
+            test_resolve_keeper_path_allows_playground_write_default;
         ] );
     ]

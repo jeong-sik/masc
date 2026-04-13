@@ -88,6 +88,10 @@ let keeper_effective_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_allowed_paths ~meta
 ;;
 
+let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
+  Keeper_alerting_path.effective_write_allowed_paths ~meta
+;;
+
 let keeper_playground_root ~(config : Room.config) ~(meta : keeper_meta) =
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   Filename.concat
@@ -131,7 +135,7 @@ let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path
   =
   resolve_keeper_target_path
     ~config
-    ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+    ~allowed_paths:(keeper_effective_write_allowed_paths ~meta)
     ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
 ;;
 

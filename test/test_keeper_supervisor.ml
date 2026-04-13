@@ -150,6 +150,7 @@ let make_meta name =
   | Error err -> fail ("make_meta: " ^ err)
 
 let test_self_preservation_subset () =
+  Eio_main.run @@ fun _env ->
   Reg.clear ();
   let names = ["a"; "b"; "c"; "d"; "e"] in
   let entries = List.map (fun name ->

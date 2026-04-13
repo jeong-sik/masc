@@ -56,16 +56,21 @@ let insert_sorted entry ws =
 
 (* ── Core Queue ────────────────────────────────────────── *)
 
+let initial_max_concurrent_of_env getenv =
+  let parse_int raw =
+    Option.bind (getenv raw) (fun value ->
+      int_of_string_opt (String.trim value))
+  in
+  match parse_int "MASC_ADMISSION_MAX_CONCURRENT" with
+  | Some n -> max 1 n
+  | None ->
+      (* Default 3: with_permit is now passthrough (provider throttle
+         belongs in OAS cascade, not MASC).  This value is only used
+         for snapshot reporting; it does not gate anything. *)
+      3
+
 let global : t = {
-  max_slots = (
-    let env_val =
-      try int_of_string (Sys.getenv "MASC_ADMISSION_MAX_CONCURRENT")
-      with Not_found | Failure _ ->
-        try int_of_string (Sys.getenv "OLLAMA_NUM_PARALLEL")
-        with Not_found | Failure _ -> 4
-    in
-    max 1 env_val
-  );
+  max_slots = initial_max_concurrent_of_env Sys.getenv_opt;
   active = 0;
   waiters = [];
   mutex = Eio.Mutex.create ();
@@ -74,7 +79,7 @@ let global : t = {
 let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
-let rec acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
+let rec _acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
   let resolved = Llm_provider.Request_priority.resolve priority in
   let rank = Llm_provider.Request_priority.to_int resolved in
   let action =
@@ -109,7 +114,7 @@ let rec acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
       (* If release already resolved our promise, the slot was handed
          to us but we are being cancelled. Release it back. *)
       if Eio.Promise.is_resolved p then
-        release_slot t;
+        _release_slot t;
       raise exn
     in
     (try
@@ -131,7 +136,7 @@ let rec acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
      | exn ->
          cancel_wait exn)
 
-and release_slot t =
+and _release_slot t =
   let to_wake =
     Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
       let rec find_valid acc = function
@@ -155,31 +160,16 @@ and release_slot t =
 
 (* ── Public API ────────────────────────────────────────── *)
 
-let with_permit ?wait_timeout_sec ~priority ~keeper_name ~cascade_name f =
-  acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name global;
-  Fun.protect f
-    ~finally:(fun () ->
-      Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-      release_slot global)
+let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name:_ ~cascade_name:_ f =
+  (* Passthrough: provider-level throttling belongs in OAS (cascade),
+     not in MASC.  The cascade distributes requests across providers
+     and handles 429/timeout by falling to the next provider.
+     Gating here starves cloud-routed keepers behind a serial local
+     decode and cannot express per-provider capacity. *)
+  f ()
 
-let try_with_permit ~priority ~keeper_name ~cascade_name f =
-  let _resolved = Llm_provider.Request_priority.resolve priority in
-  let got =
-    Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-      if global.active < global.max_slots then (
-        global.active <- global.active + 1;
-        true
-      ) else
-        false)
-  in
-  if got then (
-    Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
-    Some (Fun.protect f
-      ~finally:(fun () ->
-        Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
-        release_slot global)))
-  else
-    None
+let try_with_permit ~priority:_ ~keeper_name:_ ~cascade_name:_ f =
+  Some (f ())
 
 let snapshot () =
   Eio.Mutex.use_ro global.mutex (fun () ->

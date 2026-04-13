@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Auto label and optional reviewer request
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           DEFAULT_REVIEWERS: ${{ vars.DEFAULT_REVIEWERS }}
         with:

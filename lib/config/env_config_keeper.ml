@@ -261,13 +261,18 @@ module KeeperKeepalive = struct
       (get_float ~default:1200.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
-      before abandoning the current OAS attempt. This prevents background
-      keepers from looking silently stuck behind long-running inference calls.
-      Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 45.0.
-      Range: [5, 600]. *)
+      before abandoning the current OAS attempt.
+
+      With admission max_concurrent=1 (MLX decode serial), a keeper may wait
+      for the full duration of the preceding keeper's turn. Observed turn
+      durations: 180-963s. Default 180s covers the common case (GLM cascade
+      completes in ~180s) while avoiding indefinite waits.
+
+      Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.0.
+      Range: [5, 1200]. *)
   let admission_wait_timeout_sec =
-    Float.max 5.0 (Float.min 600.0
-      (get_float ~default:45.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+    Float.max 5.0 (Float.min 1200.0
+      (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
 
   (** Maximum time a scheduled autonomous keeper will wait for the local
       keeper turn gate before skipping the cycle. Reactive turns still wait

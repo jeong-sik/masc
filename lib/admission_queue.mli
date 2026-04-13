@@ -32,6 +32,13 @@ type snapshot = {
 exception Wait_timeout of int
 (** Raised when [with_permit] exceeds [wait_timeout_sec]. Carries [wait_ms]. *)
 
+val initial_max_concurrent_of_env : (string -> string option) -> int
+(** Resolve the startup queue capacity from environment variables.
+
+    Ownership is intentionally MASC-local: only [MASC_ADMISSION_MAX_CONCURRENT]
+    affects the admission queue. Provider-specific knobs such as
+    [OLLAMA_NUM_PARALLEL] must not implicitly resize the global MASC queue. *)
+
 val with_permit :
   ?wait_timeout_sec:float ->
   priority:Llm_provider.Request_priority.t ->

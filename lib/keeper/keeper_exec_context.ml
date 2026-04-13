@@ -126,6 +126,61 @@ let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
+let dispatch_keeper_phase_event ~(config : Room.config) ~keeper_name event =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.base_path
+      keeper_name
+      event
+  with
+  | Ok _ -> ()
+  | Error err ->
+      Log.Keeper.warn
+        "%s: post-turn lifecycle dispatch failed event=%s error=%s"
+        keeper_name
+        (Keeper_state_machine.event_to_string event)
+        (Keeper_state_machine.transition_error_to_string err)
+
+let dispatch_post_turn_lifecycle_events
+    ~(config : Room.config)
+    ~keeper_name
+    (lifecycle : post_turn_lifecycle) =
+  if lifecycle.compaction.attempted then
+    if lifecycle.compaction.applied then
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Compaction_completed
+           {
+             before_tokens = lifecycle.compaction.before_tokens;
+             after_tokens = lifecycle.compaction.after_tokens;
+           })
+    else
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Compaction_failed
+           {
+             reason =
+               Option.value lifecycle.compaction.failure_reason
+                 ~default:lifecycle.compaction.decision;
+           });
+  match lifecycle.handoff_attempted, lifecycle.handoff_json with
+  | true, Some _json ->
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Handoff_completed
+           {
+             generation = lifecycle.updated_meta.runtime.generation;
+             new_trace_id =
+               Keeper_id.Trace_id.to_string
+                 lifecycle.updated_meta.runtime.trace_id;
+           })
+  | true, None ->
+      dispatch_keeper_phase_event ~config ~keeper_name
+        (Keeper_state_machine.Handoff_failed
+           {
+             reason =
+               Option.value lifecycle.handoff_failure_reason
+                 ~default:"handoff_aborted";
+           })
+  | false, _ -> ()
+
 (* ================================================================ *)
 (* Remaining functions (not extracted — small utilities)              *)
 (* ================================================================ *)

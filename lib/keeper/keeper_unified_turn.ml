@@ -88,18 +88,9 @@ let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
 
-type committed_tool_call = {
-  tool_name : string;
-}
-
-let committed_tool_names tool_calls =
-  tool_calls
-  |> List.map (fun (tool_call : committed_tool_call) -> tool_call.tool_name)
+let committed_mutating_tools tool_names =
+  tool_names
   |> dedupe_keep_order
-
-let committed_mutating_tool_names tool_calls =
-  tool_calls
-  |> committed_tool_names
   |> List.filter Keeper_exec_tools.has_mutating_side_effect
 
 let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
@@ -112,9 +103,7 @@ let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
     (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
-  let committed_tools = committed_mutating_tool_names
-      (List.map (fun tool_name -> { tool_name }) tool_names)
-  in
+  let committed_tools = committed_mutating_tools tool_names in
   if committed_tools = [] || is_ambiguous_side_effect_error err then err
   else
     let tools = String.concat ", " committed_tools in
@@ -133,11 +122,7 @@ let summarize_post_commit_failure
     ~(tool_names : string list)
     ~(kind : Keeper_registry.ambiguous_partial_commit_kind)
     (err : Oas.Error.sdk_error) =
-  let tools =
-    String.concat ", "
-      (committed_mutating_tool_names
-         (List.map (fun tool_name -> { tool_name }) tool_names))
-  in
+  let tools = String.concat ", " (committed_mutating_tools tool_names) in
   let err_preview = short_preview (Oas.Error.to_string err) in
   match kind with
   | Keeper_registry.Post_commit_timeout ->
@@ -151,23 +136,11 @@ let summarize_post_commit_failure
         tools
         err_preview
 
-let blocker_class_of_failure_reason = function
-  | Keeper_registry.Ambiguous_partial_commit
-      { kind = Keeper_registry.Post_commit_timeout; _ } ->
-      "ambiguous_post_commit_timeout"
-  | Keeper_registry.Ambiguous_partial_commit
-      { kind = Keeper_registry.Post_commit_failure; _ } ->
-      "ambiguous_post_commit_failure"
-  | _ -> "manual_reconcile_required"
-
 let classify_post_commit_failure
     ~(tool_names : string list)
     ?kind
     (err : Oas.Error.sdk_error) =
-  let committed_tools =
-    committed_mutating_tool_names
-      (List.map (fun tool_name -> { tool_name }) tool_names)
-  in
+  let committed_tools = committed_mutating_tools tool_names in
   if committed_tools = []
   then None
   else
@@ -285,6 +258,42 @@ let recover_context_overflow_retry
         "%s: context overflow detected but checkpoint recovery unavailable: %s"
         meta.name (short_preview (Oas.Error.to_string error));
       None
+
+let resolved_max_context_for_turn
+    ~(meta : keeper_meta)
+    (model_labels : string list) : int =
+  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+  let raw =
+    match meta.max_context_override with
+    | Some v ->
+        Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
+        v
+    | None ->
+        let primary =
+          let resolved =
+            Oas_model_resolve.resolve_primary_max_context model_labels
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:model_labels ~max_context:resolved
+        in
+        let cascade_max =
+          let resolved =
+            Oas_model_resolve.resolve_max_cascade_context model_labels
+          in
+          Oas_model_resolve.clamp_context_for_pure_local_labels
+            ~labels:model_labels ~max_context:resolved
+        in
+        if primary < cascade_max then
+          Log.Keeper.info
+            "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
+            meta.name primary cascade_max;
+        primary
+  in
+  if raw < min_keeper_context then begin
+    Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
+      meta.name raw min_keeper_context;
+    min_keeper_context
+  end else raw
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -1128,69 +1137,37 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       match ensure_api_keys_for_labels model_labels with
       | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
-          ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
-          let max_cascade_context =
-            let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-            let raw =
-              match meta.max_context_override with
-              | Some v ->
-                  Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
-                  v
-              | None ->
-                  let resolved =
-                    Oas_model_resolve.resolve_max_cascade_context model_labels
-                  in
-                  Oas_model_resolve.clamp_context_for_pure_local_labels
-                    ~labels:model_labels ~max_context:resolved
-            in
-            if raw < min_keeper_context then begin
-              Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
-                meta.name raw min_keeper_context;
-              min_keeper_context
-            end else raw
+      ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
+      let max_context =
+        resolved_max_context_for_turn ~meta model_labels
+      in
+      (* Yield before CPU-bound prompt construction so the Eio scheduler
+         can service HTTP handlers between keeper turn setups. *)
+      Eio.Fiber.yield ();
+      (* 2. Build unified prompt *)
+      let diversity_hint =
+        let entries =
+          Keeper_registry.tool_usage_of ~base_path:config.base_path meta.name
+        in
+        if entries = [] then None
+        else
+          let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
+          let available_tools =
+            Keeper_tool_policy.keeper_allowed_tool_names meta
           in
-          (* Yield before CPU-bound prompt construction so the Eio scheduler
-             can service HTTP handlers between keeper turn setups. *)
-          Eio.Fiber.yield ();
-          (* 2. Build unified prompt *)
-          let diversity_hint =
-            let entries =
-              Keeper_registry.tool_usage_of ~base_path:config.base_path meta.name
-            in
-            if entries = [] then None
-            else
-              let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
-              let available_tools =
-                Keeper_tool_policy.keeper_allowed_tool_names meta
-              in
-              let summary =
-                Keeper_tool_diversity.compute_diversity ~available_tools stats
-              in
-              Keeper_tool_diversity.diversity_hint summary
+          let summary =
+            Keeper_tool_diversity.compute_diversity ~available_tools stats
           in
-          let system_prompt, user_message =
-            Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
-              ~observation ?diversity_hint ()
-          in
-          Eio.Fiber.yield ();
-          let trace_dir = session_base_dir config in
-          let dispatch_lifecycle_event event =
-            match
-              Keeper_registry.dispatch_event
-                ~base_path:registry_base_path meta.name event
-            with
-            | Ok _ -> ()
-            | Error err ->
-                Log.Keeper.warn
-                  "%s: post-turn lifecycle dispatch failed event=%s error=%s"
-                  meta.name
-                  (Keeper_state_machine.event_to_string event)
-                  (Keeper_state_machine.transition_error_to_string err)
-          in
+          Keeper_tool_diversity.diversity_hint summary
+      in
+      let system_prompt, user_message =
+        Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
+          ~observation ?diversity_hint ()
+      in
+      Eio.Fiber.yield ();
+      let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
-      Keeper_types.mkdir_p
-        (Filename.concat trace_dir
-           (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+      Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
@@ -1232,8 +1209,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            && Keeper_exec_tools.has_mutating_side_effect_with_input
                 ~tool_name ~input
         then
-          mutating_tools_committed :=
-            { tool_name } :: !mutating_tools_committed
+          mutating_tools_committed := tool_name :: !mutating_tools_committed
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
       let evidence_before_hash =
@@ -1263,7 +1239,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               | Keeper_world_observation.Scheduled_autonomous ->
                   Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous
             in
-            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir:trace_dir
+            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:meta.cascade_name
               ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
@@ -1306,7 +1282,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             | Ok _ as ok -> ok
             | Error err ->
                 let committed_tools =
-                  committed_mutating_tool_names !mutating_tools_committed
+                  committed_mutating_tools !mutating_tools_committed
                 in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1379,9 +1355,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                     ~is_retry:true ~overflow_retry_used
                 end else if (not overflow_retry_used)
                              && is_context_overflow err then (
-                  match
-                    recover_context_overflow_retry ~meta ~base_dir:trace_dir
-                      ~max_cascade_context ~error:err
+                      match
+                        recover_context_overflow_retry ~meta ~base_dir
+                      ~max_cascade_context:max_context ~error:err
                   with
                   | Some retry_plan ->
                       let retry_meta =
@@ -1408,7 +1384,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           (try
             Eio.Time.with_timeout_exn clock timeout_sec
               (fun () ->
-                retry_loop ~run_meta:meta ~max_context:max_cascade_context
+                retry_loop ~run_meta:meta ~max_context
                   ~run_generation:generation ~attempt:1
                   ~is_retry:false ~overflow_retry_used:false)
           with Eio.Time.Timeout ->
@@ -1419,7 +1395,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             Log.Keeper.error "%s: %s" meta.name msg;
             let committed_tools =
-              committed_mutating_tool_names !mutating_tools_committed
+              committed_mutating_tools !mutating_tools_committed
             in
             if committed_tools <> []
                && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1480,7 +1456,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
             "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
-            meta.name meta.cascade_name max_cascade_context latency_ms
+            meta.name meta.cascade_name max_context latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
              else if is_server_parse_rejection then
@@ -1497,6 +1473,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_transient ~social_state ()
           in
           if is_ambiguous_partial then begin
+            (* Log the partial commit but do NOT block the keeper with
+               a manual_reconcile file. Keeper tools (board_vote,
+               board_comment, broadcast) are safe to re-encounter —
+               duplicates are tolerable, but a stuck keeper is not.
+               The failure is still recorded in decisions.jsonl and
+               failure_reason for observability. *)
             let failure_reason =
               Option.value
                 ~default:
@@ -1509,23 +1491,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
               (Some failure_reason);
-            ignore
-              (Keeper_manual_reconcile.open_pending
-                 config
-                 ~keeper_name:meta.name
-                 ~blocker_class:(blocker_class_of_failure_reason failure_reason)
-                 ~summary:(short_preview e_str)
-                 ~failure_reason:
-                   (Some (Keeper_registry.failure_reason_to_string failure_reason))
-                 ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-                 ~generation:(Some meta.runtime.generation)
-                 ~committed_tools:
-                   (committed_tool_names !mutating_tools_committed));
-            ignore (Keeper_registry.dispatch_event
-              ~base_path:config.base_path meta.name
-              (Keeper_state_machine.Manual_reconcile_required {
-                reason = short_preview e_str;
-              }))
+            Log.Keeper.warn
+              "%s: auto-recoverable partial commit (tools=[%s]); \
+               continuing without manual reconcile block"
+              meta.name
+              (String.concat ", "
+                 (committed_mutating_tools !mutating_tools_committed))
           end;
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
@@ -1609,47 +1580,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~output_tokens:result.usage.output_tokens ()
           in
           let lifecycle =
-            apply_post_turn_lifecycle ~base_dir:trace_dir
+            apply_post_turn_lifecycle ~base_dir
               ~on_compaction_started:(fun () ->
-                dispatch_lifecycle_event
+                dispatch_keeper_phase_event
+                  ~config
+                  ~keeper_name:meta.name
                   Keeper_state_machine.Compaction_started)
               ~on_handoff_started:(fun () ->
-                dispatch_lifecycle_event
+                dispatch_keeper_phase_event
+                  ~config
+                  ~keeper_name:meta.name
                   Keeper_state_machine.Handoff_started)
               ~meta
               ~model:result.model_used
-              ~primary_model_max_tokens:max_cascade_context
+              ~primary_model_max_tokens:max_context
               ~checkpoint:result.checkpoint
           in
-          if lifecycle.compaction.attempted then
-            if lifecycle.compaction.applied then
-              dispatch_lifecycle_event
-                (Keeper_state_machine.Compaction_completed {
-                  before_tokens = lifecycle.compaction.before_tokens;
-                  after_tokens = lifecycle.compaction.after_tokens;
-                })
-            else
-              dispatch_lifecycle_event
-                (Keeper_state_machine.Compaction_failed {
-                  reason =
-                    Option.value lifecycle.compaction.failure_reason
-                      ~default:lifecycle.compaction.decision;
-                });
-          (match lifecycle.handoff_attempted, lifecycle.handoff_json with
-           | true, Some _json ->
-               dispatch_lifecycle_event
-                 (Keeper_state_machine.Handoff_completed {
-                   generation = lifecycle.updated_meta.runtime.generation;
-                   new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
-                 })
-           | true, None ->
-               dispatch_lifecycle_event
-                 (Keeper_state_machine.Handoff_failed {
-                   reason =
-                     Option.value lifecycle.handoff_failure_reason
-                       ~default:"handoff_aborted";
-                 })
-           | false, _ -> ());
+          dispatch_post_turn_lifecycle_events
+            ~config
+            ~keeper_name:meta.name
+            lifecycle;
           let scope_only_reactive =
             observation.pending_scope_messages <> []
             && observation.pending_mentions = []

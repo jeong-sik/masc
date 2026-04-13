@@ -22,6 +22,7 @@ let test_spawn_config_creation () =
     timeout_seconds = 60;
     working_dir = Some "/tmp";
     mcp_tools = ["tool1"; "tool2"]; parse_output = Spawn.parse_raw_output; stdin_prompt = true;
+    mcp_mode = Spawn.Mcp_none; prompt_mode = Spawn.Prompt_stdin;
   } in
   check string "agent_name" "test-agent" cfg.agent_name;
   check string "command" "claude -p" cfg.command;
@@ -36,6 +37,7 @@ let test_spawn_config_no_working_dir () =
     timeout_seconds = 30;
     working_dir = None;
     mcp_tools = []; parse_output = Spawn.parse_raw_output; stdin_prompt = true;
+    mcp_mode = Spawn.Mcp_none; prompt_mode = Spawn.Prompt_stdin;
   } in
   match cfg.working_dir with
   | None -> ()
@@ -48,6 +50,7 @@ let test_spawn_config_empty_tools () =
     timeout_seconds = 1;
     working_dir = None;
     mcp_tools = []; parse_output = Spawn.parse_raw_output; stdin_prompt = true;
+    mcp_mode = Spawn.Mcp_none; prompt_mode = Spawn.Prompt_stdin;
   } in
   check int "empty tools" 0 (List.length cfg.mcp_tools)
 

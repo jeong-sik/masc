@@ -8,8 +8,14 @@
     to a uniform JSON format with an "oas:" prefix so consumers can
     distinguish them from MASC-originated events.
 
+    Since OAS 0.123.0 every event carries an envelope with
+    [correlation_id], [run_id], and [ts]. These are always emitted
+    in the SSE JSON so downstream consumers can join events into
+    causal chains offline.
+
     @since 2.96.0
-    @modified 2.255.0 — accept OAS native events (#5620) *)
+    @modified 2.255.0 — accept OAS native events (#5620)
+    @modified 2.260.0 — emit envelope correlation_id/run_id (oas#845) *)
 
 (** Drain interval: how often we poll the Event_bus subscription.
     Lower default keeps the dashboard close to real-time, while staying
@@ -40,120 +46,88 @@ let payload_agent_name payload =
   | Some _ as value -> value
   | None -> payload_string_opt "agent" payload
 
-let wrap_event ~ts ~event_type ~payload ?agent_name ?session_id ?worker_run_id
-    ?task_id ?turn ?tool_name () =
+(** Build the SSE JSON wrapper. [correlation_id] and [run_id] are
+    mandatory (from the envelope); all other fields are optional. *)
+let wrap_event ~ts ~correlation_id ~run_id ~event_type ~payload
+    ?agent_name ?task_id ?turn ?tool_name () =
   `Assoc
     [
       ("type", `String ("oas:" ^ event_type));
       ("event_type", `String event_type);
       ("ts_unix", `Float ts);
+      ("correlation_id", `String correlation_id);
+      ("run_id", `String run_id);
       ("agent_name", json_string_opt agent_name);
-      ("session_id", json_string_opt session_id);
-      ("worker_run_id", json_string_opt worker_run_id);
       ("task_id", json_string_opt task_id);
       ("turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn);
       ("tool_name", json_string_opt tool_name);
       ("payload", payload);
     ]
 
-(** Serialize an OAS event to JSON for SSE relay + durable storage. *)
+(** Serialize an OAS event to JSON for SSE relay + durable storage.
+    Reads envelope metadata ([correlation_id], [run_id], [ts]) from
+    [evt.meta] and includes them in every emitted JSON object. *)
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
-  let ts = Time_compat.now () in
-  match evt with
-  | Agent_sdk.Event_bus.AgentStarted
-      { agent_name; task_id; session_id; worker_run_id; _ } ->
+  let { Agent_sdk.Event_bus.correlation_id; run_id; ts } = evt.meta in
+  let wrap = wrap_event ~ts ~correlation_id ~run_id in
+  match evt.payload with
+  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("task_id", `String task_id);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"agent_started" ~payload ~agent_name
-           ~task_id ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.AgentCompleted
-      { agent_name; task_id; elapsed; session_id; worker_run_id; _ } ->
+      Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
+  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("task_id", `String task_id);
             ("elapsed_s", `Float elapsed);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"agent_completed" ~payload ~agent_name
-           ~task_id ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.ToolCalled
-      { agent_name; tool_name; session_id; worker_run_id; _ } ->
+      Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
+  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("tool_name", `String tool_name);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"tool_called" ~payload ~agent_name
-           ~tool_name ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.ToolCompleted
-      { agent_name; tool_name; session_id; worker_run_id; _ } ->
+      Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
+  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("tool_name", `String tool_name);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"tool_completed" ~payload ~agent_name
-           ~tool_name ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.TurnStarted
-      { agent_name; turn; session_id; worker_run_id; _ } ->
+      Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
+  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("turn", `Int turn);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"turn_started" ~payload ~agent_name ~turn
-           ?session_id ?worker_run_id ())
-  | Agent_sdk.Event_bus.TurnCompleted
-      { agent_name; turn; session_id; worker_run_id; _ } ->
+      Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())
+  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("turn", `Int turn);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"turn_completed" ~payload ~agent_name ~turn
-           ?session_id ?worker_run_id ())
+      Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
   | Agent_sdk.Event_bus.ContextCompacted
-      {
-        agent_name;
-        before_tokens;
-        after_tokens;
-        phase;
-        session_id;
-        worker_run_id;
-      } ->
+      { agent_name; before_tokens; after_tokens; phase } ->
       let payload =
         `Assoc
           [
@@ -161,13 +135,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
             ("before_tokens", `Int before_tokens);
             ("after_tokens", `Int after_tokens);
             ("phase", `String phase);
-            ("session_id", json_string_opt session_id);
-            ("worker_run_id", json_string_opt worker_run_id);
           ]
       in
-      Some
-        (wrap_event ~ts ~event_type:"context_compacted" ~payload ~agent_name
-           ?session_id ?worker_run_id ())
+      Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
   | Agent_sdk.Event_bus.TaskStateChanged { task_id; from_state; to_state } ->
       let payload =
         `Assoc
@@ -177,15 +147,13 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
             ("to_state", `String to_state);
           ]
       in
-      Some (wrap_event ~ts ~event_type:"task_state_changed" ~payload ~task_id ())
+      Some (wrap ~event_type:"task_state_changed" ~payload ~task_id ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ ->
     None  (* Internal; no SSE relay needed *)
   | Agent_sdk.Event_bus.Custom (name, payload) ->
       Some
-        (wrap_event ~ts ~event_type:name ~payload
+        (wrap ~event_type:name ~payload
            ?agent_name:(payload_agent_name payload)
-           ?session_id:(payload_string_opt "session_id" payload)
-           ?worker_run_id:(payload_string_opt "worker_run_id" payload)
            ?task_id:(payload_string_opt "task_id" payload)
            ?turn:(payload_int_opt "turn" payload)
            ?tool_name:(payload_string_opt "tool_name" payload)

@@ -991,8 +991,9 @@ let test_unified_turn_runtime_defaults () =
   with_env "MASC_KEEPER_UNIFIED_MAX_TOKENS" "" (fun () ->
     check (float 0.01) "unified temp default" 0.4
       (KC.keeper_unified_temperature ());
-    (* This unit test does not run Runtime_params.restore, so an empty env var
-       falls back to the code-level default rather than config/cascade.json. *)
+    (* Runtime param default is 65536 (safe fallback).
+       In production, cascade.json overrides to 16384.
+       This test verifies the runtime default, not cascade-resolved value. *)
     check int "unified max_tokens default" 65536
       (KC.keeper_unified_max_tokens ())
     (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
@@ -2151,6 +2152,12 @@ let test_clamp_context_for_pure_local_labels () =
        ~labels:[ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ]
        ~max_context:262_144)
 
+let test_resolved_max_context_for_turn_uses_primary_budget () =
+  let labels = [ "glm:glm-5.1"; "ollama:qwen3.5:35b-a3b-nvfp4" ] in
+  let expected = OMR.resolve_primary_max_context labels in
+  check int "turn budget follows primary available model" expected
+    (UT.resolved_max_context_for_turn ~meta:minimal_meta labels)
+
 let test_side_effect_reclassification_ignores_keeper_read_only_tools () =
   let original =
     Agent_sdk.Error.Api
@@ -3094,6 +3101,8 @@ let () =
             test_pure_local_labels_detection;
           test_case "pure local context clamp" `Quick
             test_clamp_context_for_pure_local_labels;
+          test_case "turn context budget uses primary model" `Quick
+            test_resolved_max_context_for_turn_uses_primary_budget;
           test_case "read-only keeper tools do not become ambiguous partial" `Quick
             test_side_effect_reclassification_ignores_keeper_read_only_tools;
           test_case "mixed tool sets only keep mutating keeper tools" `Quick

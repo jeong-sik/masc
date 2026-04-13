@@ -333,7 +333,7 @@ let metadata name =
     | Some meta -> meta
     | None ->
       if is_public_mcp name then default_metadata
-      else if Hashtbl.mem keeper_internal_set name then
+      else if List.mem name keeper_internal_set then
         keeper_internal_metadata name
       else if Tool_catalog_surfaces.is_on_surface System_internal name then
         { default_metadata with

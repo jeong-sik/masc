@@ -109,6 +109,15 @@ val is_ambiguous_side_effect_error : Oas.Error.sdk_error -> bool
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Oas.Error.sdk_error -> bool
 
+(** Resolve the initial keeper turn context budget.
+    Uses the first available model in the cascade rather than the largest
+    fallback model, so lifecycle context math matches the provider that will
+    receive the first request. Exposed for regression tests. *)
+val resolved_max_context_for_turn :
+  meta:Keeper_types.keeper_meta ->
+  string list ->
+  int
+
 val run_unified_turn :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->

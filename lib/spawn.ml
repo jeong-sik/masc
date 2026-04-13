@@ -10,6 +10,17 @@ type parsed_output = {
   cost_usd : float option;
 }
 
+(** How MCP tool list is passed on the CLI. *)
+type mcp_flag =
+  | Mcp_joined of string    (** Single flag with comma-joined tools: --flag t1,t2 *)
+  | Mcp_spread of string    (** Server name + spread tools: --server masc --flag t1 t2 *)
+  | Mcp_none                (** No MCP flags emitted *)
+
+(** How the prompt is passed to the CLI. *)
+type prompt_flag =
+  | Prompt_flag of string   (** Prompt passed via CLI flag: -p <prompt> *)
+  | Prompt_stdin             (** Prompt passed via stdin *)
+
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
@@ -21,7 +32,12 @@ type spawn_config = {
     (** Parse CLI tool's raw output into structured result.
         Each CLI tool has a different JSON schema. *)
   stdin_prompt: bool;
-    (** Whether prompt is passed via stdin (true) or CLI flag (false). *)
+    (** Whether prompt is passed via stdin (true) or CLI flag (false).
+        Deprecated: use [prompt_mode] instead. Kept for backward compat. *)
+  mcp_mode: mcp_flag;
+    (** How MCP tools are passed on the CLI. *)
+  prompt_mode: prompt_flag;
+    (** How the prompt is delivered to the agent. *)
 }
 
 (** Spawn result with token tracking *)
@@ -151,6 +167,8 @@ let default_configs = [
     mcp_tools = masc_mcp_tools;
     parse_output = parse_claude_output;
     stdin_prompt = true;
+    mcp_mode = Mcp_joined "--allowedTools";
+    prompt_mode = Prompt_stdin;
   });
   ("gemini", {
     agent_name = "gemini";
@@ -159,7 +177,9 @@ let default_configs = [
     working_dir = None;
     mcp_tools = masc_mcp_tools;
     parse_output = parse_gemini_output;
-    stdin_prompt = false;  (* Gemini CLI uses -p flag, not stdin *)
+    stdin_prompt = false;
+    mcp_mode = Mcp_spread "--allowed-tools";
+    prompt_mode = Prompt_flag "-p";
   });
   ("codex", {
     agent_name = "codex";
@@ -169,6 +189,8 @@ let default_configs = [
     mcp_tools = masc_mcp_tools;
     parse_output = parse_raw_output;
     stdin_prompt = true;
+    mcp_mode = Mcp_none;
+    prompt_mode = Prompt_stdin;
   });
   ("llama", {
     agent_name = "llama";
@@ -178,6 +200,8 @@ let default_configs = [
     mcp_tools = masc_mcp_tools;
     parse_output = parse_raw_output;
     stdin_prompt = true;
+    mcp_mode = Mcp_none;
+    prompt_mode = Prompt_stdin;
   });
 ]
 
@@ -193,28 +217,37 @@ let get_config agent_name =
     | Some key -> List.assoc_opt key default_configs
     | None -> None
 
+(** Build MCP flags from config's [mcp_mode] field.
+    No agent-name matching — dispatch is config-driven. *)
+let build_mcp_args_from_config (config : spawn_config) tools =
+  if tools = [] then []
+  else
+    match config.mcp_mode with
+    | Mcp_joined flag ->
+      [flag; String.concat "," tools]
+    | Mcp_spread flag ->
+      ["--allowed-mcp-server-names"; "masc"; flag] @ tools
+    | Mcp_none -> []
+
+(** Build prompt flags from config's [prompt_mode] field. *)
+let build_prompt_args_from_config (config : spawn_config) prompt =
+  match config.prompt_mode with
+  | Prompt_flag flag -> [flag; prompt]
+  | Prompt_stdin -> []
+
 (** Build MCP flags as argument list (no shell escaping needed).
-    Uses spawn_key (not canonical_name) to match Spawn.default_configs keys. *)
+    Resolves agent config then dispatches via [mcp_mode]. *)
 let build_mcp_args agent_name tools =
   if tools = [] then []
   else
-    let key = Provider_adapter.resolve_spawn_key agent_name
-              |> Option.value ~default:agent_name in
-    match key with
-    | "claude" ->
-      let tools_str = String.concat "," tools in
-      ["--allowedTools"; tools_str]
-    | "gemini" ->
-      ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"] @ tools
-    | "codex" | "llama" -> []
-    | _ -> []
+    match get_config agent_name with
+    | Some config -> build_mcp_args_from_config config tools
+    | None -> []
 
 let build_prompt_args agent_name prompt =
-  let key = Provider_adapter.resolve_spawn_key agent_name
-            |> Option.value ~default:agent_name in
-  match key with
-  | "gemini" -> ["-p"; prompt]
-  | _ -> []
+  match get_config agent_name with
+  | Some config -> build_prompt_args_from_config config prompt
+  | None -> []
 
 (** Parse command string into executable and arguments *)
 let parse_command cmd =
@@ -344,6 +377,8 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
         mcp_tools = [];
         parse_output = parse_raw_output;
         stdin_prompt = true;
+        mcp_mode = Mcp_none;
+        prompt_mode = Prompt_stdin;
       }
   in
 

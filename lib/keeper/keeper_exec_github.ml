@@ -883,23 +883,33 @@ let handle_keeper_pr_submit
           else begin
             (* Extract PR URL from potentially multi-line output (stdout+stderr merged via 2>&1).
                Search all lines for the first matching https://github.com/.../pull/N pattern. *)
-            let url_re = Str.regexp {|https://github\.com/[^ \t\r\n'"\\]+/pull/[0-9]+|} in
+            let url_re =
+              Re.Pcre.re {|https://github\.com/[^ \t\r\n'"\\]+/pull/[0-9]+|}
+              |> Re.compile
+            in
             let lines = String.split_on_char '\n' out in
             let found_url = ref "" in
             (try
                List.iter (fun line ->
                  let trimmed = String.trim line in
-                 if !found_url = "" && Str.string_match url_re trimmed 0 then
-                   found_url := Str.matched_string trimmed
+                 if !found_url = "" then
+                   match Re.exec_opt url_re trimmed with
+                   | Some groups -> found_url := Re.Group.get groups 0
+                   | None -> ()
                ) lines
              with _ -> ());
             if !found_url <> "" then begin
               pr_url := !found_url;
               Ok (Printf.sprintf "PR created: %s" !found_url)
             end else
+              let out_preview =
+                let trimmed = String.trim out in
+                let len = String.length trimmed in
+                if len <= 200 then trimmed else String.sub trimmed 0 200
+              in
               Error (Printf.sprintf
-                "gh pr create returned exit 0 but no PR URL found in output: %.200s"
-                (String.trim out))
+                "gh pr create returned exit 0 but no PR URL found in output: %s"
+                out_preview)
           end
         ) in
         (* Step 6: verify PR actually exists on remote *)

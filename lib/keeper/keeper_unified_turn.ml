@@ -1656,17 +1656,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~config
             ~keeper_name:meta.name
             lifecycle;
-          let scope_only_reactive =
-            observation.pending_scope_messages <> []
-            && observation.pending_mentions = []
-            && observation.pending_board_events = []
-          in
-          (* 6. Observe result and update metrics *)
+          (* 6. Observe result and update metrics.
+             Always update proactive_rt regardless of turn type.
+             Previously, scope-only reactive turns (pending_scope but no
+             mentions/board) skipped the timestamp update, freezing the
+             proactive cooldown timer so the second autonomous turn never
+             fired.  See Bug #3 in the root-cause analysis. *)
           let updated_meta =
             update_metrics_from_result lifecycle.updated_meta ~latency_ms
               ~observation
               ~social_state
-              ~update_proactive_rt:(not scope_only_reactive)
+              ~update_proactive_rt:true
               result
           in
           (try

@@ -816,8 +816,15 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
           ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
           ~evidence_refs:[]
           ~idempotency_key:None);
+        (* Clear the FSM condition — Turn_succeeded alone does NOT reset
+           manual_reconcile_required (only Manual_reconcile_cleared does).
+           Without this, derive_phase stays Failing and the keeper can
+           never take another turn.  See the one-way trap analysis. *)
+        ignore (Keeper_registry.dispatch_event
+          ~base_path:ctx.config.base_path meta.name
+          Keeper_state_machine.Manual_reconcile_cleared);
         Log.Keeper.info
-          "heartbeat recovery: cleared reconcile blocker for %s (auto-recoverable, re-trigger risk low)"
+          "heartbeat recovery: cleared reconcile blocker + FSM condition for %s (auto-recoverable, re-trigger risk low)"
           meta.name
       end;
       dispatch_keepalive_event ~ctx ~keeper_name:meta.name

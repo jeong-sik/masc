@@ -80,14 +80,31 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           ]
       in
       Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
-  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
+  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
+      let usage_fields =
+        match result with
+        | Ok resp -> (
+            match resp.usage with
+            | Some u ->
+                [
+                  ("input_tokens", `Int u.input_tokens);
+                  ("output_tokens", `Int u.output_tokens);
+                  ( "cost_usd",
+                    match u.cost_usd with
+                    | Some c -> `Float c
+                    | None -> `Null );
+                ]
+            | None -> [])
+        | Error _ -> []
+      in
       let payload =
         `Assoc
-          [
-            ("agent_name", `String agent_name);
-            ("task_id", `String task_id);
-            ("elapsed_s", `Float elapsed);
-          ]
+          ([
+             ("agent_name", `String agent_name);
+             ("task_id", `String task_id);
+             ("elapsed_s", `Float elapsed);
+           ]
+          @ usage_fields)
       in
       Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->

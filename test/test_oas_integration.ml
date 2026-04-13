@@ -192,6 +192,86 @@ let test_compact_syncs_oas_context () =
    | _ -> Alcotest.fail "expected context_ratio in oas_context after compact")
 
 (* ================================================================ *)
+let test_agent_completed_includes_usage () =
+  let open Agent_sdk in
+  let usage : Types.api_usage =
+    {
+      input_tokens = 500;
+      output_tokens = 150;
+      cache_creation_input_tokens = 0;
+      cache_read_input_tokens = 0;
+      cost_usd = Some 0.003;
+    }
+  in
+  let resp : Types.api_response =
+    {
+      id = "msg-test";
+      model = "test-model";
+      stop_reason = EndTurn;
+      content = [];
+      usage = Some usage;
+      telemetry = None;
+    }
+  in
+  let evt =
+    Event_bus.mk_event ~correlation_id:"sess-usage" ~run_id:"run-usage"
+      (AgentCompleted
+         {
+           agent_name = "usage-agent";
+           task_id = "task-usage";
+           result = Ok resp;
+           elapsed = 1.5;
+         })
+  in
+  match Oas_sse_bridge.native_event_to_json evt with
+  | None -> Alcotest.fail "expected Some for AgentCompleted"
+  | Some (`Assoc fields) ->
+      let payload_fields =
+        match List.assoc_opt "payload" fields with
+        | Some (`Assoc p) -> p
+        | _ -> Alcotest.failf "expected payload assoc"
+      in
+      let int_field name =
+        match List.assoc_opt name payload_fields with
+        | Some (`Int v) -> v
+        | _ -> -1
+      in
+      Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
+      Alcotest.(check int) "output_tokens" 150 (int_field "output_tokens");
+      (match List.assoc_opt "cost_usd" payload_fields with
+       | Some (`Float f) ->
+           Alcotest.(check (float 0.001)) "cost_usd" 0.003 f
+       | _ -> Alcotest.fail "expected cost_usd float");
+      Alcotest.(check string) "event_type" "agent_completed"
+        (match List.assoc_opt "event_type" fields with
+         | Some (`String s) -> s
+         | _ -> "")
+  | Some _ -> Alcotest.fail "expected assoc"
+
+let test_agent_completed_no_usage_on_error () =
+  let open Agent_sdk in
+  let evt =
+    Event_bus.mk_event
+      (AgentCompleted
+         {
+           agent_name = "err-agent";
+           task_id = "task-err";
+           result = Error (Error.Internal "test failure");
+           elapsed = 0.5;
+         })
+  in
+  match Oas_sse_bridge.native_event_to_json evt with
+  | None -> Alcotest.fail "expected Some for AgentCompleted error"
+  | Some (`Assoc fields) ->
+      let payload_fields =
+        match List.assoc_opt "payload" fields with
+        | Some (`Assoc p) -> p
+        | _ -> []
+      in
+      Alcotest.(check bool) "no input_tokens on error" true
+        (Option.is_none (List.assoc_opt "input_tokens" payload_fields))
+  | Some _ -> Alcotest.fail "expected assoc"
+
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -204,6 +284,10 @@ let () =
         test_event_bus_task_transition;
       Alcotest.test_case "sse bridge persists native events" `Quick
         test_oas_sse_bridge_persists_native_events;
+      Alcotest.test_case "agent_completed includes usage" `Quick
+        test_agent_completed_includes_usage;
+      Alcotest.test_case "agent_completed no usage on error" `Quick
+        test_agent_completed_no_usage_on_error;
     ];
     "message_conversion", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;

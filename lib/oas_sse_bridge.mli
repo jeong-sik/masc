@@ -18,3 +18,7 @@ val start :
   config:Room.config ->
   bus:Agent_sdk.Event_bus.t ->
   unit
+
+(** Serialize a single OAS event to SSE JSON.
+    Exposed for unit testing. *)
+val native_event_to_json : Agent_sdk.Event_bus.event -> Yojson.Safe.t option

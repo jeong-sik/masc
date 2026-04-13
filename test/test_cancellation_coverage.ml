@@ -14,31 +14,6 @@ open Alcotest
 module Cancellation = Masc_mcp.Cancellation
 
 (* ============================================================
-   token Type Tests
-   ============================================================ *)
-
-let test_token_type_id () =
-  (* Token has id field *)
-  let _ : string = "token_id" in
-  ()
-
-let test_token_type_cancelled () =
-  let _ : bool = false in
-  ()
-
-let test_token_type_reason () =
-  let _ : string option = None in
-  ()
-
-let test_token_type_callbacks () =
-  let _ : (unit -> unit) list = [] in
-  ()
-
-let test_token_type_created_at () =
-  let _ : float = 0.0 in
-  ()
-
-(* ============================================================
    TokenStore.create_with_id Tests
    ============================================================ *)
 
@@ -138,13 +113,6 @@ let test_cancel_nonexistent () =
 
 let () =
   run "Cancellation Coverage" [
-    "token_type", [
-      test_case "id" `Quick test_token_type_id;
-      test_case "cancelled" `Quick test_token_type_cancelled;
-      test_case "reason" `Quick test_token_type_reason;
-      test_case "callbacks" `Quick test_token_type_callbacks;
-      test_case "created_at" `Quick test_token_type_created_at;
-    ];
     "create_with_id", [
       test_case "creates" `Quick test_create_with_id_creates;
       test_case "not cancelled" `Quick test_create_with_id_not_cancelled;

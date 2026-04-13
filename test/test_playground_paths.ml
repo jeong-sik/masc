@@ -141,6 +141,22 @@ let test_strip_no_traversal () =
   check bool "no backslash in result" true
     (not (String.contains result '\\'))
 
+let test_worktree_dir_name () =
+  check string "basic worktree dir"
+    "sangsu-fix-bug"
+    (PP.worktree_dir_name "sangsu" "fix-bug");
+  check string "hyphenated task id"
+    "cheolsu-PK-123"
+    (PP.worktree_dir_name "cheolsu" "PK-123")
+
+let test_worktree_branch_name () =
+  check string "basic worktree branch"
+    "sangsu/fix-bug"
+    (PP.worktree_branch_name "sangsu" "fix-bug");
+  check string "hyphenated task id"
+    "cheolsu/PK-123"
+    (PP.worktree_branch_name "cheolsu" "PK-123")
+
 let () =
   run "Playground_paths"
     [
@@ -164,5 +180,9 @@ let () =
         test_case "both forms produce identical paths" `Quick test_canonical_short_path_identity;
         test_case "edge cases" `Quick test_strip_edge_cases;
         test_case "strip does not create traversal" `Quick test_strip_no_traversal;
+      ]);
+      ("worktree_naming", [
+        test_case "worktree_dir_name" `Quick test_worktree_dir_name;
+        test_case "worktree_branch_name" `Quick test_worktree_branch_name;
       ]);
     ]

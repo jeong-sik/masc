@@ -13,6 +13,7 @@ import type { SwimlaneResponse } from '../types'
 import { selectedNodeId, highlightedAgentId } from './activity-graph-view'
 import { formatDurationMs } from '../lib/format-time'
 import { createAsyncResource } from '../lib/async-state'
+import { escapeHtml, tooltipHtml } from '../lib/escape-html'
 import 'vis-timeline/styles/vis-timeline-graph2d.css'
 
 const swimlaneResource = createAsyncResource<SwimlaneResponse | null>()
@@ -30,21 +31,8 @@ interface SwimlaneTimelineItem {
   style: string
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
 function truncateLabel(value: string, max = 20): string {
   return value.length > max ? `${value.slice(0, max - 2)}..` : value
-}
-
-function tooltipHtml(lines: string[]): string {
-  return lines.map(escapeHtml).join('<br/>')
 }
 
 function syncHighlightedGroups(
@@ -126,7 +114,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
 
     const groups = new DataSet(data.agents.map((agent, i) => ({
       id: agent,
-      content: agent.length > 10 ? agent.slice(0, 9) + '..' : agent,
+      content: agent.length > 16 ? agent.slice(0, 15) + '..' : agent,
       title: agent,
       className: 'agent-swimlane-group text-[11px] font-system text-[#94a3b8]',
       order: i

@@ -370,7 +370,7 @@ export function ActivityGraphSurface() {
         <//>
 
         <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
-          <div class="max-h-[520px] overflow-y-auto">
+          <div class="max-h-[360px] overflow-y-auto">
             <${ActionTimeline} data=${data} />
           </div>
         <//>

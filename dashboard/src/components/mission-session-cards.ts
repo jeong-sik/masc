@@ -9,6 +9,7 @@ import { ActionBar, ActionBtn } from './common/action-bar'
 import { StatusChip } from './common/status-chip'
 import { openAgentDetail } from './agent-detail'
 import { SessionFlowCard } from './mission-session-flow'
+import { CollapsibleSection } from './common/collapsible'
 import { WorkerRunEvidenceRow } from './proof-sections'
 import type {
   DashboardMissionSessionCard,
@@ -153,9 +154,12 @@ export function SessionDetailCard({
 
       ${workerRuns
         ? html`
-            <div class="grid gap-4 mt-4">
+            <div class="border-t border-[var(--white-8)] mt-4 pt-4">
+              <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3">워커 런타임</div>
+            </div>
+            <div class="grid gap-4">
               <div class="flex justify-between gap-3 items-start flex-wrap">
-                <strong>워커 런타임</strong>
+                <strong>실행 현황</strong>
                 <${StatusChip}
                   label=${`${workerRuns.completed_success_count ?? 0}/${workerRuns.requested_count ?? 0} 완료`}
                   tone=${(workerRuns.completed_failed_count ?? 0) > 0 ? 'warn' : 'ok'}
@@ -188,7 +192,7 @@ export function SessionDetailCard({
               <div class="grid grid-cols-2 gap-5">
                 <div class="grid gap-3">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
-                    <strong>Delegate Readiness</strong>
+                    <strong>위임 준비 상태</strong>
                     <${StatusChip}
                       label=${String(workerRuns.worker_readiness.length)}
                       tone=${workerRuns.blocked_worker_names.length > 0 ? 'warn' : 'ok'}
@@ -216,9 +220,9 @@ export function SessionDetailCard({
                     />
                   </div>
                   <div class="grid gap-2 text-[13px] text-[var(--text-body)]">
-                    <div>in-flight · ${workerRuns.in_flight_actor_names.join(', ') || '없음'}</div>
-                    <div>delegate-ready · ${workerRuns.delegate_ready_worker_names.join(', ') || '없음'}</div>
-                    <div>blocked · ${workerRuns.blocked_worker_names.join(', ') || '없음'}</div>
+                    <div><span class="text-[var(--text-muted)]">실행 중</span> · ${workerRuns.in_flight_actor_names.join(', ') || '없음'}</div>
+                    <div><span class="text-[var(--text-muted)]">위임 가능</span> · ${workerRuns.delegate_ready_worker_names.join(', ') || '없음'}</div>
+                    <div><span class="text-[var(--text-muted)]">차단됨</span> · ${workerRuns.blocked_worker_names.join(', ') || '없음'}</div>
                   </div>
                 </div>
               </div>
@@ -238,7 +242,10 @@ export function SessionDetailCard({
           `
         : null}
 
-      <div class="grid grid-cols-2 gap-5 mt-4">
+      <div class="border-t border-[var(--white-8)] mt-4 pt-4">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3">타임라인 & 참여자</div>
+      </div>
+      <div class="grid grid-cols-2 gap-5">
         <div class="grid gap-3">
           <div class="flex justify-between gap-3 items-start flex-wrap">
             <strong>타임라인</strong>
@@ -277,43 +284,50 @@ export function SessionDetailCard({
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-5 mt-4">
-        <div class="grid gap-3">
-          <div class="flex justify-between gap-3 items-start flex-wrap">
-            <strong>연결된 작전</strong>
-            <${StatusChip} label=${String(detail.operations.length)} />
-          </div>
-          <div class="flex flex-col gap-3">
-            ${detail.operations.length > 0
-              ? detail.operations.map(operation => html`
-                  <${ListItem}
-                    title=${operation.operation_id}
-                    subtitle=${html`${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}`}
-                    detail=${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}
-                    onClick=${() => openSession('command', session.session_id)}
-                  />
-                `)
-              : html`<${EmptyState} message="연결된 작전이 없습니다." compact />`}
-          </div>
-        </div>
+      <div class="mt-4">
+        <${CollapsibleSection}
+          title="작전 & 키퍼"
+          badge=${html`<span class="text-[11px] text-[var(--text-muted)]">${detail.operations.length + detail.keepers.length}건</span>`}
+        >
+          <div class="grid grid-cols-2 gap-5">
+            <div class="grid gap-3">
+              <div class="flex justify-between gap-3 items-start flex-wrap">
+                <strong>연결된 작전</strong>
+                <${StatusChip} label=${String(detail.operations.length)} />
+              </div>
+              <div class="flex flex-col gap-3">
+                ${detail.operations.length > 0
+                  ? detail.operations.map(operation => html`
+                      <${ListItem}
+                        title=${operation.operation_id}
+                        subtitle=${html`${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}`}
+                        detail=${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}
+                        onClick=${() => openSession('command', session.session_id)}
+                      />
+                    `)
+                  : html`<${EmptyState} message="연결된 작전이 없습니다." compact />`}
+              </div>
+            </div>
 
-        <div class="grid gap-3">
-          <div class="flex justify-between gap-3 items-start flex-wrap">
-            <strong>연속성 관찰</strong>
-            <${StatusChip} label=${String(detail.keepers.length)} />
+            <div class="grid gap-3">
+              <div class="flex justify-between gap-3 items-start flex-wrap">
+                <strong>연속성 관찰</strong>
+                <${StatusChip} label=${String(detail.keepers.length)} />
+              </div>
+              <div class="flex flex-col gap-3">
+                ${detail.keepers.length > 0
+                  ? detail.keepers.map(keeper => html`
+                      <${ListItem}
+                        title=${keeper.name}
+                        subtitle=${html`${statusLabel(keeper.status)}${keeper.generation != null ? ` · 세대 ${keeper.generation}` : ''}`}
+                        detail=${keeper.current_work ?? '현재 작업 정보 없음'}
+                      />
+                    `)
+                  : html`<${EmptyState} message="직접 연결된 키퍼는 없습니다." compact />`}
+              </div>
+            </div>
           </div>
-          <div class="flex flex-col gap-3">
-            ${detail.keepers.length > 0
-              ? detail.keepers.map(keeper => html`
-                  <${ListItem}
-                    title=${keeper.name}
-                    subtitle=${html`${statusLabel(keeper.status)}${keeper.generation != null ? ` · 세대 ${keeper.generation}` : ''}`}
-                    detail=${keeper.current_work ?? '현재 작업 정보 없음'}
-                  />
-                `)
-              : html`<${EmptyState} message="직접 연결된 키퍼는 없습니다." compact />`}
-          </div>
-        </div>
+        <//>
       </div>
     <//>
   `

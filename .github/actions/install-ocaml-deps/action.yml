@@ -22,14 +22,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Pin OAS agent_sdk from source
-      shell: bash
-      run: |
-        set -euo pipefail
-        # Source pin metadata from the canonical script
-        source scripts/oas-agent-sdk-pin.sh
-        echo "Pinning agent_sdk from ${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
-        opam pin add agent_sdk "${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}" --no-action --yes
     - name: Install system and OCaml dependencies
       shell: bash
       env:

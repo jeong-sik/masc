@@ -65,7 +65,7 @@ OAS  ──does not know──→ MASC
 |------------------|----------------|-----|
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
 | `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
-| `lib/memory_oas_bridge.ml` | Acceptable but lossy | Correct consumer-side adapter, but seeding/flushing is still imperative instead of hook-first |
+| `lib/memory_oas_bridge.ml` | Acceptable | Consumer-side adapter; imperative seeding removed in RFC-MASC-004 Phase 2, hook-first injection is now the sole path |
 | `lib/team_session/team_session_oas_bridge.ml` | Acceptable but lossy | OAS Swarm is the substrate, while MASC semantics survive via metadata/projections with known fidelity loss |
 | `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Boundary violation | Keeper still owns duplicate runtime state via `working_context` and relies on raw text markers such as `[STATE]` |
 
@@ -73,7 +73,7 @@ OAS  ──does not know──→ MASC
 
 - keeper runtime still uses a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives
 - keeper continuity still leaks domain semantics through raw message text (`[STATE]`, goal/memory markers)
-- `memory_oas_bridge.ml` still owns imperative seeding/flushing instead of a hook-first boundary
+- `memory_oas_bridge.ml` imperative seeding removed (RFC-MASC-004 Phase 2); `create_memory_full` and `seed_*` functions remain for Phase 3 dead-code cleanup
 - team-session bridge fidelity and runtime-health signaling are still incomplete
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc
 
@@ -105,8 +105,8 @@ These stay in MASC:
    - reduce dependence on raw `[STATE]`, `[GOAL]`, and memory-summary markers in runtime-facing paths
 3. **P3 — team-session bridge fidelity**
    - keep MASC semantics in metadata/projections while improving OAS Swarm parity
-4. **P4 — memory bridge hardening**
-   - move from imperative seed/flush toward reusable OAS hook/callback seams where generic
+4. **P4 — memory bridge hardening** — Resolved (2026-04-13, PR #6795 Phase 1 + Phase 2)
+   - imperative seed/flush replaced by hook-first injection via `Memory_hooks` (RFC-MASC-004)
 5. **P5 — doc truth alignment**
    - keep this contract, the implementation spec, and the utilization audit in sync
 

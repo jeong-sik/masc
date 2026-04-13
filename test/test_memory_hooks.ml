@@ -158,20 +158,11 @@ let test_flush_incremental_idempotent () =
   check int "second flush episodes (idempotent)" 0 ep2;
   check int "second flush procedures (idempotent)" 0 pr2
 
-(* ── Feature flag test ─────────────────────────────────────── *)
+(* ── Feature flag removed (RFC-MASC-004 Phase 2) ─────────── *)
 
-let test_feature_flag_registered () =
+let test_feature_flag_removed () =
   let flag = Feature_flag_registry.find_opt "MASC_MEMORY_HOOK_FIRST" in
-  check bool "flag registered" true (Option.is_some flag);
-  match flag with
-  | Some f ->
-    check bool "default is false" false f.default;
-    check string "category is runtime" "runtime" f.category
-  | None -> fail "flag not found"
-
-let test_feature_flag_default_false () =
-  let value = Feature_flag_registry.get_bool "MASC_MEMORY_HOOK_FIRST" in
-  check bool "default runtime value is false" false value
+  check bool "flag removed from registry" true (Option.is_none flag)
 
 (* ── Hook composition test ─────────────────────────────────── *)
 
@@ -209,7 +200,6 @@ let () =
       test_case "flush_incremental idempotent" `Quick test_flush_incremental_idempotent;
     ];
     "feature_flag", [
-      test_case "flag registered" `Quick test_feature_flag_registered;
-      test_case "default is false" `Quick test_feature_flag_default_false;
+      test_case "flag removed (Phase 2)" `Quick test_feature_flag_removed;
     ];
   ]

@@ -154,15 +154,20 @@ type comment = {
 (** {1 Limits - Enforced, Not Optional} *)
 
 module Limits = struct
-  let max_posts = 10_000
-  let max_comments_per_post = 1_000
-  let max_content_length = 4_000
+  let env_int name default =
+    match Sys.getenv_opt name with
+    | Some s -> (match int_of_string_opt s with Some n -> n | None -> default)
+    | None -> default
+
+  let max_posts = env_int "MASC_BOARD_MAX_POSTS" 10_000
+  let max_comments_per_post = env_int "MASC_BOARD_MAX_COMMENTS_PER_POST" 1_000
+  let max_content_length = env_int "MASC_BOARD_MAX_CONTENT_LENGTH" 4_000
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
-  let automation_ttl_hours = 168 (* 7 days for Automation_post / System_post *)
-  let max_ttl_hours = 720      (* 30 days max; ignored when ttl=0 *)
-  let sweeper_interval_sec = 10  (* Much more aggressive than OpenClaw's 60s *)
-  let sweeper_batch_size = 100   (* Backpressure: don't delete too many at once *)
-  let author_post_cap = 100     (* Max active posts per author; oldest auto-expired *)
+  let automation_ttl_hours = env_int "MASC_BOARD_AUTOMATION_TTL_HOURS" 168
+  let max_ttl_hours = env_int "MASC_BOARD_MAX_TTL_HOURS" 720
+  let sweeper_interval_sec = env_int "MASC_BOARD_SWEEPER_INTERVAL_SEC" 10
+  let sweeper_batch_size = env_int "MASC_BOARD_SWEEPER_BATCH_SIZE" 100
+  let author_post_cap = env_int "MASC_BOARD_AUTHOR_POST_CAP" 100
 end
 
 (** {1 Vote Direction} *)

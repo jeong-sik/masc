@@ -1,3 +1,5 @@
+module StringMap = Map.Make (String)
+
 (** Meta_cognition_snapshot — Data loading, JSON builders, and snapshot generation.
 
     Loads board posts/comments/votes/governance cases and produces
@@ -61,13 +63,12 @@ let load_governance_cases config =
 (* ================================================================ *)
 
 let post_sources ?hearth_filter posts =
-  let post_by_id : (string, Board.post) Hashtbl.t =
-    Hashtbl.create (max 16 (List.length posts))
+  let post_by_id : Board.post StringMap.t =
+    List.fold_left
+      (fun m (post : Board.post) ->
+         StringMap.add (Board.Post_id.to_string post.id) post m)
+      StringMap.empty posts
   in
-  List.iter
-    (fun (post : Board.post) ->
-      Hashtbl.replace post_by_id (Board.Post_id.to_string post.id) post)
-    posts;
   let post_matches_hearth (post : Board.post) =
     match hearth_filter with
     | None -> true
@@ -86,7 +87,7 @@ let post_sources ?hearth_filter posts =
            let target_author =
              match post.thread_id with
              | Some thread_id -> (
-                 match Hashtbl.find_opt post_by_id thread_id with
+                 match StringMap.find_opt thread_id post_by_id with
                  | Some thread_post ->
                      Some (Board.Agent_id.to_string thread_post.author)
                  | None -> None)
@@ -107,11 +108,11 @@ let post_sources ?hearth_filter posts =
   (sources, post_by_id)
 
 let comment_sources ?hearth_filter
-    (post_by_id : (string, Board.post) Hashtbl.t) comments =
+    (post_by_id : Board.post StringMap.t) comments =
   comments
   |> List.filter_map (fun (comment : Board.comment) ->
          match
-           Hashtbl.find_opt post_by_id (Board.Post_id.to_string comment.post_id)
+           StringMap.find_opt (Board.Post_id.to_string comment.post_id) post_by_id
          with
          | None -> None
          | Some parent_post ->
@@ -318,21 +319,20 @@ let desire_json ~limit (rule : desire_rule) sources =
          ])
 
 let social_edges_json ~limit sources =
-  let table : (string, social_edge) Hashtbl.t = Hashtbl.create 32 in
-  let record_edge (source : source) edge_type target_author =
+  let record_edge table (source : source) edge_type target_author =
     let key = source.author ^ "|" ^ target_author ^ "|" ^ edge_type in
-    match Hashtbl.find_opt table key with
+    match StringMap.find_opt key table with
     | Some edge ->
-        Hashtbl.replace table key
+        StringMap.add key
           {
             edge with
             weight = edge.weight + 1;
             evidence_refs =
               unique_non_empty (source.ref_id :: edge.evidence_refs);
             last_seen_at = max edge.last_seen_at source.created_at;
-          }
+          } table
     | None ->
-        Hashtbl.add table key
+        StringMap.add key
           {
             from_agent = source.author;
             to_agent = target_author;
@@ -340,19 +340,21 @@ let social_edges_json ~limit sources =
             weight = 1;
             evidence_refs = [ source.ref_id ];
             last_seen_at = source.created_at;
-          }
+          } table
   in
-  List.iter
-    (fun (source : source) ->
-      match source.target_author, Meta_cognition_rules.classify_interaction_text source.text with
-      | Some target_author, Some edge_type
-        when String.trim target_author <> ""
-             && not (String.equal source.author target_author) ->
-          record_edge source edge_type target_author
-      | _ -> ())
-    sources;
-  Hashtbl.to_seq_values table
-  |> List.of_seq
+  let table =
+    List.fold_left
+      (fun table (source : source) ->
+         match source.target_author, Meta_cognition_rules.classify_interaction_text source.text with
+         | Some target_author, Some edge_type
+           when String.trim target_author <> ""
+                && not (String.equal source.author target_author) ->
+             record_edge table source edge_type target_author
+         | _ -> table)
+      StringMap.empty sources
+  in
+  StringMap.bindings table
+  |> List.map snd
   |> List.sort (fun a b ->
          let by_weight = compare b.weight a.weight in
          if by_weight <> 0 then by_weight

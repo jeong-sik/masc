@@ -253,7 +253,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   match try_strip "repos/" (playground ^ "/repos/") with
   | Some _ as r -> r
   | None ->
-  match try_strip "playground/" ".masc/playground/" with
+  match try_strip "playground/" (Playground_paths.all_playgrounds_prefix ^ "/") with
   | Some _ as r -> r
   | None -> None
 
@@ -296,7 +296,7 @@ let resolve_keeper_shell_read_path
            (e.g. ".masc/playground/keeper/repos"), concatenating would
            produce a doubled path.  Detect and resolve against project
            root instead. *)
-        let pg = ".masc/playground" in
+        let pg = Playground_paths.all_playgrounds_prefix in
         let contains s sub =
           let sl = String.length s and nl = String.length sub in
           if nl > sl then false
@@ -442,7 +442,7 @@ let handle_keeper_bash
                        Clone into your playground first (keeper_shell op=git_clone), \
                        then set cwd to the cloned repo path." )
                 ; "cmd", `String cmd_for_log
-                ; "hint", `String "Use cwd=.masc/playground/YOUR_KEEPER_NAME/repos/REPO"
+                ; "hint", `String (Printf.sprintf "Use cwd=%srepos/REPO" (Playground_paths.bundle_root meta.name))
                 ]))
         (* Write gate — preset layer *)
         else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
@@ -480,14 +480,16 @@ let handle_keeper_bash
                 ; "error", `String "write_outside_playground_blocked"
                 ; ( "reason"
                   , `String
-                      "Write operations (git push/commit, make deploy, etc.) \
-                       must run with cwd inside your playground \
-                       (.masc/playground/<keeper>/...). Open a worktree under \
-                       your playground clone first via masc_worktree_create, \
-                       then set cwd to the returned worktree path." )
+                      (Printf.sprintf
+                         "Write operations (git push/commit, make deploy, etc.) \
+                          must run with cwd inside your playground \
+                          (%s). Open a worktree under \
+                          your playground clone first via masc_worktree_create, \
+                          then set cwd to the returned worktree path."
+                         (Playground_paths.bundle_root meta.name)) )
                 ; "cmd", `String cmd_for_log
                 ; "cwd", `String cwd
-                ; "hint", `String "cwd must start with .masc/playground/YOUR_KEEPER_NAME/"
+                ; "hint", `String (Printf.sprintf "cwd must start with %s" (Playground_paths.bundle_root meta.name))
                 ]))
         else (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with

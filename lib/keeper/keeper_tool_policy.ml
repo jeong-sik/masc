@@ -17,7 +17,7 @@ open Keeper_tool_registry
    Phase B2 / Plan Part 2.5 Axis 4. *)
 
 let keeper_writable_prefixes = [
-  ".masc/playground/";       (* coding workspace *)
+  Playground_paths.all_playgrounds_prefix ^ "/";  (* coding workspace *)
   ".masc/decision_audit/";   (* self audit logs — forensics, not trust input *)
   ".worktrees/";             (* git worktree workspace — repo-root, not .masc/ *)
 ]

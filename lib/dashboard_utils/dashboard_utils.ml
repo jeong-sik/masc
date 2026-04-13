@@ -25,14 +25,13 @@ let trim_to_option text =
   if trimmed = "" then None else Some trimmed
 
 let dedup_strings (xs : string list) : string list =
-  let seen = Hashtbl.create (List.length xs) in
-  List.filter
-    (fun x ->
-      if Hashtbl.mem seen x then false
-      else (
-        Hashtbl.add seen x ();
-        true))
-    xs
+  let rec go seen acc = function
+    | [] -> List.rev acc
+    | x :: rest ->
+      if Base.Set.mem seen x then go seen acc rest
+      else go (Base.Set.add seen x) (x :: acc) rest
+  in
+  go (Base.Set.empty (module Base.String)) [] xs
 
 let string_list_of_json json =
   match json with

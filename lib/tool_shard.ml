@@ -474,7 +474,7 @@ let coding_tools : Types.tool_schema list =
 let voice_tools : Types.tool_schema list = [
   {
     name = "keeper_voice_speak";
-    description = "Speak a short utterance as this keeper via the voice bridge, falling back to text when voice is unavailable.";
+    description = "Speak a short utterance via the voice bridge. Blocks until playback finishes and returns played_seconds. Do NOT call again until you receive the result — concurrent calls are serialized by a global lock. Duplicate identical messages within 30s are silently skipped.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

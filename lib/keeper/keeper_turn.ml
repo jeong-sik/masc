@@ -130,6 +130,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let no_skill_route = get_bool args "no_skill_route" false in
     let no_state_block = get_bool args "no_state_block" false in
     let direct_reply = get_bool args "direct_reply" false in
+    let channel_session_key = get_string_opt args "channel_session_key" in
     (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "❌ " ^ e)
     | Ok () ->
@@ -197,7 +198,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
              min_keeper_context
            end else raw
          in
-            let base_dir = session_base_dir ctx.config in
+            let base_dir =
+              let root = session_base_dir ctx.config in
+              match channel_session_key with
+              | Some key when direct_reply ->
+                let d = Filename.concat (Filename.concat root "channels") key in
+                Keeper_types.mkdir_p d; d
+              | _ -> root
+            in
             let effective_no_skill_route = no_skill_route || direct_reply in
             let effective_no_state_block = no_state_block || direct_reply in
             let fallback_skill_route =

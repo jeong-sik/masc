@@ -89,6 +89,11 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
   let agent_name =
     agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id
   in
+  let channel_session_key =
+    Printf.sprintf "%s_%s"
+      (normalized_or_unknown channel)
+      (normalized_or_unknown channel_room_id)
+  in
   let args =
     `Assoc [
       ("name", `String (String.trim keeper_name));
@@ -97,6 +102,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
           (contextualize_message ~channel ~channel_user_id ~channel_user_name
              ~channel_room_id ~content) );
       ("direct_reply", `Bool true);
+      ("channel_session_key", `String channel_session_key);
     ]
   in
   let keeper_ctx : _ Tool_keeper.context = {

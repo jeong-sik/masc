@@ -215,17 +215,5 @@ let start_refresh_loop ~sw ~clock ~keeper_name ~decision_log_path
         Eio.Time.sleep clock (float_of_int interval_sec)
     done)
 
-(* ------------------------------------------------------------------ *)
-(* Prompt rendering                                                    *)
-(* ------------------------------------------------------------------ *)
-
-let format_age_sec (sec : int) : string =
-  if sec < 60 then Printf.sprintf "%ds" sec
-  else if sec < 3600 then Printf.sprintf "%dm %ds" (sec / 60) (sec mod 60)
-  else
-    let h = sec / 3600 in
-    let m = (sec mod 3600) / 60 in
-    Printf.sprintf "%dh %dm" h m
-
-(* render_feedback_block removed in #6814: behavioral self-assessment
-   no longer injected into keeper prompt. *)
+(* render_feedback_block + format_age_sec removed in #6814:
+   behavioral self-assessment no longer injected into keeper prompt. *)

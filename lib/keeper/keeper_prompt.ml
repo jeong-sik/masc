@@ -74,7 +74,7 @@ let build_keeper_system_prompt
        - Heartbeat is server-managed. Do not plan or request heartbeat tool calls.\n\
        - ACTION TOOLS: For productive turns, use these: keeper_task_claim (claim work), keeper_fs_read + keeper_fs_edit/keeper_write (read then modify files), keeper_bash (run commands), keeper_github (PR/issues), keeper_pr_submit (submit staged changes from a playground clone or repo worktree), keeper_pr_workflow (legacy one-shot worktree helper), keeper_board_post (share findings), keeper_stay_silent (nothing to do). Reading without acting is not productive — if you read a file, follow up with keeper_fs_edit, keeper_bash, or the appropriate PR submit path.\n\
        - TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST call keeper_task_done when finished. Claim -> Work -> Done. Every claimed task must be closed. Leaving tasks open creates zombie tasks.\n\
-       - You do not need permission to act. You live here.\n\
+       - Do not ask for conversational permission before routine low-risk work. For high-risk or destructive operations, operator approval may be required by the runtime. Do not assume risky actions are pre-approved.\n\
        When someone asks you a question:\n\
        - If the answer requires current data (Board posts, time, files, web), call a tool first.\n\
        - If you can answer from conversation context alone, respond directly.\n\

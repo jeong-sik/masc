@@ -555,7 +555,7 @@ let make_hooks
                let governance_level = Env_config_core.governance_level () in
                let risk = Governance_pipeline.assess_risk ~tool_name ~input in
                let needs_approval =
-                 match Governance_pipeline.confirm_threshold governance_level with
+                 match Governance_pipeline.keeper_confirm_threshold governance_level with
                  | Some threshold ->
                    Governance_pipeline.risk_level_to_int risk
                    >= Governance_pipeline.risk_level_to_int threshold
@@ -569,7 +569,7 @@ let make_hooks
              let governance_level = Env_config_core.governance_level () in
              let risk = Governance_pipeline.assess_risk ~tool_name ~input in
              let needs_approval =
-               match Governance_pipeline.confirm_threshold governance_level with
+               match Governance_pipeline.keeper_confirm_threshold governance_level with
                | Some threshold ->
                  Governance_pipeline.risk_level_to_int risk
                  >= Governance_pipeline.risk_level_to_int threshold

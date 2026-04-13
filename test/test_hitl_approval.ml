@@ -32,6 +32,8 @@ let test_risk_classification_high () =
   let tools = [
     ("masc_code_write", GP.High);
     ("keeper_write", GP.High);
+    ("keeper_fs_edit", GP.High);
+    ("keeper_pr_submit", GP.High);
     ("masc_create_task", GP.High);
   ] in
   List.iter (fun (tool_name, expected) ->
@@ -57,6 +59,26 @@ let test_risk_classification_low () =
       (GP.risk_level_to_string expected)
       (GP.risk_level_to_string actual)
   ) tools
+
+let test_keeper_github_read_only_stays_low () =
+  let actual =
+    GP.assess_risk
+      ~tool_name:"keeper_github"
+      ~input:(`Assoc [("cmd", `String "pr view 123")])
+  in
+  check "keeper_github pr view → low"
+    (GP.risk_level_to_string GP.Low)
+    (GP.risk_level_to_string actual)
+
+let test_keeper_github_mutation_escalates_high () =
+  let actual =
+    GP.assess_risk
+      ~tool_name:"keeper_github"
+      ~input:(`Assoc [("cmd", `String "pr comment 123 --body hi")])
+  in
+  check "keeper_github pr comment → high"
+    (GP.risk_level_to_string GP.High)
+    (GP.risk_level_to_string actual)
 
 (* ── 2. Threshold decisions ──────────────────────────────── *)
 
@@ -245,6 +267,60 @@ let test_callback_approves_low_risk () =
     Alcotest.fail ("expected Approve for low-risk tool, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
+let test_callback_production_keeper_write_requires_approval () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let cb =
+      GP.to_oas_approval_callback
+        ~governance_level:"production" ~keeper_name:"test" in
+    let decision =
+      cb
+        ~tool_name:"keeper_fs_edit"
+        ~input:(`Assoc [
+          ("path", `String "lib/example.ml");
+          ("content", `String "let x = 1\n");
+        ])
+    in
+    result := Some decision
+  );
+  Eio.Fiber.yield ();
+  Alcotest.(check int) "one pending approval"
+    (initial_pending + 1) (AQ.pending_count ());
+  let pending_json = AQ.list_pending_json () in
+  let id =
+    match pending_json with
+    | `List (`Assoc kvs :: _) ->
+      (match List.assoc_opt "id" kvs with
+       | Some (`String id) -> id
+       | _ -> Alcotest.fail "missing approval id")
+    | _ -> Alcotest.fail "expected pending approval entry"
+  in
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+  Eio.Fiber.yield ();
+  match !result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some _ -> Alcotest.fail "expected Approve after operator resolution"
+  | None -> Alcotest.fail "keeper write callback did not suspend for approval"
+
+let test_callback_production_keeper_github_read_only_auto_approved () =
+  let cb =
+    GP.to_oas_approval_callback
+      ~governance_level:"production" ~keeper_name:"test" in
+  let decision =
+    cb ~tool_name:"keeper_github"
+      ~input:(`Assoc [("cmd", `String "pr view 123")])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve -> ()
+  | Agent_sdk.Hooks.Reject r ->
+    Alcotest.fail ("expected Approve for read-only keeper_github, got Reject: " ^ r)
+  | _ -> Alcotest.fail "unexpected decision"
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -253,6 +329,10 @@ let () =
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
       Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
       Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
+      Alcotest.test_case "keeper_github read-only stays low" `Quick
+        test_keeper_github_read_only_stays_low;
+      Alcotest.test_case "keeper_github mutation escalates high" `Quick
+        test_keeper_github_mutation_escalates_high;
     ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
@@ -269,5 +349,9 @@ let () =
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
+      Alcotest.test_case "production keeper write requires approval" `Quick
+        test_callback_production_keeper_write_requires_approval;
+      Alcotest.test_case "production keeper_github read-only auto-approved" `Quick
+        test_callback_production_keeper_github_read_only_auto_approved;
     ]);
   ]

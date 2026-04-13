@@ -346,6 +346,7 @@
         test_transport_integration
         test_tool_metrics
         test_tool_metrics_persist
+        test_model_inference_metrics
         test_keeper_tool_call_log
         test_tool_unified
         test_build_identity
@@ -495,6 +496,7 @@
         test_transport_integration
         test_tool_metrics
         test_tool_metrics_persist
+        test_model_inference_metrics
         test_tool_unified
         test_keeper_tool_call_log
         test_build_identity

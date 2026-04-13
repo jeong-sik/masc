@@ -29,67 +29,99 @@ type metric = {
   labels: label list;
 }
 
-(** {1 Global Metrics Store} *)
+(** {1 Global Metrics Store}
+
+    [metrics] is updated from any fiber on any domain — LLM telemetry,
+    keeper heartbeats, SSE bookkeeping, HTTP handlers. The previous
+    implementation used a bare [Hashtbl.t] with [find_opt] + [add] which
+    has two race windows:
+
+    1. TOCTOU on registration: two fibers call [inc_counter] on a new
+       key, both see [None], both [Hashtbl.add] — duplicate entries in
+       the table.
+    2. Non-atomic float update: [m.value <- m.value +. delta] reads,
+       adds, writes without a memory barrier; two concurrent increments
+       can both observe the same old value.
+
+    We serialise every read and write path through [Stdlib.Mutex].
+    Choice of primitive: operations must work during module
+    initialisation ([let () = init ()] at EOF runs before any Eio
+    scheduler exists), must hold across OCaml 5 domains (Executor_pool
+    workers), and are individually cheap (a Hashtbl op + a float add) so
+    the lock is never held long. [Stdlib.Mutex] fits all three. *)
 
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
+let metrics_mutex = Stdlib.Mutex.create ()
+
+let with_lock f =
+  Stdlib.Mutex.lock metrics_mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex)
+    f
 
 (** {1 Metric Registration} *)
 
 let register_counter ~name ~help ?(labels=[]) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  if not (Hashtbl.mem metrics key) then
-    Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels }
+  with_lock (fun () ->
+    if not (Hashtbl.mem metrics key) then
+      Hashtbl.add metrics key { name; help; metric_type = Counter; value = 0.0; labels })
 
 let register_gauge ~name ~help ?(labels=[]) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  if not (Hashtbl.mem metrics key) then
-    Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels }
+  with_lock (fun () ->
+    if not (Hashtbl.mem metrics key) then
+      Hashtbl.add metrics key { name; help; metric_type = Gauge; value = 0.0; labels })
 
 let register_histogram ~name ~help ?(labels=[]) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  if not (Hashtbl.mem metrics key) then
-    Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }
+  with_lock (fun () ->
+    if not (Hashtbl.mem metrics key) then
+      Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels })
 
 (** {1 Metric Updates} *)
 
 let inc_counter name ?(labels=[]) ?(delta=1.0) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  match Hashtbl.find_opt metrics key with
-  | Some m -> m.value <- m.value +. delta
-  | None ->
-      Hashtbl.add metrics key {
-        name;
-        help = name;
-        metric_type = Counter;
-        value = delta;
-        labels;
-      }
+  with_lock (fun () ->
+    match Hashtbl.find_opt metrics key with
+    | Some m -> m.value <- m.value +. delta
+    | None ->
+        Hashtbl.add metrics key {
+          name;
+          help = name;
+          metric_type = Counter;
+          value = delta;
+          labels;
+        })
 
 let set_gauge name ?(labels=[]) value =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  match Hashtbl.find_opt metrics key with
-  | Some m -> m.value <- value
-  | None ->
-      Hashtbl.add metrics key {
-        name;
-        help = name;
-        metric_type = Gauge;
-        value;
-        labels;
-      }
+  with_lock (fun () ->
+    match Hashtbl.find_opt metrics key with
+    | Some m -> m.value <- value
+    | None ->
+        Hashtbl.add metrics key {
+          name;
+          help = name;
+          metric_type = Gauge;
+          value;
+          labels;
+        })
 
 let inc_gauge name ?(labels=[]) ?(delta=1.0) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  match Hashtbl.find_opt metrics key with
-  | Some m -> m.value <- m.value +. delta
-  | None ->
-      Hashtbl.add metrics key {
-        name;
-        help = name;
-        metric_type = Gauge;
-        value = delta;
-        labels;
-      }
+  with_lock (fun () ->
+    match Hashtbl.find_opt metrics key with
+    | Some m -> m.value <- m.value +. delta
+    | None ->
+        Hashtbl.add metrics key {
+          name;
+          help = name;
+          metric_type = Gauge;
+          value = delta;
+          labels;
+        })
 
 let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
   inc_gauge name ~labels ~delta:(-.delta) ()
@@ -97,7 +129,8 @@ let dec_gauge name ?(labels=[]) ?(delta=1.0) () =
 (** Get current metric value by name + labels (if any). *)
 let get_metric_value name ?(labels=[]) () =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value)
+  with_lock (fun () ->
+    Hashtbl.find_opt metrics key |> Option.map (fun m -> m.value))
 
 let metric_value_or_zero name ?(labels=[]) () =
   get_metric_value name ~labels () |> Option.value ~default:0.0
@@ -108,19 +141,20 @@ let metric_value_or_zero name ?(labels=[]) () =
 let observe_histogram name ?(labels=[]) value =
   let key = name ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
   let count_key = name ^ "_count" ^ (String.concat "" (List.map (fun (k, v) -> k ^ v) labels)) in
-  (match Hashtbl.find_opt metrics key with
-  | Some m -> m.value <- m.value +. value
-  | None ->
-      Hashtbl.add metrics key {
-        name; help = name; metric_type = Histogram; value; labels;
-      });
-  (match Hashtbl.find_opt metrics count_key with
-  | Some m -> m.value <- m.value +. 1.0
-  | None ->
-      Hashtbl.add metrics count_key {
-        name = name ^ "_count"; help = name ^ " observation count";
-        metric_type = Counter; value = 1.0; labels;
-      })
+  with_lock (fun () ->
+    (match Hashtbl.find_opt metrics key with
+     | Some m -> m.value <- m.value +. value
+     | None ->
+         Hashtbl.add metrics key {
+           name; help = name; metric_type = Histogram; value; labels;
+         });
+    (match Hashtbl.find_opt metrics count_key with
+     | Some m -> m.value <- m.value +. 1.0
+     | None ->
+         Hashtbl.add metrics count_key {
+           name = name ^ "_count"; help = name ^ " observation count";
+           metric_type = Counter; value = 1.0; labels;
+         }))
 
 (** {1 Built-in Metrics} *)
 
@@ -218,12 +252,28 @@ let labels_to_string = function
 
 let to_prometheus_text () =
   update_uptime ();
+  (* Snapshot (name, help, metric_type, value, labels) under the mutex so
+     the render phase sees a consistent view even when concurrent fibers
+     are still updating [metrics].  [m.value] is mutable so we copy it
+     here rather than holding the lock for the full render. *)
+  let snapshot =
+    with_lock (fun () ->
+      Hashtbl.fold
+        (fun _ (m : metric) acc ->
+          { name = m.name;
+            help = m.help;
+            metric_type = m.metric_type;
+            value = m.value;
+            labels = m.labels;
+          } :: acc)
+        metrics [])
+  in
   let buf = Buffer.create 1024 in
   let by_name = Hashtbl.create 32 in
-  Hashtbl.iter (fun _ m ->
+  List.iter (fun (m : metric) ->
     let existing = Hashtbl.find_opt by_name m.name |> Option.value ~default:[] in
     Hashtbl.replace by_name m.name (m :: existing)
-  ) metrics;
+  ) snapshot;
   (* Collect histogram parent names.  observe_histogram stores the
      cumulative sum under the original name and the observation count
      under "<name>_count".  We suppress standalone export of the
@@ -265,9 +315,10 @@ let to_prometheus_text () =
              (Printf.sprintf "%s_sum%s %g\n" name ls metric.value);
            let count_key = name ^ "_count" ^ label_key metric.labels in
            let count_val =
-             match Hashtbl.find_opt metrics count_key with
-             | Some cm -> cm.value
-             | None -> 0.0
+             with_lock (fun () ->
+               match Hashtbl.find_opt metrics count_key with
+               | Some cm -> cm.value
+               | None -> 0.0)
            in
            Buffer.add_string buf
              (Printf.sprintf "%s_count%s %g\n" name ls count_val)

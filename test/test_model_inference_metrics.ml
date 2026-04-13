@@ -232,6 +232,94 @@ let test_json_roundtrip () =
     check int "total_error_entries" 0
       (json |> member "total_error_entries" |> to_int))
 
+(* ── Bucket tests ───────────────────────────────── *)
+
+let success_entry_with_cache ~model ~ts ~cache_read () =
+  `Assoc [
+    ("ts_unix", `Float ts);
+    ("tool_call_count", `Int 0);
+    ("tools_used", `List []);
+    ("telemetry", `Assoc [
+      ("model_used", `String model);
+      ("tokens_per_second", `Float 10.0);
+      ("request_latency_ms", `Int 500);
+      ("input_tokens", `Int 100);
+      ("output_tokens", `Int 50);
+      ("cache_read_tokens", `Int cache_read);
+      ("reasoning_tokens", `Int 0);
+      ("fallback_applied", `Bool false);
+      ("cost_usd", `Float 0.01);
+    ]);
+  ]
+
+let test_buckets_empty_dir () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:5 in
+    check int "empty → no models" 0 (List.length result))
+
+let test_buckets_single_bucket () =
+  let dir = test_dir () in
+  let path = make_keeper_dir dir "single_bucket" in
+  let now = now_unix () in
+  write_decisions path [
+    success_entry ~model:"model-a" ~ts:now ();
+    success_entry ~model:"model-a" ~ts:(now -. 30.0) ();
+  ];
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60 in
+    check int "one model" 1 (List.length result);
+    let m = List.hd result in
+    check string "model_id" "model-a" m.mb_model_id;
+    check int "one bucket (60min window, 60min bucket)" 1 (List.length m.mb_buckets))
+
+let test_buckets_sparse () =
+  let dir = test_dir () in
+  let path = make_keeper_dir dir "sparse" in
+  let now = now_unix () in
+  write_decisions path [
+    success_entry ~model:"model-b" ~ts:now ();
+    success_entry ~model:"model-b" ~ts:(now -. 600.0) ();
+  ];
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:5 in
+    check int "one model" 1 (List.length result);
+    let m = List.hd result in
+    check bool "sparse → 2 distinct buckets (10min apart, 5min width)"
+      true (List.length m.mb_buckets >= 2))
+
+let test_buckets_cache_hit_ratio_zero_denom () =
+  let dir = test_dir () in
+  let path = make_keeper_dir dir "cache_zero" in
+  let now = now_unix () in
+  write_decisions path [
+    success_entry_with_cache ~model:"model-c" ~ts:now ~cache_read:0 ();
+  ];
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let result = M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60 in
+    check int "one model" 1 (List.length result);
+    let m = List.hd result in
+    let b = List.hd m.mb_buckets in
+    check bool "cache_hit_ratio not NaN" true
+      (not (Float.is_nan b.b_cache_hit_ratio));
+    check bool "cache_hit_ratio = 0.0 when input=100, cache=0"
+      true (b.b_cache_hit_ratio < 0.01))
+
+let test_buckets_with_compute () =
+  let dir = test_dir () in
+  let path = make_keeper_dir dir "bucketed_compute" in
+  let now = now_unix () in
+  write_decisions path [
+    success_entry ~model:"model-x" ~ts:now ();
+  ];
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let agg = M.compute_with_buckets ~base_path:dir ~window_minutes:60 ~bucket_minutes:5 in
+    check int "bucket_minutes populated" 5 agg.bucket_minutes;
+    let m = List.hd agg.models in
+    check bool "model_stats.buckets non-empty" true (List.length m.buckets > 0);
+    let b = List.hd m.buckets in
+    check int "bucket entry_count" 1 b.b_entry_count)
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -247,5 +335,12 @@ let () =
       test_case "top tools per model" `Quick test_top_tools_per_model;
       test_case "recent entries capped" `Quick test_recent_entries;
       test_case "json roundtrip" `Quick test_json_roundtrip;
+    ];
+    "buckets", [
+      test_case "empty dir → no buckets" `Quick test_buckets_empty_dir;
+      test_case "single bucket window" `Quick test_buckets_single_bucket;
+      test_case "sparse entries → distinct buckets" `Quick test_buckets_sparse;
+      test_case "cache_hit_ratio zero denom" `Quick test_buckets_cache_hit_ratio_zero_denom;
+      test_case "compute_with_buckets integration" `Quick test_buckets_with_compute;
     ];
   ]

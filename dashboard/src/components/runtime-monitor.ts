@@ -4,6 +4,7 @@ import { useSignal } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchRuntimeProviders,
+  type BucketMetric,
   type DashboardRuntimeModelMetric,
   type DashboardRuntimeModelMetricsResponse,
   type DashboardRuntimeProviderSnapshot,
@@ -25,7 +26,7 @@ async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, wind
   await resource.load(async (signal) => {
     const [providers, metrics] = await Promise.all([
       fetchRuntimeProviders({ signal }),
-      fetchRuntimeModelMetrics(windowMinutes, { signal }),
+      fetchRuntimeModelMetrics(windowMinutes, 5, { signal }),
     ])
     return { providers, metrics }
   })
@@ -80,6 +81,24 @@ function fmtTime(tsUnix: number): string {
   if (tsUnix <= 0) return '--'
   const d = new Date(tsUnix * 1000)
   return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function fmtPct(value: number): string {
+  if (Number.isNaN(value)) return '--'
+  return `${(value * 100).toFixed(1)}%`
+}
+
+function sparklineSvg(values: number[], color: string, w = 80, h = 20): string {
+  if (values.length < 2) return ''
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w
+    const y = h - ((v - min) / range) * (h - 2) - 1
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return `<svg width="${w}" height="${h}" class="inline-block align-middle" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><polyline fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" points="${points}"/></svg>`
 }
 
 export function RuntimeMonitor() {
@@ -228,6 +247,22 @@ export function RuntimeMonitor() {
                     <div>reasoning/cache · ${fmtNumber(metric.total_reasoning_tokens)} / ${fmtNumber(metric.total_cache_read_tokens)}</div>
                     <div>tools · ${fmtNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${fmtNumber(metric.total_tool_calls)})</div>
                   </div>
+                  ${(metric.buckets ?? []).length >= 2
+                    ? html`<div class="flex items-center gap-4 mt-1 text-[11px] text-[var(--text-muted)]">
+                        <span>p95 latency</span>
+                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg((metric.buckets as BucketMetric[]).map(b => b.p95_latency_ms), 'var(--status-warn)', 80, 18) }}></span>
+                        <span>error rate</span>
+                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg((metric.buckets as BucketMetric[]).map(b => b.error_rate), 'var(--status-bad)', 80, 18) }}></span>
+                      </div>`
+                    : null}
+                  ${(() => {
+                    const cacheRead = metric.total_cache_read_tokens ?? 0
+                    const totalIn = cacheRead + (metric.total_input_tokens ?? 0)
+                    const cacheRatio = totalIn > 0 ? cacheRead / totalIn : 0
+                    return html`<div class="text-[11px] text-[var(--text-muted)] mt-1">
+                      cost ${fmtCost(metric.total_cost_usd)} · cache savings ${fmtPct(cacheRatio)} (${fmtNumber(cacheRead)} / ${fmtNumber(totalIn)} tokens)
+                    </div>`
+                  })()}
                   ${(metric.error_count ?? 0) > 0
                     ? html`<div class="text-[11px] text-[var(--status-bad)] mt-1">errors ${fmtNumber(metric.error_count)} / success ${fmtNumber(metric.success_count)}</div>`
                     : null}

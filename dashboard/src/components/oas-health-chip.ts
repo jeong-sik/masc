@@ -45,12 +45,16 @@ export function OasHealthChip() {
         <${StatCell}
           label="LLM 호출"
           value=${summary.value.totalLlmCalls}
-          detail="durable journal"
+          detail=${summary.value.lastLlmCallTs != null
+            ? `최근 ${formatLastTick(summary.value.lastLlmCallTs)}`
+            : 'durable journal'}
         />
         <${StatCell}
           label="에러"
           value=${summary.value.totalErrors}
-          detail="Api/agent 실패"
+          detail=${summary.value.lastErrorTs != null
+            ? `최근 ${formatLastTick(summary.value.lastErrorTs)}`
+            : 'Api/agent 실패'}
           tone=${summary.value.totalErrors > 0 ? 'text-[var(--bad)]' : undefined}
         />
         <${StatCell}

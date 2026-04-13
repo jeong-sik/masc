@@ -15,7 +15,11 @@
       limit from the recovery path.
 
     Property 4 (Structural absence):
-      keeper_agent_run source does NOT contain ~max_input_tokens. *)
+      keeper_agent_run source does NOT contain ~max_input_tokens.
+
+    Property 5 (Reducer integration):
+      keeper_agent_run source contains cap_message_tokens in the
+      keeper reducer chain, ordered before repair_dangling_tool_calls. *)
 
 module UT = Masc_mcp.Keeper_unified_turn
 
@@ -129,6 +133,59 @@ let test_structural_absence () =
       false has_max_input_tokens
   end
 
+let test_cap_message_tokens_integration () =
+  let find_substring haystack needle =
+    let hlen = String.length haystack in
+    let nlen = String.length needle in
+    let rec loop i =
+      if i + nlen > hlen then None
+      else if String.sub haystack i nlen = needle then Some i
+      else loop (i + 1)
+    in
+    if nlen = 0 then Some 0 else loop 0
+  in
+  let has_prompt_root path =
+    Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
+  in
+  let repo_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when has_prompt_root root -> root
+    | _ ->
+        let rec ascend path =
+          if has_prompt_root path then path
+          else
+            let parent = Filename.dirname path in
+            if String.equal parent path then Sys.getcwd () else ascend parent
+        in
+        ascend (Sys.getcwd ())
+  in
+  let target = Filename.concat repo_root "lib/keeper/keeper_agent_run.ml" in
+  if not (Sys.file_exists target) then
+    ()
+  else begin
+    let ic = open_in target in
+    let content = Fun.protect
+      ~finally:(fun () -> close_in ic)
+      (fun () ->
+        let len = in_channel_length ic in
+        let buf = Bytes.create len in
+        really_input ic buf 0 len;
+        Bytes.to_string buf)
+    in
+    let cap_pos =
+      find_substring content "Agent_sdk.Context_reducer.cap_message_tokens"
+    in
+    let repair_pos =
+      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
+    in
+    Alcotest.(check bool)
+      "keeper_agent_run.ml must integrate cap_message_tokens before repair_dangling_tool_calls"
+      true
+      (match cap_pos, repair_pos with
+       | Some cap_pos, Some repair_pos -> cap_pos < repair_pos
+       | _ -> false)
+  end
+
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
@@ -166,5 +223,7 @@ let () =
     ("structural", [
       Alcotest.test_case "absence of max_input_tokens" `Quick
         test_structural_absence;
+      Alcotest.test_case "cap_message_tokens integrated in reducer chain" `Quick
+        test_cap_message_tokens_integration;
     ]);
   ]

@@ -28,7 +28,21 @@ let write_json path json =
   Out_channel.with_open_bin path (fun oc ->
       output_string oc (Yojson.Safe.pretty_to_string json))
 
-let write_keeper_meta_exn config ~name ~trace_id =
+let write_keeper_toml_exn config ~name =
+  let keepers_dir =
+    Filename.concat (Room.masc_root_dir config) "config/keepers"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|
+[keeper]
+goal = "test keeper"
+room_scope = "current"
+proactive_enabled = false
+|}
+
+let write_keeper_meta_exn ?(autoboot_enabled = true) config ~name ~trace_id =
   let json =
     `Assoc
       [
@@ -36,6 +50,7 @@ let write_keeper_meta_exn config ~name ~trace_id =
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String trace_id);
         ("goal", `String "test keeper");
+        ("autoboot_enabled", `Bool autoboot_enabled);
       ]
   in
   let meta =
@@ -74,6 +89,9 @@ let test_keeper_listing_ignores_sidecar_json_files () =
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_toml_exn config ~name:"dot.name";
+      Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
       write_keeper_meta_exn config ~name:"dot.name" ~trace_id:"trace-dot-name";
       ignore
@@ -110,10 +128,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check int "status handler count filters sidecars" 2
         Yojson.Safe.Util.(json |> member "count" |> to_int))
 
-(** bootable_keeper_names excludes JSON-only keepers with total_turns=0
-    (phantom keepers from old test runs) but keeps JSON-only keepers
-    that have actually run (total_turns > 0). *)
-let test_bootable_keeper_names_filters_phantom_keepers () =
+let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun _sw ->
@@ -126,35 +141,13 @@ let test_bootable_keeper_names_filters_phantom_keepers () =
     (fun () ->
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
-      (* Create a phantom keeper: JSON only, total_turns=0 *)
-      write_keeper_meta_exn config ~name:"phantom-test" ~trace_id:"trace-phantom";
-      (* Create a real keeper: JSON only, total_turns > 0 *)
-      write_keeper_meta_exn config ~name:"real-test" ~trace_id:"trace-real";
-      (match Keeper_types.read_meta config "real-test" with
-       | Ok (Some meta) ->
-         let updated =
-           Keeper_types.map_usage
-             (fun u -> { u with total_turns = 5 })
-             meta
-         in
-         (match Keeper_types.write_meta ~force:true config updated with
-          | Ok () -> ()
-          | Error e -> fail ("write_meta for real-test failed: " ^ e))
-       | Ok None -> fail "real-test meta not found"
-       | Error e -> fail ("read_meta for real-test failed: " ^ e));
-      (* keeper_names should list both (it scans all JSON files in keepers dir) *)
-      let all_names = Keeper_types.keeper_names config in
-      check bool "keeper_names includes phantom-test" true
-        (List.mem "phantom-test" all_names);
-      check bool "keeper_names includes real-test" true
-        (List.mem "real-test" all_names);
-      (* bootable_keeper_names should exclude the phantom but keep real-test *)
-      let bootable = Keeper_runtime.bootable_keeper_names config in
-      check bool "bootable excludes phantom-test (total_turns=0, no TOML)" false
-        (List.mem "phantom-test" bootable);
-      check bool "bootable includes real-test (total_turns>0)" true
-        (List.mem "real-test" bootable))
-
+      write_keeper_toml_exn config ~name:"sangsu";
+      Config_dir_resolver.reset ();
+      write_keeper_meta_exn
+        ~autoboot_enabled:false config ~name:"sangsu" ~trace_id:"trace-sangsu";
+      let names = Keeper_runtime.bootable_keeper_names config in
+      check (list string) "autoboot disabled meta excluded from bootable list"
+        [] names)
 let () =
   run "keeper_meta_listing"
     [
@@ -162,7 +155,7 @@ let () =
         [
           test_case "keeper_names and keeper_list ignore sidecar json" `Quick
             test_keeper_listing_ignores_sidecar_json_files;
-          test_case "bootable_keeper_names filters phantom keepers" `Quick
-            test_bootable_keeper_names_filters_phantom_keepers;
+          test_case "bootable list skips autoboot-disabled meta" `Quick
+            test_bootable_keeper_names_skip_autoboot_disabled_meta;
         ] );
     ]

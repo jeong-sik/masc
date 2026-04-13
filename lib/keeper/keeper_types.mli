@@ -155,6 +155,7 @@ type keeper_meta = {
   continuity_summary: string;
   active_goal_ids: string list;
   paused: bool;
+  autoboot_enabled: bool;
   current_task_id: Keeper_id.Task_id.t option;
   (** Currently claimed task ID for cost attribution. *)
   work_discovery_enabled : bool option;
@@ -223,6 +224,8 @@ val meta_of_json : Yojson.Safe.t -> (keeper_meta, string) result
 (** {1 Meta file I/O} *)
 
 val read_meta_file_path : string -> (keeper_meta option, string) result
+val persisted_keeper_names : Room.config -> string list
+val configured_keeper_names : Room.config -> string list
 val keeper_names : Room.config -> string list
 val keepalive_keeper_names : Room.config -> string list
 val persistent_agent_names : Room.config -> string list

@@ -184,6 +184,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("agent_name", `String meta.agent_name);
             ("status", `String status);
             ("keepalive_running", `Bool keepalive_running);
+            ("autoboot_enabled", `Bool meta.autoboot_enabled);
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);

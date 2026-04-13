@@ -601,6 +601,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
+              ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("auto_handoff", `Bool m.auto_handoff);
               ("handoff_threshold", `Float m.handoff_threshold);
               ("agent", agent);
@@ -635,6 +636,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("compaction_ratio_gate", `Float compact_ratio_gate);
               ("compaction_message_gate", `Int compact_message_gate);
               ("compaction_token_gate", `Int compact_token_gate);
+              ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);

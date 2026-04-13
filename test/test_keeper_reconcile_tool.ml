@@ -71,6 +71,7 @@ let test_keeper_reconcile_inspect_and_clear () =
                 ("name", `String keeper_name);
                 ("goal", `String "Exercise keeper reconcile tool");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       check bool "keeper up ok" true ok;
@@ -195,6 +196,7 @@ let test_keeper_reconcile_clear_without_record_clears_runtime_blocker () =
                 ("name", `String keeper_name);
                 ("goal", `String "Exercise no-record reconcile clear");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       check bool "keeper up ok" true ok;

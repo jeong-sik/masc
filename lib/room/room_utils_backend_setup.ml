@@ -133,12 +133,9 @@ let resolve_masc_base_path path =
     when running_under_test_executable ()
          && not
               (Env_config_core.get_bool ~default:false
-                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
-         && Option.equal String.equal
-              (Sys.getenv_opt "MASC_TEST_SYNCED_BASE_PATH")
-              (Some explicit) ->
+                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH") ->
       Log.Room.info
-        "Ignoring auto-synced MASC_BASE_PATH=%s for requested test path %s"
+        "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
         explicit path;
       resolve_requested_base_path path
   | Some explicit ->

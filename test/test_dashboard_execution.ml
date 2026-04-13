@@ -383,6 +383,7 @@ let create_keeper env sw config name =
             ("name", `String name);
             ("goal", `String "Dashboard keeper fixture");
             ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
           ])
   with
   | Some (true, _) -> ()

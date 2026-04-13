@@ -25,7 +25,7 @@ let test_clamp_no_ceiling () =
 
 let test_clamp_zero_ceiling () =
   let result = clamp ~provider_ceiling:(Some 0) 1024 in
-  check int "zero ceiling clamps to 0" 0 result
+  check int "zero ceiling floors to 1" 1 result
 
 let () =
   run "cascade_capability_gate" [

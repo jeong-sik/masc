@@ -1129,7 +1129,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     let phase =
       match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
       | Some p -> p
-      | None -> Keeper_state_machine.Running
+      | None ->
+          (* Safe default: if registry lookup fails, assume degraded state.
+             Running would skip local_recovery; Failing triggers cheap cascade. *)
+          Log.Keeper.warn "%s: registry phase lookup returned None, defaulting to Failing"
+            meta.name;
+          Keeper_state_machine.Failing
     in
     let routing = Keeper_cascade_routing.select_cascade
       ~base_cascade:meta.cascade_name ~phase

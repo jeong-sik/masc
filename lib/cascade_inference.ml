@@ -78,5 +78,5 @@ let resolve_max_tokens ~(cascade_name : string) ~(fallback : unit -> int) : int 
     Mirrors TLA+ KeeperCoreTriad.CapabilityGate action. *)
 let clamp_max_tokens_to_ceiling ~(provider_ceiling : int option) (max_tokens : int) : int =
   match provider_ceiling with
-  | Some ceiling when max_tokens > ceiling -> ceiling
+  | Some ceiling when max_tokens > ceiling -> max 1 ceiling
   | _ -> max_tokens

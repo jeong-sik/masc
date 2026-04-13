@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.5.11] - 2026-04-13
+
+### Changed
+- Replace all `Eio.traceln` in `lib/` with structured `Log` module
+  calls (cascade_inference, autoresearch_codegen, dashboard judges,
+  opentelemetry_client). Zero ad-hoc traceln calls remain.
+- Add relay calibration drift metric: warn on correction_factor
+  outside [0.5, 1.5], debug on shift > 0.1.
+
 ## [0.5.10] - 2026-04-13
 
 ### Added

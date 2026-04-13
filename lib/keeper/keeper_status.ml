@@ -190,6 +190,7 @@ let handle_keeper_list ctx args : tool_result =
               ("compaction_ratio_gate", `Float compact_ratio_gate);
               ("compaction_message_gate", `Int compact_message_gate);
               ("compaction_token_gate", `Int compact_token_gate);
+              ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_idle_sec", `Int m.proactive.idle_sec);
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);

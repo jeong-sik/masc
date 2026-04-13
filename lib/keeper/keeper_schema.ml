@@ -91,6 +91,10 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
+        ("autoboot_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
+        ]);
         ("proactive_enabled", `Assoc [("type", `String "boolean")]);
         ("auto_handoff", `Assoc [("type", `String "boolean")]);
         ("handoff_threshold", `Assoc [("type", `String "number")]);
@@ -176,6 +180,10 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
+        ]);
+        ("autoboot_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If false, persist the keeper but skip auto-start on future server boots.");
         ]);
         ("max_context_override", `Assoc [
           ("type", `String "integer");

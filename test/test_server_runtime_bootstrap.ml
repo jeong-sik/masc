@@ -89,6 +89,20 @@ let make_config_root root =
   write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
+
+let write_basepath_keeper_toml base_path name =
+  let keepers_dir =
+    Filename.concat (Filename.concat (Filename.concat base_path ".masc") "config")
+      "keepers"
+  in
+  mkdir_p keepers_dir;
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+goal = "example"
+room_scope = "current"
+proactive_enabled = false
+|}
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -518,6 +532,7 @@ let test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path () =
 
 let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
   with_temp_dir "startup-blocking-legacy-keepers" (fun dir ->
+      write_basepath_keeper_toml dir "sangsu";
       let state = Mcp_server.create_state ~base_path:dir in
       let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in

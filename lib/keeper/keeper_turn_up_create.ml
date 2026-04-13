@@ -25,6 +25,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         p.profile_defaults.goal |> Option.value ~default:""
         |> normalize_goal_horizon_text
   in
+  let autoboot_enabled = Option.value ~default:true p.autoboot_enabled_opt in
   let policy_voice_enabled =
     first_some
       p.policy_voice_enabled_opt
@@ -282,6 +283,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         continuity_summary = "";
         active_goal_ids = [];
         paused = false;
+        autoboot_enabled;
         current_task_id = None;
         work_discovery_enabled = p.profile_defaults.work_discovery_enabled;
         work_discovery_sources = p.profile_defaults.work_discovery_sources;

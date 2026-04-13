@@ -480,6 +480,8 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "mid_goal" props);
           Alcotest.(check bool) "has long_goal" true
             (List.mem_assoc "long_goal" props);
+          Alcotest.(check bool) "has autoboot_enabled" true
+            (List.mem_assoc "autoboot_enabled" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false

@@ -686,6 +686,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
                 ("name", `String "admin-keeper");
                 ("goal", `String "Admin tool policy test");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       with
       | Some (true, _) -> (

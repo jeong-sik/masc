@@ -107,6 +107,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -189,6 +190,7 @@ let test_keeper_status_defaults_name_to_caller () =
                 ("name", `String keeper_name);
                 ("goal", `String "Self inspect");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -235,6 +237,7 @@ let test_keeper_status_accepts_agent_name_alias () =
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -281,6 +284,7 @@ let test_keeper_down_accepts_agent_name_alias () =
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -332,6 +336,7 @@ let test_operator_keeper_probe_accepts_agent_name_alias () =
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -396,6 +401,7 @@ let test_operator_keeper_recover_accepts_agent_name_alias () =
                 ("name", `String keeper_name);
                 ("goal", `String "Probe keeper runtime");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -482,6 +488,7 @@ let test_keeper_list_scoped_to_current_base_path () =
                 ("name", `String keeper_name_a);
                 ("goal", `String "Scoped to base path A");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok in base path A" true ok;
@@ -493,6 +500,7 @@ let test_keeper_list_scoped_to_current_base_path () =
                 ("name", `String keeper_name_b);
                 ("goal", `String "Scoped to base path B");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok in base path B" true ok;
@@ -562,6 +570,7 @@ let test_keeper_status_does_not_cross_base_path () =
                 ("name", `String keeper_name);
                 ("goal", `String "Only exists in base path B");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok in base path B" true ok;
@@ -624,6 +633,7 @@ let test_keeper_down_only_pauses_current_base_path () =
                 ("name", `String keeper_name);
                 ("goal", `String "Shared name in base path A");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok in base path A" true ok;
@@ -635,6 +645,7 @@ let test_keeper_down_only_pauses_current_base_path () =
                 ("name", `String keeper_name);
                 ("goal", `String "Shared name in base path B");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok in base path B" true ok;
@@ -854,6 +865,7 @@ let test_snapshot_keeper_tool_audit_fallback () =
                 ("name", `String keeper_name);
                 ("goal", `String "Expose dashboard fallback keeper audit");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -938,6 +950,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
                 ("name", `String keeper_name);
                 ("goal", `String "Expose dashboard decision audit");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
@@ -1036,6 +1049,7 @@ let test_keeper_msg_auto_execution_session_bridge () =
                 ("name", `String keeper_name);
                 ("goal", `String "Start projected team sessions from explicit keeper messages");
                 ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;

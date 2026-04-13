@@ -155,6 +155,7 @@ type keeper_meta =
     continuity_summary : string
   ; active_goal_ids : string list
   ; paused : bool
+  ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
       Set when keeper claims a task; cleared on masc_done.
@@ -726,6 +727,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_blocker", `String rt.last_blocker
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
+    ; "autoboot_enabled", `Bool m.autoboot_enabled
     ; "current_task_id", Json_util.string_opt_to_json (Option.map Keeper_id.Task_id.to_string m.current_task_id)
     ; "max_context_override", Json_util.int_opt_to_json m.max_context_override
     ; "work_discovery_enabled", Json_util.bool_opt_to_json m.work_discovery_enabled
@@ -785,6 +787,7 @@ type parsed_keeper_state =
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
+  ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
   ; ps_max_context_override : int option
   ; ps_runtime : agent_runtime_state
@@ -1100,6 +1103,9 @@ let parse_keeper_state
   let last_blocker = Safe_ops.json_string ~default:"" "last_blocker" json in
   let last_need = Safe_ops.json_string ~default:"" "last_need" json in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
+  let ps_autoboot_enabled =
+    Safe_ops.json_bool ~default:true "autoboot_enabled" json
+  in
   let ps_current_task_id = match Safe_ops.json_string_opt "current_task_id" json with None -> None | Some s -> (match Keeper_id.Task_id.of_string s with Ok tid -> Some tid | Error _ -> None) in
   let ps_max_context_override = Safe_ops.json_int_opt "max_context_override" json in
   { ps_created_at_raw
@@ -1107,6 +1113,7 @@ let parse_keeper_state
   ; ps_continuity_summary
   ; ps_active_goal_ids
   ; ps_paused
+  ; ps_autoboot_enabled
   ; ps_current_task_id
   ; ps_max_context_override
   ; ps_runtime =
@@ -1203,6 +1210,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
              ; continuity_summary = state.ps_continuity_summary
              ; active_goal_ids = state.ps_active_goal_ids
              ; paused = state.ps_paused
+             ; autoboot_enabled = state.ps_autoboot_enabled
              ; current_task_id = state.ps_current_task_id
              ; max_context_override = state.ps_max_context_override
              ; work_discovery_enabled = Safe_ops.json_bool_opt "work_discovery_enabled" json
@@ -1311,6 +1319,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_blocker"
   ; "last_need"
   ; "paused"
+  ; "autoboot_enabled"
   ; "current_task_id"
   ; "max_context_override"
   ; "work_discovery_enabled"
@@ -1396,11 +1405,11 @@ let is_keeper_meta_file f =
               String.length stem > String.length suf
               && String.ends_with ~suffix:suf stem)
             keeper_sidecar_stem_suffixes)
-let keeper_names config =
+let persisted_keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error e ->
-    Log.Keeper.warn "keeper_names: failed to list directory %s: %s" dir e;
+    Log.Keeper.warn "persisted_keeper_names: failed to list directory %s: %s" dir e;
     []
   | Ok files ->
     files
@@ -1410,11 +1419,23 @@ let keeper_names config =
     |> List.sort String.compare
 ;;
 
+let configured_keeper_names _config =
+  Config_dir_resolver.log_warnings ~context:"KeeperTypes" ();
+  Keeper_types_profile.discover_keepers_toml (Config_dir_resolver.keepers_dir ())
+  |> List.map fst
+  |> dedupe_keep_order
+;;
+
+let keeper_names config =
+  persisted_keeper_names config
+;;
+
 let keepalive_keeper_names config =
-  keeper_names config
+  configured_keeper_names config
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta) when not meta.paused -> Some meta.name
+    | Ok (Some meta) when not meta.paused && meta.autoboot_enabled -> Some meta.name
+    | Ok None -> Some name
     | _ -> None)
 ;;
 

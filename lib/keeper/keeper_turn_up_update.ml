@@ -45,6 +45,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
+  let autoboot_enabled =
+    Option.value ~default:old.autoboot_enabled p.autoboot_enabled_opt
+  in
   let mention_targets =
     resolve_mention_targets
       ~mention_targets_in:p.mention_targets_in
@@ -147,6 +150,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       Option.value ~default:old.execution_scope p.execution_scope_opt;
     tool_access;
     tool_denylist;
+    autoboot_enabled;
     voice_enabled =
       Option.value ~default:old.voice_enabled p.voice_enabled_opt;
     voice_channel =

@@ -114,6 +114,11 @@ export interface SSEEvent {
   total_turns?: number
   // OAS bridge payload (generic container for Event_bus events)
   payload?: Record<string, unknown>
+  // OAS envelope — attached to every oas:* event by oas_sse_bridge since 2.260.0.
+  // Used to join events into causal chains in the dashboard journal.
+  correlation_id?: string
+  // OAS envelope per-run identifier (one per Agent.run invocation).
+  run_id?: string
 }
 
 // --- Journal ---
@@ -155,6 +160,13 @@ export interface JournalEntry {
   sessionId?: string
   operationId?: string
   workerRunId?: string
+  // OAS envelope — propagated from oas_sse_bridge so the journal can group
+  // consecutive entries belonging to the same logical run.
+  correlationId?: string
+  // OAS envelope per-run identifier (one per Agent.run invocation).
+  runId?: string
+  // OAS envelope event timestamp (Unix epoch seconds, from envelope, not local clock).
+  oasTs?: number
 }
 
 // --- Sort modes ---

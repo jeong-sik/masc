@@ -125,7 +125,7 @@ let has_background_capacity () =
       with
       | Eio.Cancel.Cancelled _ as ex -> raise ex
       | ex ->
-        Eio.traceln "[autoresearch] capacity check failed: %s" (Printexc.to_string ex);
+        Log.Autoresearch.warn "capacity check failed: %s" (Printexc.to_string ex);
         true)
   | _ -> true
 
@@ -134,7 +134,7 @@ let has_background_capacity () =
 let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
     ~target_file ~file_content =
   if not (has_background_capacity ()) then begin
-    Eio.traceln "[autoresearch] backoff: local slots saturated, skipping cycle";
+    Log.Autoresearch.info "backoff: local slots saturated, skipping cycle";
     Result.error "autoresearch: local slots saturated, skipping cycle"
   end else
   let prompt = build_code_change_prompt ~goal ~baseline ~lower_is_better ~history ~insights

@@ -434,7 +434,7 @@ let create_backend ~sw ?(stop = Atomic.make false) ?(config = Config.make ()) en
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Eio.traceln "otel tick failed: %s" (Printexc.to_string exn))
+           Log.Telemetry.warn "otel tick failed: %s" (Printexc.to_string exn))
       done);
   (module B)
 

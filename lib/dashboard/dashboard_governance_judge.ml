@@ -354,8 +354,8 @@ let should_backoff ~sw ~net =
     capacity.all_discovered && capacity.endpoints_found > 0
     && capacity.process_available <= 0
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Eio.traceln
-      "[governance] capacity check failed in should_backoff: %s"
+    Log.Governance.warn
+      "capacity check failed in should_backoff: %s"
       (Printexc.to_string exn);
     false
 
@@ -374,7 +374,7 @@ let refresh_once ~sw ~net
           was_online)
     in
     if was_online then
-      Eio.traceln "[governance] backoff: local slots saturated, skipping cycle"
+      Log.Governance.info "backoff: local slots saturated, skipping cycle"
   else begin
     with_lock st (fun () -> st.refreshing <- true);
     match compute_judgments ~masc_tools ~dispatch ~factual_json:(build_facts ()) with
@@ -429,7 +429,7 @@ let start ~sw ~clock ~net ~base_path
             else min (base *. Float.pow 2.0 (float_of_int (min n 5))) 300.0
           in
           if n > 0 then
-            Eio.traceln "[governance] backoff: sleeping %.0fs (consecutive=%d)" sleep_s n;
+            Log.Governance.debug "backoff: sleeping %.0fs (consecutive=%d)" sleep_s n;
           Eio.Time.sleep clock sleep_s;
           loop ()
         in

@@ -5,7 +5,7 @@
     as text via [extra_system_context] in the [BeforeTurnParams] hook
     and flushes incrementally in the [AfterTurn] hook.
 
-    This eliminates the MASC-to-OAS lifecycle invasion where
+    This eliminates the MASC-to-OAS lifecycle invasion where the former
     [create_memory_full] directly manipulated OAS memory state.
 
     The hook is composed (via [Hooks.compose]) with existing keeper hooks
@@ -13,10 +13,11 @@
 
     Phase 1 introduced this as an opt-in path behind
     [MASC_MEMORY_HOOK_FIRST]. Phase 2 made it the only path and
-    removed the feature flag and the legacy imperative code path.
+    removed the feature flag. Phase 3 removed all dead imperative
+    seeding functions from [Memory_oas_bridge].
 
     @since v2.265.0 (RFC-MASC-004 Phase 1)
-    @since v2.266.0 (RFC-MASC-004 Phase 2 — imperative path removed) *)
+    @since v2.266.0 (RFC-MASC-004 Phase 2-3 — legacy functions removed) *)
 
 (** Build an [extra_system_context] string from episodic, procedural,
     and institutional memory.

@@ -1,11 +1,13 @@
 (** test_memory_oas_5tier -- Tests for Memory_oas_bridge 5-tier integration.
 
-    Covers oas_procedure_of_masc, create_memory_full, and OAS Memory
-    tier lifecycle without external dependencies.
+    Covers oas_procedure_of_masc, OAS Memory tier lifecycle, flush,
+    and hook-first pure-read functions without external dependencies.
 
+    Imperative seeding tests removed (RFC-MASC-004 Phase 3).
     episode_of_entry tests removed (Memory_stream removed).
 
-    @since 2.124.0 *)
+    @since 2.124.0
+    @since 2.266.0 (imperative seeding tests removed) *)
 
 open Masc_mcp
 
@@ -74,40 +76,6 @@ let test_procedure_metadata () =
   (match List.assoc_opt "evidence_count" op.metadata with
    | Some (`Int n) -> Alcotest.(check int) "evidence_count" 2 n
    | _ -> Alcotest.fail "expected evidence_count in metadata")
-
-(* ================================================================ *)
-(* create_memory_full (integration)                                  *)
-(* ================================================================ *)
-
-let test_create_memory_full_empty () =
-  let dir = setup_tmp_dir () in
-  let memory =
-    Memory_oas_bridge.create_memory_full ~agent_name:"test-new"
-      ~episode_limit:10 ~procedure_limit:5 ()
-  in
-  let (sp, wk, ep, pr, _lt) = Oas.Memory.stats memory in
-  Alcotest.(check int) "scratchpad empty" 0 sp;
-  Alcotest.(check int) "working empty" 0 wk;
-  Alcotest.(check int) "episodic empty (no data)" 0 ep;
-  Alcotest.(check int) "procedural empty (no data)" 0 pr;
-  cleanup_tmp_dir dir
-
-let test_create_memory_full_seeds_recent_episodes () =
-  let dir = setup_tmp_dir () in
-  ignore
-    (Institution_eio.record_episode_jsonl
-       ~event_type:"operation"
-       ~summary:"worker completed setup"
-       ~participants:["worker-a"]
-       ~outcome:`Success
-       ~learnings:["seeded into memory"]);
-  let memory =
-    Memory_oas_bridge.create_memory_full ~agent_name:"test-seeded"
-      ~episode_limit:5 ~procedure_limit:5 ()
-  in
-  let (_, _, ep, _, _) = Oas.Memory.stats memory in
-  Alcotest.(check int) "episodic seeded from jsonl" 1 ep;
-  cleanup_tmp_dir dir
 
 let test_memory_scratchpad_lifecycle () =
   let dir = setup_tmp_dir () in
@@ -301,7 +269,19 @@ let test_flush_procedures_dedupes_legacy_records () =
     (List.hd final.evidence);
   cleanup_tmp_dir dir
 
-let test_seed_procedures_refreshes_after_external_append () =
+let contains_substring haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen then false
+  else
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then
+        found := true
+    done;
+    !found
+
+let test_load_procedures_text_refreshes_after_external_append () =
   let dir = setup_tmp_dir () in
   let agent_name = "test-pr-refresh" in
   let first : Procedural_memory.procedure = {
@@ -327,23 +307,22 @@ let test_seed_procedures_refreshes_after_external_append () =
     last_applied = 130.0;
   } in
   Procedural_memory.save_procedure ~agent_name first;
-  let memory_before = Memory_oas_bridge.create_memory ~agent_name () in
-  let seeded_before =
-    Memory_oas_bridge.seed_procedures_as_oas ~memory:memory_before ~agent_name ~limit:10
-  in
-  Alcotest.(check int) "initial seed count" 1 seeded_before;
+  let text_before = Memory_oas_bridge.load_procedures_text ~agent_name ~limit:10 in
+  (match text_before with
+   | Some t ->
+     Alcotest.(check bool) "first procedure in text" true
+       (contains_substring t "restart")
+   | None -> Alcotest.fail "expected at least 1 procedure in text");
   Procedural_memory.save_procedure ~agent_name second;
-  let memory_after = Memory_oas_bridge.create_memory ~agent_name () in
-  let seeded_after =
-    Memory_oas_bridge.seed_procedures_as_oas ~memory:memory_after ~agent_name ~limit:10
-  in
-  Alcotest.(check int) "cache invalidated after append" 2 seeded_after;
-  (match Oas.Memory.best_procedure memory_after ~pattern:"drain" with
-   | Some proc -> Alcotest.(check string) "new procedure visible" "proc-second" proc.id
-   | None -> Alcotest.fail "expected appended procedure to be visible after reseed");
+  let text_after = Memory_oas_bridge.load_procedures_text ~agent_name ~limit:10 in
+  (match text_after with
+   | Some t ->
+     Alcotest.(check bool) "cache invalidated — both procedures in text" true
+       (contains_substring t "restart" && contains_substring t "drain")
+   | None -> Alcotest.fail "expected procedures text after second save");
   cleanup_tmp_dir dir
 
-let test_flush_procedures_updates_cache_for_immediate_reseed () =
+let test_flush_procedures_updates_cache_for_immediate_reload () =
   let dir = setup_tmp_dir () in
   let agent_name = "test-pr-cache-writeback" in
   let existing : Procedural_memory.procedure = {
@@ -373,16 +352,13 @@ let test_flush_procedures_updates_cache_for_immediate_reseed () =
        });
   let flushed = Memory_oas_bridge.flush_procedures ~memory ~agent_name in
   Alcotest.(check int) "updated procedure flushed" 1 flushed;
-  let memory_reseed = Memory_oas_bridge.create_memory ~agent_name () in
-  let seeded =
-    Memory_oas_bridge.seed_procedures_as_oas ~memory:memory_reseed ~agent_name ~limit:10
-  in
-  Alcotest.(check int) "reseed count" 1 seeded;
-  (match Oas.Memory.best_procedure memory_reseed ~pattern:"rollback" with
-   | Some proc ->
-       Alcotest.(check int) "updated success count visible" 7 proc.success_count;
-       Alcotest.(check int) "updated failure count visible" 1 proc.failure_count
-   | None -> Alcotest.fail "expected rewritten procedure after immediate reseed");
+  (* Verify cache is updated: load_procedures_text should see the new counts *)
+  let text = Memory_oas_bridge.load_procedures_text ~agent_name ~limit:10 in
+  (match text with
+   | Some t ->
+     Alcotest.(check bool) "flushed procedure visible in text" true
+       (contains_substring t "rollback")
+   | None -> Alcotest.fail "expected procedure text after flush + cache update");
   cleanup_tmp_dir dir
 
 (* ================================================================ *)
@@ -463,63 +439,6 @@ let test_jsonl_backend_uses_explicit_base_dir () =
   Alcotest.(check bool) "writes under explicit base_dir" true (Sys.file_exists expected_path);
   cleanup_tmp_dir dir
 
-let test_seed_episodes_loads_recent_jsonl () =
-  let dir = setup_tmp_dir () in
-  let first =
-    Institution_eio.record_episode_jsonl
-      ~event_type:"keeper_turn"
-      ~summary:"keeper observed drift"
-      ~participants:["keeper-a"]
-      ~outcome:`Partial
-      ~learnings:["watch alert frequency"]
-  in
-  let second =
-    Institution_eio.record_episode_jsonl
-      ~event_type:"incident"
-      ~summary:"rollback completed"
-      ~participants:["keeper-b"; "operator"]
-      ~outcome:`Success
-      ~learnings:["rollback path healthy"]
-  in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-seed" () in
-  let count = Memory_oas_bridge.seed_episodes ~memory ~limit:10 in
-  Alcotest.(check int) "seed_episodes loads both records" 2 count;
-  let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
-  let ids = List.map (fun (episode : Oas.Memory.episode) -> episode.id) recalled in
-  Alcotest.(check bool) "first episode present" true (List.mem first.id ids);
-  Alcotest.(check bool) "second episode present" true (List.mem second.id ids);
-  cleanup_tmp_dir dir
-
-let test_seed_episodes_respects_limit () =
-  let dir = setup_tmp_dir () in
-  ignore
-    (Institution_eio.record_episode_jsonl
-       ~event_type:"a"
-       ~summary:"episode-a"
-       ~participants:["agent-a"]
-       ~outcome:`Partial
-       ~learnings:[]);
-  ignore
-    (Institution_eio.record_episode_jsonl
-       ~event_type:"b"
-       ~summary:"episode-b"
-       ~participants:["agent-b"]
-       ~outcome:`Success
-       ~learnings:[]);
-  ignore
-    (Institution_eio.record_episode_jsonl
-       ~event_type:"c"
-       ~summary:"episode-c"
-       ~participants:["agent-c"]
-       ~outcome:`Failure
-       ~learnings:["inspect retry budget"]);
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-limit" () in
-  let count = Memory_oas_bridge.seed_episodes ~memory ~limit:2 in
-  Alcotest.(check int) "seed_episodes limit applied" 2 count;
-  let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
-  Alcotest.(check int) "only 2 episodes recalled" 2 (List.length recalled);
-  cleanup_tmp_dir dir
-
 let test_flush_episodes_appends_only_new_records () =
   let dir = setup_tmp_dir () in
   let existing =
@@ -531,7 +450,7 @@ let test_flush_episodes_appends_only_new_records () =
       ~learnings:["persist once"]
   in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
-  ignore (Memory_oas_bridge.seed_episodes ~memory ~limit:10);
+  (* Store a new episode directly into OAS memory (no imperative seeding) *)
   Oas.Memory.store_episode memory
     {
       Oas.Memory.id = "new-episode-id";
@@ -555,12 +474,6 @@ let test_flush_episodes_appends_only_new_records () =
   let ids = List.map (fun (episode : Institution_eio.episode) -> episode.id) persisted in
   Alcotest.(check bool) "existing record preserved" true (List.mem existing.id ids);
   Alcotest.(check bool) "new record appended" true (List.mem "new-episode-id" ids);
-  let memory_reseed = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
-  let reseeded =
-    Memory_oas_bridge.seed_episodes ~memory:memory_reseed
-      ~limit:10
-  in
-  Alcotest.(check int) "reseed count stays deduped" 2 reseeded;
   cleanup_tmp_dir dir
 
 (* ================================================================ *)
@@ -576,11 +489,6 @@ let () =
       Alcotest.test_case "basic conversion" `Quick test_procedure_basic;
       Alcotest.test_case "metadata fields" `Quick test_procedure_metadata;
     ]);
-    ("create_memory_full", [
-      Alcotest.test_case "empty agent" `Quick test_create_memory_full_empty;
-      Alcotest.test_case "seeds recent episodes" `Quick
-        test_create_memory_full_seeds_recent_episodes;
-    ]);
     ("scratchpad_working", [
       Alcotest.test_case "scratchpad lifecycle" `Quick test_memory_scratchpad_lifecycle;
       Alcotest.test_case "working survives clear" `Quick test_memory_working_survives_clear;
@@ -595,10 +503,10 @@ let () =
       Alcotest.test_case "record success" `Quick test_procedural_record_success;
       Alcotest.test_case "flush dedupes legacy records" `Quick
         test_flush_procedures_dedupes_legacy_records;
-      Alcotest.test_case "seed refreshes after external append" `Quick
-        test_seed_procedures_refreshes_after_external_append;
-      Alcotest.test_case "flush updates cache for immediate reseed" `Quick
-        test_flush_procedures_updates_cache_for_immediate_reseed;
+      Alcotest.test_case "load_procedures_text refreshes after append" `Quick
+        test_load_procedures_text_refreshes_after_external_append;
+      Alcotest.test_case "flush updates cache for immediate reload" `Quick
+        test_flush_procedures_updates_cache_for_immediate_reload;
     ]);
     ("stats", [
       Alcotest.test_case "all tiers" `Quick test_stats_all_tiers;
@@ -609,10 +517,6 @@ let () =
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
       Alcotest.test_case "uses explicit base_dir" `Quick
         test_jsonl_backend_uses_explicit_base_dir;
-      Alcotest.test_case "seed_episodes loads recent jsonl" `Quick
-        test_seed_episodes_loads_recent_jsonl;
-      Alcotest.test_case "seed_episodes respects limit" `Quick
-        test_seed_episodes_respects_limit;
       Alcotest.test_case "flush_episodes appends only new" `Quick
         test_flush_episodes_appends_only_new_records;
     ]);

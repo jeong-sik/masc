@@ -1529,9 +1529,10 @@ let run_turn
            Without this, read_continuity_summary finds no [STATE] in the
            checkpoint messages and returns empty — causing keepers to lose
            context across turns.  See #5431. *)
-       (* RFC-MASC-004 Phase 2: AfterTurn hooks flush incrementally on
-          every turn. No final flush_all needed — the AfterTurn hook
-          already ran for the last turn before Agent.run returned. *)
+       (* RFC-MASC-004: AfterTurn hooks flush incrementally on every
+          turn via flush_incremental. No separate final flush needed —
+          the AfterTurn hook already ran for the last turn before
+          Agent.run returned. *)
        let text = Agent_sdk.Types.text_of_content result.response.content in
        let model = result.response.model in
        (* Extract and persist thinking blocks to trajectory JSONL.

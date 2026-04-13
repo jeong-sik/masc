@@ -5,8 +5,6 @@
     Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
 *)
 
-open Yojson.Safe.Util
-
 type tool_result = bool * string
 
 type context = {

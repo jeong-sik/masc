@@ -6,6 +6,14 @@ open Tool_args
     reference this constant instead of using the string literal. *)
 let default_cascade_name = Keeper_cascade_profile.default_name
 
+(** Cascade name for recovery turns when keeper is in Failing phase.
+    Maps to local_recovery_* entries in cascade.json. *)
+let local_recovery_cascade_name = "local_recovery"
+
+(** Cascade name for buffer operations (compacting, handing off).
+    Maps to local_only_* entries in cascade.json. *)
+let local_only_cascade_name = "local_only"
+
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward
     to 65,536, which can exceed the discovered provider ceiling. *)

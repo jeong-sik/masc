@@ -36,3 +36,14 @@ val resolve_temperature : cascade_name:string -> fallback:(unit -> float) -> flo
 (** Resolve a max_tokens value with cascade config priority.
     Returns cascade config value if present, otherwise calls [fallback]. *)
 val resolve_max_tokens : cascade_name:string -> fallback:(unit -> int) -> int
+
+(** Clamp max_tokens to provider ceiling.
+
+    If [provider_ceiling] is [Some ceiling] and [max_tokens > ceiling],
+    returns [ceiling]. Otherwise returns [max_tokens] unchanged.
+
+    Clamping strategy: a smaller response is better than no response.
+    Mirrors TLA+ KeeperCoreTriad.CapabilityGate action.
+
+    @since Core Triad *)
+val clamp_max_tokens_to_ceiling : provider_ceiling:int option -> int -> int

@@ -554,12 +554,21 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
        try
          let json = Yojson.Safe.from_string line in
          let role = Yojson.Safe.Util.(json |> member "role" |> to_string) in
+         let source =
+           Yojson.Safe.Util.(json |> member "source" |> to_string_option)
+           |> Option.value ~default:""
+           |> String.trim
+         in
          if role = "user" then
            let content =
              Yojson.Safe.Util.(json |> member "content" |> to_string)
              |> String.trim
            in
-           if content = "" then None else Some content
+           if content = ""
+              || Keeper_types.is_internal_history_source source
+              || Keeper_context_core.has_world_state_signature content
+           then None
+           else Some content
          else None
        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
   |> take max_n

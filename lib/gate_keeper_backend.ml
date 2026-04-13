@@ -58,6 +58,25 @@ let normalized_or_unknown value =
   | "" -> "unknown"
   | trimmed -> trimmed
 
+(** Sanitize a value for use as a filesystem path component.
+    Replaces everything outside [A-Za-z0-9_-] with '_' so that the resulting
+    string cannot escape its intended parent directory via '/', '\\', or '..'
+    sequences. Empty or fully-stripped values collapse to "unknown". *)
+let filesystem_safe_or_unknown value =
+  let normalized = normalized_context_value value in
+  if normalized = "" then "unknown"
+  else
+    let buf = Buffer.create (String.length normalized) in
+    String.iter
+      (fun ch ->
+        match ch with
+        | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' ->
+          Buffer.add_char buf ch
+        | _ -> Buffer.add_char buf '_')
+      normalized;
+    let s = Buffer.contents buf in
+    if s = "" || String.for_all (fun c -> c = '_') s then "unknown" else s
+
 let agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id =
   Printf.sprintf "gate:%s:%s:%s"
     (normalized_or_unknown channel)
@@ -89,10 +108,15 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
   let agent_name =
     agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id
   in
+  (* Use filesystem-safe sanitizer: this key is later used as a directory
+     component in session_dir. An unsanitized channel_room_id with '..' or '/'
+     would escape the intended traces/channels/ subtree. Discord passes
+     numeric IDs so this is defensive for future integrations (webhooks,
+     custom channels) that could pass attacker-controlled values. *)
   let channel_session_key =
     Printf.sprintf "%s_%s"
-      (normalized_or_unknown channel)
-      (normalized_or_unknown channel_room_id)
+      (filesystem_safe_or_unknown channel)
+      (filesystem_safe_or_unknown channel_room_id)
   in
   let args =
     `Assoc [

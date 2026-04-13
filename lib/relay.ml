@@ -70,7 +70,17 @@ let record_actual_tokens ~estimated ~actual =
     | [] -> ()
     | rs ->
       let sum = List.fold_left (+.) 0.0 rs in
-      calibration.correction_factor <- sum /. float_of_int (List.length rs)
+      let new_factor = sum /. float_of_int (List.length rs) in
+      let prev_factor = calibration.correction_factor in
+      calibration.correction_factor <- new_factor;
+      if new_factor > 1.5 || new_factor < 0.5 then
+        Log.warn ~ctx:"relay"
+          "calibration drift: correction_factor=%.2f (was %.2f, %d samples)"
+          new_factor prev_factor (List.length rs)
+      else if abs_float (new_factor -. prev_factor) > 0.1 then
+        Log.debug ~ctx:"relay"
+          "calibration updated: correction_factor=%.2f (was %.2f)"
+          new_factor prev_factor
   end
 
 (** Get calibration info as JSON for debugging *)

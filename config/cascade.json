@@ -19,5 +19,9 @@
   "local_only_temperature": 0.2,
   "local_only_max_tokens": 32768,
   "default_temperature": 0.3,
-  "default_max_tokens": 4096
+  "default_max_tokens": 4096,
+  "default_api_key_env": {
+    "glm-coding": "ZAI_API_KEY_SB",
+    "glm": "ZAI_API_KEY_SB"
+  }
 }

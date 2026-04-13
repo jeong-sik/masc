@@ -200,7 +200,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
              min_keeper_context
            end else raw
          in
-            let base_dir = session_base_dir ctx.config in
+            let trace_dir = session_base_dir ctx.config in
+            let registry_base_path = ctx.config.base_path in
+            let dispatch_lifecycle_event event =
+              match
+                Keeper_registry.dispatch_event
+                  ~base_path:registry_base_path meta.name event
+              with
+              | Ok _ -> ()
+              | Error err ->
+                  Log.Keeper.warn
+                    "%s: post-turn lifecycle dispatch failed event=%s error=%s"
+                    meta.name
+                    (Keeper_state_machine.event_to_string event)
+                    (Keeper_state_machine.transition_error_to_string err)
+            in
             let effective_no_skill_route = no_skill_route || direct_reply in
             let effective_no_state_block = no_state_block || direct_reply in
             let fallback_skill_route =
@@ -306,7 +320,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let run_result, latency_ms =
               Keeper_exec_context.timed (fun () ->
                   Keeper_agent_run.run_turn
-                    ~config:ctx.config ~meta ~base_dir
+                    ~config:ctx.config ~meta ~base_dir:trace_dir
                     ~max_context:max_cascade_context
                     ~build_turn_prompt
                     ~user_message:message
@@ -334,15 +348,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
               let lifecycle =
-                Keeper_exec_context.apply_post_turn_lifecycle ~base_dir
+                Keeper_exec_context.apply_post_turn_lifecycle ~base_dir:trace_dir
                   ~on_compaction_started:(fun () ->
-                    ignore (Keeper_registry.dispatch_event
-                      ~base_path:base_dir meta.name
-                      Keeper_state_machine.Compaction_started))
+                    dispatch_lifecycle_event
+                      Keeper_state_machine.Compaction_started)
                   ~on_handoff_started:(fun () ->
-                    ignore (Keeper_registry.dispatch_event
-                      ~base_path:base_dir meta.name
-                      Keeper_state_machine.Handoff_started))
+                    dispatch_lifecycle_event
+                      Keeper_state_machine.Handoff_started)
                   ~meta
                   ~model:result.model_used
                   ~primary_model_max_tokens:max_cascade_context
@@ -350,36 +362,32 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               if lifecycle.compaction.attempted then
                 if lifecycle.compaction.applied then
-                  ignore (Keeper_registry.dispatch_event
-                    ~base_path:base_dir meta.name
+                  dispatch_lifecycle_event
                     (Keeper_state_machine.Compaction_completed {
                       before_tokens = lifecycle.compaction.before_tokens;
                       after_tokens = lifecycle.compaction.after_tokens;
-                    }))
+                    })
                 else
-                  ignore (Keeper_registry.dispatch_event
-                    ~base_path:base_dir meta.name
+                  dispatch_lifecycle_event
                     (Keeper_state_machine.Compaction_failed {
                       reason =
                         Option.value lifecycle.compaction.failure_reason
                           ~default:lifecycle.compaction.decision;
-                    }));
+                    });
               (match lifecycle.handoff_attempted, lifecycle.handoff_json with
                | true, Some _json ->
-                   ignore (Keeper_registry.dispatch_event
-                     ~base_path:base_dir meta.name
+                   dispatch_lifecycle_event
                      (Keeper_state_machine.Handoff_completed {
                        generation = lifecycle.updated_meta.runtime.generation;
                        new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
-                     }))
+                     })
                | true, None ->
-                   ignore (Keeper_registry.dispatch_event
-                     ~base_path:base_dir meta.name
+                   dispatch_lifecycle_event
                      (Keeper_state_machine.Handoff_failed {
                        reason =
                          Option.value lifecycle.handoff_failure_reason
                            ~default:"handoff_aborted";
-                     }))
+                     })
                | false, _ -> ());
               let updated_meta =
                 update_direct_turn_meta lifecycle.updated_meta ~latency_ms result

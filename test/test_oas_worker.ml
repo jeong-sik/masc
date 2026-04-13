@@ -365,6 +365,167 @@ let test_cascade_observation_json_includes_fallback_fields () =
   Alcotest.(check string) "attempt detail boundary preserved" "oas_metrics_callbacks"
     Yojson.Safe.Util.(json |> member "attempt_details_source" |> to_string)
 
+let find_cascade_metric_entry name (json : Yojson.Safe.t) =
+  Yojson.Safe.Util.(json |> to_list)
+  |> List.find_opt (fun entry ->
+         String.equal
+           Yojson.Safe.Util.(entry |> member "cascade_name" |> to_string)
+           name)
+
+let test_cascade_metrics_concurrent_recording () =
+  Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ())
+    (fun () ->
+      Eio.Fiber.all
+        (List.init 8 (fun _ ->
+             fun () ->
+               for _ = 1 to 25 do
+                 Masc_mcp.Oas_worker_cascade.record_cascade
+                   ~cascade_name:"concurrent-cascade"
+                   ~observation:None
+                   ~outcome:`Success
+               done));
+      match
+        find_cascade_metric_entry "concurrent-cascade"
+          (Oas_worker.cascade_metrics_json ())
+      with
+      | None -> fail "expected concurrent-cascade metrics"
+      | Some entry ->
+          Alcotest.(check int) "calls aggregated" 200
+            Yojson.Safe.Util.(entry |> member "calls" |> to_int);
+          Alcotest.(check int) "successes aggregated" 200
+            Yojson.Safe.Util.(entry |> member "successes" |> to_int);
+          Alcotest.(check int) "failures stay zero" 0
+            Yojson.Safe.Util.(entry |> member "failures" |> to_int))
+
+let test_cascade_metrics_evicts_lowest_call_key () =
+  Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ())
+    (fun () ->
+      Masc_mcp.Oas_worker_cascade.record_cascade
+        ~cascade_name:"victim-key"
+        ~observation:None
+        ~outcome:`Success;
+      for i = 1 to 254 do
+        let name = Printf.sprintf "stable-%03d" i in
+        Masc_mcp.Oas_worker_cascade.record_cascade
+          ~cascade_name:name
+          ~observation:None
+          ~outcome:`Success;
+        Masc_mcp.Oas_worker_cascade.record_cascade
+          ~cascade_name:name
+          ~observation:None
+          ~outcome:`Success
+      done;
+      for _ = 1 to 3 do
+        Masc_mcp.Oas_worker_cascade.record_cascade
+          ~cascade_name:"hot-key"
+          ~observation:None
+          ~outcome:`Success
+      done;
+      let before = Yojson.Safe.Util.to_list (Oas_worker.cascade_metrics_json ()) in
+      Alcotest.(check int) "table capped before admit" 256 (List.length before);
+      Masc_mcp.Oas_worker_cascade.record_cascade
+        ~cascade_name:"new-key"
+        ~observation:None
+        ~outcome:`Success;
+      let after_json = Oas_worker.cascade_metrics_json () in
+      let after = Yojson.Safe.Util.to_list after_json in
+      Alcotest.(check int) "table stays capped" 256 (List.length after);
+      Alcotest.(check bool) "victim evicted" true
+        (Option.is_none
+           (find_cascade_metric_entry "victim-key" after_json));
+      Alcotest.(check bool) "new key admitted" true
+        (Option.is_some
+           (find_cascade_metric_entry "new-key" after_json));
+      Alcotest.(check bool) "hot key retained" true
+        (Option.is_some
+           (find_cascade_metric_entry "hot-key" after_json)))
+
+let test_cascade_audit_persists_observation () =
+  let base = temp_dir "test_cascade_audit" in
+  let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match old_base_path with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
+      cleanup_dir base)
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" base;
+      let observation : Oas_worker.cascade_observation =
+        {
+          cascade_name = "audit-cascade";
+          configured_labels = [ "glm:auto"; "openai:auto" ];
+          candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
+          primary_model = Some "glm:glm-5.1";
+          selected_model = Some "openai:qwen3.5-35b";
+          selected_model_raw = Some "qwen3.5-35b";
+          selected_index = Some 1;
+          fallback_hops = Some 1;
+          fallback_applied = true;
+          attempts =
+            [
+              {
+                attempt_index = 0;
+                model_id = "glm-5.1";
+                model_label = Some "glm:glm-5.1";
+                latency_ms = Some 120;
+                error = Some "HTTP 503";
+              };
+              {
+                attempt_index = 1;
+                model_id = "qwen3.5-35b";
+                model_label = Some "openai:qwen3.5-35b";
+                latency_ms = Some 90;
+                error = None;
+              };
+            ];
+          fallback_events =
+            [
+              {
+                from_model_id = "glm-5.1";
+                from_model_label = Some "glm:glm-5.1";
+                to_model_id = "qwen3.5-35b";
+                to_model_label = Some "openai:qwen3.5-35b";
+                reason = "HTTP 503";
+              };
+            ];
+          attempt_details_available = true;
+          attempt_details_source = "oas_metrics_callbacks";
+        }
+      in
+      Masc_mcp.Oas_worker_cascade.record_cascade
+        ~cascade_name:"audit-cascade"
+        ~observation:(Some observation)
+        ~outcome:`Failure;
+      let store =
+        Dated_jsonl.create
+          ~base_dir:(Filename.concat base ".masc/cascade_audit")
+          ()
+      in
+      match Dated_jsonl.read_recent store 1 with
+      | [ json ] ->
+          Alcotest.(check string) "cascade name persisted" "audit-cascade"
+            Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
+          Alcotest.(check string) "outcome persisted" "failure"
+            Yojson.Safe.Util.(json |> member "outcome" |> to_string);
+          Alcotest.(check string) "selected model persisted"
+            "openai:qwen3.5-35b"
+            Yojson.Safe.Util.(
+              json |> member "observation" |> member "selected_model" |> to_string);
+          Alcotest.(check bool) "fallback flag persisted" true
+            Yojson.Safe.Util.(
+              json |> member "observation" |> member "fallback_applied" |> to_bool)
+      | _ ->
+          Alcotest.fail "expected one cascade audit record")
+
 let make_worker_meta ?(effective_model = "local-qwen") () :
     Worker_container_types.worker_container_meta =
   {
@@ -1518,6 +1679,12 @@ let () =
         test_cascade_names_produce_models;
       Alcotest.test_case "cascade observation json includes fallback fields" `Quick
         test_cascade_observation_json_includes_fallback_fields;
+      Alcotest.test_case "cascade metrics concurrent recording" `Quick
+        test_cascade_metrics_concurrent_recording;
+      Alcotest.test_case "cascade metrics evict lowest call key" `Quick
+        test_cascade_metrics_evicts_lowest_call_key;
+      Alcotest.test_case "cascade audit persists observation" `Quick
+        test_cascade_audit_persists_observation;
     ];
     "resume_config", [
       Alcotest.test_case "checkpoint model wins" `Quick

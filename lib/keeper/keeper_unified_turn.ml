@@ -1097,59 +1097,82 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
-  (* 1. Check API keys *)
-  let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
-  match ensure_api_keys_for_labels model_labels with
-  | Error e -> Error (Oas.Error.Internal e)
-  | Ok () ->
-      ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
-      let max_cascade_context =
-        let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-        let raw =
-          match meta.max_context_override with
-          | Some v ->
-              Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
-              v
-          | None ->
-              let resolved =
-                Oas_model_resolve.resolve_max_cascade_context model_labels
+  let registry_base_path = config.base_path in
+  match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
+  | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
+      Log.Keeper.info
+        "%s: unified turn skipped in non-executable phase=%s"
+        meta.name (Keeper_state_machine.phase_to_string phase);
+      Ok meta
+  | _ ->
+      (* 1. Check API keys *)
+      let model_labels = Keeper_coordination.effective_model_labels_for_turn meta in
+      match ensure_api_keys_for_labels model_labels with
+      | Error e -> Error (Oas.Error.Internal e)
+      | Ok () ->
+          ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
+          let max_cascade_context =
+            let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+            let raw =
+              match meta.max_context_override with
+              | Some v ->
+                  Log.Keeper.debug "%s: using max_context_override=%d" meta.name v;
+                  v
+              | None ->
+                  let resolved =
+                    Oas_model_resolve.resolve_max_cascade_context model_labels
+                  in
+                  Oas_model_resolve.clamp_context_for_pure_local_labels
+                    ~labels:model_labels ~max_context:resolved
+            in
+            if raw < min_keeper_context then begin
+              Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
+                meta.name raw min_keeper_context;
+              min_keeper_context
+            end else raw
+          in
+          (* Yield before CPU-bound prompt construction so the Eio scheduler
+             can service HTTP handlers between keeper turn setups. *)
+          Eio.Fiber.yield ();
+          (* 2. Build unified prompt *)
+          let diversity_hint =
+            let entries =
+              Keeper_registry.tool_usage_of ~base_path:config.base_path meta.name
+            in
+            if entries = [] then None
+            else
+              let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
+              let available_tools =
+                Keeper_tool_policy.keeper_allowed_tool_names meta
               in
-              Oas_model_resolve.clamp_context_for_pure_local_labels
-                ~labels:model_labels ~max_context:resolved
-        in
-        if raw < min_keeper_context then begin
-          Log.Keeper.warn "%s: resolved max_context=%d below minimum %d, clamped"
-            meta.name raw min_keeper_context;
-          min_keeper_context
-        end else raw
-      in
-      (* Yield before CPU-bound prompt construction so the Eio scheduler
-         can service HTTP handlers between keeper turn setups. *)
-      Eio.Fiber.yield ();
-      (* 2. Build unified prompt *)
-      let diversity_hint =
-        let entries =
-          Keeper_registry.tool_usage_of ~base_path:config.base_path meta.name
-        in
-        if entries = [] then None
-        else
-          let stats = Keeper_tool_diversity.stats_of_registry_entries entries in
-          let available_tools =
-            Keeper_tool_policy.keeper_allowed_tool_names meta
+              let summary =
+                Keeper_tool_diversity.compute_diversity ~available_tools stats
+              in
+              Keeper_tool_diversity.diversity_hint summary
           in
-          let summary =
-            Keeper_tool_diversity.compute_diversity ~available_tools stats
+          let system_prompt, user_message =
+            Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
+              ~observation ?diversity_hint ()
           in
-          Keeper_tool_diversity.diversity_hint summary
-      in
-      let system_prompt, user_message =
-        Keeper_unified_prompt.build_prompt ~meta ~base_path:config.base_path
-          ~observation ?diversity_hint ()
-      in
-      Eio.Fiber.yield ();
-      let base_dir = session_base_dir config in
+          Eio.Fiber.yield ();
+          let trace_dir = session_base_dir config in
+          let dispatch_lifecycle_event event =
+            match
+              Keeper_registry.dispatch_event
+                ~base_path:registry_base_path meta.name event
+            with
+            | Ok _ -> ()
+            | Error err ->
+                Log.Keeper.warn
+                  "%s: post-turn lifecycle dispatch failed event=%s error=%s"
+                  meta.name
+                  (Keeper_state_machine.event_to_string event)
+                  (Keeper_state_machine.transition_error_to_string err)
+          in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
-      Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+      Keeper_types.mkdir_p
+        (Filename.concat trace_dir
+           (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
@@ -1217,7 +1240,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               | Keeper_world_observation.Scheduled_autonomous ->
                   Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous
             in
-            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
+            Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir:trace_dir
               ~max_context ~build_turn_prompt
               ~user_message ~cascade_name:meta.cascade_name
               ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
@@ -1334,7 +1357,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 end else if (not overflow_retry_used)
                              && is_context_overflow err then (
                   match
-                    recover_context_overflow_retry ~meta ~base_dir
+                    recover_context_overflow_retry ~meta ~base_dir:trace_dir
                       ~max_cascade_context ~error:err
                   with
                   | Some retry_plan ->
@@ -1563,15 +1586,13 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~output_tokens:result.usage.output_tokens ()
           in
           let lifecycle =
-            apply_post_turn_lifecycle ~base_dir
+            apply_post_turn_lifecycle ~base_dir:trace_dir
               ~on_compaction_started:(fun () ->
-                ignore (Keeper_registry.dispatch_event
-                  ~base_path:base_dir meta.name
-                  Keeper_state_machine.Compaction_started))
+                dispatch_lifecycle_event
+                  Keeper_state_machine.Compaction_started)
               ~on_handoff_started:(fun () ->
-                ignore (Keeper_registry.dispatch_event
-                  ~base_path:base_dir meta.name
-                  Keeper_state_machine.Handoff_started))
+                dispatch_lifecycle_event
+                  Keeper_state_machine.Handoff_started)
               ~meta
               ~model:result.model_used
               ~primary_model_max_tokens:max_cascade_context
@@ -1579,36 +1600,32 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           in
           if lifecycle.compaction.attempted then
             if lifecycle.compaction.applied then
-              ignore (Keeper_registry.dispatch_event
-                ~base_path:base_dir meta.name
+              dispatch_lifecycle_event
                 (Keeper_state_machine.Compaction_completed {
                   before_tokens = lifecycle.compaction.before_tokens;
                   after_tokens = lifecycle.compaction.after_tokens;
-                }))
+                })
             else
-              ignore (Keeper_registry.dispatch_event
-                ~base_path:base_dir meta.name
+              dispatch_lifecycle_event
                 (Keeper_state_machine.Compaction_failed {
                   reason =
                     Option.value lifecycle.compaction.failure_reason
                       ~default:lifecycle.compaction.decision;
-                }));
+                });
           (match lifecycle.handoff_attempted, lifecycle.handoff_json with
            | true, Some _json ->
-               ignore (Keeper_registry.dispatch_event
-                 ~base_path:base_dir meta.name
+               dispatch_lifecycle_event
                  (Keeper_state_machine.Handoff_completed {
                    generation = lifecycle.updated_meta.runtime.generation;
                    new_trace_id = Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id;
-                 }))
+                 })
            | true, None ->
-               ignore (Keeper_registry.dispatch_event
-                 ~base_path:base_dir meta.name
+               dispatch_lifecycle_event
                  (Keeper_state_machine.Handoff_failed {
                    reason =
                      Option.value lifecycle.handoff_failure_reason
                        ~default:"handoff_aborted";
-                 }))
+                 })
            | false, _ -> ());
           let scope_only_reactive =
             observation.pending_scope_messages <> []

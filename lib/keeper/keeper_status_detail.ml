@@ -216,7 +216,7 @@ let handle_keeper_status ctx args : tool_result =
                ("provider", `String provider_name);
                ("model_id", `String cfg.model_id);
                ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
-               ("max_output_tokens", `Int cfg.max_tokens);
+               ("max_output_tokens", match cfg.max_tokens with Some n -> `Int n | None -> `Null);
                ("api_key_env", if cfg.api_key <> "" then `String "(set)" else `Null);
                ("cost_per_million_input", `Float pricing.input_per_million);
                ("cost_per_million_output", `Float pricing.output_per_million);

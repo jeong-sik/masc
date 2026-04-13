@@ -143,6 +143,20 @@ export function pushOasAgentEvent(event: OasAgentEvent): void {
   oasTotalEvents.value++
 }
 
+/** Record an OAS durable LLM-call event. Increments the global
+ *  counter and pins the latest timestamp so the runtime panel can
+ *  surface recency. */
+export function recordOasLlmCall(tsMs: number): void {
+  oasTotalLlmCalls.value++
+  oasLastLlmCallTs.value = tsMs
+}
+
+/** Record an OAS durable error event. */
+export function recordOasError(tsMs: number): void {
+  oasTotalErrors.value++
+  oasLastErrorTs.value = tsMs
+}
+
 export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
   const next = new Map<string, OasKeeperSnapshot>(oasKeeperSnapshots.value)
   next.set(snapshot.keeper_name, snapshot)

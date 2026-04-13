@@ -6,9 +6,13 @@ import {
   oasTotalEvents,
   oasTotalLlmCalls,
   oasTotalErrors,
+  oasLastLlmCallTs,
+  oasLastErrorTs,
   oasHealthSummary,
   pushOasAgentEvent,
   updateOasKeeperSnapshot,
+  recordOasLlmCall,
+  recordOasError,
 } from './store'
 import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
 
@@ -19,6 +23,8 @@ function resetOasSignals() {
   oasTotalEvents.value = 0
   oasTotalLlmCalls.value = 0
   oasTotalErrors.value = 0
+  oasLastLlmCallTs.value = null
+  oasLastErrorTs.value = null
 }
 
 describe('oasHealthSummary', () => {
@@ -80,5 +86,33 @@ describe('oasHealthSummary', () => {
     expect(s.agentEventsCount).toBe(0)
     expect(s.keeperSnapshotsCount).toBe(0)
     expect(s.lastKeeperTick).toBeNull()
+    expect(s.lastLlmCallTs).toBeNull()
+    expect(s.lastErrorTs).toBeNull()
+  })
+})
+
+describe('recordOasLlmCall / recordOasError', () => {
+  beforeEach(resetOasSignals)
+
+  it('increments LLM call counter and pins timestamp', () => {
+    recordOasLlmCall(1_700_000_000_000)
+    recordOasLlmCall(1_700_000_060_000)
+    expect(oasTotalLlmCalls.value).toBe(2)
+    expect(oasLastLlmCallTs.value).toBe(1_700_000_060_000)
+    expect(oasHealthSummary.value.lastLlmCallTs).toBe(1_700_000_060_000)
+  })
+
+  it('increments error counter and pins timestamp', () => {
+    recordOasError(1_700_000_000_000)
+    expect(oasTotalErrors.value).toBe(1)
+    expect(oasLastErrorTs.value).toBe(1_700_000_000_000)
+    expect(oasHealthSummary.value.lastErrorTs).toBe(1_700_000_000_000)
+  })
+
+  it('keeps LLM and error counters independent', () => {
+    recordOasLlmCall(1)
+    recordOasError(2)
+    expect(oasTotalLlmCalls.value).toBe(1)
+    expect(oasTotalErrors.value).toBe(1)
   })
 })

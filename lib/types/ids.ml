@@ -36,8 +36,10 @@ end = struct
   let _id_counter = Atomic.make 0
   let generate () =
     let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    Atomic.incr _id_counter;
-    let seq = Atomic.get _id_counter land 0xFFFF in
+    (* [fetch_and_add] atomically returns the pre-increment value, avoiding
+       the [incr; get] split where two fibers can observe the same counter
+       value and produce duplicate task IDs within the same millisecond. *)
+    let seq = (Atomic.fetch_and_add _id_counter 1 + 1) land 0xFFFF in
     Printf.sprintf "task-%d-%04x" timestamp seq
   let to_yojson t = `String t
   let of_yojson = function
@@ -62,8 +64,10 @@ end = struct
   let _id_counter = Atomic.make 0
   let generate () =
     let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    Atomic.incr _id_counter;
-    let seq = Atomic.get _id_counter land 0xFFFF in
+    (* See Task_id.generate — [fetch_and_add] closes the split-atomic race
+       so concurrent callers cannot produce duplicate IDs within the same
+       millisecond. *)
+    let seq = (Atomic.fetch_and_add _id_counter 1 + 1) land 0xFFFF in
     Printf.sprintf "thread-%d-%04x" timestamp seq
   let to_yojson t = `String t
   let of_yojson = function

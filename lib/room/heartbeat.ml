@@ -26,8 +26,11 @@ let with_mu_safe mode f =
   | `RO -> Eio_guard.with_mutex_ro mu f
 
 let generate_id () =
-  Atomic.incr heartbeat_counter;
-  Printf.sprintf "hb-%d-%d" (int_of_float (Time_compat.now ())) (Atomic.get heartbeat_counter)
+  (* [fetch_and_add] instead of [incr; get] pair — the split version lets two
+     fibers both observe the same post-increment counter and produce duplicate
+     heartbeat IDs. *)
+  let seq = Atomic.fetch_and_add heartbeat_counter 1 + 1 in
+  Printf.sprintf "hb-%d-%d" (int_of_float (Time_compat.now ())) seq
 
 let start ~agent_name ~interval ~message =
   with_mu_safe `RW (fun () ->

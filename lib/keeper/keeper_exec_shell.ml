@@ -532,8 +532,14 @@ let handle_keeper_shell
     | _ -> raw_op
   in
   let root = Keeper_alerting_path.project_root_of_config config in
+  let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
   let read_target () = resolve_keeper_shell_read_path ~config ~meta ~args in
   let cwd_target () = resolve_keeper_shell_read_cwd ~config ~meta ~args in
+  (* Actionable error: Samchon/Claude Code validateInput pattern.
+     Returns structured JSON with tried path, playground root, and concrete next action. *)
+  let path_error e =
+    actionable_path_error ~op ~keeper_name:meta.name ~raw_path ~error:e
+  in
   let render_process_result ?cwd ~cmd argv =
     let st, out =
       Process_eio.run_argv_with_status ?cwd ~timeout_sec:io_timeout_sec argv
@@ -554,18 +560,18 @@ let handle_keeper_shell
   match op with
   | "pwd" ->
     (match cwd_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok cwd -> render_process_result ~cwd ~cmd:"pwd" [ "/bin/pwd" ])
   | "git_status" ->
     (match cwd_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok cwd ->
        render_process_result ~cwd
          ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
          [ "git"; "-C"; cwd; "--no-optional-locks"; "status"; "--short"; "--branch" ])
   | "ls" ->
     (match read_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok target ->
        let st, out =
          Process_eio.run_argv_with_status ~timeout_sec:io_timeout_sec [ "/bin/ls"; "-la"; target ]
@@ -581,7 +587,7 @@ let handle_keeper_shell
              ]))
   | "cat" ->
     (match read_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok target ->
        let max_bytes = shell_readonly_cat_max_bytes args in
        let st, out =
@@ -605,7 +611,7 @@ let handle_keeper_shell
     then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
     else (
       match read_target () with
-      | Error e -> error_json ~fields:[ "op", `String op ] e
+      | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
         (* Optional file-type filter (e.g. "ml", "py") *)
@@ -631,7 +637,7 @@ let handle_keeper_shell
               [ "grep"; "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
         in
         match argv with
-        | Error e -> error_json ~fields:[ "op", `String op ] e
+        | Error e -> path_error e
         | Ok argv ->
         let st, out =
           Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec argv
@@ -650,7 +656,7 @@ let handle_keeper_shell
               ]))
   | "git_log" ->
     (match cwd_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok cwd ->
        let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
        let format = Safe_ops.json_string ~default:"%h %s" "format" args in
@@ -679,7 +685,7 @@ let handle_keeper_shell
     then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (
       match read_target () with
-      | Error e -> error_json ~fields:[ "op", `String op ] e
+      | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
         let st, out =
@@ -700,7 +706,7 @@ let handle_keeper_shell
               ]))
   | "head" ->
     (match read_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
        let st, out =
@@ -718,7 +724,7 @@ let handle_keeper_shell
              ]))
   | "tail" ->
     (match read_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
        let st, out =
@@ -736,12 +742,12 @@ let handle_keeper_shell
              ]))
   | "wc" ->
     (match read_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok target ->
        render_process_result ~cmd:"wc" [ "/usr/bin/wc"; "-l"; target ])
   | "tree" ->
     (match read_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok target ->
        let st, out =
          Process_eio.run_argv_with_status ~timeout_sec:read_timeout_sec
@@ -760,7 +766,7 @@ let handle_keeper_shell
              ]))
   | "git_diff" ->
     (match cwd_target () with
-     | Error e -> error_json ~fields:[ "op", `String op ] e
+     | Error e -> path_error e
      | Ok cwd ->
        render_process_result ~cwd
          ~cmd:"git diff --stat"
@@ -773,7 +779,7 @@ let handle_keeper_shell
     begin match action with
     | "list" ->
       (match cwd_target () with
-       | Error e -> error_json ~fields:[ "op", `String op ] e
+       | Error e -> path_error e
        | Ok cwd ->
          render_process_result ~cwd ~cmd:"git worktree list"
            [ "git"; "-C"; cwd; "worktree"; "list" ])
@@ -785,7 +791,7 @@ let handle_keeper_shell
           "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
       else (
         match cwd_target () with
-        | Error e -> error_json ~fields:[ "op", `String op ] e
+        | Error e -> path_error e
         | Ok cwd ->
           let _st, wt_out =
             Process_eio.run_argv_with_status ~timeout_sec:5.0
@@ -869,10 +875,10 @@ let handle_keeper_shell
               ])
       | None ->
         (match cwd_target () with
-         | Error e -> error_json ~fields:[ "op", `String op ] e
+         | Error e -> path_error e
          | Ok cwd ->
            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd_str with
-            | Error e -> error_json ~fields:[ "op", `String op ] e
+            | Error e -> path_error e
             | Ok () ->
               let st, out =
                 Process_eio.run_argv_with_status ~cwd ~timeout_sec

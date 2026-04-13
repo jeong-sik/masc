@@ -135,7 +135,25 @@ and corrective_hint cls keeper_name =
 let maybe_enrich_error ~keeper_name ~(error_msg : string) : string =
   match record_failure ~keeper_name ~error_msg with
   | None -> error_msg
-  | Some hint -> error_msg ^ hint
+  | Some hint ->
+    (* Try to enrich JSON responses by adding circuit_breaker field.
+       If error_msg is valid JSON with an "action" field, replace it.
+       Otherwise append as text (fallback for non-JSON errors). *)
+    (try
+       match Yojson.Safe.from_string error_msg with
+       | `Assoc fields ->
+         let enriched =
+           List.map (fun (k, v) ->
+             if k = "action" then (k, `String hint)
+             else (k, v)
+           ) fields
+         in
+         let with_breaker =
+           ("circuit_breaker", `Bool true) :: enriched
+         in
+         Yojson.Safe.to_string (`Assoc with_breaker)
+       | _ -> error_msg ^ hint
+     with _ -> error_msg ^ hint)
 
 (* ================================================================ *)
 (* Diagnostics                                                      *)

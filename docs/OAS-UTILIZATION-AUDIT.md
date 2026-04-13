@@ -21,7 +21,7 @@ The main remaining problems are no longer “missing migration” at large. They
 ## Pin Policy
 
 <!-- BEGIN GENERATED: oas-pin-audit-policy -->
-`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK declaration in `agent_sdk.opam`. Generated snapshot: runtime pin `main@v0.126.0`, declared base version `v0.126.0`, dependency floor `0.126.0`.
+`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK declaration in `agent_sdk.opam`. Generated snapshot: runtime pin `main@v0.129.0`, declared base version `v0.129.0`, dependency floor `0.129.0`.
 <!-- END GENERATED: oas-pin-audit-policy -->
 
 ## Status by Area

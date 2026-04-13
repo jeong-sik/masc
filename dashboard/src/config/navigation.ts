@@ -144,6 +144,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'append-only 이벤트 기록. runtime snapshot은 별도 런타임 탭에서 봅니다.',
       params: { section: 'telemetry' },
     },
+    {
+      id: 'governance',
+      label: 'tool 이벤트',
+      description: 'tool rejection 집계 + approval queue depth/latency.',
+      params: { section: 'governance' },
+    },
   ],
   command: [
     {

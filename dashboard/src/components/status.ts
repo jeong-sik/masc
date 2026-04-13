@@ -8,12 +8,13 @@ import { AgentsUnified } from './agents-unified'
 import { Activity } from './activity'
 import { RuntimeMonitor } from './runtime-monitor'
 import { TelemetryUnified } from './telemetry-unified'
+import { GovernanceMonitor } from './governance-monitor'
 
-type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry'
+type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
-  if (section === 'agents' || section === 'activity' || section === 'runtime' || section === 'telemetry') return section
+  if (section === 'agents' || section === 'activity' || section === 'runtime' || section === 'telemetry' || section === 'governance') return section
   return 'sessions'
 }
 
@@ -31,6 +32,8 @@ export function Status() {
               ? html`<${RuntimeMonitor} />`
             : section === 'telemetry'
               ? html`<${TelemetryUnified} />`
+            : section === 'governance'
+              ? html`<${GovernanceMonitor} />`
               : html`<${Mission} />`}
       </div>
     </div>

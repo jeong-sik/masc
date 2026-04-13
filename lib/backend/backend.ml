@@ -474,7 +474,10 @@ module FileSystem = struct
                   (match set t lock_key (lock_info_to_json info) with
                    | Ok () -> Ok true
                    | Error e -> Error e))
-         | Error _ -> Ok false)
+         | Error err ->
+             Log.Backend.warn "acquire_lock get failed for %s: %s"
+               key (Backend_types.show_error err);
+             Ok false)
     | Error e -> Error e
 
   let release_lock t ~key ~owner =
@@ -485,7 +488,10 @@ module FileSystem = struct
          | Some info when info.owner = owner ->
              (match delete t lock_key with
               | Ok () -> Ok true
-              | Error _ -> Ok false)
+              | Error err ->
+                  Log.Backend.warn "release_lock delete failed for %s: %s"
+                    key (Backend_types.show_error err);
+                  Ok false)
          | _ -> Ok false)  (* Not owner or invalid *)
     | Error (NotFound _) -> Ok true  (* Already released *)
     | Error e -> Error e
@@ -635,7 +641,10 @@ module FileSystem = struct
     | Ok () ->
         (match delete t test_key with
          | Ok () -> Ok { latency_ms = 0.0; is_healthy = true }
-         | Error _ -> Ok { latency_ms = 0.0; is_healthy = false })
+         | Error err ->
+             Log.Backend.warn "health_check probe delete failed: %s"
+               (Backend_types.show_error err);
+             Ok { latency_ms = 0.0; is_healthy = false })
     | Error e -> Error e
 
 end

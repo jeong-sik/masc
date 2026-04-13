@@ -62,7 +62,7 @@ proactive_enabled = true
 # .masc/keepers/<name>.json (live runtime meta). See keeper_types_profile.ml.
 execution_scope = "workspace"
 
-tool_preset = "social"
+tool_preset = "delivery"
 also_allow = ["keeper_voice_speak", "keeper_voice_listen"]
 
 cascade_name = "keeper_unified"

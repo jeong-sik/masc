@@ -98,7 +98,7 @@ let rec copy_missing_tree ~src ~dst =
 
 let bootstrap_base_path_config_root ~base_path =
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
-  if Option.is_some (Env_config_core.config_dir_opt ()) then
+  if Option.is_some (Config_dir_resolver.current_env_config_dir_opt ()) then
     ()
   else
     let config_root =
@@ -131,9 +131,9 @@ let startup_config_resolution ~base_path =
         cwd = Sys.getcwd ();
         executable_name = Sys.executable_name;
         env_base_path = Some base_path;
-        env_config_dir = Env_config_core.config_dir_opt ();
-        env_personas_dir = Env_config_core.personas_dir_opt ();
-        env_home = Sys.getenv_opt "HOME";
+        env_config_dir = Config_dir_resolver.current_env_config_dir_opt ();
+        env_personas_dir = Config_dir_resolver.current_env_personas_dir_opt ();
+        env_home = Config_dir_resolver.current_env_home_opt ();
       }
 
 (* GC tuning for long-running server with bursty allocation.

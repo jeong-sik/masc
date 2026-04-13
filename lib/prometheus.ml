@@ -224,18 +224,61 @@ let to_prometheus_text () =
     let existing = Hashtbl.find_opt by_name m.name |> Option.value ~default:[] in
     Hashtbl.replace by_name m.name (m :: existing)
   ) metrics;
+  (* Collect histogram parent names.  observe_histogram stores the
+     cumulative sum under the original name and the observation count
+     under "<name>_count".  We suppress standalone export of the
+     _count companion and instead emit it inline as part of the
+     summary stanza for the parent. *)
+  let histogram_parents = Hashtbl.create 8 in
   Hashtbl.iter (fun name ms ->
+    List.iter (fun (m : metric) ->
+      if m.metric_type = Histogram then
+        Hashtbl.replace histogram_parents name true
+    ) ms
+  ) by_name;
+  let label_key labels =
+    String.concat "" (List.map (fun (k, v) -> k ^ v) labels)
+  in
+  Hashtbl.iter (fun name ms ->
+    let is_histogram_count =
+      let suf = "_count" in
+      let slen = String.length suf in
+      String.length name > slen
+      && String.sub name (String.length name - slen) slen = suf
+      && Hashtbl.mem histogram_parents
+           (String.sub name 0 (String.length name - slen))
+    in
+    if is_histogram_count then ()
+    else
     match ms with
     | [] -> ()
     | m :: _ ->
-        Buffer.add_string buf (Printf.sprintf "# HELP %s %s\n" name m.help);
-        Buffer.add_string buf (Printf.sprintf "# TYPE %s %s\n" name (type_to_string m.metric_type));
-        List.iter (fun metric ->
-          Buffer.add_string buf (Printf.sprintf "%s%s %g\n"
-            metric.name
-            (labels_to_string metric.labels)
-            metric.value)
-        ) ms
+      Buffer.add_string buf (Printf.sprintf "# HELP %s %s\n" name m.help);
+      (match m.metric_type with
+       | Histogram ->
+         (* No bucket distribution is tracked, so emit as summary
+            (sum + count) which is the closest valid Prometheus type. *)
+         Buffer.add_string buf (Printf.sprintf "# TYPE %s summary\n" name);
+         List.iter (fun (metric : metric) ->
+           let ls = labels_to_string metric.labels in
+           Buffer.add_string buf
+             (Printf.sprintf "%s_sum%s %g\n" name ls metric.value);
+           let count_key = name ^ "_count" ^ label_key metric.labels in
+           let count_val =
+             match Hashtbl.find_opt metrics count_key with
+             | Some cm -> cm.value
+             | None -> 0.0
+           in
+           Buffer.add_string buf
+             (Printf.sprintf "%s_count%s %g\n" name ls count_val)
+         ) ms
+       | _ ->
+         Buffer.add_string buf
+           (Printf.sprintf "# TYPE %s %s\n" name (type_to_string m.metric_type));
+         List.iter (fun (metric : metric) ->
+           Buffer.add_string buf (Printf.sprintf "%s%s %g\n"
+             metric.name (labels_to_string metric.labels) metric.value)
+         ) ms)
   ) by_name;
   Buffer.contents buf
 

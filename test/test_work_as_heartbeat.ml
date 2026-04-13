@@ -92,9 +92,10 @@ let test_oas_timeout_262k_scheduled_autonomous () =
       ~max_context:262_144
       ~max_turns:Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
   in
-  (* 120 + 262.144*1.5 + min(5,40)*30 = 120+393.216+150 = 663.216 *)
-  check bool "262K scheduled autonomous → [660, 670]" true
-    (v >= 660.0 && v <= 670.0)
+  (* #6810: default lowered 5→2 to keep semaphore hold under wait timeout.
+     120 + 262.144*1.5 + min(2,40)*30 = 120+393.216+60 = 573.216 *)
+  check bool "262K scheduled autonomous → [570, 580]" true
+    (v >= 570.0 && v <= 580.0)
 
 let test_oas_timeout_zero () =
   let v = adaptive ~max_context:0 in
@@ -121,7 +122,9 @@ let test_max_turns_default () =
     Cfg.KeeperKeepalive.oas_max_turns_per_call
 
 let test_scheduled_autonomous_max_turns_default () =
-  check int "default scheduled autonomous max_turns_per_call 5" 5
+  (* #6810: lowered 5→2 so autonomous semaphore hold
+     (turns × latency) stays under 60s wait timeout. *)
+  check int "default scheduled autonomous max_turns_per_call 2" 2
     Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
 
 let test_max_turns_range () =
@@ -356,7 +359,7 @@ let () =
       test_case "turn timeout default is 1200" `Quick test_turn_timeout_default;
       test_case "adaptive capped at turn timeout" `Quick test_oas_timeout_cap;
       test_case "max_turns default is 15" `Quick test_max_turns_default;
-      test_case "scheduled autonomous max_turns default is 5" `Quick
+      test_case "scheduled autonomous max_turns default is 2" `Quick
         test_scheduled_autonomous_max_turns_default;
       test_case "max_turns range" `Quick test_max_turns_range;
       test_case "scheduled autonomous max_turns range" `Quick

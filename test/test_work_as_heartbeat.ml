@@ -163,6 +163,28 @@ let test_semaphore_wait_timeout_exception_shape () =
   in
   check (float 0.001) "exception carries wait sec" 42.5 carried
 
+let test_autonomous_queue_fifo_prevents_reentry_cutting () =
+  KK.reset_autonomous_turn_queue_for_test ();
+  let cheolsu_1 = KK.enqueue_autonomous_waiter_for_test "cheolsu" in
+  let sangsu = KK.enqueue_autonomous_waiter_for_test "sangsu" in
+  let janitor = KK.enqueue_autonomous_waiter_for_test "janitor" in
+  check (list string) "initial FIFO order"
+    [ "cheolsu"; "sangsu"; "janitor" ]
+    (KK.autonomous_waiter_snapshot_for_test ());
+  KK.drop_autonomous_waiter_for_test cheolsu_1;
+  let cheolsu_2 = KK.enqueue_autonomous_waiter_for_test "cheolsu" in
+  check (list string) "reentry goes to queue tail"
+    [ "sangsu"; "janitor"; "cheolsu" ]
+    (KK.autonomous_waiter_snapshot_for_test ());
+  KK.drop_autonomous_waiter_for_test sangsu;
+  KK.drop_autonomous_waiter_for_test janitor;
+  check (list string) "older waiters stay ahead of reentry"
+    [ "cheolsu" ]
+    (KK.autonomous_waiter_snapshot_for_test ());
+  KK.drop_autonomous_waiter_for_test cheolsu_2;
+  check (list string) "queue drained" []
+    (KK.autonomous_waiter_snapshot_for_test ())
+
 (* ── KeeperGrpc config defaults ────────────────────────── *)
 
 let test_grpc_max_reconnect_default () =
@@ -345,6 +367,8 @@ let () =
       test_case "default 60s" `Quick test_semaphore_wait_timeout_default;
       test_case "range [5, 600]" `Quick test_semaphore_wait_timeout_range;
       test_case "exception carries wait sec" `Quick test_semaphore_wait_timeout_exception_shape;
+      test_case "autonomous queue FIFO prevents reentry cutting" `Quick
+        test_autonomous_queue_fifo_prevents_reentry_cutting;
     ];
     "grpc_config", [
       test_case "max_reconnect default" `Quick test_grpc_max_reconnect_default;

@@ -53,6 +53,68 @@ let () =
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
+type autonomous_waiter =
+  {
+    ticket : int;
+    keeper_name : string;
+  }
+
+let autonomous_wait_queue_mutex = Mutex.create ()
+
+let autonomous_wait_queue : autonomous_waiter list ref = ref []
+
+let autonomous_wait_queue_next_ticket = ref 0
+
+let autonomous_queue_poll_sec = 0.05
+
+let with_autonomous_wait_queue f =
+  Mutex.lock autonomous_wait_queue_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock autonomous_wait_queue_mutex) f
+
+let reset_autonomous_turn_queue_for_test () =
+  with_autonomous_wait_queue (fun () ->
+    autonomous_wait_queue := [];
+    autonomous_wait_queue_next_ticket := 0)
+
+let enqueue_autonomous_waiter ~(keeper_name : string) : int =
+  with_autonomous_wait_queue (fun () ->
+    let ticket = !autonomous_wait_queue_next_ticket in
+    incr autonomous_wait_queue_next_ticket;
+    autonomous_wait_queue :=
+      !autonomous_wait_queue @ [{ ticket; keeper_name }];
+    ticket)
+
+let drop_autonomous_waiter ~(ticket : int) : unit =
+  with_autonomous_wait_queue (fun () ->
+    autonomous_wait_queue :=
+      List.filter (fun waiter -> waiter.ticket <> ticket) !autonomous_wait_queue)
+
+let autonomous_waiter_snapshot_for_test () : string list =
+  with_autonomous_wait_queue (fun () ->
+    List.map (fun waiter -> waiter.keeper_name) !autonomous_wait_queue)
+
+let enqueue_autonomous_waiter_for_test keeper_name =
+  enqueue_autonomous_waiter ~keeper_name
+
+let drop_autonomous_waiter_for_test ticket =
+  drop_autonomous_waiter ~ticket
+
+let autonomous_waiter_head_ticket () : int option =
+  with_autonomous_wait_queue (fun () ->
+    match !autonomous_wait_queue with
+    | head :: _ -> Some head.ticket
+    | [] -> None)
+
+let autonomous_waiter_position ~(ticket : int) : int option =
+  with_autonomous_wait_queue (fun () ->
+    let rec loop idx = function
+      | [] -> None
+      | waiter :: rest ->
+          if waiter.ticket = ticket then Some idx
+          else loop (idx + 1) rest
+    in
+    loop 0 !autonomous_wait_queue)
+
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
     turn slot. Without this, a keeper whose peers hold all slots while
     their LLM calls stall for the entire 1200s turn budget would block
@@ -80,17 +142,43 @@ let semaphore_wait_timeout_sec =
     not a keeper failure in the unified-turn sense. *)
 exception Semaphore_wait_timeout of float
 
-let with_keeper_turn_slot ~channel f =
+let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
+    ~(started_at : float) : unit =
+  if Option.equal Int.equal (autonomous_waiter_head_ticket ()) (Some ticket)
+  then ()
+  else
+    let waited_sec = Time_compat.now () -. started_at in
+    if waited_sec >= semaphore_wait_timeout_sec
+    then
+      let ahead =
+        match autonomous_waiter_position ~ticket with
+        | Some idx -> idx
+        | None -> 0
+      in
+      Log.Keeper.warn
+        "semaphore_wait: autonomous fairness queue wait exceeded %.0fs (keeper=%s ahead=%d), skipping turn"
+        semaphore_wait_timeout_sec keeper_name ahead;
+      raise (Semaphore_wait_timeout semaphore_wait_timeout_sec)
+    else (
+      (match Eio_context.get_clock_opt () with
+       | Some clock -> Eio.Time.sleep clock autonomous_queue_poll_sec
+       | None -> Unix.sleepf autonomous_queue_poll_sec);
+      wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at)
+
+let with_keeper_turn_slot ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
     | Keeper_world_observation.Reactive -> false
   in
   let t0 = Time_compat.now () in
-  Log.Keeper.debug "semaphore_acquire: channel=%s autonomous_available=%d turn_available=%d"
+  let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
+  Log.Keeper.debug "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
+    keeper_name
     (if is_autonomous then "autonomous" else "reactive")
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
-    (Eio.Semaphore.get_value turn_semaphore);
+    (Eio.Semaphore.get_value turn_semaphore)
+    queue_depth;
   (* Track acquisitions in mutable flags so the outer Fun.protect can
      release exactly the slots we hold — regardless of which exception
      path fires (Semaphore_wait_timeout, Eio.Cancel.Cancelled, or any
@@ -98,6 +186,7 @@ let with_keeper_turn_slot ~channel f =
      internal cancel-race handling. *)
   let acquired_autonomous = ref false in
   let acquired_turn = ref false in
+  let autonomous_ticket = ref None in
   let acquire_bounded ~label sem =
     match Eio_context.get_clock_opt () with
     | Some clock ->
@@ -124,14 +213,20 @@ let with_keeper_turn_slot ~channel f =
   in
   Fun.protect
     ~finally:(fun () ->
+      Option.iter (fun ticket -> drop_autonomous_waiter ~ticket) !autonomous_ticket;
       (* Release exactly what we acquired. Order does not matter because
          these two semaphores do not contend with each other. *)
       if !acquired_turn then Eio.Semaphore.release turn_semaphore;
       if !acquired_autonomous then Eio.Semaphore.release autonomous_turn_semaphore)
     (fun () ->
       if is_autonomous then begin
+        let ticket = enqueue_autonomous_waiter ~keeper_name in
+        autonomous_ticket := Some ticket;
+        wait_for_autonomous_queue_head ~keeper_name ~ticket ~started_at:t0;
         acquire_bounded ~label:"autonomous" autonomous_turn_semaphore;
-        acquired_autonomous := true
+        acquired_autonomous := true;
+        drop_autonomous_waiter ~ticket;
+        autonomous_ticket := None
       end;
       acquire_bounded ~label:"turn" turn_semaphore;
       acquired_turn := true;
@@ -1053,7 +1148,8 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
-        with_keeper_turn_slot ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
+        with_keeper_turn_slot ~keeper_name:meta_after_triage.name
+          ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
           match
             Keeper_unified_turn.run_unified_turn
               ~config:ctx.config

@@ -5,24 +5,12 @@ import { Network } from 'vis-network'
 import 'vis-network/styles/vis-network.css'
 import { DataSet } from 'vis-data'
 import { statusLabel } from '../lib/status-label'
+import { tooltipHtml } from '../lib/escape-html'
 import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 
 const hoveredNodeId = signal<string | null>(null)
 export const selectedNodeId = signal<string | null>(null)
 export const highlightedAgentId = signal<string | null>(null)
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function tooltipHtml(lines: string[]): string {
-  return lines.map(escapeHtml).join('<br/>')
-}
 
 function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return '#64748b'

@@ -195,12 +195,12 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
       ],
     },
     {
-      title: '정렬 품질',
+      title: 'LLM 응답 정렬',
       rows: [
-        { label: '목표 정렬', value: fmtFixed(mw?.goal_alignment_avg) },
-        { label: '응답 정렬', value: fmtFixed(mw?.response_alignment_avg) },
-        { label: '목표 드리프트', value: fmtFixed(mw?.goal_drift_avg) },
-        { label: '반복 위험', value: fmtFixed(mw?.repetition_risk_avg) },
+        { label: '목표 일치도', value: fmtFixed(mw?.goal_alignment_avg) },
+        { label: '응답 일치도', value: fmtFixed(mw?.response_alignment_avg) },
+        { label: '목표 이탈도', value: fmtFixed(mw?.goal_drift_avg) },
+        { label: '반복 패턴 위험도', value: fmtFixed(mw?.repetition_risk_avg) },
       ],
     },
     {

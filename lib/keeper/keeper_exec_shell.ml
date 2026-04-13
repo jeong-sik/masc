@@ -287,10 +287,32 @@ let resolve_keeper_shell_read_path
     let resolved_raw_path =
       if raw_path = "" then
         cwd
-      else if Filename.is_relative raw_path then
-        Filename.concat cwd raw_path
-      else
+      else if not (Filename.is_relative raw_path) then
         raw_path
+      else
+        (* Guard against playground path doubling: when cwd already
+           contains a playground prefix (e.g. .../playground/keeper/)
+           and raw_path also starts with a playground-relative segment
+           (e.g. ".masc/playground/keeper/repos"), concatenating would
+           produce a doubled path.  Detect and resolve against project
+           root instead. *)
+        let pg = ".masc/playground" in
+        let contains s sub =
+          let sl = String.length s and nl = String.length sub in
+          if nl > sl then false
+          else
+            let rec scan i =
+              if i + nl > sl then false
+              else if String.sub s i nl = sub then true
+              else scan (i + 1)
+            in scan 0
+        in
+        let cwd_has_pg = contains cwd pg in
+        let path_has_pg = contains raw_path pg in
+        if cwd_has_pg && path_has_pg then
+          raw_path
+        else
+          Filename.concat cwd raw_path
     in
     resolve_with_autocorrect resolved_raw_path
 

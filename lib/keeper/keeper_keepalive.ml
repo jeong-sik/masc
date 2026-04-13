@@ -784,34 +784,47 @@ let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
       | `Pending _ | `Legacy_pending _ -> true
       | `Cleared | `Absent -> false
     in
-    if sticky_manual_reconcile then begin
-      let reason_str =
-        match blocker_detail with
-        | `Pending detail | `Legacy_pending detail -> detail
-        | `Cleared -> "cleared"
-        | `Absent -> "none"
-      in
+    (* When the system already classified the partial commit as
+       auto-recoverable ("cursors already advanced, re-trigger risk is
+       low"), clear the reconcile blocker too.  Retaining a sticky
+       blocker after an auto-recoverable judgment is contradictory and
+       causes all keepers to stall within ~10 minutes of server start.
+       See #6801 for the full failure chain. *)
+    let reason_str =
+      match blocker_detail with
+      | `Pending detail | `Legacy_pending detail -> detail
+      | `Cleared -> "cleared"
+      | `Absent -> "none"
+    in
+    if sticky_manual_reconcile then
       Log.Keeper.warn
-        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — re-trigger risk is low."
-        stale_turn_failures meta.name reason_str
-    end;
+        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — clearing reconcile blocker."
+        stale_turn_failures meta.name reason_str;
     begin
       Keeper_registry.reset_turn_failures
         ~base_path:ctx.config.base_path meta.name;
       ignore (Keeper_registry.dispatch_event
         ~base_path:ctx.config.base_path meta.name
         Keeper_state_machine.Heartbeat_ok);
-      if sticky_manual_reconcile
-      then
+      (* Always dispatch Turn_succeeded to unblock the keeper.
+         Previously, sticky_manual_reconcile retained the blocker even
+         when auto-recoverable, causing permanent keeper stall. *)
+      if sticky_manual_reconcile then begin
+        ignore (Keeper_manual_reconcile.clear ctx.config
+          ~keeper_name:meta.name
+          ~actor:"heartbeat_recovery"
+          ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
+          ~evidence_refs:[]
+          ~idempotency_key:None);
         Log.Keeper.info
-          "heartbeat recovery: reset %d stale turn failures for %s but retained manual reconcile blocker"
-          stale_turn_failures meta.name
-      else (
-        dispatch_keepalive_event ~ctx ~keeper_name:meta.name
-          Keeper_state_machine.Turn_succeeded;
-        Log.Keeper.info
-          "heartbeat recovery: reset %d stale turn failures for %s"
-          stale_turn_failures meta.name)
+          "heartbeat recovery: cleared reconcile blocker for %s (auto-recoverable, re-trigger risk low)"
+          meta.name
+      end;
+      dispatch_keepalive_event ~ctx ~keeper_name:meta.name
+        Keeper_state_machine.Turn_succeeded;
+      Log.Keeper.info
+        "heartbeat recovery: reset %d stale turn failures for %s"
+        stale_turn_failures meta.name
     end
   end
 

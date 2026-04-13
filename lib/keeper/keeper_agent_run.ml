@@ -1297,15 +1297,21 @@ let run_turn
                 else all_allowed
               in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Tool choice: graduated by turn budget.
-           Normal turns: tool_choice=Any forces tool call format (deterministic
-           at API level). WHICH tool is called is non-deterministic (model decides).
-           Last turn: Auto allows [STATE] text block.
-           See #5566 for tool_choice=Any rationale. *)
+              (* Tool choice: Auto on all turns.
+           Previous design forced tool_choice=Any on non-last turns
+           (#5566) to prevent text-only "chatting" responses, but this
+           caused fatal interactions with providers that ignore
+           tool_choice (GLM, some Ollama models):
+             1. Provider returns text → OAS contract violation
+             2. Mutating tools already committed → reconcile block
+             3. sticky_reconcile retained → keeper permanently dead
+             4. All keepers stall within ~10 minutes (#6801)
+           Auto lets the model decide; tool use is guided by the system
+           prompt instruction "always call a tool" instead. *)
               let tool_choice =
                 if is_last_turn || List.length all_allowed = 0
-                then current_params.tool_choice (* last turn: Auto for [STATE] block *)
-                else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
+                then current_params.tool_choice (* last turn: preserve caller's choice *)
+                else Some Agent_sdk.Types.Auto (* all other turns: model decides *)
               in
               completion_contract_ref :=
                 Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;

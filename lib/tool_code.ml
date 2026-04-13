@@ -65,10 +65,9 @@ let validate_path config path =
     if String.contains path '\x00' then
       Error (IoError "Path contains null byte")
     else
-    let git_root = match Room_git.git_root ~base_path:config.Room.base_path with
-      | None -> raise (Invalid_argument "Not in a git repository")
-      | Some root -> root
-    in
+    match Room_git.git_root ~base_path:config.Room.base_path with
+    | None -> Error (IoError "Not in a git repository")
+    | Some git_root ->
     let absolute_path =
       if Filename.is_relative path then
         Filename.concat config.Room.base_path path

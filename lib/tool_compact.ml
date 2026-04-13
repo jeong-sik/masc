@@ -153,7 +153,7 @@ let handle_compact args : tool_result =
          "") in
     let strategies = match strategies_of_string strategy_str with
       | Ok s -> s
-      | Error msg -> raise (Invalid_argument msg)
+      | Error msg -> failwith msg
     in
     let messages = List.map parse_message messages_json in
     (* Build a working_context from the input *)

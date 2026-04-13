@@ -86,6 +86,133 @@ let validate_path config path =
   | Invalid_argument msg -> Error (IoError msg)
   | exn -> Error (IoError (Printexc.to_string exn))
 
+(* #6637 iter11 — per-agent playground containment for code-read tools.
+
+   [validate_path] guarantees the target is within the git root, but
+   .masc/playground/<other-keeper>/ is also under the git root, so a
+   keeper could historically read another keeper's playground
+   contents via masc_code_search/symbols/read — a data exfiltration
+   surface (secrets in playground .env files, proprietary code
+   mid-work, handoff notes, etc.).
+
+   Two-tier gate:
+   1. Run the pre-existing [validate_path] (git-root check, null-byte
+      rejection, canonicalisation).
+   2. If the canonical path is outside the [.masc/playground/] tree,
+      it's the shared codebase (lib/, test/, config/, etc.) — allow.
+   3. If the canonical path is inside the playground tree, require it
+      to be under the caller's own bundle (via [playground_path_of_keeper]).
+
+   Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
+let validate_read_path ~agent_name config path =
+  let base_path = config.Room.base_path in
+  match validate_path config path with
+  | Error e -> Error e
+  | Ok canonical_string ->
+      (* [validate_path] returns a [normalize_path]-resolved canonical
+         string — it collapses [.] and [..] segments but does NOT
+         follow symlinks. For the *git-root* boundary check that's
+         fine (a link's string path is still inside the git root).
+         But for the *playground* containment check we must follow
+         symlinks, otherwise a keeper could place a link inside its
+         own bundle pointing into another keeper's playground and the
+         string-level prefix check would false-accept it (GLM-5.1
+         review Issue #2 on PR #6664, with a live test case that
+         initially reproduced the bypass). Realpath the canonical
+         target once here and use the result for every subsequent
+         comparison against the playground roots (which are also
+         realpath'd below). *)
+      match
+        try Ok (Unix.realpath canonical_string) with
+        | Unix.Unix_error _ ->
+            (* The target vanished between validate_path and here
+               (racy deletion, or a broken symlink). Treat as a
+               containment failure rather than silently accepting. *)
+            Error
+              (IoError
+                 (Printf.sprintf
+                    "target path %S is not accessible (dangling \
+                     symlink or racy deletion)" path))
+      with
+      | Error e -> Error e
+      | Ok canonical ->
+      let playground_tree_rel = ".masc/playground" in
+      let playground_tree_abs_raw =
+        Filename.concat base_path playground_tree_rel
+      in
+      (* #6637 iter11 GLM review: fail closed on realpath failure.
+         [normalize_path] only resolves string-level [.] / [..]
+         segments; it does NOT follow symlinks. If the playground
+         tree doesn't realpath, a symlink in the filesystem could
+         flip the prefix comparison below. Return an explicit error
+         that points the LLM at the recovery action (provision the
+         playground bundle) instead of silently weakening the gate.
+         Mirrors iter10 #6651 fail-closed pattern. *)
+      match
+        try Ok (Unix.realpath playground_tree_abs_raw) with
+        | Unix.Unix_error _ ->
+            Error
+              (IoError
+                 (Printf.sprintf
+                    "keeper playground tree %S does not exist; cannot \
+                     validate cross-keeper containment. Clone via \
+                     keeper_shell op=git_clone to provision your \
+                     playground first. See #6527/#6637."
+                    playground_tree_rel))
+      with
+      | Error e -> Error e
+      | Ok playground_tree_canonical ->
+          let is_under_any_playground =
+            String.starts_with
+              ~prefix:(playground_tree_canonical ^ "/") canonical
+            || String.equal canonical playground_tree_canonical
+          in
+          if not is_under_any_playground then
+            (* Shared codebase read — allow. *)
+            Ok canonical
+          else
+            let own_rel_trailing =
+              Keeper_alerting_path.playground_path_of_keeper agent_name
+            in
+            (* [playground_path_of_keeper] returns a trailing-slash
+               relative path (".masc/playground/<agent>/"). Strip the
+               trailing slash for the prefix comparison. *)
+            let own_rel =
+              let n = String.length own_rel_trailing in
+              if n > 0 && own_rel_trailing.[n - 1] = '/'
+              then String.sub own_rel_trailing 0 (n - 1)
+              else own_rel_trailing
+            in
+            let own_abs_raw = Filename.concat base_path own_rel in
+            (* Same fail-closed rule for the caller's own playground
+               root — again, to preserve symlink-collapse guarantees. *)
+            match
+              try Ok (Unix.realpath own_abs_raw) with
+              | Unix.Unix_error _ ->
+                  Error
+                    (IoError
+                       (Printf.sprintf
+                          "keeper playground bundle %S does not exist \
+                           yet; cannot validate containment. Provision \
+                           via git_clone or masc_worktree_create first. \
+                           See #6527/#6637."
+                          own_rel_trailing))
+            with
+            | Error e -> Error e
+            | Ok own_canonical ->
+                if String.equal canonical own_canonical
+                   || String.starts_with ~prefix:(own_canonical ^ "/") canonical
+                then Ok canonical
+                else
+                  Error (IoError (Printf.sprintf
+                    "cross-keeper playground read blocked: agent=%S tried to \
+                     read path %S which is under another keeper's playground. \
+                     Only %s is readable for this caller; reads outside your \
+                     own playground must target the shared codebase (lib/, \
+                     test/, config/, etc.). See #6527/#6637."
+                    agent_name path own_rel_trailing))
+
+
 (* Handler: masc_code_search - Search code using ripgrep *)
 let handle_code_search ctx args =
   let query = get_string args "query" "" in
@@ -99,7 +226,9 @@ let handle_code_search ctx args =
     (false, "❌ Query required: 'query' parameter")
   else begin
     (* Validate path first *)
-    let search_path_result = validate_path ctx.config path in
+    let search_path_result =
+      validate_read_path ~agent_name:ctx.agent_name ctx.config path
+    in
     match search_path_result with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok search_path ->
@@ -209,7 +338,7 @@ let handle_code_symbols ctx args =
   if path = "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
-    match validate_path ctx.config path with
+    match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then
@@ -289,7 +418,7 @@ let handle_code_read ctx args =
   if path = "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
-    match validate_path ctx.config path with
+    match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok validated_path ->
         if not (Sys.file_exists validated_path) then

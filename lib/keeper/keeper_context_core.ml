@@ -28,6 +28,15 @@ let default_max_checkpoint_text_blocks_per_message = 32
 let default_max_checkpoint_text_chars_per_message = 16 * 1024
 let checkpoint_text_cap_marker = "\n[capped]"
 
+(** ToolResult block caps — analogous to text block caps above.
+    Without these, a single message with hundreds of ToolResult blocks
+    (e.g. 280 blocks × 7K chars = 1.95M chars) passes through the
+    sanitizer untouched, causing context window overflow on next load.
+    Values aligned with Claude Code: 200K aggregate, per-result 8K. *)
+let default_max_checkpoint_tool_result_chars = 8_000
+let default_max_checkpoint_tool_results_per_message = 20
+let default_max_checkpoint_tool_result_total_chars = 200_000
+
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
 (* ================================================================ *)
@@ -575,9 +584,10 @@ let sanitize_checkpoint_text_block (text : string)
 let sanitize_checkpoint_message
     (msg : Agent_sdk.Types.message)
   : Agent_sdk.Types.message option * checkpoint_sanitize_stats =
-  let kept_rev, _, _, stats =
+  let kept_rev, _, _, _, _, stats =
     List.fold_left
-      (fun (kept_rev, kept_text_blocks, kept_text_chars, stats) block ->
+      (fun (kept_rev, kept_text_blocks, kept_text_chars,
+            kept_tool_results, kept_tool_result_chars, stats) block ->
          match block with
          | Agent_sdk.Types.Text text ->
              let sanitized_text, text_stats =
@@ -588,6 +598,7 @@ let sanitize_checkpoint_message
                   ( kept_rev,
                     kept_text_blocks,
                     kept_text_chars,
+                    kept_tool_results, kept_tool_result_chars,
                     add_checkpoint_sanitize_stats stats text_stats )
               | Some text ->
                   if kept_text_blocks
@@ -596,6 +607,7 @@ let sanitize_checkpoint_message
                     ( kept_rev,
                       kept_text_blocks,
                       kept_text_chars,
+                      kept_tool_results, kept_tool_result_chars,
                       add_checkpoint_sanitize_stats
                         (add_checkpoint_sanitize_stats stats text_stats)
                         {
@@ -612,6 +624,7 @@ let sanitize_checkpoint_message
                       ( kept_rev,
                         kept_text_blocks,
                         kept_text_chars,
+                        kept_tool_results, kept_tool_result_chars,
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           {
@@ -635,6 +648,7 @@ let sanitize_checkpoint_message
                       ( Agent_sdk.Types.Text capped_text :: kept_rev,
                         kept_text_blocks + 1,
                         kept_text_chars + String.length capped_text,
+                        kept_tool_results, kept_tool_result_chars,
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           block_stats ))
@@ -642,6 +656,7 @@ let sanitize_checkpoint_message
              ( kept_rev,
                kept_text_blocks,
                kept_text_chars,
+               kept_tool_results, kept_tool_result_chars,
                add_checkpoint_sanitize_stats stats
                  {
                    empty_checkpoint_sanitize_stats with
@@ -652,15 +667,71 @@ let sanitize_checkpoint_message
              ( kept_rev,
                kept_text_blocks,
                kept_text_chars,
+               kept_tool_results, kept_tool_result_chars,
                add_checkpoint_sanitize_stats stats
                  {
                    empty_checkpoint_sanitize_stats with
                    dropped_blocks = 1;
                    dropped_chars = String.length text;
                  } )
+         | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+             let tool_chars = String.length content in
+             if kept_tool_results
+                >= default_max_checkpoint_tool_results_per_message
+                || kept_tool_result_chars + tool_chars
+                   > default_max_checkpoint_tool_result_total_chars
+             then
+               (* Over count or aggregate budget: stub the result *)
+               let stub =
+                 Agent_sdk.Types.ToolResult
+                   { tool_use_id;
+                     content = "[tool result cleared]";
+                     is_error;
+                     json = None }
+               in
+               ( stub :: kept_rev,
+                 kept_text_blocks, kept_text_chars,
+                 kept_tool_results + 1, kept_tool_result_chars,
+                 add_checkpoint_sanitize_stats stats
+                   { empty_checkpoint_sanitize_stats with
+                     dropped_blocks = 1;
+                     dropped_chars = tool_chars } )
+             else if tool_chars > default_max_checkpoint_tool_result_chars
+             then
+               (* Individual result too large: truncate *)
+               let capped =
+                 String.sub content 0
+                   default_max_checkpoint_tool_result_chars
+                 ^ checkpoint_text_cap_marker
+               in
+               let block =
+                 Agent_sdk.Types.ToolResult
+                   { tool_use_id; content = capped; is_error; json = None }
+               in
+               ( block :: kept_rev,
+                 kept_text_blocks, kept_text_chars,
+                 kept_tool_results + 1,
+                 kept_tool_result_chars
+                 + default_max_checkpoint_tool_result_chars,
+                 add_checkpoint_sanitize_stats stats
+                   { empty_checkpoint_sanitize_stats with
+                     truncated_blocks = 1;
+                     truncated_chars =
+                       tool_chars
+                       - default_max_checkpoint_tool_result_chars } )
+             else
+               (* Within budget: keep as-is *)
+               ( block :: kept_rev,
+                 kept_text_blocks, kept_text_chars,
+                 kept_tool_results + 1,
+                 kept_tool_result_chars + tool_chars,
+                 stats )
          | _ ->
-             (block :: kept_rev, kept_text_blocks, kept_text_chars, stats))
-      ([], 0, 0, empty_checkpoint_sanitize_stats)
+             ( block :: kept_rev,
+               kept_text_blocks, kept_text_chars,
+               kept_tool_results, kept_tool_result_chars,
+               stats ))
+      ([], 0, 0, 0, 0, empty_checkpoint_sanitize_stats)
       msg.content
   in
   let kept = List.rev kept_rev in
@@ -762,6 +833,15 @@ let save_oas_checkpoint
     else
       let drop = n - max_checkpoint_messages in
       List.filteri (fun i _ -> i >= drop) ctx.messages
+  in
+  (* Stub old tool results at save time: keep only the most recent turn's
+     results in full. During Agent.run the reducer uses keep_recent:3, but
+     at checkpoint persistence we are more aggressive — older tool results
+     are unlikely to be useful on resume and bloat disk/memory. *)
+  let capped_messages =
+    Agent_sdk.Context_reducer.reduce
+      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
+      capped_messages
   in
   let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
   let state =

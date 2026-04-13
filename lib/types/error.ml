@@ -45,7 +45,6 @@ type storage_error =
   | FileNotFound of string
   | FilePermissionDenied of string
   | FileLocked of string
-  | PostgresError of string
   | GitError of string
 
 (** MCP Protocol errors *)
@@ -112,7 +111,6 @@ let to_string = function
       | FileNotFound path -> Printf.sprintf "File not found: %s" path
       | FilePermissionDenied path -> Printf.sprintf "Permission denied: %s" path
       | FileLocked path -> Printf.sprintf "File locked: %s" path
-      | PostgresError msg -> Printf.sprintf "PostgreSQL error: %s" msg
       | GitError msg -> Printf.sprintf "Git error: %s" msg)
   | Mcp e -> (
       match e with
@@ -198,7 +196,6 @@ let to_masc_error : t -> Types_auth.masc_error = function
   | Storage (FileNotFound path) -> Types_auth.StorageError ("file not found: " ^ path)
   | Storage (FilePermissionDenied path) -> Types_auth.StorageError ("permission denied: " ^ path)
   | Storage (FileLocked path) -> Types_auth.StorageError ("file locked: " ^ path)
-  | Storage (PostgresError msg) -> Types_auth.StorageError ("pg: " ^ msg)
   | Storage (GitError msg) -> Types_auth.StorageError ("git: " ^ msg)
   | Mcp (McpParseError msg) -> Types_auth.InvalidJson msg
   | Mcp (McpMethodNotFound name) -> Types_auth.IoError ("method not found: " ^ name)

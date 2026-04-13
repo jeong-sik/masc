@@ -11,13 +11,6 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
-let with_pg_envs f =
-  with_env "MASC_STORAGE_TYPE" (Some "postgres") @@ fun () ->
-  with_env "MASC_POSTGRES_URL" (Some "postgresql://primary/db") @@ fun () ->
-  with_env "DATABASE_URL" (Some "postgresql://fallback/db") @@ fun () ->
-  with_env "SUPABASE_DB_URL" (Some "postgresql://supabase/db") @@ fun () ->
-  with_env "SB_PG_URL" (Some "postgresql://sb/db") f
-
 let with_clean_base_path_env f =
   with_env "MASC_BASE_PATH" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
@@ -223,12 +216,10 @@ let json_bool_field name json =
   | None -> Alcotest.failf "missing field %s" name
 
 let test_force_jsonl_fallback_env () =
-  with_pg_envs (fun () ->
-      Server_runtime_bootstrap.force_jsonl_fallback_env ();
-      Alcotest.(check string) "storage type forced to filesystem" "filesystem"
-        (Sys.getenv "MASC_STORAGE_TYPE");
-      Alcotest.(check string)
-        "MASC_POSTGRES_URL cleared" "" (Sys.getenv "MASC_POSTGRES_URL"))
+  with_env "MASC_STORAGE_TYPE" (Some "memory") @@ fun () ->
+  Server_runtime_bootstrap.force_jsonl_fallback_env ();
+  Alcotest.(check string) "storage type forced to filesystem" "filesystem"
+    (Sys.getenv "MASC_STORAGE_TYPE")
 
 let test_default_oas_cascade_timeout_tracks_keeper_timeout () =
   with_env "OAS_CASCADE_MODEL_TIMEOUT_SEC" None @@ fun () ->
@@ -777,7 +768,6 @@ let test_create_server_state_records_runtime_resolution () =
       mkdir_p repo;
       ignore (make_config_root repo);
       with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
-      with_env "MASC_POSTGRES_URL" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Eio_main.run @@ fun env ->
@@ -809,7 +799,6 @@ let test_create_server_state_preserves_raw_input_base_path () =
       mkdir_p raw_input;
       ignore (make_config_root repo);
       with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
-      with_env "MASC_POSTGRES_URL" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
       with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
@@ -939,10 +928,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
           [
             ("MASC_BASE_PATH", dir);
             ("MASC_STORAGE_TYPE", "filesystem");
-            ("MASC_POSTGRES_URL", "");
-            ("DATABASE_URL", "");
-            ("SUPABASE_DB_URL", "");
-            ("SB_PG_URL", "");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -985,7 +970,7 @@ let () =
     [
       ( "bootstrap",
         [
-          Alcotest.test_case "force_jsonl_fallback_env clears pg envs" `Quick
+          Alcotest.test_case "force_jsonl_fallback_env forces filesystem" `Quick
             test_force_jsonl_fallback_env;
           Alcotest.test_case
             "default OAS cascade timeout tracks keeper timeout"

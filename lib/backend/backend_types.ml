@@ -1,8 +1,5 @@
 (** Backend_types - Shared types for Backend modules.
 
-    Extracted to avoid circular dependency between
-    Backend and Backend_pg.
-
     This module is the single source of truth for error types, config,
     and shared utilities used by all _eio backend implementations.
 *)
@@ -47,7 +44,6 @@ type health_result = {
 type config = {
   backend_type: backend_type;
   base_path: string;
-  postgres_url: string option;
   node_id: string;
   cluster_name: string;
   pubsub_max_messages: int;
@@ -68,7 +64,6 @@ let generate_node_id () =
 let default_config = {
   backend_type = FileSystem;
   base_path = ".masc";
-  postgres_url = None;
   node_id = generate_node_id ();
   cluster_name = "default";
   pubsub_max_messages = pubsub_max_messages_from_env ();
@@ -88,7 +83,6 @@ let get_status config : Yojson.Safe.t =
     ("base_path", `String config.base_path);
     ("node_id", `String config.node_id);
     ("cluster_name", `String config.cluster_name);
-    ("postgres_url", Json_util.string_opt_to_json config.postgres_url);
   ]
 
 (* ============================================ *)

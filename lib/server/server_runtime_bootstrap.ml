@@ -6,11 +6,7 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
 let force_jsonl_fallback_env () =
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
-  Unix.putenv "MASC_POSTGRES_URL" "";
-  Unix.putenv "DATABASE_URL" "";
-  Unix.putenv "SUPABASE_DB_URL" "";
-  Unix.putenv "SB_PG_URL" ""
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()

@@ -275,7 +275,7 @@ let gc config ?(days=7) () =
   end else
     results := Printf.sprintf "✅ No old messages (threshold: %d days)" days :: !results;
 
-  (* 4. Cleanup backend pubsub - PostgreSQL specific, no-op for others *)
+  (* 4. Cleanup backend pubsub - no-op for filesystem backend *)
   let pubsub_cleanup_count = ref 0 in
   (match backend_cleanup_pubsub config ~days ~max_messages:10000 with
    | Ok count when count > 0 ->

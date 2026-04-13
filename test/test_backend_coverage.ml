@@ -70,9 +70,7 @@ let test_get_status_all_backends () =
   check string "memory status" "memory" (s1 |> member "backend_type" |> to_string);
 
   let s2 = Backend_types.get_status cfg_fs in
-  check string "fs status" "filesystem" (s2 |> member "backend_type" |> to_string);
-  check bool "default postgres_url remains optional" true
-    (s2 |> member "postgres_url" |> to_string_option |> Option.is_none)
+  check string "fs status" "filesystem" (s2 |> member "backend_type" |> to_string)
 
 let test_pubsub_max_messages_env () =
   (* Test the default value - cannot easily test env override in unit test *)

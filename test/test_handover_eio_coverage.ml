@@ -187,7 +187,6 @@ let make_test_config ~base_path : Room_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
-    postgres_url = None;
     node_id = "test-node";
     cluster_name = "test";
     pubsub_max_messages = 1000;

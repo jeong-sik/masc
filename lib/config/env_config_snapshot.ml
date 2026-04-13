@@ -20,7 +20,7 @@ let is_sensitive_name name =
         else contains_at (i + 1)
       in
       contains_at 0)
-    [ "token"; "password"; "secret"; "key"; "credential"; "postgres_url";
+    [ "token"; "password"; "secret"; "key"; "credential";
       "neo4j_url"; "supabase" ]
 
 type entry = {

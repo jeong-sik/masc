@@ -3,8 +3,7 @@
     Saves and restores the full swarm state (agents, tasks, operations,
     progress) so a server restart does not lose coordination context.
 
-    Persistence target: .masc/swarm-checkpoint.json (filesystem)
-    + PostgreSQL backend when available (dual persistence, same as room.ml).
+    Persistence target: .masc/swarm-checkpoint.json (filesystem).
 
     @since 2.80.0 *)
 

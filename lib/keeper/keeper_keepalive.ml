@@ -857,6 +857,17 @@ let sync_manual_reconcile_condition ~(config : Room.config) ~(keeper_name : stri
       ignore (Keeper_registry.dispatch_event
         ~base_path:config.base_path keeper_name
         (Keeper_state_machine.Manual_reconcile_required { reason = detail }))
+  | (`Cleared | `Absent), Some entry
+    when entry.conditions.manual_reconcile_required ->
+      (* Reverse sync: file removed/cleared but FSM condition still true.
+         Without this, keepers whose reconcile file was deleted externally
+         or cleared by a previous server instance stay in Failing forever. *)
+      Log.Keeper.info
+        "sync_reconcile: clearing stale FSM manual_reconcile_required for %s (no file)"
+        keeper_name;
+      ignore (Keeper_registry.dispatch_event
+        ~base_path:config.base_path keeper_name
+        Keeper_state_machine.Manual_reconcile_cleared)
   | _ -> ()
 
 (** Reset stale turn failures so the keeper can exit Failing phase.

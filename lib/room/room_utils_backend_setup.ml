@@ -125,9 +125,12 @@ let resolve_requested_base_path path =
       requested
 
 (** Resolve base_path with a single authority:
-    - explicit [MASC_BASE_PATH] always wins
+    - in normal executables, explicit [MASC_BASE_PATH] wins
+    - in test executables, inherited [MASC_BASE_PATH] is ignored unless it
+      matches the requested path or the test explicitly opts in
     - otherwise resolve the requested path to its git root *)
 let resolve_masc_base_path path =
+  let requested = resolve_requested_base_path path in
   match Env_config_core.base_path_opt () with
   | Some explicit
     when running_under_test_executable ()
@@ -137,11 +140,21 @@ let resolve_masc_base_path path =
       Log.Room.info
         "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
         explicit path;
-      resolve_requested_base_path path
+      requested
+  | Some explicit
+    when running_under_test_executable ()
+         && not
+              (Env_config_core.get_bool ~default:false
+                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+         && not (String.equal explicit requested) ->
+      Log.Room.info
+        "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
+        explicit path;
+      requested
   | Some explicit ->
       Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
-  | None -> resolve_requested_base_path path
+  | None -> requested
 
 let resolve_server_default_base_path path = resolve_masc_base_path path
 

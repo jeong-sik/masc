@@ -13,6 +13,27 @@ let ensure_fs env =
   if not (Fs_compat.has_fs ()) then
     Fs_compat.set_fs (Eio.Stdenv.fs env)
 
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+      (match value_opt with
+       | Some value -> Unix.putenv name value
+       | None -> Unix.putenv name "");
+      f ())
+
+let with_clean_base_path_env f =
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_TEST_SYNCED_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" None f
+
 let cleanup_dir dir =
   let rec rm path =
     if Sys.file_exists path then
@@ -84,6 +105,7 @@ let keeper_ctx env sw config agent_name : _ Tool_keeper.context =
 let test_keeper_listing_ignores_sidecar_json_files () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -138,6 +160,7 @@ let test_keeper_listing_ignores_sidecar_json_files () =
 let test_dashboard_ignores_fileless_manual_reconcile_fallback () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   Fun.protect

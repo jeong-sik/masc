@@ -8,6 +8,8 @@ import {
   updateOasKeeperSnapshot,
   oasLastKeeperTick,
   oasTotalEvents,
+  oasTotalLlmCalls,
+  oasTotalErrors,
   removeBoardPost,
 } from './store'
 import {
@@ -827,6 +829,7 @@ function handleEvent(event: SSEEvent): void {
       const model = asString(p.model) ?? 'unknown'
       const inputTokens = asNumber(p.input_tokens) ?? 0
       const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+      oasTotalLlmCalls.value++
       appendLiveOasEvent(agent, {
         id: `live-oas-durable-llm-req-${tsMs}-${agent}`,
         ts: tsMs,
@@ -872,6 +875,7 @@ function handleEvent(event: SSEEvent): void {
       const errorDomain = asString(p.error_domain) ?? 'unknown'
       const detail = asString(p.detail) ?? ''
       const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+      oasTotalErrors.value++
       appendLiveOasEvent(agent, {
         id: `live-oas-durable-err-${tsMs}-${agent}`,
         ts: tsMs,

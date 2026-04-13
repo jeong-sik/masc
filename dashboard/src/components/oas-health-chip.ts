@@ -36,11 +36,22 @@ export function OasHealthChip() {
 
   return html`
     <${Card} title="OAS 런타임">
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         <${StatCell}
           label="총 이벤트"
           value=${summary.value.totalEvents}
           detail="SSE relay"
+        />
+        <${StatCell}
+          label="LLM 호출"
+          value=${summary.value.totalLlmCalls}
+          detail="durable journal"
+        />
+        <${StatCell}
+          label="에러"
+          value=${summary.value.totalErrors}
+          detail="Api/agent 실패"
+          tone=${summary.value.totalErrors > 0 ? 'text-[var(--bad)]' : undefined}
         />
         <${StatCell}
           label="에이전트 이벤트"

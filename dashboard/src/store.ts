@@ -129,6 +129,8 @@ export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
 export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
+export const oasTotalLlmCalls = signal(0)
+export const oasTotalErrors = signal(0)
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
   const head = oasAgentEvents.value[0]
@@ -164,11 +166,15 @@ export const oasHealthSummary: ReadonlySignal<{
   keeperSnapshotsCount: number
   lastKeeperTick: number | null
   totalEvents: number
+  totalLlmCalls: number
+  totalErrors: number
 }> = computed(() => ({
   agentEventsCount: oasAgentEvents.value.length,
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
   lastKeeperTick: oasLastKeeperTick.value,
   totalEvents: oasTotalEvents.value,
+  totalLlmCalls: oasTotalLlmCalls.value,
+  totalErrors: oasTotalErrors.value,
 }))
 
 // --- Loading flags ---

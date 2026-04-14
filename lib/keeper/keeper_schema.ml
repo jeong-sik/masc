@@ -498,6 +498,54 @@ Clears stale data from previous sessions. Does not affect configuration, goals, 
     ];
   };
 
+  {
+    name = "masc_keeper_compact";
+    description = "Trigger operator-initiated context compaction for a keeper. \
+Compacts the keeper's checkpoint to reduce context size. \
+Use when a keeper is in Overflowed or Paused state due to context overflow, \
+or proactively on a Running keeper with force=true.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("force", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Bypass phase precondition check (allow compaction on Running/Failing keepers).");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_clear";
+    description = "Last-resort context clear for a keeper. \
+Drops all conversation messages from the checkpoint, optionally preserving the system prompt. \
+Use only when compaction is insufficient and the keeper cannot recover otherwise. \
+Requires a reason for the audit trail.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("preserve_system_prompt", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Keep the system prompt in the cleared context. Defaults to true.");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Required. Operator explanation for why the context is being cleared (audit trail).");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "reason"]);
+    ];
+  };
+
 ]
 
 let schemas : tool_schema list =

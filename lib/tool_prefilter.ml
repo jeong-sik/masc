@@ -224,6 +224,10 @@ let synonyms : (string * string list) list =
      [ "send keeper message"; "talk to keeper"; "message keeper"; "keeper chat" ]);
     ("masc_keeper_status",
      [ "keeper health"; "keeper state"; "keeper check"; "keeper info" ]);
+    ("masc_keeper_compact",
+     [ "compact keeper"; "shrink context"; "reduce context"; "context overflow fix" ]);
+    ("masc_keeper_clear",
+     [ "clear keeper"; "reset keeper context"; "wipe keeper history"; "emergency clear" ]);
     (* masc heartbeat — lifecycle tools *)
     ("masc_heartbeat_start",
      [ "start heartbeat"; "begin pinging"; "auto ping"; "keep alive" ]);

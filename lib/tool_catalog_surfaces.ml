@@ -125,6 +125,7 @@ let public_mcp_surface_tools =
     (* Keeper interaction *)
     "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status";
     "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reconcile"; "masc_keeper_reset";
+    "masc_keeper_compact"; "masc_keeper_clear";
     "masc_keeper_down";
     "masc_persona_list";
     (* Board *)

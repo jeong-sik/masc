@@ -84,6 +84,8 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_keeper_msg_result", CanBroadcast);
     ("masc_keeper_repair", CanBroadcast);
     ("masc_keeper_reset", CanBroadcast);
+    ("masc_keeper_compact", CanBroadcast);
+    ("masc_keeper_clear", CanBroadcast);
     ("masc_keeper_create_from_persona", CanBroadcast);
     ("masc_operator_confirm", CanBroadcast);
     ("masc_unit_define", CanBroadcast);

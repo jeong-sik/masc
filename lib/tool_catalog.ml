@@ -246,6 +246,11 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_keeper_reset",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
+    ( "masc_keeper_compact",
+      { default_metadata with required_permission = Some Types.CanBroadcast } );
+    ( "masc_keeper_clear",
+      with_semantic_flags ~destructive:true
+        { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_operation_stop",
       destructive_tool );
     ( "masc_operation_pause",

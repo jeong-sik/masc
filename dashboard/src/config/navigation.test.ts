@@ -197,7 +197,7 @@ describe('consolidation redirects (Phase 1)', () => {
     ['telemetry', { operation_id: 'op1' }, 'fleet-health', 'event-log', { operation_id: 'op1' }],
     ['tool-quality', { tool: 'bash' }, 'fleet-health', 'tool-quality', { tool: 'bash' }],
     ['fleet', {}, 'fleet-health', 'comparison', {}],
-    ['fsm-hub', {}, 'agents', undefined, {}],
+    ['fsm-hub', {}, 'agents', 'fsm', {}],
     ['metrics', {}, 'runtime', undefined, {}],
   ])(
     'monitoring:%s → %s (view: %s) preserves params',

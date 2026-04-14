@@ -258,7 +258,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
   'monitoring:tool-quality': { section: 'fleet-health', view: 'tool-quality' },
   'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
-  'monitoring:fsm-hub':      { section: 'agents' },
+  'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
   'monitoring:metrics':      { section: 'runtime' },
 
   // Dashboard consolidation Phase 1: command surface

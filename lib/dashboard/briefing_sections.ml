@@ -5,7 +5,7 @@ open Briefing_gaps
 
 let has_operational_signal ~section_id ~room_health ~incident_count ~recommended_action_count =
   let room_risky =
-    Dashboard_utils.is_health_at_risk (String.lowercase_ascii (String.trim room_health))
+    Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
   in
   match section_id with
   | "watch" -> room_risky || incident_count > 0 || recommended_action_count > 0
@@ -114,7 +114,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
     ("unclear", "Communication metadata is incomplete and no positive activity signal is recorded.", evidence)
   else if known_mode_count = 0 then
     ("unclear", "Communication mode is not recorded for the live sessions.", evidence)
-  else if Dashboard_utils.is_health_at_risk (String.lowercase_ascii (String.trim room_health))
+  else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
           || incident_count > 0 || recommended_action_count > 0
   then
     ("watch", "Live sessions exist without recorded communication activity while the namespace still has open operator attention.", evidence)
@@ -172,9 +172,9 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
 
 let build_watch_section ~room_health ~incident_count ~recommended_action_count
     ~top_attention_summary =
-  let lowered_room_health = String.lowercase_ascii (String.trim room_health) in
+  let room_health_level = Dashboard_utils.health_level_of_string room_health in
   let risky_room =
-    Dashboard_utils.is_health_at_risk lowered_room_health
+    Dashboard_utils.is_health_at_risk room_health_level
   in
   let evidence =
     []

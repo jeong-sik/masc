@@ -84,6 +84,27 @@ type registry_entry = {
           keeper turn via [Event_bus.drain]. [None] until the first
           successful drain. Stable per session (= [meta.runtime.trace_id]
           as passed to OAS). *)
+  current_turn_observation : turn_observation option;
+      (** Live, turn-scoped observation record (issue #7122).
+
+          [Some _] while a turn is actively executing (between
+          [mark_turn_started] and [mark_turn_finished]). [None]
+          outside any turn, meaning the keeper is idle w.r.t. the
+          decision pipeline / cascade layers.
+
+          Anti-stale barrier for the composite observer: sub-FSM
+          states like [`Executing`] are only observable while the
+          turn is live. Once the turn ends, this field is cleared so
+          idle keepers cannot surface stale states from a previous
+          turn. *)
+}
+
+and turn_observation = {
+  turn_id : int;
+      (** Per-keeper turn counter at turn start (matches
+          [meta.runtime.usage.total_turns] + 1). *)
+  started_at : float;
+      (** Unix timestamp when this turn record was installed. *)
 }
 
 (** Register a keeper with an already-live fiber. Primarily used by tests and
@@ -125,6 +146,16 @@ val set_failure_reason : base_path:string -> string -> failure_reason option -> 
 
 (** Store the OAS Event_bus [correlation_id] from the most recent turn. *)
 val set_last_correlation_id : base_path:string -> string -> string -> unit
+
+(** Mark the beginning of a keeper turn. Installs a fresh
+    [current_turn_observation] with [turn_id = usage.total_turns + 1].
+    Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
+val mark_turn_started : base_path:string -> string -> unit
+
+(** Mark the end of a keeper turn. Clears [current_turn_observation]
+    so the composite observer reverts to idle. Idempotent — safe to
+    call in finally blocks even if [mark_turn_started] was not called. *)
+val mark_turn_finished : base_path:string -> string -> unit
 
 (** Increment turn consecutive failure counter. *)
 val increment_turn_failures : base_path:string -> string -> unit

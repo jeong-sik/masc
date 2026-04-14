@@ -82,12 +82,25 @@ let compaction_stage_to_string = function
    to the observer — those live inside a single [run_unified_turn] call.
    Post-turn hooks (PR follow-up) will update shared state so the
    observer can distinguish them. *)
+(* Turn-cycle phase derivation (issue #7122).
+
+   The Compacting/Finalizing branches reflect KSM lifecycle phases that
+   the keeper enters between turns. Within a normal turn the phase
+   defaults to [Idle] unless [current_turn_observation] is [Some _],
+   in which case the keeper is actively in [`Executing`] — the OAS
+   call is in flight, between [mark_turn_started] and
+   [mark_turn_finished]. Finer-grained breakdown
+   ([Prompting]/[ToolCall]) requires Event_bus subscription and is
+   tracked as Phase 2 of #7122. *)
 let derive_turn_phase (entry : Keeper_registry.registry_entry) : turn_phase =
   match entry.phase with
   | Keeper_state_machine.Compacting -> `Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining -> `Finalizing
-  | _ -> `Idle
+  | _ ->
+    (match entry.current_turn_observation with
+     | Some _ -> `Executing
+     | None -> `Idle)
 
 (* Compaction sub-FSM: compaction_active is the authoritative condition.
    Phase [Compacting] MUST coincide with this condition under the
@@ -97,17 +110,32 @@ let derive_compaction_stage (conds : Keeper_state_machine.conditions)
   if conds.compaction_active then `Compacting
   else `Accumulating
 
-(* Decision pipeline stage. Observer-visible only via [guardrail_triggered]
-   for now; per-turn Guard/Thompson/ToolPolicy staging requires reading
-   the decision-audit ring buffer (follow-up). *)
+(* Decision pipeline stage (issue #7122 Phase 2 follow-up).
+
+   Only [Gate_rejected] is observable from the registry today
+   ([guardrail_triggered] is a sticky condition). [Guard_ok] and
+   [Tool_policy_selected] are per-turn-internal and require either
+   Event_bus subscription (TurnStarted → Guard pass) or an explicit
+   field on [current_turn_observation] populated by the decision
+   audit. Returning [Undecided] for the non-rejected case is the
+   honest placeholder — we do not have observability for the
+   intermediate states yet. Anything else would be a stale-state lie. *)
 let derive_decision_stage (conds : Keeper_state_machine.conditions)
     : decision_stage =
   if conds.guardrail_triggered then `Gate_rejected
   else `Undecided
 
-(* Cascade state is per-turn-internal; not derivable from registry alone.
-   Follow-up PR wires [Local_runtime_pool] slot telemetry and
-   [Keeper_exec_status_metrics.last_model_used] into an observable field. *)
+(* Cascade state (issue #7122 Phase 2 follow-up).
+
+   [cascade_observation] is produced by [Oas_worker.run_named] only
+   on the success path, after the cascade has already terminated.
+   Persisting it into the registry post-hoc would surface stale
+   [`Done`/`Trying`] on idle keepers — strictly worse than [`Idle`].
+   Live cascade state requires Event_bus subscription on
+   [TurnStarted]/[ToolCalled] events that flow through the OAS
+   pipeline. Until that wiring lands, the only honest projection
+   is [`Idle`]. See #7122 for the design constraints that ruled out
+   the post-hoc-persist approach. *)
 let derive_cascade_state (_ : Keeper_registry.registry_entry) : cascade_state =
   `Idle
 

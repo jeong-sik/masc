@@ -18,6 +18,9 @@ module WO = Masc_mcp.Keeper_world_observation
 module DA = Masc_mcp.Keeper_decision_audit
 module TS = Masc_mcp.Tool_shard
 module KTP = Masc_mcp.Keeper_tool_policy
+module Reg = Masc_mcp.Keeper_registry
+module Obs = Masc_mcp.Keeper_composite_observer
+module KTypes = Masc_mcp.Keeper_types
 
 (* ── E1: NEL Invariant ──────────────────────────────── *)
 
@@ -194,6 +197,71 @@ let test_cascade_mermaid_healthy_no_reason_note () =
   check bool "healthy provider does not emit unhealthy note"
     false (substring_present ~haystack:out ~needle:"unhealthy")
 
+(* ── Composite Observer: turn-scoped state (issue #7122) ─ *)
+
+let test_obs_bp = "/tmp/test-composite-obs"
+
+let make_obs_meta name =
+  let json = `Assoc [
+    ("name", `String name);
+    ("agent_name", `String ("agent-" ^ name));
+    ("trace_id", `String ("trace-obs-" ^ name));
+    ("goal", `String "observer test");
+  ] in
+  match KTypes.meta_of_json json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
+
+let test_observer_idle_when_no_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-idle" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "registered keeper not found"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "idle keeper has Idle turn phase"
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
+
+let test_observer_executing_during_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-active" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  (match Reg.get ~base_path:test_obs_bp name with
+   | None -> Alcotest.fail "entry missing after mark_turn_started"
+   | Some entry ->
+     let snap = Obs.observe entry in
+     check string "in-turn keeper has Executing turn phase"
+       "executing" (Obs.turn_phase_to_string snap.ktc_turn_phase))
+
+let test_observer_no_stale_after_turn_end () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-no-stale" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing after mark_turn_finished"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "post-turn keeper reverts to Idle (no stale Executing)"
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
+
+let test_observer_finished_idempotent () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-idempotent" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  (* mark_turn_finished without prior mark_turn_started must not crash. *)
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "stays Idle through repeated mark_turn_finished"
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -228,5 +296,11 @@ let () =
       test_case "other reason passes through" `Quick test_cascade_mermaid_renders_other_reason;
       test_case "other reason sanitizes newline and colon" `Quick test_cascade_mermaid_other_sanitizes_newline_colon;
       test_case "healthy has no unhealthy note" `Quick test_cascade_mermaid_healthy_no_reason_note;
+    ];
+    "composite_observer_turn_scope", [
+      test_case "idle when no turn" `Quick test_observer_idle_when_no_turn;
+      test_case "Executing during turn" `Quick test_observer_executing_during_turn;
+      test_case "no stale Executing after turn end" `Quick test_observer_no_stale_after_turn_end;
+      test_case "mark_turn_finished is idempotent" `Quick test_observer_finished_idempotent;
     ];
   ]

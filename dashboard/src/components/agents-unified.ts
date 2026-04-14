@@ -1,5 +1,5 @@
 // MASC Dashboard — Unified Agents Tab
-// Absorbs: agent-roster + execution + keeper-roster into one view with chip toggle.
+// Absorbs: agent-roster + execution + keeper-roster + FSM hub into one view with chip toggle.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -14,8 +14,9 @@ import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { KeeperFleetOverview } from './keeper-fleet-overview'
+import { FsmHub } from './fsm-hub'
 
-type AgentsView = 'all' | 'agents' | 'keepers'
+type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
 
 const activeView = signal<AgentsView>('all')
 
@@ -23,6 +24,7 @@ const CHIPS: { id: AgentsView; label: string; description: string }[] = [
   { id: 'all', label: '전체 보기', description: '에이전트와 키퍼를 한 목록에서 봅니다.' },
   { id: 'agents', label: '일반 에이전트', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
   { id: 'keepers', label: '키퍼', description: '키퍼만 따로 봅니다.' },
+  { id: 'fsm', label: 'FSM', description: '키퍼 composite FSM lifecycle 상태를 봅니다.' },
 ]
 
 export function AgentsUnified() {
@@ -34,7 +36,7 @@ export function AgentsUnified() {
 
   const viewParam = route.value.params.view as string | undefined
   const routeView =
-    viewParam === 'keepers' || viewParam === 'agents'
+    viewParam === 'keepers' || viewParam === 'agents' || viewParam === 'fsm'
       ? viewParam
       : null
   const currentView = routeView ?? activeView.value
@@ -83,17 +85,21 @@ export function AgentsUnified() {
         class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_var(--white-3)]"
       />
 
-      ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
+      ${currentView === 'fsm'
+        ? html`<${FsmHub} />`
+        : html`
+          ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
 
-      ${currentView !== 'agents' && keepers.value.length > 0 ? html`
-        <${KeeperFleetOverview} keepers=${keepers.value} />
-      ` : null}
+          ${currentView !== 'agents' && keepers.value.length > 0 ? html`
+            <${KeeperFleetOverview} keepers=${keepers.value} />
+          ` : null}
 
-      <${AgentRoster}
-        keeperFilter=${currentView === 'keepers' ? 'keeper-only'
-          : currentView === 'agents' ? 'agent-only'
-          : 'all'}
-      />
+          <${AgentRoster}
+            keeperFilter=${currentView === 'keepers' ? 'keeper-only'
+              : currentView === 'agents' ? 'agent-only'
+              : 'all'}
+          />
+        `}
     </div>
   `
 }

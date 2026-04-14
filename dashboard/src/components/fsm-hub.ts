@@ -51,6 +51,14 @@ export function FsmHub() {
   const shouldRefetchForTick =
     selected != null && tick.name === selected ? tick.ts_unix : 0
 
+  // Periodic polling (30s) keeps the hub current even when keepers are idle
+  // and no SSE events fire. Without this the page freezes once activity stops.
+  const [pollTick, setPollTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setPollTick(t => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
+
   useEffect(() => {
     if (!selected) return
     let cancelled = false
@@ -77,7 +85,7 @@ export function FsmHub() {
     return () => {
       cancelled = true
     }
-  }, [selected, shouldRefetchForTick])
+  }, [selected, shouldRefetchForTick, pollTick])
 
   return html`
     <div class="flex flex-col gap-5">
@@ -337,18 +345,34 @@ function RecoveryStatePanel({
   `
 }
 
+function formatIdleDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.floor(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.floor(seconds % 60)}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
 function SnapshotMeta({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const date = new Date(snapshot.ts * 1000)
+  const nowSec = Date.now() / 1000
+  const idleSec = snapshot.last_outcome
+    ? nowSec - snapshot.last_outcome.ended_at
+    : nowSec - snapshot.ts
+  const isStale = idleSec > 300
   const liveClass = snapshot.is_live
     ? 'text-emerald-400 border-emerald-500/40'
-    : 'text-[var(--text-dim)] border-white/10'
+    : isStale
+      ? 'text-[#f59e0b] border-[rgba(245,158,11,0.3)]'
+      : 'text-[var(--text-dim)] border-white/10'
+  const liveLabel = snapshot.is_live
+    ? '● LIVE'
+    : `○ idle ${formatIdleDuration(idleSec)}`
   const lastOutcomeText = snapshot.last_outcome
     ? `last turn #${snapshot.last_outcome.turn_id} ended ${new Date(snapshot.last_outcome.ended_at * 1000).toLocaleTimeString()}`
     : 'no completed turn'
   return html`
     <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)] font-mono items-center">
       <span class=${`px-1.5 py-0.5 border rounded ${liveClass}`}>
-        ${snapshot.is_live ? '● LIVE' : '○ idle'}
+        ${liveLabel}
       </span>
       <span>correlation ${snapshot.correlation_id}</span>
       <span>run ${snapshot.run_id}</span>

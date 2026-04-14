@@ -378,11 +378,14 @@ let run_system_prompt provider =
     "You are a single MASC dashboard run using provider %s. Answer directly, keep tool use disabled, and return only the final answer."
     provider
 
-let execute_single_agent_run ~sw ~net ~provider ~model ~prompt =
+let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
   let label_result = provider_label_for_model provider model in
   match label_result with
   | Error _ as error -> error
   | Ok label -> (
+      Log.info ~ctx:"dashboard_provider_runs"
+        "single-agent run resolved run_id=%s provider=%s requested_model=%s model_label=%s"
+        run_id provider model label;
       (* Validate label parses *)
       match Llm_provider.Cascade_config.parse_model_string label with
       | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
@@ -432,8 +435,14 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
         }
       in
       set_run_record run;
+      Log.info ~ctx:"dashboard_provider_runs"
+        "single-agent run queued run_id=%s provider=%s model=%s"
+        run.run_id run.provider run.model;
       Eio.Fiber.fork ~sw (fun () ->
           let mark_failed message =
+            Log.warn ~ctx:"dashboard_provider_runs"
+              "single-agent run failed run_id=%s provider=%s model=%s error=%s"
+              run.run_id run.provider run.model message;
             update_run_record run.run_id (fun current ->
                 current.status <- Failed;
                 current.finished_at <- Some (Types.now_iso ());
@@ -446,11 +455,15 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
                 current.status <- Running;
                 current.started_at <- Some (Types.now_iso ()));
             match
-              execute_single_agent_run ~sw ~net ~provider:run.provider
+              execute_single_agent_run ~sw ~net ~run_id:run.run_id
+                ~provider:run.provider
                 ~model:run.model
                 ~prompt:run.prompt
             with
             | Ok output ->
+                Log.info ~ctx:"dashboard_provider_runs"
+                  "single-agent run completed run_id=%s provider=%s model=%s"
+                  run.run_id run.provider run.model;
                 update_run_record run.run_id (fun current ->
                     current.status <- Completed;
                     current.finished_at <- Some (Types.now_iso ());

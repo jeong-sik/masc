@@ -120,35 +120,20 @@ let proof_result_status_to_string status =
 
 (** Resolve a model label string to an OAS Provider.config.
     Uses OAS Cascade_config.parse_model_string (Provider_registry SSOT).
-    Falls back to default local provider when parsing fails. *)
+    Explicit model-label execution must never silently substitute a
+    discovery-only model. Callers are expected to validate labels
+    before reaching this helper. *)
 let resolve_provider_of_label (label : string) : Oas.Provider.config =
   match Llm_provider.Cascade_config.parse_model_string label with
   | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
-    let fallback = Provider_adapter.default_local_fallback_label () in
-    match Llm_provider.Cascade_config.parse_model_string fallback with
-    | Some pc -> Oas.Provider.config_of_provider_config pc
-    | None ->
-      (* Failsafe: direct Provider_config construction — cascade bypass.
-         This is the last-resort path when BOTH the requested label AND the
-         default fallback label fail Cascade_config parsing.  That happens
-         only when no cascade TOML/env is configured at all, which is a
-         valid startup state for fresh installs.  Raw infrastructure values
-         (endpoint, request_path) are passed to OAS, which owns them.
-         Ollama rejects literal "auto" — must resolve to a concrete ID. *)
-      let model_id =
-        match Llm_provider.Discovery.first_discovered_model_id () with
-        | Some id -> id
-        | None ->
-          Sys.getenv_opt "OLLAMA_DEFAULT_MODEL"
-          |> Option.value ~default:"auto"
-      in
-      Oas.Provider.config_of_provider_config
-        (Llm_provider.Provider_config.make
-           ~kind:Llm_provider.Provider_config.OpenAI_compat
-           ~model_id
-           ~base_url:(Llm_provider.Provider_registry.next_llama_endpoint ())
-           ~request_path:"/v1/chat/completions" ())
+      Log.error ~ctx:"oas_worker_exec"
+        "refusing unresolved explicit model label=%S; execution never falls back to discovery-only models"
+        label;
+      invalid_arg
+        (Printf.sprintf
+           "Oas_worker_exec.resolve_provider_of_label: invalid model label %S"
+           label)
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

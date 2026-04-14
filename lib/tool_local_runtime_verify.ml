@@ -137,8 +137,15 @@ let probe_chat_completion_compatible
     (endpoint : Discovery_cache.endpoint_info) =
   match Masc_eio_env.get_opt (), endpoint_model_id endpoint with
   | None, _ -> (None, None)
-  | _, None -> (None, Some "missing model id")
+  | _, None ->
+      Log.warn ~ctx:"runtime_verify"
+        "chat-completions probe skipped caller_surface=runtime_verify endpoint=%s reason=missing_model_id"
+        endpoint.url;
+      (None, Some "missing model id")
   | Some env, Some model_id ->
+      Log.info ~ctx:"runtime_verify"
+        "chat-completions probe caller_surface=runtime_verify endpoint=%s model_id=%s timeout_sec=%d"
+        endpoint.url model_id timeout_sec;
       let provider_config =
         Llm_provider.Provider_config.make
           ~kind:Llm_provider.Provider_config.OpenAI_compat

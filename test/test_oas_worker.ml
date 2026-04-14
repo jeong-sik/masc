@@ -691,6 +691,22 @@ let test_oas_worker_exec_build_applies_priority () =
       Oas.Agent.close agent
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
+  match
+    try
+      ignore (Oas_worker_exec.resolve_provider_of_label "not-a-model-label");
+      Ok ()
+    with Invalid_argument msg -> Error msg
+  with
+  | Ok () ->
+      Alcotest.fail
+        "expected invalid explicit model label to be rejected without fallback"
+  | Error msg ->
+      Alcotest.(check bool) "mentions invalid model label" true
+        (contains_substring ~needle:"invalid model label" msg);
+      Alcotest.(check bool) "mentions rejected label" true
+        (contains_substring ~needle:"not-a-model-label" msg)
+
 let test_worker_build_agent_uses_default_internal_retry_policy () =
   with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->
   let meta = make_worker_meta () in
@@ -1721,6 +1737,8 @@ let () =
         test_oas_worker_exec_build_default_priority_unset;
       Alcotest.test_case "oas_worker applies explicit priority" `Quick
         test_oas_worker_exec_build_applies_priority;
+      Alcotest.test_case "invalid explicit model label is rejected" `Quick
+        test_resolve_provider_of_label_rejects_invalid_explicit_label;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

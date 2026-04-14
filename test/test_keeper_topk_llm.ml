@@ -317,6 +317,9 @@ let test_deterministic_prefilter_surfaces_code_tools () =
     true (List.mem "masc_code_search" selected)
 
 let test_prune_boring_tools_after_recent_polling () =
+  (* Boring concept retired. prune_boring_tools_after_recent_polling is now
+     an identity transform — the caller's visible tool set is returned
+     unchanged regardless of recent tool history. *)
   let visible_tools =
     [ "masc_status"; "keeper_tasks_list"; "keeper_context_status";
       "keeper_stay_silent"; "keeper_fs_edit"; "masc_code_search" ]
@@ -329,9 +332,8 @@ let test_prune_boring_tools_after_recent_polling () =
       ~visible_tools ~recent_entries
   in
   Alcotest.(check (list string))
-    "recent polling hides boring tools but keeps productive tools"
-    [ "keeper_stay_silent"; "keeper_fs_edit"; "masc_code_search" ]
-    pruned
+    "visible tools returned unchanged"
+    visible_tools pruned
 
 let test_prune_boring_tools_keeps_set_when_last_tool_productive () =
   let visible_tools =
@@ -345,7 +347,7 @@ let test_prune_boring_tools_keeps_set_when_last_tool_productive () =
       ~visible_tools ~recent_entries
   in
   Alcotest.(check (list string))
-    "productive last tool does not hide boring tools"
+    "productive last tool leaves visible tools unchanged"
     visible_tools pruned
 
 let test_keeper_config_defaults () =

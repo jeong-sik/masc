@@ -145,29 +145,14 @@ let latest_tool_name (entries : Yojson.Safe.t list) : string option =
 let prune_boring_tools_after_recent_polling
     ~(visible_tools : string list)
     ~(recent_entries : Yojson.Safe.t list) : string list =
-  let productive_visible =
-    List.exists
-      (fun name -> not (Keeper_tool_registry.is_boring_tool name))
-      visible_tools
-  in
-  let just_polled =
-    match latest_tool_name recent_entries with
-    | Some name ->
-      Keeper_tool_registry.is_boring_tool name
-      && not (String.equal name "keeper_stay_silent")
-    | None -> false
-  in
-  if not just_polled then visible_tools
-  else if not productive_visible then
-    (* All visible tools are boring and we just used one — force silent
-       to break the polling loop instead of offering the same boring tools. *)
-    List.filter (fun name -> String.equal name "keeper_stay_silent") visible_tools
-  else
-    List.filter
-      (fun name ->
-         not (Keeper_tool_registry.is_boring_tool name)
-         || String.equal name "keeper_stay_silent")
-      visible_tools
+  (* Boring concept retired. Previously: when the latest tool call was
+     boring and no visible tool was productive, this collapsed visible
+     tools down to [keeper_stay_silent], forcing silent turns. With the
+     registry's classification empty this becomes an identity transform.
+     The function stays on the public API until the full-removal PR to
+     avoid churn in callers/tests that still import it. *)
+  let _ = latest_tool_name recent_entries in
+  visible_tools
 ;;
 
 let merge_tool_selection_boundary

@@ -127,8 +127,10 @@ let string_of_provider_kind
   | OpenAI_compat -> cn_codex
   | Ollama -> cn_ollama
   | Gemini -> cn_gemini
+  | Gemini_cli -> cn_gemini
   | Glm -> cn_glm
   | Claude_code -> cn_claude
+  | Codex_cli -> cn_codex
 
 (** Single source of truth for all agent adapters.
     spawn_key maps to Spawn.default_configs keys.
@@ -972,7 +974,9 @@ let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider
   | Llm_provider.Provider_config.Glm -> [ "ZAI_API_KEY" ]
   | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
   | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
+  | Llm_provider.Provider_config.Gemini_cli -> [ google_cloud_project_env; google_cloud_location_env ]
   | Llm_provider.Provider_config.Claude_code
+  | Llm_provider.Provider_config.Codex_cli
   | Llm_provider.Provider_config.Ollama -> []
 
 let is_loopback_host = function

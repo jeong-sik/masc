@@ -754,7 +754,16 @@ let shard_autoresearch : shard = {
   description = "Autonomous experiment loop: start, cycle, status, inject, stop";
 }
 
+(** Per-agent shard overrides.  Read-modify-write is serialised by
+    [agent_shards_mutex] so concurrent keeper setup calls cannot lose updates.
+
+    Stdlib.Mutex (not Eio.Mutex) because these helpers are also called from
+    non-Eio contexts — unit tests and some startup wiring — where Eio.Mutex
+    raises Effect.Unhandled(Cancel.Get_context). Critical sections are short
+    StringMap ops, so Stdlib blocking is acceptable.
+    See memory/feedback_ocaml5-mutex-selection.md. *)
 let agent_shards : string list StringMap.t ref = ref StringMap.empty
+let agent_shards_mutex = Stdlib.Mutex.create ()
 
 (** Default shards for a new keeper.
     All keepers get all shards unconditionally. Safety is handled by
@@ -771,14 +780,19 @@ let default_shard_names : string list = [
 ]
 
 let get_agent_shards (agent_name : string) : string list =
-  StringMap.find_opt agent_name !agent_shards
-  |> Option.value ~default:default_shard_names
+  Stdlib.Mutex.protect agent_shards_mutex (fun () ->
+    StringMap.find_opt agent_name !agent_shards
+    |> Option.value ~default:default_shard_names)
 
 let set_agent_shards (agent_name : string) (shards : string list) : unit =
-  agent_shards := StringMap.add agent_name (List.sort_uniq String.compare shards) !agent_shards
+  Stdlib.Mutex.protect agent_shards_mutex (fun () ->
+    agent_shards :=
+      StringMap.add agent_name
+        (List.sort_uniq String.compare shards) !agent_shards)
 
 let remove_agent_shards (agent_name : string) : unit =
-  agent_shards := StringMap.remove agent_name !agent_shards
+  Stdlib.Mutex.protect agent_shards_mutex (fun () ->
+    agent_shards := StringMap.remove agent_name !agent_shards)
 
 (** All predefined shards by name *)
 let all_shards : shard StringMap.t =

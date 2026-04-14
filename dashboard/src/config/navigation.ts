@@ -2,7 +2,6 @@ import type { RouteState, TabId } from '../types'
 
 export type SurfaceId = TabId
 export type SurfaceSectionId =
-  | 'sessions'
   | 'agents'
   | 'activity'
   | 'board'
@@ -64,9 +63,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '세션, 에이전트/키퍼 현황 관찰',
+    description: '에이전트/키퍼 현황 및 observability 관찰',
     defaultTab: 'monitoring',
-    defaultParams: { section: 'sessions' },
+    defaultParams: { section: 'agents' },
     tabs: ['monitoring'],
   },
   {
@@ -117,15 +116,9 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   monitoring: [
     {
-      id: 'sessions',
-      label: '세션',
-      description: '읽기 전용 관찰: 세션 상태, 블로커, 주의 큐. 개입은 운영 › 실시간 개입에서.',
-      params: { section: 'sessions' },
-    },
-    {
       id: 'agents',
       label: '에이전트 & 키퍼',
-      description: '이름과 운영 상태를 함께 봅니다.',
+      description: '이름과 운영 상태를 함께 봅니다. 세션 요약은 오버뷰에서.',
       params: { section: 'agents' },
     },
     {
@@ -269,6 +262,11 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     delete next.section
     delete next.surface
     return next
+  }
+
+  // Phase 0 (RFC-MASC-006): sessions stub removed — redirect to agents
+  if (tabId === 'monitoring' && next.section === 'sessions') {
+    next.section = 'agents'
   }
 
   const typedTabId = tabId as NonHomeTabId

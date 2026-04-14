@@ -1,35 +1,8 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(** Resolve the keeper-scoped gh config directory.
-
-    Location: [$base_path/.masc/gh-auth/]
-
-    When this directory exists, keeper [gh] invocations set
-    [GH_CONFIG_DIR] to it, isolating keeper identity from the operator's
-    personal [~/.config/gh] credentials. A typical setup stores an
-    [anyang-keepers] PAT here via:
-
-    {[
-      GH_CONFIG_DIR="$base_path/.masc/gh-auth" gh auth login --hostname github.com
-    ]}
-
-    Falls back to the operator's default gh config when the directory
-    is absent, so the feature is opt-in and backwards compatible. *)
-let keeper_gh_config_dir (config : Room.config) : string option =
-  let dir =
-    Filename.concat config.Room_utils.base_path ".masc/gh-auth"
-  in
-  if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
-
-(** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
-    keeper-scoped config exists. The env var is scoped to the single
-    subprocess invocation — the operator's terminal is unaffected. *)
-let with_keeper_gh_env (config : Room.config) (gh_cmd : string) : string =
-  match keeper_gh_config_dir config with
-  | None -> gh_cmd
-  | Some dir ->
-    Printf.sprintf "GH_CONFIG_DIR=%s %s" (Filename.quote dir) gh_cmd
+(* GH credential isolation — SSOT in Keeper_gh_env. *)
+let with_keeper_gh_env = Keeper_gh_env.with_env
 
 (** Pre-compiled regex for gh CLI "not found" error messages.
     Matches case-insensitively against multiple known error phrases
@@ -383,6 +356,22 @@ let handle_keeper_github
          Log.Keeper.warn
            "keeper_github hallucination-gate: %s #%d not in %s (keeper=%s)"
            kind_label number slug meta.name;
+         (* The reason field is the first thing the LLM reads. Put the
+            valid numbers DIRECTLY in the reason — don't rely on the LLM
+            parsing a separate JSON array field. Also clarify that the
+            REPO is correct, only the NUMBER is wrong. Without this,
+            nick0cave interpreted "does not exist in jeong-sik/masc-mcp"
+            as a repo-access failure and abandoned the task.
+            Ref: #7176 *)
+         let sub_label =
+           match kind with Keeper_gh_cache.PR -> "pr" | Issue -> "issue"
+         in
+         let suggested =
+           match shown with
+           | recent :: _ ->
+             Printf.sprintf "gh %s view %d" sub_label recent
+           | [] -> Printf.sprintf "gh %s list --state open" sub_label
+         in
          Yojson.Safe.to_string
            (`Assoc
                [ "ok", `Bool false
@@ -390,18 +379,17 @@ let handle_keeper_github
                ; ( "reason"
                  , `String
                      (Printf.sprintf
-                        "%s #%d does not exist in %s."
-                        kind_label number slug) )
+                        "WRONG NUMBER (not a repo problem). \
+                         %s #%d does not exist. \
+                         The repo %s is correct. \
+                         Pick from these valid %s numbers: [%s]."
+                        kind_label number slug kind_label valid_str) )
                ; "valid_numbers", `List (List.map (fun n -> `Int n) shown)
+               ; "suggested_command", `String suggested
                ; ( "hint"
                  , `String
                      (Printf.sprintf
-                        "Valid %s numbers in %s: [%s]. \
-                         Use one of these instead. \
-                         Do not guess. If you need a number not in this \
-                         list, run '%s list' first to refresh."
-                        kind_label slug valid_str
-                        (match kind with PR -> "pr" | Issue -> "issue")) )
+                        "Try: %s" suggested) )
                ; "cmd", `String ("gh " ^ gh_raw)
                ])
        | None ->

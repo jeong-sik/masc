@@ -117,11 +117,18 @@ type registry_entry = {
     (float * Keeper_state_machine.auto_rule_summary) option;
   last_event_bus_correlation : string option;
   current_turn_observation : turn_observation option;
+  last_completed_turn : completed_turn_observation option;
 }
 
 and turn_observation = {
   turn_id : int;
   started_at : float;
+}
+
+and completed_turn_observation = {
+  ct_turn_id : int;
+  ct_started_at : float;
+  ct_ended_at : float;
 }
 
 
@@ -224,6 +231,7 @@ let register_with_state ~base_path name meta
     last_auto_rules = None;
     last_event_bus_correlation = None;
     current_turn_observation = None;
+    last_completed_turn = None;
   } in
   put_entry key entry;
   if phase = Running then
@@ -346,7 +354,19 @@ let mark_turn_started ~base_path name =
 
 let mark_turn_finished ~base_path name =
   update_entry ~base_path name (fun e ->
-    { e with current_turn_observation = None })
+    let last_completed_turn =
+      match e.current_turn_observation with
+      | Some obs ->
+        Some {
+          ct_turn_id = obs.turn_id;
+          ct_started_at = obs.started_at;
+          ct_ended_at = Time_compat.now ();
+        }
+      | None -> e.last_completed_turn  (* no live turn → preserve previous *)
+    in
+    { e with
+      current_turn_observation = None;
+      last_completed_turn })
 
 let increment_turn_failures ~base_path name =
   update_entry ~base_path name (fun e ->

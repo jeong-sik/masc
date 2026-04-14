@@ -57,6 +57,15 @@ type invariants_check = {
   recovery_two_store_sync : bool;
 }
 
+(** Frozen outcome of the most recently completed turn (RFC-0003
+    Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
+    polluting the live sub-FSM fields. [None] until the first turn
+    has finished after registration. *)
+type last_outcome = {
+  turn_id : int;
+  ended_at : float;
+}
+
 type snapshot = {
   correlation_id : string;
   run_id : string;
@@ -70,6 +79,15 @@ type snapshot = {
   reconcile_data : bool;
   reconcile_fsm : bool;
   invariants : invariants_check;
+  is_live : bool;
+      (** [true] when [current_turn_observation] is [Some] — a turn is
+          actively executing and the live sub-FSM fields reflect its
+          state. [false] indicates an idle keeper; sub-FSM fields
+          revert to [Idle]/[Undecided]. *)
+  last_outcome : last_outcome option;
+      (** Most recent completed turn, surfaced separately from live
+          state so operators can see "what just finished" without
+          confusing it with "what's running now". *)
 }
 
 (** Derive a composite snapshot from a live registry entry.

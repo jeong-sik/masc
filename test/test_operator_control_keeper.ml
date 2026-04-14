@@ -250,6 +250,135 @@ let test_keeper_status_accepts_agent_name_alias () =
       Alcotest.(check string) "status resolves canonical keeper name" keeper_name
         Yojson.Safe.Util.(status_json |> member "name" |> to_string))
 
+let test_keeper_status_exposes_model_observability () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "visibility-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Expose operator model visibility");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Dated_jsonl.append
+        (Keeper_types.keeper_metrics_store config keeper_name)
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("model_used", `String "llama:qwen3.5-3b-a3b-ud-q8-xl");
+            ( "cascade",
+              `Assoc
+                [
+                  ("cascade_name", `String "keeper_unified");
+                  ( "configured_labels",
+                    `List [ `String "llama:auto"; `String "glm:auto" ] );
+                  ( "candidate_models",
+                    `List
+                      [
+                        `String "llama:qwen3.5-35b-a3b-ud-q8-xl";
+                        `String "llama:qwen3.5-3b-a3b-ud-q8-xl";
+                      ] );
+                  ("selected_model", `String "llama:qwen3.5-3b-a3b-ud-q8-xl");
+                  ("selected_index", `Int 1);
+                  ("fallback_hops", `Int 1);
+                  ("fallback_applied", `Bool true);
+                  ( "attempts",
+                    `List
+                      [
+                        `Assoc
+                          [
+                            ("attempt_index", `Int 0);
+                            ("model_id", `String "qwen3.5-35b-a3b-ud-q8-xl");
+                            ( "model_label",
+                              `String "llama:qwen3.5-35b-a3b-ud-q8-xl" );
+                            ("latency_ms", `Null);
+                            ("error", `String "HTTP 503");
+                          ];
+                        `Assoc
+                          [
+                            ("attempt_index", `Int 1);
+                            ("model_id", `String "qwen3.5-3b-a3b-ud-q8-xl");
+                            ( "model_label",
+                              `String "llama:qwen3.5-3b-a3b-ud-q8-xl" );
+                            ("latency_ms", `Int 187);
+                            ("error", `Null);
+                          ];
+                      ] );
+                  ("attempt_details_available", `Bool true);
+                  ("attempt_details_source", `String "oas_metrics_callbacks");
+                ] );
+          ]);
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+          ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
+      in
+      Alcotest.(check bool) "status ok" true ok;
+      let status_json = parse_json_exn body in
+      let open Yojson.Safe.Util in
+      let observability = status_json |> member "model_observability" in
+      let status_dump = Yojson.Safe.pretty_to_string status_json in
+      Alcotest.(check (option string))
+        ("cascade name surfaced\n" ^ status_dump)
+        (Some "keeper_unified")
+        (observability |> member "cascade_name" |> to_string_option);
+      Alcotest.(check bool) "recent turn observation true" true
+        (observability |> member "recent_turn_observation" |> to_bool);
+      Alcotest.(check (list string)) "configured labels surfaced"
+        [ "llama:auto"; "glm:auto" ]
+        (observability |> member "configured_labels" |> to_list
+       |> List.map to_string);
+      Alcotest.(check (list string)) "resolved candidates surfaced"
+        [
+          "llama:qwen3.5-35b-a3b-ud-q8-xl";
+          "llama:qwen3.5-3b-a3b-ud-q8-xl";
+        ]
+        (observability |> member "resolved_candidates" |> to_list
+       |> List.map to_string);
+      Alcotest.(check (option string))
+        ("selected model surfaced\n" ^ status_dump)
+        (Some "llama:qwen3.5-3b-a3b-ud-q8-xl")
+        (observability |> member "selected_model" |> to_string_option);
+      Alcotest.(check string) "attempt summary surfaced"
+        "2 attempt(s); fallback after 1 hop(s); selected candidate 2/2."
+        (observability |> member "attempt_summary" |> member "summary"
+       |> to_string);
+      Alcotest.(check string) "runtime scope local" "local"
+        (observability |> member "runtime_contract" |> member "provider_scope"
+       |> to_string);
+      Alcotest.(check bool) "runtime contract unverified" false
+        (observability |> member "runtime_contract" |> member "verified"
+       |> to_bool);
+      Alcotest.(check bool) "chat compatibility intentionally null" true
+        (observability |> member "runtime_contract"
+         |> member "chat_completion_compatible" = `Null))
+
 let test_keeper_down_accepts_agent_name_alias () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

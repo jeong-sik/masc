@@ -18,6 +18,7 @@ export type SSEEventType =
   | 'keeper_guardrail'
   | 'masc/keeper_guardrail'
   | 'keeper_phase_changed'
+  | 'keeper_composite_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
   | 'keeper_tool_skipped'

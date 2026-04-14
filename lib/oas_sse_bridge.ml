@@ -196,6 +196,9 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
            ?turn:(payload_int_opt "turn" payload)
            ?tool_name:(payload_string_opt "tool_name" payload)
            ())
+  | Agent_sdk.Event_bus.ContextOverflowImminent _
+  | Agent_sdk.Event_bus.ContextCompactStarted _ ->
+    None  (* Internal context management; no SSE relay needed *)
 
 (** Relay a single Event_bus event to SSE. *)
 let relay_event ?store evt =

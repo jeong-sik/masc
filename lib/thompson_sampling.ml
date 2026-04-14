@@ -268,16 +268,25 @@ let load_stats () =
   if Fs_compat.file_exists path then begin
     try
       let entries = Fs_compat.load_jsonl path in
-      List.iter (fun json ->
-        match stats_of_json json with
-        | Some s ->
-            Hashtbl.replace stats_table s.name s
-        | None ->
-            Log.Thompson.warn "Failed to parse stats line: %s"
-              (Yojson.Safe.to_string json)
-      ) entries;
-      Log.Metrics.debug "thompson sampling loaded stats for %d agents"
-        (Hashtbl.length stats_table)
+      (* Parse outside the lock — [stats_of_json] is pure and avoids
+         holding [ts_mu] across per-line work — then install the whole
+         batch under one critical section. *)
+      let parsed =
+        List.filter_map (fun json ->
+          match stats_of_json json with
+          | Some s -> Some s
+          | None ->
+              Log.Thompson.warn "Failed to parse stats line: %s"
+                (Yojson.Safe.to_string json);
+              None
+        ) entries
+      in
+      let count =
+        with_ts_rw (fun () ->
+          List.iter (fun s -> Hashtbl.replace stats_table s.name s) parsed;
+          Hashtbl.length stats_table)
+      in
+      Log.Metrics.debug "thompson sampling loaded stats for %d agents" count
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -288,14 +297,20 @@ let load_stats () =
 let save_stats () =
   let path = stats_path () in
   try
-    let content =
-      Hashtbl.fold (fun _ s acc ->
-        acc ^ Yojson.Safe.to_string (stats_to_json s) ^ "\n"
-      ) stats_table ""
+    (* Serialise the table under the lock so a concurrent [record_*]
+       cannot [Hashtbl.replace] mid-[Hashtbl.fold] and corrupt the
+       iteration. *)
+    let content, count =
+      with_ts_ro (fun () ->
+        let content =
+          Hashtbl.fold (fun _ s acc ->
+            acc ^ Yojson.Safe.to_string (stats_to_json s) ^ "\n"
+          ) stats_table ""
+        in
+        (content, Hashtbl.length stats_table))
     in
     Fs_compat.save_file path content;
-    Log.Metrics.debug "thompson sampling saved stats for %d agents"
-      (Hashtbl.length stats_table)
+    Log.Metrics.debug "thompson sampling saved stats for %d agents" count
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->

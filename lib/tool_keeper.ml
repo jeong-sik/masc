@@ -638,11 +638,18 @@ let handle_keeper_compact ctx args : tool_result =
   | Error err -> (false, err)
   | Ok name ->
     let force = get_bool args "force" false in
-    let phase_before =
-      match Keeper_registry.get ~base_path:ctx.config.base_path name with
-      | Some entry -> Keeper_state_machine.phase_to_string entry.phase
-      | None -> "unknown"
-    in
+    (* Registry race: [resolve_keeper_name] succeeded but the registry entry
+       can still disappear if another fiber unregistered the keeper.  Treat
+       this as a distinct "not found" error rather than an opaque
+       "phase=unknown" precondition failure. *)
+    match Keeper_registry.get ~base_path:ctx.config.base_path name with
+    | None ->
+      Prometheus.inc_counter "masc_keeper_operator_compact_total"
+        ~labels:[("keeper", name); ("result", "not_found")] ();
+      error_result_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name)
+    | Some entry ->
+    let phase_before = Keeper_state_machine.phase_to_string entry.phase in
     (* Phase precondition: Overflowed, Paused, or (Running/Failing with force). *)
     let allowed =
       match phase_before with
@@ -738,6 +745,14 @@ let handle_keeper_clear ctx args : tool_result =
       error_result_typed ~code:Validation_error
         "reason is required for masc_keeper_clear (audit trail)"
     else
+    (* Same registry race guard as [handle_keeper_compact]: if the keeper
+       disappeared between [resolve_keeper_name] and [get], abort cleanly
+       rather than silently proceed with a half-applied clear. *)
+    match Keeper_registry.get ~base_path:ctx.config.base_path name with
+    | None ->
+      error_result_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name)
+    | Some _entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before =
         match Keeper_registry.get ~base_path:ctx.config.base_path name with

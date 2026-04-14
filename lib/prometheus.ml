@@ -193,7 +193,7 @@ let init () =
     "Context ratio change after compaction (pre - post)" Gauge;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
   add "masc_keeper_operator_compact_total"
-    "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition)" Counter;
+    "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;
   add "masc_keeper_operator_clear_total"
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)" Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)

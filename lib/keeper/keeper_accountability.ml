@@ -567,8 +567,10 @@ let accountability_summary_json (config : Room_query.config) ~keeper_name
           | Pending -> ()
           | Unsupported -> ())
       | Completion_claim ->
-          if status <> Pending then incr total_completion_claims;
-          if status = Unsupported then incr unsupported_completion_claims);
+          if status <> Pending && not snapshot.claim.synthetic then
+            incr total_completion_claims;
+          if status = Unsupported && not snapshot.claim.synthetic then
+            incr unsupported_completion_claims);
       (match status with
       | Supported ->
           incr supported_claims;

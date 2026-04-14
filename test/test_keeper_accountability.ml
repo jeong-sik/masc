@@ -194,6 +194,68 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
         "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
         (string_member "routing_warning" result))
 
+let test_synthetic_claims_do_not_dilute_unsupported_rate () =
+  (* Regression: synthetic completion claims (created by task_transition "done")
+     must NOT be counted in total_completion_claims, otherwise they dilute the
+     unsupported_completion_rate and mask genuine risk. *)
+  with_room (fun config ->
+      let created_at = iso_of_unix (Unix.gettimeofday () -. 3600.0) in
+      (* 1 real unsupported completion claim *)
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-real-unsupported");
+             ("agent_name", `String "keeper-test-agent");
+             ("keeper_name", `String "keeper-test");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Real claim");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      (* 10 synthetic Supported completion claims — these should be ignored *)
+      for i = 1 to 10 do
+        let cid = Printf.sprintf "acct-synthetic-%d" i in
+        let created_at_s = iso_of_unix (Unix.gettimeofday () -. 1800.0) in
+        append_accountability_event config.base_path
+          ~created_at:created_at_s
+          (`Assoc
+             [
+               ("event_type", `String "claim_created");
+               ("claim_id", `String cid);
+               ("agent_name", `String "keeper-test-agent");
+               ("keeper_name", `String "keeper-test");
+               ("kind", `String "completion_claim");
+               ("subject", `String (Printf.sprintf "Synthetic %d" i));
+               ("surface", `String "task_transition");
+               ("created_at", `String created_at_s);
+               ("evidence_refs", `List []);
+               ("synthetic", `Bool true);
+             ]);
+        append_accountability_event config.base_path
+          ~created_at:created_at_s
+          (`Assoc
+             [
+               ("event_type", `String "claim_resolved");
+               ("claim_id", `String cid);
+               ("status", `String "supported");
+               ("resolved_at", `String created_at_s);
+               ("reason", `String "task_done");
+               ("supporting_evidence_refs", `List []);
+             ])
+      done;
+      let summary =
+        Keeper_accountability.accountability_summary_json config
+          ~keeper_name:"keeper-test" ~agent_name:"keeper-test-agent"
+      in
+      (* Without the fix: 0/11 = 0.0 unsupported rate. With fix: 1/1 = 1.0 *)
+      check (float 0.0001) "unsupported rate should be 1.0 not diluted" 1.0
+        (float_member "unsupported_completion_rate" summary);
+      check string "risk band should be high" "high"
+        (string_member "risk_band" summary))
+
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
@@ -207,5 +269,7 @@ let () =
             test_stale_completion_claim_sets_high_risk;
           test_case "claim tool exposes routing warning for high risk keeper"
             `Quick test_claim_tool_exposes_routing_warning_for_high_risk_keeper;
+          test_case "synthetic claims do not dilute unsupported rate" `Quick
+            test_synthetic_claims_do_not_dilute_unsupported_rate;
         ] );
     ]

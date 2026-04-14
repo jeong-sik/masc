@@ -72,6 +72,13 @@ type registry_entry = {
   waiting_for_inference : bool Atomic.t;
       (** Ephemeral flag: true when keeper is blocked in admission queue.
           Does not affect state machine phase derivation. *)
+  last_auto_rules :
+    (float * Keeper_state_machine.auto_rule_summary) option;
+      (** Snapshot of the most recent [Context_measured] auto-rule summary.
+          Stored as [(wall_clock, summary)] so the composite observer
+          (RFC-0003 §6) can surface the last measurement without reading
+          history files. [None] until the first [Context_measured] event
+          has been dispatched. *)
 }
 
 (** Register a keeper with an already-live fiber. Primarily used by tests and

@@ -9,16 +9,12 @@ import type { ToolQualityHourlyPoint } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
 import { detectAnomalies } from './anomaly-utils'
+import { hourToMs } from './observatory-utils'
 
 interface Props {
   points: ToolQualityHourlyPoint[]
   windowStart: number
   windowEnd: number
-}
-
-function hourToMs(hour: string): number | null {
-  const parsed = Date.parse(hour.includes('T') ? hour : `${hour}:00:00Z`)
-  return Number.isNaN(parsed) ? null : parsed
 }
 
 export function MetricTrack({ points, windowStart, windowEnd }: Props) {

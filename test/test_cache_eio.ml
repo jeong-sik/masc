@@ -340,21 +340,38 @@ let test_get_migrates_legacy_entry_and_list_dedupes () =
   print_endline "  test_get_migrates_legacy_entry_and_list_dedupes passed"
 
 let () =
-  print_endline "\n=== Cache_eio Tests (Pure Sync) ===\n";
-  test_set_and_get ();
-  test_set_with_ttl ();
-  test_set_with_tags ();
-  test_large_value_round_trips_without_truncation ();
-  test_get_nonexistent ();
-  test_delete ();
-  test_list ();
-  test_clear ();
-  test_stats ();
-  test_expired_cleanup ();
-  test_evict_expired_batch ();
-  test_maybe_evict_expired_triggers_when_ratio_high ();
-  test_maybe_evict_expired_throttled ();
-  test_distinct_keys_do_not_collide_after_sanitize ();
-  test_overwrite_existing_key_when_cache_is_full ();
-  test_get_migrates_legacy_entry_and_list_dedupes ();
-  print_endline "\n=== All 16 Cache_eio tests passed ===\n"
+  Alcotest.run "Cache_eio"
+    [
+      ( "basic",
+        [
+          Alcotest.test_case "set and get" `Quick test_set_and_get;
+          Alcotest.test_case "set with ttl" `Quick test_set_with_ttl;
+          Alcotest.test_case "set with tags" `Quick test_set_with_tags;
+          Alcotest.test_case "large value round-trips"
+            `Quick test_large_value_round_trips_without_truncation;
+          Alcotest.test_case "get nonexistent" `Quick test_get_nonexistent;
+          Alcotest.test_case "delete" `Quick test_delete;
+          Alcotest.test_case "list" `Quick test_list;
+          Alcotest.test_case "clear" `Quick test_clear;
+          Alcotest.test_case "stats" `Quick test_stats;
+        ] );
+      ( "expiration",
+        [
+          Alcotest.test_case "expired cleanup" `Quick test_expired_cleanup;
+          Alcotest.test_case "evict expired batch" `Quick
+            test_evict_expired_batch;
+          Alcotest.test_case "maybe_evict triggers when ratio high" `Quick
+            test_maybe_evict_expired_triggers_when_ratio_high;
+          Alcotest.test_case "maybe_evict throttled" `Quick
+            test_maybe_evict_expired_throttled;
+        ] );
+      ( "keys_and_eviction",
+        [
+          Alcotest.test_case "distinct keys don't collide after sanitize"
+            `Quick test_distinct_keys_do_not_collide_after_sanitize;
+          Alcotest.test_case "overwrite existing key when full" `Quick
+            test_overwrite_existing_key_when_cache_is_full;
+          Alcotest.test_case "get migrates legacy entry and list dedupes"
+            `Quick test_get_migrates_legacy_entry_and_list_dedupes;
+        ] );
+    ]

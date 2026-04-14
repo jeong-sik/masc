@@ -50,8 +50,6 @@ type deliberation_action =
   | ProposeSpawn of { topic: string; reason: string }
   | StartDiscussion of { topic: string; context: string }
   | ShareFinding of { finding: string; source: string }
-  | CreateTask of { title: string; description: string; priority: int }
-  | CreateIssue of { title: string; body: string; labels: string list }
   | MultiStep of deliberation_action list
 
 let rec deliberation_action_to_string = function
@@ -65,8 +63,6 @@ let rec deliberation_action_to_string = function
   | ProposeSpawn _ -> "propose_spawn"
   | StartDiscussion { topic; _ } -> "start_discussion:" ^ topic
   | ShareFinding { finding; _ } -> "share_finding:" ^ finding
-  | CreateTask { title; _ } -> "create_task:" ^ title
-  | CreateIssue { title; _ } -> "create_issue:" ^ title
   | MultiStep actions ->
       "multi_step:["
       ^ String.concat "," (List.map deliberation_action_to_string actions)
@@ -84,8 +80,6 @@ let deliberation_action_to_policy_label = function
   | ProposeSpawn _ -> "propose_spawn"
   | StartDiscussion _ -> "start_discussion"
   | ShareFinding _ -> "share_finding"
-  | CreateTask _ -> "create_task"
-  | CreateIssue _ -> "create_issue"
   | MultiStep _ -> "multi_step"
 
 let rec deliberation_action_to_json = function
@@ -151,22 +145,6 @@ let rec deliberation_action_to_json = function
           ("type", `String "share_finding");
           ("finding", `String finding);
           ("source", `String source);
-        ]
-  | CreateTask { title; description; priority } ->
-      `Assoc
-        [
-          ("type", `String "create_task");
-          ("title", `String title);
-          ("description", `String description);
-          ("priority", `Int priority);
-        ]
-  | CreateIssue { title; body; labels } ->
-      `Assoc
-        [
-          ("type", `String "create_issue");
-          ("title", `String title);
-          ("body", `String body);
-          ("labels", `List (List.map (fun l -> `String l) labels));
         ]
   | MultiStep actions ->
       `Assoc
@@ -511,14 +489,6 @@ let rec legality_error (obs : world_observation) = function
       if has_board_signal obs || obs.active_goal_count > 0
          || is_self_directed obs then None
       else Some "share_finding requires board activity, active goals, or self-directed context"
-  | CreateTask _ ->
-      if obs.active_goal_count > 0 || obs.failed_task_count > 0
-         || has_operational_signal obs || is_self_directed obs then None
-      else Some "create_task requires active goals, failed tasks, operational signal, or self-directed context"
-  | CreateIssue _ ->
-      if obs.active_goal_count > 0 || obs.failed_task_count > 0
-         || has_operational_signal obs || is_self_directed obs then None
-      else Some "create_issue requires active goals, failed tasks, operational signal, or self-directed context"
   | MultiStep actions -> (
       match actions with
       | [] -> Some "multi_step requires non-empty steps"
@@ -672,18 +642,6 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
       let reason = Safe_ops.json_string ~default:"" "reason" params in
       if topic = "" then Error "propose_spawn requires non-empty topic"
       else Ok (ProposeSpawn { topic; reason })
-  | "create_task" ->
-      let title = Safe_ops.json_string ~default:"" "title" params in
-      let description = Safe_ops.json_string ~default:"" "description" params in
-      let priority = Safe_ops.json_int ~default:3 "priority" params in
-      if title = "" then Error "create_task requires non-empty title"
-      else Ok (CreateTask { title; description; priority })
-  | "create_issue" ->
-      let title = Safe_ops.json_string ~default:"" "title" params in
-      let body = Safe_ops.json_string ~default:"" "body" params in
-      let labels = Safe_ops.json_string_list "labels" params in
-      if title = "" then Error "create_issue requires non-empty title"
-      else Ok (CreateIssue { title; body; labels })
   | "multi_step" -> (
       let steps_json =
         match params with
@@ -762,7 +720,7 @@ let structured_result_schema : structured_result Agent_sdk.Structured.schema =
       [
         {
           Agent_sdk.Types.name = "action";
-          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, create_task, create_issue, multi_step.";
+          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, start_discussion, share_finding, multi_step.";
           param_type = Agent_sdk.Types.String;
           required = true;
         };

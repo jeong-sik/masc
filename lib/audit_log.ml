@@ -10,6 +10,8 @@
     @since 0.6.0 - MASC Social v4 Tier 1
 *)
 
+module StringMap = Map.Make (String)
+
 (** {1 Types} *)
 
 type outcome =
@@ -194,17 +196,17 @@ let legacy_audit_path (config : config) =
     current single-domain Eio with a non-yielding [Dated_jsonl.create]
     this race does not fire today, but the fix is cheap and removes a
     fragile implicit invariant. *)
-let audit_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty
 let audit_store_cache_mu = Eio.Mutex.create ()
 
 let get_audit_store (config : config) : Dated_jsonl.t =
   let base = Filename.concat (Room_utils.masc_dir config) "audit" in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->
-    match Hashtbl.find_opt audit_store_cache base with
+    match StringMap.find_opt base !audit_store_cache with
     | Some store -> store
     | None ->
       let store = Dated_jsonl.create ~base_dir:base () in
-      Hashtbl.replace audit_store_cache base store;
+      audit_store_cache := StringMap.add base store !audit_store_cache;
       store)
 
 (** Parse JSON list into audit entries. Logs first 5 failures individually,

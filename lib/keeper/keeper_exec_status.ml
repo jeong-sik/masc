@@ -29,6 +29,30 @@ let string_of_fiber_health = function
   | Fiber_dead -> "dead"
   | Fiber_unknown -> "unknown"
 
+let keeper_health_to_string = function
+  | KH_healthy -> "healthy"
+  | KH_idle -> "idle"
+  | KH_offline -> "offline"
+  | KH_stale -> "stale"
+  | KH_degraded -> "degraded"
+  | KH_zombie -> "zombie"
+  | KH_dead -> "dead"
+
+let keeper_health_of_string = function
+  | "healthy" -> KH_healthy
+  | "idle" -> KH_idle
+  | "offline" -> KH_offline
+  | "stale" -> KH_stale
+  | "degraded" -> KH_degraded
+  | "zombie" -> KH_zombie
+  | "dead" -> KH_dead
+  | _ -> KH_offline
+
+let keeper_continuity_to_string = function
+  | Continuity_healthy -> "healthy"
+  | Continuity_recovering -> "recovering"
+  | Continuity_not_running -> "not_running"
+
 let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
     Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
@@ -290,11 +314,11 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
     ?(keepalive_interval_s = 300.0)
-    ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts () =
+    ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts () : keeper_health =
   (* Supervisor-level health takes priority *)
   match fiber_health with
-  | Fiber_zombie -> "zombie"
-  | Fiber_dead -> "dead"
+  | Fiber_zombie -> KH_zombie
+  | Fiber_dead -> KH_dead
   | _ ->
   let agent_exists = json_bool "exists" agent_status false in
   let agent_status_text =
@@ -318,35 +342,28 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
       last_turn_ago_s
   in
   if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
-  then "offline"
+  then KH_offline
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
-  else if is_zombie then "stale"
+  else if is_zombie then KH_stale
   else if keepalive_running then
-    (* Secondary timeout: if the fiber is stuck and not heartbeating, flag as stale.
-       Use 2x the configured keepalive interval (default: max 300s) so that keepers
-       with a long heartbeat cadence are not incorrectly classified. *)
-    if last_seen_ago_s > 2.0 *. keepalive_interval_s then "stale"
+    if last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
     else
-      (* Keepalive fiber is alive — trust it over last_seen.
-         presence_fresh optimization may skip Room.heartbeat(),
-         causing last_seen to drift without the keeper actually being stale. *)
       (match quiet_reason with
-    | Some "graphql_error" | Some "model_error" -> "degraded"
+    | Some "graphql_error" | Some "model_error" -> KH_degraded
     | _ ->
-        if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then "idle"
+        if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then KH_idle
         else if effective_activity_ago_s > float_of_int (max meta.proactive.idle_sec 900)
-        then "idle"
-        else "healthy")
-  (* Keepalive NOT running — fall back to last_seen for stale detection *)
-  else if last_seen_ago_s > stale_threshold_s then "stale"
-  else "offline"
+        then KH_idle
+        else KH_healthy)
+  else if last_seen_ago_s > stale_threshold_s then KH_stale
+  else KH_offline
 
-let keeper_next_action_path ~health_state ~quiet_reason =
+let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
-  | "zombie" -> "auto_restart"
-  | "dead" -> "manual_restart"
-  | "offline" | "stale" | "degraded" -> "recover"
-  | _ -> (
+  | KH_zombie -> "auto_restart"
+  | KH_dead -> "manual_restart"
+  | KH_offline | KH_stale | KH_degraded -> "recover"
+  | KH_healthy | KH_idle -> (
       match quiet_reason with
       | Some "quiet_hours" -> "manual_social_poke"
       | Some "not_running" | Some "agent_missing" -> "recover"
@@ -364,15 +381,15 @@ let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
       if remaining > 0.0 then `Float remaining else `Null
   | _ -> `Null
 
-let keeper_diagnostic_summary ~meta ~health_state ~quiet_reason =
+let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
-  | "zombie" ->
+  | KH_zombie ->
       "Keeper fiber has terminated but registry entry persists. Supervisor will auto-restart."
-  | "dead" ->
+  | KH_dead ->
       "Keeper restart budget exhausted. Manual restart via masc_keeper_up required."
-  | "offline" | "stale" | "degraded" ->
+  | KH_offline | KH_stale | KH_degraded ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
-  | _ -> (
+  | KH_healthy | KH_idle -> (
       match quiet_reason with
       | Some "disabled" ->
           "Keeper proactive automation is disabled. Direct messages still work, but scheduled social ticks will stay quiet."
@@ -395,11 +412,11 @@ let keeper_continuity_state
     ~(meta : keeper_meta)
     ~(keepalive_running : bool)
     ~(keepalive_started_at : float option)
-    ~(health_state : string)
-    ~(now_ts : float) =
+    ~(health_state : keeper_health)
+    ~(now_ts : float) : keeper_continuity =
   let _ = meta in
   let healthy_like =
-    String.equal health_state "healthy" || String.equal health_state "idle"
+    match health_state with KH_healthy | KH_idle -> true | _ -> false
   in
   let recently_started =
     match keepalive_started_at with
@@ -408,19 +425,17 @@ let keeper_continuity_state
         now_ts -. started_at < recovery_window_s
     | None -> false
   in
-  if not keepalive_running then "not_running"
-  else if recently_started || not healthy_like then "recovering"
-  else "healthy"
+  if not keepalive_running then Continuity_not_running
+  else if recently_started || not healthy_like then Continuity_recovering
+  else Continuity_healthy
 
-let keeper_continuity_summary continuity_state =
-  match continuity_state with
-  | "not_running" ->
+let keeper_continuity_summary = function
+  | Continuity_not_running ->
       "Keeper runtime is not running. The runtime should reconcile it."
-  | "recovering" ->
+  | Continuity_recovering ->
       "Keeper runtime is reconciling back into live presence."
-  | "healthy" ->
+  | Continuity_healthy ->
       "Keeper runtime is aligned with the durable keeper state."
-  | _ -> "Keeper runtime is offline."
 
 let augment_keeper_diagnostic_json
     ~(meta : keeper_meta)
@@ -429,16 +444,19 @@ let augment_keeper_diagnostic_json
     ~(now_ts : float)
     (diagnostic : Yojson.Safe.t) : Yojson.Safe.t =
   let health_state =
-    json_string_opt "health_state" diagnostic |> Option.value ~default:"offline"
+    json_string_opt "health_state" diagnostic
+    |> Option.value ~default:"offline"
+    |> keeper_health_of_string
   in
   let continuity_state =
     keeper_continuity_state ~meta ~keepalive_running
       ~keepalive_started_at ~health_state ~now_ts
   in
   let continuity_summary = keeper_continuity_summary continuity_state in
+  let continuity_str = keeper_continuity_to_string continuity_state in
   let summary =
     match json_string_opt "summary" diagnostic with
-    | Some base when continuity_state = "healthy" -> base
+    | Some base when continuity_state = Continuity_healthy -> base
     | Some _ | None -> continuity_summary
   in
   match diagnostic with
@@ -453,7 +471,7 @@ let augment_keeper_diagnostic_json
       in
       `Assoc
         (("summary", `String summary)
-        :: ("continuity_state", `String continuity_state)
+        :: ("continuity_state", `String continuity_str)
         :: ("continuity_summary", `String continuity_summary)
         :: filtered)
   | other -> other
@@ -464,24 +482,20 @@ let keeper_surface_status
   let health_state =
     json_string_opt "health_state" diagnostic
     |> Option.value ~default:"offline"
-    |> String.lowercase_ascii
+    |> keeper_health_of_string
   in
   let agent_runtime_status =
     json_string_opt "status" agent_status |> Option.map String.lowercase_ascii
   in
   match health_state with
-  | "healthy" -> (
+  | KH_healthy -> (
       match agent_runtime_status with
       | Some (("active" | "busy" | "listening" | "idle") as status) -> status
       | Some ("offline" | "inactive") -> "offline"
       | _ -> "active")
-  | "idle" -> "idle"
-  | "stale" | "degraded" | "zombie" | "dead" -> "inactive"
-  | "offline" -> "offline"
-  | _ -> (
-      match agent_runtime_status with
-      | Some ("offline" | "inactive") -> "offline"
-      | _ -> "inactive")
+  | KH_idle -> "idle"
+  | KH_stale | KH_degraded | KH_zombie | KH_dead -> "inactive"
+  | KH_offline -> "offline"
 
 let keeper_diagnostic_json
     ~(meta : keeper_meta)
@@ -504,7 +518,7 @@ let keeper_diagnostic_json
   in
   `Assoc
     [
-      ("health_state", `String health_state);
+      ("health_state", `String (keeper_health_to_string health_state));
       ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
       ("next_action_path", `String next_action_path);
       ("recoverable", `Bool (String.equal next_action_path "recover"));

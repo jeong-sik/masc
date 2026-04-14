@@ -89,9 +89,14 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   | _ -> None
 
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
-  match U.member "health_state" diagnostic with
-  | `String ("stale" | "degraded" | "zombie" | "dead") -> false
-  | _ -> true
+  let kh =
+    match U.member "health_state" diagnostic with
+    | `String s -> Keeper_exec_status.keeper_health_of_string s
+    | _ -> Keeper_types.KH_offline
+  in
+  match kh with
+  | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
+  | KH_healthy | KH_idle | KH_offline -> true
 
 let align_keeper_runtime_status
     ~(surface_status : string)

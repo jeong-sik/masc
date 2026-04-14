@@ -26,6 +26,7 @@ import {
 import { showToast } from './common/toast'
 import {
   ContextChart,
+  CtxCompositionPanel,
   EquipmentList,
   InferenceTelemetryPanel,
   KpiGrid,
@@ -563,6 +564,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* ── Per-turn token trend (input vs output) ── */}
         <${TokenTrendChart} keeper=${keeper} />
+
+        ${'' /* ── CTX composition by category ── */}
+        <${CtxCompositionPanel} keeper=${keeper} />
 
         ${'' /* ── Prompt fingerprint / segment telemetry ── */}
         <${PromptTelemetryPanel} keeper=${keeper} />

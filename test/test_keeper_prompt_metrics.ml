@@ -232,6 +232,78 @@ let test_token_report () =
   (* This test always passes — it's a measurement, not an assertion *)
   check pass "report emitted" () ()
 
+let test_ctx_composition_splits_history_and_residual () =
+  let history_messages =
+    [
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.User;
+        content = [Agent_sdk.Types.Text "Earlier user request"];
+        name = None;
+        tool_call_id = None;
+      };
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+        content =
+          [
+            Agent_sdk.Types.Text "Investigating the issue";
+            Agent_sdk.Types.ToolUse
+              {
+                id = "call-1";
+                name = "masc_board_get";
+                input = `Assoc [("post_id", `String "p-1")];
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+      };
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+        content =
+          [
+            Agent_sdk.Types.ToolResult
+              {
+                tool_use_id = "call-1";
+                content = "Fetched board post body";
+                is_error = false;
+                json = None;
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+      };
+    ]
+  in
+  let metrics =
+    KAR.build_ctx_composition_metrics
+      ~system_prompt:"System prompt"
+      ~dynamic_context:"Dynamic context"
+      ~memory_context:"Memory context"
+      ~temporal_context:"Temporal context"
+      ~user_message:"Current user message"
+      ~history_messages
+      ~actual_input_tokens:1000
+  in
+  let segment_tokens key =
+    metrics.segments
+    |> List.assoc_opt key
+    |> Option.map (fun segment -> segment.KAR.estimated_tokens)
+    |> Option.value ~default:0
+  in
+  check bool "system prompt bucket present" true
+    (segment_tokens "system_prompt" > 0);
+  check bool "history user bucket present" true
+    (segment_tokens "history_user" > 0);
+  check bool "history assistant text bucket present" true
+    (segment_tokens "history_assistant_text" > 0);
+  check bool "history tool use bucket present" true
+    (segment_tokens "history_tool_use" > 0);
+  check bool "history tool result bucket present" true
+    (segment_tokens "history_tool_result" > 0);
+  check bool "unattributed residual added" true
+    (segment_tokens "unattributed" > 0);
+  check int "display total anchored to actual input" 1000
+    metrics.display_total_tokens
+
 (* ── Suite ────────────────────────────────────────────── *)
 
 let () =
@@ -261,5 +333,10 @@ let () =
         [
           test_case "token report (A/B baseline)" `Quick
             test_token_report;
+        ] );
+      ( "ctx_composition",
+        [
+          test_case "splits history buckets and residual" `Quick
+            test_ctx_composition_splits_history_and_residual;
         ] );
     ]

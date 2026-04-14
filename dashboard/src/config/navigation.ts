@@ -2,6 +2,7 @@ import type { RouteState, TabId } from '../types'
 
 export type SurfaceId = TabId
 export type SurfaceSectionId =
+  | 'observatory'
   | 'agents'
   | 'activity'
   | 'board'
@@ -19,6 +20,7 @@ export type SurfaceSectionId =
   | 'fleet'
   | 'connectors'
   | 'memory-subsystems'
+  | 'fsm-hub'
   | 'metrics'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
@@ -116,6 +118,12 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   monitoring: [
     {
+      id: 'observatory',
+      label: '관찰소 (beta)',
+      description: '이벤트/메트릭을 단일 timeline에 통합. RFC-MASC-006 Phase 2a.',
+      params: { section: 'observatory' },
+    },
+    {
       id: 'agents',
       label: '에이전트 & 키퍼',
       description: '이름과 운영 상태를 함께 봅니다. 세션 요약은 오버뷰에서.',
@@ -150,6 +158,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '기억 서브시스템',
       description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
       params: { section: 'memory-subsystems' },
+    },
+    {
+      id: 'fsm-hub',
+      label: 'FSM 허브',
+      description: 'Composite lifecycle — Decision/Cascade/Memory/Compaction FSM 교차 뷰와 invariants.',
+      params: { section: 'fsm-hub' },
     },
     {
       id: 'metrics',

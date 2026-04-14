@@ -178,6 +178,13 @@ export interface PromptTelemetry {
   segments: Record<string, PromptSegmentTelemetry>
 }
 
+export interface CtxCompositionTelemetry {
+  actual_input_tokens: number | null
+  display_total_tokens: number
+  estimated_known_tokens: number
+  segments: Record<string, PromptSegmentTelemetry>
+}
+
 export interface KeeperMetricPoint {
   ts: number
   context_ratio: number
@@ -196,6 +203,7 @@ export interface KeeperMetricPoint {
   handoff_new_generation: number | null
   prompt_fingerprint: string | null
   prompt_metrics: PromptTelemetry | null
+  ctx_composition: CtxCompositionTelemetry | null
   inference_telemetry: InferenceTelemetry | null
   fallback_applied: boolean
   fallback_hops: number

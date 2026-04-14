@@ -825,6 +825,20 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
     () =
   KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
 
+let sample_ctx_composition ?(system_prompt = "You are a keeper.")
+    ?(dynamic_context = "")
+    ?(user_message = "Check the board.")
+    ?(actual_input_tokens = 0)
+    () =
+  KAR.build_ctx_composition_metrics
+    ~system_prompt
+    ~dynamic_context
+    ~memory_context:""
+    ~temporal_context:""
+    ~user_message
+    ~history_messages:[]
+    ~actual_input_tokens
+
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?trace_ref
     ?run_validation
@@ -834,6 +848,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     response_text = text;
     model_used = model;
     prompt_metrics = sample_prompt_metrics ();
+    ctx_composition = sample_ctx_composition ~actual_input_tokens:input_tok ();
     cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;
@@ -1391,6 +1406,20 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         Yojson.Safe.Util.(
           json |> member "prompt" |> member "user_message"
           |> member "fingerprint" |> to_string);
+      check int "ctx composition known tokens persisted"
+        result.ctx_composition.estimated_known_tokens
+        Yojson.Safe.Util.(
+          json |> member "ctx_composition" |> member "estimated_known_tokens"
+          |> to_int);
+      check int "ctx composition display total persisted"
+        result.ctx_composition.display_total_tokens
+        Yojson.Safe.Util.(
+          json |> member "ctx_composition" |> member "display_total_tokens"
+          |> to_int);
+      check bool "ctx composition unattributed bucket persisted" true
+        Yojson.Safe.Util.(
+          json |> member "ctx_composition" |> member "segments"
+          |> member "unattributed" <> `Null);
       check string "trace ref worker run id persisted"
         sample_run_ref.worker_run_id
         Yojson.Safe.Util.(
@@ -2595,7 +2624,8 @@ let test_recent_tool_streak_count_ignores_stale_entries () =
        entries)
 
 let test_cross_turn_polling_tool_excludes_stay_silent () =
-  check bool "masc_status is polling tool" true
+  (* Boring concept retired — every tool is non-polling. *)
+  check bool "masc_status no longer flagged as polling" false
     (HK.is_cross_turn_polling_tool "masc_status");
   check bool "stay_silent excluded" false
     (HK.is_cross_turn_polling_tool "keeper_stay_silent");
@@ -2603,10 +2633,11 @@ let test_cross_turn_polling_tool_excludes_stay_silent () =
     (HK.is_cross_turn_polling_tool "keeper_fs_edit")
 
 let test_should_block_cross_turn_polling_on_second_attempt () =
+  (* Boring concept retired — cross-turn polling block is a no-op. *)
   let recent_entries =
     [ tool_log_entry "masc_status" ]
   in
-  check bool "second consecutive polling attempt is blocked" true
+  check bool "cross-turn polling block retired" false
     (HK.should_block_cross_turn_polling ~within_sec:900.0 ~threshold:2
        ~tool_name:"masc_status" ~recent_entries)
 
@@ -2933,50 +2964,32 @@ let () =
         ] );
       ( "boring_tools",
         [
-          test_case "masc_status is boring" `Quick (fun () ->
-            check bool "masc_status"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_status"));
-          test_case "masc_heartbeat is NOT boring (removed from keeper)" `Quick (fun () ->
-            check bool "masc_heartbeat"
-              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "masc_heartbeat"));
-          test_case "keeper_tasks_list is boring" `Quick (fun () ->
-            check bool "keeper_tasks_list"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tasks_list"));
-          test_case "keeper_tools_list is boring" `Quick (fun () ->
-            check bool "keeper_tools_list"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_tools_list"));
-          test_case "keeper_context_status is boring" `Quick (fun () ->
-            check bool "keeper_context_status"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_context_status"));
-          test_case "actionable turns prune boring tools when alternatives exist" `Quick (fun () ->
-            let pruned =
-              Masc_mcp.Keeper_tool_registry.prune_boring_tools_for_actionable_turn
+          (* Boring concept retired — these tests previously asserted
+             particular tools were classified boring. After neutralization,
+             the classification is empty and [is_boring_tool] is constant
+             false. The suite is retained as a regression guard against
+             accidental reintroduction of the classification. *)
+          test_case "no tool is classified boring" `Quick (fun () ->
+            List.iter
+              (fun name ->
+                check bool
+                  (Printf.sprintf "%s not boring" name)
+                  false
+                  (Masc_mcp.Keeper_tool_registry.is_boring_tool name))
+              [ "masc_status"; "keeper_tasks_list"; "keeper_tools_list";
+                "keeper_context_status"; "keeper_stay_silent";
+                "keeper_board_list"; "keeper_fs_read"; "keeper_board_post";
+                "keeper_task_claim"; "keeper_bash"; "masc_heartbeat" ]);
+          test_case "prune_boring_tools_for_actionable_turn is identity"
+            `Quick (fun () ->
+              let input =
                 [ "masc_status"; "keeper_tasks_list"; "keeper_board_post" ]
-            in
-            check (list string) "boring tools removed"
-              [ "keeper_board_post" ] pruned);
-          test_case "actionable turns keep boring tools when nothing else exists" `Quick (fun () ->
-            let pruned =
-              Masc_mcp.Keeper_tool_registry.prune_boring_tools_for_actionable_turn
-                [ "masc_status"; "keeper_tasks_list" ]
-            in
-            check (list string) "boring-only set preserved"
-              [ "masc_status"; "keeper_tasks_list" ] pruned);
-          test_case "keeper_fs_read is NOT boring" `Quick (fun () ->
-            check bool "keeper_fs_read"
-              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_fs_read"));
-          test_case "keeper_board_post is NOT boring" `Quick (fun () ->
-            check bool "keeper_board_post"
-              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_board_post"));
-          test_case "keeper_task_claim is NOT boring" `Quick (fun () ->
-            check bool "keeper_task_claim"
-              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_task_claim"));
-          test_case "keeper_stay_silent IS boring (no-op)" `Quick (fun () ->
-            check bool "keeper_stay_silent"
-              true (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_stay_silent"));
-          test_case "keeper_bash is NOT boring" `Quick (fun () ->
-            check bool "keeper_bash"
-              false (Masc_mcp.Keeper_tool_registry.is_boring_tool "keeper_bash"));
+              in
+              let pruned =
+                Masc_mcp.Keeper_tool_registry
+                  .prune_boring_tools_for_actionable_turn input
+              in
+              check (list string) "no tools removed" input pruned);
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
         ] );

@@ -78,6 +78,16 @@ type prompt_metrics =
   ; user_message_segment : prompt_segment_metrics
   }
 
+type ctx_composition_metrics =
+  { actual_input_tokens : int option
+  ; display_total_tokens : int
+  ; estimated_known_tokens : int
+  ; segments : (string * prompt_segment_metrics) list
+  }
+
+let empty_prompt_segment_metrics =
+  { bytes = 0; estimated_tokens = 0; fingerprint = None }
+
 let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
   let text = Inference_utils.sanitize_text_utf8 text in
   {
@@ -139,11 +149,151 @@ let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
       ("user_message", prompt_segment_metrics_to_json metrics.user_message_segment);
     ]
 
+let synthetic_prompt_segment_metrics ~estimated_tokens : prompt_segment_metrics =
+  { bytes = 0; estimated_tokens; fingerprint = None }
+
+let add_segment_metric
+    (totals : (string, prompt_segment_metrics) Hashtbl.t)
+    ~(bucket : string)
+    (metric : prompt_segment_metrics) : unit =
+  let prev =
+    match Hashtbl.find_opt totals bucket with
+    | Some existing -> existing
+    | None -> empty_prompt_segment_metrics
+  in
+  Hashtbl.replace totals bucket
+    {
+      bytes = prev.bytes + metric.bytes;
+      estimated_tokens = prev.estimated_tokens + metric.estimated_tokens;
+      fingerprint = None;
+    }
+
+let metric_of_block
+    ~(role : Agent_sdk.Types.role)
+    (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
+  let bytes =
+    match block with
+    | Agent_sdk.Types.Text text ->
+        String.length (Inference_utils.sanitize_text_utf8 text)
+    | Agent_sdk.Types.ToolUse { id; name; input } ->
+        String.length (Inference_utils.sanitize_text_utf8 id)
+        + String.length (Inference_utils.sanitize_text_utf8 name)
+        + String.length (Yojson.Safe.to_string input)
+    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+        String.length (Inference_utils.sanitize_text_utf8 tool_use_id)
+        + String.length (Inference_utils.sanitize_text_utf8 content)
+        + (match json with
+           | Some value -> String.length (Yojson.Safe.to_string value)
+           | None -> 0)
+    | _ -> 0
+  in
+  let msg =
+    {
+      Agent_sdk.Types.role;
+      content = [block];
+      name = None;
+      tool_call_id = None;
+    }
+  in
+  {
+    bytes;
+    estimated_tokens = Keeper_exec_context.msg_tokens msg;
+    fingerprint = None;
+  }
+
+let history_bucket_of_block
+    ~(role : Agent_sdk.Types.role)
+    (block : Agent_sdk.Types.content_block) : string =
+  match block with
+  | Agent_sdk.Types.ToolUse _ -> "history_tool_use"
+  | Agent_sdk.Types.ToolResult _ -> "history_tool_result"
+  | Agent_sdk.Types.Text _ -> (
+      match role with
+      | Agent_sdk.Types.User -> "history_user"
+      | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
+          "history_assistant_text"
+      | Agent_sdk.Types.Tool -> "history_tool_result")
+  | _ -> "history_other"
+
+let build_ctx_composition_metrics
+    ~(system_prompt : string)
+    ~(dynamic_context : string)
+    ~(memory_context : string)
+    ~(temporal_context : string)
+    ~(user_message : string)
+    ~(history_messages : Agent_sdk.Types.message list)
+    ~(actual_input_tokens : int) : ctx_composition_metrics =
+  let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
+  let add_text_segment bucket text =
+    let metric = prompt_segment_metrics_of_text text in
+    if metric.estimated_tokens > 0 then add_segment_metric totals ~bucket metric
+  in
+  add_text_segment "system_prompt" system_prompt;
+  add_text_segment "dynamic_context" dynamic_context;
+  add_text_segment "memory_context" memory_context;
+  add_text_segment "temporal_context" temporal_context;
+  add_text_segment "user_message" user_message;
+  List.iter
+    (fun (message : Agent_sdk.Types.message) ->
+      List.iter
+        (fun block ->
+          let bucket = history_bucket_of_block ~role:message.role block in
+          let metric = metric_of_block ~role:message.role block in
+          if metric.estimated_tokens > 0 then add_segment_metric totals ~bucket metric)
+        message.content)
+    history_messages;
+  let segments =
+    Hashtbl.to_seq totals
+    |> List.of_seq
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  in
+  let estimated_known_tokens =
+    List.fold_left
+      (fun acc (_, metric) -> acc + metric.estimated_tokens)
+      0 segments
+  in
+  let actual_input_tokens =
+    if actual_input_tokens > 0 then Some actual_input_tokens else None
+  in
+  let display_total_tokens =
+    match actual_input_tokens with
+    | Some actual -> max actual estimated_known_tokens
+    | None -> estimated_known_tokens
+  in
+  let segments =
+    if display_total_tokens > estimated_known_tokens then
+      segments
+      @ [ ( "unattributed",
+            synthetic_prompt_segment_metrics
+              ~estimated_tokens:(display_total_tokens - estimated_known_tokens) ) ]
+    else segments
+  in
+  {
+    actual_input_tokens;
+    display_total_tokens;
+    estimated_known_tokens;
+    segments;
+  }
+
+let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
+      ("display_total_tokens", `Int metrics.display_total_tokens);
+      ("estimated_known_tokens", `Int metrics.estimated_known_tokens);
+      ( "segments",
+        `Assoc
+          (List.map
+             (fun (key, value) -> (key, prompt_segment_metrics_to_json value))
+             metrics.segments) );
+    ]
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
   ; model_used : string
   ; prompt_metrics : prompt_metrics
+  ; ctx_composition : ctx_composition_metrics
   ; cascade_observation : Oas_worker.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
@@ -393,6 +543,21 @@ let run_turn
      via OAS extra_system_context (prepended as User message after reduction). *)
   let { system_prompt = turn_system_prompt; dynamic_context } =
     build_turn_prompt ~base_system_prompt ~messages:ctx_work.messages
+  in
+  let memory_episode_limit = 30 in
+  let memory_procedure_limit = 10 in
+  let memory_context =
+    Memory_hooks.render_memory_context
+      ~agent_name:meta.agent_name
+      ~config
+      ~episode_limit:memory_episode_limit
+      ~procedure_limit:memory_procedure_limit
+      ()
+    |> Option.value ~default:""
+  in
+  let temporal_context =
+    Masc_context_injector.render_temporal_summary shared_context
+    |> Option.value ~default:""
   in
   let prompt_metrics =
     build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
@@ -1400,7 +1565,8 @@ let run_turn
     let mem_hooks =
       Memory_hooks.make
         ~agent_name ~config ~memory
-        ~episode_limit:30 ~procedure_limit:10 ()
+        ~episode_limit:memory_episode_limit
+        ~procedure_limit:memory_procedure_limit ()
     in
     Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
   in
@@ -1611,6 +1777,16 @@ let run_turn
          Keeper_tool_disclosure.merge_reported_and_observed_tool_names ~reported_tool_names ~observed_tool_names
        in
        let usage = Keeper_exec_context.usage_of_response result.response in
+       let ctx_composition =
+         build_ctx_composition_metrics
+           ~system_prompt:turn_system_prompt
+           ~dynamic_context
+           ~memory_context
+           ~temporal_context
+           ~user_message
+           ~history_messages
+           ~actual_input_tokens:usage.input_tokens
+       in
        (* Text-response trap tolerance: when tool_choice=Any is set but
           the provider ignores it (e.g. Ollama #14493), the model returns
           text-only on non-last turns. Instead of hard-failing the turn
@@ -1897,6 +2073,7 @@ let run_turn
                { response_text
                ; model_used = model
                ; prompt_metrics
+               ; ctx_composition
                ; cascade_observation = result.cascade_observation
                ; turn_count = result.turns
                ; tool_calls_made = List.length tool_names

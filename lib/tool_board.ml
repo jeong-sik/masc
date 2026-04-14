@@ -845,7 +845,9 @@ let handle_board_cleanup args =
         match Board_dispatch.delete_post ~post_id:pid with
         | Ok () -> incr deleted
         | Error _ -> incr failed
-      with _exn -> incr failed))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _exn -> incr failed))
       targets;
     (true, Printf.sprintf "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
        !deleted !failed (List.length all_posts) max_age_hours)

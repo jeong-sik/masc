@@ -92,11 +92,15 @@ let dashboard_memory_subsystems_http_json ~(config : Room_utils.config) request
     try
       let g = Hebbian_eio.load_graph config in
       Hebbian_eio.graph_to_json g
-    with _ -> `Assoc [ ("synapses", `List []); ("last_consolidation", `Float 0.0) ]
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> `Assoc [ ("synapses", `List []); ("last_consolidation", `Float 0.0) ]
   in
   let all_episodes =
     try Institution_eio.load_recent_episodes_jsonl ~limit:max_int
-    with _ -> []
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> []
   in
   let total = List.length all_episodes in
   let contains_ci haystack needle =

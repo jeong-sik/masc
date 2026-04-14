@@ -7,6 +7,7 @@ type phase =
   | Offline
   | Running
   | Failing
+  | Overflowed
   | Compacting
   | HandingOff
   | Draining
@@ -20,6 +21,7 @@ let phase_to_string = function
   | Offline -> "offline"
   | Running -> "running"
   | Failing -> "failing"
+  | Overflowed -> "overflowed"
   | Compacting -> "compacting"
   | HandingOff -> "handing_off"
   | Draining -> "draining"
@@ -33,6 +35,7 @@ let phase_of_string = function
   | "offline" -> Some Offline
   | "running" -> Some Running
   | "failing" -> Some Failing
+  | "overflowed" -> Some Overflowed
   | "compacting" -> Some Compacting
   | "handing_off" -> Some HandingOff
   | "draining" -> Some Draining
@@ -44,7 +47,7 @@ let phase_of_string = function
   | _ -> None
 
 let all_phases =
-  [ Offline; Running; Failing; Compacting; HandingOff;
+  [ Offline; Running; Failing; Overflowed; Compacting; HandingOff;
     Draining; Paused; Stopped; Crashed; Restarting; Dead ]
 
 (* ── Conditions ────────────────────────────────────────── *)
@@ -65,6 +68,8 @@ type conditions = {
   backoff_elapsed : bool;
   guardrail_triggered : bool;
   drain_complete : bool;
+  context_overflow : bool;
+  compact_retry_exhausted : bool;
 }
 
 let default_conditions = {
@@ -83,6 +88,8 @@ let default_conditions = {
   backoff_elapsed = false;
   guardrail_triggered = false;
   drain_complete = false;
+  context_overflow = false;
+  compact_retry_exhausted = false;
 }
 
 (* ── Events ────────────────────────────────────────────── *)
@@ -126,6 +133,14 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Guardrail_stop of { reason : string }
+  | Context_overflow_detected of {
+      source : [`Prompt_rejected | `Oas_signal];
+      token_count : int;
+      limit_tokens : int option;
+    }
+  | Auto_compact_triggered
+  | Operator_compact_requested
+  | Operator_clear_requested of { preserve_system : bool; reason : string }
 
 let event_to_string = function
   | Heartbeat_ok -> "heartbeat_ok"
@@ -163,6 +178,22 @@ let event_to_string = function
   | Restart_budget_exhausted -> "restart_budget_exhausted"
   | Guardrail_stop r ->
     Printf.sprintf "guardrail_stop(%s)" r.reason
+  | Context_overflow_detected r ->
+    let src = match r.source with
+      | `Prompt_rejected -> "prompt_rejected"
+      | `Oas_signal -> "oas_signal"
+    in
+    let lim = match r.limit_tokens with
+      | Some n -> string_of_int n
+      | None -> "?"
+    in
+    Printf.sprintf "context_overflow_detected(%s,tokens=%d,limit=%s)"
+      src r.token_count lim
+  | Auto_compact_triggered -> "auto_compact_triggered"
+  | Operator_compact_requested -> "operator_compact_requested"
+  | Operator_clear_requested r ->
+    Printf.sprintf "operator_clear_requested(preserve_system=%b,reason=%s)"
+      r.preserve_system r.reason
 
 (* ── Entry Actions ─────────────────────────────────────── *)
 
@@ -212,16 +243,30 @@ let can_transition ~from_phase ~to_phase =
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
   | Offline, _ -> false
-  (* Running -> buffer states, Paused, Stopped, Crashed (fiber death) *)
-  | Running, (Failing | Compacting | HandingOff | Draining | Paused | Stopped | Crashed) -> true
+  (* Running -> buffer states, Paused, Stopped, Crashed (fiber death),
+     Overflowed (prompt exceeded provider budget) *)
+  | Running, (Failing | Overflowed | Compacting | HandingOff | Draining
+             | Paused | Stopped | Crashed) -> true
   | Running, _ -> false
   (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop)
-     | Paused (operator can pause for investigation) *)
-  | Failing, (Running | Crashed | Draining | Paused) -> true
+     | Paused (operator can pause for investigation)
+     | Overflowed (context overflow distinct from generic failure) *)
+  | Failing, (Running | Overflowed | Crashed | Draining | Paused) -> true
   | Failing, _ -> false
-  (* Compacting -> Running (done) | Failing (hb fail / guardrail during)
-     | Crashed (fatal) | Draining (operator stop during) *)
-  | Compacting, (Running | Failing | Crashed | Draining) -> true
+  (* Overflowed -> Running (operator_clear resolves the overflow in-place)
+     | Compacting (auto-recovery, the default next step)
+     | Paused (compact retry budget exhausted — operator needed)
+     | Draining (operator stop) | Crashed (fiber died). *)
+  | Overflowed, (Running | Compacting | Paused | Draining | Crashed) -> true
+  | Overflowed, _ -> false
+  (* Compacting -> Running (done, overflow cleared)
+     | Overflowed (Compaction_failed leaves context_overflow=true; the keeper
+     re-enters Overflowed so the retry loop can decide next step — if the
+     caller has latched [compact_retry_exhausted], derive_phase immediately
+     promotes to Paused instead)
+     | Failing (hb fail / guardrail during)
+     | Crashed (fatal) | Draining (operator stop during). *)
+  | Compacting, (Running | Overflowed | Failing | Crashed | Draining) -> true
   | Compacting, _ -> false
   (* HandingOff -> Running (done) | Failing | Crashed
      | Draining (operator stop during handoff) *)
@@ -231,8 +276,10 @@ let can_transition ~from_phase ~to_phase =
   | Draining, (Stopped | Crashed) -> true
   | Draining, _ -> false
   (* Paused -> Running (resume) | Draining (stop) | Stopped (remove)
-     | Crashed (fiber can die while keeper is paused) *)
-  | Paused, (Running | Draining | Stopped | Crashed) -> true
+     | Crashed (fiber can die while keeper is paused)
+     | Compacting (operator invoked masc_keeper_compact on paused keeper
+     to clear an overflow-induced pause) *)
+  | Paused, (Running | Compacting | Draining | Stopped | Crashed) -> true
   | Paused, _ -> false
   (* Crashed -> Restarting (backoff done) | Dead (budget exhausted) *)
   | Crashed, (Restarting | Dead) -> true
@@ -244,7 +291,7 @@ let can_transition ~from_phase ~to_phase =
 
 let can_execute_turn = function
   | Running | Failing -> true
-  | Offline | Compacting | HandingOff | Draining | Paused
+  | Offline | Overflowed | Compacting | HandingOff | Draining | Paused
   | Stopped | Crashed | Restarting | Dead -> false
 
 (* ── derive_phase ──────────────────────────────────────── *)
@@ -281,11 +328,23 @@ let derive_phase (c : conditions) : phase =
   else if c.stop_requested then Draining
   (* 5. Guardrail -> Failing *)
   else if c.guardrail_triggered then Failing
-  (* 6. Operator control *)
-  else if c.operator_paused then Paused
+  (* 6. Operator pause OR auto-compact retry budget exhausted.
+     When [compact_retry_exhausted] is latched together with an ongoing
+     [context_overflow], the keeper MUST land on [Paused] so that an
+     operator has to intervene; otherwise [Overflowed → Compacting]
+     would loop indefinitely. *)
+  else if c.operator_paused
+       || (c.context_overflow && c.compact_retry_exhausted) then Paused
   (* 7. Buffer states: in-progress operations *)
   else if c.handoff_active then HandingOff
   else if c.compaction_active then Compacting
+  (* 7b. Context overflow awaiting auto-compact.
+     Transient: [entry_actions_for] emits [Start_compaction] on entry,
+     which flips [compaction_active] via [Auto_compact_triggered] and the
+     next [derive_phase] returns [Compacting]. If [compaction_active] is
+     already set (compaction already started), priority 7 wins and the
+     keeper reads as [Compacting], not [Overflowed]. *)
+  else if c.context_overflow then Overflowed
   (* 8. Health degradation *)
   else if not c.heartbeat_healthy
           || not c.turn_healthy
@@ -325,8 +384,20 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Compaction_started ->
     { c with compaction_active = true }
   | Compaction_completed _ ->
-    { c with compaction_active = false }
+    (* A successful compaction clears the overflow flags.  The retry-
+       exhausted latch is released too: further overflow cycles start
+       fresh. *)
+    { c with
+      compaction_active = false;
+      context_overflow = false;
+      compact_retry_exhausted = false;
+    }
   | Compaction_failed _ ->
+    (* Leave [context_overflow] set — the overflow has not been resolved.
+       The retry-exhausted latch is owned by the caller (keeper_unified_turn
+       retry loop) and is promoted into this state machine via a subsequent
+       [Operator_clear_requested] or [Context_overflow_detected] after
+       the retry budget is depleted. *)
     { c with compaction_active = false }
   | Handoff_started ->
     { c with handoff_active = true }
@@ -370,6 +441,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       guardrail_triggered = false;
       drain_complete = false;
       stop_requested = false;
+      context_overflow = false;
+      compact_retry_exhausted = false;
     }
   | Fiber_terminated _ ->
     { c with fiber_alive = false }
@@ -379,6 +452,29 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with restart_budget_remaining = false }
   | Guardrail_stop _ ->
     { c with guardrail_triggered = true }
+  | Context_overflow_detected _ ->
+    (* Hard overflow reported by the provider. The phase derivation
+       maps this to either [Overflowed] (auto-compact path) or [Paused]
+       (if the retry latch is already set). *)
+    { c with context_overflow = true }
+  | Auto_compact_triggered ->
+    (* Emitted as part of [Overflowed] entry actions.  Promotes the
+       keeper into [Compacting] on the next derivation without waiting
+       for [Compaction_started] from the post-turn lifecycle. *)
+    { c with compaction_active = true }
+  | Operator_compact_requested ->
+    (* Operator override: same as [Auto_compact_triggered] but also
+       releases the retry latch so that a fresh compaction sequence
+       starts. *)
+    { c with compaction_active = true; compact_retry_exhausted = false }
+  | Operator_clear_requested _ ->
+    (* Last resort: context fully dropped by [masc_keeper_clear].
+       Conditions reset in-place without passing through [Compacting]. *)
+    { c with
+      context_overflow = false;
+      compact_retry_exhausted = false;
+      manual_reconcile_required = false;
+    }
 
 (** Compute entry actions for a phase transition.
     Only [Publish_lifecycle] is consumed by the current registry runtime.
@@ -408,12 +504,37 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ lifecycle "restarting" "backoff elapsed" ]
   | Restarting, Running ->
     [ lifecycle "restarted" "fiber launched" ]
+  (* [Overflowed] entry actions: request a compaction so the next
+     derivation moves us to [Compacting], and publish the transition so
+     operators can see "context overflow" distinctly from generic failure.
+     [Start_compaction] is a side-effect descriptor; the registry
+     integration is responsible for promoting it into an
+     [Auto_compact_triggered] event on the next event-loop tick. *)
+  | _, Overflowed ->
+    [ Start_compaction;
+      lifecycle "overflowed"
+        (match event with
+         | Context_overflow_detected r ->
+           let lim = match r.limit_tokens with
+             | Some n -> Printf.sprintf ",limit=%d" n
+             | None -> ""
+           in
+           Printf.sprintf "tokens=%d%s" r.token_count lim
+         | _ -> event_to_string event) ]
   | _, Failing ->
     [ lifecycle "failing" (event_to_string event) ]
   | Failing, Running ->
     [ lifecycle "recovered" "failure counters reset" ]
   | _, Paused ->
-    [ lifecycle "paused" "operator request" ]
+    (* Distinguish operator-pause from overflow-induced pause so the
+       dashboard can surface the right message. *)
+    let detail =
+      match event with
+      | Context_overflow_detected _ -> "auto-compact retry exhausted"
+      | Operator_pause -> "operator request"
+      | _ -> "operator request"
+    in
+    [ lifecycle "paused" detail ]
   | Paused, Running ->
     [ lifecycle "resumed" "operator request" ]
   | _ -> []
@@ -485,6 +606,8 @@ let conditions_to_json (c : conditions) =
     "backoff_elapsed", `Bool c.backoff_elapsed;
     "guardrail_triggered", `Bool c.guardrail_triggered;
     "drain_complete", `Bool c.drain_complete;
+    "context_overflow", `Bool c.context_overflow;
+    "compact_retry_exhausted", `Bool c.compact_retry_exhausted;
   ]
 
 let event_to_json (ev : event) : Yojson.Safe.t =
@@ -544,6 +667,27 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     obj "supervisor_restart_attempt" ["attempt", `Int r.attempt]
   | Restart_budget_exhausted -> obj "restart_budget_exhausted" []
   | Guardrail_stop r -> obj "guardrail_stop" ["reason", `String r.reason]
+  | Context_overflow_detected r ->
+    let source = match r.source with
+      | `Prompt_rejected -> "prompt_rejected"
+      | `Oas_signal -> "oas_signal"
+    in
+    let limit_tokens = match r.limit_tokens with
+      | Some n -> `Int n
+      | None -> `Null
+    in
+    obj "context_overflow_detected" [
+      "source", `String source;
+      "token_count", `Int r.token_count;
+      "limit_tokens", limit_tokens;
+    ]
+  | Auto_compact_triggered -> obj "auto_compact_triggered" []
+  | Operator_compact_requested -> obj "operator_compact_requested" []
+  | Operator_clear_requested r ->
+    obj "operator_clear_requested" [
+      "preserve_system", `Bool r.preserve_system;
+      "reason", `String r.reason;
+    ]
 
 let transition_result_to_json (tr : transition_result) =
   `Assoc [
@@ -561,6 +705,7 @@ let phase_to_mermaid_id = function
   | Offline -> "Offline"
   | Running -> "Running"
   | Failing -> "Failing"
+  | Overflowed -> "Overflowed"
   | Compacting -> "Compacting"
   | HandingOff -> "HandingOff"
   | Draining -> "Draining"
@@ -580,6 +725,7 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Offline --> Draining : stop requested\n";
   p "    Offline --> Stopped : stop while not started\n";
   p "    Running --> Failing : hb/turn/reconcile fail\n";
+  p "    Running --> Overflowed : prompt exceeded max context\n";
   p "    Running --> Compacting : compact start\n";
   p "    Running --> HandingOff : handoff start\n";
   p "    Running --> Draining : stop requested\n";
@@ -587,10 +733,17 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Running --> Stopped : stop requested\n";
   p "    Running --> Crashed : fiber death\n";
   p "    Failing --> Running : clean turn recovery\n";
+  p "    Failing --> Overflowed : prompt exceeded max context\n";
   p "    Failing --> Crashed : fiber death\n";
   p "    Failing --> Draining : stop requested\n";
   p "    Failing --> Paused : operator pause\n";
+  p "    Overflowed --> Running : operator clear\n";
+  p "    Overflowed --> Compacting : auto-compact\n";
+  p "    Overflowed --> Paused : retry exhausted\n";
+  p "    Overflowed --> Draining : stop requested\n";
+  p "    Overflowed --> Crashed : fiber death\n";
   p "    Compacting --> Running : compact done\n";
+  p "    Compacting --> Overflowed : compact failed (overflow persists)\n";
   p "    Compacting --> Failing : hb fail\n";
   p "    Compacting --> Crashed : fiber death\n";
   p "    Compacting --> Draining : stop requested\n";
@@ -601,6 +754,7 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Draining --> Stopped : drain done\n";
   p "    Draining --> Crashed : fiber death\n";
   p "    Paused --> Running : operator resume\n";
+  p "    Paused --> Compacting : operator compact\n";
   p "    Paused --> Draining : stop requested\n";
   p "    Paused --> Stopped : stop requested\n";
   p "    Paused --> Crashed : fiber death\n";
@@ -621,7 +775,7 @@ let phase_to_mermaid ~(current : phase) : string =
   (match current with
    | Stopped | Dead ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
-   | Failing | Compacting | HandingOff | Draining | Restarting ->
+   | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)
    | _ ->
      p "    class %s active\n" (phase_to_mermaid_id current));

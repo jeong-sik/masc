@@ -101,6 +101,7 @@
         test_run_local_script
         test_tool_prefilter
         test_keeper_state_machine
+        test_keeper_overflow_recovery
         test_keeper_reconcile_tool
         test_telemetry_unified
         test_keeper_topk_llm
@@ -181,6 +182,7 @@
           test_run_local_script
           test_tool_prefilter
           test_keeper_state_machine
+          test_keeper_overflow_recovery
           test_keeper_reconcile_tool
           test_telemetry_unified
           test_keeper_topk_llm

@@ -1,6 +1,6 @@
 (** Keeper State Machine — Deterministic Core (RFC-0002).
 
-    This module defines the 10-state keeper lifecycle as a pure state machine.
+    This module defines the 12-state keeper lifecycle as a pure state machine.
     All functions are deterministic: no I/O, no clock reads, no mutable state.
 
     Architecture:
@@ -11,19 +11,26 @@
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (10-State Enum)} *)
+(** {1 Phase (12-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
-    Buffer states ([Failing], [Compacting], [HandingOff], [Draining],
-    [Restarting]) are observable intermediaries between stable states. *)
+    Buffer states ([Failing], [Overflowed], [Compacting], [HandingOff],
+    [Draining], [Restarting]) are observable intermediaries between
+    stable states. *)
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
+  | Overflowed    (** Prompt exceeded provider max context; auto-compact
+                      pending. Transient: [entry_actions_for] emits
+                      [Start_compaction] so the next event-loop iteration
+                      derives [Compacting]. Distinguishes "context overflow"
+                      from generic [Failing] for operator observability. *)
   | Compacting    (** Context compaction in progress *)
   | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
-  | Paused        (** Operator-paused, fiber sleeping *)
+  | Paused        (** Operator-paused or auto-compact-retry-exhausted,
+                      fiber sleeping *)
   | Stopped       (** Clean exit, terminal *)
   | Crashed       (** Unrecoverable error, restart candidate *)
   | Restarting    (** Supervisor backoff wait before re-launch *)
@@ -70,6 +77,17 @@ type conditions = {
   (** [auto_rules.guardrail_stop = true] *)
   drain_complete : bool;
   (** Current turn finished, no pending work *)
+  context_overflow : bool;
+  (** Provider rejected the most recent prompt for exceeding its max
+      context window. Distinct from [context_within_budget] (soft,
+      ratio-based warning): [context_overflow] is a hard failure reported
+      by the provider. Cleared by a successful [Compaction_completed] or
+      by an operator clear action. *)
+  compact_retry_exhausted : bool;
+  (** Consecutive auto-compact attempts failed to resolve the overflow.
+      While set, the next [Context_overflow_detected] derives [Paused]
+      instead of [Overflowed] so operator intervention is required.
+      Reset by [Compaction_completed] or [Fiber_started]. *)
 }
 
 val default_conditions : conditions
@@ -158,6 +176,29 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Guardrail_stop of { reason : string }
+  | Context_overflow_detected of {
+      source : [`Prompt_rejected | `Oas_signal];
+      token_count : int;
+      limit_tokens : int option;
+    }
+    (** Provider rejected prompt for exceeding max context.
+        [`Prompt_rejected] is sourced from a failed unified turn
+        (see [Keeper_unified_turn.is_context_overflow]);
+        [`Oas_signal] is reserved for the future OAS event_bus
+        subscription feature (masc.overflow.source=event_bus). *)
+  | Auto_compact_triggered
+    (** Emitted as part of [Overflowed] entry actions to mark the
+        start of auto-recovery. Sets [compaction_active] so the next
+        [derive_phase] returns [Compacting]. *)
+  | Operator_compact_requested
+    (** Operator invoked [masc_keeper_compact] MCP tool. Behaves like
+        [Auto_compact_triggered] but also clears [compact_retry_exhausted]
+        so a subsequent compaction failure restarts the retry counter. *)
+  | Operator_clear_requested of { preserve_system : bool; reason : string }
+    (** Operator invoked [masc_keeper_clear]. Last-resort: drops
+        conversation context entirely. Bypasses [Compacting] buffer
+        state — conditions reset in-place. [reason] is required for
+        audit trail. *)
 
 val event_to_string : event -> string
 
@@ -201,18 +242,19 @@ val transition_error_to_string : transition_error -> string
     This is the SOLE function that determines keeper phase.
 
     Priority (first match wins):
-    1. Dead (terminal)
-    2. Stopped (stop_requested + drain_complete)
-    3. Offline (launch_pending before first fiber start)
-    4. Restarting (fiber dead + budget + backoff elapsed)
-    5. Crashed (fiber dead + budget remaining)
-    6. Draining (stop_requested)
-    7. Guardrail -> Failing
-    8. Paused (operator_paused)
-    9. HandingOff (handoff_active)
+    1.  Dead (terminal)
+    2.  Stopped (stop_requested + drain_complete)
+    3.  Offline (launch_pending before first fiber start)
+    4.  Restarting (fiber dead + budget + backoff elapsed)
+    5.  Crashed (fiber dead + budget remaining)
+    6.  Draining (stop_requested)
+    7.  Guardrail -> Failing
+    8.  Paused (operator_paused OR context_overflow + compact_retry_exhausted)
+    9.  HandingOff (handoff_active)
     10. Compacting (compaction_active)
-    11. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
-    12. Running (fiber_alive) *)
+    11. Overflowed (context_overflow AND NOT compaction_active)
+    12. Failing (heartbeat degraded, turn degraded, or manual reconcile required)
+    13. Running (fiber_alive) *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,

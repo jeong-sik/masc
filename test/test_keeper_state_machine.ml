@@ -1346,6 +1346,8 @@ let test_invariant_fiber_started_reset_exhaustive () =
     backoff_elapsed = true;
     guardrail_triggered = true;
     drain_complete = true;
+    context_overflow = true;
+    compact_retry_exhausted = true;
   } in
   let updated = match SM.apply_event ~current_phase:SM.Restarting
       ~conditions:dirty_conds ~event:SM.Fiber_started ~now:1000.0 with
@@ -1577,6 +1579,7 @@ let test_invariant_derive_matches_matrix () =
         | SM.Offline -> { SM.default_conditions with restart_budget_remaining = true }
         | SM.Running -> running_conditions
         | SM.Failing -> { running_conditions with heartbeat_healthy = false }
+        | SM.Overflowed -> { running_conditions with context_overflow = true }
         | SM.Compacting -> { running_conditions with compaction_active = true }
         | SM.HandingOff -> { running_conditions with handoff_active = true }
         | SM.Draining -> { running_conditions with
@@ -1629,6 +1632,8 @@ let test_invariant_priority_chain () =
     backoff_elapsed = true;
     guardrail_triggered = true;
     drain_complete = true;
+    context_overflow = true;
+    compact_retry_exhausted = true;
   } in
   (* TLA+ fix: all_true has compaction+handoff active, so Stopped is blocked → Draining.
      Clear buffer ops to reach Stopped. *)
@@ -1644,8 +1649,14 @@ let test_invariant_priority_chain () =
   (* Remove guardrail: paused wins *)
   let no_guard = { no_stop with guardrail_triggered = false } in
   check phase_t "no guardrail: Paused" SM.Paused (SM.derive_phase no_guard);
-  (* Remove paused: handoff wins over compaction *)
-  let no_paused = { no_guard with operator_paused = false } in
+  (* Remove paused trigger: must also clear the overflow-latched path
+     (context_overflow && compact_retry_exhausted) that can hold the
+     keeper in Paused independently of operator_paused. *)
+  let no_paused = { no_guard with
+    operator_paused = false;
+    context_overflow = false;
+    compact_retry_exhausted = false;
+  } in
   check phase_t "no paused: HandingOff" SM.HandingOff (SM.derive_phase no_paused);
   (* Remove handoff: compaction wins *)
   let no_handoff = { no_paused with handoff_active = false } in
@@ -1660,7 +1671,7 @@ let test_invariant_priority_chain () =
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
 let test_all_phases_covered () =
-  check int "11 phases" 11 (List.length SM.all_phases)
+  check int "12 phases" 12 (List.length SM.all_phases)
 
 (* ── Mermaid diagram tests ─────────────────────────────── *)
 
@@ -1777,6 +1788,8 @@ let test_setclear_coverage () =
     "backoff_elapsed",           (fun c -> c.backoff_elapsed);
     "guardrail_triggered",       (fun c -> c.guardrail_triggered);
     "drain_complete",            (fun c -> c.drain_complete);
+    "context_overflow",          (fun c -> c.context_overflow);
+    "compact_retry_exhausted",   (fun c -> c.compact_retry_exhausted);
   ] in
   (* Conditions with all booleans false *)
   let all_false : SM.conditions = {
@@ -1795,6 +1808,8 @@ let test_setclear_coverage () =
     backoff_elapsed = false;
     guardrail_triggered = false;
     drain_complete = false;
+    context_overflow = false;
+    compact_retry_exhausted = false;
   } in
   (* Conditions with all booleans true *)
   let all_true : SM.conditions = {
@@ -1813,6 +1828,8 @@ let test_setclear_coverage () =
     backoff_elapsed = true;
     guardrail_triggered = true;
     drain_complete = true;
+    context_overflow = true;
+    compact_retry_exhausted = true;
   } in
   (* auto_rules with all flags false *)
   let auto_rules_clean : SM.auto_rule_summary = {
@@ -1879,6 +1896,17 @@ let test_setclear_coverage () =
       SM.Restart_budget_exhausted;
     "Guardrail_stop",
       SM.Guardrail_stop { reason = "test" };
+    "Context_overflow_detected",
+      SM.Context_overflow_detected
+        { source = `Prompt_rejected;
+          token_count = 205_000;
+          limit_tokens = Some 200_000 };
+    "Auto_compact_triggered",
+      SM.Auto_compact_triggered;
+    "Operator_compact_requested",
+      SM.Operator_compact_requested;
+    "Operator_clear_requested",
+      SM.Operator_clear_requested { preserve_system = true; reason = "test" };
   ] in
   (* Build coverage map: for each field, which events set it and clear it *)
   let setters = Hashtbl.create 16 in
@@ -1911,9 +1939,11 @@ let test_setclear_coverage () =
     "context_within_budget";  (* external: never touched by update_conditions *)
   ] in
   let exempt_from_setter = [
-    "context_within_budget";  (* external *)
-    "launch_pending";         (* set externally before Fiber_started *)
+    "context_within_budget";    (* external *)
+    "launch_pending";           (* set externally before Fiber_started *)
     "restart_budget_remaining"; (* supervisor-managed budget *)
+    "compact_retry_exhausted";  (* latched by keeper_unified_turn retry loop, *)
+                                (* no dedicated FSM event sets it to true. *)
   ] in
   (* Print coverage report for diagnostics *)
   let buf = Buffer.create 512 in
@@ -2056,7 +2086,7 @@ let () =
     ];
     "roundtrip", [
       test_case "phase string roundtrip" `Quick test_phase_string_roundtrip;
-      test_case "11 phases" `Quick test_all_phases_covered;
+      test_case "12 phases" `Quick test_all_phases_covered;
     ];
     "lifecycle_chain", [
       test_case "happy path (boot->compact->handoff->stop)" `Quick test_chain_happy_path;

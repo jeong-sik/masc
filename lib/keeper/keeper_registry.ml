@@ -409,7 +409,7 @@ let fiber_health_of ~base_path name =
           in
           if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
       | Stopped | Offline -> Fiber_unknown
-      | Running | Paused | Failing | Compacting | HandingOff | Draining -> (
+      | Running | Paused | Failing | Overflowed | Compacting | HandingOff | Draining -> (
           match Eio.Promise.peek entry.done_p with
           | None -> Fiber_alive
           | Some `Stopped -> Fiber_unknown

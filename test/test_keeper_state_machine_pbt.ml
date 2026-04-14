@@ -81,6 +81,10 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Operator_stop { remove_meta = false };
         SM.Fiber_terminated { outcome = "crash" };
         SM.Guardrail_stop { reason = "test" };
+        SM.Context_overflow_detected
+          { source = `Prompt_rejected;
+            token_count = 205000;
+            limit_tokens = Some 200000 };
       ]
     | SM.Failing ->
       [ SM.Heartbeat_ok; SM.Turn_succeeded;
@@ -88,6 +92,17 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Manual_reconcile_required { reason = "test" };
         SM.Fiber_terminated { outcome = "crash" };
         SM.Stop_requested; SM.Operator_pause;
+        SM.Context_overflow_detected
+          { source = `Prompt_rejected;
+            token_count = 205000;
+            limit_tokens = Some 200000 };
+      ]
+    | SM.Overflowed ->
+      [ SM.Auto_compact_triggered;
+        SM.Operator_compact_requested;
+        SM.Operator_clear_requested { preserve_system = true; reason = "pbt" };
+        SM.Stop_requested;
+        SM.Fiber_terminated { outcome = "crash" };
       ]
     | SM.Compacting ->
       [ SM.Compaction_completed { before_tokens = 100; after_tokens = 50 };
@@ -109,6 +124,8 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
       ]
     | SM.Paused ->
       [ SM.Operator_resume;
+        SM.Operator_compact_requested;
+        SM.Operator_clear_requested { preserve_system = true; reason = "pbt" };
         SM.Stop_requested; SM.Operator_stop { remove_meta = false };
         SM.Fiber_terminated { outcome = "crash" };
       ]

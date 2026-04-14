@@ -202,7 +202,8 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                  match e.phase with
                  | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
                  | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> true
-                 | Keeper_state_machine.Failing | Keeper_state_machine.Compacting
+                 | Keeper_state_machine.Failing | Keeper_state_machine.Overflowed
+                 | Keeper_state_machine.Compacting
                  | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
                  | Keeper_state_machine.Restarting -> true
                  | Keeper_state_machine.Offline -> false
@@ -338,7 +339,8 @@ let sweep_and_recover (ctx : _ context) =
         to_unregister := entry :: !to_unregister
     | Keeper_state_machine.Running | Keeper_state_machine.Paused
     | Keeper_state_machine.Crashed
-    | Keeper_state_machine.Failing | Keeper_state_machine.Compacting
+    | Keeper_state_machine.Failing | Keeper_state_machine.Overflowed
+    | Keeper_state_machine.Compacting
     | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
     | Keeper_state_machine.Restarting | Keeper_state_machine.Offline ->
       (match Eio.Promise.peek entry.done_p with

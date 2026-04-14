@@ -164,6 +164,18 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: '저수준 raw 지표(/metrics): counter·gauge·summary. 디버깅과 알림 소스용.',
       params: { section: 'metrics' },
     },
+    {
+      id: 'tool-quality',
+      label: '도구 품질',
+      description: 'Keeper tool call 성공률, 실패 카테고리, keeper별 품질 지표.',
+      params: { section: 'tool-quality' },
+    },
+    {
+      id: 'fleet',
+      label: 'Fleet 텔레메트리',
+      description: 'Keeper 전체 비교: tok/sec, latency, error 분류, model 분포, compaction.',
+      params: { section: 'fleet' },
+    },
   ],
   command: [
     {
@@ -174,7 +186,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'governance',
-      label: '거버넌스',
+      label: '승인 큐',
       description: '쓰기 액션: 자율 결정 검토·승인·반려. 추이 관찰은 모니터링 › 도구 이벤트에서.',
       params: { section: 'governance' },
     },
@@ -183,6 +195,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '커넥터',
       description: '외부 채널(Discord 등) 연결 상태, 바인딩 관리, 이벤트 로그.',
       params: { section: 'connectors' },
+    },
+    {
+      id: 'inspector',
+      label: '운영 인스펙터',
+      description: '피처 플래그와 서버 설정을 한 화면으로 묶은 운영 진단/점검 화면.',
+      params: { section: 'inspector' },
     },
   ],
   workspace: [
@@ -223,24 +241,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '세이프티 하네스',
       description: '평가 모델, 압축 전 상태, 세대 교체 rail 감시 상태.',
       params: { section: 'harness' },
-    },
-    {
-      id: 'inspector',
-      label: '운영 인스펙터',
-      description: '피처 플래그와 서버 설정을 한 화면으로 묶은 운영 진단/점검 화면.',
-      params: { section: 'inspector' },
-    },
-    {
-      id: 'tool-quality',
-      label: '도구 품질',
-      description: 'Keeper tool call 성공률, 실패 카테고리, keeper별 품질 지표.',
-      params: { section: 'tool-quality' },
-    },
-    {
-      id: 'fleet',
-      label: 'Fleet 텔레메트리',
-      description: 'Keeper 전체 비교: tok/sec, latency, error 분류, model 분포, compaction.',
-      params: { section: 'fleet' },
     },
   ],
 }

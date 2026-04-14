@@ -100,7 +100,7 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['harness'])
 
     expect(refreshPlanForRoute({
-      tab: 'lab',
+      tab: 'monitoring',
       params: { section: 'tool-quality' },
     })).toEqual(['toolQuality'])
 
@@ -112,7 +112,7 @@ describe('refreshPlanForRoute', () => {
 
   it('refreshes the inspector shell through server config once', async () => {
     refreshForRoute({
-      tab: 'lab',
+      tab: 'command',
       params: { section: 'inspector' },
     })
 

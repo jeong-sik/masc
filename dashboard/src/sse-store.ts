@@ -25,6 +25,7 @@ import {
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
 import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
+import { compositeTick } from './composite-signals'
 import { hydrateTransportHealthFromSSE } from './components/transport-health'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 import { showToast } from './components/common/toast'
@@ -320,6 +321,16 @@ export function setupSSEReaction(): () => void {
     // 1. Keeper heartbeat — signal-only, zero network calls
     if (event.type === 'keeper_heartbeat') {
       handleKeeperHeartbeat(event)
+      return
+    }
+
+    // Composite lifecycle tick — signal-only; consumers (FSM Hub) re-fetch
+    // /composite themselves. Envelope carries {name, ts_unix} per RFC-0003.
+    if (event.type === 'keeper_composite_changed') {
+      const payload = event as unknown as { name?: string; ts_unix?: number }
+      const name = typeof payload.name === 'string' ? payload.name : ''
+      const ts_unix = typeof payload.ts_unix === 'number' ? payload.ts_unix : Date.now() / 1000
+      compositeTick.value = { name, ts_unix }
       return
     }
 

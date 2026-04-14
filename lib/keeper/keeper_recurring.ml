@@ -28,16 +28,33 @@ type recurring_task = {
 
 let tasks : (string, recurring_task) Hashtbl.t = Hashtbl.create 16
 
+(** Mutex protecting [tasks] and [id_counter].  The module header and
+    [.mli] advertise thread-safety, but the previous implementation had
+    no serialisation — [Hashtbl.replace]/[remove]/[fold] ran from every
+    keeper heartbeat loop concurrently, and [id_counter] used the
+    [incr; !] split pattern that lets two fibers observe the same
+    post-increment value and emit duplicate task IDs.  Use
+    [Eio_guard.with_mutex] so code paths that run before [Eio_main.run]
+    (module init, non-Eio tests) still work without triggering
+    [Effect.Unhandled]. *)
+let tasks_mu = Eio.Mutex.create ()
+let with_tasks_rw f = Eio_guard.with_mutex tasks_mu f
+let with_tasks_ro f = Eio_guard.with_mutex_ro tasks_mu f
+
 (* ================================================================ *)
 (* ID generation                                                     *)
 (* ================================================================ *)
 
-let id_counter = ref 0
+let id_counter = Atomic.make 0
 
 let generate_id () =
-  incr id_counter;
+  (* [fetch_and_add] returns the pre-increment value; +1 gives the
+     fresh ticket.  Prevents the [incr; !] race where two fibers read
+     the same post-increment value and produce duplicate IDs within
+     the same millisecond. *)
+  let seq = Atomic.fetch_and_add id_counter 1 + 1 in
   let ts = int_of_float (Unix.gettimeofday () *. 1000.0) mod 100_000 in
-  Printf.sprintf "loop-%d-%d" ts !id_counter
+  Printf.sprintf "loop-%d-%d" ts seq
 
 (* ================================================================ *)
 (* CRUD                                                              *)
@@ -50,35 +67,43 @@ let add ~keeper_name ~label ~interval_sec ?(max_failures = 5) action =
     last_run_ts = 0.0; run_count = 0; failure_count = 0;
     max_failures; enabled = true;
   } in
-  Hashtbl.replace tasks id task;
+  with_tasks_rw (fun () -> Hashtbl.replace tasks id task);
   task
 
 let remove ~id =
-  if Hashtbl.mem tasks id then begin
-    Hashtbl.remove tasks id; true
-  end else false
+  with_tasks_rw (fun () ->
+    if Hashtbl.mem tasks id then begin
+      Hashtbl.remove tasks id; true
+    end else false)
 
 let list ~keeper_name =
-  Hashtbl.fold (fun _id task acc ->
-    if task.keeper_name = keeper_name then task :: acc else acc
-  ) tasks []
+  with_tasks_ro (fun () ->
+    Hashtbl.fold (fun _id task acc ->
+      if task.keeper_name = keeper_name then task :: acc else acc
+    ) tasks [])
 
 let list_all () =
-  Hashtbl.fold (fun _id task acc -> task :: acc) tasks []
+  with_tasks_ro (fun () ->
+    Hashtbl.fold (fun _id task acc -> task :: acc) tasks [])
 
 (* ================================================================ *)
 (* Dispatch                                                          *)
 (* ================================================================ *)
 
 let dispatch_due ~keeper_name ~now_ts ~dispatch =
+  (* Snapshot due tasks under the lock so [add]/[remove] cannot mutate
+     the table while we iterate; then release the lock before invoking
+     [dispatch], which runs arbitrary user code that may yield or call
+     back into this module. *)
   let due_tasks =
-    Hashtbl.fold (fun _id task acc ->
-      if task.keeper_name = keeper_name
-         && task.enabled
-         && now_ts -. task.last_run_ts >= float_of_int task.interval_sec
-      then task :: acc
-      else acc
-    ) tasks []
+    with_tasks_ro (fun () ->
+      Hashtbl.fold (fun _id task acc ->
+        if task.keeper_name = keeper_name
+           && task.enabled
+           && now_ts -. task.last_run_ts >= float_of_int task.interval_sec
+        then task :: acc
+        else acc
+      ) tasks [])
   in
   let count = ref 0 in
   List.iter (fun task ->
@@ -122,4 +147,4 @@ let task_to_json (t : recurring_task) : Yojson.Safe.t =
 (* ================================================================ *)
 
 let clear () =
-  Hashtbl.clear tasks
+  with_tasks_rw (fun () -> Hashtbl.clear tasks)

@@ -1,4 +1,4 @@
-// MASC Dashboard — Status Surface (Phase 2: fleet-health unified)
+// MASC Dashboard — Status Surface (Phase 2+4: fleet-health + runtime unified)
 // Read-only observability surfaces: observatory, agents, activity, runtime,
 // fleet-health (FilterChips unified panel), memory-subsystems.
 
@@ -6,10 +6,8 @@ import { html } from 'htm/preact'
 import { route } from '../router'
 import { AgentsUnified } from './agents-unified'
 import { Activity } from './activity'
-import { RuntimeMonitor } from './runtime-monitor'
-import { OasHealthChip } from './oas-health-chip'
+import { RuntimePanel } from './runtime-panel'
 import { MemorySubsystems } from './memory-subsystems'
-import { PrometheusMetrics } from './prometheus-metrics'
 import { FleetHealthPanel } from './fleet-health-panel'
 import { Observatory } from './observatory/observatory'
 
@@ -36,13 +34,7 @@ export function Status() {
           : section === 'activity'
             ? html`<${Activity} />`
           : section === 'runtime'
-            ? html`
-              <div class="grid gap-4">
-                <${OasHealthChip} />
-                <${RuntimeMonitor} />
-                <${PrometheusMetrics} />
-              </div>
-            `
+            ? html`<${RuntimePanel} />`
           : section === 'fleet-health'
             ? html`<${FleetHealthPanel} />`
           : section === 'memory-subsystems'

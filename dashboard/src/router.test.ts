@@ -15,23 +15,23 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('board')
   })
 
-  it('redirects removed warroom params to intervene', () => {
+  it('redirects removed warroom params to operations', () => {
     navigate('command', { section: 'warroom', surface: 'swarm' })
     expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('intervene')
+    expect(route.value.params.section).toBe('operations')
     expect(route.value.params.surface).toBeUndefined()
   })
 
-  it('keeps governance params on the command surface', () => {
+  it('redirects governance to operations on the command surface (Phase 1)', () => {
     navigate('command', { section: 'governance' })
     expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('governance')
+    expect(route.value.params.section).toBe('operations')
   })
 
-  it('keeps governance deep links on the command surface', () => {
+  it('redirects governance deep links to operations on the command surface', () => {
     window.location.hash = '#command/governance'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('governance')
+    expect(route.value.params.section).toBe('operations')
   })
 })

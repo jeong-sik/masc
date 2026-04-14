@@ -508,7 +508,7 @@ function OperationsHubCard() {
         label="운영 허브"
         linkLabel="거버넌스 열기 ->"
         linkTab="command"
-        linkParams=${{ section: 'governance' }}
+        linkParams=${{ section: 'operations' }}
       />
       <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-4 max-[900px]:grid-cols-1">
         <div class="rounded-xl border border-card-border/40 bg-card/40 p-4">
@@ -547,7 +547,7 @@ function OperationsHubCard() {
         <div class="flex flex-col gap-2">
           <${RouteLink}
             tab="command"
-            params=${{ section: 'governance' }}
+            params=${{ section: 'operations' }}
             class="rounded-xl border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
             title="거버넌스 열기"
           >
@@ -555,7 +555,7 @@ function OperationsHubCard() {
           <//>
           <${RouteLink}
             tab="command"
-            params=${{ section: 'intervene' }}
+            params=${{ section: 'operations' }}
             class="rounded-xl border border-card-border/45 bg-card/45 px-4 py-3 text-[13px] font-semibold text-[var(--text-strong)] transition-colors hover:bg-card"
             title="실시간 개입 열기"
           >

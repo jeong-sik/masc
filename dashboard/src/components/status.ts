@@ -1,7 +1,6 @@
-// MASC Dashboard — Status Surface
-// Read-only observability surfaces: agents, activity, runtime, telemetry, governance,
-// memory-subsystems, fsm-hub, metrics, tool-quality, fleet.
-// (sessions section removed in Phase 0 of RFC-MASC-006 — overlapped with overview.)
+// MASC Dashboard — Status Surface (Phase 1: consolidated)
+// Read-only observability surfaces: observatory, agents, activity, runtime,
+// fleet-health (absorbs telemetry + fleet + tool-quality + governance), memory-subsystems.
 
 import { html } from 'htm/preact'
 import { route } from '../router'
@@ -12,23 +11,44 @@ import { OasHealthChip } from './oas-health-chip'
 import { TelemetryUnified } from './telemetry-unified'
 import { GovernanceMonitor } from './governance-monitor'
 import { MemorySubsystems } from './memory-subsystems'
-import { FsmHub } from './fsm-hub'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { Observatory } from './observatory/observatory'
 
-type StatusSection = 'observatory' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems' | 'fsm-hub' | 'metrics' | 'tool-quality' | 'fleet'
+type StatusSection = 'observatory' | 'agents' | 'activity' | 'runtime' | 'fleet-health' | 'memory-subsystems'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
     section === 'observatory'
     || section === 'activity' || section === 'runtime'
-    || section === 'telemetry' || section === 'governance' || section === 'memory-subsystems'
-    || section === 'fsm-hub' || section === 'metrics' || section === 'tool-quality' || section === 'fleet'
+    || section === 'fleet-health' || section === 'memory-subsystems'
   ) return section
   return 'agents'
+}
+
+// Phase 1 interim: routes fleet-health sub-views to existing panel components.
+// Phase 2 replaces this with a unified FleetHealthPanel using FilterChips.
+type FleetHealthView = 'event-log' | 'comparison' | 'tool-quality' | 'governance'
+
+function currentFleetView(): FleetHealthView {
+  const view = route.value.params.view
+  if (view === 'comparison' || view === 'tool-quality' || view === 'governance') return view
+  return 'event-log'
+}
+
+function FleetHealthRouter() {
+  const view = currentFleetView()
+  return html`
+    ${view === 'event-log'
+      ? html`<${TelemetryUnified} />`
+    : view === 'comparison'
+      ? html`<${FleetTelemetryPanel} />`
+    : view === 'tool-quality'
+      ? html`<${ToolQualityPanel} />`
+    : html`<${GovernanceMonitor} />`}
+  `
 }
 
 export function Status() {
@@ -46,22 +66,13 @@ export function Status() {
               <div class="grid gap-4">
                 <${OasHealthChip} />
                 <${RuntimeMonitor} />
+                <${PrometheusMetrics} />
               </div>
             `
-          : section === 'telemetry'
-            ? html`<${TelemetryUnified} />`
-          : section === 'governance'
-            ? html`<${GovernanceMonitor} />`
+          : section === 'fleet-health'
+            ? html`<${FleetHealthRouter} />`
           : section === 'memory-subsystems'
             ? html`<${MemorySubsystems} />`
-          : section === 'fsm-hub'
-            ? html`<${FsmHub} />`
-          : section === 'metrics'
-            ? html`<${PrometheusMetrics} />`
-          : section === 'tool-quality'
-            ? html`<${ToolQualityPanel} />`
-          : section === 'fleet'
-            ? html`<${FleetTelemetryPanel} />`
             : html`<${AgentsUnified} />`}
       </div>
     </div>

@@ -276,7 +276,7 @@ export function Planning() {
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg border border-accent/25 bg-[var(--accent-12)] px-3 py-1.5 text-[12px] font-medium text-accent transition-colors hover:border-accent/40 hover:bg-[var(--accent-15)]"
-            onClick=${() => navigate('workspace', { section: 'goals' })}
+            onClick=${() => navigate('workspace', { section: 'planning' })}
           >
             목표 트리에서 보기
             <span aria-hidden="true">\u2192</span>

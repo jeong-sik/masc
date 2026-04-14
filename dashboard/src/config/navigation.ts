@@ -2,26 +2,24 @@ import type { RouteState, TabId } from '../types'
 
 export type SurfaceId = TabId
 export type SurfaceSectionId =
+  // monitoring
   | 'observatory'
   | 'agents'
-  | 'activity'
+  | 'activity'       // kept alongside observatory until observatory exits beta
+  | 'runtime'
+  | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'memory-subsystems'
+  // command
+  | 'operations'     // Phase 1: absorbs intervene + command governance
+  | 'connectors'
+  | 'inspector'
+  // workspace
   | 'board'
-  | 'governance'
-  | 'planning'
-  | 'goals'
-  | 'intervene'
+  | 'planning'       // Phase 1: absorbs goals
+  // lab
   | 'tools'
   | 'autoresearch'
   | 'harness'
-  | 'inspector'
-  | 'runtime'
-  | 'telemetry'
-  | 'tool-quality'
-  | 'fleet'
-  | 'connectors'
-  | 'memory-subsystems'
-  | 'fsm-hub'
-  | 'metrics'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -76,7 +74,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     icon: '🎛️',
     description: '실시간 개입과 거버넌스 판단/승인 운영 화면',
     defaultTab: 'command',
-    defaultParams: { section: 'intervene' },
+    defaultParams: { section: 'operations' },
     tabs: ['command'],
   },
   {
@@ -132,7 +130,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'activity',
       label: '활동 그래프',
-      description: '실시간 이벤트 흐름 (broadcast, task, keeper 이벤트).',
+      description: '실시간 이벤트 흐름 (broadcast, task, keeper 이벤트). Observatory 졸업 후 통합 예정.',
       params: { section: 'activity' },
     },
     {
@@ -142,16 +140,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'runtime' },
     },
     {
-      id: 'telemetry',
-      label: '텔레메트리',
-      description: 'append-only 이벤트 기록. runtime snapshot은 별도 런타임 탭에서 봅니다.',
-      params: { section: 'telemetry' },
-    },
-    {
-      id: 'governance',
-      label: '도구 이벤트',
-      description: '읽기 전용: 도구 거부 집계, 승인 큐 깊이/지연. 승인 액션은 운영 › 거버넌스에서.',
-      params: { section: 'governance' },
+      id: 'fleet-health',
+      label: 'Fleet 건강',
+      description: '텔레메트리 이벤트, Fleet 비교, 도구 품질, 거버넌스 지표를 통합 뷰로.',
+      params: { section: 'fleet-health' },
     },
     {
       id: 'memory-subsystems',
@@ -159,43 +151,13 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
       params: { section: 'memory-subsystems' },
     },
-    {
-      id: 'fsm-hub',
-      label: 'FSM 허브',
-      description: 'Composite lifecycle — Decision/Cascade/Memory/Compaction FSM 교차 뷰와 invariants.',
-      params: { section: 'fsm-hub' },
-    },
-    {
-      id: 'metrics',
-      label: 'Prometheus',
-      description: '저수준 raw 지표(/metrics): counter·gauge·summary. 디버깅과 알림 소스용.',
-      params: { section: 'metrics' },
-    },
-    {
-      id: 'tool-quality',
-      label: '도구 품질',
-      description: 'Keeper tool call 성공률, 실패 카테고리, keeper별 품질 지표.',
-      params: { section: 'tool-quality' },
-    },
-    {
-      id: 'fleet',
-      label: 'Fleet 텔레메트리',
-      description: 'Keeper 전체 비교: tok/sec, latency, error 분류, model 분포, compaction.',
-      params: { section: 'fleet' },
-    },
   ],
   command: [
     {
-      id: 'intervene',
-      label: '실시간 개입',
-      description: '쓰기 액션: 네임스페이스 브로드캐스트, 키퍼에게 직접 메시지 발송. 세션 읽기는 모니터링 › 세션에서.',
-      params: { section: 'intervene' },
-    },
-    {
-      id: 'governance',
-      label: '승인 큐',
-      description: '쓰기 액션: 자율 결정 검토·승인·반려. 추이 관찰은 모니터링 › 도구 이벤트에서.',
-      params: { section: 'governance' },
+      id: 'operations',
+      label: '운영 행동',
+      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려를 한 화면에서.',
+      params: { section: 'operations' },
     },
     {
       id: 'connectors',
@@ -219,15 +181,9 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'planning',
-      label: '작업 큐',
-      description: '실행 단위의 칸반과 백로그. 상위 의도 구조는 목표 트리에서.',
+      label: '계획 & 목표',
+      description: '실행 단위 칸반과 상위 의도 구조(목표 트리)를 함께 봅니다.',
       params: { section: 'planning' },
-    },
-    {
-      id: 'goals',
-      label: '목표 트리',
-      description: '의도의 부모-자식 계층과 수렴도. 실행 단위 태스크는 작업 큐에서.',
-      params: { section: 'goals' },
     },
   ],
   lab: [
@@ -272,20 +228,21 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
 /**
  * Redirect table for legacy section IDs.
  *
- * Key: (tab, old section) → value: { section, view?, tab? }
+ * Key: (tab, old section) → value: { section, view? }
  *
- * `tab` override allows cross-surface redirects (e.g. future misroute fixes).
- * `view` sets/overrides the view query param when absent or for canonicalization.
+ * `view` sets the view query param when absent, for canonicalization into
+ * fleet-health sub-views.
  *
- * Contract (Phase -1 / RFC consolidation):
+ * Contract:
  *   - Redirects are applied BEFORE section validation.
- *   - Caller-supplied query params (session_id, operation_id, worker_run_id, tool,
- *     target_id, keeper, agent, ns, range, etc.) are preserved.
- *   - This function MUST remain pure. Side effects (modal open, analytics) must
- *     live in router/app effects, not here.
+ *   - Caller-supplied query params (session_id, operation_id, worker_run_id,
+ *     tool, target_id, keeper, agent, ns, range, etc.) are preserved.
+ *   - This function MUST remain pure. Side effects (modal open, analytics)
+ *     must live in router/app effects, not here.
+ *   - Cross-surface redirects are not supported (normalizeRouteParams returns
+ *     params for the same tab). Cross-surface routing lives in the router.
  */
 export interface SectionRedirect {
-  tab?: TabId
   section: string
   view?: string
 }
@@ -293,11 +250,23 @@ export interface SectionRedirect {
 type TabSectionKey = `${TabId}:${string}`
 
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
-  // RFC-MASC-006 Phase 0: sessions stub removed — redirect to agents
+  // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
-  // Dashboard consolidation Phase 1+ redirects are added in later phases
-  // once the target sections exist in SurfaceSectionId. See dashboard/docs/
-  // consolidation/route-inventory.md for the full contract.
+
+  // Dashboard consolidation Phase 1: monitoring surface
+  'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
+  'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
+  'monitoring:tool-quality': { section: 'fleet-health', view: 'tool-quality' },
+  'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
+  'monitoring:fsm-hub':      { section: 'agents' },
+  'monitoring:metrics':      { section: 'runtime' },
+
+  // Dashboard consolidation Phase 1: command surface
+  'command:intervene':  { section: 'operations' },
+  'command:governance': { section: 'operations' },
+
+  // Dashboard consolidation Phase 1: workspace surface
+  'workspace:goals': { section: 'planning' },
 }
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {

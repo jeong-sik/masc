@@ -88,7 +88,7 @@ export function CommandPalette() {
         title: '거버넌스로 이동 (Governance)',
         section: 'Navigation',
         keywords: 'approval review hitl judge',
-        handler: () => navigate('command', { section: 'governance' })
+        handler: () => navigate('command', { section: 'operations' })
       },
       {
         id: 'nav-lab',

@@ -23,21 +23,19 @@ describe('lab navigation', () => {
 })
 
 describe('command navigation', () => {
-  it('includes inspector alongside intervene, governance (승인 큐), and connectors', () => {
-    expect(defaultParamsForTab('command')).toEqual({ section: 'intervene' })
+  it('includes inspector alongside operations (consolidated) and connectors', () => {
+    expect(defaultParamsForTab('command')).toEqual({ section: 'operations' })
 
     const commandSections = visibleSectionItemsForTab('command')
 
     expect(commandSections.map(item => item.id)).toEqual([
-      'intervene',
-      'governance',
+      'operations',
       'connectors',
       'inspector',
     ])
 
     expect(commandSections.map(item => item.label)).toEqual([
-      '실시간 개입',
-      '승인 큐',
+      '운영 행동',
       '커넥터',
       '운영 인스펙터',
     ])
@@ -45,12 +43,12 @@ describe('command navigation', () => {
 })
 
 describe('monitoring navigation labels', () => {
-  it('uses Korean label for 도구 이벤트 and keeps Prometheus naming', () => {
+  it('uses Korean labels for consolidated monitoring sections', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('governance')).toBe('도구 이벤트')
-    expect(labelFor('metrics')).toBe('Prometheus')
+    expect(labelFor('fleet-health')).toBe('Fleet 건강')
+    expect(labelFor('runtime')).toBe('런타임')
     expect(labelFor('agents')).toBe('에이전트 & 키퍼')
   })
 
@@ -61,24 +59,30 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces tool-quality and fleet alongside telemetry/metrics', () => {
+  it('surfaces fleet-health as consolidated monitoring section (Phase 1)', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
 
-    expect(ids).toContain('tool-quality')
-    expect(ids).toContain('fleet')
-    expect(ids).toContain('telemetry')
-    expect(ids).toContain('metrics')
+    expect(ids).toContain('fleet-health')
+    expect(ids).toContain('runtime')
+    // Legacy sections removed in Phase 1
+    expect(ids).not.toContain('tool-quality')
+    expect(ids).not.toContain('fleet')
+    expect(ids).not.toContain('telemetry')
+    expect(ids).not.toContain('metrics')
+    expect(ids).not.toContain('governance')
   })
 })
 
 describe('workspace navigation labels', () => {
-  it('renames planning to 작업 큐 and keeps 목표 트리', () => {
+  it('uses consolidated planning label (absorbs goals)', () => {
     const sections = visibleSectionItemsForTab('workspace')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('planning')).toBe('작업 큐')
-    expect(labelFor('goals')).toBe('목표 트리')
+    expect(labelFor('planning')).toBe('계획 & 목표')
+    // goals is no longer a standalone section
+    const ids = sections.map(item => item.id)
+    expect(ids).not.toContain('goals')
   })
 })
 
@@ -89,9 +93,10 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(redirected.session_id).toBe('s-123')
   })
 
-  it('leaves other valid monitoring sections untouched', () => {
+  it('redirects telemetry to fleet-health with event-log view (Phase 1)', () => {
     const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
-    expect(result.section).toBe('telemetry')
+    expect(result.section).toBe('fleet-health')
+    expect(result.view).toBe('event-log')
   })
 })
 
@@ -114,29 +119,31 @@ describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
 })
 
 describe('normalizeRouteParams query param preservation', () => {
-  it('preserves telemetry deep-link params through identity mapping', () => {
+  it('preserves telemetry deep-link params through fleet-health redirect', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'telemetry',
       session_id: 'sess-1',
       operation_id: 'op-42',
       worker_run_id: 'run-7',
     })
-    expect(result.section).toBe('telemetry')
+    expect(result.section).toBe('fleet-health')
+    expect(result.view).toBe('event-log')
     expect(result.session_id).toBe('sess-1')
     expect(result.operation_id).toBe('op-42')
     expect(result.worker_run_id).toBe('run-7')
   })
 
-  it('preserves tool query param for tool-quality section', () => {
+  it('preserves tool query param through tool-quality → fleet-health redirect', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'tool-quality',
       tool: 'bash',
     })
-    expect(result.section).toBe('tool-quality')
+    expect(result.section).toBe('fleet-health')
+    expect(result.view).toBe('tool-quality')
     expect(result.tool).toBe('bash')
   })
 
-  it('preserves intervene workflow params (target_type, target_id, source)', () => {
+  it('preserves intervene workflow params through operations redirect', () => {
     const result = normalizeRouteParams('command', {
       section: 'intervene',
       target_type: 'operation',
@@ -144,7 +151,7 @@ describe('normalizeRouteParams query param preservation', () => {
       source: 'execution',
       focus_kind: 'operation',
     })
-    expect(result.section).toBe('intervene')
+    expect(result.section).toBe('operations')
     expect(result.target_type).toBe('operation')
     expect(result.target_id).toBe('op-x')
     expect(result.source).toBe('execution')
@@ -158,35 +165,33 @@ describe('normalizeRouteParams query param preservation', () => {
   })
 })
 
-describe('normalizeRouteParams view param (forward contract)', () => {
-  it('preserves explicit view param on valid sections', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'telemetry', view: 'event-log' })
-    expect(result.section).toBe('telemetry')
+describe('normalizeRouteParams view param (Phase 1 active)', () => {
+  it('preserves explicit view param on fleet-health', () => {
+    const result = normalizeRouteParams('monitoring', { section: 'fleet-health', view: 'event-log' })
+    expect(result.section).toBe('fleet-health')
     expect(result.view).toBe('event-log')
   })
 
-  it('does not inject a view param when absent', () => {
-    const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
+  it('does not inject a view param when absent on a non-redirected section', () => {
+    const result = normalizeRouteParams('monitoring', { section: 'agents' })
     expect(result.view).toBeUndefined()
   })
 
-  it('sets view from redirect table when redirect provides one', () => {
-    // No such redirect entry exists in Phase -1, but the mechanism is exercised
-    // so Phase 1+ can rely on it without reworking the pipeline.
-    // Verified indirectly by the SECTION_REDIRECTS contract test above.
-    expect(true).toBe(true)
+  it('injects view from redirect table when redirect provides one', () => {
+    // telemetry → fleet-health with view=event-log
+    const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
+    expect(result.section).toBe('fleet-health')
+    expect(result.view).toBe('event-log')
   })
 })
 
 // -----------------------------------------------------------------------------
-// Forward contract — consolidation Phase 1+
+// Consolidation redirects — Phase 1 active
 //
-// These tests document the redirect shape that Phase 1 will enable when the
-// new sections (fleet-health, operations, etc.) are added to SurfaceSectionId.
-// They intentionally use `.skip` so Phase -1 merges green; remove `.skip` and
-// the assertions activate automatically once the target sections exist.
+// These tests verify the redirect shape for Phase 1 consolidation where
+// new sections (fleet-health, operations, etc.) replace legacy section IDs.
 // -----------------------------------------------------------------------------
-describe.skip('consolidation redirects (activated in Phase 1)', () => {
+describe('consolidation redirects (Phase 1)', () => {
   it.each([
     ['telemetry', { session_id: 'abc' }, 'fleet-health', 'event-log', { session_id: 'abc' }],
     ['telemetry', { operation_id: 'op1' }, 'fleet-health', 'event-log', { operation_id: 'op1' }],

@@ -295,7 +295,7 @@ describe('Overview freshness strip', () => {
       .find(candidate => candidate.textContent?.includes('거버넌스 열기'))
     governanceLink?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
-    expect(navigate).toHaveBeenCalledWith('command', { section: 'governance' })
+    expect(navigate).toHaveBeenCalledWith('command', { section: 'operations' })
   }, 15000)
 
   it('renders the meta-cognition summary card when shell data is available', async () => {

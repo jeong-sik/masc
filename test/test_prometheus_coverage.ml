@@ -214,7 +214,11 @@ let test_keeper_metrics_registered () =
   check bool "has keeper heartbeat successes counter" true
     (has "masc_keeper_heartbeat_successes_total");
   check bool "has keeper heartbeat failures counter" true
-    (has "masc_keeper_heartbeat_failures_total")
+    (has "masc_keeper_heartbeat_failures_total");
+  check bool "has operator compact counter" true
+    (has "masc_keeper_operator_compact_total");
+  check bool "has operator clear counter" true
+    (has "masc_keeper_operator_clear_total")
 
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in

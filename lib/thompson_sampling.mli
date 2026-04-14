@@ -31,6 +31,11 @@ type agent_stats = {
   mutable posts_created : int;
   mutable comments_created : int;
   mutable skips : int;
+  (* Guard penalty tracking (Phase B1: Guard → Thompson bridge).
+     Incremented on each [record_guard_penalty] call. The caller enforces
+     the 1/cycle cap so this value approximates "cycles in which the
+     guardrail fired" without a separate cycle-boundary state machine. *)
+  mutable guard_penalties_total : int;
   (* Timestamp *)
   mutable updated_at : float;
 }

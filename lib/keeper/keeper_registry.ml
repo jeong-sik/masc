@@ -782,6 +782,21 @@ let dispatch_event_with_audit
             ~phase:tr.new_phase
             ~ts_unix:now)
          tr.entry_actions;
+       (* Composite-lifecycle SSE envelope — RFC-0003 §6.
+          The body carries only the keeper name and observation timestamp;
+          subscribers re-fetch [/api/v1/keepers/:name/composite] for the
+          full snapshot so the spec's "single writer, pull observers"
+          invariant is preserved. *)
+       (try
+          Sse.broadcast
+            (`Assoc [
+               "type", `String "keeper_composite_changed";
+               "name", `String name;
+               "ts_unix", `Float now;
+             ])
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _exn -> ());
        Ok tr
      | Ok tr ->
        (* No phase change — still update conditions *)
@@ -799,6 +814,16 @@ let dispatch_event_with_audit
          transition_seq = new_seq;
          last_auto_rules;
        };
+       (try
+          Sse.broadcast
+            (`Assoc [
+               "type", `String "keeper_composite_changed";
+               "name", `String name;
+               "ts_unix", `Float now;
+             ])
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _exn -> ());
        Ok tr
      | Error e ->
        Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"

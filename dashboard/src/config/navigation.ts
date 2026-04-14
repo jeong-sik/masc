@@ -19,6 +19,7 @@ export type SurfaceSectionId =
   | 'fleet'
   | 'connectors'
   | 'memory-subsystems'
+  | 'fsm-hub'
   | 'metrics'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
@@ -150,6 +151,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '기억 서브시스템',
       description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
       params: { section: 'memory-subsystems' },
+    },
+    {
+      id: 'fsm-hub',
+      label: 'FSM 허브',
+      description: 'Composite lifecycle — Decision/Cascade/Memory/Compaction FSM 교차 뷰와 invariants.',
+      params: { section: 'fsm-hub' },
     },
     {
       id: 'metrics',

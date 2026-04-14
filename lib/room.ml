@@ -183,24 +183,52 @@ let () = Room_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
 (* Relation materializer — task done *)
 let () = Room_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
 
-(* Hebbian learning — strengthen on task completion *)
+(* Hebbian learning — strengthen on task completion.
+   Also emits activity events so strengthens appear in the
+   activity graph / telemetry surface alongside task events. *)
 let () = Room_hooks.hebbian_on_task_done_fn :=
   (fun config ~assignee ~active_agents ->
     List.iter (fun peer ->
-      if peer <> assignee then
+      if peer <> assignee then begin
         (try Hebbian_eio.strengthen config ~from_agent:assignee ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Room.warn "hebbian strengthen failed: %s" (Printexc.to_string exn))
+           Log.Room.warn "hebbian strengthen failed: %s" (Printexc.to_string exn));
+        (try
+           !Room_hooks.activity_emit_fn config
+             ~actor:Room_hooks.{ kind = "agent"; id = assignee }
+             ~subject:Room_hooks.{ kind = "agent"; id = peer }
+             ~kind:"hebbian.strengthen"
+             ~payload:(`Assoc [
+               ("from_agent", `String assignee);
+               ("to_agent", `String peer);
+             ])
+             ~tags:[ "hebbian"; "strengthen"; "memory" ]
+             ()
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+      end
     ) active_agents)
 
-(* Hebbian learning — weaken on task cancellation *)
+(* Hebbian learning — weaken on task cancellation. *)
 let () = Room_hooks.hebbian_on_task_cancelled_fn :=
   (fun config ~agent_name ~active_agents ->
     List.iter (fun peer ->
-      if peer <> agent_name then
+      if peer <> agent_name then begin
         (try Hebbian_eio.weaken config ~from_agent:agent_name ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Room.warn "hebbian weaken failed: %s" (Printexc.to_string exn))
+           Log.Room.warn "hebbian weaken failed: %s" (Printexc.to_string exn));
+        (try
+           !Room_hooks.activity_emit_fn config
+             ~actor:Room_hooks.{ kind = "agent"; id = agent_name }
+             ~subject:Room_hooks.{ kind = "agent"; id = peer }
+             ~kind:"hebbian.weaken"
+             ~payload:(`Assoc [
+               ("from_agent", `String agent_name);
+               ("to_agent", `String peer);
+             ])
+             ~tags:[ "hebbian"; "weaken"; "memory" ]
+             ()
+         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+      end
     ) active_agents)
 
 let () = Room_hooks.observe_agent_lifecycle_fn :=

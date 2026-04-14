@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
+import { MermaidGraph } from './common/mermaid-graph'
 import {
   fetchMemorySubsystems,
   type MemorySubsystemsResponse,
@@ -13,6 +14,142 @@ import { isAbortError } from '../lib/async-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
 const REFRESH_MS = 30_000
+
+const ARCHITECTURE_FLOW = `graph LR
+    subgraph Keeper["Keeper Turn"]
+      K1[LLM 응답 생성] --> K2["[STATE] 파싱"]
+      K2 --> K3{STATE 있음?}
+    end
+
+    K3 -->|Yes| M1[store_episode_from_snapshot]
+    M1 --> M2[Memory.t in-memory]
+    M2 --> M3[flush_incremental]
+    M3 --> F1[(institution_episodes.jsonl)]
+    F1 -->|cap 500| F1
+
+    subgraph Task["Task Completion"]
+      T1[keeper_task_done] --> T2[transition_task_r]
+      T2 --> T3[Done_action 분기]
+    end
+
+    T3 --> H1[hebbian_on_task_done_fn]
+    H1 --> H2["List.iter: strengthen per peer"]
+    H2 --> G1[(graph.json)]
+
+    subgraph Dashboard["Dashboard"]
+      D1[fetchMemorySubsystems]
+    end
+
+    F1 --> D1
+    G1 --> D1
+    D1 --> UI[기억 서브시스템 패널]
+
+    classDef store fill:#1e293b,stroke:#334155,color:#f1f5f9
+    classDef action fill:#0f766e,stroke:#14b8a6,color:#f0fdfa
+    classDef ui fill:#7c2d12,stroke:#f97316,color:#ffedd5
+    class F1,G1 store
+    class M1,M3,H1,H2,T2 action
+    class UI ui`
+
+function HebbianNetwork({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
+  if (synapses.length === 0) return null
+
+  const nodes = new Map<string, number>()
+  synapses.forEach(s => {
+    nodes.set(s.from_agent, (nodes.get(s.from_agent) ?? 0) + 1)
+    nodes.set(s.to_agent, (nodes.get(s.to_agent) ?? 0) + 1)
+  })
+
+  const nodeNames = Array.from(nodes.keys())
+  const width = 600
+  const height = 360
+  const cx = width / 2
+  const cy = height / 2
+  const radius = Math.min(width, height) / 2 - 60
+
+  const positions = new Map<string, { x: number; y: number }>()
+  nodeNames.forEach((name, i) => {
+    const angle = (i / nodeNames.length) * Math.PI * 2 - Math.PI / 2
+    positions.set(name, {
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
+    })
+  })
+
+  const shortLabel = (name: string) => {
+    const trimmed = name.replace(/^keeper-/, '').replace(/-agent$/, '')
+    return trimmed.length > 10 ? trimmed.slice(0, 9) + '…' : trimmed
+  }
+
+  return html`
+    <div class="bg-zinc-900 rounded-lg p-2 overflow-x-auto">
+      <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" style="max-height:400px">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" class="text-zinc-600" />
+          </marker>
+        </defs>
+        ${synapses.map(s => {
+          const from = positions.get(s.from_agent)
+          const to = positions.get(s.to_agent)
+          if (!from || !to) return null
+          const pct = Math.round(s.weight * 100)
+          const stroke =
+            pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#f87171'
+          const sw = Math.max(1, s.weight * 4)
+          const dx = to.x - from.x
+          const dy = to.y - from.y
+          const len = Math.sqrt(dx * dx + dy * dy)
+          const ux = dx / len
+          const uy = dy / len
+          const sx = from.x + ux * 22
+          const sy = from.y + uy * 22
+          const ex = to.x - ux * 22
+          const ey = to.y - uy * 22
+          return html`<line
+            x1=${sx}
+            y1=${sy}
+            x2=${ex}
+            y2=${ey}
+            stroke=${stroke}
+            stroke-width=${sw}
+            opacity="0.7"
+            marker-end="url(#arrow)"
+          />`
+        })}
+        ${nodeNames.map(name => {
+          const pos = positions.get(name)!
+          const label = shortLabel(name)
+          const isKeeper = name.startsWith('keeper-')
+          const fill = isKeeper ? '#1e293b' : '#0f172a'
+          const stroke = isKeeper ? '#3b82f6' : '#64748b'
+          return html`
+            <g>
+              <circle
+                cx=${pos.x}
+                cy=${pos.y}
+                r="22"
+                fill=${fill}
+                stroke=${stroke}
+                stroke-width="2"
+              />
+              <text
+                x=${pos.x}
+                y=${pos.y + 4}
+                text-anchor="middle"
+                font-size="11"
+                fill="#f1f5f9"
+                font-family="monospace"
+              >
+                ${label}
+              </text>
+            </g>
+          `
+        })}
+      </svg>
+    </div>
+  `
+}
 
 function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
   const pct = Math.round(s.weight * 100)
@@ -160,8 +297,39 @@ export function MemorySubsystems() {
 
   const hasFilter = Boolean(keeperFilter.value || outcomeFilter.value || searchQuery.value)
 
+  const showArch = useSignal(false)
+
   return html`
     <div class="space-y-6">
+      <!-- Architecture Flow (collapsible) -->
+      <section>
+        <button
+          onClick=${() => (showArch.value = !showArch.value)}
+          class="w-full flex items-center justify-between p-2 bg-zinc-900 rounded-lg hover:bg-zinc-800 transition-colors"
+        >
+          <span class="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+            <span class="text-xs">${showArch.value ? '▼' : '▶'}</span>
+            아키텍처 — 데이터 흐름도
+          </span>
+          <span class="text-xs text-zinc-500">
+            Keeper turn → Memory.t → JSONL / task_done → Hebbian → graph.json
+          </span>
+        </button>
+        ${
+          showArch.value
+            ? html`
+                <div class="mt-2 bg-zinc-900 rounded-lg p-3">
+                  <${MermaidGraph}
+                    source=${ARCHITECTURE_FLOW}
+                    prefix="memory-arch"
+                    minHeightClass="min-h-[320px]"
+                  />
+                </div>
+              `
+            : null
+        }
+      </section>
+
       <!-- Hebbian Synapses -->
       <section>
         <div class="flex items-center justify-between mb-3">
@@ -175,6 +343,11 @@ export function MemorySubsystems() {
             }
           </div>
         </div>
+        ${
+          synapses.length > 0
+            ? html`<div class="mb-3"><${HebbianNetwork} synapses=${synapses} /></div>`
+            : null
+        }
         ${
           synapses.length === 0
             ? html`<div class="text-sm text-zinc-500 bg-zinc-900 rounded-lg p-4 text-center">

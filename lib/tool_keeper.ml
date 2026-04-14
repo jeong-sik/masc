@@ -665,7 +665,7 @@ let handle_keeper_compact ctx args : tool_result =
       | Ok None | Error _ ->
         (false, Printf.sprintf "keeper %s: meta unavailable for compaction" name)
       | Ok (Some (_resolved, meta)) ->
-        let base_dir = Filename.concat ctx.config.base_path name in
+        let base_dir = Keeper_types.session_base_dir ctx.config in
         let model = Keeper_exec_context.checkpoint_model_of_meta meta in
         let max_tokens =
           match meta.max_context_override with
@@ -732,7 +732,7 @@ let handle_keeper_clear ctx args : tool_result =
         | Some entry -> Keeper_state_machine.phase_to_string entry.phase
         | None -> "unknown"
       in
-      let base_dir = Filename.concat ctx.config.base_path name in
+      let base_dir = Keeper_types.session_base_dir ctx.config in
       let trace_id = Keeper_exec_context.generate_trace_id () in
       let max_tokens =
         match read_meta_resolved ctx.config name with

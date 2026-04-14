@@ -64,6 +64,8 @@ let is_meaningful_memory_text (s : string) : bool =
     "미정";
   ] in
   not (List.mem key placeholders)
+  && not (String_util.contains_substring s "[SYNTHETIC]")
+  && not (String.equal (String.trim s) "No tools used this generation")
 
 let memory_candidates_from_snapshot
     (snapshot : keeper_state_snapshot) : (string * string * int) list =

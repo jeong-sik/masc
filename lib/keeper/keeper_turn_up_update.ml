@@ -117,9 +117,15 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     mid_goal;
     long_goal;
     cascade_name =
-      (if String.trim old.cascade_name <> "" then
-         Keeper_cascade_profile.canonicalize old.cascade_name
-       else Keeper_config.default_cascade_name);
+      (* TOML cascade_name takes precedence over runtime JSON when present.
+         Without this, changing cascade_name in keepers/*.toml has no effect
+         until the runtime JSON is deleted.  See #6747. *)
+      (match p.profile_defaults.cascade_name with
+       | Some name -> Keeper_cascade_profile.canonicalize name
+       | None ->
+         if String.trim old.cascade_name <> "" then
+           Keeper_cascade_profile.canonicalize old.cascade_name
+         else Keeper_config.default_cascade_name);
     will =
       Option.value
         ~default:

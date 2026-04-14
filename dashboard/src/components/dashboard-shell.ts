@@ -17,6 +17,7 @@ import {
   visibleSectionItemsForTab,
 } from '../config/navigation'
 import { RouteLink } from './common/route-link'
+import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
@@ -334,6 +335,7 @@ export function DashboardMain() {
       <div class="mb-3 shrink-0 rounded-xl border border-solid border-[rgba(230,167,0,0.22)] bg-[rgba(230,167,0,0.1)] px-4 py-1.5 text-center text-[0.78rem] text-[#e6a700]">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${SurfaceLead} />
+    <${ObservatoryFilterBar} />
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <div class="animate-in fade-in slide-in-from-bottom-2 duration-300 fill-mode-both">
         <${TabContent} />

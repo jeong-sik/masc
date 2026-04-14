@@ -33,6 +33,7 @@ vi.mock('./common/empty-state', () => ({
 
 vi.mock('./common/input', () => ({
   TextInput: (props: Record<string, unknown>) => h('input', props),
+  TextArea: (props: Record<string, unknown>) => h('textarea', props),
 }))
 
 vi.mock('./memory-state', () => ({

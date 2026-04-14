@@ -37,8 +37,21 @@ type call_stats = {
   mutable deprecated_alias_count : int;
 }
 
-(** Global registry - process-lifetime, protected by mutex for fiber safety *)
+(** Global registry — process-lifetime. Protected by [registry_mu] against
+    concurrent access from tool dispatch (write path via [record_call]) and
+    HTTP dashboard handlers (read path via [get_stats]/[stats_report]).
+
+    Within a single Eio domain the RMW in [record_call] (find_opt → replace
+    → mutate fields) happens to be atomic today only because none of the
+    steps yield, but that is an implicit contract on the scheduler, not on
+    this module. The mutex makes the contract explicit so the invariant
+    survives future code changes (e.g. a yielding telemetry callback) and
+    any future cross-domain use. *)
 let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
+
+let registry_mu = Eio.Mutex.create ()
+let with_registry_rw f = Eio_guard.with_mutex registry_mu f
+let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 (** Use raw_all_tool_schemas to include hidden/internal tools.
     Previously used Config.all_tool_schemas (public-filtered), which caused
     hidden tools to be structurally undercounted in telemetry. *)
@@ -53,46 +66,62 @@ let known_tool_names : (string, unit) Hashtbl.t Eio.Lazy.t =
 let is_known_tool tool_name =
   Hashtbl.mem (Eio.Lazy.force known_tool_names) tool_name
 
-(** Record a tool call with source attribution. *)
+(** Record a tool call with source attribution.
+
+    The whole find-or-create + accumulator mutation runs under
+    [with_registry_rw] so two concurrent calls cannot both observe [None]
+    for the same [tool_name] and both install a fresh [call_stats] record
+    (which would drop one increment). Re-entry is not possible because
+    the body performs only non-yielding computation. *)
 let record_call ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
-  let stats =
-    match Hashtbl.find_opt registry tool_name with
-    | Some s -> s
-    | None ->
-        let s = {
-          call_count = 0;
-          success_count = 0;
-          failure_count = 0;
-          last_called_at = 0.0;
-          total_duration_ms = 0;
-          external_mcp_count = 0;
-          keeper_internal_count = 0;
-          inline_dispatch_count = 0;
-          deprecated_alias_count = 0;
-        } in
-        Hashtbl.replace registry tool_name s;
-        s
-  in
-  stats.call_count <- stats.call_count + 1;
-  (match source with
-   | External_mcp -> stats.external_mcp_count <- stats.external_mcp_count + 1
-   | Keeper_internal -> stats.keeper_internal_count <- stats.keeper_internal_count + 1
-   | Inline_dispatch -> stats.inline_dispatch_count <- stats.inline_dispatch_count + 1
-   | Deprecated_alias -> stats.deprecated_alias_count <- stats.deprecated_alias_count + 1);
-  if success then
-    stats.success_count <- stats.success_count + 1
-  else
-    stats.failure_count <- stats.failure_count + 1;
-  stats.last_called_at <- Time_compat.now ();
-  stats.total_duration_ms <- stats.total_duration_ms + duration_ms
+  with_registry_rw (fun () ->
+    let stats =
+      match Hashtbl.find_opt registry tool_name with
+      | Some s -> s
+      | None ->
+          let s = {
+            call_count = 0;
+            success_count = 0;
+            failure_count = 0;
+            last_called_at = 0.0;
+            total_duration_ms = 0;
+            external_mcp_count = 0;
+            keeper_internal_count = 0;
+            inline_dispatch_count = 0;
+            deprecated_alias_count = 0;
+          } in
+          Hashtbl.replace registry tool_name s;
+          s
+    in
+    stats.call_count <- stats.call_count + 1;
+    (match source with
+     | External_mcp -> stats.external_mcp_count <- stats.external_mcp_count + 1
+     | Keeper_internal -> stats.keeper_internal_count <- stats.keeper_internal_count + 1
+     | Inline_dispatch -> stats.inline_dispatch_count <- stats.inline_dispatch_count + 1
+     | Deprecated_alias -> stats.deprecated_alias_count <- stats.deprecated_alias_count + 1);
+    if success then
+      stats.success_count <- stats.success_count + 1
+    else
+      stats.failure_count <- stats.failure_count + 1;
+    stats.last_called_at <- Time_compat.now ();
+    stats.total_duration_ms <- stats.total_duration_ms + duration_ms)
 
 let record_call_if_known ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
   if is_known_tool tool_name then
     record_call ~source ~tool_name ~success ~duration_ms ()
 
-(** Get all stats as a sorted list (by call_count descending) *)
+(** Get all stats as a sorted list (by call_count descending).
+
+    The [Hashtbl.fold] happens under [with_registry_ro] so the snapshot of
+    bindings is consistent with the concurrent [record_call] writer. The
+    returned list still points at the mutable [call_stats] records, so
+    callers that format fields immediately see the current values; that
+    matches the pre-existing API contract (callers already have no
+    transactional guarantee across fields, only that the hashtable itself
+    is not corrupted). *)
 let get_stats () : (string * call_stats) list =
-  Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry []
+  with_registry_ro (fun () ->
+    Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry [])
   |> List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count)
 
 (** Get top N tools by call count *)
@@ -109,27 +138,30 @@ let get_top_n n : (string * call_stats) list =
     Only includes tools that are registered (have been called at least once)
     but not recently. *)
 let get_unused_since (cutoff : float) : string list =
-  Hashtbl.fold
-    (fun name stats acc ->
-      if stats.last_called_at < cutoff then name :: acc else acc)
-    registry []
+  with_registry_ro (fun () ->
+    Hashtbl.fold
+      (fun name stats acc ->
+        if stats.last_called_at < cutoff then name :: acc else acc)
+      registry [])
   |> List.sort String.compare
 
 (** Get tools that have never been called (not in registry at all)
     compared against a list of all known tool names *)
 let get_never_called (all_tool_names : string list) : string list =
-  List.filter
-    (fun name -> not (Hashtbl.mem registry name))
-    all_tool_names
+  with_registry_ro (fun () ->
+    List.filter
+      (fun name -> not (Hashtbl.mem registry name))
+      all_tool_names)
   |> List.sort String.compare
 
 (** Total calls across all tools *)
 let total_calls () : int =
-  Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0
+  with_registry_ro (fun () ->
+    Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0)
 
 (** Number of distinct tools that have been called *)
 let distinct_tools_called () : int =
-  Hashtbl.length registry
+  with_registry_ro (fun () -> Hashtbl.length registry)
 
 (** Convert call_stats to JSON *)
 let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
@@ -172,30 +204,35 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
   ]
 
 (** Warm up registry from telemetry summary.
-    Called once at server startup to restore persistent metrics. *)
+    Called once at server startup to restore persistent metrics.
+
+    [Eio_guard.with_mutex] degrades to a direct call before the Eio
+    runtime is up, so this stays safe when [warm_up] runs during early
+    bootstrap. *)
 let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
   let count = ref 0 in
-  Hashtbl.iter
-    (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
-      if not (Hashtbl.mem registry tool_name) then (
-        Hashtbl.replace registry tool_name
-          {
-            call_count = stats.count;
-            success_count = stats.success_count;
-            failure_count = stats.failure_count;
-            last_called_at =
-              (match stats.last_used_at with
-              | Some t -> t
-              | None -> 0.0);
-            total_duration_ms = 0;
-            external_mcp_count = 0;
-            keeper_internal_count = 0;
-            inline_dispatch_count = 0;
-            deprecated_alias_count = 0;
-          };
-        incr count))
-    summary.stats_by_tool;
+  with_registry_rw (fun () ->
+    Hashtbl.iter
+      (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
+        if not (Hashtbl.mem registry tool_name) then (
+          Hashtbl.replace registry tool_name
+            {
+              call_count = stats.count;
+              success_count = stats.success_count;
+              failure_count = stats.failure_count;
+              last_called_at =
+                (match stats.last_used_at with
+                | Some t -> t
+                | None -> 0.0);
+              total_duration_ms = 0;
+              external_mcp_count = 0;
+              keeper_internal_count = 0;
+              inline_dispatch_count = 0;
+              deprecated_alias_count = 0;
+            };
+          incr count))
+      summary.stats_by_tool);
   !count
 
 (** Reset all counters (for testing) *)
-let reset () = Hashtbl.clear registry
+let reset () = with_registry_rw (fun () -> Hashtbl.clear registry)

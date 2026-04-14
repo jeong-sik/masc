@@ -7,6 +7,7 @@ import {
   type KeeperCompositeInvariants,
 } from '../api/keeper'
 import { keepers } from '../store'
+import { compositeTick } from '../composite-signals'
 import { EmptyState } from './common/empty-state'
 
 /**
@@ -40,6 +41,14 @@ export function FsmHub() {
     }
   }, [keeperNames, selected])
 
+  // Re-fetch composite snapshot whenever the selected keeper changes OR the
+  // SSE envelope signals a registry mutation on it. [compositeTick.value.ts_unix]
+  // advances monotonically; the name match guards against unrelated keeper
+  // events triggering refetches.
+  const tick = compositeTick.value
+  const shouldRefetchForTick =
+    selected != null && tick.name === selected ? tick.ts_unix : 0
+
   useEffect(() => {
     if (!selected) return
     let cancelled = false
@@ -63,12 +72,10 @@ export function FsmHub() {
 
     run()
 
-    const interval = window.setInterval(run, 5000)
     return () => {
       cancelled = true
-      window.clearInterval(interval)
     }
-  }, [selected])
+  }, [selected, shouldRefetchForTick])
 
   return html`
     <div class="flex flex-col gap-5">

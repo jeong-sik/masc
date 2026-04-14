@@ -172,6 +172,18 @@ let test_cascade_mermaid_renders_other_reason () =
   check bool "other reason string passes through"
     true (substring_present ~haystack:out ~needle:"unhealthy: custom-signal")
 
+let test_cascade_mermaid_other_sanitizes_newline_colon () =
+  let out = DA.cascade_fsm_to_mermaid
+      ~provider_health:[("alpha", `Unhealthy (`Other "line1\nline2:bad"))]
+      ~models:["alpha"]
+      ~last_provider_result:None
+      ()
+  in
+  check bool "sanitized output contains expected string"
+    true (substring_present ~haystack:out ~needle:"unhealthy: line1 line2 bad");
+  check bool "unsanitized colon not present in note"
+    false (substring_present ~haystack:out ~needle:"line2:bad")
+
 let test_cascade_mermaid_healthy_no_reason_note () =
   let out = DA.cascade_fsm_to_mermaid
       ~provider_health:[("alpha", `Healthy)]
@@ -214,6 +226,7 @@ let () =
     "provider_health_reason", [
       test_case "saturated reason in note" `Quick test_cascade_mermaid_renders_saturated_reason;
       test_case "other reason passes through" `Quick test_cascade_mermaid_renders_other_reason;
+      test_case "other reason sanitizes newline and colon" `Quick test_cascade_mermaid_other_sanitizes_newline_colon;
       test_case "healthy has no unhealthy note" `Quick test_cascade_mermaid_healthy_no_reason_note;
     ];
   ]

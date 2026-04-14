@@ -289,12 +289,16 @@ type provider_health =
   | `Unknown
   ]
 
+let sanitize_mermaid_note s =
+  String.map (fun c ->
+    if c = ':' || c = '\n' || c = '\r' then ' ' else c) s
+
 let unhealthy_reason_label = function
   | `Saturated -> "saturated"
   | `Unreachable -> "unreachable"
   | `Rate_limited -> "rate_limited"
   | `Timeout -> "timeout"
-  | `Other s -> s
+  | `Other s -> sanitize_mermaid_note s
 
 let cascade_fsm_to_mermaid
     ?(provider_health : (string * provider_health) list option)
@@ -318,25 +322,20 @@ let cascade_fsm_to_mermaid
   (* Provider nodes *)
   let n = List.length models in
   List.iteri (fun i label ->
-    let safe = String.map (fun c ->
-      if c = ':' || c = '/' then '_' else c) label
-    in
-    let display = label in
     let is_last = (i = n - 1) in
     let try_edge = if is_last then "TryLast" else "TryNonLast" in
     if i = 0 then
       p "    SelectProvider --> P%d: %s\n" i try_edge
     else
       p "    P%d --> P%d: CascadableError\n" (i - 1) i;
-    p "    state \"%s\" as P%d\n" display i;
+    p "    state \"%s\" as P%d\n" label i;
     p "    P%d --> Accept: RespondOk\n" i;
     if not is_last then begin
       p "    P%d --> P%d: SlotUnavailable\n" i (i + 1)
     end else begin
       p "    P%d --> AcceptExhaust: LastProviderFail\\n(accept_on_exhaustion)\n" i;
       p "    P%d --> Exhausted: LastProviderFail\n" i
-    end;
-    ignore safe
+    end
   ) models;
   p "    Accept --> [*]\n";
   p "    AcceptExhaust --> [*]\n";

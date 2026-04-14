@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import {
   fetchKeeperComposite,
@@ -28,6 +28,13 @@ export function FsmHub() {
   const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 30-second polling fallback so the dashboard stays alive when
+  // no SSE keeper_composite_changed events arrive (idle keepers).
+  const [pollTick, setPollTick] = useState(0)
+  // Wall-clock of last successful fetch — drives stale indicator.
+  const [lastFetchAt, setLastFetchAt] = useState(0)
+  // Current clock for relative time display (updates every second).
+  const [now, setNow] = useState(() => Date.now() / 1000)
 
   const keeperList = keepers.value
   const keeperNames = useMemo(
@@ -43,41 +50,45 @@ export function FsmHub() {
     }
   }, [keeperNames, selected])
 
+  // 30-second polling interval — ensures the dashboard updates even
+  // when SSE events are absent (idle keeper). Restores the behavior
+  // from 28349f986 that was accidentally removed in 9275013f1.
+  useEffect(() => {
+    const id = setInterval(() => setPollTick(t => t + 1), 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  // 1-second clock tick for relative time display (idle duration,
+  // last refreshed). Lightweight: only updates a number, no fetch.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now() / 1000), 1_000)
+    return () => clearInterval(id)
+  }, [])
+
   // Re-fetch composite snapshot whenever the selected keeper changes OR the
-  // SSE envelope signals a registry mutation on it. [compositeTick.value.ts_unix]
-  // advances monotonically; the name match guards against unrelated keeper
-  // events triggering refetches.
+  // SSE envelope signals a registry mutation on it OR the poll timer fires.
   const tick = compositeTick.value
   const shouldRefetchForTick =
     selected != null && tick.name === selected ? tick.ts_unix : 0
 
+  const doFetch = useCallback(async (name: string) => {
+    try {
+      const data = await fetchKeeperComposite(name)
+      setSnapshot(data)
+      setLastFetchAt(Date.now() / 1000)
+      setLoading(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'composite fetch failed')
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!selected) return
-    let cancelled = false
     setLoading(true)
     setError(null)
-
-    const run = async () => {
-      try {
-        const data = await fetchKeeperComposite(selected)
-        if (!cancelled) {
-          setSnapshot(data)
-          setLoading(false)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'composite fetch failed')
-          setLoading(false)
-        }
-      }
-    }
-
-    run()
-
-    return () => {
-      cancelled = true
-    }
-  }, [selected, shouldRefetchForTick])
+    doFetch(selected)
+  }, [selected, shouldRefetchForTick, pollTick, doFetch])
 
   return html`
     <div class="flex flex-col gap-5">
@@ -112,7 +123,7 @@ export function FsmHub() {
           dataRecord=${snapshot.recovery.data_record}
           fsmCondition=${snapshot.recovery.fsm_condition}
         />
-        <${SnapshotMeta} snapshot=${snapshot} />
+        <${SnapshotMeta} snapshot=${snapshot} now=${now} lastFetchAt=${lastFetchAt} />
       ` : null}
     </div>
   `
@@ -213,10 +224,29 @@ function SubFsmCard({
         ? 'text-[#818cf8]'
         : 'text-[#f59e0b]'
 
+  // Flash on state transition: track previous value and trigger a
+  // brief highlight animation when it changes.
+  const prevRef = useRef(value)
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (prevRef.current !== value) {
+      prevRef.current = value
+      setFlash(true)
+      const id = setTimeout(() => setFlash(false), 1200)
+      return () => clearTimeout(id)
+    }
+    return undefined
+  }, [value])
+
+  const flashBorder = flash
+    ? 'border-[var(--accent)] shadow-[0_0_8px_rgba(var(--accent-rgb),0.35)]'
+    : 'border-[var(--white-8)]'
+
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
+    <div class=${`rounded-xl border bg-[var(--white-2)] p-4 transition-all duration-500 ${flashBorder}`}>
       <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
-      <div class=${`mt-1.5 font-mono text-[18px] font-semibold ${toneCls}`}>${value}</div>
+      <div class=${`mt-1.5 font-mono text-[18px] font-semibold ${toneCls} ${flash ? 'animate-pulse' : ''}`}>${value}</div>
+      ${flash ? html`<div class="mt-1 text-[9px] text-[var(--accent)] animate-pulse">state changed</div>` : null}
     </div>
   `
 }
@@ -337,19 +367,61 @@ function RecoveryStatePanel({
   `
 }
 
-function SnapshotMeta({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+/** Format seconds into a compact human-readable duration. */
+function fmtDuration(seconds: number): string {
+  if (seconds < 0) return '0s'
+  const s = Math.floor(seconds)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m < 60) return `${m}m ${rem}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
+}
+
+function SnapshotMeta({
+  snapshot,
+  now,
+  lastFetchAt,
+}: {
+  snapshot: KeeperCompositeSnapshot
+  now: number
+  lastFetchAt: number
+}) {
   const date = new Date(snapshot.ts * 1000)
+
+  // Idle duration: time since last_outcome.ended_at or snapshot.ts
+  const idleRef = snapshot.last_outcome
+    ? snapshot.last_outcome.ended_at
+    : snapshot.ts
+  const idleSec = snapshot.is_live ? 0 : Math.max(0, now - idleRef)
+  const idleStr = snapshot.is_live ? '' : ` ${fmtDuration(idleSec)}`
+  const idleWarn = idleSec > 300 // 5 minutes
+
   const liveClass = snapshot.is_live
-    ? 'text-emerald-400 border-emerald-500/40'
-    : 'text-[var(--text-dim)] border-white/10'
+    ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
+    : idleWarn
+      ? 'text-amber-400 border-amber-500/40 bg-amber-500/8'
+      : 'text-[var(--text-dim)] border-white/10'
+
   const lastOutcomeText = snapshot.last_outcome
     ? `last turn #${snapshot.last_outcome.turn_id} ended ${new Date(snapshot.last_outcome.ended_at * 1000).toLocaleTimeString()}`
     : 'no completed turn'
+
+  // Stale indicator: how long since the last successful fetch
+  const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
+  const staleWarn = staleSec > 60
+
   return html`
     <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)] font-mono items-center">
       <span class=${`px-1.5 py-0.5 border rounded ${liveClass}`}>
-        ${snapshot.is_live ? '● LIVE' : '○ idle'}
+        ${snapshot.is_live ? '● LIVE' : `○ idle${idleStr}`}
       </span>
+      ${staleWarn ? html`
+        <span class="px-1.5 py-0.5 border rounded text-amber-400 border-amber-500/40">
+          refreshed ${fmtDuration(staleSec)} ago
+        </span>
+      ` : null}
       <span>correlation ${snapshot.correlation_id}</span>
       <span>run ${snapshot.run_id}</span>
       <span>ts ${date.toISOString()}</span>

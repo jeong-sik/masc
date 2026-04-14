@@ -10,7 +10,15 @@
     "glm-coding:glm-5.1",
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
+  "nick0cave_models": [
+    "glm-coding:glm-5-turbo",
+    "claude:claude-haiku-4-5-20251001",
+    "glm-coding:glm-5.1",
+    "gemini:gemini-2.5-flash",
+    "ollama:qwen3.5:35b-a3b-nvfp4"
+  ],
   "_comment": "Only endpoints the operator actually pays for. glm-coding = Coding Plan subscription (api.z.ai/api/coding/paas/v4). ollama = local MLX fallback. Removed 2026-04-12: (a) glm:glm-5.1 general API — operator has no pay-per-use balance, every call returned HTTP 429 code=1113 'Insufficient balance or no resource package. Please recharge.'. (b) groq:qwen/qwen3-32b — Groq model advertises context_window >= max_tokens, but qwen3-32b caps max_tokens at 40960 while cascade defaults carry 65536, so every call returned HTTP 400 'max_tokens must be less than or equal to 40960'. Both failures committed mutating tools (masc_add_task, keeper_board_vote, keeper_board_comment) before the cascade could fall through to ollama, driving keepers into ambiguous_partial_commit + manual_reconcile. coding_first profile removed 2026-04-12: all keepers now use keeper_unified.",
+  "_comment_nick0cave": "nick0cave is an opt-in implementation-heavy keeper profile. It prefers fast cloud coding models, then gemini, then local ollama fallback.",
   "local_recovery_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
@@ -20,6 +28,8 @@
   "tool_rerank_max_tokens": 200,
   "keeper_unified_temperature": 0.2,
   "keeper_unified_max_tokens": 16384,
+  "nick0cave_temperature": 0.2,
+  "nick0cave_max_tokens": 16384,
   "keeper_turn_max_tokens": 32768,
   "local_only_temperature": 0.2,
   "local_only_max_tokens": 32768,

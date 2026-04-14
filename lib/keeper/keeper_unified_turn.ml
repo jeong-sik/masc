@@ -358,7 +358,7 @@ let scheduled_autonomous_outcome_of_result
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
   List.exists (fun name ->
-    not (Keeper_tool_registry.is_boring_tool name)) tools_used
+    not (String.equal name "keeper_stay_silent")) tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =
@@ -740,7 +740,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let substantive_tool_call_count =
     result.tools_used
     |> List.filter (fun name ->
-         not (Keeper_tool_registry.is_boring_tool name))
+         not (String.equal name "keeper_stay_silent"))
     |> List.length
   in
   let has_substantive_tools = has_substantive_tool_calls result.tools_used in

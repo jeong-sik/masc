@@ -70,11 +70,6 @@ val injected_masc_tool_names : unit -> string list
 (** [is_core_always_tool name] — true if [name] bypasses policy restrictions. *)
 val is_core_always_tool : string -> bool
 
-(** Drop boring observation tools when a turn already has actionable work.
-    Returns the original set when every tool is boring so callers do not end
-    up with an empty allowlist. *)
-val prune_boring_tools_for_actionable_turn : string list -> string list
-
 (** Deduplicate tool names, preserving order. *)
 val dedupe_tool_names : string list -> string list
 

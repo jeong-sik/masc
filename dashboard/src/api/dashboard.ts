@@ -1736,17 +1736,36 @@ export interface MemorySubsystemsResponse {
   }
   episodes: {
     total: number
+    filtered: number
     shown: number
+    limit: number
     items: MemorySubsystemsEpisode[]
+  }
+  filters: {
+    keepers: string[]
+    outcomes: string[]
   }
 }
 
+export interface MemorySubsystemsQuery {
+  limit?: number
+  keeper?: string
+  outcome?: string
+  q?: string
+  signal?: AbortSignal
+}
+
 export function fetchMemorySubsystems(
-  opts?: { limit?: number; signal?: AbortSignal },
+  opts?: MemorySubsystemsQuery,
 ): Promise<MemorySubsystemsResponse> {
-  const params = opts?.limit ? `?limit=${opts.limit}` : ''
+  const params = new URLSearchParams()
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  if (opts?.keeper) params.set('keeper', opts.keeper)
+  if (opts?.outcome) params.set('outcome', opts.outcome)
+  if (opts?.q) params.set('q', opts.q)
+  const qs = params.toString()
   return get<MemorySubsystemsResponse>(
-    `/api/v1/dashboard/memory-subsystems${params}`,
+    `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,
     { signal: opts?.signal },
   )
 }

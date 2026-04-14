@@ -473,18 +473,30 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
   let persisted_ids = persisted_episode_ids () in
   let path = Institution_eio.episodes_jsonl_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
-  Agent_sdk.Memory.recall_episodes memory ~limit:max_int ()
-  |> List.fold_left
-       (fun flushed (episode : Agent_sdk.Memory.episode) ->
-         if Hashtbl.mem persisted_ids episode.id then flushed
-         else (
-           let persisted = institution_episode_of_oas ~agent_name episode in
-           Hashtbl.replace persisted_ids episode.id ();
-           Fs_compat.append_jsonl path
-             (Institution_eio.episode_to_json persisted);
-           note_episode_flush persisted;
-           flushed + 1))
-       0
+  let flushed =
+    Agent_sdk.Memory.recall_episodes memory ~limit:max_int ()
+    |> List.fold_left
+         (fun flushed (episode : Agent_sdk.Memory.episode) ->
+           if Hashtbl.mem persisted_ids episode.id then flushed
+           else (
+             let persisted = institution_episode_of_oas ~agent_name episode in
+             Hashtbl.replace persisted_ids episode.id ();
+             Fs_compat.append_jsonl path
+               (Institution_eio.episode_to_json persisted);
+             note_episode_flush persisted;
+             flushed + 1))
+         0
+  in
+  (* Cap file growth. Called after append so we only rewrite when needed. *)
+  if flushed > 0 then begin
+    try
+      let dropped = Institution_eio.cap_episodes_jsonl () in
+      if dropped > 0 then
+        Log.Institution.info "capped institution_episodes.jsonl: dropped %d old entries" dropped
+    with exn ->
+      Log.Institution.warn "episode cap failed: %s" (Printexc.to_string exn)
+  end;
+  flushed
 
 (* ================================================================ *)
 (* Procedural tier: Procedural_memory <-> OAS procedures            *)

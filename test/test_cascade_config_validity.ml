@@ -75,7 +75,14 @@ let load_profile_strings ~path ~profile : string list =
   match json |> member key with
   | `List items ->
     List.filter_map
-      (function `String s -> Some (String.trim s) | _ -> None)
+      (function
+        | `String s -> Some (String.trim s)
+        | `Assoc _ as obj ->
+          (* Weighted entry: {"model": "provider:id", "weight": N} *)
+          (match obj |> member "model" with
+           | `String s when String.trim s <> "" -> Some (String.trim s)
+           | _ -> None)
+        | _ -> None)
       items
   | _ -> []
 

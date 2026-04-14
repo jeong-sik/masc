@@ -916,6 +916,7 @@ let keeper_config_json (config : Room.config) (name : string)
         Keeper_decision_audit.decision_pipeline_to_mermaid
           ?tool_policy_mode
           ?turn_outcome
+          ~guard_penalty_this_cycle:stats.guard_penalties_total
           ~phase
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta

@@ -298,7 +298,6 @@
    tool_worktree
    tool_a2a
    tool_handover
-   tool_relay
    worktree_live_context
    tool_operator
    tool_heartbeat

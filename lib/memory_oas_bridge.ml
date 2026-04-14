@@ -493,7 +493,9 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
       let dropped = Institution_eio.cap_episodes_jsonl () in
       if dropped > 0 then
         Log.Institution.info "capped institution_episodes.jsonl: dropped %d old entries" dropped
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Log.Institution.warn "episode cap failed: %s" (Printexc.to_string exn)
   end;
   flushed

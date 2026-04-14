@@ -1,5 +1,6 @@
 # TLA+ Model Checking — CI integration
 # Pattern: tlaplus/Examples (https://github.com/tlaplus/Examples)
+# CI invocation: `make -C specs -j 2 check-all` (see .github/workflows/ci.yml)
 #
 # Usage:
 #   make check-all          Run all specs (clean + buggy)

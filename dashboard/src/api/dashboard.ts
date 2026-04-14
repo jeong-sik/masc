@@ -348,6 +348,8 @@ export function fetchDashboardMemory(
 ): Promise<DashboardMemoryResponse> {
   const params = new URLSearchParams()
   params.set('sort_by', sortMode)
+  const hasFilter = opts?.excludeSystem || opts?.excludeAutomation || opts?.author
+  params.set('limit', hasFilter ? '200' : '100')
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)

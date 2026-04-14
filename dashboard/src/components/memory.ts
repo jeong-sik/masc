@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef, useCallback } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -56,6 +56,23 @@ import {
 } from './memory-state'
 import type { BoardPost } from './memory-state'
 
+// ── Scroll sentinel (IntersectionObserver auto-load) ──────────────
+function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const cb = useCallback(onVisible, [onVisible])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) cb() },
+      { rootMargin: '200px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [cb])
+  return html`<div ref=${ref} class="h-1" />`
+}
+
 // ── Render section (paginated group) ───────────────────────────────
 function renderSection(
   title: string,
@@ -63,13 +80,15 @@ function renderSection(
   visible: typeof visibleLimit,
 ) {
   if (posts.length === 0) return null
+  const hasMore = posts.length > visible.value
   return html`
     <${Card} title=${`${title} (${posts.length})`} class="mb-4">
       <div class="flex flex-col gap-2">
         ${posts.slice(0, visible.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
-      ${posts.length > visible.value ? html`
-        <div class="text-center py-4">
+      ${hasMore ? html`
+        <${ScrollSentinel} onVisible=${() => { visible.value = visible.value + PAGE_SIZE }} />
+        <div class="text-center py-3">
           <button type="button"
             class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
             onClick=${() => { visible.value = visible.value + PAGE_SIZE }}

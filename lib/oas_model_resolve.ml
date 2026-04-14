@@ -8,6 +8,13 @@
 
     @since 2.135.0 — inference-to-oas migration (Phase 1) *)
 
+(** Fallback context window (tokens) when no provider can be resolved.
+    128K matches mid-range cloud models and avoids under-allocating for
+    providers that don't publish their context size.  Referenced as the
+    SSOT fallback across relay, tool_compact, context_compact_oas, and
+    dashboard_harness_health — do not duplicate this literal elsewhere. *)
+let fallback_context_window = 128_000
+
 let default_registry = Llm_provider.Provider_registry.default ()
 
 (** Extract provider name from a "provider:model_id" label string.
@@ -84,15 +91,15 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
        endpoint lookup for local providers, round-robin fallback).
     2. Apply {!context_floor} guard on the discovered value.
     3. If OAS returns [None], use static registry entry's [max_context].
-    4. Final fallback: [128_000]. *)
+    4. Final fallback: {!fallback_context_window}. *)
 let max_context_of_label (label : string) : int =
   let static_ctx =
     match provider_name_of_label label with
-    | None -> 128_000
+    | None -> fallback_context_window
     | Some pname ->
       match Llm_provider.Provider_registry.find default_registry pname with
       | Some entry -> entry.max_context
-      | None -> 128_000
+      | None -> fallback_context_window
   in
   match Llm_provider.Cascade_config.resolve_label_context label with
   | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
@@ -122,21 +129,21 @@ let context_if_available (label : string) : int option =
     "Available" means the provider's API key env var is set (or not required).
     Per-label context resolved by OAS — no routing guess in MASC.
     Applies {!context_floor} to discovered values.
-    Falls back to 128_000 if no model is available. *)
+    Falls back to {!fallback_context_window} if no model is available. *)
 let resolve_primary_max_context (labels : string list) : int =
   match List.find_map context_if_available labels with
   | Some ctx -> ctx
-  | None -> 128_000
+  | None -> fallback_context_window
 
 (** Maximum context across all available models in a label list.
     Returns the largest context window that any model in the cascade can
     handle.  This is the value MASC should use for [max_input_tokens]:
     OAS cascade will try providers in order — if the primary overflows,
     the cascade fails over to the next provider that can handle the
-    prompt size.  Falls back to [128_000] if no model is available. *)
+    prompt size.  Falls back to {!fallback_context_window} if no model is available. *)
 let resolve_max_cascade_context (labels : string list) : int =
   match List.filter_map context_if_available labels with
-  | [] -> 128_000
+  | [] -> fallback_context_window
   | ctxs -> List.fold_left max 0 ctxs
 
 let labels_are_pure_local (labels : string list) : bool =

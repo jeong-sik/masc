@@ -60,7 +60,7 @@ Each message has 'role' (system/user/assistant/tool) and 'content' (string).");
         ]);
         ("max_tokens", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Max context window size for ratio calculation (default: 128000)");
+          ("description", `String (Printf.sprintf "Max context window size for ratio calculation (default: %d)" Oas_model_resolve.fallback_context_window));
         ]);
         ("system_prompt", `Assoc [
           ("type", `String "string");
@@ -141,9 +141,9 @@ let handle_compact args : tool_result =
       (try args |> member "max_tokens" |> to_int
        with Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Log.Misc.warn "handle_compact: max_tokens parse failed (%s), using 128000"
-           (Printexc.to_string exn);
-         128_000) in
+         Log.Misc.warn "handle_compact: max_tokens parse failed (%s), using %d"
+           (Printexc.to_string exn) Oas_model_resolve.fallback_context_window;
+         Oas_model_resolve.fallback_context_window) in
     let system_prompt =
       (try args |> member "system_prompt" |> to_string
        with Eio.Cancel.Cancelled _ as e -> raise e

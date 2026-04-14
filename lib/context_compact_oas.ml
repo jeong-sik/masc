@@ -357,11 +357,11 @@ let resolve_strategies
       let obs_val = match obs with
         | Some o -> o
         | None ->
-          (* Fallback: minimal observation when none provided.
-             128_000 matches OAS resolve_primary_max_context fallback. *)
+          (* Fallback: minimal observation when none provided. *)
           { context_ratio = 0.5; active_agent_count = 1;
             unclaimed_task_count = 0; is_single_focused_task = true;
-            context_window = 128_000; is_local_model = false }
+            context_window = Oas_model_resolve.fallback_context_window;
+            is_local_model = false }
       in
       (* Resolve once — no recursive Dynamic *)
       selector obs_val

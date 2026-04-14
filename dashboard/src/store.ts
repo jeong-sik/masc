@@ -101,6 +101,8 @@ export const boardPosts = signal<BoardPost[]>([])
 export const boardSortMode = signal<BoardSortMode>('recent')
 export const boardExcludeSystem = signal(true)
 export const boardExcludeAutomation = signal(false)
+/** Content-category filter: which categories to hide */
+export const boardHiddenCategories = signal<Set<string>>(new Set(['system']))
 export const boardAuthorFilter = signal('')
 
 export function removeBoardPost(postId: string | undefined): void {

@@ -17,13 +17,13 @@ import { hasRichMarkdownSignals } from './common/rich-content-utils'
 import {
   boardPosts,
   boardSortMode,
-  boardExcludeSystem,
-  boardExcludeAutomation,
+  boardHiddenCategories,
   boardAuthorFilter,
   boardLoading,
   lastBoardRefreshAt,
   refreshBoard,
   SORT_MODES,
+  CONTENT_CATEGORIES,
   detailPost,
   detailLoading,
   detailPostId,
@@ -32,6 +32,7 @@ import {
   newPostContent,
   newPostSubmitting,
   PAGE_SIZE,
+  categoryVisibleLimits,
   visibleLimit,
   automationVisibleLimit,
   systemVisibleLimit,
@@ -45,16 +46,16 @@ import {
   splitVisiblePosts,
   filterHint,
   isUpdated,
-  boardPostKind,
+  contentCategory,
+  categoryLabel,
+  categoryBadgeColor,
   authorAvatar,
-  kindLabel,
-  kindBadgeColor,
   visibilityLabel,
   visibilityBadgeColor,
   votePost,
   deleteBoardPost,
 } from './memory-state'
-import type { BoardPost } from './memory-state'
+import type { BoardPost, ContentCategory } from './memory-state'
 
 // ── Scroll sentinel (IntersectionObserver auto-load) ──────────────
 function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
@@ -73,32 +74,54 @@ function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
   return html`<div ref=${ref} class="h-1" />`
 }
 
-// ── Render section (paginated group) ───────────────────────────────
-function renderSection(
-  title: string,
+// ── Render section (paginated group by category) ──────────────────
+function renderCategorySection(
+  category: ContentCategory,
   posts: BoardPost[],
-  visible: typeof visibleLimit,
+  total: number,
+  hidden: number,
 ) {
-  if (posts.length === 0) return null
-  const hasMore = posts.length > visible.value
+  const meta = CONTENT_CATEGORIES.find(c => c.id === category)
+  const label = meta ? `${meta.icon} ${meta.label}` : category
+  const limits = categoryVisibleLimits.value
+  const limit = limits[category] ?? PAGE_SIZE
+  const hasMore = posts.length > limit
+
+  if (posts.length === 0 && hidden === 0) return null
+  if (posts.length === 0 && hidden > 0) {
+    return html`
+      <div class="mb-3 px-3 py-2 rounded-xl border border-dashed border-[var(--border-slate-16)] text-[12px] text-[var(--text-muted)]">
+        ${label} — ${hidden}건 숨김
+      </div>
+    `
+  }
+
   return html`
-    <${Card} title=${`${title} (${posts.length})`} class="mb-4">
+    <${Card} title=${`${label} (${total})`} class="mb-4">
       <div class="flex flex-col gap-2">
-        ${posts.slice(0, visible.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+        ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
       ${hasMore ? html`
-        <${ScrollSentinel} onVisible=${() => { visible.value = visible.value + PAGE_SIZE }} />
+        <${ScrollSentinel} onVisible=${() => {
+          categoryVisibleLimits.value = { ...limits, [category]: limit + PAGE_SIZE }
+        }} />
         <div class="text-center py-3">
           <button type="button"
             class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
-            onClick=${() => { visible.value = visible.value + PAGE_SIZE }}
+            onClick=${() => {
+              categoryVisibleLimits.value = { ...limits, [category]: limit + PAGE_SIZE }
+            }}
           >
-            더 보기 (${posts.length - visible.value}개 남음)
+            더 보기 (${posts.length - limit}개 남음)
           </button>
         </div>
       ` : null}
     <//>
   `
+}
+
+function CategorySection({ group }: { group: { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number } }) {
+  return renderCategorySection(group.category, group.posts, group.total, group.hidden)
 }
 
 // ── New post form ──────────────────────────────────────────────────
@@ -149,8 +172,6 @@ function NewPostForm() {
 function SortBar() {
   const current = boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
-  const automationLabel = boardExcludeAutomation.value ? '자동화 제외' : '자동화 포함'
-  const systemLabel = boardExcludeSystem.value ? '시스템 제외' : '시스템 포함'
   return html`
     <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
       <div class="flex items-center gap-1.5 flex-wrap">
@@ -174,32 +195,27 @@ function SortBar() {
         `)}
       </div>
       <div class="flex items-center gap-2 flex-wrap">
-        <button type="button"
-          class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
-            ${boardExcludeAutomation.value
-              ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
-              : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
-            }"
-          onClick=${() => {
-            boardExcludeAutomation.value = !boardExcludeAutomation.value
-            refreshBoard()
-          }}
-        >
-          ${automationLabel} (${grouped.totalAutomation})
-        </button>
-        <button type="button"
-          class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
-            ${boardExcludeSystem.value
-              ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)]'
-              : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
-            }"
-          onClick=${() => {
-            boardExcludeSystem.value = !boardExcludeSystem.value
-            refreshBoard()
-          }}
-        >
-          ${systemLabel} (${grouped.totalSystem})
-        </button>
+        ${grouped.groups.map(g => {
+          const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
+          const isHidden = boardHiddenCategories.value.has(g.category)
+          return html`
+            <button type="button"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 border cursor-pointer
+                ${isHidden
+                  ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)] line-through opacity-60'
+                  : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
+                }"
+              onClick=${() => {
+                const next = new Set(boardHiddenCategories.value)
+                if (next.has(g.category)) next.delete(g.category)
+                else next.add(g.category)
+                boardHiddenCategories.value = next
+              }}
+            >
+              ${meta?.icon ?? ''} ${meta?.label ?? g.category} (${g.total})
+            </button>
+          `
+        })}
         <input
           type="text"
           placeholder="작성자"
@@ -250,17 +266,18 @@ function SortBar() {
 // ── Memory summary stats (compact inline) ────────────────────────
 function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
-  const visibleCount = grouped.direct.length + grouped.automation.length + grouped.system.length
+  const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   return html`
     <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-[12px] text-[var(--text-muted)]">
       <span class="font-semibold text-[var(--text-strong)] tabular-nums text-[15px]">${visibleCount}</span>
       <span>개 표시 중</span>
-      <span class="text-[var(--text-muted)]">·</span>
-      <span>직접 작성 ${grouped.direct.length}</span>
-      <span class="text-[var(--text-muted)]">·</span>
-      <span>자동화 ${grouped.automation.length}</span>
-      <span class="text-[var(--text-muted)]">·</span>
-      <span>시스템 ${grouped.system.length}</span>
+      ${grouped.groups.map(g => {
+        const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
+        return html`
+          <span class="text-[var(--text-muted)]">·</span>
+          <span>${meta?.icon ?? ''} ${g.posts.length}</span>
+        `
+      })}
       ${lastBoardRefreshAt.value ? html`
         <span class="ml-auto text-[11px]">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
       ` : null}
@@ -270,7 +287,7 @@ function MemorySummary() {
 
 // ── Post card (list item) ──────────────────────────────────────────
 function PostCard({ post }: { post: BoardPost }) {
-  const kind = boardPostKind(post)
+  const cat = contentCategory(post)
   const isDeleting = deletingPostId.value === post.id
   const previewBody = stripStateBlocks(post.body)
   const richPreview = hasRichMarkdownSignals(previewBody)
@@ -364,7 +381,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-[11px] text-[var(--text-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${kindBadgeColor(kind)}">${kindLabel(kind)}</span>
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
 
@@ -386,7 +403,7 @@ function PostCard({ post }: { post: BoardPost }) {
 export function Memory() {
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
   const grouped = splitVisiblePosts(boardPosts.value)
-  const posts = [...grouped.direct, ...grouped.automation, ...grouped.system]
+  const posts = grouped.groups.flatMap(g => g.posts)
   const hint = filterHint(grouped)
   const postId = route.value.params.post ?? null
   const post = postId
@@ -435,9 +452,9 @@ export function Memory() {
           ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
               ${boardLoading.value ? html`<div class="mb-2 text-[11px] text-[var(--text-muted)] animate-pulse">업데이트 중...</div>` : null}
-              ${renderSection('직접 작성 글', grouped.direct, visibleLimit)}
-              ${renderSection('자동화 글', grouped.automation, automationVisibleLimit)}
-              ${renderSection('시스템 글', grouped.system, systemVisibleLimit)}
+              ${grouped.groups.map(g => html`
+                <${CategorySection} key=${g.category} group=${g} />
+              `)}
             `}
     </div>
   `

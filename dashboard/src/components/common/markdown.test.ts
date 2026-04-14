@@ -202,4 +202,32 @@ describe('Markdown', () => {
       expect(container.innerHTML).not.toContain('<script>')
     })
   })
+
+  describe('truncated markdown repair', () => {
+    it('repairs trailing orphan backtick from truncated tool output', () => {
+      // Reproduces the ani1999 board post symptom: LLM output cut at
+      // max_tokens mid-bullet, leaving "- `" as the final line.
+      const md = 'first line\n- `keeper_memory_search`\n- `'
+      render(html`<${Markdown} text=${md} />`, container)
+      // Body is still rendered; the trailing backtick doesn't swallow it.
+      expect(container.textContent).toContain('first line')
+      expect(container.textContent).toContain('keeper_memory_search')
+      // Repair marker is visible so the operator knows it was cut.
+      expect(container.textContent).toContain('[잘림]')
+    })
+
+    it('repairs unclosed triple-backtick code fence', () => {
+      const md = 'before\n```ocaml\nlet x = 1'
+      render(html`<${Markdown} text=${md} />`, container)
+      expect(container.textContent).toContain('before')
+      expect(container.textContent).toContain('let x = 1')
+      expect(container.textContent).toContain('[잘림]')
+    })
+
+    it('leaves balanced markdown untouched', () => {
+      const md = 'plain `inline` and ```\ncode\n```'
+      render(html`<${Markdown} text=${md} />`, container)
+      expect(container.textContent).not.toContain('[잘림]')
+    })
+  })
 })

@@ -81,7 +81,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
 
 let local_worker_internal_schemas : Types.tool_schema list =
   [
-    { Tool_heartbeat.heartbeat_schema with
+    { Types.name = "masc_heartbeat";
       description =
         "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
       input_schema =

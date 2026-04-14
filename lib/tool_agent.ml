@@ -439,26 +439,19 @@ let tool_required_permission = function
       Some Types.CanBroadcast
   | _ -> None
 
-(* Heartbeat tools are dispatched by Tool_heartbeat, not Tool_agent.
-   Registering them here under Mod_agent would create a module_tag conflict.
-   Derived from Tool_heartbeat.schemas to stay in sync automatically. *)
-let _heartbeat_tool_names =
-  List.map (fun (s : Types.tool_schema) -> s.name) Tool_heartbeat.schemas
-
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
-      if not (List.mem s.name _heartbeat_tool_names) then
-        Tool_spec.register
-          (Tool_spec.create
-             ~name:s.name
-             ~description:s.description
-             ~module_tag:Tool_dispatch.Mod_agent
-             ~input_schema:s.input_schema
-             ~handler_binding:Tag_dispatch
-             ~is_read_only:(List.mem s.name _tool_spec_read_only)
-             ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-             ~requires_join:(List.mem s.name _tool_spec_requires_join)
-             ?required_permission:(tool_required_permission s.name)
-             ()))
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_agent
+           ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ?required_permission:(tool_required_permission s.name)
+           ()))
     schemas

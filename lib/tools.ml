@@ -25,16 +25,13 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_inline.schemas
   @ Tool_schemas_plan.schemas
   @ Tool_schemas_agent.schemas
-  @ Tool_schemas_auth.schemas
   @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
-  @ Tool_handover.schemas
   @ Tool_code.schemas
   @ Tool_code_write.schemas
   @ Tool_library.schemas
-  @ Tool_heartbeat.schemas
 
 let all_schemas : tool_schema list = raw_schemas
 

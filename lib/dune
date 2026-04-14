@@ -284,10 +284,6 @@
    tools
    tool_args
    task_sandbox
-   tool_repair_loop_types
-   tool_repair_loop_storage
-   tool_repair_loop_ocaml
-   tool_repair_loop_cdal
    tool_plan
    tool_run
    tool_bridge
@@ -297,11 +293,8 @@
    tool_portal
    tool_worktree
    tool_a2a
-   tool_handover
    worktree_live_context
    tool_operator
-   tool_heartbeat
-   tool_auth
    tool_agent
    tool_task
    tool_task_schemas
@@ -309,8 +302,6 @@
    tool_room
    workflow_guide
    tool_control
-   tool_repair_loop
-   tool_verification
    tool_misc
    tool_agent_timeline
    tool_local_runtime

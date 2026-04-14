@@ -78,8 +78,7 @@ let dispatch
         ~name ~args
   | Mod_a2a ->
       Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args
-  | Mod_auth ->
-      Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args
+  (* Mod_auth removed: tools pruned *)
   | Mod_run ->
       Tool_run.dispatch { Tool_run.config } ~name ~args
   | Mod_agent ->
@@ -118,12 +117,7 @@ let dispatch
 
   (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
 
-  | Mod_heartbeat ->
-      (match require_sw (), require_clock () with
-       | Ok sw, Ok clock ->
-           Tool_heartbeat.dispatch
-             { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args
-       | Error e, _ | _, Error e -> Some (false, e))
+  (* Mod_heartbeat removed: tools pruned *)
 
   | Mod_task ->
       Tool_task.dispatch
@@ -131,21 +125,7 @@ let dispatch
           sw = Eio_context.get_switch_opt () }
         ~name ~args
 
-  | Mod_handover ->
-      Tool_handover.dispatch
-        { Tool_handover.config; agent_name;
-          fs = get_fs_opt (); proc_mgr = get_proc_mgr_opt ();
-          sw = Eio_context.get_switch_opt () }
-        ~name ~args
-
-  | Mod_repair_loop ->
-      let ctx : _ Tool_repair_loop_types.context =
-        { config; agent_name;
-          sw = Eio_context.get_switch_opt ();
-          clock = Eio_context.get_clock_opt ();
-          proc_mgr = get_proc_mgr_opt () }
-      in
-      Tool_repair_loop.dispatch ctx ~name ~args
+  (* Mod_handover, Mod_repair_loop removed: tools pruned *)
 
   | Mod_keeper ->
       (* Tool_keeper depends on Keeper_exec_status — dispatching it here

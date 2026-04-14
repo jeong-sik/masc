@@ -116,10 +116,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
            Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
          | Error msg -> Some (false, msg))
 
-  (* ── Verification ───────────────────────────────────────────── *)
-  | "masc_verify_request" | "masc_verify_submit" | "masc_verify_status"
-  | "masc_verify_pending" | "masc_verify_auto" ->
-      Some (Tool_verification.dispatch config agent_name name arguments)
+  (* Verification tools removed: pruned *)
 
   (* ── MCP Session ────────────────────────────────────────────── *)
   | "masc_mcp_session" ->

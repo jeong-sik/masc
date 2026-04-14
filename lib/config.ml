@@ -36,7 +36,6 @@ let raw_all_tool_schemas : Types.tool_schema list =
        @ Tool_local_runtime.schemas
        @ Tool_autoresearch.schemas
        @ Tool_compact.schemas
-       @ Tool_repair_loop.schemas
        @ Tool_agent_timeline.schemas
        @ Tool_shard.schemas))
 

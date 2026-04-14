@@ -167,6 +167,27 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Some (wrap ~event_type:"task_state_changed" ~payload ~task_id ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ ->
     None  (* Internal; no SSE relay needed *)
+  | Agent_sdk.Event_bus.ContextOverflowImminent
+        { agent_name; estimated_tokens; limit_tokens; ratio } ->
+      let payload =
+        `Assoc [
+          ("agent_name", `String agent_name);
+          ("estimated_tokens", `Int estimated_tokens);
+          ("limit_tokens", `Int limit_tokens);
+          ("ratio", `Float ratio);
+        ]
+      in
+      Some (wrap ~event_type:"context_overflow_imminent" ~payload
+              ~agent_name ())
+  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
+      let payload =
+        `Assoc [
+          ("agent_name", `String agent_name);
+          ("trigger", `String trigger);
+        ]
+      in
+      Some (wrap ~event_type:"context_compact_started" ~payload
+              ~agent_name ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
       Some
         (wrap ~event_type:name ~payload

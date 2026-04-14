@@ -17,28 +17,32 @@ type runtime = {
   cwd_default : Eio.Fs.dir_ty Eio.Path.t;
 }
 
-let runtime_state : runtime option ref = ref None
+(** [Atomic.t] rather than a plain [ref] because subprocess spawns from
+    Executor_pool workers (distinct OCaml 5 domains) read this state;
+    without a memory barrier a worker domain can observe [None] even
+    after [init] has published the runtime on the main domain. *)
+let runtime_state : runtime option Atomic.t = Atomic.make None
 
 let init ~cwd_default ~proc_mgr ~clock =
-  runtime_state := Some { proc_mgr; clock; cwd_default }
+  Atomic.set runtime_state (Some { proc_mgr; clock; cwd_default })
 
-let is_initialized () = Option.is_some !runtime_state
+let is_initialized () = Option.is_some (Atomic.get runtime_state)
 
 let reset_for_testing () =
-  runtime_state := None
+  Atomic.set runtime_state None
 
 let get_proc_mgr () =
-  match !runtime_state with
+  match Atomic.get runtime_state with
   | Some runtime -> Ok runtime.proc_mgr
   | None -> Error "Process_eio.get_proc_mgr: init not called"
 
 let get_clock () =
-  match !runtime_state with
+  match Atomic.get runtime_state with
   | Some runtime -> Ok runtime.clock
   | None -> Error "Process_eio.get_clock: init not called"
 
 let get_cwd_default () =
-  match !runtime_state with
+  match Atomic.get runtime_state with
   | Some runtime -> Ok runtime.cwd_default
   | None -> Error "Process_eio.get_cwd_default: init not called"
 

@@ -7,6 +7,8 @@
 
 open Types
 
+module StringSet = Set.Make (String)
+
 type risk_class =
   | Safe
   | Audited
@@ -64,18 +66,18 @@ let max_risk left right =
 let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Types.tool_schema list) =
-  let seen = Hashtbl.create (List.length schemas) in
+  let seen = ref StringSet.empty in
   List.filter
     (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
+      if StringSet.mem schema.name !seen then
         false
       else (
-        Hashtbl.add seen schema.name ();
+        seen := StringSet.add schema.name !seen;
         true))
     schemas
 
 let dedupe_projections projections =
-  let seen = Hashtbl.create (List.length projections) in
+  let seen = ref StringSet.empty in
   List.filter
     (fun (projection : projection) ->
       let key =
@@ -89,10 +91,10 @@ let dedupe_projections projections =
           | Privileged_executor_surface -> "privileged_executor")
           projection.tool_name
       in
-      if Hashtbl.mem seen key then
+      if StringSet.mem key !seen then
         false
       else (
-        Hashtbl.add seen key ();
+        seen := StringSet.add key !seen;
         true))
     projections
 

@@ -267,6 +267,116 @@ let tool_call_events (config : Room.config) ~agent_name ~limit :
          })
   |> take limit
 
+(* Collect turn-completed events from Activity Graph *)
+let turn_completed_events (config : Room.config) ~agent_name ~limit :
+    timeline_event list =
+  let rec take n xs =
+    match (n, xs) with
+    | n, _ when n <= 0 -> []
+    | _, [] -> []
+    | n, x :: rest -> x :: take (n - 1) rest
+  in
+  let scan_limit =
+    let expanded = if limit <= 0 then 0 else limit * 10 in
+    min 1000 (max limit expanded)
+  in
+  let all_events =
+    Activity_graph.list_events config
+      ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit:scan_limit ()
+  in
+  all_events
+  |> List.filter (fun (e : Activity_graph.event) ->
+       match e.actor with
+       | Some a -> String.equal a.id agent_name
+       | None -> false)
+  |> List.filter_map (fun (e : Activity_graph.event) ->
+       let ts = Float.of_int e.ts_ms /. 1000.0 in
+       let open Yojson.Safe.Util in
+       let keeper_name =
+         try e.payload |> member "keeper_name" |> to_string
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
+       in
+       let input_tokens =
+         try e.payload |> member "input_tokens" |> to_int
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+       in
+       let output_tokens =
+         try e.payload |> member "output_tokens" |> to_int
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+       in
+       let cache_creation_tokens =
+         try e.payload |> member "cache_creation_tokens" |> to_int
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+       in
+       let cache_read_tokens =
+         try e.payload |> member "cache_read_tokens" |> to_int
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+       in
+       let cost_usd =
+         try e.payload |> member "cost_usd" |> to_float
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0.0
+       in
+       let latency_ms =
+         try e.payload |> member "latency_ms" |> to_int
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0
+       in
+       let model_used =
+         try e.payload |> member "model_used" |> to_string
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
+       in
+       let work_kind =
+         try e.payload |> member "work_kind" |> to_string
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> "unknown"
+       in
+       let context_ratio =
+         try e.payload |> member "context_ratio" |> to_float
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0.0
+       in
+       let tools_used =
+         try e.payload |> member "tools_used" |> to_list
+             |> List.filter_map (fun j ->
+                  try Some (to_string j)
+                  with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> None)
+         with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+       in
+       let optional_fields =
+         let reasoning =
+           try match e.payload |> member "reasoning_tokens" with
+               | `Int n -> [("reasoning_tokens", `Int n)]
+               | _ -> []
+           with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+         in
+         let tps =
+           try match e.payload |> member "tokens_per_second" with
+               | `Float v -> [("tokens_per_second", `Float v)]
+               | _ -> []
+           with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+         in
+         reasoning @ tps
+       in
+       Some
+         {
+           ts;
+           ts_iso = e.ts_iso;
+           event_type = "turn_completed";
+           detail =
+             `Assoc
+               ([
+                 ("keeper_name", `String keeper_name);
+                 ("input_tokens", `Int input_tokens);
+                 ("output_tokens", `Int output_tokens);
+                 ("cache_creation_tokens", `Int cache_creation_tokens);
+                 ("cache_read_tokens", `Int cache_read_tokens);
+                 ("cost_usd", `Float cost_usd);
+                 ("latency_ms", `Int latency_ms);
+                 ("model_used", `String model_used);
+                 ("work_kind", `String work_kind);
+                 ("context_ratio", `Float context_ratio);
+                 ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+               ] @ optional_fields);
+         })
+  |> take limit
+
 (* Build the full timeline *)
 let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
@@ -284,7 +394,10 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
       if include_tool_calls then tool_call_events config ~agent_name ~limit:200
       else []
     in
-    agent_evts @ task_evts @ msg_evts @ tool_evts
+    let turn_evts =
+      turn_completed_events config ~agent_name ~limit:200
+    in
+    agent_evts @ task_evts @ msg_evts @ tool_evts @ turn_evts
   in
   (* Filter by time cutoff and sort chronologically *)
   let filtered =
@@ -326,6 +439,31 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     List.length
       (List.filter (fun e -> String.equal e.event_type "tool_call") events)
   in
+  let turn_events =
+    List.filter (fun e -> String.equal e.event_type "turn_completed") events
+  in
+  let turns_completed = List.length turn_events in
+  let total_input_tokens =
+    List.fold_left (fun acc e ->
+      let open Yojson.Safe.Util in
+      acc + (try e.detail |> member "input_tokens" |> to_int
+             with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0))
+      0 turn_events
+  in
+  let total_output_tokens =
+    List.fold_left (fun acc e ->
+      let open Yojson.Safe.Util in
+      acc + (try e.detail |> member "output_tokens" |> to_int
+             with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0))
+      0 turn_events
+  in
+  let total_cost_usd =
+    List.fold_left (fun acc e ->
+      let open Yojson.Safe.Util in
+      acc +. (try e.detail |> member "cost_usd" |> to_float
+              with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0.0))
+      0.0 turn_events
+  in
   (* Active duration: time between first and last event *)
   let active_duration_minutes =
     match (events, List.rev events) with
@@ -355,6 +493,10 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
             ("tasks_claimed", `Int tasks_claimed);
             ("messages_sent", `Int messages_sent);
             ("tool_calls", `Int tool_calls);
+            ("turns_completed", `Int turns_completed);
+            ("total_input_tokens", `Int total_input_tokens);
+            ("total_output_tokens", `Int total_output_tokens);
+            ("total_cost_usd", `Float total_cost_usd);
             ("active_duration_minutes", `Float active_duration_minutes);
             ("total_events", `Int (List.length events));
           ] );

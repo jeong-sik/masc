@@ -53,6 +53,7 @@ let semantic_multiplier = function
   | "keeper.compaction" | "keeper.guardrail" -> 0.5
   | "keeper.autonomy_started" | "keeper.autonomy_completed" -> 1.5
   | "operation.paused" | "operation.stopped" -> 0.5
+  | "keeper.turn_completed" -> 0.4
   | "tool.called" -> 0.3
   | _ -> 1.0
 

@@ -12,7 +12,7 @@ module StringMap = Map.Make (String)
 
     @since 2.190.0 -- Issue #5120 *)
 
-(* -- System_internal membership set (O(1) lookup) -- *)
+(* -- System_internal membership set (O(log n) lookup) -- *)
 
 let system_internal_set : StringSet.t =
   let tools = Tool_catalog_surfaces.system_internal_surface_tools in
@@ -102,5 +102,6 @@ let summary () : (string * int) list =
           StringMap.add name (c + 1) counts
       | None -> counts
     ) StringMap.empty entries
+  in
   let pairs = StringMap.bindings counts in
   List.sort (fun (_, a) (_, b) -> Int.compare b a) pairs

@@ -315,41 +315,6 @@ let test_deterministic_prefilter_surfaces_code_tools () =
   in
   Alcotest.(check bool) "code search appears without llm rerank"
     true (List.mem "masc_code_search" selected)
-
-let test_prune_boring_tools_after_recent_polling () =
-  (* Boring concept retired. prune_boring_tools_after_recent_polling is now
-     an identity transform — the caller's visible tool set is returned
-     unchanged regardless of recent tool history. *)
-  let visible_tools =
-    [ "masc_status"; "keeper_tasks_list"; "keeper_context_status";
-      "keeper_stay_silent"; "keeper_fs_edit"; "masc_code_search" ]
-  in
-  let recent_entries =
-    [ `Assoc [ ("tool", `String "masc_status") ] ]
-  in
-  let pruned =
-    Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
-      ~visible_tools ~recent_entries
-  in
-  Alcotest.(check (list string))
-    "visible tools returned unchanged"
-    visible_tools pruned
-
-let test_prune_boring_tools_keeps_set_when_last_tool_productive () =
-  let visible_tools =
-    [ "masc_status"; "keeper_tasks_list"; "keeper_stay_silent"; "keeper_fs_edit" ]
-  in
-  let recent_entries =
-    [ `Assoc [ ("tool", `String "keeper_fs_edit") ] ]
-  in
-  let pruned =
-    Keeper_tool_disclosure.prune_boring_tools_after_recent_polling
-      ~visible_tools ~recent_entries
-  in
-  Alcotest.(check (list string))
-    "productive last tool leaves visible tools unchanged"
-    visible_tools pruned
-
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -386,10 +351,6 @@ let () =
         test_selection_boundary_sorts_discovered;
       Alcotest.test_case "deterministic prefilter surfaces code tools" `Quick
         test_deterministic_prefilter_surfaces_code_tools;
-      Alcotest.test_case "recent polling prunes boring tools" `Quick
-        test_prune_boring_tools_after_recent_polling;
-      Alcotest.test_case "productive last tool keeps boring tools visible" `Quick
-        test_prune_boring_tools_keeps_set_when_last_tool_productive;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

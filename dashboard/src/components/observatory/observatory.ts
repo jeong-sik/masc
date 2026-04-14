@@ -31,6 +31,9 @@ import {
 } from '../../api/dashboard'
 import { EventTrack } from './event-track'
 import { MetricTrack } from './metric-track'
+import { ToolCallTrack } from './tool-call-track'
+import { CrossSignalReadout } from './cross-signal-readout'
+import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
 
 // --- Time range utilities ---
@@ -229,15 +232,31 @@ export function Observatory() {
           windowStart=${data.windowStart}
           windowEnd=${data.windowEnd}
         />
+        <${ToolCallTrack}
+          events=${data.events}
+          windowStart=${data.windowStart}
+          windowEnd=${data.windowEnd}
+        />
         <${MetricTrack}
           points=${data.hourlyTrend}
           windowStart=${data.windowStart}
           windowEnd=${data.windowEnd}
         />
+        ${cursorPosition.value === null ? html`
+          <div class="mt-1 text-[10px] text-text-dim italic">
+            hover any track for cross-signal readout
+          </div>
+        ` : null}
       </div>
 
+      <${CrossSignalReadout}
+        events=${data.events}
+        hourlyTrend=${data.hourlyTrend}
+        eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
+      />
+
       <p class="text-[10px] text-text-dim italic">
-        Phase 2a 스켈레톤 — 더 많은 track(도구 호출, 메모리, autoresearch)과 cross-signal cursor는 Phase 2b+에서 추가됩니다.
+        Phase 2c — cross-signal readout card. 추가 track(메모리, autoresearch)과 drill-down은 이후 단계에서.
       </p>
     </div>
   `

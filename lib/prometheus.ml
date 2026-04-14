@@ -168,6 +168,13 @@ let init () =
   in
   add "masc_mcp_requests_total" "Total MCP requests received" Counter;
   add "masc_llm_inference_duration_seconds" "LLM inference request duration in seconds" Histogram;
+  add "masc_after_turn_hook_total"
+    "Times the keeper AfterTurn hook ran (labeled by model). Divergence from \
+     masc_llm_inference_duration_seconds_count identifies missing telemetry." Counter;
+  add "masc_after_turn_telemetry_missing_total"
+    "AfterTurn responses where response.telemetry was None." Counter;
+  add "masc_after_turn_telemetry_zero_latency_total"
+    "AfterTurn responses where telemetry was present but request_latency_ms was 0." Counter;
   add "masc_tasks_total" "Total tasks processed" Counter;
   add "masc_errors_total" "Total errors" Counter;
   add "masc_active_agents" "Currently active agents" Gauge;

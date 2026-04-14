@@ -169,11 +169,9 @@ let suggest_alternatives ~(allowed_tools : string list)
     ~(repeated_tools : string list) ~(max_suggestions : int) : string list =
   let repeated_set = Hashtbl.create (List.length repeated_tools) in
   List.iter (fun t -> Hashtbl.replace repeated_set t ()) repeated_tools;
-  (* Exclude boring/meta tools — uses Keeper_tool_registry SSOT *)
   allowed_tools
   |> List.filter (fun t ->
        not (Hashtbl.mem repeated_set t)
-       && not (Keeper_tool_registry.is_boring_tool t)
        && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in
@@ -238,10 +236,6 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 
-let is_cross_turn_polling_tool (tool_name : string) : bool =
-  Keeper_tool_registry.is_boring_tool tool_name
-  && not (String.equal tool_name "keeper_stay_silent")
-
 let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
     (entries : Yojson.Safe.t list) : int =
   let now = Time_compat.now () in
@@ -256,11 +250,6 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
        | _ -> count)
   in
   loop 0 (List.rev entries)
-
-let should_block_cross_turn_polling ~within_sec ~threshold
-    ~(tool_name : string) ~(recent_entries : Yojson.Safe.t list) : bool =
-  is_cross_turn_polling_tool tool_name
-  && recent_tool_streak_count ~within_sec ~tool_name recent_entries + 1 >= threshold
 
 let make_hooks
     ~config:(_config : Room.config)
@@ -296,7 +285,6 @@ let make_hooks
      At >= streak_threshold, pre_tool_use blocks the call with Override. *)
   let tool_name_streak : (string * int) ref = ref ("", 0) in
   let streak_threshold = 5 in
-  let cross_turn_polling_threshold = 2 in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -325,14 +313,28 @@ let make_hooks
                "masc_provider_prefix_cache_read_tokens_total"
                ~delta:(Float.of_int cr) ()
          | None -> ());
-        (* Inference latency histogram for /metrics endpoint. *)
+        (* Inference latency histogram for /metrics endpoint.
+           Split observations into three buckets so we can tell "metric is
+           silent because no telemetry" apart from "metric is silent because
+           the hook isn't running". Without this split a histogram sum/count
+           of 0 is ambiguous between the two. *)
+        Prometheus.inc_counter
+          "masc_after_turn_hook_total"
+          ~labels:[("model", model)] ();
         (match response.telemetry with
          | Some t when t.request_latency_ms > 0 ->
            Prometheus.observe_histogram
              "masc_llm_inference_duration_seconds"
              ~labels:[("model", model)]
              (Float.of_int t.request_latency_ms /. 1000.0)
-         | _ -> ());
+         | Some _ ->
+           Prometheus.inc_counter
+             "masc_after_turn_telemetry_zero_latency_total"
+             ~labels:[("model", model)] ()
+         | None ->
+           Prometheus.inc_counter
+             "masc_after_turn_telemetry_missing_total"
+             ~labels:[("model", model)] ());
         Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.
@@ -469,15 +471,6 @@ let make_hooks
           if prev_name = tool_name then prev_count + 1 else 1
         in
         tool_name_streak := (tool_name, new_count);
-        let recent_entries =
-          if is_cross_turn_polling_tool tool_name then
-            Keeper_tool_call_log.read_recent ~keeper_name ~n:8 ()
-          else []
-        in
-        let cross_turn_streak =
-          if recent_entries = [] then 0
-          else recent_tool_streak_count ~tool_name recent_entries + 1
-        in
         if new_count >= streak_threshold then begin
           Log.Keeper.warn
             "keeper:%s streak_gate: %s called %d times consecutively, blocking"
@@ -491,24 +484,6 @@ let make_hooks
                ~reason_text:(Printf.sprintf
                  "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
                  tool_name new_count))
-        end
-        else if should_block_cross_turn_polling
-                  ~within_sec:900.0
-                  ~threshold:cross_turn_polling_threshold
-                  ~tool_name
-                  ~recent_entries then begin
-          Log.Keeper.warn
-            "keeper:%s cross_turn_polling_gate: %s called %d recent tool calls in a row, blocking"
-            keeper_name tool_name cross_turn_streak;
-          broadcast_tool_skipped ~keeper_name ~tool_name
-            ~reason_code:"cross_turn_polling_gate";
-          Agent_sdk.Hooks.Override
-            (render_inline_skip_reason
-               ~tool_name
-               ~reason_code:"cross_turn_polling_gate"
-               ~reason_text:(Printf.sprintf
-                 "%s was already the last recent polling tool. Do real work with a different tool or use keeper_stay_silent"
-                 tool_name))
         end
         else
         (* Safety gate 0: Keeper deny list *)

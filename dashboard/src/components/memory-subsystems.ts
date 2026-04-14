@@ -60,15 +60,19 @@ const shortAgentLabel = (name: string) => {
 const weightColor = (w: number) =>
   w >= 0.7 ? '#10b981' : w >= 0.4 ? '#f59e0b' : '#f87171'
 
-// Perceptual linearization: √weight maps linear data to perceived brightness.
-// Ghoniem et al. 2005 — in-cell encoding beats on-edge encoding for weight tasks.
+// √ compresses the high end so differences near 0 remain visible.
+// Floor 0.25 keeps low-weight cells distinguishable from empty (undefined)
+// cells drawn at #1e293b. Floor and range are arbitrary — picked by eye,
+// not derived from a perceptual model. Tune if empty/low contrast is wrong.
 const weightOpacity = (w: number) => 0.25 + 0.75 * Math.sqrt(Math.max(0, Math.min(1, w)))
 
 function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   if (synapses.length === 0) return null
 
   // Sort by activity total (success + failure on either side) — hubs appear top-left.
-  // Canonical in Hebbian literature (Sadeh & Clopath, PNAS 2024): sort rows by a feature.
+  // Sorting the matrix by some feature is common in Hebbian literature
+  // (e.g. Sadeh & Clopath, PNAS 2024 sorts by stimulus tuning peak); activity
+  // total is a usage-frequency proxy chosen here because MASC has no stimulus.
   const activity = new Map<string, number>()
   synapses.forEach(s => {
     const n = s.success_count + s.failure_count
@@ -215,6 +219,9 @@ function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
     .join(' ')
   const first = chronological[0]?.[1] ?? 0
   const last = chronological[n - 1]?.[1] ?? 0
+  // 0.02 is arbitrary — well under the typical strengthen/weaken step (~0.1
+  // at time of writing), so one learning event produces a decisive color
+  // while sub-threshold drift stays neutral. Not derived from a perceptual law.
   const trendColor = last > first + 0.02 ? '#10b981' : last < first - 0.02 ? '#f87171' : '#94a3b8'
   return html`
     <svg

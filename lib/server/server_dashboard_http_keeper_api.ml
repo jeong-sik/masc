@@ -632,6 +632,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Keeper_decision_audit.decision_pipeline_to_mermaid
           ?tool_policy_mode
           ?turn_outcome
+          ~guard_penalty_this_cycle:stats.guard_penalties_total
           ~phase:current
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
@@ -667,8 +668,19 @@ let handle_keeper_get_subroutes state req request reqd =
               (model, h))
               models
           in
+          (* Slot occupancy from the local runtime pool. The cascade FSM
+             shares these slots across all keepers, so rendering the
+             fleet-global (used, capacity) is the honest value — a
+             per-cascade split would claim an isolation the runtime does
+             not actually provide. *)
+          let slot_state =
+            let used = Local_runtime_pool.allocated_slots () in
+            let max = Local_runtime_pool.configured_capacity () in
+            if max > 0 then Some (used, max) else None
+          in
           Keeper_decision_audit.cascade_fsm_to_mermaid
             ~provider_health
+            ?slot_state
             ~effective_cascade_reason:routing.reason
             ~models ~last_provider_result ()
         | _ ->

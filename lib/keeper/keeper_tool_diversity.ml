@@ -99,7 +99,7 @@ let compute_diversity ~(available_tools : string list)
   let threshold = max 1 (total_calls / 100) in
   let underused = available_tools
     |> List.filter (fun tool ->
-      not (Keeper_tool_registry.is_boring_tool tool)
+      not (String.equal tool "keeper_stay_silent")
       && (not (Hashtbl.mem used_set tool)
           || List.exists (fun s -> s.name = tool && s.count < threshold) stats))
   in

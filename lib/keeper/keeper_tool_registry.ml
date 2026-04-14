@@ -336,42 +336,6 @@ let is_reconcile_safe_tool (name : string) : bool =
 let all_tools_reconcile_safe (names : string list) : bool =
   names <> [] && List.for_all is_reconcile_safe_tool names
 
-(* ── Boring tools (non-productive observation/polling) ─────── *)
-
-(** Tools that gather status but produce no side effects.
-    Calling only these tools across consecutive turns indicates a
-    polling loop. This shared classification is still useful for
-    prompt shaping, telemetry, and tool-diversity heuristics.
-
-    A tool is "boring" if calling it N times yields the same
-    information as calling it once, and it mutates nothing.
-    [keeper_stay_silent] is included: it is a no-op by design
-    and should not be treated as productive work.
-    Contrast with [keeper_fs_read] which reads new content, or
-    [keeper_board_post] which creates artifacts. *)
-(* Boring concept retired. Repeated history: #6199/#6381/#6407 removed it,
-   #6375/#6432/#6872 restored it, #6886 reverted again. Each revival kept
-   widening the list (keeper_board_list, keeper_context_status) which drove
-   keepers into silent-only turns when every visible tool was flagged.
-   Neutralized by leaving the API shape (so callers compile) but treating
-   no tool as boring. Full-source removal tracked in follow-up issue. *)
-let boring_tools : string list = []
-
-let boring_tools_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create (List.length boring_tools) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) boring_tools;
-  tbl
-
-let is_boring_tool (name : string) : bool =
-  Hashtbl.mem boring_tools_set name
-
-let prune_boring_tools_for_actionable_turn (tool_names : string list) :
-    string list =
-  let actionable =
-    List.filter (fun name -> not (is_boring_tool name)) tool_names
-  in
-  if actionable = [] then tool_names else actionable
-
 (* ── Dynamic schema injection (masc_* tools) ──────────────────── *)
 
 let masc_schemas_ref : Types.tool_schema list ref = ref []

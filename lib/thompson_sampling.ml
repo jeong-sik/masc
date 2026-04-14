@@ -24,6 +24,10 @@ type agent_stats = {
   mutable posts_created : int;
   mutable comments_created : int;
   mutable skips : int;
+  (* Guard penalty tracking (Phase B1: Guard → Thompson bridge).
+     Cumulative count of [record_guard_penalty] calls — caller enforces
+     the 1/cycle cap so this approximates "cycles where guardrail fired". *)
+  mutable guard_penalties_total : int;
   (* Timestamp *)
   mutable updated_at : float;
 }
@@ -192,6 +196,7 @@ let make_default_stats name =
     posts_created = 0;
     comments_created = 0;
     skips = 0;
+    guard_penalties_total = 0;
     updated_at = now;
   }
 
@@ -229,6 +234,7 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
     ("posts_created", `Int s.posts_created);
     ("comments_created", `Int s.comments_created);
     ("skips", `Int s.skips);
+    ("guard_penalties_total", `Int s.guard_penalties_total);
     ("updated_at", `Float s.updated_at);
   ]
 
@@ -245,6 +251,7 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
     let posts_created = json |> member "posts_created" |> to_int_option |> Option.value ~default:0 in
     let comments_created = json |> member "comments_created" |> to_int_option |> Option.value ~default:0 in
     let skips = json |> member "skips" |> to_int_option |> Option.value ~default:0 in
+    let guard_penalties_total = json |> member "guard_penalties_total" |> to_int_option |> Option.value ~default:0 in
     let updated_at = json |> member "updated_at" |> to_float in
     Some {
       name;
@@ -257,6 +264,7 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
       posts_created;
       comments_created;
       skips;
+      guard_penalties_total;
       updated_at;
     }
   with Yojson.Safe.Util.Type_error _ -> None
@@ -427,6 +435,7 @@ let record_guard_penalty ~agent_name =
   with_ts_rw (fun () ->
     s.beta <- s.beta +. guard_penalty_beta_nudge;
     s.beta <- Float.max min_prior s.beta;
+    s.guard_penalties_total <- s.guard_penalties_total + 1;
     s.updated_at <- Time_compat.now ())
 
 (** Record Post Verifier result into Thompson Sampling priors. *)
@@ -444,6 +453,14 @@ let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
 (** {1 Selection Algorithm} *)
 
 let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
+  (* Drain any pending votes so Beta posteriors reflect recorded feedback
+     before sampling. [record_vote] batches into [pending_votes], and
+     without this flush the batched evidence never reaches [stats_table] —
+     the sampler would read only the initial priors and votes are silently
+     discarded over time. This sampling entry point is the natural "tick
+     end" the .mli refers to. Safe to call under no lock: [flush] acquires
+     [ts_mu] itself. *)
+  flush_pending_votes ();
   (* Initialize stats for all agents *)
   List.iter init_agent agents;
 

@@ -31,7 +31,13 @@ type synapse = {
        vs weakening over time). *)
 }
 
-(** Cap for [weight_history]. Newer entries evict older ones. *)
+(** Cap for [weight_history]. Newer entries evict older ones.
+
+    30 is arbitrary — not derived from any learning-theory argument. It
+    roughly matches the dashboard sparkline pixel budget (80 px wide,
+    ~2.7 px per point) so the polyline renders with legible segments,
+    but the number was picked first and the rationale came after. Raise
+    it if you want longer trajectories; the JSON payload grows linearly. *)
 let history_cap = 30
 
 (** Prepend [(ts, w)] to [history] and trim to [history_cap].

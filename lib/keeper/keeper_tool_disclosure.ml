@@ -136,25 +136,6 @@ let deterministic_prefilter_names
     |> List.filteri (fun i _ -> i < selection_limit)
 ;;
 
-let latest_tool_name (entries : Yojson.Safe.t list) : string option =
-  entries
-  |> List.rev
-  |> List.find_map (Safe_ops.json_string_opt "tool")
-;;
-
-let prune_boring_tools_after_recent_polling
-    ~(visible_tools : string list)
-    ~(recent_entries : Yojson.Safe.t list) : string list =
-  (* Boring concept retired. Previously: when the latest tool call was
-     boring and no visible tool was productive, this collapsed visible
-     tools down to [keeper_stay_silent], forcing silent turns. With the
-     registry's classification empty this becomes an identity transform.
-     The function stays on the public API until the full-removal PR to
-     avoid churn in callers/tests that still import it. *)
-  let _ = latest_tool_name recent_entries in
-  visible_tools
-;;
-
 let merge_tool_selection_boundary
     ~(core : string list)
     ~(deterministic_prefilter : string list)

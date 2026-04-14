@@ -5,8 +5,6 @@ open Masc_mcp
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
 
-let () = Printf.printf "\n=== Tool_auth Coverage Tests ===\n"
-
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -52,17 +50,16 @@ let with_isolated_runtime_env f =
             with_env "SUPABASE_DB_URL" None (fun () ->
               with_env "SB_PG_URL" None f))))))
 
-(* Test helper — wraps in Eio context so dispatch paths that use
-   Eio.Mutex or structured concurrency work correctly. *)
+(* Test registry — collected at top-level and dispatched via Alcotest.run
+   at the bottom of the file.  Eio scope is set up per-test because the
+   dispatch paths use Eio.Mutex / structured concurrency. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
-    Eio_main.run @@ (fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      with_isolated_runtime_env f);
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+  test_cases := (name, fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    with_isolated_runtime_env f) :: !test_cases
 
 (* Create test context — called inside Eio scope from test helper *)
 let test_counter = ref 0
@@ -340,4 +337,10 @@ let () = test "get_bool_missing" (fun () ->
   assert (Tool_args.get_bool args "key" true = true)
 )
 
-let () = Printf.printf "\n✅ All Tool_auth tests passed!\n"
+let () =
+  Alcotest.run "Tool_auth"
+    [
+      ( "coverage",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]

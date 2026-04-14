@@ -170,39 +170,58 @@ let client_id_counter = Atomic.make 0
 (** Global event counter for resumability *)
 let event_counter = Atomic.make 0
 
-(** Event buffer for resumability - stores (event_id, event_string, timestamp) *)
+(** Event buffer for resumability - stores (event_id, event_string, timestamp)
+
+    [event_buffer] is written by every [broadcast_impl] / [send_to] and
+    drained by the periodic [cleanup_expired_events] background fiber;
+    [get_events_after] folds over it from the HTTP transport handler
+    when a client reconnects with [Last-Event-ID].  [Stdlib.Queue] is
+    not domain-safe, and even within a single Eio domain the
+    "[length]+[pop]+[push]" sequence in [buffer_event] is three
+    operations that must stay paired.  Serialise every access through
+    [event_buffer_mutex]; the same pattern already protects [clients]
+    and [ext_subs] above.  Kept separate from [registry_mutex] because
+    broadcast fan-out deliberately holds the registry mutex read-only,
+    and the buffer write does not need to wait for client snapshots. *)
 let max_buffer_size = 100
 let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
 let event_buffer : (int * string * float) Queue.t = Queue.create ()
+let event_buffer_mutex = Eio.Mutex.create ()
+
+let with_event_buffer_rw f = Eio_guard.with_mutex event_buffer_mutex f
+let with_event_buffer_ro f = Eio_guard.with_mutex_ro event_buffer_mutex f
 
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
-  if Queue.length event_buffer >= max_buffer_size then
-    ignore (Queue.pop event_buffer);
-  Queue.push (event_id, event_str, Time_compat.now ()) event_buffer
+  with_event_buffer_rw (fun () ->
+    if Queue.length event_buffer >= max_buffer_size then
+      ignore (Queue.pop event_buffer);
+    Queue.push (event_id, event_str, Time_compat.now ()) event_buffer)
 
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after last_id =
-  Queue.fold (fun acc (id, ev, _ts) ->
-    if id > last_id then ev :: acc else acc
-  ) [] event_buffer
-  |> List.rev
+  with_event_buffer_ro (fun () ->
+    Queue.fold (fun acc (id, ev, _ts) ->
+      if id > last_id then ev :: acc else acc
+    ) [] event_buffer
+    |> List.rev)
 
 (** Remove events older than [buffer_ttl_seconds] from the front of the buffer.
     Returns count of evicted events. *)
 let cleanup_expired_events () =
-  let now = Time_compat.now () in
-  let count = ref 0 in
-  let keep_popping = ref true in
-  while !keep_popping && not (Queue.is_empty event_buffer) do
-    let (_id, _ev, ts) = Queue.peek event_buffer in
-    if now -. ts > buffer_ttl_seconds then begin
-      ignore (Queue.pop event_buffer);
-      incr count
-    end else
-      keep_popping := false
-  done;
-  !count
+  with_event_buffer_rw (fun () ->
+    let now = Time_compat.now () in
+    let count = ref 0 in
+    let keep_popping = ref true in
+    while !keep_popping && not (Queue.is_empty event_buffer) do
+      let (_id, _ev, ts) = Queue.peek event_buffer in
+      if now -. ts > buffer_ttl_seconds then begin
+        ignore (Queue.pop event_buffer);
+        incr count
+      end else
+        keep_popping := false
+    done;
+    !count)
 
 (** Format SSE event with optional ID and event type.
 

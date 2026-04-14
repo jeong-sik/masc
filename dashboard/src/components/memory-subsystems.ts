@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useSignal } from '@preact/signals'
+import { signal, useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { MermaidGraph } from './common/mermaid-graph'
@@ -55,6 +55,28 @@ const ARCHITECTURE_FLOW = `graph LR
 const shortAgentLabel = (name: string) => {
   const trimmed = name.replace(/^keeper-/, '').replace(/-agent$/, '')
   return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed
+}
+
+// Synapse pair filter — when set, only episodes whose participants include
+// both agents are shown in the episode list below the matrix.
+// Module-scope so HebbianMatrix cells, HebbianTopLinks rows, and the main
+// MemorySubsystems component can all read/write it.
+type SynapsePairFilter = { from: string; to: string } | null
+const synapsePairFilter = signal<SynapsePairFilter>(null)
+const setSynapsePairFilter = (pair: SynapsePairFilter) => {
+  synapsePairFilter.value = pair
+}
+const toggleSynapsePairFilter = (from: string, to: string) => {
+  const current = synapsePairFilter.value
+  if (current && current.from === from && current.to === to) {
+    synapsePairFilter.value = null
+  } else {
+    synapsePairFilter.value = { from, to }
+  }
+}
+const isActivePair = (from: string, to: string) => {
+  const f = synapsePairFilter.value
+  return f !== null && f.from === from && f.to === to
 }
 
 // --- Hebbian visualization constants (SSOT) ---------------------------------
@@ -188,9 +210,10 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
             }
             const pct = Math.round(s.weight * 100)
             const isDiag = from === to
+            const active = isActivePair(from, to)
             return html`
               <g>
-                <title>${`${from} → ${to}\nweight ${pct}% · 성공 ${s.success_count} · 실패 ${s.failure_count}`}</title>
+                <title>${`${from} → ${to}\nweight ${pct}% · 성공 ${s.success_count} · 실패 ${s.failure_count}\n(클릭: 이 쌍의 에피소드만 필터)`}</title>
                 <rect
                   x=${x}
                   y=${y}
@@ -198,13 +221,14 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                   height=${cell - 1}
                   fill=${weightColor(s.weight)}
                   opacity=${weightOpacity(s.weight)}
-                  stroke=${isDiag ? '#64748b' : '#0f172a'}
+                  stroke=${active ? '#f1f5f9' : isDiag ? '#64748b' : '#0f172a'}
                   stroke-dasharray=${isDiag ? '2 2' : ''}
-                  stroke-width="0.5"
+                  stroke-width=${active ? '1.5' : '0.5'}
                   class="cursor-pointer hover:stroke-zinc-300"
                   role="button"
-                  aria-label=${`${from} to ${to}: ${pct}%`}
-                  onClick=${() => openAgentDetail(to)}
+                  aria-label=${`${from} to ${to}: ${pct}% — filter episodes for this pair`}
+                  aria-pressed=${active ? 'true' : 'false'}
+                  onClick=${() => toggleSynapsePairFilter(from, to)}
                 />
               </g>
             `
@@ -286,16 +310,23 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
       <div class="space-y-1.5">
         ${top.map(s => {
           const pct = Math.round(s.weight * 100)
+          const active = isActivePair(s.from_agent, s.to_agent)
           return html`
-            <div class="flex items-center gap-2 text-xs font-mono">
+            <div
+              class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded cursor-pointer ${active ? 'ring-1 ring-zinc-300 bg-zinc-800/50' : 'hover:bg-zinc-800/30'}"
+              role="button"
+              aria-pressed=${active ? 'true' : 'false'}
+              title="클릭: 이 쌍의 에피소드만 필터"
+              onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
+            >
               <button
                 class="text-zinc-300 hover:text-sky-400 truncate w-32 text-right"
-                onClick=${() => openAgentDetail(s.from_agent)}
+                onClick=${(e: Event) => { e.stopPropagation(); openAgentDetail(s.from_agent) }}
               >${shortAgentLabel(s.from_agent)}</button>
               <span class="text-zinc-600">→</span>
               <button
                 class="text-zinc-300 hover:text-sky-400 truncate w-32 text-left"
-                onClick=${() => openAgentDetail(s.to_agent)}
+                onClick=${(e: Event) => { e.stopPropagation(); openAgentDetail(s.to_agent) }}
               >${shortAgentLabel(s.to_agent)}</button>
               <div class="flex-1 bg-zinc-800 rounded h-1.5 min-w-[60px]">
                 <div class="${weightBarClass(s.weight)} rounded h-1.5" style="width:${pct}%"></div>
@@ -462,9 +493,24 @@ export function MemorySubsystems() {
     keeperFilter.value = ''
     outcomeFilter.value = ''
     searchQuery.value = ''
+    synapsePairFilter.value = null
   }
 
-  const hasFilter = Boolean(keeperFilter.value || outcomeFilter.value || searchQuery.value)
+  const pairFilter = synapsePairFilter.value
+  const hasFilter = Boolean(
+    keeperFilter.value || outcomeFilter.value || searchQuery.value || pairFilter,
+  )
+
+  // Pair filter is applied client-side after the server returns episodes —
+  // episodes aren't indexed by synapse pair on the backend. For typical
+  // keeper workloads episode lists are <100 items, so per-render filter
+  // cost is negligible.
+  const visibleEpisodes = pairFilter
+    ? episodes.filter(ep =>
+        ep.participants.includes(pairFilter.from) &&
+        ep.participants.includes(pairFilter.to),
+      )
+    : episodes
 
   const showArch = useSignal(false)
 
@@ -555,9 +601,23 @@ export function MemorySubsystems() {
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 class="text-base font-semibold text-zinc-200">에피소드 기록</h3>
           <span class="text-xs text-zinc-500">
-            총 ${totalEpisodes}개 · 필터 ${filteredTotal}개 · 표시 ${episodes.length}개
+            총 ${totalEpisodes}개 · 필터 ${filteredTotal}개 · 표시 ${visibleEpisodes.length}개
           </span>
         </div>
+
+        ${
+          pairFilter
+            ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-zinc-800/60 border border-zinc-700 rounded text-xs">
+                <span class="text-zinc-500">시냅스 쌍 필터</span>
+                <span class="text-zinc-300 font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
+                <button
+                  class="ml-auto text-zinc-400 hover:text-zinc-200"
+                  onClick=${() => setSynapsePairFilter(null)}
+                  aria-label="시냅스 쌍 필터 해제"
+                >✕</button>
+              </div>`
+            : null
+        }
 
         <!-- Filter Bar -->
         <div class="flex items-center gap-2 mb-3 flex-wrap">
@@ -601,7 +661,7 @@ export function MemorySubsystems() {
         </div>
 
         ${
-          episodes.length === 0
+          visibleEpisodes.length === 0
             ? html`<div class="text-sm text-zinc-500 bg-zinc-900 rounded-lg p-4 text-center">
                 ${hasFilter
                   ? '필터 조건에 맞는 에피소드가 없습니다.'
@@ -609,7 +669,7 @@ export function MemorySubsystems() {
               </div>`
             : html`
                 <div class="space-y-1">
-                  ${episodes
+                  ${visibleEpisodes
                     .slice()
                     .reverse()
                     .map(

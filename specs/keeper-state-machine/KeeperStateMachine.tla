@@ -458,11 +458,13 @@ RunningClearsManualReconcile == [](Phase = "Running" => ~manual_reconcile_requir
 \*      runaway is caught by the retry latch + OverflowedResolves
 \*      instead.
 
-\* S11: Overflowed is transient — each visit must progress to a different
-\*      phase before a step completes.  Combined with AutoCompactTriggered
-\*      fairness, this guarantees no keeper stays in Overflowed.
-OverflowedNeverStutters ==
-    [][(Phase = "Overflowed") => (Phase' /= "Overflowed")]_vars
+\* S11: CompactionClearsOverflow — action property: whenever compaction
+\*      goes from active to inactive, context_overflow must become false.
+\*      This encodes the CompactionCompleted contract: compaction resolves
+\*      the overflow condition. Replaces OverflowedNeverStutters (which
+\*      over-constrained by forbidding heartbeat changes in Overflowed).
+CompactionClearsOverflow ==
+    [][compaction_active /\ ~compaction_active' => ~context_overflow']_vars
 
 \* ── Liveness Properties ───────────────────────────────────
 
@@ -488,8 +490,10 @@ HandoffResolves == (Phase = "HandingOff") ~> (Phase \in StablePhases)
 
 \* L6: Overflowed eventually resolves — either the auto-compact succeeds
 \*     (→ Running via Compacting) or the retry latch promotes to Paused.
+\*     Target is StablePhases only (not Compacting) so the buggy cycle
+\*     Overflowed↔Compacting is correctly detected as a liveness violation.
 OverflowedResolves ==
-    (Phase = "Overflowed") ~> (Phase \in StablePhases \cup {"Compacting"})
+    (Phase = "Overflowed") ~> (Phase \in StablePhases)
 
 \* ── Deadlock Freedom ──────────────────────────────────────
 
@@ -520,13 +524,13 @@ TypeOK ==
 
 \* ── Bug Model: CompactionCompleted forgets to clear context_overflow ──
 \*
-\* Intent: demonstrate that the OverflowedResolves liveness property has
-\* discriminating power.  If a future refactor breaks the condition-reset
-\* contract in CompactionCompleted (for example, by forgetting to clear
-\* context_overflow), the keeper will re-enter Overflowed on the very
-\* next DerivePhase call even though compaction succeeded, looping
-\* forever.  TLC must report a counterexample that violates
-\* OverflowedResolves.
+\* Intent: demonstrate that CompactionClearsOverflow has discriminating
+\* power.  If a future refactor breaks the condition-reset contract in
+\* CompactionCompleted (for example, by forgetting to clear context_overflow),
+\* the keeper re-enters Overflowed on the very next DerivePhase call even
+\* though compaction succeeded.  TLC must report a counterexample that
+\* violates CompactionClearsOverflow (compaction completed but
+\* context_overflow remains true).
 \*
 \* Used by: KeeperOverflowRecovery-buggy.cfg (SPECIFICATION SpecBuggy)
 

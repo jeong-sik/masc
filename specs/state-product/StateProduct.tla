@@ -2,7 +2,7 @@
 \* Orthogonal State Machine Composition — TLA+ Formal Specification
 \*
 \* Models three independent FSMs composed as a product:
-\*   1. Keeper (simplified: 5 key phases from 11-state FSM)
+\*   1. Keeper (simplified: 6 key phases from 12-state FSM; Overflowed added 2026-04)
 \*   2. Agent Turn (7 phases: pipeline stages)
 \*   3. Tool Validation (7 phases: det/nondet correction)
 \*
@@ -31,7 +31,7 @@ vars == <<keeper, turn, validation>>
 
 \* ── Phase Sets ───────────────────────────────────────────
 
-KeeperPhases == {"Offline", "Running", "Compacting", "Draining", "Stopped"}
+KeeperPhases == {"Offline", "Running", "Overflowed", "Compacting", "Draining", "Stopped"}
 TurnPhases == {"Idle", "Prompting", "Awaiting", "Parsing", "Dispatching", "Collecting", "Finalizing"}
 ValidationPhases == {"Unchecked", "DetCorrecting", "DetValid", "DetInvalid", "NondetRetrying", "Valid", "Rejected"}
 
@@ -80,6 +80,23 @@ KeeperStop ==
     /\ keeper = "Draining"
     /\ turn = "Idle"          \* can only stop when turn is idle
     /\ keeper' = "Stopped"
+    /\ UNCHANGED <<turn, validation>>
+
+\* Overflowed is entered from Running when context_overflow is detected.
+\* Entry does not cancel the in-flight turn (keeper_state_machine.ml behaviour);
+\* it only blocks NEW turns (enforced via the TurnStart guard `keeper \in {"Running"}`).
+KeeperOverflow ==
+    /\ keeper = "Running"
+    /\ keeper' = "Overflowed"
+    /\ UNCHANGED <<turn, validation>>
+
+\* Auto-compaction bridges Overflowed -> Compacting (entry_action Start_compaction
+\* in keeper_state_machine.ml). Same LLM-exclusion guard as KeeperCompact:
+\* the compactor must not race an active LLM call.
+KeeperAutoCompact ==
+    /\ keeper = "Overflowed"
+    /\ turn \notin {"Prompting", "Awaiting"}
+    /\ keeper' = "Compacting"
     /\ UNCHANGED <<turn, validation>>
 
 \* ── Agent Turn Events ────────────────────────────────────
@@ -177,6 +194,7 @@ ValSkip ==
 
 Next ==
     \/ KeeperStart \/ KeeperCompact \/ KeeperCompactDone
+    \/ KeeperOverflow \/ KeeperAutoCompact
     \/ KeeperDrain \/ KeeperStop
     \/ TurnStart \/ TurnPrompt \/ TurnResponse \/ TurnParse
     \/ TurnDispatch \/ TurnCollect \/ TurnFinalize \/ TurnError

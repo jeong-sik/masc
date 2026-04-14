@@ -126,6 +126,31 @@ val maybe_rollover_oas_handoff :
   checkpoint:Agent_sdk.Checkpoint.t option ->
   handoff_rollover
 
+(** {2 Pure gate helpers (for testing)} *)
+
+type rollover_gate_decision =
+  | Skip of string
+  | Go of string
+
+(** [blocker_indicates_overflow msg] returns true when [msg] matches a
+    provider-agnostic context-overflow wording (GLM / OpenAI / Ollama /
+    Anthropic). Case-insensitive substring match. *)
+val blocker_indicates_overflow : string -> bool
+
+(** [classify_rollover_gate] is the pure decision function used by
+    [maybe_rollover_oas_handoff]. Exposed for unit tests.
+
+    Returns [Go reason] when a handoff should be attempted; [Skip reason]
+    otherwise. The [reason] string is surfaced in logs and [handoff_json]. *)
+val classify_rollover_gate :
+  auto_handoff:bool ->
+  cooldown_elapsed:bool ->
+  ratio:float ->
+  handoff_threshold:float ->
+  last_outcome:proactive_cycle_outcome ->
+  last_blocker:string ->
+  rollover_gate_decision
+
 (** {1 Checkpoint Loading and Saving} *)
 
 val load_context_from_checkpoint :

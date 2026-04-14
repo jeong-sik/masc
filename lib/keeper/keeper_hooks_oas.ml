@@ -325,14 +325,28 @@ let make_hooks
                "masc_provider_prefix_cache_read_tokens_total"
                ~delta:(Float.of_int cr) ()
          | None -> ());
-        (* Inference latency histogram for /metrics endpoint. *)
+        (* Inference latency histogram for /metrics endpoint.
+           Split observations into three buckets so we can tell "metric is
+           silent because no telemetry" apart from "metric is silent because
+           the hook isn't running". Without this split a histogram sum/count
+           of 0 is ambiguous between the two. *)
+        Prometheus.inc_counter
+          "masc_after_turn_hook_total"
+          ~labels:[("model", model)] ();
         (match response.telemetry with
          | Some t when t.request_latency_ms > 0 ->
            Prometheus.observe_histogram
              "masc_llm_inference_duration_seconds"
              ~labels:[("model", model)]
              (Float.of_int t.request_latency_ms /. 1000.0)
-         | _ -> ());
+         | Some _ ->
+           Prometheus.inc_counter
+             "masc_after_turn_telemetry_zero_latency_total"
+             ~labels:[("model", model)] ()
+         | None ->
+           Prometheus.inc_counter
+             "masc_after_turn_telemetry_missing_total"
+             ~labels:[("model", model)] ());
         Log.Keeper.info "keeper:%s turn=%d total_turns=%d model=%s tokens=%d"
           meta.name turn meta.runtime.usage.total_turns model total_tok;
         (* Emit per-turn cost event for task attribution.

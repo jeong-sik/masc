@@ -146,10 +146,20 @@ function RangeSelector() {
 
 // --- Main container ---
 
+const LIVE_INTERVAL_MS = 30_000
+
 export function Observatory() {
   const state = useSignal<ObservatoryData>(emptyData())
+  const liveMode = useSignal(false)
+  const refreshTick = useSignal(0)
   const activeController = useRef<AbortController | null>(null)
   const latestRequestId = useRef(0)
+
+  useEffect(() => {
+    if (!liveMode.value) return
+    const id = setInterval(() => { refreshTick.value++ }, LIVE_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [liveMode.value])
 
   useEffect(() => {
     const keeper = currentKeeperFilter() ?? undefined
@@ -198,7 +208,7 @@ export function Observatory() {
     })
 
     return () => { controller.abort() }
-  }, [currentKeeperFilter(), currentTimeRangeFilter()])
+  }, [currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value])
 
   const data = state.value
 
@@ -215,9 +225,33 @@ export function Observatory() {
             ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
             · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
             · ${data.events.length} events
+            ${liveMode.value ? ' · 30s auto-refresh' : ''}
           </p>
         </div>
-        <${RangeSelector} />
+        <div class="flex items-center gap-2">
+          <${RangeSelector} />
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              liveMode.value
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
+            }"
+            onClick=${() => {
+              liveMode.value = !liveMode.value
+              if (liveMode.value) refreshTick.value++
+            }}
+            aria-pressed=${liveMode.value}
+          >
+            ${liveMode.value ? html`
+              <span class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+              </span>
+              Live
+            ` : 'Live'}
+          </button>
+        </div>
       </div>
 
       ${data.error ? html`

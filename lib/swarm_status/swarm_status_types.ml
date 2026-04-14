@@ -6,9 +6,41 @@ type lane_kind =
   | Projected
   | Supervised
 
+(** Lane lifecycle phase — derived deterministically from lane metrics.
+    Never deserialized from JSON; computed in [swarm_status_classify.lane_phase]. *)
+type lane_phase =
+  | Forming           (** No active operations or detachments *)
+  | Dispatching       (** Active operations exist but no detachments yet *)
+  | Executing         (** Detachments or workers are active *)
+  | Blocked           (** Motion is stalled with no approvals pending *)
+  | Awaiting_approval (** Manual approval is gating progress *)
+  | Lane_completed    (** All operations terminal, no pending approvals *)
+
+(** Lane motion state — freshness-based classification.
+    Computed from timestamps in [swarm_status_classify.lane_motion_state]. *)
+type lane_motion =
+  | Waiting   (** Not present, or within stale window with no fresh signal *)
+  | Moving    (** Fresh event within [moving_window_sec] *)
+  | Stalled   (** No event within [stale_window_sec] *)
+  | Terminal  (** Lane phase is [Lane_completed] *)
+
+(** Flag severity — two-level classification for lane diagnostic flags. *)
+type flag_severity = Flag_bad | Flag_warn
+
+(** Flag code — closed set of diagnostic flag identifiers.
+    Each flag is computed deterministically in [swarm_status_classify.lane_flags]. *)
+type flag_code =
+  | Projected_only
+  | Missing_trace_events
+  | Pending_manual_confirmation
+  | Missing_worker_binding
+  | Missing_runtime_progress
+  | Stale_data
+  | Dashboard_source_split
+
 type flag = {
-  code : string;
-  severity : string;
+  code : flag_code;
+  severity : flag_severity;
   summary : string;
 }
 
@@ -26,10 +58,10 @@ type timeline_event = {
 type lane = {
   lane_id : string;
   label : string;
-  kind : string;
+  kind : lane_kind;
   present : bool;
-  phase : string;
-  motion_state : string;
+  phase : lane_phase;
+  motion_state : lane_motion;
   source_of_truth : string;
   last_movement_at : string option;
   movement_reason : string;

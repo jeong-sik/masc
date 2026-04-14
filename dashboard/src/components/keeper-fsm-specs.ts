@@ -166,3 +166,80 @@ export function buildCascadeSpec(params: CascadeParams): FsmGraphSpec {
 
   return { nodes, edges, activeNodeId: activeId }
 }
+
+// ================================================================
+// Composite Lifecycle (RFC-0003 KeeperCompositeLifecycle.tla)
+// ================================================================
+//
+// Compound graph: five parent clusters (one per sub-FSM) each containing
+// their possible states. The current state is rendered [active] and the
+// rest [dim], so the viewer reads "where is this keeper in each layer
+// simultaneously". No cross-cluster edges — causal ordering between
+// sub-FSMs is captured by the invariants panel, not the graph edges.
+
+export interface CompositeFsmParams {
+  phase: string            // KSM — keeper lifecycle (11 phases, we show a reduced set)
+  turnPhase: string        // KTC — idle | prompting | executing | compacting | finalizing
+  decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected
+  cascadeState: string     // KCL — idle | selecting | trying | done | exhausted
+  compactionStage: string  // KMC — accumulating | compacting | done
+}
+
+const KSM_STATES = [
+  'Offline', 'Running', 'Failing', 'Compacting', 'HandingOff',
+  'Paused', 'Stopped', 'Crashed', 'Dead',
+]
+const KTC_STATES = ['idle', 'prompting', 'executing', 'compacting', 'finalizing']
+const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']
+const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
+const KMC_STATES = ['accumulating', 'compacting', 'done']
+
+function nodeType(stateId: string, activeId: string, tone: 'active' | 'warn' | 'err'): FsmNode['type'] {
+  return stateId === activeId ? tone : 'dim'
+}
+
+function clusterNodes(
+  clusterId: string,
+  clusterLabel: string,
+  states: readonly string[],
+  active: string,
+  tone: 'active' | 'warn' | 'err',
+): FsmNode[] {
+  const parent: FsmNode = {
+    id: clusterId,
+    label: clusterLabel,
+    type: 'state',
+  }
+  const children: FsmNode[] = states.map(s => ({
+    id: `${clusterId}:${s}`,
+    label: s,
+    type: nodeType(s, active, tone),
+    parent: clusterId,
+  }))
+  return [parent, ...children]
+}
+
+export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec {
+  const nodes: FsmNode[] = [
+    ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, 'active'),
+    ...clusterNodes('KTC', 'KTC · turn cycle', KTC_STATES, params.turnPhase, 'active'),
+    ...clusterNodes('KDP', 'KDP · decision pipeline', KDP_STATES, params.decisionStage,
+      params.decisionStage === 'gate_rejected' ? 'err' : 'active'),
+    ...clusterNodes('KCL', 'KCL · cascade state', KCL_STATES, params.cascadeState,
+      params.cascadeState === 'exhausted' ? 'err' : 'active'),
+    ...clusterNodes('KMC', 'KMC · memory compaction', KMC_STATES, params.compactionStage, 'warn'),
+  ]
+
+  // Edges left empty by design: the compound visual encodes "what sub-FSMs
+  // are simultaneously active". Cross-cluster causality lives in the TLA+
+  // spec (see KeeperCompositeLifecycle.tla join actions) and the invariants
+  // panel — drawing inter-cluster arrows here would overstate the coupling.
+  const edges: FsmEdge[] = []
+
+  return {
+    nodes,
+    edges,
+    layout: 'breadthfirst',
+    direction: 'LR',
+  }
+}

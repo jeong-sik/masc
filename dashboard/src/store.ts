@@ -129,6 +129,10 @@ export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
 export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
+export const oasTotalLlmCalls = signal(0)
+export const oasTotalErrors = signal(0)
+export const oasLastLlmCallTs = signal<number | null>(null)
+export const oasLastErrorTs = signal<number | null>(null)
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
   const head = oasAgentEvents.value[0]
@@ -137,6 +141,20 @@ export function pushOasAgentEvent(event: OasAgentEvent): void {
   }
   oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
   oasTotalEvents.value++
+}
+
+/** Record an OAS durable LLM-call event. Increments the global
+ *  counter and pins the latest timestamp so the runtime panel can
+ *  surface recency. */
+export function recordOasLlmCall(tsMs: number): void {
+  oasTotalLlmCalls.value++
+  oasLastLlmCallTs.value = tsMs
+}
+
+/** Record an OAS durable error event. */
+export function recordOasError(tsMs: number): void {
+  oasTotalErrors.value++
+  oasLastErrorTs.value = tsMs
 }
 
 export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
@@ -164,11 +182,19 @@ export const oasHealthSummary: ReadonlySignal<{
   keeperSnapshotsCount: number
   lastKeeperTick: number | null
   totalEvents: number
+  totalLlmCalls: number
+  totalErrors: number
+  lastLlmCallTs: number | null
+  lastErrorTs: number | null
 }> = computed(() => ({
   agentEventsCount: oasAgentEvents.value.length,
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
   lastKeeperTick: oasLastKeeperTick.value,
   totalEvents: oasTotalEvents.value,
+  totalLlmCalls: oasTotalLlmCalls.value,
+  totalErrors: oasTotalErrors.value,
+  lastLlmCallTs: oasLastLlmCallTs.value,
+  lastErrorTs: oasLastErrorTs.value,
 }))
 
 // --- Loading flags ---

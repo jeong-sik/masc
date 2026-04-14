@@ -209,6 +209,133 @@ describe('getTraceSummary', () => {
     expect(summary.broadcast_count).toBe(1)
     expect(summary.total_cost_usd).toBeCloseTo(0.03)
   })
+
+  it('accumulates OAS tokens and cost from lifecycle events', () => {
+    traceSlots.value = {
+      'agent-x': {
+        events: [
+          {
+            id: 'a',
+            ts: 1000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'agent completed',
+            detail: { input_tokens: 500, output_tokens: 150 },
+            cost_usd: 0.003,
+          },
+          {
+            id: 'b',
+            ts: 2000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'agent completed',
+            detail: { input_tokens: 300, output_tokens: 80 },
+            cost_usd: 0.002,
+          },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        fetchToken: 0,
+      },
+    }
+
+    const summary = getTraceSummary('agent-x')
+    expect(summary.oas_input_tokens).toBe(800)
+    expect(summary.oas_output_tokens).toBe(230)
+    expect(summary.total_cost_usd).toBeCloseTo(0.005)
+    expect(summary.lifecycle_count).toBe(2)
+  })
+
+  it('accumulates oas_tokens_saved from context compactions', () => {
+    traceSlots.value = {
+      'agent-z': {
+        events: [
+          {
+            id: 'c1',
+            ts: 1000,
+            ts_iso: '',
+            kind: 'oas_context',
+            sourceLane: 'oas',
+            summary: 'compact',
+            detail: { before_tokens: 1000, after_tokens: 400 },
+          },
+          {
+            id: 'c2',
+            ts: 2000,
+            ts_iso: '',
+            kind: 'oas_context',
+            sourceLane: 'oas',
+            summary: 'compact',
+            detail: { before_tokens: 600, after_tokens: 300 },
+          },
+          {
+            id: 'c3',
+            ts: 3000,
+            ts_iso: '',
+            kind: 'oas_context',
+            sourceLane: 'oas',
+            summary: 'compact (no-op)',
+            detail: { before_tokens: 200, after_tokens: 200 },
+          },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        fetchToken: 0,
+      },
+    }
+
+    const summary = getTraceSummary('agent-z')
+    expect(summary.oas_context_count).toBe(3)
+    expect(summary.oas_tokens_saved).toBe(900) // 600 + 300 + 0
+  })
+
+  it('counts durable llm_request and error_occurred events', () => {
+    traceSlots.value = {
+      'agent-y': {
+        events: [
+          {
+            id: 'r1',
+            ts: 1000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'LLM 요청',
+            detail: { durable_kind: 'llm_request', turn: 1, model: 'qwen', input_tokens: 100 },
+          },
+          {
+            id: 'r2',
+            ts: 1500,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'LLM 요청',
+            detail: { durable_kind: 'llm_request', turn: 2, model: 'qwen', input_tokens: 200 },
+          },
+          {
+            id: 'e1',
+            ts: 2000,
+            ts_iso: '',
+            kind: 'lifecycle',
+            sourceLane: 'oas',
+            summary: 'OAS 에러',
+            detail: { durable_kind: 'error_occurred', turn: 2, error_domain: 'Api', detail: 'timeout' },
+          },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        fetchToken: 0,
+      },
+    }
+
+    const summary = getTraceSummary('agent-y')
+    expect(summary.oas_llm_call_count).toBe(2)
+    expect(summary.oas_error_count).toBe(1)
+  })
 })
 
 describe('getKindCounts', () => {

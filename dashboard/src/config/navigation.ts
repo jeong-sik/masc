@@ -269,6 +269,37 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
   return sectionItemsForTab(tabId).filter(item => item.hidden !== true)
 }
 
+/**
+ * Redirect table for legacy section IDs.
+ *
+ * Key: (tab, old section) → value: { section, view?, tab? }
+ *
+ * `tab` override allows cross-surface redirects (e.g. future misroute fixes).
+ * `view` sets/overrides the view query param when absent or for canonicalization.
+ *
+ * Contract (Phase -1 / RFC consolidation):
+ *   - Redirects are applied BEFORE section validation.
+ *   - Caller-supplied query params (session_id, operation_id, worker_run_id, tool,
+ *     target_id, keeper, agent, ns, range, etc.) are preserved.
+ *   - This function MUST remain pure. Side effects (modal open, analytics) must
+ *     live in router/app effects, not here.
+ */
+export interface SectionRedirect {
+  tab?: TabId
+  section: string
+  view?: string
+}
+
+type TabSectionKey = `${TabId}:${string}`
+
+export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
+  // RFC-MASC-006 Phase 0: sessions stub removed — redirect to agents
+  'monitoring:sessions': { section: 'agents' },
+  // Dashboard consolidation Phase 1+ redirects are added in later phases
+  // once the target sections exist in SurfaceSectionId. See dashboard/docs/
+  // consolidation/route-inventory.md for the full contract.
+}
+
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
 
@@ -278,9 +309,15 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     return next
   }
 
-  // Phase 0 (RFC-MASC-006): sessions stub removed — redirect to agents
-  if (tabId === 'monitoring' && next.section === 'sessions') {
-    next.section = 'agents'
+  // Apply redirect table (pure transform: no side effects).
+  const inputSection = next.section
+  if (inputSection) {
+    const redirect = SECTION_REDIRECTS[`${tabId}:${inputSection}` as TabSectionKey]
+    if (redirect) {
+      if (redirect.view && !next.view) next.view = redirect.view
+      next.section = redirect.section
+      // Cross-surface redirect handled by caller (router) — see contract doc.
+    }
   }
 
   const typedTabId = tabId as NonHomeTabId

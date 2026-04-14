@@ -134,6 +134,79 @@ let test_snapshot_json_shape () =
     | _ -> fail "expected Assoc")
 
 (* ============================================================
+   Metric Regression — locks in PR #7127 fix.
+
+   with_permit / try_with_permit are passthrough wrappers, but they
+   MUST still call on_acquire/on_release so the inflight gauge is
+   meaningful.  Without this, masc_inference_queue_inflight stays at 0
+   and dashboards see no load even when keepers are active.  Easy to
+   regress because the queue body is a one-line passthrough.
+   ============================================================ *)
+
+let test_with_permit_releases_inflight_gauge () =
+  Eio_main.run (fun _env ->
+    let before =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_inflight" ()
+    in
+    AQ.with_permit ~priority:Interactive
+      ~keeper_name:"metric-test" ~cascade_name:"test"
+      (fun () -> ());
+    let after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_inflight" ()
+    in
+    check (float 0.1) "inflight balanced after success" before after)
+
+let test_with_permit_releases_on_exception () =
+  Eio_main.run (fun _env ->
+    let before =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_inflight" ()
+    in
+    (try
+       AQ.with_permit ~priority:Interactive
+         ~keeper_name:"metric-test-exn" ~cascade_name:"test"
+         (fun () -> failwith "boom")
+     with Failure _ -> ());
+    let after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_inflight" ()
+    in
+    check (float 0.1) "inflight balanced after exception" before after)
+
+let test_with_permit_increments_acquired_counter () =
+  Eio_main.run (fun _env ->
+    let before =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_acquired_total" ()
+    in
+    AQ.with_permit ~priority:Interactive
+      ~keeper_name:"counter-test" ~cascade_name:"test"
+      (fun () -> ());
+    let after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_acquired_total" ()
+    in
+    check (float 0.1) "acquired counter incremented" (before +. 1.0) after)
+
+let test_try_with_permit_releases_inflight_gauge () =
+  Eio_main.run (fun _env ->
+    let before =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_inflight" ()
+    in
+    let _ : int option = AQ.try_with_permit ~priority:Interactive
+      ~keeper_name:"try-metric" ~cascade_name:"test"
+      (fun () -> 1)
+    in
+    let after =
+      Masc_mcp.Prometheus.metric_value_or_zero
+        "masc_inference_queue_inflight" ()
+    in
+    check (float 0.1) "try_with_permit balanced" before after)
+
+(* ============================================================
    Runner
    ============================================================ *)
 
@@ -160,5 +233,15 @@ let () =
         test_max_concurrent_metric_tracks_capacity;
       test_case "rejects zero" `Quick test_set_max_concurrent_rejects_zero;
       test_case "snapshot_json shape" `Quick test_snapshot_json_shape;
+    ];
+    "metric_regression", [
+      test_case "with_permit balances inflight gauge" `Quick
+        test_with_permit_releases_inflight_gauge;
+      test_case "with_permit releases on exception" `Quick
+        test_with_permit_releases_on_exception;
+      test_case "with_permit increments acquired counter" `Quick
+        test_with_permit_increments_acquired_counter;
+      test_case "try_with_permit balances inflight gauge" `Quick
+        test_try_with_permit_releases_inflight_gauge;
     ];
   ]

@@ -12,7 +12,11 @@ import {
   type TelemetrySource,
   type TelemetrySourceSummary,
 } from '../api/dashboard'
-import { refreshSharedTelemetrySummary, sharedTelemetrySummary } from './fleet-data-core'
+import {
+  refreshSharedTelemetrySummary,
+  sharedTelemetrySummary,
+  sharedTelemetrySummaryError,
+} from './fleet-data-core'
 import { route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
@@ -618,6 +622,15 @@ export function TelemetryUnified() {
         storePromise,
       ])
       if (requestId !== latestRequestId.current) return
+      // refreshSharedTelemetrySummary records failures on the shared error
+      // signal rather than throwing (so tool-quality-panel can keep rendering
+      // the last-good value). Telemetry-unified, however, treated a summary
+      // failure as a panel-level error before Phase 0, so re-raise it here
+      // to preserve the user-visible regression surface.
+      const summaryError = sharedTelemetrySummaryError.value
+      if (summaryError !== null) {
+        throw new Error(summaryError)
+      }
       const summary = sharedTelemetrySummary.value ?? { sources: [], total_entries: 0, generated_at: '' }
       state.value = {
         entries: telemetry.entries,

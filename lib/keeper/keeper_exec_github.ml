@@ -67,19 +67,35 @@ let gh_issue_number_subcmds =
   [ "view"; "close"; "reopen"; "comment"; "edit"
   ; "develop"; "lock"; "unlock"; "pin"; "unpin"; "transfer" ]
 
-(** Parse a gh command string and return [Some (kind, number)] when the
-    command references a specific PR/issue number that we should
-    pre-validate. Returns [None] for list/create/status commands, and
-    for any command whose first positional after the subcommand is not
-    a positive integer (e.g. branch names for [gh pr view my-branch]).
+(** Parse a gh command string and return [Some (kind, number)] ONLY when
+    the number is the immediate positional argument after the
+    subcommand:
+
+        pr <sub> <N> [flags...]
+        issue <sub> <N> [flags...]
+
+    This strict shape is deterministic -- no flag-table heuristic, no
+    guessing which tokens are flag values. For the keeper-hallucination
+    use case the real failures are simple "pr view 99999" strings, so
+    the strict form catches them without risking false rejections on
+    variants like "pr view --web 123" (where we simply fallthrough to
+    normal execution).
+
+    Returns [None] for:
+      - list/create/status subcommands (no target number at all)
+      - commands with flags between the subcommand and the number
+      - commands whose first positional after the subcommand is not a
+        positive integer (branch names, URLs, etc.)
 
     Examples:
-      "pr view 123"           -> Some (PR, 123)
-      "pr view my-branch"     -> None  (not an integer)
-      "pr list --state open"  -> None
-      "pr create --title foo" -> None
-      "issue comment 456 -b hi" -> Some (Issue, 456)
-      "pr merge 789 --squash" -> Some (PR, 789) *)
+      "pr view 123"             -> Some (PR, 123)
+      "pr view 456 --json title" -> Some (PR, 456)
+      "pr merge 789 --squash"   -> Some (PR, 789)
+      "issue comment 42 --body hi" -> Some (Issue, 42)
+      "pr view my-branch"       -> None  (not an integer)
+      "pr view --web 123"       -> None  (flag precedes number)
+      "pr list --state open"    -> None
+      "pr create --title foo"   -> None *)
 let extract_gh_target_number (cmd : string)
     : (Keeper_gh_cache.entity_kind * int) option
   =
@@ -87,27 +103,18 @@ let extract_gh_target_number (cmd : string)
     String.split_on_char ' ' (String.trim cmd)
     |> List.filter (fun s -> s <> "")
   in
-  let rec first_positional_int = function
-    | [] -> None
-    | tok :: rest ->
-      if String.length tok > 0 && tok.[0] = '-' then
-        (* Flag: skip over its value too, if this flag takes one.
-           We use a conservative heuristic -- skip the next token only
-           when it doesn't also look like a flag. *)
-        (match rest with
-         | next :: rest' when String.length next > 0 && next.[0] <> '-' ->
-           first_positional_int rest'
-         | _ -> first_positional_int rest)
-      else
-        (match int_of_string_opt tok with
-         | Some n when n > 0 -> Some n
-         | _ -> None)  (* first non-flag positional wasn't a number *)
+  let positive_int s =
+    match int_of_string_opt s with
+    | Some n when n > 0 -> Some n
+    | _ -> None
   in
   match parts with
-  | "pr" :: sub :: rest when List.mem (String.lowercase_ascii sub) gh_pr_number_subcmds ->
-    Option.map (fun n -> Keeper_gh_cache.PR, n) (first_positional_int rest)
-  | "issue" :: sub :: rest when List.mem (String.lowercase_ascii sub) gh_issue_number_subcmds ->
-    Option.map (fun n -> Keeper_gh_cache.Issue, n) (first_positional_int rest)
+  | "pr" :: sub :: num_str :: _
+    when List.mem (String.lowercase_ascii sub) gh_pr_number_subcmds ->
+    Option.map (fun n -> Keeper_gh_cache.PR, n) (positive_int num_str)
+  | "issue" :: sub :: num_str :: _
+    when List.mem (String.lowercase_ascii sub) gh_issue_number_subcmds ->
+    Option.map (fun n -> Keeper_gh_cache.Issue, n) (positive_int num_str)
   | _ -> None
 
 (** Return the kind whose cached number list should be invalidated after

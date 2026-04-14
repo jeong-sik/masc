@@ -102,6 +102,19 @@ let test_extract_negative_is_none () =
   (* Negative ints fail parsing (leading - looks like a flag and is skipped). *)
   check target_testable "pr view -5" None (extract "pr view -5")
 
+let test_extract_flag_before_number_is_none () =
+  (* The parser is strict: it only recognizes `<kind> <sub> <N>` with
+     the integer as the immediate third token. If the caller puts a
+     flag between [sub] and [N] we fallthrough (Unknown), letting gh
+     process the command normally. This keeps the parser sound without
+     a gh-flag-table heuristic. *)
+  check target_testable "pr view --web 42 (flag precedes number)"
+    None
+    (extract "pr view --web 42");
+  check target_testable "issue view --json title 7"
+    None
+    (extract "issue view --json title 7")
+
 (* ====================================================================== *)
 (* gh_mutates_entity                                                        *)
 (* ====================================================================== *)
@@ -219,6 +232,8 @@ let () =
       ; test_case "extra whitespace" `Quick test_extract_extra_whitespace
       ; test_case "number 0 -> None" `Quick test_extract_zero_is_none
       ; test_case "negative number -> None" `Quick test_extract_negative_is_none
+      ; test_case "flag before number -> None (strict)" `Quick
+          test_extract_flag_before_number_is_none
       ]
     ; "gh_mutates_entity",
       [ test_case "pr create" `Quick test_mutates_pr_create

@@ -672,12 +672,14 @@ let handle_keeper_compact ctx args : tool_result =
         (Printf.sprintf "keeper %s is not in the registry" name)
     | Some entry ->
     let phase_before = Keeper_state_machine.phase_to_string entry.phase in
-    (* Phase precondition: Overflowed, Paused, or (Running/Failing with force). *)
+    (* Phase precondition: Overflowed, Paused, or (Running/Failing with force).
+       Match on the variant directly so the compiler warns when new phases
+       are added — the catch-all wildcard would silently default to [false]. *)
     let allowed =
-      match phase_before with
-      | "overflowed" | "paused" | "compacting" -> true
-      | "running" | "failing" -> force
-      | _ -> false
+      match entry.phase with
+      | Overflowed | Paused | Compacting -> true
+      | Running | Failing -> force
+      | Offline | Stopped | Dead | Crashed | Restarting | HandingOff | Draining -> false
     in
     if not allowed then begin
       Prometheus.inc_counter "masc_keeper_operator_compact_total"

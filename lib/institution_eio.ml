@@ -672,3 +672,35 @@ let load_recent_episodes_jsonl ~limit : episode list =
       | _ :: rest -> drop (n - 1) rest
     in
     drop (total - limit) all
+
+(** Cap episodes JSONL to at most [max_lines] by keeping the most recent ones.
+    Rewrites the file atomically only if over cap. Returns number of lines
+    dropped (0 when no rewrite was needed).
+
+    Triggered by [flush_episodes] to prevent unbounded growth. *)
+let episodes_jsonl_default_cap = 500
+
+let cap_episodes_jsonl ?(max_lines = episodes_jsonl_default_cap) () : int =
+  let path = episodes_jsonl_path () in
+  if not (Sys.file_exists path) then 0
+  else
+    let lines = Fs_compat.load_jsonl path in
+    let total = List.length lines in
+    if total <= max_lines then 0
+    else begin
+      let rec drop n = function
+        | [] -> []
+        | rest when n <= 0 -> rest
+        | _ :: rest -> drop (n - 1) rest
+      in
+      let keep = drop (total - max_lines) lines in
+      let tmp_path = path ^ ".tmp" in
+      let oc = open_out tmp_path in
+      List.iter (fun line ->
+        output_string oc (Yojson.Safe.to_string line);
+        output_char oc '\n'
+      ) keep;
+      close_out oc;
+      Sys.rename tmp_path path;
+      total - max_lines
+    end

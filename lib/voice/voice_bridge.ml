@@ -474,21 +474,39 @@ let attempt_tts_endpoint ~sw ~clock ~net ~agent_id ~message ~voice ~model
            ~agent_id ~output_file:audio_file
        with
       | Ok file_size ->
-          start_local_playback ~sw ~agent_id ~audio_file;
-          Ok
-            (append_provider_metadata
-               (`Assoc
-                 [
-                   ("status", `String "spoken");
-                   ("agent_id", `String agent_id);
-                   ("voice", `String voice);
-                   ("audio_file", `String audio_file);
-                   ("audio_size", `Int file_size);
-                   ( "message_preview",
-                     `String
-                       (String.sub message 0 (min 50 (String.length message))) );
-                 ])
-               endpoint)
+          (* run_local_playback now owns the dedup record inside its mutex to
+             close the check-then-act race with [is_dedup_hit]. *)
+          let playback_result =
+            run_local_playback ~sw ~agent_id ~message ~audio_file ()
+          in
+          (match playback_result with
+           | `Dedup_hit ->
+             (try Sys.remove audio_file with Sys_error _ -> ());
+             Ok (`Assoc [
+               ("status", `String "dedup_skipped");
+               ("agent_id", `String agent_id);
+               ("reason", `String "identical message was played recently (mutex)");
+             ])
+           | `Played played_seconds ->
+             Ok
+               (append_provider_metadata
+                  (`Assoc
+                    (List.concat [
+                      [
+                        ("status", `String "spoken");
+                        ("agent_id", `String agent_id);
+                        ("voice", `String voice);
+                        ("audio_file", `String audio_file);
+                        ("audio_size", `Int file_size);
+                        ( "message_preview",
+                          `String
+                            (String.sub message 0 (min 50 (String.length message))) );
+                      ];
+                      (match played_seconds with
+                       | Some s -> [("played_seconds", `Float s)]
+                       | None -> []);
+                    ]))
+                  endpoint))
       | Error error ->
           (try Sys.remove audio_file with Sys_error _ -> ());
           Error error)
@@ -651,6 +669,16 @@ let end_voice_session ~sw ~clock ~net ~agent_id =
     Ordered endpoint chain from voice_config.json. Fails explicitly when no
     real backend accepts the request. *)
 let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority=1) () =
+  if is_dedup_hit ~agent_id ~message then begin
+    log_info (Printf.sprintf "voice dedup skip: agent=%s (same message within %.0fs window)"
+      agent_id playback_dedup_window_sec);
+    Ok (`Assoc [
+      ("status", `String "dedup_skipped");
+      ("agent_id", `String agent_id);
+      ("reason", `String "identical message was played recently");
+    ])
+  end
+  else
   let voice = get_voice_for_agent agent_id in
   let provider =
     provider |> Option.map String.trim

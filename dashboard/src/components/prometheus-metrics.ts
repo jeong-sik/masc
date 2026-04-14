@@ -1,0 +1,368 @@
+// MASC Dashboard — Prometheus Metrics Surface
+// Fetches /metrics (Prometheus text format) and renders as categorized tables.
+
+import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
+import { Card } from './common/card'
+import { EmptyState } from './common/empty-state'
+import { ErrorState, LoadingState } from './common/feedback-state'
+import { fetchWithTimeout, authHeaders } from '../api/core'
+import { navigate } from '../router'
+
+// --- Prometheus text format parser ---
+
+interface ParsedMetric {
+  name: string
+  help: string
+  type: string
+  samples: MetricSample[]
+}
+
+interface MetricSample {
+  name: string
+  labels: Record<string, string>
+  value: number
+}
+
+function parsePrometheusText(text: string): ParsedMetric[] {
+  const metrics: ParsedMetric[] = []
+  const lines = text.split('\n')
+  let current: ParsedMetric | null = null
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+
+    if (trimmed.startsWith('# HELP ')) {
+      const rest = trimmed.slice(7)
+      const spaceIdx = rest.indexOf(' ')
+      const name = spaceIdx > 0 ? rest.slice(0, spaceIdx) : rest
+      const help = spaceIdx > 0 ? rest.slice(spaceIdx + 1) : ''
+      current = { name, help, type: 'untyped', samples: [] }
+      metrics.push(current)
+      continue
+    }
+
+    if (trimmed.startsWith('# TYPE ')) {
+      const rest = trimmed.slice(7)
+      const spaceIdx = rest.indexOf(' ')
+      if (current && spaceIdx > 0) {
+        current.type = rest.slice(spaceIdx + 1)
+      }
+      continue
+    }
+
+    if (trimmed.startsWith('#')) continue
+
+    // Sample line: metric_name{label="value"} 123.45
+    const sample = parseSampleLine(trimmed)
+    if (sample && current) {
+      current.samples.push(sample)
+    }
+  }
+
+  return metrics
+}
+
+function parseSampleLine(line: string): MetricSample | null {
+  let name: string
+  let labels: Record<string, string> = {}
+  let valueStr: string
+
+  const braceStart = line.indexOf('{')
+  if (braceStart >= 0) {
+    name = line.slice(0, braceStart)
+    const braceEnd = line.indexOf('}', braceStart)
+    if (braceEnd < 0) return null
+    labels = parseLabels(line.slice(braceStart + 1, braceEnd))
+    valueStr = line.slice(braceEnd + 1).trim()
+  } else {
+    const parts = line.split(/\s+/)
+    if (parts.length < 2 || !parts[0] || !parts[1]) return null
+    name = parts[0]
+    valueStr = parts[1]
+  }
+
+  const value = Number(valueStr)
+  if (Number.isNaN(value)) return null
+  return { name, labels, value }
+}
+
+function parseLabels(raw: string): Record<string, string> {
+  const labels: Record<string, string> = {}
+  const re = /(\w+)="([^"]*)"/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(raw)) !== null) {
+    if (m[1] && m[2] !== undefined) labels[m[1]] = m[2]
+  }
+  return labels
+}
+
+// --- Categorization ---
+
+type MetricCategory = 'server' | 'agent' | 'keeper' | 'transport' | 'inference' | 'tool' | 'delta' | 'provider' | 'other'
+
+function categorize(name: string): MetricCategory {
+  if (name.startsWith('masc_keeper_')) return 'keeper'
+  if (name.startsWith('masc_agent_')) return 'agent'
+  if (name.startsWith('masc_sse_') || name.startsWith('masc_grpc_') || name.startsWith('masc_ws_')) return 'transport'
+  if (name.startsWith('masc_inference_') || name.startsWith('masc_llm_')) return 'inference'
+  if (name.startsWith('masc_tool_')) return 'tool'
+  if (name.startsWith('masc_delta_') || name.startsWith('masc_full_checkpoint')) return 'delta'
+  if (name.startsWith('masc_provider_')) return 'provider'
+  if (name.startsWith('masc_mcp_') || name.startsWith('masc_uptime') || name.startsWith('masc_tasks') || name.startsWith('masc_errors') || name.startsWith('masc_active') || name.startsWith('masc_pending')) return 'server'
+  return 'other'
+}
+
+const CATEGORY_META: Record<MetricCategory, { label: string; description: string }> = {
+  server: { label: 'Server', description: 'requests, tasks, errors, uptime' },
+  agent: { label: 'Agent', description: 'agent heartbeat age, stale detection' },
+  keeper: { label: 'Keeper', description: 'compaction, heartbeat (per-keeper labels)' },
+  transport: { label: 'Transport', description: 'SSE, gRPC, WebSocket connections/sessions' },
+  inference: { label: 'Inference', description: 'LLM duration, admission queue' },
+  tool: { label: 'Tool', description: 'tool call duration' },
+  delta: { label: 'Delta Checkpoint', description: 'checkpoint size, shadow match' },
+  provider: { label: 'Provider', description: 'prefix cache tokens, HTTP status' },
+  other: { label: 'Other', description: 'uncategorized (report as bug)' },
+}
+
+// --- Formatting ---
+
+function fmtValue(value: number, type: string, name: string): string {
+  if (name.includes('seconds') || name.includes('duration')) {
+    if (value === 0) return '0s'
+    if (value < 0.001) return `${(value * 1_000_000).toFixed(0)}us`
+    if (value < 1) return `${(value * 1000).toFixed(1)}ms`
+    if (value < 60) return `${value.toFixed(2)}s`
+    return `${(value / 60).toFixed(1)}m`
+  }
+  if (name.includes('bytes')) {
+    if (value === 0) return '0B'
+    if (value < 1024) return `${value.toFixed(0)}B`
+    if (value < 1048576) return `${(value / 1024).toFixed(1)}KB`
+    return `${(value / 1048576).toFixed(1)}MB`
+  }
+  if (type === 'gauge' && !Number.isInteger(value)) return value.toFixed(4)
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+  return String(value)
+}
+
+function typeBadge(type: string): ReturnType<typeof html> {
+  const colors: Record<string, string> = {
+    counter: 'bg-blue-900/40 text-blue-300',
+    gauge: 'bg-emerald-900/40 text-emerald-300',
+    summary: 'bg-amber-900/40 text-amber-300',
+  }
+  return html`<span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-mono ${colors[type] ?? 'bg-gray-800 text-gray-400'}">${type}</span>`
+}
+
+function labelPills(labels: Record<string, string>): ReturnType<typeof html> | null {
+  const entries = Object.entries(labels)
+  if (entries.length === 0) return null
+  return html`<span class="ml-2 inline-flex gap-1 flex-wrap">${entries.map(([k, v]) => {
+    if (k === 'keeper') {
+      return html`<button
+        class="rounded bg-blue-900/40 px-1 py-0.5 text-[10px] text-blue-300 font-mono hover:bg-blue-800/60 hover:text-blue-200 transition-colors cursor-pointer"
+        title="View keeper detail"
+        onClick=${(e: Event) => {
+          e.stopPropagation()
+          navigate('monitoring', { section: 'agents', keeper: v })
+        }}
+      >${k}=${v}</button>`
+    }
+    if (k === 'tool_name' || k === 'tool') {
+      return html`<button
+        class="rounded bg-amber-900/40 px-1 py-0.5 text-[10px] text-amber-300 font-mono hover:bg-amber-800/60 hover:text-amber-200 transition-colors cursor-pointer"
+        title="View tool quality"
+        onClick=${(e: Event) => {
+          e.stopPropagation()
+          navigate('lab', { section: 'tool-quality', tool: v })
+        }}
+      >${k}=${v}</button>`
+    }
+    return html`<span class="rounded bg-gray-800/60 px-1 py-0.5 text-[10px] text-gray-400 font-mono">${k}=${v}</span>`
+  })}</span>`
+}
+
+// --- Fetch ---
+
+async function fetchPrometheusText(signal?: AbortSignal): Promise<string> {
+  const res = await fetchWithTimeout(
+    '/metrics',
+    { headers: authHeaders(), signal },
+    10_000,
+  )
+  if (!res.ok) throw new Error(`/metrics returned ${res.status}`)
+  return res.text()
+}
+
+// --- Component ---
+
+export function PrometheusMetrics() {
+  const loading = useSignal(true)
+  const error = useSignal<string | null>(null)
+  const metrics = useSignal<ParsedMetric[]>([])
+  const lastUpdated = useSignal<string | null>(null)
+  const expandedCategories = useSignal<Set<MetricCategory>>(new Set(['server', 'agent', 'keeper', 'inference']))
+
+  async function refresh() {
+    loading.value = true
+    error.value = null
+    try {
+      const text = await fetchPrometheusText()
+      metrics.value = parsePrometheusText(text)
+      lastUpdated.value = new Date().toLocaleTimeString('ko-KR')
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  useEffect(() => { void refresh() }, [])
+
+  if (loading.value && metrics.value.length === 0) {
+    return html`<${LoadingState} label="Prometheus /metrics" />`
+  }
+
+  if (error.value && metrics.value.length === 0) {
+    return html`<${ErrorState} message=${error.value} onRetry=${refresh} />`
+  }
+
+  if (metrics.value.length === 0) {
+    return html`<${EmptyState} message="No metrics available" />`
+  }
+
+  // Group by category
+  const grouped = new Map<MetricCategory, ParsedMetric[]>()
+  for (const m of metrics.value) {
+    const cat = categorize(m.name)
+    const list = grouped.get(cat) ?? []
+    list.push(m)
+    grouped.set(cat, list)
+  }
+
+  // Summary stats
+  const totalMetrics = metrics.value.length
+  const totalSamples = metrics.value.reduce((sum, m) => sum + m.samples.length, 0)
+  const nonZeroSamples = metrics.value.reduce(
+    (sum, m) => sum + m.samples.filter(s => s.value !== 0).length,
+    0,
+  )
+
+  function toggleCategory(cat: MetricCategory) {
+    const next = new Set(expandedCategories.value)
+    if (next.has(cat)) next.delete(cat)
+    else next.add(cat)
+    expandedCategories.value = next
+  }
+
+  const categoryOrder: MetricCategory[] = ['server', 'agent', 'keeper', 'transport', 'inference', 'tool', 'delta', 'provider', 'other']
+
+  return html`
+    <div class="flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus Metrics</h2>
+          <p class="text-xs text-[var(--text-muted)]">
+            /metrics endpoint (${totalMetrics} metrics, ${totalSamples} samples, ${nonZeroSamples} active)
+          </p>
+        </div>
+        <div class="flex items-center gap-3">
+          ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]">${lastUpdated.value}</span>`}
+          <button
+            class="rounded-md border border-[var(--card-border)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--bg-2)] transition-colors"
+            onClick=${refresh}
+            disabled=${loading.value}
+          >
+            ${loading.value ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      ${error.value && html`
+        <div class="rounded-md bg-red-900/20 border border-red-800/30 px-3 py-2 text-xs text-red-300">
+          ${error.value}
+        </div>
+      `}
+
+      ${categoryOrder.filter(cat => grouped.has(cat)).map(cat => {
+        const catMetrics = grouped.get(cat)!
+        const meta = CATEGORY_META[cat]
+        const expanded = expandedCategories.value.has(cat)
+        const activeSamples = catMetrics.reduce(
+          (sum, m) => sum + m.samples.filter(s => s.value !== 0).length,
+          0,
+        )
+
+        return html`
+          <${Card}>
+            <button
+              class="flex w-full items-center justify-between text-left"
+              onClick=${() => toggleCategory(cat)}
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-mono ${expanded ? 'text-[var(--text-body)]' : 'text-[var(--text-muted)]'}">${expanded ? '▼' : '▶'}</span>
+                <span class="font-medium text-[var(--text-heading)]">${meta.label}</span>
+                <span class="text-xs text-[var(--text-muted)]">${meta.description}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="rounded-full bg-[var(--bg-2)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                  ${catMetrics.length} metrics
+                </span>
+                ${activeSamples > 0 && html`
+                  <span class="rounded-full bg-emerald-900/30 px-2 py-0.5 text-[10px] text-emerald-400">
+                    ${activeSamples} active
+                  </span>
+                `}
+              </div>
+            </button>
+
+            ${expanded && html`
+              <div class="mt-3 overflow-x-auto">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">
+                      <th class="pb-2 text-left font-normal">Metric</th>
+                      <th class="pb-2 text-left font-normal w-16">Type</th>
+                      <th class="pb-2 text-right font-normal w-24">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${catMetrics.flatMap(m =>
+                      m.samples.length === 0
+                        ? [html`
+                            <tr key="${m.name}" class="border-b border-[var(--card-border)]/30 hover:bg-[var(--bg-1)]">
+                              <td class="py-1.5 font-mono text-[var(--text-body)]">
+                                ${m.name}
+                                <div class="text-[10px] text-[var(--text-muted)] font-sans">${m.help}</div>
+                              </td>
+                              <td class="py-1.5">${typeBadge(m.type)}</td>
+                              <td class="py-1.5 text-right text-[var(--text-muted)]">--</td>
+                            </tr>
+                          `]
+                        : m.samples.map((s, i) => html`
+                            <tr key="${s.name}-${i}" class="border-b border-[var(--card-border)]/30 hover:bg-[var(--bg-1)]">
+                              <td class="py-1.5 font-mono ${s.value !== 0 ? 'text-[var(--text-body)]' : 'text-[var(--text-muted)]'}">
+                                ${s.name}${labelPills(s.labels)}
+                                ${i === 0 && html`<div class="text-[10px] text-[var(--text-muted)] font-sans">${m.help}</div>`}
+                              </td>
+                              <td class="py-1.5">${i === 0 ? typeBadge(m.type) : null}</td>
+                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-emerald-400' : 'text-[var(--text-muted)]'}">
+                                ${fmtValue(s.value, m.type, s.name)}
+                              </td>
+                            </tr>
+                          `)
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          <//>
+        `
+      })}
+    </div>
+  `
+}

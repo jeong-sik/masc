@@ -98,8 +98,7 @@ let deprecation_warned = Hashtbl.create 8
 let warn_deprecated ~old_name ~new_name =
   if not (Hashtbl.mem deprecation_warned old_name) then begin
     Hashtbl.replace deprecation_warned old_name true;
-    Printf.eprintf
-      "[WARN] env %s is deprecated; use %s instead. Support will be removed in a future release.\n%!"
+    Log.Misc.warn "env %s is deprecated; use %s instead. Support will be removed in a future release."
       old_name new_name
   end
 
@@ -264,7 +263,6 @@ let storage_type () =
   match Sys.getenv_opt "MASC_STORAGE_TYPE" |> trim_opt with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
-      | "postgres" | "postgresql" | "postgres-native"
       | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
       | "memory" -> "memory"
       | other -> other)
@@ -326,14 +324,6 @@ let build_git_commit_opt () =
 (** Raw MASC_AUTO_RESPOND value for mode parsing. *)
 let auto_respond_opt () =
   Sys.getenv_opt "MASC_AUTO_RESPOND" |> trim_opt
-
-(** {1 Legacy PostgreSQL Compatibility} *)
-
-(** Legacy PostgreSQL connection URL.
-    Retained temporarily so older tests and callers can compile while
-    the runtime path is filesystem-only. *)
-let postgres_url_opt () =
-  None
 
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =

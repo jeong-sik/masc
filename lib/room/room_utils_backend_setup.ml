@@ -178,10 +178,7 @@ let env_opt name =
         Some value
   | _ -> None
 
-let postgres_url_from_env () = None
-
 (** Auto-detect best backend based on environment variables.
-    Stage-1 SSOT policy: no implicit PG auto-detect.
     MASC defaults to the local filesystem unless the caller explicitly
     selects another backend via MASC_STORAGE_TYPE. *)
 let auto_detect_backend () =
@@ -191,15 +188,12 @@ let auto_detect_backend () =
   "filesystem"
 
 (** Storage type from environment variable.
-    Defaults to filesystem when MASC_STORAGE_TYPE is not set.
-    PostgreSQL values are normalized to filesystem because PG storage
-    is no longer part of the live runtime path. *)
+    Defaults to filesystem when MASC_STORAGE_TYPE is not set. *)
 let storage_type_from_env () =
   match env_opt "MASC_STORAGE_TYPE" with
   | Some raw ->
       let value = String.lowercase_ascii (String.trim raw) in
       (match value with
-       | "postgres" | "postgresql" | "postgres-native"
        | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
        | "memory" -> "memory"
        | other -> other)
@@ -250,7 +244,6 @@ let backend_config_for base_path =
   in
   {
     Backend_types.backend_type;
-    Backend_types.postgres_url = None;
     Backend_types.base_path = backend_base_path;
     Backend_types.cluster_name;
     Backend_types.node_id = Backend_types.generate_node_id ();

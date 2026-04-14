@@ -69,9 +69,12 @@ let current_month_file config agent_id =
 let metric_counter = Atomic.make 0
 
 let generate_id () =
-  Atomic.incr metric_counter;
+  (* Use [fetch_and_add] rather than [Atomic.incr; Atomic.get] so the counter
+     read is atomic with the increment. With the split pair, two fibers can
+     both [incr] before either [get], and both observe the same post-increment
+     value, producing duplicate IDs for entries in the same millisecond. *)
+  let sequence = Atomic.fetch_and_add metric_counter 1 + 1 in
   let timestamp_ms = int_of_float (Time_compat.now () *. 1000.) in
-  let sequence = Atomic.get metric_counter in
   Printf.sprintf "metric-%d-%06d" timestamp_ms sequence
 
 (* Async write queue: callers push (file, line) entries into a bounded stream.

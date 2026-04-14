@@ -96,12 +96,10 @@ let parse_checkpoint_file (path : string) : Keeper_types.checkpoint =
   in
   let open Yojson.Safe.Util in
   let serialized =
-    try
-      let ctx = json |> member "context" in
-      if ctx = `Null then raise Not_found;
-      Yojson.Safe.to_string ctx
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ ->
-      json |> member "serialized" |> to_string
+    match json |> member "context" with
+    | `Null | exception Yojson.Safe.Util.Type_error _ ->
+        json |> member "serialized" |> to_string
+    | ctx -> Yojson.Safe.to_string ctx
   in
   {
     Keeper_types.checkpoint_id =

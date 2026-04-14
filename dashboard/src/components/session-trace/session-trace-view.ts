@@ -30,6 +30,10 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
     && s.oas_context_count === 0
     && s.broadcast_count === 0
     && s.task_completed_count === 0
+    && s.oas_input_tokens === 0
+    && s.oas_output_tokens === 0
+    && s.oas_llm_call_count === 0
+    && s.oas_error_count === 0
   ) return null
 
   const items: string[] = []
@@ -37,6 +41,12 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.oas_tool_count > 0) items.push(`OAS 도구 ${s.oas_tool_count}회`)
   if (s.oas_turn_count > 0) items.push(`OAS 턴 ${s.oas_turn_count}건`)
   if (s.oas_context_count > 0) items.push(`OAS 압축 ${s.oas_context_count}건`)
+  if (s.oas_tokens_saved > 0) items.push(`절약 ${s.oas_tokens_saved}tok`)
+  if (s.oas_input_tokens > 0 || s.oas_output_tokens > 0) {
+    items.push(`OAS 토큰 ${s.oas_input_tokens}→${s.oas_output_tokens}`)
+  }
+  if (s.oas_llm_call_count > 0) items.push(`LLM 호출 ${s.oas_llm_call_count}회`)
+  if (s.oas_error_count > 0) items.push(`OAS 에러 ${s.oas_error_count}건`)
   if (s.task_completed_count > 0) items.push(`완료 ${s.task_completed_count}건`)
   if (s.task_claimed_count > 0) items.push(`할당 ${s.task_claimed_count}건`)
   if (s.broadcast_count > 0) items.push(`메시지 ${s.broadcast_count}건`)

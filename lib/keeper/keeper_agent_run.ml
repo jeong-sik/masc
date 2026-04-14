@@ -1773,14 +1773,32 @@ let run_turn
                  Memory_oas_bridge.flush_incremental ~memory
                    ~agent_name:meta.name
                in
-               if ep > 0 || pr > 0 then
+               if ep > 0 || pr > 0 then begin
                  Log.Keeper.debug
                    "keeper:%s post-run flush episodes=%d procedures=%d"
-                   meta.name ep pr
+                   meta.name ep pr;
+                 (* Emit activity event so episode flushes appear in
+                    the activity graph / telemetry surface. *)
+                 (try
+                    !Room_hooks.activity_emit_fn config
+                      ~actor:Room_hooks.{ kind = "keeper"; id = meta.name }
+                      ~kind:"episode.flush"
+                      ~payload:(`Assoc [
+                        ("keeper", `String meta.name);
+                        ("episodes", `Int ep);
+                        ("procedures", `Int pr);
+                        ("turn", `Int result.turns);
+                      ])
+                      ~tags:[ "memory"; "episode"; "flush" ]
+                      ()
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
+               end
              | None -> ())
-           with exn ->
-             Log.Keeper.warn "keeper:%s episode_create failed: %s"
-               meta.name (Printexc.to_string exn));
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn "keeper:%s episode_create failed: %s"
+                 meta.name (Printexc.to_string exn));
           (* Memory bank compaction: dedup + consolidate if over threshold. *)
           (try
              let compaction =
@@ -1791,9 +1809,11 @@ let run_turn
                  "keeper:%s memory_compacted before=%d after=%d dropped=%d"
                  meta.name compaction.before_notes compaction.after_notes
                  compaction.dropped_notes
-           with exn ->
-             Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
-               (Printexc.to_string exn));
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
+                 (Printexc.to_string exn));
           (* Post-turn quality metrics — goal alignment + memory recall.
             Logged to decisions.jsonl for feedback loop analysis. *)
           (try

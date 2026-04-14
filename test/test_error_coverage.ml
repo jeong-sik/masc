@@ -43,9 +43,6 @@ let test_is_recoverable_agent_not_found () =
 let test_is_recoverable_file_locked () =
   check bool "locked" true (Error.is_recoverable (Error.Storage (Error.FileLocked "test")))
 
-let test_is_recoverable_storage_postgres () =
-  check bool "postgres" false (Error.is_recoverable (Error.Storage (Error.PostgresError "test")))
-
 let test_is_recoverable_portal_timeout () =
   check bool "portal timeout" true (Error.is_recoverable (Error.Federation (Error.PortalTimeout 1000)))
 
@@ -150,11 +147,6 @@ let test_to_string_storage_locked () =
   let e = Error.Storage (Error.FileLocked "path") in
   let s = Error.to_string e in
   check bool "contains locked" true (String.length s > 0)
-
-let test_to_string_storage_postgres () =
-  let e = Error.Storage (Error.PostgresError "msg") in
-  let s = Error.to_string e in
-  check bool "contains postgres" true (String.length s > 0)
 
 let test_to_string_storage_git () =
   let e = Error.Storage (Error.GitError "msg") in
@@ -311,7 +303,6 @@ let () =
       test_case "agent heartbeat" `Quick test_is_recoverable_agent_heartbeat;
       test_case "agent not found" `Quick test_is_recoverable_agent_not_found;
       test_case "file locked" `Quick test_is_recoverable_file_locked;
-      test_case "storage postgres" `Quick test_is_recoverable_storage_postgres;
       test_case "portal timeout" `Quick test_is_recoverable_portal_timeout;
       test_case "internal" `Quick test_is_recoverable_internal;
     ];
@@ -335,7 +326,6 @@ let () =
       test_case "storage file" `Quick test_to_string_storage_file_not_found;
       test_case "storage permission" `Quick test_to_string_storage_permission;
       test_case "storage locked" `Quick test_to_string_storage_locked;
-      test_case "storage postgres" `Quick test_to_string_storage_postgres;
       test_case "storage git" `Quick test_to_string_storage_git;
       test_case "mcp parse" `Quick test_to_string_mcp_parse;
       test_case "mcp method" `Quick test_to_string_mcp_method;

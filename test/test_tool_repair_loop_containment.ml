@@ -9,8 +9,6 @@
 
 open Masc_mcp
 
-let () = Printf.printf "\n=== Tool_repair_loop containment (#6641 iter10) ===\n"
-
 (* macOS canonicalises [$TMPDIR] through a symlink (`/var/folders/...`
    vs `/private/var/folders/...`), which trips `String.starts_with` on
    `playground_abs` when comparing against a realpath-ed child. Use
@@ -48,13 +46,11 @@ let contains_substring haystack needle =
   in
   nlen = 0 || loop 0
 
+(* Test registry pattern — dispatched via Alcotest.run at the bottom. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
-    f ();
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+  test_cases := (name, f) :: !test_cases
 
 (* Build a tmp [base_path] with two keeper playgrounds + an
    out-of-playground sibling dir so each branch of the gate can be
@@ -209,4 +205,10 @@ let () =
         assert (contains_substring msg "does not exist");
         assert (contains_substring msg "masc_worktree_create"))
 
-let () = Printf.printf "\n✅ All Tool_repair_loop containment tests passed!\n"
+let () =
+  Alcotest.run "Tool_repair_loop_containment"
+    [
+      ( "containment",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]

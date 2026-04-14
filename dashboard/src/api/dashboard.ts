@@ -560,6 +560,18 @@ export interface DashboardRuntimeProvidersResponse {
   providers: DashboardRuntimeProviderSnapshot[]
 }
 
+export interface BucketMetric {
+  ts_start: number
+  entry_count: number
+  success_count: number
+  error_count: number
+  p50_latency_ms: number
+  p95_latency_ms: number
+  error_rate: number
+  total_cost_usd: number
+  cache_hit_ratio: number
+}
+
 export interface DashboardRuntimeModelMetric {
   model_id: string
   entry_count?: number | null
@@ -588,10 +600,12 @@ export interface DashboardRuntimeModelMetric {
     cost_usd: number
     tools_count: number
   }> | null
+  buckets?: BucketMetric[] | null
 }
 
 export interface DashboardRuntimeModelMetricsResponse {
   window_minutes?: number
+  bucket_minutes?: number
   total_entries?: number
   total_error_entries?: number
   models: DashboardRuntimeModelMetric[]
@@ -690,6 +704,21 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             tools_count: asNumber(r.tools_count) ?? 0,
           }))
       : null,
+    buckets: Array.isArray(raw.buckets)
+      ? (raw.buckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            ts_start: asNumber(b.ts_start) ?? 0,
+            entry_count: asNumber(b.entry_count) ?? 0,
+            success_count: asNumber(b.success_count) ?? 0,
+            error_count: asNumber(b.error_count) ?? 0,
+            p50_latency_ms: asNumber(b.p50_latency_ms) ?? 0,
+            p95_latency_ms: asNumber(b.p95_latency_ms) ?? 0,
+            error_rate: asNumber(b.error_rate) ?? 0,
+            total_cost_usd: asNumber(b.total_cost_usd) ?? 0,
+            cache_hit_ratio: asNumber(b.cache_hit_ratio) ?? 0,
+          }))
+      : null,
   }
 }
 
@@ -697,6 +726,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
   if (!isRecord(raw)) return null
   return {
     window_minutes: asNumber(raw.window_minutes),
+    bucket_minutes: asNumber(raw.bucket_minutes),
     total_entries: asNumber(raw.total_entries),
     total_error_entries: asNumber(raw.total_error_entries),
     models: asRecordArray(raw.models)
@@ -714,9 +744,11 @@ export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Pro
 
 export async function fetchRuntimeModelMetrics(
   windowMinutes = 30,
+  bucketMinutes = 5,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardRuntimeModelMetricsResponse> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}`, { signal: opts?.signal })
+  const bParam = bucketMinutes > 0 ? `&bucket_min=${bucketMinutes}` : ''
+  const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}${bParam}`, { signal: opts?.signal })
   const decoded = decodeRuntimeModelMetricsResponse(raw)
   if (!decoded) throw new Error('invalid runtime model metrics payload')
   return decoded
@@ -1671,6 +1703,71 @@ export function fetchExcusePatterns(): Promise<ExcusePattern[]> {
 
 export function updateExcusePatterns(patterns: ExcusePattern[]): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/dashboard/config/excuse-patterns', patterns)
+}
+
+// --- Memory Subsystems ---
+
+export interface MemorySubsystemsSynapse {
+  from_agent: string
+  to_agent: string
+  weight: number
+  success_count: number
+  failure_count: number
+  last_updated: number
+  created_at: number
+}
+
+export interface MemorySubsystemsEpisode {
+  id: string
+  timestamp: number
+  participants: string[]
+  event_type: string
+  summary: string
+  outcome: string
+  learnings: string[]
+  context: Record<string, string>
+}
+
+export interface MemorySubsystemsResponse {
+  generated_at: string
+  hebbian: {
+    synapses: MemorySubsystemsSynapse[]
+    last_consolidation: number
+  }
+  episodes: {
+    total: number
+    filtered: number
+    shown: number
+    limit: number
+    items: MemorySubsystemsEpisode[]
+  }
+  filters: {
+    keepers: string[]
+    outcomes: string[]
+  }
+}
+
+export interface MemorySubsystemsQuery {
+  limit?: number
+  keeper?: string
+  outcome?: string
+  q?: string
+  signal?: AbortSignal
+}
+
+export function fetchMemorySubsystems(
+  opts?: MemorySubsystemsQuery,
+): Promise<MemorySubsystemsResponse> {
+  const params = new URLSearchParams()
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  if (opts?.keeper) params.set('keeper', opts.keeper)
+  if (opts?.outcome) params.set('outcome', opts.outcome)
+  if (opts?.q) params.set('q', opts.q)
+  const qs = params.toString()
+  return get<MemorySubsystemsResponse>(
+    `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,
+    { signal: opts?.signal },
+  )
 }
 
 // --- Keeper Cascade Config ---

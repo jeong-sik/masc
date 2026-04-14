@@ -8,6 +8,8 @@ import {
   updateOasKeeperSnapshot,
   oasLastKeeperTick,
   oasTotalEvents,
+  recordOasLlmCall,
+  recordOasError,
   removeBoardPost,
 } from './store'
 import {
@@ -141,6 +143,23 @@ function addTypedJournalEntry(
         : explicitSeverity,
     eventType,
   })
+}
+
+/** Extract OAS envelope fields (correlation_id, run_id, ts_unix) from an SSE
+ * event into the shape expected by JournalEntry. Returns an empty object for
+ * non-OAS events so spreading into `extra` stays inert. */
+function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' | 'runId' | 'oasTs'> {
+  const out: Pick<JournalEntry, 'correlationId' | 'runId' | 'oasTs'> = {}
+  if (typeof event.correlation_id === 'string' && event.correlation_id.trim() !== '') {
+    out.correlationId = event.correlation_id
+  }
+  if (typeof event.run_id === 'string' && event.run_id.trim() !== '') {
+    out.runId = event.run_id
+  }
+  if (typeof event.ts_unix === 'number' && Number.isFinite(event.ts_unix)) {
+    out.oasTs = event.ts_unix
+  }
+  return out
 }
 
 // --- SSE Manager ---
@@ -541,6 +560,7 @@ function handleEvent(event: SSEEvent): void {
           narrativeText:
             `${actorLabel(snap.keeper_name)}의 keeper snapshot이 갱신되었습니다`
             + ` (gen ${snap.generation}, ctx ${Math.round(snap.context_ratio * 100)}%)`,
+          ...envelopeFromEvent(event),
         },
       )
       break
@@ -573,6 +593,7 @@ function handleEvent(event: SSEEvent): void {
             + ([lifecycleEvent, detail].filter(Boolean).length > 0
               ? ` (${[lifecycleEvent, detail].filter(Boolean).join(' · ')})`
               : ''),
+          ...envelopeFromEvent(event),
         },
       )
       break
@@ -601,6 +622,7 @@ function handleEvent(event: SSEEvent): void {
           narrativeText:
             `${actorLabel(agentA)}와 ${actorLabel(agentB)} 사이 trust score가 갱신되었습니다`
             + (trustScore != null ? ` (${trustScore.toFixed(2)})` : ''),
+          ...envelopeFromEvent(event),
         },
       )
       break
@@ -632,6 +654,7 @@ function handleEvent(event: SSEEvent): void {
             `${actorLabel(agentName)} reputation이 갱신되었습니다`
             + (oldScore != null && newScore != null ? ` (${oldScore.toFixed(2)} → ${newScore.toFixed(2)})` : '')
             + (trend ? `, trend=${trend}` : ''),
+          ...envelopeFromEvent(event),
         },
       )
       break
@@ -661,17 +684,27 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText: `${actorLabel(agentName)} OAS agent ${phase}${taskId ? ` (${taskId})` : ''}`,
           preview: taskId,
+          ...envelopeFromEvent(event),
         },
       )
       if (agentName) {
         const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+        const inputTokens = asNumber(p.input_tokens)
+        const outputTokens = asNumber(p.output_tokens)
+        const costUsd = asNumber(p.cost_usd)
         appendLiveOasEvent(agentName, {
           id: `live-oas-agent-${phase}-${tsMs}-${agentName}`,
           ts: tsMs,
           ts_iso: new Date(tsMs).toISOString(),
           kind: 'lifecycle',
-          summary: `agent ${phase}`,
-          detail: { task_id: taskId ?? null, elapsed_s: elapsed ?? null },
+          summary: `agent ${phase}${inputTokens != null || outputTokens != null ? ` · ${inputTokens ?? 0}→${outputTokens ?? 0}tok` : ''}`,
+          detail: {
+            task_id: taskId ?? null,
+            elapsed_s: elapsed ?? null,
+            input_tokens: inputTokens ?? null,
+            output_tokens: outputTokens ?? null,
+          },
+          cost_usd: costUsd ?? undefined,
         })
       }
       break
@@ -788,6 +821,87 @@ function handleEvent(event: SSEEvent): void {
           narrativeText: `OAS task 상태 전이 ${taskId}${fromState || toState ? ` (${fromState ?? '?'} → ${toState ?? '?'})` : ''}`,
         },
       )
+      break
+    }
+    case 'oas:durable:llm_request': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const turn = asNumber(p.turn)
+      const model = asString(p.model) ?? 'unknown'
+      const inputTokens = asNumber(p.input_tokens) ?? 0
+      const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+      recordOasLlmCall(tsMs)
+      appendLiveOasEvent(agent, {
+        id: `live-oas-durable-llm-req-${tsMs}-${agent}`,
+        ts: tsMs,
+        ts_iso: new Date(tsMs).toISOString(),
+        kind: 'lifecycle',
+        summary: `LLM 요청 · ${model} · ${inputTokens}tok${turn != null ? ` · turn ${turn}` : ''}`,
+        detail: {
+          durable_kind: 'llm_request',
+          turn: turn ?? null,
+          model,
+          input_tokens: inputTokens,
+        },
+      })
+      break
+    }
+    case 'oas:durable:llm_response': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const turn = asNumber(p.turn)
+      const outputTokens = asNumber(p.output_tokens) ?? 0
+      const stopReason = asString(p.stop_reason) ?? 'unknown'
+      const durationMs = asNumber(p.duration_ms)
+      const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+      appendLiveOasEvent(agent, {
+        id: `live-oas-durable-llm-res-${tsMs}-${agent}`,
+        ts: tsMs,
+        ts_iso: new Date(tsMs).toISOString(),
+        kind: 'lifecycle',
+        summary: `LLM 응답 · ${outputTokens}tok · ${stopReason}${durationMs != null ? ` · ${durationMs.toFixed(0)}ms` : ''}`,
+        detail: {
+          durable_kind: 'llm_response',
+          turn: turn ?? null,
+          output_tokens: outputTokens,
+          stop_reason: stopReason,
+          duration_ms: durationMs ?? null,
+        },
+        duration_ms: durationMs ?? undefined,
+      })
+      break
+    }
+    case 'oas:durable:error_occurred': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const turn = asNumber(p.turn)
+      const errorDomain = asString(p.error_domain) ?? 'unknown'
+      const detail = asString(p.detail) ?? ''
+      const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
+      recordOasError(tsMs)
+      appendLiveOasEvent(agent, {
+        id: `live-oas-durable-err-${tsMs}-${agent}`,
+        ts: tsMs,
+        ts_iso: new Date(tsMs).toISOString(),
+        kind: 'lifecycle',
+        summary: `OAS 에러 · ${errorDomain}${turn != null ? ` · turn ${turn}` : ''}`,
+        detail: {
+          durable_kind: 'error_occurred',
+          turn: turn ?? null,
+          error_domain: errorDomain,
+          detail,
+        },
+        error: detail || errorDomain,
+      })
+      break
+    }
+    case 'oas:durable:turn_started':
+    case 'oas:durable:tool_called':
+    case 'oas:durable:tool_completed':
+    case 'oas:durable:state_transition':
+    case 'oas:durable:checkpoint_saved': {
+      // Already covered by non-durable oas:* events; journal-only.
+      addTypedJournalEntry(agent, type, 'oas', 'oas_event', {
+        severity: event.severity,
+        source: event.source,
+      })
       break
     }
     default:

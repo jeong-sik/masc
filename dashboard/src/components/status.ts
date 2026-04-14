@@ -7,13 +7,17 @@ import { Mission } from './mission'
 import { AgentsUnified } from './agents-unified'
 import { Activity } from './activity'
 import { RuntimeMonitor } from './runtime-monitor'
+import { OasHealthChip } from './oas-health-chip'
 import { TelemetryUnified } from './telemetry-unified'
+import { GovernanceMonitor } from './governance-monitor'
+import { MemorySubsystems } from './memory-subsystems'
+import { PrometheusMetrics } from './prometheus-metrics'
 
-type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry'
+type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems' | 'metrics'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
-  if (section === 'agents' || section === 'activity' || section === 'runtime' || section === 'telemetry') return section
+  if (section === 'agents' || section === 'activity' || section === 'runtime' || section === 'telemetry' || section === 'governance' || section === 'memory-subsystems' || section === 'metrics') return section
   return 'sessions'
 }
 
@@ -28,9 +32,20 @@ export function Status() {
           : section === 'activity'
             ? html`<${Activity} />`
             : section === 'runtime'
-              ? html`<${RuntimeMonitor} />`
+              ? html`
+                <div class="grid gap-4">
+                  <${OasHealthChip} />
+                  <${RuntimeMonitor} />
+                </div>
+              `
             : section === 'telemetry'
               ? html`<${TelemetryUnified} />`
+            : section === 'governance'
+              ? html`<${GovernanceMonitor} />`
+            : section === 'memory-subsystems'
+              ? html`<${MemorySubsystems} />`
+            : section === 'metrics'
+              ? html`<${PrometheusMetrics} />`
               : html`<${Mission} />`}
       </div>
     </div>

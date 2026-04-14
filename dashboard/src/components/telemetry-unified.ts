@@ -19,6 +19,7 @@ import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-
 import { formatTimeAgo } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
+import { OasHealthChip } from './oas-health-chip'
 
 interface StoreSnapshot {
   keepers: number
@@ -676,6 +677,8 @@ export function TelemetryUnified() {
           ${workerRunFilter.value ? html`<span class="rounded-md bg-[var(--white-4)] px-2 py-1 text-[11px] font-mono text-[var(--text-dim)]">worker_run ${workerRunFilter.value}</span>` : null}
         </div>
       </div>
+
+      <${OasHealthChip} />
 
       <div class="flex flex-wrap gap-3">
         ${summary.map(src => html`<${SummaryCard} src=${src} />`)}

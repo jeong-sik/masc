@@ -119,6 +119,17 @@ type registry_entry = {
 let registry : registry_entry StringMap.t ref = ref StringMap.empty
 let running_count_atomic = Atomic.make 0
 
+(** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can
+    leave the counter negative if increment/decrement paths interleave,
+    so we retry until we successfully install [max 0 (cur - 1)]. *)
+let decr_running_count_clamped () =
+  let rec loop () =
+    let cur = Atomic.get running_count_atomic in
+    let next = max 0 (cur - 1) in
+    if not (Atomic.compare_and_set running_count_atomic cur next) then loop ()
+  in
+  loop ()
+
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
@@ -144,7 +155,7 @@ let register_with_state ~base_path name meta
   (match StringMap.find_opt key !registry with
    | Some entry when entry.phase = Running ->
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
-       Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
+       decr_running_count_clamped ()
    | _ -> ());
   let entry = {
     base_path;
@@ -175,7 +186,7 @@ let register_with_state ~base_path name meta
   } in
   put_entry key entry;
   if phase = Running then
-    Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1);
+    Atomic.incr running_count_atomic;
   Log.Keeper.debug "registry: keeper registered name=%s running_count=%d"
     name (Atomic.get running_count_atomic);
   entry
@@ -212,7 +223,7 @@ let unregister ~base_path name =
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key !registry with
    | Some entry when entry.phase = Running ->
-       Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1));
+       decr_running_count_clamped ();
        Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
          name (Atomic.get running_count_atomic)
    | Some entry ->
@@ -228,11 +239,6 @@ let get ~base_path name =
    | None -> Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path
    | Some _ -> ());
   result
-
-let get_exn ~base_path name =
-  match get ~base_path name with
-  | Some e -> e
-  | None -> raise Not_found
 
 let all ?base_path () =
   StringMap.fold
@@ -254,9 +260,7 @@ let mark_dead ~base_path name ~at =
   update_entry ~base_path name (fun entry ->
     if entry.phase <> Dead then begin
       (match entry.phase with
-       | Running ->
-           Atomic.set running_count_atomic
-             (max 0 (Atomic.get running_count_atomic - 1))
+       | Running -> decr_running_count_clamped ()
        | _ -> ());
       let conditions =
         { Keeper_state_machine.default_conditions with
@@ -693,9 +697,9 @@ let dispatch_event_with_audit
        (* Update running count based on phase transition *)
        (match tr.prev_phase, tr.new_phase with
         | Running, phase when phase <> Running ->
-          Atomic.set running_count_atomic (max 0 (Atomic.get running_count_atomic - 1))
+          decr_running_count_clamped ()
         | phase, Running when phase <> Running ->
-          Atomic.set running_count_atomic (Atomic.get running_count_atomic + 1)
+          Atomic.incr running_count_atomic
         | _ -> ());
        (* Update dead_since_ts: always set to now on Dead transition *)
        let dead_since_ts = match tr.new_phase with

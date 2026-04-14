@@ -273,60 +273,6 @@ export interface DashboardMissionBriefingResponse {
 
 export type DashboardProofVerdict = 'proven' | 'partial' | 'insufficient' | string
 
-export interface DashboardProofSelection {
-  mode?: 'explicit' | 'latest_auto_selected' | 'requested_not_found' | 'none' | string
-  reason?: string
-  requested_session_id?: string | null
-  requested_operation_id?: string | null
-  selected_session_id?: string | null
-  selected_goal?: string | null
-  selected_created_by?: string | null
-  selected_operation_id?: string | null
-  available_session_count?: number
-}
-
-export interface DashboardProofTimelineItem {
-  id: string
-  seq?: number
-  source?: string
-  session_id?: string | null
-  operation_id?: string | null
-  event_type?: string
-  timestamp?: string
-  actor?: string | null
-  summary?: string
-  detail?: Record<string, unknown>
-}
-
-export interface DashboardProofActorContribution {
-  actor: string
-  role?: string | null
-  activity_state?: 'acted' | 'mentioned_only' | 'planned_only' | string
-  activity_detail?: string | null
-  observed_event_count?: number
-  turn_count?: number
-  spawn_count?: number
-  tool_evidence_count?: number
-  interaction_count?: number
-  mention_count?: number
-  recent_input_preview?: string | null
-  recent_output_preview?: string | null
-  recent_event_summary?: string | null
-  requested_by?: string | null
-  recent_request_preview?: string | null
-  recent_request_at?: string | null
-  recent_tool_names?: string[]
-  last_active_at?: string | null
-}
-
-export interface DashboardProofToolEvidence {
-  actor?: string | null
-  event_type?: string | null
-  tool_names?: string[]
-  summary?: string | null
-  timestamp?: string | null
-}
-
 export interface DashboardProofWorkerRunEvidence {
   worker_run_id: string
   session_id?: string | null
@@ -381,12 +327,6 @@ export interface DashboardProofWorkerRunEvidence {
   proof_evidence_status?: string | null
   evidence_refs?: string[]
   ts_iso?: string | null
-}
-
-export interface DashboardProofArtifactRef {
-  kind: string
-  path: string
-  exists: boolean
 }
 
 export interface OperatorNamespaceSnapshot {

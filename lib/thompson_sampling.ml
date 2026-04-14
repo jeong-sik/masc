@@ -156,19 +156,19 @@ let priority_score ~trigger ~signal =
   float_of_int (trigger_priority trigger) +. normalized_subscore signal
 
 let best_pending_triggers pending_triggers =
-  let table : (string, int * selection_trigger) Hashtbl.t = Hashtbl.create 16 in
-  List.iteri (fun idx (name, trigger) ->
-    match Hashtbl.find_opt table name with
-    | Some (_, existing)
-      when trigger_priority existing >= trigger_priority trigger -> ()
-    | Some _ ->
-        Hashtbl.replace table name (idx, trigger)
-    | None ->
-        Hashtbl.add table name (idx, trigger)
-  ) pending_triggers;
-  Hashtbl.fold (fun name (first_idx, trigger) acc ->
-    (first_idx, name, trigger) :: acc
-  ) table []
+  let table = Hashtbl.create (List.length pending_triggers) in
+  List.iteri
+    (fun idx (name, trigger) ->
+       match Hashtbl.find_opt table name with
+       | Some (_, existing)
+         when trigger_priority existing >= trigger_priority trigger ->
+           ()
+       | Some _ | None ->
+           Hashtbl.replace table name (idx, trigger))
+    pending_triggers;
+  Hashtbl.fold
+    (fun name (selected_idx, trigger) acc -> (selected_idx, name, trigger) :: acc)
+    table []
   |> List.sort (fun (idx1, _, trigger1) (idx2, _, trigger2) ->
     match Int.compare (trigger_priority trigger2) (trigger_priority trigger1) with
     | 0 -> Int.compare idx1 idx2

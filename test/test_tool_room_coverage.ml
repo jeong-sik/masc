@@ -4,8 +4,6 @@ open Masc_mcp
 
 let () = Random.self_init ()
 
-let () = Printf.printf "\n=== Tool_room Coverage Tests ===\n"
-
 let str_contains s sub =
   let len_s = String.length s in
   let len_sub = String.length sub in
@@ -42,17 +40,16 @@ let with_isolated_runtime_env f =
             with_env "SUPABASE_DB_URL" None (fun () ->
               with_env "SB_PG_URL" None f))))))
 
-(* Test helper — wraps in Eio context so dispatch paths that use
-   Eio.Mutex, Fs_compat, or structured concurrency work correctly. *)
+(* Test registry — each [test] call appends to this list; the final
+   [let ()] dispatches the list through Alcotest.run.  Eio scope is
+   set up per-test inside the registered thunk. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
-    Eio_main.run @@ (fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      with_isolated_runtime_env f);
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+  test_cases := (name, fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    with_isolated_runtime_env f) :: !test_cases
 
 (* Create test context *)
 let test_counter = ref 0
@@ -238,4 +235,10 @@ let () = test "get_bool_missing" (fun () ->
   assert (Tool_args.get_bool args "key" true = true)
 )
 
-let () = Printf.printf "\n✅ All Tool_room tests passed!\n"
+let () =
+  Alcotest.run "Tool_room"
+    [
+      ( "coverage",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]

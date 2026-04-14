@@ -47,3 +47,24 @@ describe('command navigation', () => {
     ])
   })
 })
+
+describe('monitoring navigation labels', () => {
+  it('uses Korean label for 도구 이벤트 and keeps Prometheus naming', () => {
+    const sections = visibleSectionItemsForTab('monitoring')
+    const labelFor = (id: string) => sections.find(item => item.id === id)?.label
+
+    expect(labelFor('governance')).toBe('도구 이벤트')
+    expect(labelFor('metrics')).toBe('Prometheus')
+    expect(labelFor('sessions')).toBe('세션')
+  })
+})
+
+describe('workspace navigation labels', () => {
+  it('renames planning to 작업 큐 and keeps 목표 트리', () => {
+    const sections = visibleSectionItemsForTab('workspace')
+    const labelFor = (id: string) => sections.find(item => item.id === id)?.label
+
+    expect(labelFor('planning')).toBe('작업 큐')
+    expect(labelFor('goals')).toBe('목표 트리')
+  })
+})

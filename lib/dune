@@ -67,6 +67,7 @@
    dashboard_tool_host_events
    dashboard_governance
    dashboard_governance_judge
+   dashboard_governance_metrics
    dashboard_operator_judge
    dashboard_surface_readiness
    dashboard_execution
@@ -475,6 +476,7 @@
    keeper_execution
    keeper_event_bus
    keeper_keepalive
+   heartbeat_smart
    keeper_crash_persistence
    keeper_chat_store
    keeper_recurring

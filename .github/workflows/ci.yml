@@ -569,3 +569,42 @@ jobs:
 
       - name: Run TLA+ model checking
         run: make -C specs check-all
+
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs: [pr-sync-check, changes, build, lint, dashboard, health, tla-specs]
+    if: ${{ !cancelled() }}
+    timeout-minutes: 2
+
+    steps:
+      - name: Aggregate required check status
+        env:
+          PR_SYNC_RESULT: ${{ needs.pr-sync-check.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          DASHBOARD_RESULT: ${{ needs.dashboard.result }}
+          HEALTH_RESULT: ${{ needs.health.result }}
+          TLA_RESULT: ${{ needs.tla-specs.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          check() {
+            local name=$1
+            local result=$2
+            if [[ "$result" == "success" || "$result" == "skipped" ]]; then
+              printf 'PASS  %-20s %s\n' "$name" "$result"
+            else
+              printf 'FAIL  %-20s %s\n' "$name" "$result"
+              fail=1
+            fi
+          }
+          check "pr-sync-check" "$PR_SYNC_RESULT"
+          check "changes"       "$CHANGES_RESULT"
+          check "build"         "$BUILD_RESULT"
+          check "lint"          "$LINT_RESULT"
+          check "dashboard"     "$DASHBOARD_RESULT"
+          check "health"        "$HEALTH_RESULT"
+          check "tla-specs"     "$TLA_RESULT"
+          [ "$fail" -eq 0 ]

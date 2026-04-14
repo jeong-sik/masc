@@ -234,7 +234,8 @@ let handle_set_room (ctx : context) : tool_result option =
          Best-effort: GC failure must not block set_room. *)
       (try ignore (Room.cleanup_zombies rc)
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Log.Gc.warn "set_room GC failed: %s" (Printexc.to_string exn));
+         Log.Gc.warn "[sid=%s] set_room GC failed: %s"
+           (Option.value ~default:"-" ctx.mcp_session_id) (Printexc.to_string exn));
       let status = if Room.is_initialized rc then "ok" else "(not initialized)" in
       let root_note =
         if rc.workspace_path <> rc.base_path then
@@ -256,12 +257,13 @@ let handle_join (ctx : context) : tool_result option =
   let registry = ctx.registry in
   let state = ctx.state in
   let mcp_session_id = ctx.mcp_session_id in
+  let sid = Option.value ~default:"-" mcp_session_id in
   let caps = arg_get_string_list ctx "capabilities" in
   let result = Room.join config ~agent_name ~capabilities:caps () in
   (* GC: reap zombie agents on join. Best-effort. *)
   (try ignore (Room.cleanup_zombies config)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Gc.warn "join GC failed: %s" (Printexc.to_string exn));
+     Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Printexc.to_string exn));
   (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
   let nickname =
     try
@@ -280,11 +282,11 @@ let handle_join (ctx : context) : tool_result option =
   in
   let _ = Session.register registry ~agent_name:nickname in
   ctx.write_mcp_session_agent nickname;
-  Log.Misc.debug "masc_join: saved nickname=%s to MCP session (original=%s)" nickname agent_name;
+  Log.Misc.debug "[sid=%s] masc_join: saved nickname=%s to MCP session (original=%s)" sid nickname agent_name;
   (* Deprecated: /tmp file agent identity. Agent_identity system is primary.
      Remove when deprecation log shows zero hits over a release cycle. *)
   if Option.is_none mcp_session_id then begin
-    Log.Misc.warn "[deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity";
+    Log.Misc.warn "[sid=%s] [deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity" sid;
     let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
     let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
     (try
@@ -292,7 +294,7 @@ let handle_join (ctx : context) : tool_result option =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.Misc.error "Failed to write agent file %s: %s" agent_file (Printexc.to_string e))
+      Log.Misc.error "[sid=%s] Failed to write agent file %s: %s" sid agent_file (Printexc.to_string e))
   end;
   (* Cultural Inheritance: append institution welcome to join response *)
   let institution_welcome = match state.Mcp_server.fs with
@@ -302,7 +304,7 @@ let handle_join (ctx : context) : tool_result option =
          | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-             Log.Institution.warn "Unexpected institution error: %s" (Printexc.to_string exn); "")
+             Log.Institution.warn "[sid=%s] Unexpected institution error: %s" sid (Printexc.to_string exn); "")
     | None -> ""
   in
   let final_result = if institution_welcome = "" then result

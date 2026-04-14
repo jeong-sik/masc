@@ -28,7 +28,6 @@
   mention
   resilience
   heartbeat
-  heartbeat_smart
   nickname
   ;; New aliases (Room-free names for gradual migration)
   agent_lifecycle

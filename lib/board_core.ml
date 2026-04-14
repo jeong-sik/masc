@@ -7,6 +7,18 @@ include Board_core_payload
 (** Flush interval in seconds - configurable via MASC_BOARD_FLUSH_INTERVAL_SEC env var *)
 let flush_interval_sec = Env_config.Board.flush_interval_sec
 
+(** Monotonic counter of persist failures (disk full, permission errors, etc.).
+    Callers of [rewrite_posts]/[rewrite_comments] cannot propagate these
+    errors, but operators need visibility. Surface via [persist_error_count ()]
+    in health dashboards and Prometheus exporters. *)
+let persist_errors = Atomic.make 0
+
+let persist_error_count () = Atomic.get persist_errors
+
+let record_persist_error ~where msg =
+  Atomic.incr persist_errors;
+  Log.BoardLog.error "persist error (%s): %s" where msg
+
 let create_store () = {
   posts = Hashtbl.create 1024;
   comments = Hashtbl.create 4096;
@@ -241,8 +253,8 @@ let rewrite_posts store =
     ) store.posts;
     (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
      | Ok () -> ()
-     | Error msg -> Log.BoardLog.error "persist error (rewrite_posts): %s" msg)
-  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_posts): %s" msg
+     | Error msg -> record_persist_error ~where:"rewrite_posts" msg)
+  with Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
 
 let rewrite_comments store =
   try
@@ -254,8 +266,8 @@ let rewrite_comments store =
     ) store.comments;
     (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
      | Ok () -> ()
-     | Error msg -> Log.BoardLog.error "persist error (rewrite_comments): %s" msg)
-  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_comments): %s" msg
+     | Error msg -> record_persist_error ~where:"rewrite_comments" msg)
+  with Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
 
 (** {1 Append Helpers} *)
 
@@ -265,7 +277,7 @@ let append_post (p : post) =
     let path = persist_path () in
     Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
     rotate_if_needed path
-  with Sys_error msg -> Log.BoardLog.error "persist error (append_post): %s" msg
+  with Sys_error msg -> record_persist_error ~where:"append_post" msg
 
 let append_comment (c : comment) =
   try
@@ -273,7 +285,7 @@ let append_comment (c : comment) =
     let path = comments_path () in
     Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
     rotate_if_needed path
-  with Sys_error msg -> Log.BoardLog.error "persist error (append_comment): %s" msg
+  with Sys_error msg -> record_persist_error ~where:"append_comment" msg
 
 (** {1 Post Operations} *)
 

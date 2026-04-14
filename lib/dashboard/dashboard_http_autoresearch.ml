@@ -219,7 +219,7 @@ let autoresearch_loop_detail_json ~(base_path : string)
     Autoresearch.with_loops_ro (fun () ->
       Hashtbl.find_opt Autoresearch.active_loops loop_id)
   in
-  let base_json, insights_list, full_history =
+  let detail =
     match in_memory with
     | Some state ->
         let json = loop_summary_json base_path state in
@@ -227,7 +227,7 @@ let autoresearch_loop_detail_json ~(base_path : string)
         let history =
           Autoresearch.load_cycle_history ~base_path loop_id
         in
-        (json, insights, history)
+        Ok (json, insights, history)
     | None -> (
         match Autoresearch.load_state ~base_path loop_id with
         | Some summary ->
@@ -235,11 +235,13 @@ let autoresearch_loop_detail_json ~(base_path : string)
             let history =
               Autoresearch.load_cycle_history ~base_path loop_id
             in
-            (json, [], history)
+            Ok (json, [], history)
         | None ->
-            let msg = Printf.sprintf "Loop %s not found" loop_id in
-            raise (Invalid_argument msg))
+            Error (Printf.sprintf "Loop %s not found" loop_id))
   in
+  match detail with
+  | Error msg -> Error msg
+  | Ok (base_json, insights_list, full_history) ->
   (* Replace recent_cycles and insights with full data *)
   let history_json =
     full_history

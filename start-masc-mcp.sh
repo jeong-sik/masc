@@ -363,17 +363,6 @@ do
     restore_env_override "$env_name"
 done
 
-case "$(printf '%s' "${MASC_STORAGE_TYPE:-filesystem}" | tr '[:upper:]' '[:lower:]')" in
-    postgres|postgresql|postgres-native)
-        export MASC_STORAGE_TYPE="filesystem"
-        ;;
-esac
-
-unset MASC_POSTGRES_URL
-unset DATABASE_URL
-unset SUPABASE_DB_URL
-unset SB_PG_URL
-
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0
 

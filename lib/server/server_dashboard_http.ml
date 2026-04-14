@@ -68,6 +68,121 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
       ("sort_by", `String (board_sort_label sort_by));
     ]
 
+let dashboard_memory_subsystems_http_json ~(config : Room_utils.config) request
+    : Yojson.Safe.t =
+  let limit =
+    int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500
+  in
+  let keeper_filter =
+    query_param request "keeper"
+    |> Option.map String.trim
+    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+  in
+  let outcome_filter =
+    query_param request "outcome"
+    |> Option.map String.trim
+    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+  in
+  let search =
+    query_param request "q"
+    |> Option.map (fun s -> String.trim s |> String.lowercase_ascii)
+    |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+  in
+  let hebbian =
+    try
+      let g = Hebbian_eio.load_graph config in
+      Hebbian_eio.graph_to_json g
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> `Assoc [ ("synapses", `List []); ("last_consolidation", `Float 0.0) ]
+  in
+  let all_episodes =
+    try Institution_eio.load_recent_episodes_jsonl ~limit:max_int
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> []
+  in
+  let total = List.length all_episodes in
+  let contains_ci haystack needle =
+    let h = String.lowercase_ascii haystack in
+    let hlen = String.length h in
+    let nlen = String.length needle in
+    if nlen = 0 then true
+    else if nlen > hlen then false
+    else
+      let rec scan i =
+        if i + nlen > hlen then false
+        else if String.sub h i nlen = needle then true
+        else scan (i + 1)
+      in
+      scan 0
+  in
+  let filtered =
+    all_episodes
+    |> List.filter (fun (e : Institution_eio.episode) ->
+           let keeper_ok =
+             match keeper_filter with
+             | None -> true
+             | Some k -> List.mem k e.participants
+           in
+           let outcome_ok =
+             match outcome_filter with
+             | None -> true
+             | Some "success" -> e.outcome = `Success
+             | Some "failure" -> e.outcome = `Failure
+             | Some "partial" -> e.outcome = `Partial
+             | Some _ -> true
+           in
+           let search_ok =
+             match search with
+             | None -> true
+             | Some q ->
+               contains_ci e.summary q
+               || contains_ci e.event_type q
+               || List.exists (fun l -> contains_ci l q) e.learnings
+               || List.exists (fun p -> contains_ci p q) e.participants
+           in
+           keeper_ok && outcome_ok && search_ok)
+  in
+  let filtered_total = List.length filtered in
+  let episodes =
+    let rec drop n = function
+      | [] -> []
+      | rest when n <= 0 -> rest
+      | _ :: rest -> drop (n - 1) rest
+    in
+    if filtered_total <= limit then filtered
+    else drop (filtered_total - limit) filtered
+  in
+  let known_keepers =
+    all_episodes
+    |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
+    |> List.sort_uniq String.compare
+  in
+  `Assoc
+    [
+      ("generated_at", `String (Types.now_iso ()));
+      ( "hebbian", hebbian );
+      ( "episodes",
+        `Assoc
+          [
+            ("total", `Int total);
+            ("filtered", `Int filtered_total);
+            ("shown", `Int (List.length episodes));
+            ("limit", `Int limit);
+            ( "items",
+              `List
+                (List.map Institution_eio.episode_to_json episodes) );
+          ] );
+      ( "filters",
+        `Assoc
+          [
+            ( "keepers",
+              `List (List.map (fun k -> `String k) known_keepers) );
+            ("outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]);
+          ] );
+    ]
+
 let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
@@ -75,6 +190,15 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   ignore (query_param request "status");
   Dashboard_governance.dashboard_json ~base_path ~limit ~offset
     ~status_filter
+
+(** Read the optional [?window=<minutes>] query param.
+    Defaults to 60 minutes; clamped to [5..1440]. *)
+let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
+  let window =
+    int_query_param request "window" ~default:60 |> clamp ~min_v:5 ~max_v:1440
+  in
+  Dashboard_governance_metrics.governance_tool_events_json
+    ~window_minutes:window ()
 
 let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
     (Yojson.Safe.t, string) result =

@@ -340,7 +340,6 @@ let with_memory_test_env f =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path = Filename.concat tmp_dir ".masc";
-    postgres_url = None;
     node_id = "test-node";
     cluster_name = "default";
     pubsub_max_messages = 1000;

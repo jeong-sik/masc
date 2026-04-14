@@ -135,9 +135,9 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
     let text = Buffer.contents state.msg_input in
     if String.length (String.trim text) > 0 then begin
       let keeper_name =
-        if state.keeper_cursor < List.length state.keepers then
-          (List.nth state.keepers state.keeper_cursor).k_name
-        else "unknown"
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some k -> k.k_name
+        | None -> "unknown"
       in
       (* Add user message to history *)
       let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -236,9 +236,11 @@ let main () =
            load_from_masc_dir state base_path;
            (* Also reload logs if in log view *)
            (match state.view with
-            | Keeper_logs when state.keeper_cursor < List.length state.keepers ->
-                let k = List.nth state.keepers state.keeper_cursor in
-                state.log_entries <- load_keeper_logs base_path k.k_name 200
+            | Keeper_logs ->
+                (match List.nth_opt state.keepers state.keeper_cursor with
+                 | Some k ->
+                     state.log_entries <- load_keeper_logs base_path k.k_name 200
+                 | None -> ())
             | _ -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
@@ -273,9 +275,9 @@ let main () =
             | Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
-                  (* Update live context for new selection *)
-                  let k = List.nth state.keepers state.keeper_cursor in
-                  load_live_context state base_path k.k_name
+                  (match List.nth_opt state.keepers state.keeper_cursor with
+                   | Some k -> load_live_context state base_path k.k_name
+                   | None -> ())
                 end
             | Keeper_detail ->
                 state.detail_scroll <- state.detail_scroll + 1
@@ -287,8 +289,9 @@ let main () =
             | Keeper_list ->
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
-                  let k = List.nth state.keepers state.keeper_cursor in
-                  load_live_context state base_path k.k_name
+                  (match List.nth_opt state.keepers state.keeper_cursor with
+                   | Some k -> load_live_context state base_path k.k_name
+                   | None -> ())
                 end
             | Keeper_detail ->
                 if state.detail_scroll > 0 then
@@ -301,21 +304,23 @@ let main () =
            (* Enter opens detail from list *)
            (match state.view with
             | Keeper_list ->
-                if List.length state.keepers > 0 then begin
-                  state.view <- Keeper_detail;
-                  state.detail_scroll <- 0;
-                  let k = List.nth state.keepers state.keeper_cursor in
-                  load_live_context state base_path k.k_name
-                end
+                (match List.nth_opt state.keepers state.keeper_cursor with
+                 | Some k ->
+                     state.view <- Keeper_detail;
+                     state.detail_scroll <- 0;
+                     load_live_context state base_path k.k_name
+                 | None -> ())
             | _ -> ())
        | Some "l" | Some "L" ->
            (* L opens log view from detail *)
            (match state.view with
-            | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
-                let k = List.nth state.keepers state.keeper_cursor in
-                state.log_entries <- load_keeper_logs base_path k.k_name 200;
-                state.log_scroll <- max 0 (List.length state.log_entries - 1);
-                state.view <- Keeper_logs
+            | Keeper_detail ->
+                (match List.nth_opt state.keepers state.keeper_cursor with
+                 | Some k ->
+                     state.log_entries <- load_keeper_logs base_path k.k_name 200;
+                     state.log_scroll <- max 0 (List.length state.log_entries - 1);
+                     state.view <- Keeper_logs
+                 | None -> ())
             | _ -> ())
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
@@ -332,9 +337,11 @@ let main () =
         load_from_masc_dir state base_path;
         (* Also refresh logs if viewing them *)
         (match state.view with
-         | Keeper_logs when state.keeper_cursor < List.length state.keepers ->
-             let k = List.nth state.keepers state.keeper_cursor in
-             state.log_entries <- load_keeper_logs base_path k.k_name 200
+         | Keeper_logs ->
+             (match List.nth_opt state.keepers state.keeper_cursor with
+              | Some k ->
+                  state.log_entries <- load_keeper_logs base_path k.k_name 200
+              | None -> ())
          | _ -> ());
         last_check := now
       end;

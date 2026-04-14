@@ -19,6 +19,23 @@ type recent_entry = {
   re_tools_count : int;
 }
 
+type bucket_metric = {
+  b_ts_start : float;
+  b_entry_count : int;
+  b_success_count : int;
+  b_error_count : int;
+  b_p50_latency_ms : float;
+  b_p95_latency_ms : float;
+  b_error_rate : float;
+  b_total_cost_usd : float;
+  b_cache_hit_ratio : float;
+}
+
+type model_bucketed = {
+  mb_model_id : string;
+  mb_buckets : bucket_metric list;
+}
+
 type model_stats = {
   model_id : string;
   entry_count : int;
@@ -40,10 +57,12 @@ type model_stats = {
   total_tool_calls : int;
   top_tools : (string * int) list;
   recent_entries : recent_entry list;
+  buckets : bucket_metric list;
 }
 
 type aggregate = {
   window_minutes : int;
+  bucket_minutes : int;
   models : model_stats list;
   total_entries : int;
   total_error_entries : int;
@@ -284,10 +303,69 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
           re_cost_usd = e.cost_usd;
           re_tools_count = e.tool_call_count;
         });
+      buckets = [];
     } in
     stats :: acc
   ) tbl []
   |> List.sort (fun a b -> compare b.entry_count a.entry_count)
+
+(* ── Time-bucketed aggregation ──────────────────────────── *)
+
+(** Bucket entries for a single model. Returns oldest-first list of
+    non-empty buckets. *)
+let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
+    : bucket_metric list =
+  let bsec = if bucket_sec <= 0 then 60 else bucket_sec in
+  let bsec_f = Float.of_int bsec in
+  let tbl : (int, raw_entry list) Hashtbl.t = Hashtbl.create 16 in
+  List.iter (fun e ->
+    let key = int_of_float (Float.floor (e.ts_unix /. bsec_f)) in
+    let prev = match Hashtbl.find_opt tbl key with Some l -> l | None -> [] in
+    Hashtbl.replace tbl key (e :: prev)
+  ) entries;
+  Hashtbl.fold (fun key bucket_entries acc ->
+    let n = List.length bucket_entries in
+    let lat_vals = List.filter_map (fun e ->
+      if e.latency_ms > 0.0 then Some e.latency_ms else None
+    ) bucket_entries |> Array.of_list in
+    Array.sort Float.compare lat_vals;
+    let success_count = List.length (List.filter (fun e -> not e.is_error) bucket_entries) in
+    let error_count = List.length (List.filter (fun e -> e.is_error) bucket_entries) in
+    let total_cache_read = List.fold_left (fun acc e -> acc + e.cache_read_tokens) 0 bucket_entries in
+    let total_input = List.fold_left (fun acc e -> acc + e.input_tokens) 0 bucket_entries in
+    let denom = total_cache_read + total_input in
+    let cache_hit_ratio =
+      if denom = 0 then 0.0
+      else Float.of_int total_cache_read /. Float.of_int denom
+    in
+    let error_rate =
+      if n = 0 then 0.0
+      else Float.of_int error_count /. Float.of_int n
+    in
+    let bucket = {
+      b_ts_start = Float.of_int key *. bsec_f;
+      b_entry_count = n;
+      b_success_count = success_count;
+      b_error_count = error_count;
+      b_p50_latency_ms = percentile lat_vals 50.0;
+      b_p95_latency_ms = percentile lat_vals 95.0;
+      b_error_rate = error_rate;
+      b_total_cost_usd =
+        List.fold_left (fun acc e -> acc +. e.cost_usd) 0.0 bucket_entries;
+      b_cache_hit_ratio = cache_hit_ratio;
+    } in
+    bucket :: acc
+  ) tbl []
+  |> List.sort (fun a b -> Float.compare a.b_ts_start b.b_ts_start)
+
+let group_entries_by_model (entries : raw_entry list)
+    : (string * raw_entry list) list =
+  let tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
+  List.iter (fun e ->
+    let prev = match Hashtbl.find_opt tbl e.model with Some l -> l | None -> [] in
+    Hashtbl.replace tbl e.model (e :: prev)
+  ) entries;
+  Hashtbl.fold (fun model es acc -> (model, es) :: acc) tbl []
 
 (* ── Public API ─────────────────────────────────────────── *)
 
@@ -298,10 +376,62 @@ let compute ~base_path ~window_minutes : aggregate =
   let total_error_entries =
     List.length (List.filter (fun e -> e.is_error) entries)
   in
-  { window_minutes; models; total_entries = List.length entries;
+  { window_minutes; bucket_minutes = 0; models;
+    total_entries = List.length entries;
     total_error_entries }
 
+let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate =
+  let bucket_minutes = max 1 bucket_minutes in
+  let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
+  let entries = read_all_decisions ~base_path ~since_unix in
+  let models = aggregate_by_model entries in
+  let bucket_sec = bucket_minutes * 60 in
+  let by_model_tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
+  List.iter (fun (model, es) -> Hashtbl.replace by_model_tbl model es)
+    (group_entries_by_model entries);
+  let models_with_buckets =
+    List.map (fun (s : model_stats) ->
+      let model_entries =
+        match Hashtbl.find_opt by_model_tbl s.model_id with
+        | Some es -> es
+        | None -> []
+      in
+      { s with buckets = bucket_entries_for_model model_entries ~bucket_sec }
+    ) models
+  in
+  let total_error_entries =
+    List.length (List.filter (fun e -> e.is_error) entries)
+  in
+  { window_minutes; bucket_minutes;
+    models = models_with_buckets;
+    total_entries = List.length entries;
+    total_error_entries }
+
+let aggregate_buckets ~base_path ~window_min ~bucket_min : model_bucketed list =
+  let since_unix = Time_compat.now () -. (Float.of_int window_min *. 60.0) in
+  let entries = read_all_decisions ~base_path ~since_unix in
+  let bucket_sec = if bucket_min <= 0 then 60 else bucket_min * 60 in
+  let by_model = group_entries_by_model entries in
+  List.map (fun (model_id, es) ->
+    { mb_model_id = model_id;
+      mb_buckets = bucket_entries_for_model es ~bucket_sec }
+  ) by_model
+  |> List.sort (fun a b -> compare a.mb_model_id b.mb_model_id)
+
 (* ── JSON serialization ─────────────────────────────────── *)
+
+let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
+  `Assoc
+    [ ("ts_start", `Float b.b_ts_start)
+    ; ("entry_count", `Int b.b_entry_count)
+    ; ("success_count", `Int b.b_success_count)
+    ; ("error_count", `Int b.b_error_count)
+    ; ("p50_latency_ms", `Float b.b_p50_latency_ms)
+    ; ("p95_latency_ms", `Float b.b_p95_latency_ms)
+    ; ("error_rate", `Float b.b_error_rate)
+    ; ("total_cost_usd", `Float b.b_total_cost_usd)
+    ; ("cache_hit_ratio", `Float b.b_cache_hit_ratio)
+    ]
 
 let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
   `Assoc
@@ -336,11 +466,13 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
           ("tools_count", `Int r.re_tools_count);
         ]
       ) s.recent_entries))
+    ; ("buckets", `List (List.map bucket_metric_to_json s.buckets))
     ]
 
 let to_json (agg : aggregate) : Yojson.Safe.t =
   `Assoc
     [ ("window_minutes", `Int agg.window_minutes)
+    ; ("bucket_minutes", `Int agg.bucket_minutes)
     ; ("total_entries", `Int agg.total_entries)
     ; ("total_error_entries", `Int agg.total_error_entries)
     ; ("models", `List (List.map model_stats_to_json agg.models))

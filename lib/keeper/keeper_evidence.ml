@@ -94,6 +94,15 @@ let capture_turn_evidence
       Keeper_file_tracker.record_turn_files ~keeper_name ~files:status_lines
     else []
   in
+  if collision_warnings <> [] then begin
+    let n = List.length collision_warnings in
+    Prometheus.inc_counter "masc_keeper_collision_detected_total"
+      ~labels:[("keeper", keeper_name)] ();
+    Log.Keeper.warn
+      "evidence: %s has %d file collision(s) with other keeper(s) — \
+       overlapping writes may corrupt shared state"
+      keeper_name n
+  end;
   let prev_evidence_hash = get_prev_hash ~keeper_name ~trace_id in
   let ts = Types.now_iso () in
   let evidence_body = `Assoc ([

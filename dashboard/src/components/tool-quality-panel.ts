@@ -1,11 +1,17 @@
 import { html } from 'htm/preact'
-import { signal, computed, type Signal } from '@preact/signals'
+import { computed } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { fetchToolQuality, type ToolQualityResponse } from '../api/dashboard'
+import { type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { ErrorState, LoadingState } from './common/feedback-state'
-import { isAbortError } from '../lib/async-state'
+import {
+  cancelSharedToolQuality,
+  refreshSharedToolQuality,
+  sharedToolQuality,
+  sharedToolQualityError,
+  sharedToolQualityLoading,
+} from './fleet-data-core'
 import { route } from '../router'
 
 interface ToolStat {
@@ -39,22 +45,6 @@ type ToolQualityData = Omit<ToolQualityResponse, 'by_tool'> & {
   by_tool: ToolStat[]
 }
 
-const data: Signal<ToolQualityData | null> = signal(null)
-const loading: Signal<boolean> = signal(false)
-const error: Signal<string | null> = signal(null)
-let latestRequestId = 0
-let activeController: AbortController | null = null
-type RefreshToolQualityOptions = {
-  signal?: AbortSignal
-}
-
-function cancelActiveToolQualityRequest() {
-  latestRequestId += 1
-  activeController?.abort()
-  activeController = null
-  loading.value = false
-}
-
 function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
   return {
     ...json,
@@ -66,51 +56,22 @@ function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
   }
 }
 
-async function runToolQualityRefresh(opts: RefreshToolQualityOptions = {}) {
-  const requestId = ++latestRequestId
-  activeController?.abort()
-  loading.value = true
-  error.value = null
-  const controller = new AbortController()
-  activeController = controller
-  const abortFromUpstream = () => controller.abort()
+// Panel-local view over the shared fleet-data-core signals. Normalization is
+// applied on read so the component can continue to consume `data.value` as
+// before; the actual fetch/request-lifecycle lives in fleet-data-core.
+const data = computed<ToolQualityData | null>(() =>
+  sharedToolQuality.value ? normalizeToolQualityData(sharedToolQuality.value) : null,
+)
+const loading = sharedToolQualityLoading
+const error = sharedToolQualityError
 
-  if (opts.signal) {
-    if (opts.signal.aborted) {
-      controller.abort()
-    } else {
-      opts.signal.addEventListener('abort', abortFromUpstream, { once: true })
-    }
-  }
-
-  try {
-    const json = await fetchToolQuality({ n: 5000, signal: controller.signal })
-    if (requestId !== latestRequestId) return
-    data.value = normalizeToolQualityData(json)
-  } catch (e) {
-    if (requestId !== latestRequestId) return
-    if (isAbortError(e)) {
-      return
-    }
-    if (e instanceof Error && /timeout after \d+ms/i.test(e.message)) {
-      const match = e.message.match(/timeout after (\d+)ms/i)
-      const seconds = match?.[1] ? Math.round(Number(match[1]) / 1000) : '?'
-      error.value = `request timeout (${seconds}s)`
-    } else {
-      error.value = e instanceof Error ? e.message : 'fetch failed'
-    }
-  } finally {
-    opts.signal?.removeEventListener('abort', abortFromUpstream)
-    if (activeController === controller) {
-      activeController = null
-    }
-    if (requestId !== latestRequestId) return
-    loading.value = false
-  }
-}
-
-export async function refreshToolQuality() {
-  await runToolQualityRefresh()
+/**
+ * Public refresh API consumed by tab-refresh.ts. Signature is preserved as a
+ * no-argument async function so the refresh pipeline remains source-compatible.
+ * The underlying fetch is shared across panels via fleet-data-core.
+ */
+export async function refreshToolQuality(): Promise<void> {
+  await refreshSharedToolQuality()
 }
 
 function handleRefreshToolQualityClick() {
@@ -270,7 +231,7 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 export function ToolQualityPanel() {
   useEffect(() => {
     const lifecycleController = new AbortController()
-    const runRefresh = () => runToolQualityRefresh({ signal: lifecycleController.signal })
+    const runRefresh = () => refreshSharedToolQuality({ signal: lifecycleController.signal })
 
     void runRefresh()
     const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
@@ -280,7 +241,7 @@ export function ToolQualityPanel() {
 
     return () => {
       lifecycleController.abort()
-      cancelActiveToolQualityRequest()
+      cancelSharedToolQuality()
       disposeAutoRefresh()
     }
   }, [])

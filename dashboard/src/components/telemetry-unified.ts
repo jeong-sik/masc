@@ -8,11 +8,11 @@ import {
   fetchDashboardTools,
   fetchDashboardNamespaceTruth,
   fetchTelemetry,
-  fetchTelemetrySummary,
   type TelemetryEntry,
   type TelemetrySource,
   type TelemetrySourceSummary,
 } from '../api/dashboard'
+import { refreshSharedTelemetrySummary, sharedTelemetrySummary } from './fleet-data-core'
 import { route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
@@ -602,7 +602,7 @@ export function TelemetryUnified() {
           uptime: shell?.status?.build?.uptime_seconds ?? null,
         } satisfies StoreSnapshot
       })
-      const [telemetry, summary, store] = await Promise.all([
+      const [telemetry, , store] = await Promise.all([
         fetchTelemetry({
           source: sourceFilter.value || undefined,
           keeper: keeperFilter.value || undefined,
@@ -612,10 +612,13 @@ export function TelemetryUnified() {
           n: limit.value,
           signal: controller.signal,
         }),
-        fetchTelemetrySummary({ signal: controller.signal }),
+        // Summary is shared via fleet-data-core so Phase 2's fleet-health view
+        // does not duplicate this fetch across panels.
+        refreshSharedTelemetrySummary({ signal: controller.signal }),
         storePromise,
       ])
       if (requestId !== latestRequestId.current) return
+      const summary = sharedTelemetrySummary.value ?? { sources: [], total_entries: 0, generated_at: '' }
       state.value = {
         entries: telemetry.entries,
         summary: summary.sources,

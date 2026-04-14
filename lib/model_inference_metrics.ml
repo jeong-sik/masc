@@ -1,3 +1,5 @@
+module StringMap = Map.Make (String)
+
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
     Reads keeper decisions.jsonl files, extracts telemetry entries within
@@ -235,12 +237,12 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
 (* ── Aggregate by model ─────────────────────────────────── *)
 
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
-  let tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
-  List.iter (fun e ->
-    let prev = match Hashtbl.find_opt tbl e.model with Some l -> l | None -> [] in
-    Hashtbl.replace tbl e.model (e :: prev)
-  ) entries;
-  Hashtbl.fold (fun model_id entries acc ->
+  let tbl : raw_entry list StringMap.t =
+    List.fold_left (fun m e ->
+      let prev = match StringMap.find_opt e.model m with Some l -> l | None -> [] in
+      StringMap.add e.model (e :: prev) m
+    ) StringMap.empty entries in
+  StringMap.fold (fun model_id entries acc ->
     let n = List.length entries in
     let tok_vals = List.filter_map (fun e ->
       if e.tok_per_sec > 0.0 then Some e.tok_per_sec else None
@@ -280,14 +282,15 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
         if n = 0 then 0.0
         else Float.of_int total_tool_calls /. Float.of_int n;
       top_tools = (
-        let tool_tbl : (string, int) Hashtbl.t = Hashtbl.create 16 in
-        List.iter (fun e ->
-          List.iter (fun t ->
-            let prev = match Hashtbl.find_opt tool_tbl t with Some c -> c | None -> 0 in
-            Hashtbl.replace tool_tbl t (prev + 1)
-          ) e.tools_used
-        ) entries;
-        Hashtbl.fold (fun tool count acc -> (tool, count) :: acc) tool_tbl []
+        let tool_map : int StringMap.t =
+          List.fold_left (fun m e ->
+            List.fold_left (fun m t ->
+              let prev = match StringMap.find_opt t m with Some c -> c | None -> 0 in
+              StringMap.add t (prev + 1) m
+            ) m e.tools_used
+          ) StringMap.empty entries
+        in
+        StringMap.fold (fun tool count acc -> (tool, count) :: acc) tool_map []
         |> List.sort (fun (_, a) (_, b) -> compare b a)
         |> (fun l -> if List.length l > 10 then List.filteri (fun i _ -> i < 10) l else l));
       recent_entries =

@@ -256,6 +256,56 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('normalizes ctx composition telemetry from keeper metric points', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'ctx-keeper',
+        status: 'active',
+        metrics_series: [
+          {
+            ts_unix: 5,
+            context_ratio: 0.51,
+            context_tokens: 510,
+            context_max: 1000,
+            latency_ms: 95,
+            generation: 2,
+            channel: 'turn',
+            model_used: 'glm-5',
+            cost_usd: 0.04,
+            compacted: false,
+            ctx_composition: {
+              actual_input_tokens: 1000,
+              display_total_tokens: 1000,
+              estimated_known_tokens: 740,
+              segments: {
+                system_prompt: { bytes: 320, estimated_tokens: 120, fingerprint: null },
+                history_user: { bytes: 210, estimated_tokens: 90, fingerprint: null },
+                history_tool_use: { bytes: 90, estimated_tokens: 60, fingerprint: null },
+                history_tool_result: { bytes: 540, estimated_tokens: 330, fingerprint: null },
+                unattributed: { bytes: 0, estimated_tokens: 260, fingerprint: null },
+              },
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(keeper?.metrics_series).toHaveLength(1)
+    const metric = keeper?.metrics_series?.[0]
+    expect(metric?.ctx_composition).toEqual({
+      actual_input_tokens: 1000,
+      display_total_tokens: 1000,
+      estimated_known_tokens: 740,
+      segments: {
+        system_prompt: { bytes: 320, estimated_tokens: 120, fingerprint: null },
+        history_user: { bytes: 210, estimated_tokens: 90, fingerprint: null },
+        history_tool_use: { bytes: 90, estimated_tokens: 60, fingerprint: null },
+        history_tool_result: { bytes: 540, estimated_tokens: 330, fingerprint: null },
+        unattributed: { bytes: 0, estimated_tokens: 260, fingerprint: null },
+      },
+    })
+  })
+
   it('preserves paused runtime signals and blocker metadata for keeper UI', () => {
     const [keeper] = normalizeKeepers([
       {

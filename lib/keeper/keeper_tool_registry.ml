@@ -349,10 +349,13 @@ let all_tools_reconcile_safe (names : string list) : bool =
     and should not be treated as productive work.
     Contrast with [keeper_fs_read] which reads new content, or
     [keeper_board_post] which creates artifacts. *)
-let boring_tools =
-  [ "masc_status"; "keeper_tasks_list";
-    "keeper_context_status"; "keeper_tools_list";
-    "keeper_stay_silent"; "keeper_board_list" ]
+(* Boring concept retired. Repeated history: #6199/#6381/#6407 removed it,
+   #6375/#6432/#6872 restored it, #6886 reverted again. Each revival kept
+   widening the list (keeper_board_list, keeper_context_status) which drove
+   keepers into silent-only turns when every visible tool was flagged.
+   Neutralized by leaving the API shape (so callers compile) but treating
+   no tool as boring. Full-source removal tracked in follow-up issue. *)
+let boring_tools : string list = []
 
 let boring_tools_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length boring_tools) in

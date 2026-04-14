@@ -607,8 +607,31 @@ let handle_keeper_get_subroutes state req request reqd =
       let recovery_floor_count =
         List.length (Keeper_tool_policy.failing_minimum_tool_names ())
       in
+      let tool_policy_mode : [`Preset of string | `Custom] option =
+        match meta with
+        | Ok (Some m) ->
+          (match Keeper_types.tool_access_custom_allowlist m.tool_access with
+           | Some _ -> Some `Custom
+           | None ->
+             (match Keeper_types.tool_access_preset m.tool_access with
+              | Some preset ->
+                Some (`Preset (Keeper_types.tool_preset_to_string preset))
+              | None -> None))
+        | _ -> None
+      in
+      let turn_outcome : [`Ok | `Failed | `Blocked] option =
+        match Keeper_registry.get ~base_path:state.Mcp_server.room_config.base_path name with
+        | Some entry when entry.turn_consecutive_failures > 0 ->
+          Some `Failed
+        | Some entry when entry.conditions.manual_reconcile_required ->
+          Some `Blocked
+        | Some _ -> Some `Ok
+        | None -> None
+      in
       let decision_pipeline_mermaid =
         Keeper_decision_audit.decision_pipeline_to_mermaid
+          ?tool_policy_mode
+          ?turn_outcome
           ~phase:current
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
@@ -619,14 +642,34 @@ let handle_keeper_get_subroutes state req request reqd =
       let cascade_fsm_mermaid =
         match meta with
         | Ok (Some m) ->
+          let routing =
+            Keeper_cascade_routing.select_cascade
+              ~base_cascade:m.cascade_name ~phase:current
+          in
           let models = Oas_worker_named.default_model_strings
-            ~cascade_name:m.cascade_name
+            ~cascade_name:routing.effective_cascade
           in
           let last_model = m.runtime.usage.last_model_used in
           let last_provider_result =
             if last_model <> "" then Some last_model else None
           in
+          (* Provider health derivation: mark the model that served the
+             most recent successful call [`Healthy], everything else
+             [`Unknown]. Full per-provider health tracking is tracked as
+             a follow-up — this surfaces what the runtime already knows. *)
+          let provider_health =
+            List.map (fun model ->
+              let h : Keeper_decision_audit.provider_health =
+                match last_provider_result with
+                | Some p when p = model -> `Healthy
+                | _ -> `Unknown
+              in
+              (model, h))
+              models
+          in
           Keeper_decision_audit.cascade_fsm_to_mermaid
+            ~provider_health
+            ~effective_cascade_reason:routing.reason
             ~models ~last_provider_result ()
         | _ ->
           Keeper_decision_audit.cascade_fsm_to_mermaid

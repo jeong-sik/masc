@@ -1715,6 +1715,9 @@ export interface MemorySubsystemsSynapse {
   failure_count: number
   last_updated: number
   created_at: number
+  /** Newest-first list of (unix ts seconds, weight) points, capped at 30.
+      Missing for graphs produced by pre-sparkline backends. */
+  weight_history?: Array<[number, number]>
 }
 
 export interface MemorySubsystemsEpisode {

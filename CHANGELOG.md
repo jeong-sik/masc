@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-14
+
+### Added
+- Dashboard OAS telemetry surface (#6978).
+- `oas_sse_bridge` usage relay wiring (#6938).
+
+### Changed
+- Concurrency and observability fixes carried over from the 0.5.x line.
+
+### Notes
+- Version bumped in `dune-project` and `masc_mcp.opam` by #7009. This
+  entry finalizes the release docs that were omitted in that bump, so
+  `scripts/check-version-truth.sh` stops failing on every main-base PR.
+
 ## [0.5.11] - 2026-04-13
 
 ### Changed

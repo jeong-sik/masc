@@ -1,8 +1,8 @@
 # Product Operating Plan
 
-> Current package version: v0.5.11
-> Latest release: v0.5.11 (2026-04-13)
-> Updated: 2026-04-13
+> Current package version: v0.6.0
+> Latest release: v0.6.0 (2026-04-14)
+> Updated: 2026-04-14
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only coordination hardening:

@@ -1,6 +1,36 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(** Resolve the keeper-scoped gh config directory.
+
+    Location: [$base_path/.masc/gh-auth/]
+
+    When this directory exists, keeper [gh] invocations set
+    [GH_CONFIG_DIR] to it, isolating keeper identity from the operator's
+    personal [~/.config/gh] credentials. A typical setup stores an
+    [anyang-keepers] PAT here via:
+
+    {[
+      GH_CONFIG_DIR="$base_path/.masc/gh-auth" gh auth login --hostname github.com
+    ]}
+
+    Falls back to the operator's default gh config when the directory
+    is absent, so the feature is opt-in and backwards compatible. *)
+let keeper_gh_config_dir (config : Room.config) : string option =
+  let dir =
+    Filename.concat config.Room_utils.base_path ".masc/gh-auth"
+  in
+  if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
+
+(** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
+    keeper-scoped config exists. The env var is scoped to the single
+    subprocess invocation — the operator's terminal is unaffected. *)
+let with_keeper_gh_env (config : Room.config) (gh_cmd : string) : string =
+  match keeper_gh_config_dir config with
+  | None -> gh_cmd
+  | Some dir ->
+    Printf.sprintf "GH_CONFIG_DIR=%s %s" (Filename.quote dir) gh_cmd
+
 (** Pre-compiled regex for gh CLI "not found" error messages.
     Matches case-insensitively against multiple known error phrases
     to detect hallucinated issue/PR numbers. *)
@@ -317,7 +347,8 @@ let handle_keeper_github
                 ; "cmd", `String ("gh " ^ gh_raw)
                 ])
         | `Allowed ->
-          let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
+          let scoped_cmd = with_keeper_gh_env config gh_cmd in
+          let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) scoped_cmd in
           let st, raw_out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
           let out, trunc_fields = truncate_gh_output raw_out in
           Yojson.Safe.to_string
@@ -327,7 +358,8 @@ let handle_keeper_github
                  ; "output", `String out
                  ] @ trunc_fields @ gh_not_found_hint ~st ~out)))
       else (
-        let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) gh_cmd in
+        let scoped_cmd = with_keeper_gh_env config gh_cmd in
+        let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) scoped_cmd in
         let st, raw_out =
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ]
         in

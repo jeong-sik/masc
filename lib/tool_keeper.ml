@@ -752,25 +752,34 @@ let handle_keeper_clear ctx args : tool_result =
     | None ->
       error_result_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name)
-    | Some _entry ->
+    | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
-      let phase_before =
-        match Keeper_registry.get ~base_path:ctx.config.base_path name with
-        | Some entry -> Keeper_state_machine.phase_to_string entry.phase
-        | None -> "unknown"
-      in
+      let phase_before = Keeper_state_machine.phase_to_string entry.phase in
       let base_dir = Keeper_types.session_base_dir ctx.config in
-      let trace_id = Keeper_exec_context.generate_trace_id () in
-      let max_tokens =
+      (* Must use the keeper's OWN trace_id to locate its checkpoint file.
+         Using generate_trace_id () would create a fresh session dir and
+         always report 0 cleared messages, because the existing checkpoint
+         lives under meta.runtime.trace_id. *)
+      let meta_for_trace =
         match read_meta_resolved ctx.config name with
-        | Ok (Some (_, meta)) ->
+        | Ok (Some (_, meta)) -> Some meta
+        | _ -> None
+      in
+      let trace_id =
+        match meta_for_trace with
+        | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        | None -> Keeper_exec_context.generate_trace_id ()
+      in
+      let max_tokens =
+        match meta_for_trace with
+        | Some meta ->
           (match meta.max_context_override with Some n when n > 0 -> n | _ -> 200_000)
-        | _ -> 200_000
+        | None -> 200_000
       in
       let max_checkpoint_messages =
-        match read_meta_resolved ctx.config name with
-        | Ok (Some (_, meta)) -> meta.compaction.max_checkpoint_messages
-        | _ -> 100
+        match meta_for_trace with
+        | Some meta -> meta.compaction.max_checkpoint_messages
+        | None -> 100
       in
       let session, ctx_opt =
         Keeper_exec_context.load_context_from_checkpoint

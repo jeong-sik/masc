@@ -60,8 +60,14 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
+      if (routeState.params.section === 'tool-quality') {
+        return ['toolQuality']
+      }
       return ['namespaceTruth', 'missionSnapshot']
     case 'command':
+      if (routeState.params.section === 'inspector') {
+        return ['inspector']
+      }
       return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
     case 'workspace':
       if (routeState.params.section === 'planning') {
@@ -80,12 +86,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       if (routeState.params.section === 'harness') {
         return ['harness']
-      }
-      if (routeState.params.section === 'tool-quality') {
-        return ['toolQuality']
-      }
-      if (routeState.params.section === 'inspector') {
-        return ['inspector']
       }
       return []
     case 'logs':

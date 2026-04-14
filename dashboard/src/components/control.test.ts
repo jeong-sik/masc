@@ -23,6 +23,9 @@ async function loadOperations() {
   vi.doMock('./connector-status', () => ({
     ConnectorStatusPanel: () => html`<div data-testid="connectors">Connectors</div>`,
   }))
+  vi.doMock('./lab-inspector', () => ({
+    LabInspector: () => html`<div data-testid="inspector">Inspector</div>`,
+  }))
   return import('./control')
 }
 
@@ -45,6 +48,7 @@ describe('Operations control surface', () => {
     vi.doUnmock('./ops')
     vi.doUnmock('./governance')
     vi.doUnmock('./connector-status')
+    vi.doUnmock('./lab-inspector')
   })
 
   it('renders Ops by default when section is not set', async () => {
@@ -86,6 +90,16 @@ describe('Operations control surface', () => {
     expect(container.textContent).toContain('Connectors')
     expect(container.textContent).not.toContain('Ops')
     expect(container.textContent).not.toContain('Governance')
+  })
+
+  it('renders LabInspector when section is inspector', async () => {
+    route.value.params = { section: 'inspector' }
+    const { Operations } = await loadOperations()
+    render(html`<${Operations} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Inspector')
+    expect(container.textContent).not.toContain('Ops')
   })
 
   it('falls back to Ops for unknown section values', async () => {

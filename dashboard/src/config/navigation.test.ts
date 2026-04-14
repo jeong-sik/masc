@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultParamsForTab, visibleSectionItemsForTab } from './navigation'
 
 describe('lab navigation', () => {
-  it('keeps tools as the default section after removing the experiments surface', () => {
+  it('contains only research surfaces after Phase 1 reorg', () => {
     expect(defaultParamsForTab('lab')).toEqual({ section: 'tools' })
 
     const labSections = visibleSectionItemsForTab('lab')
@@ -12,24 +12,18 @@ describe('lab navigation', () => {
       'tools',
       'autoresearch',
       'harness',
-      'inspector',
-      'tool-quality',
-      'fleet',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       '도구',
       '오토리서치',
       '세이프티 하네스',
-      '운영 인스펙터',
-      '도구 품질',
-      'Fleet 텔레메트리',
     ])
   })
 })
 
 describe('command navigation', () => {
-  it('keeps operations visible with intervene, governance, and connectors sections', () => {
+  it('includes inspector alongside intervene, governance (승인 큐), and connectors', () => {
     expect(defaultParamsForTab('command')).toEqual({ section: 'intervene' })
 
     const commandSections = visibleSectionItemsForTab('command')
@@ -38,12 +32,14 @@ describe('command navigation', () => {
       'intervene',
       'governance',
       'connectors',
+      'inspector',
     ])
 
     expect(commandSections.map(item => item.label)).toEqual([
       '실시간 개입',
-      '거버넌스',
+      '승인 큐',
       '커넥터',
+      '운영 인스펙터',
     ])
   })
 })
@@ -56,6 +52,16 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('governance')).toBe('도구 이벤트')
     expect(labelFor('metrics')).toBe('Prometheus')
     expect(labelFor('sessions')).toBe('세션')
+  })
+
+  it('surfaces tool-quality and fleet alongside telemetry/metrics', () => {
+    const sections = visibleSectionItemsForTab('monitoring')
+    const ids = sections.map(item => item.id)
+
+    expect(ids).toContain('tool-quality')
+    expect(ids).toContain('fleet')
+    expect(ids).toContain('telemetry')
+    expect(ids).toContain('metrics')
   })
 })
 

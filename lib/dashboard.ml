@@ -241,8 +241,7 @@ let tempo_section (config : Room_utils.config) : section =
   let content = [Tempo.format_state state] in
   { title = "Tempo"; content; empty_msg = "" }
 
-let ordered_room_ids (config : Room_utils.config) =
-  let _ = config in
+let ordered_room_ids (_config : Room_utils.config) =
   let current_room = "default" in
   (current_room, [ current_room ])
 

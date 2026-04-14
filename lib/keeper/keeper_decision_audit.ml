@@ -275,7 +275,26 @@ let decision_pipeline_to_mermaid
 (* Cascade FSM Mermaid diagram                                      *)
 (* ================================================================ *)
 
-type provider_health = [`Healthy | `Unhealthy | `Unknown]
+type unhealthy_reason =
+  [ `Saturated
+  | `Unreachable
+  | `Rate_limited
+  | `Timeout
+  | `Other of string
+  ]
+
+type provider_health =
+  [ `Healthy
+  | `Unhealthy of unhealthy_reason
+  | `Unknown
+  ]
+
+let unhealthy_reason_label = function
+  | `Saturated -> "saturated"
+  | `Unreachable -> "unreachable"
+  | `Rate_limited -> "rate_limited"
+  | `Timeout -> "timeout"
+  | `Other s -> s
 
 let cascade_fsm_to_mermaid
     ?(provider_health : (string * provider_health) list option)
@@ -330,10 +349,15 @@ let cascade_fsm_to_mermaid
   p "    class Accept ok\n";
   p "    class AcceptExhaust warn\n";
   p "    class Exhausted err\n";
-  (* Provider health styling: unhealthy providers get warn class. *)
+  (* Provider health styling: unhealthy providers get warn class and
+     a note listing the typed reason (Saturated/Unreachable/...) so
+     the operator sees *why* the provider is marked down. *)
   List.iteri (fun i label ->
     match health_for label with
-    | `Unhealthy -> p "    class P%d warn\n" i
+    | `Unhealthy reason ->
+      p "    class P%d warn\n" i;
+      p "    note right of P%d: unhealthy: %s\n" i
+        (unhealthy_reason_label reason)
     | `Unknown -> p "    class P%d dim\n" i
     | `Healthy -> ()
   ) models;

@@ -49,6 +49,7 @@ import {
 import { PipelineStageBar } from './keeper-pipeline-stage'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { KeeperStateDiagramPanel } from './keeper-state-diagram'
+import { KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
 import { AgentJournalStream } from './agent-detail-journal'
 import { DialogOverlay } from './common/dialog'
 import { SessionTraceView } from './session-trace/session-trace-view'
@@ -507,6 +508,16 @@ export function KeeperDetailOverlay() {
           </summary>
           <div class="px-4 pb-4 pt-1">
             <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+          </div>
+        </details>
+
+        <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]">
+          <summary class="cursor-pointer py-2 px-4 text-[10px] font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]"></span>
+            Memory Tier & Compaction
+          </summary>
+          <div class="px-4 pb-4 pt-1">
+            <${KeeperMemoryTierPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
           </div>
         </details>
 

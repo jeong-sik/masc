@@ -73,7 +73,7 @@ let event_summary event_json =
   | None, None, None, None ->
       String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
-let session_severity ~health ~status ~runtime_blocker =
+let session_severity ~(health : Dashboard_utils.health_level) ~status ~runtime_blocker =
   if status = "completed" then
     if is_health_critical health || is_health_warning health then Tone_warn
     else Tone_ok
@@ -241,7 +241,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
            | None -> (None, None)
          in
          let severity =
-           session_severity ~health:seed.health ~status:seed.status
+           session_severity ~health:(Dashboard_utils.health_level_of_string seed.health) ~status:seed.status
              ~runtime_blocker:seed.runtime_blocker
          in
          let intervene_label =

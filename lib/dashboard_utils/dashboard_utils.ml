@@ -107,21 +107,54 @@ let string_list_json values =
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii
 
+(** Health severity level — ordered from worst to best.
+    Parsed from dashboard/operator JSON at the call site via
+    [health_level_of_string], then used in typed predicates below. *)
+type health_level =
+  | HL_critical
+  | HL_bad
+  | HL_risk
+  | HL_warn
+  | HL_degraded
+  | HL_ok
+  | HL_unknown  (** Unparseable or missing health string *)
+
+let health_level_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "critical" -> HL_critical
+  | "bad" -> HL_bad
+  | "risk" -> HL_risk
+  | "warn" -> HL_warn
+  | "degraded" -> HL_degraded
+  | "ok" | "good" | "healthy" -> HL_ok
+  | _ -> HL_unknown
+
+let string_of_health_level = function
+  | HL_critical -> "critical"
+  | HL_bad -> "bad"
+  | HL_risk -> "risk"
+  | HL_warn -> "warn"
+  | HL_degraded -> "degraded"
+  | HL_ok -> "ok"
+  | HL_unknown -> "unknown"
+
 (** Status/health classification predicates — single source of truth.
-    Used across dashboard, briefing, operator, command_plane modules.
-    Adding a new status/health value? Update here, not at each call site. *)
+    Used across dashboard, briefing, operator, command_plane modules. *)
 
 let is_keeper_offline status =
   List.mem status [ "offline"; "inactive"; "error" ]
 
-let is_health_critical health =
-  List.mem health [ "bad"; "critical" ]
+let is_health_critical = function
+  | HL_bad | HL_critical -> true
+  | HL_risk | HL_warn | HL_degraded | HL_ok | HL_unknown -> false
 
-let is_health_warning health =
-  List.mem health [ "warn"; "degraded" ]
+let is_health_warning = function
+  | HL_warn | HL_degraded -> true
+  | HL_critical | HL_bad | HL_risk | HL_ok | HL_unknown -> false
 
-let is_health_at_risk health =
-  List.mem health [ "bad"; "risk"; "critical" ]
+let is_health_at_risk = function
+  | HL_bad | HL_risk | HL_critical -> true
+  | HL_warn | HL_degraded | HL_ok | HL_unknown -> false
 
 let is_session_terminal status =
   List.mem status [ "completed"; "cancelled"; "failed"; "stopped" ]

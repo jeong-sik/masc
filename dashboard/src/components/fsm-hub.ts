@@ -9,6 +9,8 @@ import {
 import { keepers } from '../store'
 import { compositeTick } from '../composite-signals'
 import { EmptyState } from './common/empty-state'
+import { CytoscapeFsm } from './common/cytoscape-fsm'
+import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 
 /**
  * FSM Hub — architecture audit surface for the composite keeper lifecycle.
@@ -96,6 +98,7 @@ export function FsmHub() {
       ` : error ? html`
         <${EmptyState} message=${error} compact />
       ` : snapshot ? html`
+        <${CompositeGraphPanel} snapshot=${snapshot} />
         <div class="grid gap-4 lg:grid-cols-2">
           <${SubFsmCard} label="KSM · Keeper lifecycle" value=${snapshot.phase} tone="accent" />
           <${SubFsmCard} label="KTC · Turn cycle" value=${snapshot.turn_phase} tone="indigo" />
@@ -111,6 +114,36 @@ export function FsmHub() {
         />
         <${SnapshotMeta} snapshot=${snapshot} />
       ` : null}
+    </div>
+  `
+}
+
+function CompositeGraphPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+  const spec = useMemo(() => buildCompositeFsmSpec({
+    phase: snapshot.phase,
+    turnPhase: snapshot.turn_phase,
+    decisionStage: snapshot.decision.stage,
+    cascadeState: snapshot.cascade.state,
+    compactionStage: snapshot.compaction.stage,
+  }), [
+    snapshot.phase,
+    snapshot.turn_phase,
+    snapshot.decision.stage,
+    snapshot.cascade.state,
+    snapshot.compaction.stage,
+  ])
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="mb-2 flex items-center justify-between">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          Composite compound view — 5 sub-FSMs
+        </div>
+        <span class="text-[10px] text-[var(--text-dim)]">
+          KeeperCompositeLifecycle.tla
+        </span>
+      </div>
+      <${CytoscapeFsm} spec=${spec} height="360px" />
     </div>
   `
 }

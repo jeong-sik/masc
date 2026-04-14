@@ -28,6 +28,16 @@ type t = {
   sessions: (string, session) Hashtbl.t;  (* agent_id -> session *)
   config_path: string;
   session_dir: string;
+  sessions_mu: Stdlib.Mutex.t;
+  (** Serialises every read/write on [sessions] and every mutation of
+      the [mutable] fields of a [session] value.  Keeper fibers call
+      start_session / heartbeat / end_session / cleanup_zombies from
+      different turns concurrently, and without the lock the Hashtbl
+      races on TOCTOU ([find_opt] + [add]) and the session record's
+      mutable [turn_count]/[last_activity]/[status] are non-atomic.
+
+      Stdlib.Mutex so callers on Executor_pool worker domains can
+      still take the lock (Eio.Mutex is single-domain). *)
 }
 
 (** {1 Utilities} *)
@@ -84,7 +94,14 @@ let create ~config_path =
     sessions = Hashtbl.create 16;
     config_path;
     session_dir;
+    sessions_mu = Stdlib.Mutex.create ();
   }
+
+let with_lock t f =
+  Stdlib.Mutex.lock t.sessions_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock t.sessions_mu)
+    f
 
 (** {1 Internal Helpers} *)
 
@@ -120,121 +137,131 @@ let delete_session_file t agent_id =
 (** {1 Session Lifecycle} *)
 
 let start_session t ~agent_id ?voice () =
-  (* Check if session already exists *)
-  match Hashtbl.find_opt t.sessions agent_id with
-  | Some existing ->
-    existing.status <- Active;
-    existing.last_activity <- Time_compat.now ();
-    save_session t existing;
-    existing
-  | None ->
-    (* Get default voice from Voice_bridge *)
-    let voice = match voice with
-      | Some v -> v
-      | None -> Voice_bridge.get_voice_for_agent agent_id
-    in
-    let now = Time_compat.now () in
-    let session = {
-      session_id = generate_session_id ();
-      agent_id;
-      voice;
-      started_at = now;
-      last_activity = now;
-      turn_count = 0;
-      status = Active;
-    } in
-    Hashtbl.add t.sessions agent_id session;
-    save_session t session;
-    session
+  with_lock t (fun () ->
+    (* Check if session already exists *)
+    match Hashtbl.find_opt t.sessions agent_id with
+    | Some existing ->
+      existing.status <- Active;
+      existing.last_activity <- Time_compat.now ();
+      save_session t existing;
+      existing
+    | None ->
+      (* Get default voice from Voice_bridge *)
+      let voice = match voice with
+        | Some v -> v
+        | None -> Voice_bridge.get_voice_for_agent agent_id
+      in
+      let now = Time_compat.now () in
+      let session = {
+        session_id = generate_session_id ();
+        agent_id;
+        voice;
+        started_at = now;
+        last_activity = now;
+        turn_count = 0;
+        status = Active;
+      } in
+      Hashtbl.add t.sessions agent_id session;
+      save_session t session;
+      session)
 
 let end_session t ~agent_id =
-  match Hashtbl.find_opt t.sessions agent_id with
-  | Some _ ->
-    Hashtbl.remove t.sessions agent_id;
-    delete_session_file t agent_id;
-    true
-  | None -> false
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.sessions agent_id with
+    | Some _ ->
+      Hashtbl.remove t.sessions agent_id;
+      delete_session_file t agent_id;
+      true
+    | None -> false)
 
 let suspend_session t ~agent_id =
-  match Hashtbl.find_opt t.sessions agent_id with
-  | Some session ->
-    session.status <- Suspended;
-    save_session t session
-  | None -> ()
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.sessions agent_id with
+    | Some session ->
+      session.status <- Suspended;
+      save_session t session
+    | None -> ())
 
 let resume_session t ~agent_id =
-  match Hashtbl.find_opt t.sessions agent_id with
-  | Some session ->
-    session.status <- Active;
-    session.last_activity <- Time_compat.now ();
-    save_session t session
-  | None -> ()
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.sessions agent_id with
+    | Some session ->
+      session.status <- Active;
+      session.last_activity <- Time_compat.now ();
+      save_session t session
+    | None -> ())
 
 (** {1 Session Query} *)
 
 let get_session t ~agent_id =
-  Hashtbl.find_opt t.sessions agent_id
+  with_lock t (fun () -> Hashtbl.find_opt t.sessions agent_id)
 
 let list_sessions t =
-  Hashtbl.fold (fun _ session acc -> session :: acc) t.sessions []
+  with_lock t (fun () ->
+    Hashtbl.fold (fun _ session acc -> session :: acc) t.sessions [])
 
 let has_session t ~agent_id =
-  Hashtbl.mem t.sessions agent_id
+  with_lock t (fun () -> Hashtbl.mem t.sessions agent_id)
 
 let session_count t =
-  Hashtbl.length t.sessions
+  with_lock t (fun () -> Hashtbl.length t.sessions)
 
 (** {1 Activity Tracking} *)
 
 let heartbeat t ~agent_id =
-  match Hashtbl.find_opt t.sessions agent_id with
-  | Some session ->
-    session.last_activity <- Time_compat.now ();
-    save_session t session
-  | None -> ()
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.sessions agent_id with
+    | Some session ->
+      session.last_activity <- Time_compat.now ();
+      save_session t session
+    | None -> ())
 
 let increment_turn t ~agent_id =
-  match Hashtbl.find_opt t.sessions agent_id with
-  | Some session ->
-    session.turn_count <- session.turn_count + 1;
-    session.last_activity <- Time_compat.now ();
-    save_session t session
-  | None -> ()
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.sessions agent_id with
+    | Some session ->
+      session.turn_count <- session.turn_count + 1;
+      session.last_activity <- Time_compat.now ();
+      save_session t session
+    | None -> ())
 
 (** {1 Zombie Cleanup} *)
 
 let cleanup_zombies t ?(timeout = Resilience.default_zombie_threshold) () =
-  let now = Time_compat.now () in
-  let to_remove = Hashtbl.fold (fun agent_id session acc ->
-    if now -. session.last_activity > timeout then
-      agent_id :: acc
-    else
-      acc
-  ) t.sessions [] in
-  List.iter (fun agent_id ->
-    Hashtbl.remove t.sessions agent_id;
-    delete_session_file t agent_id
-  ) to_remove;
-  List.length to_remove
+  with_lock t (fun () ->
+    let now = Time_compat.now () in
+    let to_remove = Hashtbl.fold (fun agent_id session acc ->
+      if now -. session.last_activity > timeout then
+        agent_id :: acc
+      else
+        acc
+    ) t.sessions [] in
+    List.iter (fun agent_id ->
+      Hashtbl.remove t.sessions agent_id;
+      delete_session_file t agent_id
+    ) to_remove;
+    List.length to_remove)
 
 (** {1 Persistence} *)
 
 let persist t =
   ensure_session_dir t;
-  Hashtbl.iter (fun _ session -> save_session t session) t.sessions
+  with_lock t (fun () ->
+    Hashtbl.iter (fun _ session -> save_session t session) t.sessions)
 
 let restore t =
   if Sys.file_exists t.session_dir && Sys.is_directory t.session_dir then begin
     let files = Sys.readdir t.session_dir in
-    Array.iter (fun filename ->
-      if Filename.check_suffix filename ".json" then begin
-        let agent_id = Filename.chop_suffix filename ".json" in
-        match load_session t agent_id with
-        | Some session ->
-          Hashtbl.add t.sessions agent_id session
-        | None -> ()
-      end
-    ) files
+    with_lock t (fun () ->
+      Array.iter (fun filename ->
+        if Filename.check_suffix filename ".json" then begin
+          let agent_id = Filename.chop_suffix filename ".json" in
+          match load_session t agent_id with
+          | Some session ->
+            Hashtbl.add t.sessions agent_id session
+          | None -> ()
+        end
+      ) files)
   end
 
 (** {1 Status} *)

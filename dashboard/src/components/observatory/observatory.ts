@@ -32,6 +32,7 @@ import {
 import { EventTrack } from './event-track'
 import { MetricTrack } from './metric-track'
 import { ToolCallTrack } from './tool-call-track'
+import { CrossSignalReadout } from './cross-signal-readout'
 import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
 
@@ -241,20 +242,21 @@ export function Observatory() {
           windowStart=${data.windowStart}
           windowEnd=${data.windowEnd}
         />
-        ${cursorPosition.value ? html`
-          <div class="mt-1 text-[10px] text-text-dim font-mono">
-            cursor: ${new Date(cursorPosition.value.ts).toLocaleTimeString()}
-            (${(cursorPosition.value.pct * 100).toFixed(1)}%)
-          </div>
-        ` : html`
+        ${cursorPosition.value === null ? html`
           <div class="mt-1 text-[10px] text-text-dim italic">
-            hover any track for cross-signal cursor
+            hover any track for cross-signal readout
           </div>
-        `}
+        ` : null}
       </div>
 
+      <${CrossSignalReadout}
+        events=${data.events}
+        hourlyTrend=${data.hourlyTrend}
+        eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
+      />
+
       <p class="text-[10px] text-text-dim italic">
-        Phase 2b — cross-signal cursor + tool calls track. 추가 track(메모리, autoresearch)과 drill-down은 이후 단계에서.
+        Phase 2c — cross-signal readout card. 추가 track(메모리, autoresearch)과 drill-down은 이후 단계에서.
       </p>
     </div>
   `

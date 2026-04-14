@@ -370,6 +370,7 @@
         test_goal_janitor
         test_keeper_pr_workflow
         test_keeper_github_hint
+        test_keeper_gh_hallucination_gate
         test_voice_config)
  (modules
         test_runtime_params
@@ -518,6 +519,7 @@
         test_goal_janitor
         test_keeper_pr_workflow
         test_keeper_github_hint
+        test_keeper_gh_hallucination_gate
         test_voice_config)
  (libraries masc_test_deps))
 

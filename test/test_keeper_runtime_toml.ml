@@ -1,5 +1,10 @@
 (** Tests for [Keeper_runtime_config] — per-base-path keeper runtime
-    tuning loaded from [<base_path>/.masc/config/keeper_runtime.toml]. *)
+    tuning loaded from [<base_path>/.masc/config/keeper_runtime.toml].
+
+    Uses [resolve_overrides] with injected env_lookup to avoid global
+    process env pollution. The load_and_apply integration path (which
+    calls Unix.putenv) is tested via missing-file and parse-error paths
+    only, since those don't depend on env state. *)
 
 open Alcotest
 open Masc_mcp
@@ -27,21 +32,21 @@ let write_toml base_path content =
   output_string oc content;
   close_out oc
 
-(* Cleanup helper: env vars we touch must not leak between tests. *)
-let env_keys =
-  [ "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-  ; "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
-  ; "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"
-  ]
+(* Fake env: always returns None (env is "empty"). *)
+let empty_env _name = None
 
-let unset_all_keys () =
-  (* CI may set these env vars globally; we must truly unset (not set to "")
-     because [Sys.getenv_opt] treats "" as Some "", which our skip-if-set
-     logic interprets as "caller provided it". *)
-  List.iter (fun k -> try Unix.unsetenv k with _ -> ()) env_keys
+(* Fake env with specific vars set. *)
+let env_with vars name = List.assoc_opt name vars
+
+(* Parse TOML content into a doc, or fail the test. *)
+let parse_or_fail content =
+  match Keeper_toml_loader.parse_toml content with
+  | Ok doc -> doc
+  | Error msg -> failf "TOML parse failed: %s" msg
+
+(* --- Tests using resolve_overrides (pure, no env side effects) --- *)
 
 let test_missing_file_returns_zero () =
-  unset_all_keys ();
   with_base_path @@ fun base_path ->
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok 0 -> ()
@@ -49,84 +54,93 @@ let test_missing_file_returns_zero () =
   | Error msg -> failf "unexpected error: %s" msg
 
 let test_applies_autonomous_max_turns () =
-  unset_all_keys ();
-  with_base_path @@ fun base_path ->
-  write_toml base_path "[autonomous]\nmax_turns_per_call = 7\n";
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "load failed: %s" msg
-  | Ok n ->
-    check int "applied count" 1 n;
-    let actual =
-      Sys.getenv_opt
-        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-    in
-    check (option string) "env var set" (Some "7") actual
+  let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied count" 1 count;
+  check (option string) "env var mapped"
+    (Some "7")
+    (List.assoc_opt
+       "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
+       overrides)
 
 let test_applies_multiple_overrides () =
-  unset_all_keys ();
-  with_base_path @@ fun base_path ->
-  write_toml base_path
+  let doc = parse_or_fail
     "[autonomous]\n\
      max_turns_per_call = 7\n\
      semaphore_wait_timeout_sec = 150\n\
      [reactive]\n\
-     max_turns_per_call = 20\n";
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "load failed: %s" msg
-  | Ok n ->
-    check int "applied 3" 3 n;
-    check (option string) "autonomous max_turns"
-      (Some "7")
-      (Sys.getenv_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS");
-    check (option string) "semaphore timeout"
-      (Some "150")
-      (Sys.getenv_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC");
-    check (option string) "reactive max_turns"
-      (Some "20")
-      (Sys.getenv_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL")
+     max_turns_per_call = 20\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 3" 3 count;
+  check (option string) "autonomous max_turns"
+    (Some "7")
+    (List.assoc_opt
+       "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
+       overrides);
+  check (option string) "semaphore timeout"
+    (Some "150")
+    (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides);
+  check (option string) "reactive max_turns"
+    (Some "20")
+    (List.assoc_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" overrides)
 
 let test_caller_env_wins_over_toml () =
-  unset_all_keys ();
-  with_base_path @@ fun base_path ->
-  Unix.putenv "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS" "3";
-  write_toml base_path "[autonomous]\nmax_turns_per_call = 7\n";
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "load failed: %s" msg
-  | Ok n ->
-    check int "applied 0 (env preempts)" 0 n;
-    check (option string) "env unchanged"
-      (Some "3")
-      (Sys.getenv_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")
+  let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
+  let fake_env =
+    env_with
+      [("MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS", "3")]
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:fake_env doc
+  in
+  check int "applied 0 (env preempts)" 0 count;
+  check int "no overrides" 0 (List.length overrides)
 
 let test_unknown_keys_ignored () =
-  unset_all_keys ();
-  with_base_path @@ fun base_path ->
-  write_toml base_path
+  let doc = parse_or_fail
     "[autonomous]\n\
      max_turns_per_call = 7\n\
      unknown_field = \"ignored\"\n\
      [future_section]\n\
-     some_key = 42\n";
-  match Keeper_runtime_config.load_and_apply ~base_path with
-  | Error msg -> failf "load failed: %s" msg
-  | Ok n -> check int "only known keys applied" 1 n
+     some_key = 42\n"
+  in
+  let count, _ =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "only known keys applied" 1 count
 
 let test_parse_error_returns_error () =
-  unset_all_keys ();
   with_base_path @@ fun base_path ->
   write_toml base_path "this is not valid TOML [[[\n";
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok _ -> fail "expected parse error"
   | Error _ -> ()
 
+let test_float_value_round_trip () =
+  let doc = parse_or_fail
+    "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
+  in
+  let _, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check (option string) "float preserved"
+    (Some "120.5")
+    (List.assoc_opt "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC" overrides)
+
 let () =
   run "keeper_runtime_toml"
-    [ ( "load_and_apply"
+    [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
+        ; test_case "float value round trip" `Quick test_float_value_round_trip
         ] )
     ]

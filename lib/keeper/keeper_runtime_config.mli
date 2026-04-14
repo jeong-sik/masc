@@ -29,6 +29,19 @@
     parse failure.  Missing file is not an error: returns [Ok 0]. *)
 val load_and_apply : base_path:string -> (int, string) result
 
+(** Pure resolution: parse TOML and determine which env vars would be
+    overridden, without actually calling [Unix.putenv].
+
+    [~env_lookup] defaults to [Sys.getenv_opt]; tests inject a fake env
+    to avoid global process env dependency.
+
+    Returns [(count, overrides)] where [overrides] is
+    [(env_name, value) list]. *)
+val resolve_overrides :
+  ?env_lookup:(string -> string option) ->
+  Keeper_toml_loader.toml_doc ->
+  int * (string * string) list
+
 (** TOML schema (for documentation):
 
     {[

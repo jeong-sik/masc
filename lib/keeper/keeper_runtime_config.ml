@@ -40,9 +40,16 @@ let value_to_string = function
 
 (** Apply one TOML key to the corresponding env var, unless the env var
     is already set (caller override wins).  Returns [true] iff a putenv
-    actually happened. *)
-let apply_one (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
-  match Sys.getenv_opt env_name with
+    actually happened.
+
+    [~env_lookup] and [~env_set] are injectable for testing: production
+    uses [Sys.getenv_opt] / [Unix.putenv]; tests supply a fake env to
+    avoid global process env pollution. *)
+let apply_one
+    ?(env_lookup = Sys.getenv_opt)
+    ?(env_set = Unix.putenv)
+    (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
+  match env_lookup env_name with
   | Some _ ->
     (* Caller env override — leave alone. *)
     false
@@ -53,8 +60,34 @@ let apply_one (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
       match value_to_string v with
       | None -> false
       | Some s ->
-        Unix.putenv env_name s;
+        env_set env_name s;
         true
+
+(** Pure version of the load+apply pipeline. Parses TOML and returns
+    the number of overrides that would be applied, plus a list of
+    (env_name, value) pairs. Exposed for testing without env side effects. *)
+let resolve_overrides
+    ?(env_lookup = Sys.getenv_opt)
+    (doc : Keeper_toml_loader.toml_doc) =
+  let applied = ref [] in
+  let count =
+    List.fold_left
+      (fun acc (toml_key, env_name) ->
+        match env_lookup env_name with
+        | Some _ -> acc
+        | None ->
+          match List.assoc_opt toml_key doc with
+          | None -> acc
+          | Some v ->
+            match value_to_string v with
+            | None -> acc
+            | Some s ->
+              applied := (env_name, s) :: !applied;
+              acc + 1)
+      0
+      key_to_env
+  in
+  (count, List.rev !applied)
 
 let load_and_apply ~base_path =
   let path = toml_path ~base_path in

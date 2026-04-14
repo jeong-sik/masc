@@ -51,7 +51,7 @@ describe('observatory-filter-store', () => {
   })
 
   it('reads keeper/ns/op/range from URL params', () => {
-    setRoute('monitoring', { section: 'telemetry', keeper: 'nova', ns: 'team-a', op: 'op-42', range: '1h' })
+    setRoute('monitoring', { section: 'fleet-health', keeper: 'nova', ns: 'team-a', op: 'op-42', range: '1h' })
 
     expect(currentKeeperFilter()).toBe('nova')
     expect(currentNamespaceFilter()).toBe('team-a')
@@ -77,10 +77,10 @@ describe('observatory-filter-store', () => {
   })
 
   it('setObservatoryFilter preserves unrelated params (section, session_id)', () => {
-    setRoute('monitoring', { section: 'telemetry', session_id: 's-1' })
+    setRoute('monitoring', { section: 'fleet-health', session_id: 's-1' })
     setObservatoryFilter({ keeper: 'nova' })
     expect(router.navigate).toHaveBeenLastCalledWith('monitoring', {
-      section: 'telemetry',
+      section: 'fleet-health',
       session_id: 's-1',
       keeper: 'nova',
     })
@@ -88,14 +88,14 @@ describe('observatory-filter-store', () => {
 
   it('clearObservatoryFilters removes all 4 filter params', () => {
     setRoute('monitoring', {
-      section: 'telemetry',
+      section: 'fleet-health',
       keeper: 'nova',
       ns: 'team-a',
       op: 'op-42',
       range: '1h',
     })
     clearObservatoryFilters()
-    expect(router.navigate).toHaveBeenLastCalledWith('monitoring', { section: 'telemetry' })
+    expect(router.navigate).toHaveBeenLastCalledWith('monitoring', { section: 'fleet-health' })
   })
 
   it('setKeeperFilter is a shortcut for keeper-only update', () => {

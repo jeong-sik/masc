@@ -241,7 +241,7 @@ export function MissionBriefingCard() {
     const context = createLiveJudgeWorkflowContext(liveJudge, mission, briefing)
     persistWorkflowContext(context)
     navigate('command', {
-      section: 'intervene',
+      section: 'operations',
       ...missionInterveneParams(context),
     })
   }

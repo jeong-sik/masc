@@ -112,7 +112,7 @@ function inheritedWorkflowRouteParams(): Record<string, string> {
 
 export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
   const inherited = inheritedWorkflowRouteParams()
-  const base = { ...inherited, section: 'intervene' }
+  const base = { ...inherited, section: 'operations' }
   if (surface === 'operations') return base
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value

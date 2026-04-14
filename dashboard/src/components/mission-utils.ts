@@ -105,7 +105,7 @@ function navigateWithContext(
   persistWorkflowContext(context)
   navigate(
     'command',
-    { section: 'intervene', ...missionInterveneParams(context) },
+    { section: 'operations', ...missionInterveneParams(context) },
   )
 }
 

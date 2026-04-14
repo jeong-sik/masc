@@ -31,7 +31,7 @@ const FOCUS_SURFACES: FocusSurface[] = [
     description: '자동 판단, review queue, 승인 대기, 실행 경로를 한 화면에서 확인합니다.',
     action: '운영 큐로 이동',
     tab: 'command',
-    params: { section: 'intervene' },
+    params: { section: 'operations' },
   },
   {
     title: 'Board',

@@ -383,7 +383,7 @@ export function Ops() {
   const confirmToken = pendingConfirmToken(selectedItem)
 
   useEffect(() => {
-    if (route.value.tab !== 'command' || route.value.params.section !== 'intervene') {
+    if (route.value.tab !== 'command' || route.value.params.section !== 'operations') {
       hydratedWorkflowId.value = null
       return
     }

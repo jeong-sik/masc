@@ -45,11 +45,11 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  // Legacy deep-link: /chains/operation/:id -> intervene surface
+  // Legacy deep-link: /chains/operation/:id -> operations surface
   if (segments[0] === 'chains') {
     const nextParams: Record<string, string> = {
       ...params,
-      section: 'intervene',
+      section: 'operations',
       source: params.source ?? 'execution',
     }
     if (segments[1] === 'operation' && segments[2]) {

@@ -304,7 +304,7 @@ describe('MissionBriefingCard', () => {
     expect(navigateMock).toHaveBeenCalledWith(
       'command',
       expect.objectContaining({
-        section: 'intervene',
+        section: 'operations',
         action_type: 'keeper_message',
         target_type: 'keeper',
         target_id: 'live-judge',
@@ -355,7 +355,7 @@ describe('MissionBriefingCard', () => {
     expect(navigateMock).toHaveBeenCalledWith(
       'command',
       expect.objectContaining({
-        section: 'intervene',
+        section: 'operations',
         action_type: 'keeper_message',
         target_type: 'keeper',
         target_id: 'mission-judge',

@@ -60,8 +60,13 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
-      if (routeState.params.section === 'tool-quality') {
-        return ['toolQuality']
+      // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)
+      if (routeState.params.section === 'fleet-health') {
+        const view = routeState.params.view
+        if (view === 'tool-quality') return ['toolQuality']
+        if (view === 'comparison') return ['execution', 'toolQuality']
+        // default + event-log + governance: general monitoring refresh
+        return ['namespaceTruth', 'missionSnapshot']
       }
       return ['namespaceTruth', 'missionSnapshot']
     case 'command':
@@ -72,9 +77,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'workspace':
       if (routeState.params.section === 'planning') {
         return ['goals', 'execution']
-      }
-      if (routeState.params.section === 'goals') {
-        return ['goals']
       }
       if (routeState.params.section === 'board') {
         return ['board']

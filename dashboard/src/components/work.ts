@@ -1,17 +1,16 @@
-// MASC Dashboard — Work Tab
-// Absorbs: memory(board) + planning + goals into pill-switched sections.
+// MASC Dashboard — Work Tab (Phase 1: goals absorbed into planning)
+// board + planning (includes goal pipeline summary + goals deep-link).
 
 import { html } from 'htm/preact'
 import { route } from '../router'
 import { Memory } from './memory'
 import { Planning } from './goals'
-import { GoalTree } from './goals/goal-tree'
 import { ErrorBoundary } from './common/error-boundary'
 
-type WorkSection = 'board' | 'planning' | 'goals'
+type WorkSection = 'board' | 'planning'
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'board' || v === 'planning' || v === 'goals'
+  return v === 'board' || v === 'planning'
 }
 
 export function Work() {
@@ -24,8 +23,7 @@ export function Work() {
       <div class="transition-opacity duration-300">
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${Memory} />`
-            : current === 'planning' ? html`<${Planning} />`
-            : html`<${GoalTree} />`
+            : html`<${Planning} />`
           }
         </>
       </div>

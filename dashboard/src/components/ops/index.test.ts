@@ -70,7 +70,7 @@ describe('Ops intervene surface', () => {
       selectedReviewTab,
     } = await loadOps()
 
-    route.value = { tab: 'command', params: { section: 'intervene' }, postId: null } as RouteState
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
     hydratedWorkflowId.value = null
     reviewDecisionReason.value = ''
     selectedReviewItemId.value = ''
@@ -166,7 +166,7 @@ describe('Ops intervene surface', () => {
       selectedReviewTab,
     } = await loadOps()
 
-    route.value = { tab: 'command', params: { section: 'intervene' }, postId: null } as RouteState
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
     hydratedWorkflowId.value = null
     reviewDecisionReason.value = ''
     selectedReviewItemId.value = ''

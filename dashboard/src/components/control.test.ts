@@ -51,34 +51,25 @@ describe('Operations control surface', () => {
     vi.doUnmock('./lab-inspector')
   })
 
-  it('renders Ops by default when section is not set', async () => {
+  it('renders both Ops and Governance by default when section is not set (falls back to operations)', async () => {
     route.value.params = {}
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('Ops')
-    expect(container.textContent).not.toContain('Governance')
+    expect(container.textContent).toContain('Governance')
     expect(container.textContent).not.toContain('Connectors')
   })
 
-  it('renders Ops when section is intervene', async () => {
-    route.value.params = { section: 'intervene' }
+  it('renders both Ops and Governance when section is operations (Phase 1 consolidated)', async () => {
+    route.value.params = { section: 'operations' }
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('Ops')
-  })
-
-  it('renders Governance when section is governance', async () => {
-    route.value.params = { section: 'governance' }
-    const { Operations } = await loadOperations()
-    render(html`<${Operations} />`, container)
-    await flushUi()
-
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).not.toContain('Ops')
   })
 
   it('renders ConnectorStatusPanel when section is connectors', async () => {

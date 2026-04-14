@@ -1,3 +1,6 @@
+module StringMap = Map.Make (String)
+module IntMap = Map.Make (Int)
+
 (** Model_inference_metrics — per-model aggregate inference statistics.
 
     Reads keeper decisions.jsonl files, extracts telemetry entries within
@@ -235,12 +238,12 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
 (* ── Aggregate by model ─────────────────────────────────── *)
 
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
-  let tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
-  List.iter (fun e ->
-    let prev = match Hashtbl.find_opt tbl e.model with Some l -> l | None -> [] in
-    Hashtbl.replace tbl e.model (e :: prev)
-  ) entries;
-  Hashtbl.fold (fun model_id entries acc ->
+  let tbl : raw_entry list StringMap.t =
+    List.fold_left (fun m e ->
+      let prev = match StringMap.find_opt e.model m with Some l -> l | None -> [] in
+      StringMap.add e.model (e :: prev) m
+    ) StringMap.empty entries in
+  StringMap.fold (fun model_id entries acc ->
     let n = List.length entries in
     let tok_vals = List.filter_map (fun e ->
       if e.tok_per_sec > 0.0 then Some e.tok_per_sec else None
@@ -280,14 +283,15 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
         if n = 0 then 0.0
         else Float.of_int total_tool_calls /. Float.of_int n;
       top_tools = (
-        let tool_tbl : (string, int) Hashtbl.t = Hashtbl.create 16 in
-        List.iter (fun e ->
-          List.iter (fun t ->
-            let prev = match Hashtbl.find_opt tool_tbl t with Some c -> c | None -> 0 in
-            Hashtbl.replace tool_tbl t (prev + 1)
-          ) e.tools_used
-        ) entries;
-        Hashtbl.fold (fun tool count acc -> (tool, count) :: acc) tool_tbl []
+        let tool_map : int StringMap.t =
+          List.fold_left (fun m e ->
+            List.fold_left (fun m t ->
+              let prev = match StringMap.find_opt t m with Some c -> c | None -> 0 in
+              StringMap.add t (prev + 1) m
+            ) m e.tools_used
+          ) StringMap.empty entries
+        in
+        StringMap.fold (fun tool count acc -> (tool, count) :: acc) tool_map []
         |> List.sort (fun (_, a) (_, b) -> compare b a)
         |> (fun l -> if List.length l > 10 then List.filteri (fun i _ -> i < 10) l else l));
       recent_entries =
@@ -317,13 +321,13 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
     : bucket_metric list =
   let bsec = if bucket_sec <= 0 then 60 else bucket_sec in
   let bsec_f = Float.of_int bsec in
-  let tbl : (int, raw_entry list) Hashtbl.t = Hashtbl.create 16 in
-  List.iter (fun e ->
-    let key = int_of_float (Float.floor (e.ts_unix /. bsec_f)) in
-    let prev = match Hashtbl.find_opt tbl key with Some l -> l | None -> [] in
-    Hashtbl.replace tbl key (e :: prev)
-  ) entries;
-  Hashtbl.fold (fun key bucket_entries acc ->
+  let tbl : raw_entry list IntMap.t =
+    List.fold_left (fun m e ->
+      let key = int_of_float (Float.floor (e.ts_unix /. bsec_f)) in
+      let prev = match IntMap.find_opt key m with Some l -> l | None -> [] in
+      IntMap.add key (e :: prev) m
+    ) IntMap.empty entries in
+  IntMap.fold (fun key bucket_entries acc ->
     let n = List.length bucket_entries in
     let lat_vals = List.filter_map (fun e ->
       if e.latency_ms > 0.0 then Some e.latency_ms else None
@@ -360,12 +364,13 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
 
 let group_entries_by_model (entries : raw_entry list)
     : (string * raw_entry list) list =
-  let tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
-  List.iter (fun e ->
-    let prev = match Hashtbl.find_opt tbl e.model with Some l -> l | None -> [] in
-    Hashtbl.replace tbl e.model (e :: prev)
-  ) entries;
-  Hashtbl.fold (fun model es acc -> (model, es) :: acc) tbl []
+  let tbl : raw_entry list StringMap.t =
+    List.fold_left (fun m e ->
+      let prev = match StringMap.find_opt e.model m with Some l -> l | None -> [] in
+      StringMap.add e.model (e :: prev) m
+    ) StringMap.empty entries
+  in
+  StringMap.fold (fun model es acc -> (model, es) :: acc) tbl []
 
 (* ── Public API ─────────────────────────────────────────── *)
 
@@ -386,13 +391,14 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
   let entries = read_all_decisions ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let bucket_sec = bucket_minutes * 60 in
-  let by_model_tbl : (string, raw_entry list) Hashtbl.t = Hashtbl.create 8 in
-  List.iter (fun (model, es) -> Hashtbl.replace by_model_tbl model es)
-    (group_entries_by_model entries);
+  let by_model_map : raw_entry list StringMap.t =
+    List.fold_left (fun acc (model, es) -> StringMap.add model es acc)
+      StringMap.empty (group_entries_by_model entries)
+  in
   let models_with_buckets =
     List.map (fun (s : model_stats) ->
       let model_entries =
-        match Hashtbl.find_opt by_model_tbl s.model_id with
+        match StringMap.find_opt s.model_id by_model_map with
         | Some es -> es
         | None -> []
       in

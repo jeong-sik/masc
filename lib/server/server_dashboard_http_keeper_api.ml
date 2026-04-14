@@ -614,6 +614,7 @@ let handle_keeper_get_subroutes state req request reqd =
           ~thompson_beta:stats.beta
           ~tool_count
           ~recovery_floor_count
+          ()
       in
       let cascade_fsm_mermaid =
         match meta with

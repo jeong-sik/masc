@@ -33,6 +33,7 @@ import { EventTrack } from './event-track'
 import { MetricTrack } from './metric-track'
 import { ToolCallTrack } from './tool-call-track'
 import { CrossSignalReadout } from './cross-signal-readout'
+import { DetailPane } from './detail-pane'
 import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
 
@@ -255,8 +256,10 @@ export function Observatory() {
         eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
       />
 
+      <${DetailPane} />
+
       <p class="text-[10px] text-text-dim italic">
-        Phase 2c — cross-signal readout card. 추가 track(메모리, autoresearch)과 drill-down은 이후 단계에서.
+        Phase 2d — click drill-down. 추가 track(메모리, autoresearch)은 이후 단계에서.
       </p>
     </div>
   `

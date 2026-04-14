@@ -1,12 +1,14 @@
-// Observatory Event Track (RFC-MASC-006 Phase 2a+2b)
+// Observatory Event Track (RFC-MASC-006 Phase 2a+2b+2d)
 // Renders discrete telemetry events as vertical markers on a shared time axis.
 // Phase 2b: mousemove updates cursor-store, CursorLine renders across track.
+// Phase 2d: click marker → selectEntity → DetailPane opens.
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
+import { selectEntity, detailSelection } from './detail-selection-store'
 
 function entryTimestampMs(entry: TelemetryEntry): number | null {
   if (typeof entry.ts === 'number') return entry.ts * 1000
@@ -72,11 +74,20 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
               const pct = ((ts - windowStart) / span) * 100
               const color = sourceColor(typeof entry.source === 'string' ? entry.source : undefined)
               const label = eventLabel(entry)
+              const selected = detailSelection.value
+              const isSelected = selected !== null
+                && selected.kind === 'event'
+                && selected.entry === entry
+              const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
-                  class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-all cursor-pointer"
+                  class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-all cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
                   title=${`${new Date(ts).toLocaleTimeString()} · ${label}`}
+                  onClick=${(e: MouseEvent) => {
+                    e.stopPropagation()
+                    selectEntity({ kind: 'event', entry, ts })
+                  }}
                 ></span>
               `
             })

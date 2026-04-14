@@ -650,11 +650,14 @@ let handle_keeper_compact ctx args : tool_result =
       | "running" | "failing" -> force
       | _ -> false
     in
-    if not allowed then
+    if not allowed then begin
+      Prometheus.inc_counter "masc_keeper_operator_compact_total"
+        ~labels:[("keeper", name); ("result", "precondition")] ();
       error_result_typed ~code:Validation_error
         (Printf.sprintf
            "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
            name phase_before)
+    end
     else begin
       (* Dispatch FSM event *)
       Keeper_exec_context.dispatch_keeper_phase_event
@@ -687,6 +690,8 @@ let handle_keeper_compact ctx args : tool_result =
                after_tokens = recovery.compaction.after_tokens;
             });
           invalidate_status_cache name;
+          Prometheus.inc_counter "masc_keeper_operator_compact_total"
+            ~labels:[("keeper", name); ("result", "ok")] ();
           (true,
            Yojson.Safe.to_string
              (`Assoc [
@@ -711,6 +716,8 @@ let handle_keeper_compact ctx args : tool_result =
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
             });
+          Prometheus.inc_counter "masc_keeper_operator_compact_total"
+            ~labels:[("keeper", name); ("result", "no_checkpoint")] ();
           (false,
            Printf.sprintf
              "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
@@ -793,6 +800,9 @@ let handle_keeper_clear ctx args : tool_result =
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;
+      Prometheus.inc_counter "masc_keeper_operator_clear_total"
+        ~labels:[("keeper", name);
+                 ("preserve_system", string_of_bool preserve_system)] ();
       (true,
        Yojson.Safe.to_string
          (`Assoc [

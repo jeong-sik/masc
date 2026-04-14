@@ -805,10 +805,17 @@ let handle_keeper_clear ctx args : tool_result =
               []
           in
           let cleared_ctx = { wctx with messages = cleared_messages } in
-          (* Increment generation to signal a new context epoch after clear. *)
-          let generation = 1 in
+          (* Increment generation from meta to signal a new context epoch.
+             Using a hardcoded value would violate generation monotonicity
+             — the keeper_unified_turn retry loop uses meta.runtime.generation
+             to detect stale contexts. *)
+          let current_gen =
+            match meta_for_trace with
+            | Some meta -> meta.runtime.generation
+            | None -> 0
+          in
           let checkpoint =
-            Keeper_exec_context.create_checkpoint cleared_ctx ~generation:(generation + 1)
+            Keeper_exec_context.create_checkpoint cleared_ctx ~generation:(current_gen + 1)
           in
           Keeper_exec_context.save_session_checkpoint session checkpoint;
           msg_count - List.length cleared_messages

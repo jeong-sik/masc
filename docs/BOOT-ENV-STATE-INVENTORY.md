@@ -24,7 +24,7 @@ Scope:
 | `MASC_BASE_PATH` | Runtime base path once the server is running. `.masc` lives under this directory. | `Env_config_core`, `Room_utils`, keeper/board/control-plane/logging paths |
 | `MASC_CONFIG_DIR` | Explicit config root override. Highest-precedence config selector. | `Config_dir_resolver`, bootstrap, keeper/persona config resolution |
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
-| `MASC_STORAGE_TYPE` | Filesystem vs `postgres-native` runtime backend. | bootstrap and backend setup |
+| `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
 | `HOME` | Fallback for home-level config discovery. | `Config_dir_resolver`, some artifact stores |
 | `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, legacy repo fallback, some knowledge paths, `scripts/sb` resolution. | `Env_config_core`, `autoresearch_knowledge`, legacy paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
@@ -146,8 +146,7 @@ Important outlier: planning data does not live under `.masc`; it lives under `<b
 
 Notes:
 
-- JSONL is the default board backend.
-- `MASC_BOARD_BACKEND=pg` can switch board persistence to PostgreSQL, but JSONL files remain the canonical filesystem lane and are present on the current host.
+- JSONL is the board backend. PostgreSQL board backend was removed; filesystem is the only supported lane.
 
 ### 3.3 Goals
 

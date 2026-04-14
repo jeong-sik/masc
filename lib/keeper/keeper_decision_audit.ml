@@ -198,7 +198,7 @@ let flush_if_needed ~base_path ~keeper_name =
 (* ================================================================ *)
 
 let decision_pipeline_to_mermaid
-    ?(guard_penalty_this_cycle : int option)
+    ?(guard_penalty_total : int option)
     ?(tool_policy_mode : [`Preset of string | `Custom] option)
     ?(turn_outcome : [`Ok | `Failed | `Blocked] option)
     ~(phase : Keeper_state_machine.phase)
@@ -246,7 +246,7 @@ let decision_pipeline_to_mermaid
      p "    class Running off\n";
      p "    class Failing off\n");
   p "\n";
-  let penalty_str = match guard_penalty_this_cycle with
+  let penalty_str = match guard_penalty_total with
     | Some n -> string_of_int n
     | None -> "n/a"
   in

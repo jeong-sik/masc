@@ -632,7 +632,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Keeper_decision_audit.decision_pipeline_to_mermaid
           ?tool_policy_mode
           ?turn_outcome
-          ~guard_penalty_this_cycle:stats.guard_penalties_total
+          ~guard_penalty_total:stats.guard_penalties_total
           ~phase:current
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta

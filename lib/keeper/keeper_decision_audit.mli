@@ -73,10 +73,28 @@ val decision_pipeline_to_mermaid :
   unit ->
   string
 
+(** Reasons a provider may be [Unhealthy].
+    Each constructor corresponds to a distinguishable failure signal
+    the runtime can record against a provider entry. Keep this list
+    closed — new reasons require dashboard+spec updates. *)
+type unhealthy_reason =
+  [ `Saturated       (** slot pool full, no capacity left *)
+  | `Unreachable     (** connect/DNS failure, provider not responding *)
+  | `Rate_limited    (** 429 / quota exhausted *)
+  | `Timeout         (** request did not complete within deadline *)
+  | `Other of string (** free-form reason for signals we do not yet categorise *)
+  ]
+
 (** Provider health surfaced in the Cascade FSM render.
     Mirrors [phealth] in CascadeLiveness.tla. [Unknown] covers the case
-    where the runtime has no recent sample. *)
-type provider_health = [`Healthy | `Unhealthy | `Unknown]
+    where the runtime has no recent sample. [Unhealthy] carries a
+    typed reason so the dashboard can distinguish saturation vs
+    unreachability vs rate limiting without parsing free text. *)
+type provider_health =
+  [ `Healthy
+  | `Unhealthy of unhealthy_reason
+  | `Unknown
+  ]
 
 (** Generate a Mermaid stateDiagram-v2 for the Cascade FSM.
     Shows the provider failover chain with accept/reject/exhaustion

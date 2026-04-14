@@ -138,6 +138,50 @@ let test_audit_ring_and_flag () =
    which lives in masc_room. Test will be added when Heartbeat_smart
    moves to masc_core (room cleanup issue). Verified locally. *)
 
+(* ── Provider Health Reason Rendering ────────────────── *)
+
+let substring_present ~haystack ~needle =
+  let hl = String.length haystack in
+  let nl = String.length needle in
+  if nl > hl then false
+  else
+    let rec loop i =
+      if i + nl > hl then false
+      else if String.sub haystack i nl = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let test_cascade_mermaid_renders_saturated_reason () =
+  let out = DA.cascade_fsm_to_mermaid
+      ~provider_health:[("alpha", `Unhealthy `Saturated)]
+      ~models:["alpha"; "beta"]
+      ~last_provider_result:None
+      ()
+  in
+  check bool "saturated reason appears in note"
+    true (substring_present ~haystack:out ~needle:"unhealthy: saturated")
+
+let test_cascade_mermaid_renders_other_reason () =
+  let out = DA.cascade_fsm_to_mermaid
+      ~provider_health:[("beta", `Unhealthy (`Other "custom-signal"))]
+      ~models:["alpha"; "beta"]
+      ~last_provider_result:None
+      ()
+  in
+  check bool "other reason string passes through"
+    true (substring_present ~haystack:out ~needle:"unhealthy: custom-signal")
+
+let test_cascade_mermaid_healthy_no_reason_note () =
+  let out = DA.cascade_fsm_to_mermaid
+      ~provider_health:[("alpha", `Healthy)]
+      ~models:["alpha"]
+      ~last_provider_result:(Some "alpha")
+      ()
+  in
+  check bool "healthy provider does not emit unhealthy note"
+    false (substring_present ~haystack:out ~needle:"unhealthy")
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -166,5 +210,10 @@ let () =
     ];
     "decision_audit", [
       test_case "ring capacity and feature flag" `Quick test_audit_ring_and_flag;
+    ];
+    "provider_health_reason", [
+      test_case "saturated reason in note" `Quick test_cascade_mermaid_renders_saturated_reason;
+      test_case "other reason passes through" `Quick test_cascade_mermaid_renders_other_reason;
+      test_case "healthy has no unhealthy note" `Quick test_cascade_mermaid_healthy_no_reason_note;
     ];
   ]

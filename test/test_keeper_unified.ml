@@ -825,6 +825,20 @@ let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
     () =
   KAR.build_prompt_metrics ~system_prompt ~dynamic_context ~user_message
 
+let sample_ctx_composition ?(system_prompt = "You are a keeper.")
+    ?(dynamic_context = "")
+    ?(user_message = "Check the board.")
+    ?(actual_input_tokens = 0)
+    () =
+  KAR.build_ctx_composition_metrics
+    ~system_prompt
+    ~dynamic_context
+    ~memory_context:""
+    ~temporal_context:""
+    ~user_message
+    ~history_messages:[]
+    ~actual_input_tokens
+
 let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     ?trace_ref
     ?run_validation
@@ -834,6 +848,7 @@ let make_run_result ~text ~tools ~model ~input_tok ~output_tok
     response_text = text;
     model_used = model;
     prompt_metrics = sample_prompt_metrics ();
+    ctx_composition = sample_ctx_composition ~actual_input_tokens:input_tok ();
     cascade_observation;
     turn_count = 1;
     tool_calls_made = List.length tools;
@@ -1391,6 +1406,20 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         Yojson.Safe.Util.(
           json |> member "prompt" |> member "user_message"
           |> member "fingerprint" |> to_string);
+      check int "ctx composition known tokens persisted"
+        result.ctx_composition.estimated_known_tokens
+        Yojson.Safe.Util.(
+          json |> member "ctx_composition" |> member "estimated_known_tokens"
+          |> to_int);
+      check int "ctx composition display total persisted"
+        result.ctx_composition.display_total_tokens
+        Yojson.Safe.Util.(
+          json |> member "ctx_composition" |> member "display_total_tokens"
+          |> to_int);
+      check bool "ctx composition unattributed bucket persisted" true
+        Yojson.Safe.Util.(
+          json |> member "ctx_composition" |> member "segments"
+          |> member "unattributed" <> `Null);
       check string "trace ref worker run id persisted"
         sample_run_ref.worker_run_id
         Yojson.Safe.Util.(

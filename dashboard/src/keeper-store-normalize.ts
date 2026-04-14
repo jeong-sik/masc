@@ -1,4 +1,5 @@
 import type {
+  CtxCompositionTelemetry,
   Keeper,
   KeeperLifecycleState,
   KeeperMetricPoint,
@@ -103,6 +104,27 @@ export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number
     : null
 }
 
+function normalizePromptSegments(
+  raw: Record<string, unknown> | null,
+  excludedKeys: Set<string>,
+): Record<string, { bytes: number; estimated_tokens: number; fingerprint: string | null }> {
+  const segments: Record<string, { bytes: number; estimated_tokens: number; fingerprint: string | null }> = {}
+  if (!raw) return segments
+  for (const [key, value] of Object.entries(raw)) {
+    if (excludedKeys.has(key) || !isRecord(value)) continue
+    const bytes = asNumber(value.bytes)
+    const estimatedTokens = asNumber(value.estimated_tokens)
+    const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : null
+    if (bytes == null && estimatedTokens == null && fingerprint == null) continue
+    segments[key] = {
+      bytes: bytes ?? 0,
+      estimated_tokens: estimatedTokens ?? 0,
+      fingerprint,
+    }
+  }
+  return segments
+}
+
 function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -125,22 +147,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
           ? (typeof handoffObj.to_model === 'string' ? handoffObj.to_model : null)
           : (typeof item.handoff_to_model === 'string' ? item.handoff_to_model : null)
       const rawPrompt = isRecord(item.prompt) ? item.prompt : null
-      const promptSegments: NonNullable<PromptTelemetry['segments']> = {}
-      if (rawPrompt) {
-        for (const [key, value] of Object.entries(rawPrompt)) {
-          if (key === 'fingerprint' || key === 'estimated_total_tokens' || key === 'estimated_cacheable_tokens') continue
-          if (!isRecord(value)) continue
-          const bytes = asNumber(value.bytes)
-          const estimatedTokens = asNumber(value.estimated_tokens)
-          const fingerprint = typeof value.fingerprint === 'string' ? value.fingerprint : null
-          if (bytes == null && estimatedTokens == null && fingerprint == null) continue
-          promptSegments[key] = {
-            bytes: bytes ?? 0,
-            estimated_tokens: estimatedTokens ?? 0,
-            fingerprint,
-          }
-        }
-      }
+      const promptSegments: NonNullable<PromptTelemetry['segments']> =
+        normalizePromptSegments(rawPrompt, new Set(['fingerprint', 'estimated_total_tokens', 'estimated_cacheable_tokens']))
       const promptFingerprint =
         (typeof item.prompt_fingerprint === 'string' ? item.prompt_fingerprint : null)
         ?? (rawPrompt && typeof rawPrompt.fingerprint === 'string' ? rawPrompt.fingerprint : null)
@@ -151,6 +159,20 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
               estimated_total_tokens: rawPrompt ? (asNumber(rawPrompt.estimated_total_tokens) ?? null) : null,
               estimated_cacheable_tokens: rawPrompt ? (asNumber(rawPrompt.estimated_cacheable_tokens) ?? null) : null,
               segments: promptSegments,
+            }
+          : null
+      const rawCtxComposition = isRecord(item.ctx_composition) ? item.ctx_composition : null
+      const rawCtxSegments =
+        rawCtxComposition && isRecord(rawCtxComposition.segments) ? rawCtxComposition.segments : null
+      const ctxSegments =
+        normalizePromptSegments(rawCtxSegments, new Set())
+      const ctx_composition: CtxCompositionTelemetry | null =
+        rawCtxComposition != null || Object.keys(ctxSegments).length > 0
+          ? {
+              actual_input_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.actual_input_tokens) ?? null) : null,
+              display_total_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.display_total_tokens) ?? 0) : 0,
+              estimated_known_tokens: rawCtxComposition ? (asNumber(rawCtxComposition.estimated_known_tokens) ?? 0) : 0,
+              segments: ctxSegments,
             }
           : null
       const rawTel = isRecord(item.inference_telemetry) ? item.inference_telemetry : null
@@ -190,6 +212,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         handoff_new_generation: handoffNewGeneration,
         prompt_fingerprint: promptFingerprint,
         prompt_metrics,
+        ctx_composition,
         inference_telemetry,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
         fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,

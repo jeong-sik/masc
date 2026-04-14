@@ -19,6 +19,14 @@
     Returns a [Hooks.hooks] record with:
     - [before_turn_params]: injects memory text via [extra_system_context]
     - [after_turn]: incrementally flushes episodes/procedures *)
+val render_memory_context :
+  agent_name:string ->
+  config:Room_utils.config ->
+  episode_limit:int ->
+  procedure_limit:int ->
+  unit ->
+  string option
+
 val make :
   agent_name:string ->
   config:Room_utils.config ->

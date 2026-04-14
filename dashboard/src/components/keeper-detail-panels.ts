@@ -26,6 +26,42 @@ export function autonomyHint(count: number | undefined, proactiveEnabled: boolea
   return undefined
 }
 
+const CTX_SEGMENT_LABELS: Record<string, string> = {
+  system_prompt: 'System prompt',
+  dynamic_context: 'Turn context',
+  memory_context: 'Memory',
+  temporal_context: 'Temporal',
+  user_message: 'Current input',
+  history_user: 'History · user',
+  history_assistant_text: 'History · assistant',
+  history_tool_use: 'History · tool use',
+  history_tool_result: 'History · tool result',
+  history_other: 'History · other',
+  unattributed: 'Unattributed',
+}
+
+const CTX_SEGMENT_COLORS: Record<string, string> = {
+  system_prompt: '#f59e0b',
+  dynamic_context: '#8b5cf6',
+  memory_context: '#fb7185',
+  temporal_context: '#14b8a6',
+  user_message: '#38bdf8',
+  history_user: '#a78bfa',
+  history_assistant_text: '#60a5fa',
+  history_tool_use: '#84cc16',
+  history_tool_result: '#f87171',
+  history_other: '#94a3b8',
+  unattributed: '#475569',
+}
+
+function ctxSegmentLabel(key: string): string {
+  return CTX_SEGMENT_LABELS[key] ?? key.replace(/[_-]+/g, ' ')
+}
+
+function ctxSegmentColor(key: string): string {
+  return CTX_SEGMENT_COLORS[key] ?? '#94a3b8'
+}
+
 
 // ── KPI Card ─────────────────────────────────────────────
 
@@ -494,6 +530,146 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
           `)}
         </div>
       ` : null}
+    </div>
+  `
+}
+
+export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
+  const series = keeper.metrics_series ?? []
+  const points = series.filter(
+    (p: KeeperMetricPoint) => (p.ctx_composition?.display_total_tokens ?? 0) > 0,
+  )
+  if (points.length === 0) return null
+
+  const latest = points[points.length - 1] ?? null
+  const latestComposition = latest?.ctx_composition ?? null
+  if (!latestComposition) return null
+
+  const latestTotal = latestComposition.display_total_tokens
+  const latestActual = latestComposition.actual_input_tokens
+  const latestKnown = latestComposition.estimated_known_tokens
+  const latestEntries = Object.entries(latestComposition.segments)
+    .filter(([, segment]) => (segment?.estimated_tokens ?? 0) > 0)
+    .sort(([, left], [, right]) => (right.estimated_tokens ?? 0) - (left.estimated_tokens ?? 0))
+  if (latestEntries.length === 0 || latestTotal <= 0) return null
+
+  const allKeys = Array.from(
+    new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(point.ctx_composition?.segments ?? {}))),
+  )
+  const sortedKeys = allKeys
+    .filter((key) => points.some((point: KeeperMetricPoint) => (point.ctx_composition?.segments?.[key]?.estimated_tokens ?? 0) > 0))
+    .sort((left, right) => {
+      const rightLatest = latestComposition.segments[right]?.estimated_tokens ?? 0
+      const leftLatest = latestComposition.segments[left]?.estimated_tokens ?? 0
+      if (rightLatest !== leftLatest) return rightLatest - leftLatest
+      return left.localeCompare(right)
+    })
+
+  const W = SPARKLINE_W
+  const H = 56
+  const pad = SPARKLINE_PAD
+  const innerW = W - (2 * pad)
+  const innerH = H - (2 * pad)
+  const barStep = innerW / Math.max(points.length, 1)
+  const barWidth = Math.max(3, Math.min(8, barStep - 1))
+
+  const knownRatio = latestTotal > 0 ? latestKnown / latestTotal : 0
+  const unattributedTokens = latestComposition.segments.unattributed?.estimated_tokens ?? 0
+
+  return html`
+    <div class="mb-5">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">CTX Composition</span>
+        <span class="text-[10px] text-[var(--text-dim)]">${points.length} snapshots</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div class="md:col-span-2 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-2 gap-3">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">latest turn input</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--accent)]">${formatTokens(latestTotal)}</span>
+          </div>
+          <div class="h-3 rounded-full overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
+            ${latestEntries.map(([key, segment]) => {
+              const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
+              return html`<div
+                title=${`${ctxSegmentLabel(key)} · ${formatTokens(segment.estimated_tokens)} · ${pct.toFixed(1)}%`}
+                style=${`width:${pct}%;background:${ctxSegmentColor(key)};min-width:${pct > 0 ? '1px' : '0'};`}
+              ></div>`
+            })}
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2 text-[9px] text-[var(--text-dim)]">
+            ${latestActual != null ? html`<span>actual ${formatTokens(latestActual)}</span>` : null}
+            <span>known ${formatTokens(latestKnown)}</span>
+            <span>${Math.round(knownRatio * 100)}% attributed</span>
+            ${unattributedTokens > 0 ? html`<span>residual ${formatTokens(unattributedTokens)}</span>` : null}
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">largest bucket</span>
+          <span class="text-sm font-medium text-[var(--text-strong)]">${ctxSegmentLabel(latestEntries[0]?.[0] ?? 'unknown')}</span>
+          <span class="text-[10px] font-mono text-[var(--text-dim)]">
+            ${latestEntries[0] ? `${formatTokens(latestEntries[0][1].estimated_tokens)} · ${((latestEntries[0][1].estimated_tokens / latestTotal) * 100).toFixed(1)}%` : '-'}
+          </span>
+        </div>
+
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
+          <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">residual</span>
+          <span class="text-lg font-mono tabular-nums text-[var(--warn)]">${formatTokens(unattributedTokens)}</span>
+          <span class="text-[9px] text-[var(--text-dim)]">tool schema / provider overhead / estimator gap</span>
+        </div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="md:col-span-2 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">stacked history</span>
+            <span class="text-[10px] text-[var(--text-dim)]">${points.length} turns</span>
+          </div>
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:#0b1220;">
+            ${points.map((point: KeeperMetricPoint, index: number) => {
+              const comp = point.ctx_composition
+              if (!comp || comp.display_total_tokens <= 0) return null
+              const x = pad + (index * barStep) + Math.max(0, (barStep - barWidth) / 2)
+              let yCursor = H - pad
+              return sortedKeys.map((key) => {
+                const tokens = comp.segments[key]?.estimated_tokens ?? 0
+                if (tokens <= 0) return null
+                const height = (tokens / comp.display_total_tokens) * innerH
+                yCursor -= height
+                return html`<rect
+                  x="${x.toFixed(1)}"
+                  y="${yCursor.toFixed(1)}"
+                  width="${barWidth.toFixed(1)}"
+                  height="${Math.max(height, 1).toFixed(1)}"
+                  fill="${ctxSegmentColor(key)}"
+                  opacity="0.92"
+                />`
+              })
+            })}
+          </svg>
+        </div>
+
+        <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2">latest breakdown</div>
+          <div class="flex flex-col gap-1.5">
+            ${latestEntries.map(([key, segment]) => {
+              const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
+              return html`
+                <div class="flex items-center justify-between gap-2 text-[11px]">
+                  <span class="inline-flex items-center gap-2 min-w-0">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full shrink-0" style=${`background:${ctxSegmentColor(key)};`}></span>
+                    <span class="truncate text-[var(--text-body)]">${ctxSegmentLabel(key)}</span>
+                  </span>
+                  <span class="font-mono tabular-nums text-[var(--text-dim)] whitespace-nowrap">
+                    ${pct.toFixed(1)}% · ${formatTokens(segment.estimated_tokens)}
+                  </span>
+                </div>
+              `
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   `
 }

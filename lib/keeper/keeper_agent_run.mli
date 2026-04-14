@@ -35,11 +35,23 @@ type prompt_metrics =
   ; user_message_segment : prompt_segment_metrics
   }
 
+(** Estimated CTX composition for the effective keeper input.
+    [segments] contains attributed token buckets; when estimator coverage is
+    incomplete, [unattributed] is added to keep the stacked total aligned with
+    the actual provider-reported [input_tokens]. *)
+type ctx_composition_metrics =
+  { actual_input_tokens : int option
+  ; display_total_tokens : int
+  ; estimated_known_tokens : int
+  ; segments : (string * prompt_segment_metrics) list
+  }
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
   ; model_used : string
   ; prompt_metrics : prompt_metrics
+  ; ctx_composition : ctx_composition_metrics
   ; cascade_observation : Oas_worker.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
@@ -67,7 +79,18 @@ val build_prompt_metrics :
   -> user_message:string
   -> prompt_metrics
 
+val build_ctx_composition_metrics :
+     system_prompt:string
+  -> dynamic_context:string
+  -> memory_context:string
+  -> temporal_context:string
+  -> user_message:string
+  -> history_messages:Agent_sdk.Types.message list
+  -> actual_input_tokens:int
+  -> ctx_composition_metrics
+
 val prompt_metrics_to_json : prompt_metrics -> Yojson.Safe.t
+val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t
 
 (** {1 Inference tuning} *)
 

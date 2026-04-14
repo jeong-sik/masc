@@ -628,6 +628,227 @@ let handle_keeper_reset ctx args : tool_result =
      | Error err ->
        (false, Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
 
+(** Operator-initiated context compaction.
+
+    Dispatches [Operator_compact_requested] to the FSM, then compacts the
+    keeper's latest checkpoint via OAS checkpoint recovery.  Returns
+    before/after token counts on success. *)
+let handle_keeper_compact ctx args : tool_result =
+  match resolve_keeper_name ctx args with
+  | Error err -> (false, err)
+  | Ok name ->
+    let force = get_bool args "force" false in
+    (* Registry race: [resolve_keeper_name] succeeded but the registry entry
+       can still disappear if another fiber unregistered the keeper.  Treat
+       this as a distinct "not found" error rather than an opaque
+       "phase=unknown" precondition failure. *)
+    match Keeper_registry.get ~base_path:ctx.config.base_path name with
+    | None ->
+      Prometheus.inc_counter "masc_keeper_operator_compact_total"
+        ~labels:[("keeper", name); ("result", "not_found")] ();
+      error_result_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name)
+    | Some entry ->
+    let phase_before = Keeper_state_machine.phase_to_string entry.phase in
+    (* Phase precondition: Overflowed, Paused, or (Running/Failing with force). *)
+    let allowed =
+      match phase_before with
+      | "overflowed" | "paused" | "compacting" -> true
+      | "running" | "failing" -> force
+      | _ -> false
+    in
+    if not allowed then begin
+      Prometheus.inc_counter "masc_keeper_operator_compact_total"
+        ~labels:[("keeper", name); ("result", "precondition")] ();
+      error_result_typed ~code:Validation_error
+        (Printf.sprintf
+           "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
+           name phase_before)
+    end
+    else begin
+      (* Dispatch FSM event *)
+      Keeper_exec_context.dispatch_keeper_phase_event
+        ~config:ctx.config ~keeper_name:name
+        Keeper_state_machine.Operator_compact_requested;
+      (* Read meta for checkpoint access *)
+      match read_meta_resolved ctx.config name with
+      | Ok None | Error _ ->
+        (false, Printf.sprintf "keeper %s: meta unavailable for compaction" name)
+      | Ok (Some (_resolved, meta)) ->
+        let base_dir = Keeper_types.session_base_dir ctx.config in
+        let model = Keeper_exec_context.checkpoint_model_of_meta meta in
+        let max_tokens =
+          match meta.max_context_override with
+          | Some n when n > 0 -> n
+          | _ -> 200_000
+        in
+        Keeper_exec_context.dispatch_keeper_phase_event
+          ~config:ctx.config ~keeper_name:name
+          Keeper_state_machine.Compaction_started;
+        match
+          Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+            ~base_dir ~meta ~model ~primary_model_max_tokens:max_tokens
+        with
+        | Some recovery ->
+          Keeper_exec_context.dispatch_keeper_phase_event
+            ~config:ctx.config ~keeper_name:name
+            (Keeper_state_machine.Compaction_completed {
+               before_tokens = recovery.compaction.before_tokens;
+               after_tokens = recovery.compaction.after_tokens;
+            });
+          invalidate_status_cache name;
+          Prometheus.inc_counter "masc_keeper_operator_compact_total"
+            ~labels:[("keeper", name); ("result", "ok")] ();
+          (true,
+           Yojson.Safe.to_string
+             (`Assoc [
+               ("name", `String name);
+               ("phase_before", `String phase_before);
+               ("phase_after", `String
+                  (match Keeper_registry.get ~base_path:ctx.config.base_path name with
+                   | Some entry -> Keeper_state_machine.phase_to_string entry.phase
+                   | None -> "unknown"));
+               ("before_tokens", `Int recovery.compaction.before_tokens);
+               ("after_tokens", `Int recovery.compaction.after_tokens);
+             ]))
+        | None ->
+          (* Compaction infrastructure unavailable — emit [Compaction_failed]
+             so [context_overflow] stays set and [derive_phase] re-projects
+             to Overflowed.  A subsequent [Compact_retry_exhausted] dispatch
+             (owned by the retry-loop caller) will latch the keeper to Paused.
+             Emitting [Compaction_completed] here would be a false success
+             signal. *)
+          Keeper_exec_context.dispatch_keeper_phase_event
+            ~config:ctx.config ~keeper_name:name
+            (Keeper_state_machine.Compaction_failed {
+               reason = "no_valid_checkpoint";
+            });
+          Prometheus.inc_counter "masc_keeper_operator_compact_total"
+            ~labels:[("keeper", name); ("result", "no_checkpoint")] ();
+          (false,
+           Printf.sprintf
+             "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
+             name)
+    end
+
+(** Last-resort context clear.
+
+    Drops all conversation messages from the keeper's checkpoint file,
+    optionally preserving the system prompt.  Dispatches
+    [Operator_clear_requested] to reset overflow-related FSM conditions. *)
+let handle_keeper_clear ctx args : tool_result =
+  match resolve_keeper_name ctx args with
+  | Error err -> (false, err)
+  | Ok name ->
+    let reason = String.trim (get_string args "reason" "") in
+    if reason = "" then
+      error_result_typed ~code:Validation_error
+        "reason is required for masc_keeper_clear (audit trail)"
+    else
+    (* Same registry race guard as [handle_keeper_compact]: if the keeper
+       disappeared between [resolve_keeper_name] and [get], abort cleanly
+       rather than silently proceed with a half-applied clear. *)
+    match Keeper_registry.get ~base_path:ctx.config.base_path name with
+    | None ->
+      error_result_typed ~code:Validation_error
+        (Printf.sprintf "keeper %s is not in the registry" name)
+    | Some entry ->
+      let preserve_system = get_bool args "preserve_system_prompt" true in
+      let phase_before = Keeper_state_machine.phase_to_string entry.phase in
+      let base_dir = Keeper_types.session_base_dir ctx.config in
+      (* Must use the keeper's OWN trace_id to locate its checkpoint file.
+         Using generate_trace_id () would create a fresh session dir and
+         always report 0 cleared messages, because the existing checkpoint
+         lives under meta.runtime.trace_id. *)
+      let meta_for_trace =
+        match read_meta_resolved ctx.config name with
+        | Ok (Some (_, meta)) -> Some meta
+        | _ -> None
+      in
+      let trace_id =
+        match meta_for_trace with
+        | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        | None -> Keeper_exec_context.generate_trace_id ()
+      in
+      let max_tokens =
+        match meta_for_trace with
+        | Some meta ->
+          (match meta.max_context_override with Some n when n > 0 -> n | _ -> 200_000)
+        | None -> 200_000
+      in
+      let max_checkpoint_messages =
+        match meta_for_trace with
+        | Some meta -> meta.compaction.max_checkpoint_messages
+        | None -> 100
+      in
+      let session, ctx_opt =
+        Keeper_exec_context.load_context_from_checkpoint
+          ~max_checkpoint_messages
+          ~trace_id
+          ~primary_model_max_tokens:max_tokens
+          ~base_dir
+      in
+      let checkpoint_found = Option.is_some ctx_opt in
+      let cleared_count =
+        match ctx_opt with
+        | None -> 0
+        | Some wctx ->
+          let msg_count = List.length wctx.messages in
+          let cleared_messages =
+            if preserve_system then
+              (* Keep only system-role messages *)
+              List.filter
+                (fun (m : Agent_sdk.Types.message) ->
+                   m.role = Llm_provider.Types.System)
+                wctx.messages
+            else
+              []
+          in
+          let cleared_ctx = { wctx with messages = cleared_messages } in
+          (* Increment generation from meta to signal a new context epoch.
+             Using a hardcoded value would violate generation monotonicity
+             — the keeper_unified_turn retry loop uses meta.runtime.generation
+             to detect stale contexts. *)
+          let current_gen =
+            match meta_for_trace with
+            | Some meta -> meta.runtime.generation
+            | None -> 0
+          in
+          let checkpoint =
+            Keeper_exec_context.create_checkpoint cleared_ctx ~generation:(current_gen + 1)
+          in
+          Keeper_exec_context.save_session_checkpoint session checkpoint;
+          msg_count - List.length cleared_messages
+      in
+      (* Dispatch FSM event to clear overflow conditions *)
+      Keeper_exec_context.dispatch_keeper_phase_event
+        ~config:ctx.config ~keeper_name:name
+        (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
+      (* Clear registry failure state *)
+      Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path name None;
+      Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path name;
+      invalidate_status_cache name;
+      Log.Keeper.warn
+        "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
+        name reason preserve_system cleared_count;
+      Prometheus.inc_counter "masc_keeper_operator_clear_total"
+        ~labels:[("keeper", name);
+                 ("preserve_system", string_of_bool preserve_system)] ();
+      (true,
+       Yojson.Safe.to_string
+         (`Assoc [
+           ("name", `String name);
+           ("phase_before", `String phase_before);
+           ("phase_after", `String
+              (match Keeper_registry.get ~base_path:ctx.config.base_path name with
+               | Some entry -> Keeper_state_machine.phase_to_string entry.phase
+               | None -> "unknown"));
+           ("cleared_message_count", `Int cleared_count);
+           ("checkpoint_found", `Bool checkpoint_found);
+           ("preserve_system_prompt", `Bool preserve_system);
+           ("reason", `String reason);
+         ]))
+
 let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
@@ -643,6 +864,8 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
   | "masc_keeper_reset" -> Some (handle_keeper_reset ctx args)
+  | "masc_keeper_compact" -> Some (handle_keeper_compact ctx args)
+  | "masc_keeper_clear" -> Some (handle_keeper_clear ctx args)
   | _ -> None
 
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.
@@ -668,7 +891,8 @@ let tool_required_permission = function
   | "masc_keeper_create_from_persona" | "masc_keeper_up"
   | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_repair" | "masc_keeper_reconcile"
-  | "masc_keeper_down" | "masc_keeper_reset" ->
+  | "masc_keeper_down" | "masc_keeper_reset"
+  | "masc_keeper_compact" | "masc_keeper_clear" ->
       Some Types.CanBroadcast
   | _ -> None
 

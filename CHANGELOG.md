@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added
+- Operator-facing context overflow recovery tools (#7115). Two new MCP
+  tools paired with the `Overflowed` phase introduced in #7083:
+  - `masc_keeper_compact`: dispatches `Operator_compact_requested` to the
+    keeper FSM and runs checkpoint compaction via OAS
+    `recover_latest_checkpoint_for_overflow_retry`. Phase precondition is
+    `Overflowed`/`Paused`/`Compacting`; `force=true` bypasses for
+    `Running`/`Failing`.
+  - `masc_keeper_clear`: last-resort context wipe. Loads the checkpoint,
+    clears non-system messages (system prompt preserved by default), saves
+    a new checkpoint, dispatches `Operator_clear_requested`. Requires an
+    operator-provided `reason` for audit trail.
+- Prometheus counters for the new operator tools:
+  `masc_keeper_operator_compact_total{keeper,result}` (result ∈
+  `ok|no_checkpoint|precondition`) and
+  `masc_keeper_operator_clear_total{keeper,preserve_system}`.
+- `checkpoint_found` field in the `masc_keeper_clear` response so
+  operators can distinguish "no messages to clear" from "no checkpoint
+  on disk".
+
+### Fixed
+- `masc_keeper_compact`/`masc_keeper_clear` now read/write checkpoints
+  from `session_base_dir(config)` (`<masc_root>/.masc/traces`) instead
+  of the incorrect `<base_path>/<keeper_name>`. Previous path would have
+  made the tools always report missing checkpoints.
+- When no valid checkpoint exists, `masc_keeper_compact` now dispatches
+  `Compaction_failed` rather than `Compaction_completed { 0, 0 }`. The
+  latter was a false-success signal that would clear `context_overflow`
+  even though no compaction happened.
+
 ## [0.7.0] - 2026-04-14
 
 ### Added

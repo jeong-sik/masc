@@ -498,6 +498,59 @@ Clears stale data from previous sessions. Does not affect configuration, goals, 
     ];
   };
 
+  {
+    name = "masc_keeper_compact";
+    description = "Trigger operator-initiated context compaction for a keeper. \
+Compacts the keeper's checkpoint to reduce context size. \
+Default precondition: keeper phase is Overflowed, Paused, or Compacting. \
+Pass force=true to allow compaction on Running or Failing keepers. \
+Terminal/transient phases (Offline, Stopped, Dead, Crashed, Restarting, \
+HandingOff, Draining) are always rejected.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("force", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Bypass default precondition to allow compaction on Running or Failing keepers. Has no effect on terminal/transient phases.");
+        ]);
+      ]);
+      ("required", `List [`String "name"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_clear";
+    description = "Last-resort context clear for a keeper. \
+Wipes user/assistant/tool messages from the checkpoint; keeps the system prompt \
+by default (preserve_system_prompt=true). Set preserve_system_prompt=false to \
+drop the system prompt too. Dispatches Operator_clear_requested to the keeper \
+FSM, which resets context_overflow and compact_retry_exhausted. \
+Use only when compaction is insufficient and the keeper cannot recover otherwise. \
+Requires a reason for the audit trail.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle");
+        ]);
+        ("preserve_system_prompt", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Keep the system prompt in the cleared context. Defaults to true.");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Required. Operator explanation for why the context is being cleared (audit trail).");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "reason"]);
+    ];
+  };
+
 ]
 
 let schemas : tool_schema list =

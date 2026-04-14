@@ -227,6 +227,8 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_reconcile", "Keeper Reconcile");
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
+  ("masc_keeper_compact", "Compact Keeper Context");
+  ("masc_keeper_clear", "Clear Keeper Context");
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");

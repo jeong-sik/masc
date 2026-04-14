@@ -74,6 +74,7 @@ type proactive_runtime = {
   last_preview: string;
   last_work_discovery_ts : float;
   work_discovery_count : int;
+  consecutive_noop_count : int;
 }
 
 type scheduled_autonomous_runtime = proactive_runtime

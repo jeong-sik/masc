@@ -371,7 +371,7 @@ let test_effective_cooldown_no_decay_within_base () =
   (* Within the base cooldown period, no decay should apply. *)
   let result =
     WO.effective_scheduled_autonomous_cooldown
-      ~base_cooldown:1800 ~since_last:900
+      ~base_cooldown:1800 ~since_last:900 ()
   in
   check int "no decay within base" 1800 result
 
@@ -379,7 +379,7 @@ let test_effective_cooldown_at_boundary () =
   (* Exactly at the base cooldown, no decay yet. *)
   let result =
     WO.effective_scheduled_autonomous_cooldown
-      ~base_cooldown:1800 ~since_last:1800
+      ~base_cooldown:1800 ~since_last:1800 ()
   in
   check int "no decay at boundary" 1800 result
 
@@ -387,7 +387,7 @@ let test_effective_cooldown_first_decay () =
   (* One full extra period: cooldown halved. *)
   let result =
     WO.effective_scheduled_autonomous_cooldown
-      ~base_cooldown:1800 ~since_last:3600
+      ~base_cooldown:1800 ~since_last:3600 ()
   in
   check int "first decay halves cooldown" 900 result
 
@@ -395,7 +395,7 @@ let test_effective_cooldown_second_decay () =
   (* Two extra periods: cooldown quartered. *)
   let result =
     WO.effective_scheduled_autonomous_cooldown
-      ~base_cooldown:1800 ~since_last:5400
+      ~base_cooldown:1800 ~since_last:5400 ()
   in
   check int "second decay quarters cooldown" 450 result
 
@@ -403,7 +403,7 @@ let test_effective_cooldown_floor () =
   (* Four+ extra periods: cooldown at floor (300s default). *)
   let result =
     WO.effective_scheduled_autonomous_cooldown
-      ~base_cooldown:1800 ~since_last:10800
+      ~base_cooldown:1800 ~since_last:10800 ()
   in
   check int "decay floors at min_cooldown" 300 result
 
@@ -411,9 +411,44 @@ let test_effective_cooldown_max_int () =
   (* max_int (first scheduled autonomous cycle ever): should hit floor immediately. *)
   let result =
     WO.effective_scheduled_autonomous_cooldown
-      ~base_cooldown:1800 ~since_last:max_int
+      ~base_cooldown:1800 ~since_last:max_int ()
   in
   check int "max_int hits floor" 300 result
+
+let test_noop_backoff_doubles_cooldown () =
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:900
+      ~consecutive_noop_count:1 ()
+  in
+  (* 1 noop → 2x multiplier → effective base = 3600, since_last < 3600 *)
+  check int "1 noop doubles effective base" 3600 result
+
+let test_noop_backoff_quadruples_cooldown () =
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:900
+      ~consecutive_noop_count:2 ()
+  in
+  (* 2 noops → 4x multiplier → effective base = 7200 *)
+  check int "2 noops quadruples effective base" 7200 result
+
+let test_noop_backoff_caps_at_8x () =
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:900
+      ~consecutive_noop_count:5 ()
+  in
+  (* 5 noops → capped at 3 → 8x multiplier → effective base = 14400 *)
+  check int "noop backoff caps at 8x" 14400 result
+
+let test_noop_backoff_zero_noops_unchanged () =
+  let result =
+    WO.effective_scheduled_autonomous_cooldown
+      ~base_cooldown:1800 ~since_last:900
+      ~consecutive_noop_count:0 ()
+  in
+  check int "0 noops = no backoff" 1800 result
 
 let test_idle_decay_triggers_turn () =
   (* After extended idle, decay should make cooldown_elapsed true
@@ -2659,6 +2694,14 @@ let () =
             test_effective_cooldown_floor;
           test_case "idle decay: max_int" `Quick
             test_effective_cooldown_max_int;
+          test_case "noop backoff: doubles cooldown" `Quick
+            test_noop_backoff_doubles_cooldown;
+          test_case "noop backoff: quadruples cooldown" `Quick
+            test_noop_backoff_quadruples_cooldown;
+          test_case "noop backoff: caps at 8x" `Quick
+            test_noop_backoff_caps_at_8x;
+          test_case "noop backoff: zero noops unchanged" `Quick
+            test_noop_backoff_zero_noops_unchanged;
           test_case "idle decay: triggers turn" `Quick
             test_idle_decay_triggers_turn;
           test_case "scheduled decision uses backlog acceleration" `Quick

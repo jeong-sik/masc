@@ -196,11 +196,13 @@ val apply_message_cursor_updates :
     After extended idle (> base cooldown), halve the cooldown each
     additional period, down to a configurable floor. *)
 val effective_scheduled_autonomous_cooldown :
-  base_cooldown:int -> since_last:int -> int
+  base_cooldown:int -> since_last:int ->
+  ?consecutive_noop_count:int -> unit -> int
 
 (** Backward-compatible alias for the pre-rename helper name. *)
 val effective_proactive_cooldown :
-  base_cooldown:int -> since_last:int -> int
+  base_cooldown:int -> since_last:int ->
+  ?consecutive_noop_count:int -> unit -> int
 
 val unified_turn_decision :
   meta:Keeper_types.keeper_meta -> world_observation -> unified_turn_decision

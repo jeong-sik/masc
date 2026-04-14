@@ -962,6 +962,12 @@
  (modules test_transport_bridge_seal)
  (libraries masc_test_deps))
 
+; OpenTelemetry trace context (W3C traceparent)
+(test
+ (name test_otel_trace_context)
+ (modules test_otel_trace_context)
+ (libraries masc_test_deps))
+
 (executable
  (name keeper_tool_matrix_case_runner)
  (modules keeper_tool_matrix_case_runner test_keeper_tool_matrix_cases

@@ -8,6 +8,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { fetchWithTimeout, authHeaders } from '../api/core'
+import { navigate } from '../router'
 
 // --- Prometheus text format parser ---
 
@@ -100,11 +101,12 @@ function parseLabels(raw: string): Record<string, string> {
 
 // --- Categorization ---
 
-type MetricCategory = 'server' | 'keeper' | 'sse' | 'inference' | 'tool' | 'delta' | 'provider' | 'other'
+type MetricCategory = 'server' | 'agent' | 'keeper' | 'transport' | 'inference' | 'tool' | 'delta' | 'provider' | 'other'
 
 function categorize(name: string): MetricCategory {
   if (name.startsWith('masc_keeper_')) return 'keeper'
-  if (name.startsWith('masc_sse_')) return 'sse'
+  if (name.startsWith('masc_agent_')) return 'agent'
+  if (name.startsWith('masc_sse_') || name.startsWith('masc_grpc_') || name.startsWith('masc_ws_')) return 'transport'
   if (name.startsWith('masc_inference_') || name.startsWith('masc_llm_')) return 'inference'
   if (name.startsWith('masc_tool_')) return 'tool'
   if (name.startsWith('masc_delta_') || name.startsWith('masc_full_checkpoint')) return 'delta'
@@ -115,13 +117,14 @@ function categorize(name: string): MetricCategory {
 
 const CATEGORY_META: Record<MetricCategory, { label: string; description: string }> = {
   server: { label: 'Server', description: 'requests, tasks, errors, uptime' },
-  keeper: { label: 'Keeper', description: 'compaction, heartbeat' },
-  sse: { label: 'SSE', description: 'connections, reconnects, evictions' },
+  agent: { label: 'Agent', description: 'agent heartbeat age, stale detection' },
+  keeper: { label: 'Keeper', description: 'compaction, heartbeat (per-keeper labels)' },
+  transport: { label: 'Transport', description: 'SSE, gRPC, WebSocket connections/sessions' },
   inference: { label: 'Inference', description: 'LLM duration, admission queue' },
   tool: { label: 'Tool', description: 'tool call duration' },
   delta: { label: 'Delta Checkpoint', description: 'checkpoint size, shadow match' },
   provider: { label: 'Provider', description: 'prefix cache tokens, HTTP status' },
-  other: { label: 'Other', description: '' },
+  other: { label: 'Other', description: 'uncategorized (report as bug)' },
 }
 
 // --- Formatting ---
@@ -158,9 +161,29 @@ function typeBadge(type: string): ReturnType<typeof html> {
 function labelPills(labels: Record<string, string>): ReturnType<typeof html> | null {
   const entries = Object.entries(labels)
   if (entries.length === 0) return null
-  return html`<span class="ml-2 inline-flex gap-1">${entries.map(([k, v]) =>
-    html`<span class="rounded bg-gray-800/60 px-1 py-0.5 text-[10px] text-gray-400 font-mono">${k}=${v}</span>`
-  )}</span>`
+  return html`<span class="ml-2 inline-flex gap-1 flex-wrap">${entries.map(([k, v]) => {
+    if (k === 'keeper') {
+      return html`<button
+        class="rounded bg-blue-900/40 px-1 py-0.5 text-[10px] text-blue-300 font-mono hover:bg-blue-800/60 hover:text-blue-200 transition-colors cursor-pointer"
+        title="View keeper detail"
+        onClick=${(e: Event) => {
+          e.stopPropagation()
+          navigate('monitoring', { section: 'agents', keeper: v })
+        }}
+      >${k}=${v}</button>`
+    }
+    if (k === 'tool_name' || k === 'tool') {
+      return html`<button
+        class="rounded bg-amber-900/40 px-1 py-0.5 text-[10px] text-amber-300 font-mono hover:bg-amber-800/60 hover:text-amber-200 transition-colors cursor-pointer"
+        title="View tool quality"
+        onClick=${(e: Event) => {
+          e.stopPropagation()
+          navigate('lab', { section: 'tool-quality', tool: v })
+        }}
+      >${k}=${v}</button>`
+    }
+    return html`<span class="rounded bg-gray-800/60 px-1 py-0.5 text-[10px] text-gray-400 font-mono">${k}=${v}</span>`
+  })}</span>`
 }
 
 // --- Fetch ---
@@ -182,7 +205,7 @@ export function PrometheusMetrics() {
   const error = useSignal<string | null>(null)
   const metrics = useSignal<ParsedMetric[]>([])
   const lastUpdated = useSignal<string | null>(null)
-  const expandedCategories = useSignal<Set<MetricCategory>>(new Set(['server', 'keeper', 'inference']))
+  const expandedCategories = useSignal<Set<MetricCategory>>(new Set(['server', 'agent', 'keeper', 'inference']))
 
   async function refresh() {
     loading.value = true
@@ -236,7 +259,7 @@ export function PrometheusMetrics() {
     expandedCategories.value = next
   }
 
-  const categoryOrder: MetricCategory[] = ['server', 'keeper', 'sse', 'inference', 'tool', 'delta', 'provider', 'other']
+  const categoryOrder: MetricCategory[] = ['server', 'agent', 'keeper', 'transport', 'inference', 'tool', 'delta', 'provider', 'other']
 
   return html`
     <div class="flex flex-col gap-4">

@@ -6,6 +6,7 @@ import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { isAbortError } from '../lib/async-state'
+import { route } from '../router'
 
 interface ToolStat {
   name: string
@@ -138,8 +139,13 @@ function RateGauge({ rate, label }: { rate: number; label: string }) {
   `
 }
 
-function ToolTable({ tools }: { tools: ToolStat[] }) {
+function ToolTable({ tools, highlightTool }: { tools: ToolStat[]; highlightTool?: string }) {
   const top = tools.slice(0, 15)
+  const displayed = top
+  if (highlightTool && !top.some(t => t.name === highlightTool)) {
+    const pinned = tools.find(t => t.name === highlightTool)
+    if (pinned) displayed.unshift(pinned)
+  }
   return html`
     <div class="overflow-x-auto">
       <table class="w-full text-[11px]">
@@ -153,12 +159,16 @@ function ToolTable({ tools }: { tools: ToolStat[] }) {
           </tr>
         </thead>
         <tbody>
-          ${top.map(t => {
+          ${displayed.map(t => {
             const color = t.success_pct >= 95 ? 'text-emerald-400'
               : t.success_pct >= 80 ? 'text-yellow-400' : 'text-red-400'
+            const isHighlighted = highlightTool && t.name === highlightTool
+            const rowClass = isHighlighted
+              ? 'border-b border-amber-500/60 bg-amber-900/20 ring-1 ring-amber-500/40'
+              : 'border-b border-[var(--card-border)] border-opacity-30'
             return html`
-              <tr class="border-b border-[var(--card-border)] border-opacity-30">
-                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}</td>
+              <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
+                <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-[9px] text-amber-400">◀ selected</span>` : null}</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.calls}</td>
                 <td class="text-right py-0.5 font-mono ${color}">${t.success_pct.toFixed(0)}%</td>
                 <td class="text-right py-0.5 text-[var(--text-dim)]">${t.avg_ms.toFixed(0)}</td>
@@ -320,7 +330,7 @@ export function ToolQualityPanel() {
 
       <div>
         <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">도구별 성공률</div>
-        <${ToolTable} tools=${d.by_tool} />
+        <${ToolTable} tools=${d.by_tool} highlightTool=${route.value.params.tool} />
       </div>
 
       <div>

@@ -501,6 +501,18 @@ jobs:
       - name: Enable corepack and install pnpm
         run: corepack enable && corepack prepare pnpm@10.31.0 --activate
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('dashboard/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
       - name: Install dashboard dependencies
         working-directory: dashboard
         run: pnpm install --frozen-lockfile

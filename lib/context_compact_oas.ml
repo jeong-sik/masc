@@ -53,10 +53,6 @@ let _legacy_memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
 let goal_prefix = "[GOAL]"
 let _legacy_goal_prefix = "[MASC_GOAL]"
 
-let starts_with ~prefix s =
-  let lp = String.length prefix in
-  String.length s >= lp && String.sub s 0 lp = prefix
-
 let first_sentence (s : string) =
   let s = String.trim s in
   let max_len = 120 in
@@ -248,10 +244,10 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
     let tool_w = if has_tool_content then tool_present else tool_absent in
     let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
     let score =
-      if starts_with ~prefix:memory_summary_prefix msg_text
-         || starts_with ~prefix:_legacy_memory_summary_prefix msg_text
-         || starts_with ~prefix:goal_prefix msg_text
-         || starts_with ~prefix:_legacy_goal_prefix msg_text then
+      if String.starts_with ~prefix:memory_summary_prefix msg_text
+         || String.starts_with ~prefix:_legacy_memory_summary_prefix msg_text
+         || String.starts_with ~prefix:goal_prefix msg_text
+         || String.starts_with ~prefix:_legacy_goal_prefix msg_text then
         Float.max score anchor_boost
       else score
     in

@@ -4,8 +4,6 @@ open Masc_mcp
 
 let () = Random.self_init ()
 
-let () = Printf.printf "\n=== Tool_heartbeat Coverage Tests ===\n"
-
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -30,14 +28,13 @@ let with_isolated_runtime_env f =
             with_env "SUPABASE_DB_URL" None (fun () ->
               with_env "SB_PG_URL" None f))))))
 
-(* Test helper *)
+(* Test registry — collected by the [test] helper and dispatched via
+   Alcotest.run at the bottom of the file.  We register rather than
+   execute so Alcotest controls the run order, reporting, and exit code. *)
+let test_cases : (string * (unit -> unit)) list ref = ref []
+
 let test name f =
-  try
-    with_isolated_runtime_env f;
-    Printf.printf "✓ %s passed\n" name
-  with e ->
-    Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);
-    exit 1
+  test_cases := (name, fun () -> with_isolated_runtime_env f) :: !test_cases
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -216,4 +213,10 @@ let () = test "handle_heartbeat_stop_not_found" (fun () ->
       assert (String.length result > 0 (* contains emoji *)))
 )
 
-let () = Printf.printf "\n✅ All Tool_heartbeat tests passed!\n"
+let () =
+  Alcotest.run "Tool_heartbeat"
+    [
+      ( "coverage",
+        List.rev !test_cases
+        |> List.map (fun (name, f) -> Alcotest.test_case name `Quick f) );
+    ]

@@ -27,20 +27,33 @@ type cache_entry = {
 
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 
+(** Mutex protecting [_cache].  [handle_keeper_status] runs from an MCP
+    tool-dispatch fiber, one per concurrent [masc_keeper_status]
+    request, and [invalidate_status_cache_{for,all}] is called from
+    keeper state-change paths on different fibers — so every access
+    path competes for the same module-level [Hashtbl.t] with no
+    serialisation.  The dangerous pair is [Hashtbl.filter_map_inplace]
+    (eviction) interleaving with [Hashtbl.find_opt] / [Hashtbl.replace]
+    from another fiber, which can segfault or return torn values: OCaml
+    [Hashtbl] is explicitly unsafe for concurrent mutate-during-read. *)
+let cache_mu = Eio.Mutex.create ()
+
 let invalidate_status_cache_for name =
-  Hashtbl.filter_map_inplace
-    (fun key entry ->
-      match String.rindex_opt key ':' with
-      | Some idx ->
-          let cached_name =
-            String.sub key (idx + 1) (String.length key - idx - 1)
-          in
-          if String.equal cached_name name then None else Some entry
-      | None -> Some entry)
-    _cache
+  Eio_guard.with_mutex cache_mu (fun () ->
+    Hashtbl.filter_map_inplace
+      (fun key entry ->
+        match String.rindex_opt key ':' with
+        | Some idx ->
+            let cached_name =
+              String.sub key (idx + 1) (String.length key - idx - 1)
+            in
+            if String.equal cached_name name then None else Some entry
+        | None -> Some entry)
+      _cache)
 
 let invalidate_status_cache_all () =
-  Hashtbl.clear _cache
+  Eio_guard.with_mutex cache_mu (fun () ->
+    Hashtbl.clear _cache)
 
 let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
@@ -405,8 +418,13 @@ let handle_keeper_status ctx args : tool_result =
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:ctx.config.base_path ~name in
       let args_hash = hash_status_args ctx.config name args in
-      (* Cache hit: same updated_at + same args → return cached response *)
-      (match Hashtbl.find_opt _cache cache_key with
+      (* Cache hit: same updated_at + same args → return cached response.
+         The read is taken under [cache_mu] so it cannot interleave with
+         an eviction from [invalidate_status_cache_{for,all}]. *)
+      (match
+         Eio_guard.with_mutex_ro cache_mu (fun () ->
+           Hashtbl.find_opt _cache cache_key)
+       with
        | Some entry
          when entry.updated_at = m.updated_at
            && entry.args_hash = args_hash ->
@@ -1098,6 +1116,7 @@ let handle_keeper_status ctx args : tool_result =
            ]);
          ]) in
          let response = Yojson.Safe.pretty_to_string json in
-         Hashtbl.replace _cache cache_key
-           { updated_at = m.updated_at; args_hash; response };
+         Eio_guard.with_mutex cache_mu (fun () ->
+           Hashtbl.replace _cache cache_key
+             { updated_at = m.updated_at; args_hash; response });
          (true, response))

@@ -64,11 +64,16 @@ let default_threshold () = Level2_config.Drift_guard.default_threshold ()
       changed while vocabulary stayed similar.
     - Semantic drift: default when neither structural nor factual patterns match.
 
-    These values are initial estimates, not empirically validated.
-    TODO(RFC-0001 Phase 3): Register in Runtime_params. *)
-let factual_coverage_floor = 0.55
-let factual_size_ratio_floor = 0.6
-let structural_divergence_threshold = 0.18
+    These values are initial estimates and still await empirical
+    calibration against a labelled drift corpus, but are now
+    governable via Runtime_params so operators can tune without a
+    rebuild. *)
+let factual_coverage_floor () =
+  Runtime_params.get Governance_registry.drift_factual_coverage_floor
+let factual_size_ratio_floor () =
+  Runtime_params.get Governance_registry.drift_factual_size_ratio_floor
+let structural_divergence_threshold () =
+  Runtime_params.get Governance_registry.drift_structural_divergence_threshold
 
 let tokenize (s : string) : string list =
   let trimmed = String.trim s in
@@ -176,8 +181,8 @@ let classify_drift ~tokens_a ~tokens_b ~jacc ~cos =
     | 0 -> 1.0
     | max_len -> float_of_int (min len_a len_b) /. float_of_int max_len
   in
-  if coverage < factual_coverage_floor || size_ratio < factual_size_ratio_floor then Factual
-  else if cos -. jacc > structural_divergence_threshold then Structural
+  if coverage < factual_coverage_floor () || size_ratio < factual_size_ratio_floor () then Factual
+  else if cos -. jacc > structural_divergence_threshold () then Structural
   else Semantic
 
 let summarize ~original ~received ~threshold =

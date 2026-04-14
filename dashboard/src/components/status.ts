@@ -1,9 +1,10 @@
 // MASC Dashboard — Status Surface
-// Conventional read-only status area: sessions, agents, activity, runtime, telemetry.
+// Read-only observability surfaces: agents, activity, runtime, telemetry, governance,
+// memory-subsystems, metrics, tool-quality, fleet.
+// (sessions section removed in Phase 0 of RFC-MASC-006 — overlapped with overview.)
 
 import { html } from 'htm/preact'
 import { route } from '../router'
-import { Mission } from './mission'
 import { AgentsUnified } from './agents-unified'
 import { Activity } from './activity'
 import { RuntimeMonitor } from './runtime-monitor'
@@ -15,16 +16,16 @@ import { PrometheusMetrics } from './prometheus-metrics'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 
-type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems' | 'metrics' | 'tool-quality' | 'fleet'
+type StatusSection = 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems' | 'metrics' | 'tool-quality' | 'fleet'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
-    section === 'agents' || section === 'activity' || section === 'runtime'
+    section === 'activity' || section === 'runtime'
     || section === 'telemetry' || section === 'governance' || section === 'memory-subsystems'
     || section === 'metrics' || section === 'tool-quality' || section === 'fleet'
   ) return section
-  return 'sessions'
+  return 'agents'
 }
 
 export function Status() {
@@ -33,30 +34,28 @@ export function Status() {
   return html`
     <div class="flex flex-col gap-5">
       <div class="transition-opacity duration-300">
-        ${section === 'agents'
-          ? html`<${AgentsUnified} />`
-          : section === 'activity'
-            ? html`<${Activity} />`
-            : section === 'runtime'
-              ? html`
-                <div class="grid gap-4">
-                  <${OasHealthChip} />
-                  <${RuntimeMonitor} />
-                </div>
-              `
-            : section === 'telemetry'
-              ? html`<${TelemetryUnified} />`
-            : section === 'governance'
-              ? html`<${GovernanceMonitor} />`
-            : section === 'memory-subsystems'
-              ? html`<${MemorySubsystems} />`
-            : section === 'metrics'
-              ? html`<${PrometheusMetrics} />`
-            : section === 'tool-quality'
-              ? html`<${ToolQualityPanel} />`
-            : section === 'fleet'
-              ? html`<${FleetTelemetryPanel} />`
-              : html`<${Mission} />`}
+        ${section === 'activity'
+          ? html`<${Activity} />`
+          : section === 'runtime'
+            ? html`
+              <div class="grid gap-4">
+                <${OasHealthChip} />
+                <${RuntimeMonitor} />
+              </div>
+            `
+          : section === 'telemetry'
+            ? html`<${TelemetryUnified} />`
+          : section === 'governance'
+            ? html`<${GovernanceMonitor} />`
+          : section === 'memory-subsystems'
+            ? html`<${MemorySubsystems} />`
+          : section === 'metrics'
+            ? html`<${PrometheusMetrics} />`
+          : section === 'tool-quality'
+            ? html`<${ToolQualityPanel} />`
+          : section === 'fleet'
+            ? html`<${FleetTelemetryPanel} />`
+            : html`<${AgentsUnified} />`}
       </div>
     </div>
   `

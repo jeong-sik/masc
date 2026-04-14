@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-14
+
+### Added
+- Prometheus metrics dashboard surface under monitoring tab (#6974). Fetches
+  `/metrics`, parses Prometheus text format, renders 8 categorized tables
+  (Server, Agent, Keeper, Transport, Inference, Tool, Delta, Provider).
+- Clickable links from Prometheus labels: `keeper=` labels navigate to
+  keeper detail, `tool_name=` labels navigate to tool-quality with
+  highlight-and-scroll of the matching row (#7017).
+- Agent + Transport metric categories — recategorize `masc_agent_*`,
+  `masc_grpc_*`, `masc_ws_*` that previously fell into Other (#7017).
+- RFC-0003 Keeper Composite Lifecycle docs + TLA+ spec with buggy variants
+  (cascade, compaction, recovery) for regression-style verification (#7020).
+
+### Fixed
+- UTF-8 sanitization on outbound telemetry writers. `keeper_tool_call_log`
+  and `oas_sse_bridge` now scrub invalid UTF-8 before persisting or
+  broadcasting, eliminating ~12% JSONL row drop when tool output contains
+  truncated multi-byte sequences (#6929).
+- Prometheus histogram export format. `to_prometheus_text()` now emits
+  histograms as `summary` type with `_sum`/`_count` pair rather than the
+  invalid `histogram` bare type, so Prometheus servers parse the metrics
+  correctly (#6936).
+- `tool_usage_log` syntax error at line 105 (`let counts = fold_left ...`
+  missing `in`) that broke Build/Test, Health, and Lint CI (#6975).
+  Complexity comment updated from O(1) to O(log n) to match StringSet.mem.
+
+### Changed
+- Concurrency hardening: serialize `keeper_recurring` tasks Hashtbl +
+  atomic id counter (#7022), `sse event_buffer` Queue with Eio.Mutex
+  (#7016), `tool_shard` agent_shards read-modify-write (#6985).
+- Pin `agent_sdk` to 0.134.0 (#7012).
+- CI `ci_core=true` no longer forces TLA+, saving ~14 min per run (#7024).
+- Dashboard: remove unused config binding in `ordered_room_ids` (#7021).
+
 ## [0.6.0] - 2026-04-14
 
 ### Added

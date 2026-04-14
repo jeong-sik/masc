@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { defaultParamsForTab, visibleSectionItemsForTab } from './navigation'
+import { defaultParamsForTab, normalizeRouteParams, visibleSectionItemsForTab } from './navigation'
 
 describe('lab navigation', () => {
   it('contains only research surfaces after Phase 1 reorg', () => {
@@ -51,7 +51,14 @@ describe('monitoring navigation labels', () => {
 
     expect(labelFor('governance')).toBe('도구 이벤트')
     expect(labelFor('metrics')).toBe('Prometheus')
-    expect(labelFor('sessions')).toBe('세션')
+    expect(labelFor('agents')).toBe('에이전트 & 키퍼')
+  })
+
+  it('does not expose sessions section (removed in Phase 0 of RFC-MASC-006)', () => {
+    const sections = visibleSectionItemsForTab('monitoring')
+    const ids = sections.map(item => item.id)
+
+    expect(ids).not.toContain('sessions')
   })
 
   it('surfaces tool-quality and fleet alongside telemetry/metrics', () => {
@@ -72,5 +79,18 @@ describe('workspace navigation labels', () => {
 
     expect(labelFor('planning')).toBe('작업 큐')
     expect(labelFor('goals')).toBe('목표 트리')
+  })
+})
+
+describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
+  it('redirects legacy ?section=sessions URL to agents and preserves other params', () => {
+    const redirected = normalizeRouteParams('monitoring', { section: 'sessions', session_id: 's-123' })
+    expect(redirected.section).toBe('agents')
+    expect(redirected.session_id).toBe('s-123')
+  })
+
+  it('leaves other valid monitoring sections untouched', () => {
+    const result = normalizeRouteParams('monitoring', { section: 'telemetry' })
+    expect(result.section).toBe('telemetry')
   })
 })

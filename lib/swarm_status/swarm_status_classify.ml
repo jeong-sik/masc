@@ -77,6 +77,12 @@ let classify_trace operations_by_id (trace : trace_info) =
     | None -> Managed
 
 let severity_sort = function
+  | Flag_bad -> 0
+  | Flag_warn -> 1
+
+(** String-based severity sort for gap_groups in build.ml where severity
+    comes from JSON extraction, not from the typed [flag.severity] field. *)
+let severity_sort_string = function
   | "bad" -> 0
   | "warn" -> 1
   | _ -> 2
@@ -86,7 +92,10 @@ let compare_flag (left : flag) (right : flag) =
     Int.compare (severity_sort left.severity) (severity_sort right.severity)
   in
   if by_severity <> 0 then by_severity
-  else String.compare left.code right.code
+  else
+    Int.compare
+      (Swarm_status_json.flag_code_order left.code)
+      (Swarm_status_json.flag_code_order right.code)
 
 let unique_strings values =
   let table = Hashtbl.create 16 in
@@ -148,41 +157,42 @@ let lane_last_movement traces decisions detachments operations sessions =
 
 let lane_motion_state now ~present ~phase ~last_movement_at ~approvals =
   if not present then
-    "waiting"
-  else if String.equal phase "completed" then
-    "terminal"
+    Waiting
+  else if phase = Lane_completed then
+    Terminal
   else
     match parse_timestamp last_movement_at with
-    | Some ts when now -. ts <= moving_window_sec -> "moving"
+    | Some ts when now -. ts <= moving_window_sec -> Moving
     | Some ts when now -. ts <= stale_window_sec ->
-        if approvals > 0 then "waiting" else "waiting"
-    | Some _ -> "stalled"
+        if approvals > 0 then Waiting else Waiting
+    | Some _ -> Stalled
     | None ->
-        if approvals > 0 then "waiting" else "stalled"
+        if approvals > 0 then Waiting else Stalled
 
 let lane_phase ~present ~active_operations ~detachments ~workers ~approvals ~motion_state ~terminal =
   if not present then
-    "forming"
+    Forming
   else if terminal && approvals = 0 then
-    "completed"
+    Lane_completed
   else if approvals > 0 then
-    "awaiting_approval"
+    Awaiting_approval
   else if active_operations > 0 && detachments = 0 then
-    "dispatching"
-  else if String.equal motion_state "stalled" then
-    "blocked"
+    Dispatching
+  else if motion_state = Stalled then
+    Blocked
   else if detachments > 0 || workers > 0 then
-    "executing"
+    Executing
   else
-    "forming"
+    Forming
 
-let lane_current_step kind ~present ~phase ~motion_state ~approvals ~detachments ~workers =
+let lane_current_step kind ~present ~(phase : lane_phase) ~(motion_state : lane_motion)
+    ~approvals ~detachments ~workers =
   match kind with
   | Managed ->
       if not present then "Start a managed operation"
       else if approvals > 0 then "Resolve pending policy approval"
-      else if String.equal phase "dispatching" then "Materialize detachments with dispatch tick"
-      else if String.equal motion_state "stalled" then "Inspect traces or run dispatch tick"
+      else if phase = Dispatching then "Materialize detachments with dispatch tick"
+      else if motion_state = Stalled then "Inspect traces or run dispatch tick"
       else if detachments > 0 then "Observe active detachments"
       else "Track managed execution"
   | Projected ->
@@ -193,10 +203,11 @@ let lane_current_step kind ~present ~phase ~motion_state ~approvals ~detachments
       if not present then "No supervised execution session is active"
       else if approvals > 0 then "Confirm the pending operator action"
       else if workers = 0 then "Bind runtime workers to the session"
-      else if String.equal motion_state "stalled" then "Inspect session status and recent events"
+      else if motion_state = Stalled then "Inspect session status and recent events"
       else "Observe session progress"
 
-let lane_blockers kind ~phase ~motion_state ~approvals ~workers ~flags =
+let lane_blockers kind ~(phase : lane_phase) ~(motion_state : lane_motion)
+    ~approvals ~workers ~flags =
   let base = [] in
   let base =
     if approvals > 0 then
@@ -204,22 +215,22 @@ let lane_blockers kind ~phase ~motion_state ~approvals ~workers ~flags =
     else base
   in
   let base =
-    if String.equal motion_state "stalled" then
+    if motion_state = Stalled then
       "No recent progress is visible inside the freshness window." :: base
     else base
   in
   let base =
     match kind with
-    | Supervised when workers = 0 && not (String.equal phase "completed") ->
+    | Supervised when workers = 0 && phase <> Lane_completed ->
         "No worker binding is visible for the supervised session." :: base
-    | Projected when List.exists (fun (flag : flag) -> String.equal flag.code "projected_only") flags ->
+    | Projected when List.exists (fun (flag : flag) -> flag.code = Projected_only) flags ->
         "This lane is projection-only and has no managed runtime backing." :: base
     | _ -> base
   in
   List.rev base
 
-let append_flag flags code severity summary =
-  if List.exists (fun (flag : flag) -> String.equal flag.code code) flags then
+let append_flag flags (code : flag_code) (severity : flag_severity) summary =
+  if List.exists (fun (flag : flag) -> flag.code = code) flags then
     flags
   else
     { code; severity; summary } :: flags
@@ -230,45 +241,45 @@ let lane_flags kind ~present ~approvals ~workers ~trace_count ~last_movement_at
   let flags =
     match kind with
     | Projected when present ->
-        append_flag flags "projected_only" "warn"
+        append_flag flags Projected_only Flag_warn
           "Projected state is visible without managed runtime backing."
     | _ -> flags
   in
   let flags =
     if present && trace_count = 0 then
-      append_flag flags "missing_trace_events" "warn"
+      append_flag flags Missing_trace_events Flag_warn
         "No trace events are attached to this lane."
     else flags
   in
   let flags =
     if present && approvals > 0 then
-      append_flag flags "pending_manual_confirmation" "warn"
+      append_flag flags Pending_manual_confirmation Flag_warn
         "Manual approval or confirmation is still pending."
     else flags
   in
   let flags =
     match kind with
     | Supervised when present && workers = 0 ->
-        append_flag flags "missing_worker_binding" "bad"
+        append_flag flags Missing_worker_binding Flag_bad
           "The supervised lane has no visible worker binding."
     | _ -> flags
   in
   let flags =
     if present && last_movement_at = None then
-      append_flag flags "missing_runtime_progress" "warn"
+      append_flag flags Missing_runtime_progress Flag_warn
         "Runtime progress is missing for this lane."
     else flags
   in
   let flags =
     match parse_timestamp last_movement_at with
     | Some ts when present && Time_compat.now () -. ts > stale_window_sec ->
-        append_flag flags "stale_data" "warn"
+        append_flag flags Stale_data Flag_warn
           "The most recent movement is older than the freshness window."
     | _ -> flags
   in
   let flags =
     if mixed_runtime_sources then
-      append_flag flags "dashboard_source_split" "warn"
+      append_flag flags Dashboard_source_split Flag_warn
         "Projected and runtime-backed lanes are both active; compare them separately."
     else flags
   in

@@ -1,6 +1,43 @@
 
 open Swarm_status_types
 
+let lane_phase_to_string = function
+  | Forming -> "forming"
+  | Dispatching -> "dispatching"
+  | Executing -> "executing"
+  | Blocked -> "blocked"
+  | Awaiting_approval -> "awaiting_approval"
+  | Lane_completed -> "completed"
+
+let lane_motion_to_string = function
+  | Waiting -> "waiting"
+  | Moving -> "moving"
+  | Stalled -> "stalled"
+  | Terminal -> "terminal"
+
+let flag_severity_to_string = function
+  | Flag_bad -> "bad"
+  | Flag_warn -> "warn"
+
+let flag_code_to_string = function
+  | Projected_only -> "projected_only"
+  | Missing_trace_events -> "missing_trace_events"
+  | Pending_manual_confirmation -> "pending_manual_confirmation"
+  | Missing_worker_binding -> "missing_worker_binding"
+  | Missing_runtime_progress -> "missing_runtime_progress"
+  | Stale_data -> "stale_data"
+  | Dashboard_source_split -> "dashboard_source_split"
+
+(** Stable ordering index for flag codes (used in [compare_flag]). *)
+let flag_code_order = function
+  | Projected_only -> 0
+  | Missing_trace_events -> 1
+  | Pending_manual_confirmation -> 2
+  | Missing_worker_binding -> 3
+  | Missing_runtime_progress -> 4
+  | Stale_data -> 5
+  | Dashboard_source_split -> 6
+
 let lane_kind_order = function
   | Managed -> 0
   | Supervised -> 1
@@ -45,8 +82,8 @@ let string_option_to_json = option_map_to_json (fun value -> `String value)
 let flag_to_json (flag : flag) =
   `Assoc
     [
-      ("code", `String flag.code);
-      ("severity", `String flag.severity);
+      ("code", `String (flag_code_to_string flag.code));
+      ("severity", `String (flag_severity_to_string flag.severity));
       ("summary", `String flag.summary);
       ("provenance", `String "derived");
     ]
@@ -70,10 +107,10 @@ let lane_to_json (lane : lane) =
     [
       ("lane_id", `String lane.lane_id);
       ("label", `String lane.label);
-      ("kind", `String lane.kind);
+      ("kind", `String (lane_kind_string lane.kind));
       ("present", `Bool lane.present);
-      ("phase", `String lane.phase);
-      ("motion_state", `String lane.motion_state);
+      ("phase", `String (lane_phase_to_string lane.phase));
+      ("motion_state", `String (lane_motion_to_string lane.motion_state));
       ("source_of_truth", `String lane.source_of_truth);
       ("last_movement_at", string_option_to_json lane.last_movement_at);
       ("movement_reason", `String lane.movement_reason);
@@ -204,49 +241,49 @@ let movement_reason_summary = function
   | "missing_runtime_progress" -> "No fresh runtime progress is currently visible."
   | other -> humanize_identifier other
 
-let gap_guidance ~lane_ids code =
+let gap_guidance ~lane_ids (code : flag_code) =
   let has_lane lane_id = List.exists (String.equal lane_id) lane_ids in
   match code with
-  | "pending_manual_confirmation" when has_lane "managed" ->
+  | Pending_manual_confirmation when has_lane "managed" ->
       ( "Managed runtime cannot continue while a confirmation is pending.",
         "masc_policy_approve",
         "Approve or deny the pending managed action before checking more traces." )
-  | "pending_manual_confirmation" ->
+  | Pending_manual_confirmation ->
       ( "The supervised lane is waiting on an operator confirmation.",
         "masc_operator_confirm",
         "Confirm or deny the pending operator action before expecting more movement." )
-  | "missing_worker_binding" ->
+  | Missing_worker_binding ->
       ( "A supervised session with no worker binding cannot produce meaningful collaboration evidence.",
         "masc_operator_digest",
         "Inspect the namespace digest and worker census before reading proof." )
-  | "projected_only" ->
+  | Projected_only ->
       ( "Projected swarm state shows intent, but not a live runtime.",
         "masc_operation_start",
         "Materialize a managed operation if this projected lane should become real work." )
-  | "stale_data" when has_lane "managed" ->
+  | Stale_data when has_lane "managed" ->
       ( "Managed runtime exists, but the freshness window has expired.",
         "masc_dispatch_tick",
         "Run a dispatch tick or inspect managed traces to confirm whether progress is stuck." )
-  | "stale_data" when has_lane "supervised" ->
+  | Stale_data when has_lane "supervised" ->
       ( "The supervised session has gone stale and may no longer reflect active collaboration.",
         "masc_observe_traces",
         "Inspect recent swarm traces before treating the supervised lane as active." )
-  | "missing_trace_events" ->
+  | Stale_data ->
+      ( "The freshness window has expired for this lane.",
+        "masc_observe_traces",
+        "Inspect recent traces before taking an operational action." )
+  | Missing_trace_events ->
       ( "Without trace events, the dashboard cannot show why the swarm moved or stalled.",
         "masc_observe_traces",
         "Collect or inspect recent trace events for the affected lane." )
-  | "missing_runtime_progress" ->
+  | Missing_runtime_progress ->
       ( "The dashboard sees the lane, but not a fresh progress signal.",
         "masc_observe_traces",
         "Inspect traces and recent runtime messages to find the missing progress signal." )
-  | "dashboard_source_split" ->
+  | Dashboard_source_split ->
       ( "Projected and runtime-backed lanes are both active, so one surface can look contradictory.",
         "masc_observe_operations",
         "Compare projected state against managed operations before interpreting the swarm as one story." )
-  | _ ->
-      ( "This flag marks a gap between visible state and trustworthy runtime proof.",
-        "masc_observe_traces",
-        "Inspect recent traces before taking an operational action." )
 
 let lane_kind_of_id lane_id =
   match lane_id with
@@ -254,11 +291,11 @@ let lane_kind_of_id lane_id =
   | "supervised" -> Supervised
   | _ -> Projected
 
-let lane_has_flag lane code =
-  List.exists (fun (flag : flag) -> String.equal flag.code code) lane.hard_flags
+let lane_has_flag lane (code : flag_code) =
+  List.exists (fun (flag : flag) -> flag.code = code) lane.hard_flags
 
 let lane_has_bad_flag lane =
-  List.exists (fun (flag : flag) -> String.equal flag.severity "bad") lane.hard_flags
+  List.exists (fun (flag : flag) -> flag.severity = Flag_bad) lane.hard_flags
 
 let lane_timestamp_key lane =
   match parse_timestamp lane.last_movement_at with
@@ -272,8 +309,8 @@ let fallback_primary_lane present_lanes =
          let right_ts = lane_timestamp_key right in
          let by_motion =
            match
-             String.equal left.motion_state "moving",
-             String.equal right.motion_state "moving"
+             left.motion_state = Moving,
+             right.motion_state = Moving
            with
            | true, false -> -1
            | false, true -> 1
@@ -301,13 +338,13 @@ let choose_primary_lane present_lanes recommendation =
   with
   | Some lane -> Some lane
   | None -> (
-      match find_lane_by (fun lane -> lane_has_flag lane "pending_manual_confirmation") with
+      match find_lane_by (fun lane -> lane_has_flag lane Pending_manual_confirmation) with
       | Some lane -> Some lane
       | None -> (
           match find_lane_by lane_has_bad_flag with
           | Some lane -> Some lane
           | None -> (
-              match find_lane_by (fun lane -> lane_has_flag lane "stale_data") with
+              match find_lane_by (fun lane -> lane_has_flag lane Stale_data) with
               | Some lane -> Some lane
               | None -> fallback_primary_lane present_lanes)))
 
@@ -318,11 +355,11 @@ let narrative_json (lanes : lane list) (timeline : timeline_event list)
   let state =
     if present_lanes = [] then
       "idle"
-    else if List.exists (fun (lane : lane) -> String.equal lane.motion_state "stalled") present_lanes then
+    else if List.exists (fun (lane : lane) -> lane.motion_state = Stalled) present_lanes then
       "stalled"
-    else if List.exists (fun (lane : lane) -> String.equal lane.phase "completed") present_lanes then
+    else if List.exists (fun (lane : lane) -> lane.phase = Lane_completed) present_lanes then
       "completed"
-    else if List.exists (fun (lane : lane) -> String.equal lane.motion_state "moving") present_lanes then
+    else if List.exists (fun (lane : lane) -> lane.motion_state = Moving) present_lanes then
       "running"
     else
       "waiting"
@@ -361,7 +398,7 @@ let narrative_json (lanes : lane list) (timeline : timeline_event list)
   let completion =
     match
       List.find_opt
-        (fun (lane : lane) -> String.equal lane.phase "completed")
+        (fun (lane : lane) -> lane.phase = Lane_completed)
         present_lanes
     with
     | Some lane ->

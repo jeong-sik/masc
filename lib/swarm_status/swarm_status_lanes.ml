@@ -62,7 +62,7 @@ let lane_for_kind kind ~now ~operations ~detachments ~alerts ~decisions ~traces
           (None, "missing_runtime_progress")
   in
   let motion_state =
-    lane_motion_state now ~present ~phase:"" ~last_movement_at:last_movement ~approvals
+    lane_motion_state now ~present ~phase:Forming ~last_movement_at:last_movement ~approvals
   in
   let phase =
     lane_phase ~present ~active_operations ~detachments:(List.length detachments)
@@ -82,7 +82,7 @@ let lane_for_kind kind ~now ~operations ~detachments ~alerts ~decisions ~traces
   {
     lane_id = lane_id kind;
     label = lane_label kind;
-    kind = lane_kind_string kind;
+    kind;
     present;
     phase;
     motion_state;
@@ -103,10 +103,10 @@ let choose_recommendation lanes =
   let find_lane lane_id =
     List.find_opt (fun (lane : lane) -> String.equal lane.lane_id lane_id) lanes
   in
-  let has_flag lane code =
-    List.exists (fun (flag : flag) -> String.equal flag.code code) lane.hard_flags
+  let has_flag lane (code : flag_code) =
+    List.exists (fun (flag : flag) -> flag.code = code) lane.hard_flags
   in
-  match List.find_opt (fun (lane : lane) -> has_flag lane "pending_manual_confirmation") lanes with
+  match List.find_opt (fun (lane : lane) -> has_flag lane Pending_manual_confirmation) lanes with
   | Some lane when String.equal lane.lane_id "managed" ->
       {
         tool = "masc_policy_approve";
@@ -140,7 +140,7 @@ let choose_recommendation lanes =
           match
             List.find_opt
               (fun (lane : lane) ->
-                String.equal lane.lane_id "managed" && has_flag lane "stale_data")
+                String.equal lane.lane_id "managed" && has_flag lane Stale_data)
               lanes
           with
           | Some lane ->
@@ -155,7 +155,7 @@ let choose_recommendation lanes =
                 List.find_opt
                   (fun (lane : lane) ->
                     String.equal lane.lane_id "supervised"
-                    && has_flag lane "stale_data")
+                    && has_flag lane Stale_data)
                   lanes
               with
               | Some lane ->

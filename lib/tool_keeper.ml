@@ -628,6 +628,28 @@ let handle_keeper_reset ctx args : tool_result =
      | Error err ->
        (false, Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
 
+(** Resolve the primary model max context for a keeper.
+
+    Follows the same resolution order as
+    [Keeper_unified_turn.resolved_max_context_for_turn]:
+    max_context_override > cascade model resolution > min floor.
+    Returns [min_keeper_context_tokens] when meta is unavailable. *)
+let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
+  let min_ctx = Keeper_config.min_keeper_context_tokens in
+  match meta with
+  | None -> min_ctx
+  | Some meta ->
+    let raw =
+      match meta.max_context_override with
+      | Some n when n > 0 -> n
+      | _ ->
+        let labels = Keeper_exec_context.effective_model_labels_for_turn meta in
+        let resolved = Oas_model_resolve.resolve_max_cascade_context labels in
+        Oas_model_resolve.clamp_context_for_pure_local_labels
+          ~labels ~max_context:resolved
+    in
+    max min_ctx raw
+
 (** Operator-initiated context compaction.
 
     Dispatches [Operator_compact_requested] to the FSM, then compacts the
@@ -650,12 +672,14 @@ let handle_keeper_compact ctx args : tool_result =
         (Printf.sprintf "keeper %s is not in the registry" name)
     | Some entry ->
     let phase_before = Keeper_state_machine.phase_to_string entry.phase in
-    (* Phase precondition: Overflowed, Paused, or (Running/Failing with force). *)
+    (* Phase precondition: Overflowed, Paused, or (Running/Failing with force).
+       Match on the variant directly so the compiler warns when new phases
+       are added — the catch-all wildcard would silently default to [false]. *)
     let allowed =
-      match phase_before with
-      | "overflowed" | "paused" | "compacting" -> true
-      | "running" | "failing" -> force
-      | _ -> false
+      match entry.phase with
+      | Overflowed | Paused | Compacting -> true
+      | Running | Failing -> force
+      | Offline | Stopped | Dead | Crashed | Restarting | HandingOff | Draining -> false
     in
     if not allowed then begin
       Prometheus.inc_counter "masc_keeper_operator_compact_total"
@@ -677,11 +701,7 @@ let handle_keeper_compact ctx args : tool_result =
       | Ok (Some (_resolved, meta)) ->
         let base_dir = Keeper_types.session_base_dir ctx.config in
         let model = Keeper_exec_context.checkpoint_model_of_meta meta in
-        let max_tokens =
-          match meta.max_context_override with
-          | Some n when n > 0 -> n
-          | _ -> 200_000
-        in
+        let max_tokens = resolve_primary_max_context (Some meta) in
         Keeper_exec_context.dispatch_keeper_phase_event
           ~config:ctx.config ~keeper_name:name
           Keeper_state_machine.Compaction_started;
@@ -770,12 +790,7 @@ let handle_keeper_clear ctx args : tool_result =
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
         | None -> Keeper_exec_context.generate_trace_id ()
       in
-      let max_tokens =
-        match meta_for_trace with
-        | Some meta ->
-          (match meta.max_context_override with Some n when n > 0 -> n | _ -> 200_000)
-        | None -> 200_000
-      in
+      let max_tokens = resolve_primary_max_context meta_for_trace in
       let max_checkpoint_messages =
         match meta_for_trace with
         | Some meta -> meta.compaction.max_checkpoint_messages

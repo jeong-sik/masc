@@ -150,8 +150,8 @@ let build_json_from_inputs ~timeline_limit_override ~now
            in
            `Assoc
              [
-               ("code", `String flag.code);
-               ("severity", `String flag.severity);
+               ("code", `String (flag_code_to_string flag.code));
+               ("severity", `String (flag_severity_to_string flag.severity));
                ("summary", `String flag.summary);
                ("why_it_matters", `String why_it_matters);
                ("next_tool", `String next_tool);
@@ -163,20 +163,20 @@ let build_json_from_inputs ~timeline_limit_override ~now
     |> List.sort (fun left right ->
            let left_severity = match U.member "severity" left with `String s -> s | _ -> "unknown" in
            let right_severity = match U.member "severity" right with `String s -> s | _ -> "unknown" in
-           Int.compare (severity_sort left_severity) (severity_sort right_severity))
+           Int.compare (severity_sort_string left_severity) (severity_sort_string right_severity))
   in
   let present_lanes = List.filter (fun (lane : lane) -> lane.present) lanes in
   let moving_lanes =
     List.length
-      (List.filter (fun (lane : lane) -> String.equal lane.motion_state "moving") lanes)
+      (List.filter (fun (lane : lane) -> lane.motion_state = Moving) lanes)
   in
   let stalled_lanes =
     List.length
-      (List.filter (fun (lane : lane) -> String.equal lane.motion_state "stalled") lanes)
+      (List.filter (fun (lane : lane) -> lane.motion_state = Stalled) lanes)
   in
   let projected_lanes =
     List.length
-      (List.filter (fun (lane : lane) -> String.equal lane.kind "projected" && lane.present) lanes)
+      (List.filter (fun (lane : lane) -> lane.kind = Projected && lane.present) lanes)
   in
   let last_movement_at =
     lanes
@@ -230,15 +230,15 @@ let empty_json =
     {
       lane_id = lane_id kind;
       label = lane_label kind;
-      kind = lane_kind_string kind;
+      kind;
       present = false;
-      phase = "forming";
-      motion_state = "waiting";
+      phase = Forming;
+      motion_state = Waiting;
       source_of_truth = source_of_truth kind;
       last_movement_at = None;
       movement_reason = "no_active_data";
-      current_step = lane_current_step kind ~present:false ~phase:"forming"
-          ~motion_state:"waiting" ~approvals:0 ~detachments:0 ~workers:0;
+      current_step = lane_current_step kind ~present:false ~phase:Forming
+          ~motion_state:Waiting ~approvals:0 ~detachments:0 ~workers:0;
       blockers = [];
       operations = 0;
       detachments = 0;

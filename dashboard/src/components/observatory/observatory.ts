@@ -259,7 +259,7 @@ export function Observatory() {
       <${DetailPane} />
 
       <p class="text-[10px] text-text-dim italic">
-        Phase 2d — click drill-down. 추가 track(메모리, autoresearch)은 이후 단계에서.
+        Phase 3a — anomaly highlight. 추가 track(메모리, autoresearch)과 compare mode는 이후 단계에서.
       </p>
     </div>
   `

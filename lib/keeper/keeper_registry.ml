@@ -137,14 +137,19 @@ let decr_running_count_clamped () =
     Readers still dereference [!registry] without the lock — [StringMap] is
     immutable, so a reader always sees a consistent snapshot (either the
     pre- or post-update map). *)
-let registry_mutex = Eio.Mutex.create ()
+(* Stdlib.Mutex is required (not Eio.Mutex): registry helpers are called
+   from non-Eio contexts (tests, startup wiring) where Eio.Mutex fails with
+   `Effect.Unhandled(Cancel.Get_context)`. Critical sections here are short
+   StringMap.add/remove ops, so Stdlib blocking is acceptable.
+   See memory/feedback_ocaml5-mutex-selection.md. *)
+let registry_mutex = Stdlib.Mutex.create ()
 
 
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
 let put_entry key entry =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+  Stdlib.Mutex.protect registry_mutex (fun () ->
     registry := StringMap.add key entry !registry)
 
 (** Apply [f entry] and write back.  No-op if key absent.
@@ -157,7 +162,7 @@ let put_entry key entry =
     no nested calls back into the registry. *)
 let update_entry ~base_path name f =
   let key = registry_key ~base_path name in
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+  Stdlib.Mutex.protect registry_mutex (fun () ->
     match StringMap.find_opt key !registry with
     | Some entry -> registry := StringMap.add key (f entry) !registry
     | None -> ())
@@ -240,7 +245,7 @@ let register_restarting ~base_path name meta =
 let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
   let key = registry_key ~base_path name in
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+  Stdlib.Mutex.protect registry_mutex (fun () ->
     (match StringMap.find_opt key !registry with
      | Some entry when entry.phase = Running ->
          decr_running_count_clamped ();
@@ -453,7 +458,7 @@ let cleanup_tracking ~base_path name =
   | None -> ()
 
 let clear () =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+  Stdlib.Mutex.protect registry_mutex (fun () ->
     registry := StringMap.empty;
     Atomic.set running_count_atomic 0)
 

@@ -33,8 +33,6 @@ type deliberation_action =
   | ProposeSpawn of { topic: string; reason: string }
   | StartDiscussion of { topic: string; context: string }
   | ShareFinding of { finding: string; source: string }
-  | CreateTask of { title: string; description: string; priority: int }
-  | CreateIssue of { title: string; body: string; labels: string list }
   | MultiStep of deliberation_action list
 
 val deliberation_action_to_string : deliberation_action -> string

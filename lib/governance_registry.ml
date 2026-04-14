@@ -432,6 +432,51 @@ let keeper_stage_timing_ring_size =
     ~deserialize:deserialize_int
     ()
 
+(* ── drift_guard heuristics (Low risk, detection tuning) ───── *)
+
+(** Token-coverage floor below which a handoff is classified as
+    factual drift. Initial estimate from drift_guard.ml; not
+    empirically calibrated against a labelled corpus. *)
+let drift_factual_coverage_floor =
+  Runtime_params.register
+    ~key:"drift.factual_coverage_floor"
+    ~default:(fun () -> 0.55)
+    ~validate:(validate_float_range ~min:0.0 ~max:1.0 "drift_factual_coverage_floor")
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ~meta:{ description = "drift_guard factual drift 판정 — 토큰 커버리지 하한";
+            value_type = "float";
+            min_value = Some (`Float 0.0); max_value = Some (`Float 1.0) }
+    ()
+
+(** Size-ratio floor (handoff / original) below which the handoff is
+    factual drift. Captures "content replaced" vs "content edited". *)
+let drift_factual_size_ratio_floor =
+  Runtime_params.register
+    ~key:"drift.factual_size_ratio_floor"
+    ~default:(fun () -> 0.6)
+    ~validate:(validate_float_range ~min:0.0 ~max:1.0 "drift_factual_size_ratio_floor")
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ~meta:{ description = "drift_guard factual drift 판정 — 크기 비율 하한";
+            value_type = "float";
+            min_value = Some (`Float 0.0); max_value = Some (`Float 1.0) }
+    ()
+
+(** Cosine-jaccard divergence threshold for structural drift. Above
+    this, vocabulary overlap is high but word-order/phrasing shifted. *)
+let drift_structural_divergence_threshold =
+  Runtime_params.register
+    ~key:"drift.structural_divergence_threshold"
+    ~default:(fun () -> 0.18)
+    ~validate:(validate_float_range ~min:0.0 ~max:1.0 "drift_structural_divergence_threshold")
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ~meta:{ description = "drift_guard structural drift 판정 — cosine-jaccard 발산 임계치";
+            value_type = "float";
+            min_value = Some (`Float 0.0); max_value = Some (`Float 1.0) }
+    ()
+
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -509,6 +554,16 @@ let surfaces =
         "relay.tokens_per_tool_call"; "relay.tokens_per_tool_result";
         "relay.cost_large_file_read"; "relay.cost_per_file_edit";
         "relay.cost_long_running"; "relay.cost_exploration"; "relay.cost_simple";
+      ];
+    };
+    {
+      id = "drift_guard";
+      description = "Handoff drift classification thresholds (initial estimates, not corpus-calibrated)";
+      risk = "low";
+      param_keys = [
+        "drift.factual_coverage_floor";
+        "drift.factual_size_ratio_floor";
+        "drift.structural_divergence_threshold";
       ];
     };
     {
@@ -593,6 +648,9 @@ let ensure_init () =
   ignore (Runtime_params.get dashboard_min_border_length);
   ignore (Runtime_params.get dashboard_agent_quiet_threshold_sec);
   ignore (Runtime_params.get dashboard_agent_stuck_threshold_sec);
+  ignore (Runtime_params.get drift_factual_coverage_floor);
+  ignore (Runtime_params.get drift_factual_size_ratio_floor);
+  ignore (Runtime_params.get drift_structural_divergence_threshold);
   Keeper_config.ensure_runtime_params_init ()
 
 let surfaces_json () =

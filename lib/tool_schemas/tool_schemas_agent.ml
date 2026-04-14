@@ -153,6 +153,20 @@ let schemas : tool_schema list = [
   };
 
   {
+    name = "masc_preferred_partner";
+    description = "Get the agent with the strongest learned collaboration affinity for a given agent. Closes the Hebbian learning loop: strengthened connections from shared task completions become actionable partner suggestions. Use when deciding whom to @mention, delegate to, or collaborate with.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to find a partner for. Defaults to the calling agent.");
+        ]);
+      ]);
+    ];
+  };
+
+  {
     name = "masc_consolidate_learning";
     description = "Apply decay to old collaboration patterns and prune weak Hebbian connections.";
     input_schema = `Assoc [

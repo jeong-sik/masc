@@ -26,6 +26,21 @@ let read_backlog_or_raise config =
   | Ok backlog -> backlog
   | Error msg -> raise (Invalid_argument msg)
 
+(** Agents who currently hold a Claimed or InProgress task.
+    Used by the Hebbian hook to strengthen only against agents who are
+    actively working, not everyone who happens to be joined.
+    Falls back to active_agents if the backlog cannot be read. *)
+let working_agents config =
+  match read_backlog_r config with
+  | Error _ -> (Room_state.read_state config).active_agents
+  | Ok backlog ->
+    List.filter_map (fun (t : task) ->
+      match t.task_status with
+      | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
+      | _ -> None
+    ) backlog.tasks
+    |> List.sort_uniq String.compare
+
 (** Update the on-disk agent state record under its own file lock.
 
     Task transitions ([claim], [complete], [cancel], …) need to
@@ -807,16 +822,19 @@ let transition_task_r config ~agent_name ~task_id ~action
            (try
               let active = (Room_state.read_state config).active_agents in
               !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+              (* Hebbian: strengthen only against agents with active tasks,
+                 not the full room. See working_agents doc for rationale. *)
+              let workers = working_agents config in
               !Room_hooks.hebbian_on_task_done_fn config
-                ~assignee:agent_name ~active_agents:active
+                ~assignee:agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition relation/hebbian done hook: %s"
                 (Printexc.to_string exn))
          | Types.Cancel ->
            (try
-              let active = (Room_state.read_state config).active_agents in
+              let workers = working_agents config in
               !Room_hooks.hebbian_on_task_cancelled_fn config
-                ~agent_name ~active_agents:active
+                ~agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition hebbian cancel hook: %s"
                 (Printexc.to_string exn))
@@ -928,9 +946,10 @@ let complete_task config ~agent_name ~task_id ~notes =
             (try
                let active = (Room_state.read_state config).active_agents in
                !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
-               (* Hebbian: strengthen collaboration pattern *)
+               (* Hebbian: strengthen only against agents with active tasks *)
+               let workers = working_agents config in
                !Room_hooks.hebbian_on_task_done_fn config
-                 ~assignee:agent_name ~active_agents:active
+                 ~assignee:agent_name ~active_agents:workers
              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.RoomTask.error "relation/hebbian task hook error: %s"
                  (Printexc.to_string exn));
@@ -1118,11 +1137,11 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                               -. task_started_at_unix task.task_status)
                              *. 1000.0)))
                      ());
-              (* Hebbian: weaken collaboration pattern on cancellation *)
+              (* Hebbian: weaken only against agents with active tasks *)
               (try
-                 let active = (Room_state.read_state config).active_agents in
+                 let workers = working_agents config in
                  !Room_hooks.hebbian_on_task_cancelled_fn config
-                   ~agent_name ~active_agents:active
+                   ~agent_name ~active_agents:workers
                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                  Log.RoomTask.error "hebbian task_cancelled hook error: %s"
                    (Printexc.to_string exn));

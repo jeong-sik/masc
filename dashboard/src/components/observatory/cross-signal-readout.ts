@@ -1,0 +1,140 @@
+// Cross-signal readout card (RFC-MASC-006 Phase 2c)
+//
+// When the cursor is active, show aligned values across all tracks at the
+// cursor's time — the core "읽기" primitive of Observatory. Reads directly
+// from `cursorPosition` signal + track data passed by parent.
+
+import { html } from 'htm/preact'
+import type { TelemetryEntry, ToolQualityHourlyPoint } from '../../api/dashboard'
+import { cursorPosition } from './cursor-store'
+
+function entryTimestampMs(entry: TelemetryEntry): number | null {
+  if (typeof entry.ts === 'number') return entry.ts * 1000
+  if (typeof entry.ts_unix === 'number') return entry.ts_unix * 1000
+  if (typeof entry.timestamp === 'number') return entry.timestamp
+  if (typeof entry.ts_iso === 'string') {
+    const parsed = Date.parse(entry.ts_iso)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  return null
+}
+
+function hourToMs(hour: string): number | null {
+  const parsed = Date.parse(hour.includes('T') ? hour : `${hour}:00:00Z`)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function isToolCall(entry: TelemetryEntry): boolean {
+  const src = typeof entry.source === 'string' ? entry.source : ''
+  return src === 'tool_call_io' || src === 'tool_usage'
+}
+
+interface Props {
+  events: TelemetryEntry[]
+  hourlyTrend: ToolQualityHourlyPoint[]
+  /** Tolerance in ms for "nearby" event (both halves of cursor). */
+  eventWindowMs: number
+}
+
+function countEventsNear(
+  events: TelemetryEntry[],
+  cursorMs: number,
+  windowMs: number,
+  predicate?: (entry: TelemetryEntry) => boolean,
+): number {
+  const half = windowMs / 2
+  return events.filter(entry => {
+    if (predicate && !predicate(entry)) return false
+    const ts = entryTimestampMs(entry)
+    return ts !== null && Math.abs(ts - cursorMs) <= half
+  }).length
+}
+
+function nearestTrendPoint(
+  points: ToolQualityHourlyPoint[],
+  cursorMs: number,
+): ToolQualityHourlyPoint | null {
+  let best: { point: ToolQualityHourlyPoint; dist: number } | null = null
+  for (const point of points) {
+    const ts = hourToMs(point.hour)
+    if (ts === null) continue
+    const dist = Math.abs(ts - cursorMs)
+    if (best === null || dist < best.dist) best = { point, dist }
+  }
+  return best?.point ?? null
+}
+
+function Row({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string | number
+  tone?: 'neutral' | 'ok' | 'warn' | 'bad'
+}) {
+  const toneClass =
+    tone === 'ok' ? 'text-emerald-400'
+      : tone === 'warn' ? 'text-amber-300'
+      : tone === 'bad' ? 'text-red-400'
+      : 'text-text-strong'
+  return html`
+    <div class="flex items-center justify-between gap-4 text-[11px]">
+      <span class="text-text-dim">${label}</span>
+      <span class="font-mono font-semibold ${toneClass}">${value}</span>
+    </div>
+  `
+}
+
+export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props) {
+  const cursor = cursorPosition.value
+  if (cursor === null) return null
+
+  const totalEvents = countEventsNear(events, cursor.ts, eventWindowMs)
+  const toolCalls = countEventsNear(events, cursor.ts, eventWindowMs, isToolCall)
+  const toolFailures = countEventsNear(
+    events,
+    cursor.ts,
+    eventWindowMs,
+    entry => isToolCall(entry) && (entry.success === false || Boolean(entry.error)),
+  )
+  const trendPoint = nearestTrendPoint(hourlyTrend, cursor.ts)
+
+  const successRateTone: 'ok' | 'warn' | 'bad' | 'neutral' =
+    trendPoint == null ? 'neutral'
+      : trendPoint.success_rate >= 97 ? 'ok'
+      : trendPoint.success_rate >= 90 ? 'neutral'
+      : 'bad'
+
+  const windowLabel = eventWindowMs >= 60_000
+    ? `±${Math.round(eventWindowMs / 60_000 / 2)}m`
+    : `±${Math.round(eventWindowMs / 1000 / 2)}s`
+
+  return html`
+    <div class="rounded-lg border border-accent/20 bg-accent/5 px-3 py-2 shadow-sm">
+      <div class="mb-1.5 flex items-center justify-between">
+        <span class="text-[10px] uppercase tracking-widest text-accent font-semibold">cursor</span>
+        <span class="text-[11px] font-mono text-text-strong">
+          ${new Date(cursor.ts).toLocaleTimeString()}
+        </span>
+      </div>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+        <${Row} label=${`이벤트 (${windowLabel})`} value=${totalEvents} />
+        <${Row}
+          label=${`도구 호출 (${windowLabel})`}
+          value=${toolFailures > 0 ? `${toolCalls} / ${toolFailures} 실패` : toolCalls}
+          tone=${toolFailures > 0 ? 'warn' : 'neutral'}
+        />
+        <${Row}
+          label="성공률 (최근 hour)"
+          value=${trendPoint != null ? `${trendPoint.success_rate.toFixed(1)}%` : '-'}
+          tone=${successRateTone}
+        />
+        <${Row}
+          label="최근 호출 건수"
+          value=${trendPoint != null ? trendPoint.calls : '-'}
+        />
+      </div>
+    </div>
+  `
+}

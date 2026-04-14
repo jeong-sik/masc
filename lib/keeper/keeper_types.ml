@@ -652,7 +652,12 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     
     ; "social_model", `String m.social_model
     ; "cascade_name", `String m.cascade_name
-    ; "models", `List (List.map (fun s -> `String s) m.models)
+    (* "models" intentionally omitted from serialization.  The field
+       is in removed_keeper_meta_key_names (via removed_keeper_input_key_names)
+       and scrub_persisted_keeper_meta_json strips it on every load.
+       Re-emitting it here creates a scrub → write → re-scrub loop that
+       fires ~20 INFO log lines per keeper per session.  Models are
+       resolved at runtime from cascade config, not from persisted meta. *)
     ; "will", `String m.will
     ; "needs", `String m.needs
     ; "desires", `String m.desires

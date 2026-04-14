@@ -6,30 +6,19 @@ let trim_trailing_slash s =
   else
     trimmed
 
-let starts_with s prefix =
-  let s_len = String.length s in
-  let prefix_len = String.length prefix in
-  s_len >= prefix_len && String.sub s 0 prefix_len = prefix
-
-let ends_with s suffix =
-  let s_len = String.length s in
-  let suffix_len = String.length suffix in
-  s_len >= suffix_len
-  && String.sub s (s_len - suffix_len) suffix_len = suffix
-
 let normalize_graphql_url ~default_scheme raw =
   let trimmed = String.trim raw in
   if trimmed = "" then
     ""
   else
     let with_scheme =
-      if starts_with trimmed "http://" || starts_with trimmed "https://" then
+      if String.starts_with ~prefix:"http://" trimmed || String.starts_with ~prefix:"https://" trimmed then
         trimmed
       else
         default_scheme ^ trimmed
     in
     let without_trailing = trim_trailing_slash with_scheme in
-    if ends_with without_trailing "/graphql" then
+    if String.ends_with ~suffix:"/graphql" without_trailing then
       without_trailing
     else
       without_trailing ^ "/graphql"
@@ -46,10 +35,10 @@ let railway_graphql_url () =
 
 let default_scheme_for_override raw =
   let trimmed = String.trim raw in
-  if starts_with trimmed "localhost"
-     || starts_with trimmed "127.0.0.1"
-     || starts_with trimmed "0.0.0.0"
-     || starts_with trimmed "[::1]"
+  if String.starts_with ~prefix:"localhost" trimmed
+     || String.starts_with ~prefix:"127.0.0.1" trimmed
+     || String.starts_with ~prefix:"0.0.0.0" trimmed
+     || String.starts_with ~prefix:"[::1]" trimmed
   then
     "http://"
   else

@@ -6,6 +6,7 @@ import {
   boardSortMode,
   boardExcludeSystem,
   boardExcludeAutomation,
+  boardHiddenCategories,
   boardAuthorFilter,
   boardLoading,
   lastBoardRefreshAt,
@@ -26,6 +27,7 @@ export {
   boardSortMode,
   boardExcludeSystem,
   boardExcludeAutomation,
+  boardHiddenCategories,
   boardAuthorFilter,
   boardLoading,
   lastBoardRefreshAt,
@@ -66,6 +68,13 @@ export const PAGE_SIZE = 20
 export const visibleLimit = signal(PAGE_SIZE)
 export const automationVisibleLimit = signal(PAGE_SIZE)
 export const systemVisibleLimit = signal(PAGE_SIZE)
+/** Per-category pagination limits */
+export const categoryVisibleLimits = signal<Record<string, number>>({
+  article: PAGE_SIZE,
+  review: PAGE_SIZE,
+  notice: PAGE_SIZE,
+  system: PAGE_SIZE,
+})
 
 // ── Selection / bulk delete ────────────────────────────────────────
 export const deletingPostId = signal<string | null>(null)
@@ -91,7 +100,62 @@ export function boardPostKind(post: BoardPost): 'direct' | 'automation' | 'syste
   return post.post_kind ?? 'direct'
 }
 
+// ── Content-based category (replaces post_kind for filtering) ─────
+export type ContentCategory = 'article' | 'review' | 'notice' | 'system'
+
+const ARTICLE_SIGNALS = ['기술 탐색', '탐색:', '발견', 'poc', '실험', '연구', '분석', '핵심 발견', '코드스멜', 'exploration', 'research']
+const REVIEW_SIGNALS = ['verdict', '판정', 'pr 리뷰', 'pr review', 'code review', '리뷰:', 'issue 사냥', 'issue 현황', 'assignee', 'needs-evidence', '우회 누적']
+const NOTICE_SIGNALS = ['alert', '알림', '경고', 'warning', '상태 업데이트', 'status', 'sprint 상태', '불균형 경고', 'health check']
+
+function matchesAny(text: string, signals: string[]): boolean {
+  const lower = text.toLowerCase()
+  return signals.some(s => lower.includes(s))
+}
+
+export function contentCategory(post: BoardPost): ContentCategory {
+  if (boardPostKind(post) === 'system') return 'system'
+
+  const title = post.title || ''
+  const body = post.body || ''
+
+  if (matchesAny(title, REVIEW_SIGNALS)) return 'review'
+  if (matchesAny(title, NOTICE_SIGNALS)) return 'notice'
+  if (matchesAny(title, ARTICLE_SIGNALS)) return 'article'
+
+  // Fallback: long content is likely an article, short is notice
+  if (body.length > 300) return 'article'
+  if (body.length < 80 && boardPostKind(post) !== 'direct') return 'notice'
+
+  return 'article'
+}
+
+export const CONTENT_CATEGORIES: { id: ContentCategory; label: string; icon: string }[] = [
+  { id: 'article', label: '글/분석', icon: '📝' },
+  { id: 'review', label: '리뷰/판정', icon: '⚖️' },
+  { id: 'notice', label: '알림/상태', icon: '📢' },
+  { id: 'system', label: '시스템', icon: '⚙️' },
+]
+
+export function categoryLabel(cat: ContentCategory): string {
+  return CONTENT_CATEGORIES.find(c => c.id === cat)?.label ?? cat
+}
+
+export function categoryBadgeColor(cat: ContentCategory): string {
+  switch (cat) {
+    case 'article': return 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)]'
+    case 'review': return 'bg-[var(--purple-10)] text-[var(--purple)] border-[var(--purple-20)]'
+    case 'notice': return 'bg-[var(--warn-10)] text-[var(--warn-bright)] border-[var(--warn-20)]'
+    case 'system': return 'bg-[var(--slate-gray-15)] text-[var(--text-slate)] border-[var(--border-slate-22)]'
+    default: return 'bg-[var(--white-8)] text-[var(--text-muted)] border-[var(--border-slate-16)]'
+  }
+}
+
+// ── Grouped posts by content category ─────────────────────────────
+export type CategoryGroup = { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number }
+
 export type VisibleBoardGroups = {
+  groups: CategoryGroup[]
+  // Legacy compat fields
   direct: BoardPost[]
   automation: BoardPost[]
   system: BoardPost[]
@@ -103,58 +167,57 @@ export type VisibleBoardGroups = {
 }
 
 export function splitVisiblePosts(posts: BoardPost[]): VisibleBoardGroups {
-  const direct: BoardPost[] = []
-  const automation: BoardPost[] = []
-  const system: BoardPost[] = []
-  let totalDirect = 0
-  let totalAutomation = 0
-  let totalSystem = 0
-  let hiddenAutomation = 0
-  let hiddenSystem = 0
+  const hidden = boardHiddenCategories.value
+  const buckets: Record<ContentCategory, { posts: BoardPost[]; total: number; hidden: number }> = {
+    article: { posts: [], total: 0, hidden: 0 },
+    review: { posts: [], total: 0, hidden: 0 },
+    notice: { posts: [], total: 0, hidden: 0 },
+    system: { posts: [], total: 0, hidden: 0 },
+  }
+
+  // Legacy counters
+  let totalDirect = 0, totalAutomation = 0, totalSystem = 0
+  let hiddenAutomation = 0, hiddenSystem = 0
+
   posts.forEach(post => {
+    const cat = contentCategory(post)
+    const bucket = buckets[cat]
+    bucket.total += 1
+    if (hidden.has(cat)) {
+      bucket.hidden += 1
+    } else {
+      bucket.posts.push(post)
+    }
+
+    // Legacy compat
     const kind = boardPostKind(post)
-    if (kind === 'direct') {
-      totalDirect += 1
-      direct.push(post)
-      return
-    }
-    if (kind === 'automation') {
-      totalAutomation += 1
-      if (boardExcludeAutomation.value) {
-        hiddenAutomation += 1
-        return
-      }
-      automation.push(post)
-      return
-    }
-    totalSystem += 1
-    if (boardExcludeSystem.value) {
-      hiddenSystem += 1
-      return
-    }
-    system.push(post)
+    if (kind === 'system') { totalSystem += 1; if (hidden.has('system')) hiddenSystem += 1 }
+    else if (kind === 'automation') { totalAutomation += 1; if (boardExcludeAutomation.value) hiddenAutomation += 1 }
+    else { totalDirect += 1 }
   })
+
+  const groups = (Object.entries(buckets) as [ContentCategory, typeof buckets.article][])
+    .map(([category, b]) => ({ category, posts: b.posts, total: b.total, hidden: b.hidden }))
+    .filter(g => g.total > 0)
+
   return {
-    direct,
-    automation,
-    system,
-    totalDirect,
-    totalAutomation,
-    totalSystem,
-    hiddenAutomation,
-    hiddenSystem,
+    groups,
+    direct: buckets.article.posts,
+    automation: buckets.review.posts,
+    system: buckets.system.posts,
+    totalDirect, totalAutomation, totalSystem,
+    hiddenAutomation, hiddenSystem,
   }
 }
 
 export function filterHint(grouped: VisibleBoardGroups): string | null {
-  if (grouped.totalAutomation === 0 && grouped.totalSystem === 0 && grouped.totalDirect > 0) {
-    return '현재 목록은 직접 작성 글만 있어서 자동화·시스템 필터를 눌러도 보이는 글 수가 그대로일 수 있습니다.'
-  }
-  if (boardExcludeAutomation.value && grouped.hiddenAutomation > 0) {
-    return `자동화 글 ${grouped.hiddenAutomation}건이 숨겨져 있습니다.`
-  }
-  if (boardExcludeSystem.value && grouped.hiddenSystem > 0) {
-    return `시스템 글 ${grouped.hiddenSystem}건이 숨겨져 있습니다.`
+  const totalHidden = grouped.groups.reduce((sum, g) => sum + g.hidden, 0)
+  if (totalHidden > 0) {
+    const names = grouped.groups
+      .filter(g => g.hidden > 0)
+      .map(g => `${categoryLabel(g.category)} ${g.hidden}건`)
+      .join(', ')
+    return `${names} 숨겨져 있습니다.`
   }
   return null
 }

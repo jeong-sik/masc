@@ -31,7 +31,7 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   let exclude_automation =
     bool_query_param request "exclude_automation" ~default:false
   in
-  let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
+  let limit = int_query_param request "limit" ~default:100 |> clamp ~min_v:1 ~max_v:500 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
   let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
   let posts =

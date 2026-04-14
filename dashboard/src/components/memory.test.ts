@@ -2,13 +2,13 @@ import { h } from 'preact'
 import { render, screen } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Memory } from './memory'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardAuthorFilter } from '../store'
+import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter } from '../store'
 import { route } from '../router'
+import { contentCategory } from './memory-state'
+import type { BoardPost } from '../types'
 
-// Ensure jest-dom matchers are available
 import '@testing-library/jest-dom'
 
-// Mock dependencies
 vi.mock('../store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../store')>()
   return {
@@ -34,8 +34,6 @@ vi.mock('../api/actions', () => ({
   deleteBoardPost: vi.fn(),
 }))
 
-// memory-state re-exports from store; Vitest needs this mock so the
-// component's transitive import resolves to the mocked signals above.
 vi.mock('./memory-state', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('./memory-state')
   const store = await vi.importMock<typeof import('../store')>('../store')
@@ -50,6 +48,80 @@ vi.mock('./memory-state', async () => {
   }
 })
 
+function makePost(overrides: Partial<BoardPost> & { id: string; title: string; author: string }): BoardPost {
+  return {
+    body: '',
+    content: '',
+    meta: null,
+    tags: [],
+    votes: 0,
+    vote_balance: 0,
+    comment_count: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    post_kind: 'automation',
+    hearth: null,
+    visibility: 'internal',
+    expires_at: null,
+    hearth_count: 0,
+    ...overrides,
+  } as BoardPost
+}
+
+// ── Content category classifier tests ─────────────────────────────
+describe('contentCategory', () => {
+  it('classifies tech exploration titles as article', () => {
+    const post = makePost({ id: '1', title: '기술 탐색: GraphRAG', author: 'ani1999', body: 'long content...' })
+    expect(contentCategory(post)).toBe('article')
+  })
+
+  it('classifies verdict titles as review', () => {
+    const post = makePost({ id: '2', title: 'Verdict: 7건 일괄 판정', author: 'verdict', body: 'details' })
+    expect(contentCategory(post)).toBe('review')
+  })
+
+  it('classifies PR review titles as review', () => {
+    const post = makePost({ id: '3', title: 'PR 리뷰: #7106 refactor', author: 'sojin', body: 'review content' })
+    expect(contentCategory(post)).toBe('review')
+  })
+
+  it('classifies alert titles as notice', () => {
+    const post = makePost({ id: '4', title: 'PR/Task 불균형 경고', author: 'poe', body: 'alert details' })
+    expect(contentCategory(post)).toBe('notice')
+  })
+
+  it('classifies status update titles as notice', () => {
+    const post = makePost({ id: '5', title: 'Sprint 상태 업데이트 #3', author: 'poe', body: 'status info' })
+    expect(contentCategory(post)).toBe('notice')
+  })
+
+  it('classifies system post_kind as system', () => {
+    const post = makePost({ id: '6', title: 'Internal ops', author: 'ecosystem', post_kind: 'system', body: 'ops' })
+    expect(contentCategory(post)).toBe('system')
+  })
+
+  it('falls back to article for long body without title signals', () => {
+    const post = makePost({ id: '7', title: 'Some random title', author: 'keeper', body: 'x'.repeat(400) })
+    expect(contentCategory(post)).toBe('article')
+  })
+
+  it('falls back to notice for short body from non-direct author', () => {
+    const post = makePost({ id: '8', title: 'Short note', author: 'keeper', body: 'brief' })
+    expect(contentCategory(post)).toBe('notice')
+  })
+
+  it('classifies issue triage as review', () => {
+    const post = makePost({ id: '9', title: 'Open Issue 20건 — Assignee 제안', author: 'sojin', body: 'proposals' })
+    expect(contentCategory(post)).toBe('review')
+  })
+
+  it('classifies needs-evidence as review', () => {
+    const post = makePost({ id: '10', title: 'Verdict: #7112 needs-evidence', author: 'verdict', body: 'details' })
+    expect(contentCategory(post)).toBe('review')
+  })
+})
+
+// ── Memory component rendering tests ──────────────────────────────
 describe('Memory Component', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -58,6 +130,7 @@ describe('Memory Component', () => {
     boardSortMode.value = 'recent'
     boardExcludeSystem.value = true
     boardExcludeAutomation.value = false
+    boardHiddenCategories.value = new Set(['system'])
     boardAuthorFilter.value = ''
     route.value = { params: {} } as any
   })
@@ -72,62 +145,31 @@ describe('Memory Component', () => {
     render(h(Memory, null))
     expect(screen.getByText(/메모리 피드 불러오는 중/)).toBeInTheDocument()
   })
-  
-  it('renders a list of direct posts', () => {
+
+  it('renders article category for a tech exploration post', () => {
     boardPosts.value = [
-      {
+      makePost({
         id: 'post-1',
-        title: 'Test Post',
-        body: 'Hello world',
-        author: 'direct-agent',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        comment_count: 0,
-        votes: 0,
-        post_kind: 'direct',
-      }
-    ] as any
+        title: '기술 탐색: test topic',
+        body: 'exploration content here',
+        author: 'ani1999',
+      }),
+    ]
     render(h(Memory, null))
-    expect(screen.getByText('Test Post')).toBeInTheDocument()
-    expect(screen.getByText(/현재 목록은 직접 작성 글만 있어서/)).toBeInTheDocument()
-    expect(screen.getByText(/직접 작성 글 \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText(/기술 탐색: test topic/)).toBeInTheDocument()
   })
 
-  it('separates automation posts into the autonomy section', () => {
+  it('hides system posts by default', () => {
     boardPosts.value = [
-      {
-        id: 'post-automation',
-        title: 'Automation Post',
-        body: 'noise',
-        author: 'dm-keeper',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        comment_count: 0,
-        votes: 0,
-        post_kind: 'automation',
-      },
-    ] as any
-    render(h(Memory, null))
-    expect(screen.getByText(/자동화 글 \(1\)/)).toBeInTheDocument()
-    expect(screen.getByText('Automation Post')).toBeInTheDocument()
-  })
-
-  it('hides system posts by default and reports the hidden count', () => {
-    boardPosts.value = [
-      {
+      makePost({
         id: 'post-system',
         title: 'System Post',
         body: 'ops',
         author: 'keeper-alert-bot',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        comment_count: 0,
-        votes: 0,
         post_kind: 'system',
-      },
-    ] as any
+      }),
+    ]
     render(h(Memory, null))
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
-    expect(screen.getByText(/시스템 0/)).toBeInTheDocument()
   })
 })

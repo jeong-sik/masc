@@ -901,6 +901,7 @@ let keeper_config_json (config : Room.config) (name : string)
           ~thompson_beta:stats.beta
           ~tool_count
           ~recovery_floor_count
+          ()
       in
       let tools_access =
         let allowed = Keeper_exec_tools.keeper_allowed_tool_names m in

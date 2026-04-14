@@ -54,13 +54,23 @@ val ring_capacity : unit -> int
 
 (** Generate a Mermaid stateDiagram-v2 for the Decision Pipeline.
     Shows the Guard→Thompson→ToolPolicy feedback loop with current
-    phase highlighted and Thompson score annotated. *)
+    phase highlighted and Thompson score annotated.
+
+    Optional parameters surface per-cycle Decision Pipeline state from
+    [KeeperDecisionPipeline.tla] (state variables: guard_penalties_this_cycle,
+    tool_policy selection, turn_outcome). When omitted, the note block
+    shows "n/a" for the missing field — callers can adopt the new
+    parameters incrementally without breaking the render. *)
 val decision_pipeline_to_mermaid :
+  ?guard_penalty_this_cycle:int ->
+  ?tool_policy_mode:[`Preset of string | `Custom] ->
+  ?turn_outcome:[`Ok | `Failed | `Blocked] ->
   phase:Keeper_state_machine.phase ->
   thompson_alpha:float ->
   thompson_beta:float ->
   tool_count:int ->
   recovery_floor_count:int ->
+  unit ->
   string
 
 (** Provider health surfaced in the Cascade FSM render.

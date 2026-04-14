@@ -210,7 +210,7 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
       Dated_jsonl.read_range store ~since:s ~until:u
   in
   (* Separate verdicts and labels *)
-  let verdicts : Yojson.Safe.t StringMap.t, labels : Yojson.Safe.t StringMap.t =
+  let (verdicts, labels) : Yojson.Safe.t StringMap.t * Yojson.Safe.t StringMap.t =
     List.fold_left (fun (vs, ls) json ->
       let rt = string_field json "record_type" in
       let hash = string_field json "notes_hash" in
@@ -351,22 +351,22 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       (StringMap.find_opt (Anti_rationalization.gate_to_string Fallback) gate_counts)
   in
   let cross_model_rate =
-    if !verdicts_with_generator = 0 then 0.0
-    else float_of_int !cross_model_match /. float_of_int !verdicts_with_generator
+    if verdicts_with_generator = 0 then 0.0
+    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
   in
   `Assoc [
-    ("total_verdicts", `Int !total_verdicts);
-    ("approve_count", `Int !approve_count);
-    ("reject_count", `Int !reject_count);
+    ("total_verdicts", `Int total_verdicts);
+    ("approve_count", `Int approve_count);
+    ("reject_count", `Int reject_count);
     ("gate_distribution", `Assoc gate_json);
     ("labeled_count", `Int labeled_total);
-    ("false_positive_count", `Int !false_pos);
-    ("false_negative_count", `Int !false_neg);
+    ("false_positive_count", `Int false_pos);
+    ("false_negative_count", `Int false_neg);
     ("agreement_rate", `Float agreement_rate);
     ("fallback_count", `Int fallback_count);
-    ("verdicts_with_generator_cascade", `Int !verdicts_with_generator);
-    ("cross_model_match_count", `Int !cross_model_match);
+    ("verdicts_with_generator_cascade", `Int verdicts_with_generator);
+    ("cross_model_match_count", `Int cross_model_match);
     ("cross_model_rate", `Float cross_model_rate);
     ("recent_fallback_reasons",
-     `List (List.rev_map (fun s -> `String s) !recent_fallback_reasons));
+     `List (List.rev_map (fun s -> `String s) recent_fallback_reasons));
   ]

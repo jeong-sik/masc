@@ -39,6 +39,7 @@ import {
   type TaskHistoryRow,
 } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
+import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { trimText } from '../lib/truncate'
 import type { Task } from '../types'
 import { DialogOverlay } from './common/dialog'
@@ -150,7 +151,16 @@ export function AgentDetailOverlay() {
               ? html`
                   <div class="mt-1 flex gap-3 flex-wrap text-text-muted text-[13px] font-medium">
                     ${keeper
-                      ? html`<span class="flex items-center gap-1.5">연결된 키퍼: <strong class="text-text-strong">${keeper.name}</strong>${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}</span>`
+                      ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
+                          <button
+                            type="button"
+                            class="text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded"
+                            onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
+                            title="키퍼 상세 페이지 열기"
+                          >${keeper.name}</button>
+                          <${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />
+                          ${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}
+                        </span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
                     ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded-md border border-accent/10">${continuitySummary}</span>` : null}

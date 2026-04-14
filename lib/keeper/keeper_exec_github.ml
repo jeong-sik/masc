@@ -1,35 +1,8 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(** Resolve the keeper-scoped gh config directory.
-
-    Location: [$base_path/.masc/gh-auth/]
-
-    When this directory exists, keeper [gh] invocations set
-    [GH_CONFIG_DIR] to it, isolating keeper identity from the operator's
-    personal [~/.config/gh] credentials. A typical setup stores an
-    [anyang-keepers] PAT here via:
-
-    {[
-      GH_CONFIG_DIR="$base_path/.masc/gh-auth" gh auth login --hostname github.com
-    ]}
-
-    Falls back to the operator's default gh config when the directory
-    is absent, so the feature is opt-in and backwards compatible. *)
-let keeper_gh_config_dir (config : Room.config) : string option =
-  let dir =
-    Filename.concat config.Room_utils.base_path ".masc/gh-auth"
-  in
-  if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
-
-(** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
-    keeper-scoped config exists. The env var is scoped to the single
-    subprocess invocation — the operator's terminal is unaffected. *)
-let with_keeper_gh_env (config : Room.config) (gh_cmd : string) : string =
-  match keeper_gh_config_dir config with
-  | None -> gh_cmd
-  | Some dir ->
-    Printf.sprintf "GH_CONFIG_DIR=%s %s" (Filename.quote dir) gh_cmd
+(* GH credential isolation — SSOT in Keeper_gh_env. *)
+let with_keeper_gh_env = Keeper_gh_env.with_env
 
 (** Pre-compiled regex for gh CLI "not found" error messages.
     Matches case-insensitively against multiple known error phrases

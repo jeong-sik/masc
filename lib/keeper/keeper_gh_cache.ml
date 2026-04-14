@@ -17,14 +17,29 @@ type cache_entry = {
           caching the failure forever. *)
 }
 
-(** TTL keeps entries fresh enough to pick up new PRs within ~2 minutes,
-    while avoiding per-call subprocess overhead for repeated validations. *)
+(* ------------------------------------------------------------------ *)
+(* Tuning constants — SSOT for keeper_gh_cache behavior.               *)
+(* If these need to vary at runtime, migrate to                        *)
+(* Keeper_tool_policy_config.t ([gh_cache] section in tool_policy.toml)*)
+(* following the pr_create_timeout_sec pattern.                        *)
+(* ------------------------------------------------------------------ *)
+
+(** Time-to-live for cached PR/issue number lists.
+    120 s keeps entries fresh enough that newly-created PRs appear within
+    ~2 minutes, while avoiding a subprocess per validation call. *)
 let cache_ttl_sec = 120.0
 
-(** Page size for the REST list call. Matches the default keeper repo
-    working set; large repos (>100 open PRs) will fall back to [`Unknown]
-    for older numbers, which is safer than a hard rejection. *)
+(** Page size for the [gh api repos/.../pulls|issues?per_page=N] REST
+    call. Repos with >100 open PRs will miss older numbers — those
+    fall to [`Unknown] (fail-open), which is safer than a hard rejection. *)
 let fetch_page_size = 100
+
+(** Subprocess timeout for the [gh api] fetch call.
+    Must be long enough for a cold gh-cli invocation behind a network
+    proxy, short enough that a stalled gh process doesn't block keeper
+    turns. 10 s matches the preflight-check timeout in
+    Keeper_exec_preflight. *)
+let fetch_timeout_sec = 10.0
 
 let kind_path = function PR -> "pulls" | Issue -> "issues"
 
@@ -41,20 +56,7 @@ let counter_misses = Atomic.make 0
 let counter_bypasses = Atomic.make 0
 let counter_fetch_errors = Atomic.make 0
 
-(* ------------------------------------------------------------------ *)
-(* gh config dir detection -- duplicated from Keeper_exec_github to keep
-   this module self-contained (no upward dependency). *)
-(* ------------------------------------------------------------------ *)
-
-let keeper_gh_config_dir (config : Room.config) : string option =
-  let dir = Filename.concat config.Room_utils.base_path ".masc/gh-auth" in
-  if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
-
-let with_keeper_gh_env (config : Room.config) (gh_cmd : string) : string =
-  match keeper_gh_config_dir config with
-  | None -> gh_cmd
-  | Some dir ->
-    Printf.sprintf "GH_CONFIG_DIR=%s %s" (Filename.quote dir) gh_cmd
+(* GH credential isolation — SSOT in Keeper_exec_shared. *)
 
 (* ------------------------------------------------------------------ *)
 (* REST-based number fetch. qa-king observed that [gh pr view] via
@@ -94,11 +96,11 @@ let fetch_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_
       (Filename.quote endpoint)
       (Filename.quote (jq_filter kind))
   in
-  let scoped = with_keeper_gh_env config raw in
+  let scoped = Keeper_gh_env.with_env config raw in
   let shell = Printf.sprintf "%s 2>/dev/null" scoped in
   match
     Process_eio.run_argv_with_status
-      ~timeout_sec:10.0
+      ~timeout_sec:fetch_timeout_sec
       [ "/bin/zsh"; "-lc"; shell ]
   with
   | Unix.WEXITED 0, out -> Some (parse_numbers_from_jq_output out)

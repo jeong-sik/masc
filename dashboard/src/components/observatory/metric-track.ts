@@ -1,12 +1,14 @@
-// Observatory Metric Track (RFC-MASC-006 Phase 2a+2b)
+// Observatory Metric Track (RFC-MASC-006 Phase 2a+2b+3a)
 // Renders tool call success rate over time as an SVG line on shared time axis.
 // Phase 2b: mousemove updates cursor-store, CursorLine renders across track.
+// Phase 3a: z-score anomaly detection, red overlay on outlier data points.
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { ToolQualityHourlyPoint } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
+import { detectAnomalies } from './anomaly-utils'
 
 interface Props {
   points: ToolQualityHourlyPoint[]
@@ -34,6 +36,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
   const viewBoxWidth = 1000
   const viewBoxHeight = 60
 
+  const anomalyResults = detectAnomalies(windowed)
+
   const polyline = windowed
     .map(({ point, ts }) => {
       const x = ((ts - windowStart) / span) * viewBoxWidth
@@ -42,6 +46,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
     })
     .join(' ')
 
+  const anomalyCount = anomalyResults.filter(r => r.isAnomaly).length
   const lastRate = windowed[windowed.length - 1]?.point.success_rate ?? null
   const lastRateColor =
     lastRate == null ? 'text-text-dim'
@@ -58,6 +63,9 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
             ${lastRate.toFixed(1)}%
           </div>
         ` : html`<div class="text-[10px] text-text-dim">데이터 없음</div>`}
+        ${anomalyCount > 0 ? html`
+          <div class="text-[9px] font-mono text-red-400">${anomalyCount} anomaly</div>
+        ` : null}
       </div>
       <div
         ref=${trackRef}
@@ -77,6 +85,22 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
             preserveAspectRatio="none"
             class="absolute inset-0 w-full h-full"
           >
+            ${anomalyResults.filter(r => r.isAnomaly).map((r, i) => {
+              const x = ((r.ts - windowStart) / span) * viewBoxWidth
+              const halfW = viewBoxWidth / Math.max(windowed.length, 1) * 0.5
+              return html`
+                <rect
+                  x="${(x - halfW).toFixed(1)}"
+                  y="0"
+                  width="${(halfW * 2).toFixed(1)}"
+                  height="${viewBoxHeight}"
+                  fill="${r.zScore < 0 ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.10)'}"
+                  key=${`anomaly-${i}`}
+                >
+                  <title>z=${r.zScore.toFixed(2)} · ${r.point.success_rate.toFixed(1)}%</title>
+                </rect>
+              `
+            })}
             <line x1="0" y1="${viewBoxHeight * 0.03}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.03}" stroke="currentColor" stroke-dasharray="2 4" class="text-emerald-500/30" stroke-width="0.5" />
             <line x1="0" y1="${viewBoxHeight * 0.1}" x2="${viewBoxWidth}" y2="${viewBoxHeight * 0.1}" stroke="currentColor" stroke-dasharray="2 4" class="text-amber-500/30" stroke-width="0.5" />
             <polyline
@@ -87,18 +111,20 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
               class="text-accent"
               vector-effect="non-scaling-stroke"
             />
-            ${windowed.map(({ point, ts }) => {
-              const x = ((ts - windowStart) / span) * viewBoxWidth
-              const y = viewBoxHeight - (point.success_rate / 100) * viewBoxHeight
+            ${anomalyResults.map((r) => {
+              const x = ((r.ts - windowStart) / span) * viewBoxWidth
+              const y = viewBoxHeight - (r.point.success_rate / 100) * viewBoxHeight
               return html`
                 <circle
                   cx="${x.toFixed(1)}"
                   cy="${y.toFixed(1)}"
-                  r="1.5"
+                  r=${r.isAnomaly ? '3' : '1.5'}
                   fill="currentColor"
-                  class="text-accent"
+                  class=${r.isAnomaly ? (r.zScore < 0 ? 'text-red-400' : 'text-amber-400') : 'text-accent'}
+                  stroke=${r.isAnomaly ? 'currentColor' : 'none'}
+                  stroke-width=${r.isAnomaly ? '0.5' : '0'}
                 >
-                  <title>${point.hour} · ${point.success_rate.toFixed(1)}% (${point.calls} calls)</title>
+                  <title>${r.point.hour} · ${r.point.success_rate.toFixed(1)}% (${r.point.calls} calls)${r.isAnomaly ? ` · z=${r.zScore.toFixed(2)}` : ''}</title>
                 </circle>
               `
             })}

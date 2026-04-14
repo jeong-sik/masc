@@ -185,6 +185,13 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      If you call tools, BDI headers are optional and informational only. \
      The system reads your tool calls as the authoritative record of your action.\n\
      \n\
+     If you explicitly claim completion or progress in text, add these optional headers:\n\
+     CLAIM_KIND: completion_claim\n\
+     CLAIM_SUBJECT: short concrete subject or task title\n\
+     CLAIM_TASK_ID: task-123 (if applicable)\n\
+     EVIDENCE_REFS: task:task-123, tool:keeper_task_done\n\
+     Only emit them for concrete claims you expect the system to audit.\n\
+     \n\
      End every response with a [STATE]...[/STATE] block:\n\
      DONE: what you accomplished this cycle\n\
      NEXT: what the next cycle should do\n\

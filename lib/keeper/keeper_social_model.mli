@@ -33,8 +33,16 @@ type social_state = {
   delivery_surface : delivery_surface;
 }
 
+type accountability_claim = {
+  subject : string;
+  task_id : string option;
+  evidence_refs : string list;
+}
+
 val speech_act_to_string : speech_act -> string
 val delivery_surface_to_string : delivery_surface -> string
+val extract_accountability_claim :
+  Keeper_agent_run.run_result -> accountability_claim option
 
 val derive_failure_state :
   meta:Keeper_types.keeper_meta ->

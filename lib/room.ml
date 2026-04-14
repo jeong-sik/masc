@@ -149,6 +149,10 @@ let observe_task_transition_event config ~agent_name ~task_id
           Telemetry_eio.track_task_completed config ~task_id ~duration_ms
             ~success:(String.equal transition "done")
       | _ -> ()
+  with Stdlib.Effect.Unhandled _ -> ());
+  (try
+     Keeper_accountability.record_task_transition config ~agent_name ~task_id
+       ~transition ~details
   with Stdlib.Effect.Unhandled _ -> ())
 
 (* force_release_task — zombie cleanup needs task management logic *)

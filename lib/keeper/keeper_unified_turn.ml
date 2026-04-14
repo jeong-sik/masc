@@ -465,6 +465,46 @@ let validated_evidence_preview
       Printf.sprintf "(validated evidence: %s)"
         (String.concat ", " names)
 
+let accountability_evidence_refs
+    ~(trace_id : string)
+    ~(turn_number : int)
+    ~(result : Keeper_agent_run.run_result)
+    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option)
+    ~(turn_evidence : Yojson.Safe.t option) =
+  let tool_refs =
+    result.tools_used
+    |> List.filter_map (fun tool_name ->
+           let trimmed = String.trim tool_name in
+           if trimmed = "" || String.equal trimmed "keeper_stay_silent" then None
+           else Some ("tool:" ^ trimmed))
+  in
+  let validation_refs =
+    match validated_evidence with
+    | Some validation ->
+        let base =
+          validation.evidence
+          |> List.map String.trim
+          |> List.filter (fun entry -> entry <> "")
+          |> List.map (fun entry -> "validation:" ^ entry)
+        in
+        if validation.has_file_write then
+          "validation:file_write" :: base
+        else
+          base
+    | None -> []
+  in
+  let turn_refs =
+    let base = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in
+    match turn_evidence with
+    | Some (`Assoc fields) -> (
+        match List.assoc_opt "after_hash" fields with
+        | Some (`String hash) when String.trim hash <> "" ->
+            ("git:" ^ String.trim hash) :: base
+        | _ -> base)
+    | _ -> base
+  in
+  tool_refs @ validation_refs @ turn_refs
+
 let scheduled_autonomous_outcome_for_result
     (result : Keeper_agent_run.run_result) :
     scheduled_autonomous_cycle_outcome =
@@ -1826,6 +1866,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           end;
           Error err
       | Ok result ->
+          let explicit_accountability_claim =
+            Social.extract_accountability_claim result
+          in
           let result, social_state =
             Social.apply_to_result ~meta ~observation result
           in
@@ -1974,20 +2017,59 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             ~social_state
             ~result:(Some result) ();
           (* Post-turn evidence: deterministic git before/after delta *)
-          (try
-            ignore (Keeper_evidence.capture_turn_evidence
-              ~base_path:config.base_path
-              ~keeper_name:meta.name
-              ~trace_id:(Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id)
-              ~turn_number:updated_meta.runtime.usage.total_turns
-              ~tool_calls_made:result.tool_calls_made
-              ~before_hash:evidence_before_hash
-              ())
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Keeper.warn "post-turn evidence capture failed (unified): %s"
-              (Printexc.to_string exn));
+          let turn_evidence =
+            try
+              Keeper_evidence.capture_turn_evidence
+                ~base_path:config.base_path
+                ~keeper_name:meta.name
+                ~trace_id:(Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id)
+                ~turn_number:updated_meta.runtime.usage.total_turns
+                ~tool_calls_made:result.tool_calls_made
+                ~before_hash:evidence_before_hash
+                ()
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Keeper.warn "post-turn evidence capture failed (unified): %s"
+                  (Printexc.to_string exn);
+                None
+          in
+          (match explicit_accountability_claim with
+          | Some claim ->
+              let trace_id =
+                Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
+              in
+              let validated_evidence = visible_run_validation result in
+              let strong_evidence =
+                has_substantive_tool_calls result.tools_used
+                || Option.is_some validated_evidence
+                ||
+                match turn_evidence with
+                | Some (`Assoc fields) -> (
+                    match List.assoc_opt "delta_detected" fields with
+                    | Some (`Bool true) -> true
+                    | _ -> false)
+                | _ -> false
+              in
+              Keeper_accountability.record_completion_claim config
+                ~keeper_name:updated_meta.name
+                ~agent_name:updated_meta.agent_name
+                ~trace_id
+                ~turn_number:updated_meta.runtime.usage.total_turns
+                ~subject:claim.subject
+                ?task_id:claim.task_id
+                ~evidence_refs:claim.evidence_refs
+                ~surface:(Social.delivery_surface_to_string social_state.delivery_surface)
+                ~strong_evidence
+                ~strong_evidence_refs:
+                  (accountability_evidence_refs
+                     ~trace_id
+                     ~turn_number:updated_meta.runtime.usage.total_turns
+                     ~result
+                     ~validated_evidence
+                     ~turn_evidence)
+                ()
+          | None -> ());
           Log.Keeper.info
             "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
             updated_meta.name (Keeper_agent_run.surface_model_used result)

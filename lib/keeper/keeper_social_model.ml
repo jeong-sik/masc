@@ -31,6 +31,12 @@ type social_state = {
   delivery_surface : delivery_surface;
 }
 
+type accountability_claim = {
+  subject : string;
+  task_id : string option;
+  evidence_refs : string list;
+}
+
 let speech_act_to_string = function
   | Stay_silent -> "stay_silent"
   | Inform -> "inform"
@@ -88,6 +94,10 @@ let is_social_header_key = function
   | "CURRENT_INTENTION"
   | "BLOCKER"
   | "NEED"
+  | "CLAIM_KIND"
+  | "CLAIM_SUBJECT"
+  | "CLAIM_TASK_ID"
+  | "EVIDENCE_REFS"
   | "SPEECH_ACT"
   | "DELIVERY_SURFACE" ->
       true
@@ -118,6 +128,16 @@ let nonempty_header_opt headers key =
       | "" | "none" | "null" -> None
       | _ -> Some (String.trim value))
   | None -> None
+
+let comma_list_header_opt headers key =
+  match nonempty_header_opt headers key with
+  | Some value ->
+      value
+      |> String.split_on_char ','
+      |> List.map String.trim
+      |> List.filter (fun item -> item <> "")
+      |> List.sort_uniq String.compare
+  | None -> []
 
 let belief_summary_of_observation
     (observation : Keeper_world_observation.world_observation) : string =
@@ -385,6 +405,23 @@ let apply_to_result ~(meta : keeper_meta)
         | Error _ -> visible_response_body
       in
       ({ result with response_text }, state)
+
+let extract_accountability_claim (result : Keeper_agent_run.run_result) =
+  let headers, _ = parse_header_block result.response_text in
+  match
+    nonempty_header_opt headers "CLAIM_KIND",
+    nonempty_header_opt headers "CLAIM_SUBJECT"
+  with
+  | Some kind, Some subject
+    when String.equal (String.lowercase_ascii (String.trim kind))
+           "completion_claim" ->
+      Some
+        {
+          subject = String.trim subject;
+          task_id = nonempty_header_opt headers "CLAIM_TASK_ID";
+          evidence_refs = comma_list_header_opt headers "EVIDENCE_REFS";
+        }
+  | _ -> None
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)

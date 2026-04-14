@@ -120,6 +120,16 @@ let handle_keeper_task_tool
         Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
     in
     let result = Room.claim_next_r config ~agent_name:meta.agent_name ~task_filter () in
+    let accountability_warning =
+      if
+        Keeper_accountability.accountability_risk_is_high config
+          ~keeper_name:meta.name ~agent_name:meta.agent_name
+      then
+        Some
+          "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
+      else
+        None
+    in
     let message = match result with
       | Room.Claim_next_claimed { message; _ } -> message
       | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
@@ -129,7 +139,15 @@ let handle_keeper_task_tool
       | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
     in
-    Yojson.Safe.to_string (`Assoc [ "result", `String message ])
+    Yojson.Safe.to_string
+      (`Assoc
+         ([
+            ("result", `String message);
+          ]
+         @
+         match accountability_warning with
+         | Some warning -> [ ("routing_warning", `String warning) ]
+         | None -> []))
   | "keeper_task_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
@@ -145,4 +163,3 @@ let handle_keeper_task_tool
            ())
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;
-

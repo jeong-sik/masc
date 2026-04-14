@@ -356,6 +356,22 @@ let handle_keeper_github
          Log.Keeper.warn
            "keeper_github hallucination-gate: %s #%d not in %s (keeper=%s)"
            kind_label number slug meta.name;
+         (* The reason field is the first thing the LLM reads. Put the
+            valid numbers DIRECTLY in the reason — don't rely on the LLM
+            parsing a separate JSON array field. Also clarify that the
+            REPO is correct, only the NUMBER is wrong. Without this,
+            nick0cave interpreted "does not exist in jeong-sik/masc-mcp"
+            as a repo-access failure and abandoned the task.
+            Ref: #7176 *)
+         let sub_label =
+           match kind with Keeper_gh_cache.PR -> "pr" | Issue -> "issue"
+         in
+         let suggested =
+           match shown with
+           | recent :: _ ->
+             Printf.sprintf "gh %s view %d" sub_label recent
+           | [] -> Printf.sprintf "gh %s list --state open" sub_label
+         in
          Yojson.Safe.to_string
            (`Assoc
                [ "ok", `Bool false
@@ -363,18 +379,17 @@ let handle_keeper_github
                ; ( "reason"
                  , `String
                      (Printf.sprintf
-                        "%s #%d does not exist in %s."
-                        kind_label number slug) )
+                        "WRONG NUMBER (not a repo problem). \
+                         %s #%d does not exist. \
+                         The repo %s is correct. \
+                         Pick from these valid %s numbers: [%s]."
+                        kind_label number slug kind_label valid_str) )
                ; "valid_numbers", `List (List.map (fun n -> `Int n) shown)
+               ; "suggested_command", `String suggested
                ; ( "hint"
                  , `String
                      (Printf.sprintf
-                        "Valid %s numbers in %s: [%s]. \
-                         Use one of these instead. \
-                         Do not guess. If you need a number not in this \
-                         list, run '%s list' first to refresh."
-                        kind_label slug valid_str
-                        (match kind with PR -> "pr" | Issue -> "issue")) )
+                        "Try: %s" suggested) )
                ; "cmd", `String ("gh " ^ gh_raw)
                ])
        | None ->

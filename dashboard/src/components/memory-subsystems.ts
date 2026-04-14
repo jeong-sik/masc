@@ -57,8 +57,51 @@ const shortAgentLabel = (name: string) => {
   return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed
 }
 
-const weightColor = (w: number) =>
-  w >= 0.7 ? '#10b981' : w >= 0.4 ? '#f59e0b' : '#f87171'
+// --- Hebbian visualization constants (SSOT) ---------------------------------
+// Arbitrary values — see #7094 for rationale and tuning guidance.
+
+// Weight ramp: single definition drives color, Tailwind bar class, and legend.
+// Sorted descending so the first match wins. Add/remove tiers here and the
+// entire file follows.
+const WEIGHT_RAMP: ReadonlyArray<{
+  floor: number
+  svg: string
+  tw: string
+  label: string
+}> = [
+  { floor: 0.7, svg: '#10b981', tw: 'bg-emerald-500', label: '70%+' },
+  { floor: 0.4, svg: '#f59e0b', tw: 'bg-amber-500', label: '40%+' },
+  { floor: 0,   svg: '#f87171', tw: 'bg-red-400',    label: '<40%' },
+]
+
+const LEGEND_STOPS = [1.0, 0.75, 0.5, 0.25, 0.05] as const
+
+// Responsive matrix cell sizes. Arbitrary breakpoints to prevent label
+// collisions at common agent counts.
+const CELL_SIZE_BREAKPOINTS: ReadonlyArray<{ maxAgents: number; cell: number }> = [
+  { maxAgents: 8, cell: 32 },
+  { maxAgents: 12, cell: 26 },
+  { maxAgents: Infinity, cell: 22 },
+]
+
+const TOP_LINK_COUNT = 5
+
+const SPARKLINE = { width: 80, height: 16, strokeWidth: 1.25 } as const
+
+// Must be well under the typical strengthen/weaken step (~0.1) so one learning
+// event produces a decisive color while sub-threshold drift stays neutral.
+const TREND_DEAD_ZONE = 0.02
+
+// --- Derived helpers --------------------------------------------------------
+
+// Last entry is the catch-all (floor: 0).
+const WEIGHT_RAMP_FALLBACK = WEIGHT_RAMP[WEIGHT_RAMP.length - 1]!
+
+const weightTier = (w: number): typeof WEIGHT_RAMP_FALLBACK =>
+  WEIGHT_RAMP.find(t => w >= t.floor) ?? WEIGHT_RAMP_FALLBACK
+
+const weightColor = (w: number) => weightTier(w).svg
+const weightBarClass = (w: number) => weightTier(w).tw
 
 // √ compresses the high end so differences near 0 remain visible.
 // Floor 0.25 keeps low-weight cells distinguishable from empty (undefined)
@@ -87,7 +130,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   synapses.forEach(s => cellMap.set(`${s.from_agent}|${s.to_agent}`, s))
 
   const n = agents.length
-  const cell = n <= 8 ? 32 : n <= 12 ? 26 : 22
+  const cell = (CELL_SIZE_BREAKPOINTS.find(b => n <= b.maxAgents) ?? CELL_SIZE_BREAKPOINTS[CELL_SIZE_BREAKPOINTS.length - 1]!).cell
   const leftPad = 120
   const topPad = 96
   const legendW = 70
@@ -170,7 +213,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
 
         <g transform="translate(${leftPad + n * cell + 16}, ${topPad})">
           <text x="0" y="-8" font-size="9" fill="#94a3b8">weight</text>
-          ${[1.0, 0.75, 0.5, 0.25, 0.05].map(
+          ${LEGEND_STOPS.map(
             (v, i) => html`
               <g>
                 <rect
@@ -207,46 +250,42 @@ function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
     return html`<span class="text-zinc-700 text-[10px] w-20 text-center">—</span>`
   }
   const chronological = [...history].reverse()
-  const w = 80
-  const h = 16
+  const { width: sw, height: sh, strokeWidth } = SPARKLINE
   const n = chronological.length
   const points = chronological
     .map(([, weight], i) => {
-      const x = (i / (n - 1)) * (w - 2) + 1
-      const y = h - 1 - Math.max(0, Math.min(1, weight)) * (h - 2)
+      const x = (i / (n - 1)) * (sw - 2) + 1
+      const y = sh - 1 - Math.max(0, Math.min(1, weight)) * (sh - 2)
       return `${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')
   const first = chronological[0]?.[1] ?? 0
   const last = chronological[n - 1]?.[1] ?? 0
-  // 0.02 is arbitrary — well under the typical strengthen/weaken step (~0.1
-  // at time of writing), so one learning event produces a decisive color
-  // while sub-threshold drift stays neutral. Not derived from a perceptual law.
-  const trendColor = last > first + 0.02 ? '#10b981' : last < first - 0.02 ? '#f87171' : '#94a3b8'
+  const trendColor =
+    last > first + TREND_DEAD_ZONE ? '#10b981' :
+    last < first - TREND_DEAD_ZONE ? '#f87171' : '#94a3b8'
   return html`
     <svg
-      viewBox="0 0 ${w} ${h}"
-      width=${w}
-      height=${h}
+      viewBox="0 0 ${sw} ${sh}"
+      width=${sw}
+      height=${sh}
       class="shrink-0"
       aria-label=${`weight trend: ${n} points`}
     >
-      <polyline fill="none" stroke=${trendColor} stroke-width="1.25" points=${points} />
+      <polyline fill="none" stroke=${trendColor} stroke-width=${strokeWidth} points=${points} />
     </svg>
   `
 }
 
 function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   if (synapses.length === 0) return null
-  const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, 5)
+  const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, TOP_LINK_COUNT)
   return html`
     <div class="bg-zinc-900 rounded-lg p-3 mt-3">
-      <div class="text-xs text-zinc-500 mb-2">강한 연결 Top 5 · sparkline = 학습 궤적</div>
+      <div class="text-xs text-zinc-500 mb-2">강한 연결 Top ${TOP_LINK_COUNT} · sparkline = 학습 궤적</div>
       <div class="space-y-1.5">
         ${top.map(s => {
           const pct = Math.round(s.weight * 100)
-          const barColor =
-            pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-400'
           return html`
             <div class="flex items-center gap-2 text-xs font-mono">
               <button
@@ -259,7 +298,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
                 onClick=${() => openAgentDetail(s.to_agent)}
               >${shortAgentLabel(s.to_agent)}</button>
               <div class="flex-1 bg-zinc-800 rounded h-1.5 min-w-[60px]">
-                <div class="${barColor} rounded h-1.5" style="width:${pct}%"></div>
+                <div class="${weightBarClass(s.weight)} rounded h-1.5" style="width:${pct}%"></div>
               </div>
               <span class="text-zinc-300 w-10 text-right">${pct}%</span>
               <${WeightSparkline} history=${s.weight_history} />
@@ -275,8 +314,6 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
 
 function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
   const pct = Math.round(s.weight * 100)
-  const barColor =
-    pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-400'
   return html`
     <tr class="border-b border-zinc-800">
       <td class="py-1.5 px-2 text-sm font-mono">
@@ -295,7 +332,7 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
       <td class="py-1.5 px-2 text-sm text-right">
         <div class="flex items-center gap-2 justify-end">
           <div class="w-16 bg-zinc-800 rounded h-1.5">
-            <div class="${barColor} rounded h-1.5" style="width:${pct}%"></div>
+            <div class="${weightBarClass(s.weight)} rounded h-1.5" style="width:${pct}%"></div>
           </div>
           <span class="text-zinc-300 w-10 text-right">${pct}%</span>
         </div>

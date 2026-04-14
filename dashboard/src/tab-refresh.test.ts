@@ -122,3 +122,49 @@ describe('refreshPlanForRoute', () => {
     })
   })
 })
+
+// -----------------------------------------------------------------------------
+// Forward contract — consolidation Phase 1+
+//
+// Fleet Health absorbs telemetry + tool-quality + fleet + governance (monitoring).
+// The refresh pipeline must branch on the `view` query param so SSE reconnect
+// (sse-store.ts:232) and manual navigation hydrate the correct data.
+//
+// These tests are `.skip`'d until fleet-health becomes a valid SurfaceSectionId
+// and tab-refresh.ts learns the view-aware branching. Once Phase 1 lands, remove
+// `.skip` and the contract activates automatically.
+// -----------------------------------------------------------------------------
+describe.skip('refreshPlanForRoute forward contract (fleet-health)', () => {
+  it('default view hydrates both event stream and tool quality', () => {
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'fleet-health' },
+    })).toEqual(expect.arrayContaining(['toolQuality']))
+  })
+
+  it('view=event-log hydrates telemetry source data', () => {
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'event-log' },
+    })).toEqual(expect.arrayContaining(['toolQuality']))
+  })
+
+  it('view=tool-quality routes to the existing refreshToolQuality API', () => {
+    // The existing export `refreshToolQuality` from components/tool-quality-panel
+    // is the single source of truth for tool quality refresh. Phase 1 MUST reuse
+    // this API rather than introducing a duplicate fetch in fleet-health.
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'tool-quality' },
+    })).toContain('toolQuality')
+  })
+
+  it('view=comparison hydrates fleet comparison rows', () => {
+    const plan = refreshPlanForRoute({
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'comparison' },
+    })
+    // Comparison view depends on execution + tool-quality + telemetry summary.
+    expect(plan).toContain('execution')
+  })
+})

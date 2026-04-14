@@ -178,7 +178,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
         title="View tool quality"
         onClick=${(e: Event) => {
           e.stopPropagation()
-          navigate('lab', { section: 'tool-quality', tool: v })
+          navigate('monitoring', { section: 'tool-quality', tool: v })
         }}
       >${k}=${v}</button>`
     }

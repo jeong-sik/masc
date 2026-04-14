@@ -473,7 +473,7 @@ function ToolCallHealthPanel() {
 
   return html`
     <div>
-      <${HomeSectionHeader} label="도구 호출" linkLabel="품질 분석 ->" linkTab="lab" linkParams=${{ section: 'tool-quality' }} />
+      <${HomeSectionHeader} label="도구 호출" linkLabel="품질 분석 ->" linkTab="monitoring" linkParams=${{ section: 'tool-quality' }} />
       <div class="grid grid-cols-4 gap-3 max-[640px]:grid-cols-2">
         <${CompactKpi} value=${health.tool_calls.toLocaleString()} label=${`호출 (${health.window_hours}h)`} />
         <${CompactKpi} value=${successRate != null ? `${successRate.toFixed(1)}%` : '-'} valueClass=${successColor} label="성공률" />

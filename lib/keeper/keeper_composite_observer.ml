@@ -233,10 +233,15 @@ let observe
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
     kmc_compaction = compaction_stage;
-    shared_measurement = None;
-    (* Registry does not yet retain the last [Context_measured] summary;
-       the follow-up PR adds [last_auto_rules : (float * auto_rule_summary) option]
-       to [registry_entry] so observers can surface the last measurement. *)
+    shared_measurement =
+      (match entry.last_auto_rules with
+       | Some (_ts, summary) -> Some summary
+       | None -> None);
+    (* Registry retains the last [Context_measured] auto-rule summary in
+       [last_auto_rules]. The wall-clock timestamp is discarded here
+       because the snapshot's [ts] field already carries it; if callers
+       ever need the original measurement timestamp, extend the snapshot
+       type rather than widening [shared_measurement]. *)
     reconcile_data;
     reconcile_fsm;
     invariants;

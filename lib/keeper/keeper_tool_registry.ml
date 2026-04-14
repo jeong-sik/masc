@@ -55,7 +55,7 @@ let core_discovery_tools =
   core_always_tools @
   (* Coordination & awareness *)
   [ "keeper_broadcast"; "keeper_tasks_list";
-    "keeper_task_claim"; "keeper_task_done"; "keeper_tasks_audit";
+    "keeper_task_claim"; "keeper_task_done"; "keeper_task_create"; "keeper_tasks_audit";
     "keeper_memory_search"; "keeper_time_now";
     (* Filesystem: read + write (action symmetry) *)
     "keeper_fs_read"; "keeper_fs_edit";
@@ -259,7 +259,7 @@ let is_main_worktree_boundary_exempt_with_input
   if is_read_only_with_input ~tool_name ~input then true
   else
     match tool_name with
-    | "keeper_task_claim" | "keeper_task_done" | "keeper_tasks_list"
+    | "keeper_task_claim" | "keeper_task_done" | "keeper_task_create" | "keeper_tasks_list"
     | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
     | "keeper_board_list" | "keeper_board_get"
     (* Board delete and cleanup are MASC-state-only mutations (board

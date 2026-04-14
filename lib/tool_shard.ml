@@ -667,6 +667,28 @@ accomplished so other agents can verify.";
       ("required", `List [`String "task_id"]);
     ];
   };
+  {
+    name = "keeper_task_create";
+    description = "Create a new task on the MASC backlog. Use when you identify work \
+that should be done — from GitHub issues, board discussions, codebase problems, \
+or your own analysis. Provide a clear title, actionable description, and priority (1=critical, 5=low). \
+The task will appear on the backlog for any keeper to claim.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("title", `Assoc [("type", `String "string"); ("description", `String "Clear, actionable task title (REQUIRED)")]);
+        ("description", `Assoc [("type", `String "string"); ("description", `String "What needs to be done and why. Include enough context for another keeper to pick this up. (REQUIRED)")]);
+        ("priority", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "1=critical, 2=high, 3=medium (default), 4=low, 5=backlog");
+          ("minimum", `Int 1);
+          ("maximum", `Int 5);
+          ("default", `Int 3);
+        ]);
+      ]);
+      ("required", `List [`String "title"; `String "description"]);
+    ];
+  };
 ]
 
 (** Predefined shards *)

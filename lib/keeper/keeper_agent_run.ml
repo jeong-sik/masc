@@ -714,6 +714,7 @@ let run_turn
     ; "keeper_tasks_list", "태스크 목록 할일 백로그"
     ; "keeper_tasks_audit", "태스크 감사 고아 방치"
     ; "keeper_task_claim", "태스크 가져오기 할당"
+    ; "keeper_task_create", "태스크 생성 만들기 일감"
     ; "keeper_task_done", "태스크 완료 마감"
     ; "keeper_task_force_release", "태스크 강제해제 반환"
     ; "keeper_task_force_done", "태스크 강제완료"

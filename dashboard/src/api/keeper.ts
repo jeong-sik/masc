@@ -386,6 +386,51 @@ export async function fetchKeeperStateDiagram(name: string): Promise<KeeperState
   return resp.json() as Promise<KeeperStateDiagramResponse>
 }
 
+export interface KeeperCompositeInvariants {
+  phase_turn_alignment: boolean
+  no_cascade_before_measurement: boolean
+  compaction_atomicity: boolean
+  event_priority_monotone: boolean
+  recovery_two_store_sync: boolean
+}
+
+export interface KeeperCompositeMeasurement {
+  captured: boolean
+  auto_rules?: {
+    reflect: boolean
+    plan: boolean
+    compact: boolean
+    handoff: boolean
+    guardrail_stop: boolean
+    guardrail_reason: string | null
+    goal_drift: number
+  }
+}
+
+export interface KeeperCompositeSnapshot {
+  correlation_id: string
+  run_id: string
+  ts: number
+  phase: string
+  turn_phase: string
+  decision: { stage: string }
+  cascade: { state: string }
+  compaction: { stage: string }
+  measurement: KeeperCompositeMeasurement
+  recovery: { data_record: boolean; fsm_condition: boolean }
+  invariants: KeeperCompositeInvariants
+}
+
+export async function fetchKeeperComposite(name: string): Promise<KeeperCompositeSnapshot> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
+    { headers: jsonHeaders() },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
+  return resp.json() as Promise<KeeperCompositeSnapshot>
+}
+
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---
 
 export interface EvalLayerResult {

@@ -11,18 +11,19 @@ import { OasHealthChip } from './oas-health-chip'
 import { TelemetryUnified } from './telemetry-unified'
 import { GovernanceMonitor } from './governance-monitor'
 import { MemorySubsystems } from './memory-subsystems'
+import { FsmHub } from './fsm-hub'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 
-type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems' | 'metrics' | 'tool-quality' | 'fleet'
+type StatusSection = 'sessions' | 'agents' | 'activity' | 'runtime' | 'telemetry' | 'governance' | 'memory-subsystems' | 'fsm-hub' | 'metrics' | 'tool-quality' | 'fleet'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
     section === 'agents' || section === 'activity' || section === 'runtime'
     || section === 'telemetry' || section === 'governance' || section === 'memory-subsystems'
-    || section === 'metrics' || section === 'tool-quality' || section === 'fleet'
+    || section === 'fsm-hub' || section === 'metrics' || section === 'tool-quality' || section === 'fleet'
   ) return section
   return 'sessions'
 }
@@ -50,6 +51,8 @@ export function Status() {
               ? html`<${GovernanceMonitor} />`
             : section === 'memory-subsystems'
               ? html`<${MemorySubsystems} />`
+            : section === 'fsm-hub'
+              ? html`<${FsmHub} />`
             : section === 'metrics'
               ? html`<${PrometheusMetrics} />`
             : section === 'tool-quality'

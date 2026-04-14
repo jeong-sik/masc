@@ -330,7 +330,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
   return html`
     <${RouteLink}
       tab="monitoring"
-      params=${{ section: 'sessions', session_id: s.session_id }}
+      params=${{ section: 'agents', session_id: s.session_id }}
       class="rounded-xl border bg-card/55 p-4 cursor-pointer transition-[transform,background-color,border-color,box-shadow] duration-200 shadow-sm shadow-black/8 hover:shadow-md hover:bg-card hover:-translate-y-0.5 group ${hasBlocker ? 'border-bad/45' : 'border-card-border hover:border-accent/32'}"
       title=${primary}
     >
@@ -377,7 +377,7 @@ function HotSessions() {
         count=${userSessions.length}
         linkLabel="전체 보기 ->"
         linkTab="monitoring"
-        linkParams=${{ section: 'sessions' }}
+        linkParams=${{ section: 'agents' }}
       />
       ${userSessions.length > 0
         ? html`<div class="grid grid-cols-2 gap-3 max-[960px]:grid-cols-1">${userSessions.map(renderSessionCard)}</div>`

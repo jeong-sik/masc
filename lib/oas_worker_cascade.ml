@@ -366,7 +366,16 @@ let cascade_metrics_for_candidates
       on_request_end =
         (fun ~model_id ~latency_ms ->
           ensure_terminal_attempt capture ~candidate_cfgs ~model_id
-            ~latency_ms:(Some latency_ms) ~error:None);
+            ~latency_ms:(Some latency_ms) ~error:None;
+          (* Forward to Prometheus so per-model latency is visible on
+             the dashboard.  Without this, the cascade capture records
+             latency internally but never exports it — the global
+             Llm_metric_bridge sink is not consulted because this
+             per-call metrics object takes precedence. *)
+          Prometheus.observe_histogram
+            Llm_metric_bridge.request_latency_metric
+            ~labels:[("model", model_id)]
+            (Float.of_int latency_ms /. 1000.0));
       on_error =
         (fun ~model_id ~error ->
           ensure_terminal_attempt capture ~candidate_cfgs ~model_id

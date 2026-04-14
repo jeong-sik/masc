@@ -3,7 +3,7 @@
     Covers three safety layers:
     1. Eval_gate.detect_destructive — all 19 patterns + safe commands
     2. Keeper_exec_tools.keeper_allowed_tool_names — policy mode tool grants
-    3. Keeper_hooks_oas.extract_command_from_input — JSON command extraction
+    3. Keeper_guards.extract_command_from_input — JSON command extraction
 
     Closes the P1 test gap from the keeper safety audit. *)
 
@@ -242,17 +242,17 @@ let test_all_modes_produce_same_tools () =
 
 let test_extract_command_key () =
   let input = `Assoc [("command", `String "rm -rf /tmp")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "command key" "rm -rf /tmp" cmd
 
 let test_extract_cmd_key () =
   let input = `Assoc [("cmd", `String "gh pr list")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "cmd key" "gh pr list" cmd
 
 let test_extract_content_key () =
   let input = `Assoc [("content", `String "DROP TABLE foo")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "content key" "DROP TABLE foo" cmd
 
 let test_extract_priority_order () =
@@ -262,7 +262,7 @@ let test_extract_priority_order () =
     ("cmd", `String "second");
     ("content", `String "third");
   ] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "command wins" "first" cmd
 
 let test_extract_cmd_over_content () =
@@ -271,27 +271,27 @@ let test_extract_cmd_over_content () =
     ("cmd", `String "second");
     ("content", `String "third");
   ] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "cmd wins over content" "second" cmd
 
 let test_extract_no_keys () =
   let input = `Assoc [("path", `String "/tmp/file")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "no matching key" "" cmd
 
 let test_extract_null_values () =
   let input = `Assoc [("command", `Null); ("cmd", `Null); ("content", `Null)] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "all null" "" cmd
 
 let test_extract_empty_object () =
   let input = `Assoc [] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   check string "empty object" "" cmd
 
 let test_extract_non_string_command () =
   let input = `Assoc [("command", `Int 42)] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   (* Non-string "command" falls through to "cmd"/"content" *)
   check string "non-string command" "" cmd
 
@@ -312,21 +312,21 @@ let test_destructive_check_tools_membership () =
 
 let test_integration_dangerous_bash () =
   let input = `Assoc [("command", `String "rm -rf /")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   match Eval_gate.detect_destructive cmd with
   | Some (pat, _) -> check string "detected rm -rf" "rm -rf" pat
   | None -> fail "Should detect rm -rf through extract+detect pipeline"
 
 let test_integration_safe_bash () =
   let input = `Assoc [("command", `String "ls -la /tmp")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   match Eval_gate.detect_destructive cmd with
   | None -> ()
   | Some (pat, _) -> fail (Printf.sprintf "Should be safe, matched %S" pat)
 
 let test_integration_github_force_push () =
   let input = `Assoc [("cmd", `String "push --force origin main")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   (* The actual command seen by the gate would be "push --force origin main",
      but detect_destructive looks for "git push --force" which requires "git" prefix.
      The keeper_github tool prepends "gh" not "git", so this would NOT match
@@ -337,7 +337,7 @@ let test_integration_github_force_push () =
 
 let test_integration_edit_destructive_content () =
   let input = `Assoc [("content", `String "DROP TABLE production_users")] in
-  let cmd = Keeper_hooks_oas.extract_command_from_input input in
+  let cmd = Keeper_guards.extract_command_from_input input in
   match Eval_gate.detect_destructive cmd with
   | Some (pat, _) -> check string "detected drop table" "drop table" pat
   | None -> fail "Should detect DROP TABLE through content key"

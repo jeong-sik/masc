@@ -356,6 +356,7 @@
         test_grpc_client
         test_http_protocol_detect
         test_keeper_safety_gates
+        test_keeper_guards
         test_eval_gate_evasion
         test_prompt_registry_defaults
         test_keeper_recurring
@@ -504,6 +505,7 @@
         test_grpc_client
         test_http_protocol_detect
         test_keeper_safety_gates
+        test_keeper_guards
         test_eval_gate_evasion
         test_prompt_registry_defaults
         test_keeper_recurring

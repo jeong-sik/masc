@@ -13,6 +13,7 @@ module KD = Masc_mcp.Keeper_deliberation
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
+module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Oas_model_resolve
 
 let has_prompt_root path =
@@ -2476,7 +2477,7 @@ let str_contains s sub =
   with Not_found -> false
 
 let test_render_inline_skip_reason_deny () =
-  let result = HK.render_inline_skip_reason
+  let result = KG.render_inline_skip_reason
     ~tool_name:"keeper_bash"
     ~reason_code:"keeper_deny"
     ~reason_text:"tool is on the keeper deny list"
@@ -2487,7 +2488,7 @@ let test_render_inline_skip_reason_deny () =
   check bool "reason encoded" true (str_contains result "reason=tool%20is%20on")
 
 let test_render_inline_skip_reason_cost () =
-  let result = HK.render_inline_skip_reason
+  let result = KG.render_inline_skip_reason
     ~tool_name:"keeper_bash"
     ~reason_code:"cost_gate"
     ~reason_text:"accumulated_cost_usd=0.5100 exceeded limit=0.5000"
@@ -2497,7 +2498,7 @@ let test_render_inline_skip_reason_cost () =
   check bool "reason encoded equals" true (str_contains result "0.5100%20exceeded")
 
 let test_render_inline_skip_reason_destructive () =
-  let result = HK.render_inline_skip_reason
+  let result = KG.render_inline_skip_reason
     ~tool_name:"keeper_bash"
     ~reason_code:"destructive_guard"
     ~reason_text:"pattern='rm -rf' (recursive forced deletion)"
@@ -2508,17 +2509,17 @@ let test_render_inline_skip_reason_destructive () =
 
 let test_render_inline_escape_edge_cases () =
   (* Empty reason text *)
-  let empty = HK.render_inline_skip_reason
+  let empty = KG.render_inline_skip_reason
     ~tool_name:"t" ~reason_code:"c" ~reason_text:"" in
   check bool "empty reason" true (str_contains empty "reason=");
   (* Percent sign in reason *)
-  let pct = HK.render_inline_skip_reason
+  let pct = KG.render_inline_skip_reason
     ~tool_name:"t" ~reason_code:"c" ~reason_text:"CPU at 90%" in
   check bool "percent encoded" true (str_contains pct "90%25")
 
 let test_render_inline_with_replacement () =
   (* keeper_board_post has replacement=masc_board_post in Tool_catalog *)
-  let result = HK.render_inline_skip_reason
+  let result = KG.render_inline_skip_reason
     ~tool_name:"keeper_board_post"
     ~reason_code:"keeper_deny"
     ~reason_text:"denied"

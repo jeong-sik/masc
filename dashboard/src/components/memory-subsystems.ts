@@ -12,6 +12,7 @@ import {
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { openAgentDetail } from './agent-detail-state'
 
 const REFRESH_MS = 30_000
 
@@ -123,8 +124,22 @@ function HebbianNetwork({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
           const isKeeper = name.startsWith('keeper-')
           const fill = isKeeper ? '#1e293b' : '#0f172a'
           const stroke = isKeeper ? '#3b82f6' : '#64748b'
+          const onNodeClick = () => openAgentDetail(name)
+          const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              openAgentDetail(name)
+            }
+          }
           return html`
-            <g>
+            <g
+              class="cursor-pointer hover:opacity-80 transition-opacity"
+              role="button"
+              tabindex="0"
+              onClick=${onNodeClick}
+              onKeyDown=${onKeyDown}
+              aria-label=${'에이전트 상세 열기: ' + label}
+            >
               <circle
                 cx=${pos.x}
                 cy=${pos.y}
@@ -140,6 +155,7 @@ function HebbianNetwork({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
                 font-size="11"
                 fill="#f1f5f9"
                 font-family="monospace"
+                class="pointer-events-none select-none"
               >
                 ${label}
               </text>
@@ -157,9 +173,19 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
     pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-400'
   return html`
     <tr class="border-b border-zinc-800">
-      <td class="py-1.5 px-2 text-sm font-mono">${s.from_agent}</td>
+      <td class="py-1.5 px-2 text-sm font-mono">
+        <button
+          class="hover:text-sky-400 hover:underline focus:outline-none focus:text-sky-400"
+          onClick=${() => openAgentDetail(s.from_agent)}
+        >${s.from_agent}</button>
+      </td>
       <td class="py-1.5 px-2 text-sm text-zinc-400 text-center">→</td>
-      <td class="py-1.5 px-2 text-sm font-mono">${s.to_agent}</td>
+      <td class="py-1.5 px-2 text-sm font-mono">
+        <button
+          class="hover:text-sky-400 hover:underline focus:outline-none focus:text-sky-400"
+          onClick=${() => openAgentDetail(s.to_agent)}
+        >${s.to_agent}</button>
+      </td>
       <td class="py-1.5 px-2 text-sm text-right">
         <div class="flex items-center gap-2 justify-end">
           <div class="w-16 bg-zinc-800 rounded h-1.5">

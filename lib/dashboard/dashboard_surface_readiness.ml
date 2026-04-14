@@ -236,7 +236,7 @@ let all_entries =
     };
     {
       id = "workspace.planning";
-      label = "계획 및 메트릭";
+      label = "작업 큐";
       exposure_status = "main";
       hidden_from_nav = false;
       meets_main_gate = true;

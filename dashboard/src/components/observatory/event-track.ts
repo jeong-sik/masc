@@ -9,17 +9,7 @@ import type { TelemetryEntry } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
 import { selectEntity, detailSelection } from './detail-selection-store'
-
-function entryTimestampMs(entry: TelemetryEntry): number | null {
-  if (typeof entry.ts === 'number') return entry.ts * 1000
-  if (typeof entry.ts_unix === 'number') return entry.ts_unix * 1000
-  if (typeof entry.timestamp === 'number') return entry.timestamp
-  if (typeof entry.ts_iso === 'string') {
-    const parsed = Date.parse(entry.ts_iso)
-    return Number.isNaN(parsed) ? null : parsed
-  }
-  return null
-}
+import { entryTimestampMs } from './observatory-utils'
 
 function sourceColor(source: string | undefined): string {
   switch (source) {

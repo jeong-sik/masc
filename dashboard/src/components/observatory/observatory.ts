@@ -29,6 +29,7 @@ import {
   type TelemetryEntry,
   type ToolQualityHourlyPoint,
 } from '../../api/dashboard'
+import { entryTimestampMs } from './observatory-utils'
 import { EventTrack } from './event-track'
 import { MetricTrack } from './metric-track'
 import { ToolCallTrack } from './tool-call-track'
@@ -73,17 +74,6 @@ function emptyData(): ObservatoryData {
     windowStart: now - RANGE_TO_MS[DEFAULT_RANGE],
     windowEnd: now,
   }
-}
-
-function entryTimestampMs(entry: TelemetryEntry): number | null {
-  if (typeof entry.ts === 'number') return entry.ts * 1000
-  if (typeof entry.ts_unix === 'number') return entry.ts_unix * 1000
-  if (typeof entry.timestamp === 'number') return entry.timestamp
-  if (typeof entry.ts_iso === 'string') {
-    const parsed = Date.parse(entry.ts_iso)
-    return Number.isNaN(parsed) ? null : parsed
-  }
-  return null
 }
 
 // --- Time axis header ---

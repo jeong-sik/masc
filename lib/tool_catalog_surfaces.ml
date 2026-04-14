@@ -240,6 +240,7 @@ let system_internal_surface_tools =
     (* Agent evaluation — system loop *)
     "masc_agent_fitness"; "masc_agent_relations";
     "masc_meta_cognition_snapshot"; "masc_consolidate_learning";
+    "masc_preferred_partner";
     "masc_select_agent";
     (* Maintenance *)
     "masc_cleanup_zombies"; "masc_gc";

@@ -116,7 +116,7 @@ type registry_entry = {
 }
 
 
-let registry : registry_entry StringMap.t ref = ref StringMap.empty
+let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
 
 (** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can
@@ -130,42 +130,47 @@ let decr_running_count_clamped () =
   in
   loop ()
 
-(** Serializes every writer path into [registry] so concurrent
-    [update_entry]/[put_entry]/[unregister] calls cannot lose each other's
-    updates via stale-snapshot read-modify-write.
+(** Serializes every writer path into [registry] via lock-free CAS.
+    Concurrent [update_entry]/[put_entry]/[unregister] retry until they
+    install their update against the snapshot they observed.
 
-    Readers still dereference [!registry] without the lock — [StringMap] is
-    immutable, so a reader always sees a consistent snapshot (either the
-    pre- or post-update map). *)
-(* Stdlib.Mutex is required (not Eio.Mutex): registry helpers are called
-   from non-Eio contexts (tests, startup wiring) where Eio.Mutex fails with
-   `Effect.Unhandled(Cancel.Get_context)`. Critical sections here are short
-   StringMap.add/remove ops, so Stdlib blocking is acceptable.
-   See memory/feedback_ocaml5-mutex-selection.md. *)
-let registry_mutex = Stdlib.Mutex.create ()
+    [Atomic.t] + [compare_and_set] is used (not Eio.Mutex / Stdlib.Mutex)
+    because registry helpers run in both Eio fibers and non-Eio contexts
+    (unit tests, startup wiring). Eio.Mutex raises
+    [Effect.Unhandled(Cancel.Get_context)] outside a scheduler;
+    Stdlib.Mutex interacts poorly with Eio fiber scheduling and was
+    observed to break test_keeper_reconcile_tool's inspect/clear path.
+    The [StringMap] snapshot is immutable, so CAS is correct.
 
+    Pattern follows #7011 (executor_pool) and #7013 (runtime_state). *)
 
 let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 
 let put_entry key entry =
-  Stdlib.Mutex.protect registry_mutex (fun () ->
-    registry := StringMap.add key entry !registry)
+  let rec loop () =
+    let current = Atomic.get registry in
+    let updated = StringMap.add key entry current in
+    if not (Atomic.compare_and_set registry current updated) then loop ()
+  in
+  loop ()
 
 (** Apply [f entry] and write back.  No-op if key absent.
 
-    The find + apply + write is a single critical section so that
-    concurrent [update_entry] calls on the same key cannot both operate on
-    a stale [entry] and overwrite each other's changes.
-
-    [f] runs under the mutex, so it must stay pure / fast — no I/O,
-    no nested calls back into the registry. *)
+    The find + apply + write is serialised via CAS so that concurrent
+    [update_entry] calls on the same key cannot both operate on a stale
+    [entry] and overwrite each other's changes. *)
 let update_entry ~base_path name f =
   let key = registry_key ~base_path name in
-  Stdlib.Mutex.protect registry_mutex (fun () ->
-    match StringMap.find_opt key !registry with
-    | Some entry -> registry := StringMap.add key (f entry) !registry
-    | None -> ())
+  let rec loop () =
+    let current = Atomic.get registry in
+    match StringMap.find_opt key current with
+    | None -> ()
+    | Some entry ->
+        let updated = StringMap.add key (f entry) current in
+        if not (Atomic.compare_and_set registry current updated) then loop ()
+  in
+  loop ()
 
 let max_crash_log_entries = 5
 
@@ -176,7 +181,7 @@ let register_with_state ~base_path name meta
     name base_path (Keeper_state_machine.phase_to_string phase);
   let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
-  (match StringMap.find_opt key !registry with
+  (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
        Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
        decr_running_count_clamped ()
@@ -245,21 +250,26 @@ let register_restarting ~base_path name meta =
 let unregister ~base_path name =
   Log.Keeper.info "registry: unregistering keeper name=%s base_path=%s" name base_path;
   let key = registry_key ~base_path name in
-  Stdlib.Mutex.protect registry_mutex (fun () ->
-    (match StringMap.find_opt key !registry with
-     | Some entry when entry.phase = Running ->
-         decr_running_count_clamped ();
-         Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
-           name (Atomic.get running_count_atomic)
-     | Some entry ->
-         Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
-           name (Keeper_state_machine.phase_to_string entry.phase)
-     | None ->
-         Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name);
-    registry := StringMap.remove key !registry)
+  let rec loop () =
+    let current = Atomic.get registry in
+    let before = StringMap.find_opt key current in
+    let updated = StringMap.remove key current in
+    if not (Atomic.compare_and_set registry current updated) then loop ()
+    else before
+  in
+  (match loop () with
+   | Some entry when entry.phase = Running ->
+       decr_running_count_clamped ();
+       Log.Keeper.debug "registry: unregistered running keeper name=%s running_count=%d"
+         name (Atomic.get running_count_atomic)
+   | Some entry ->
+       Log.Keeper.debug "registry: unregistered non-running keeper name=%s state=%s"
+         name (Keeper_state_machine.phase_to_string entry.phase)
+   | None ->
+       Log.Keeper.warn "registry: attempted to unregister non-existent keeper name=%s" name)
 
 let get ~base_path name =
-  let result = StringMap.find_opt (registry_key ~base_path name) !registry in
+  let result = StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) in
   (match result with
    | None -> Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path
    | Some _ -> ());
@@ -271,7 +281,7 @@ let all ?base_path () =
       match base_path with
       | Some expected when not (String.equal expected v.base_path) -> acc
       | _ -> v :: acc)
-    !registry []
+    (Atomic.get registry) []
 
 let update_meta ~base_path name meta =
   update_entry ~base_path name (fun e -> { e with meta })
@@ -343,7 +353,7 @@ let count_running ?base_path () =
         (fun _k v acc ->
           if String.equal expected v.base_path && v.phase = Running then acc + 1
           else acc)
-        !registry 0
+        (Atomic.get registry) 0
 
 let record_crash ~base_path name ts msg =
   Log.Keeper.error "registry: recording crash name=%s msg=%s" name msg;
@@ -353,7 +363,7 @@ let record_crash ~base_path name ts msg =
           ((ts, msg) :: e.crash_log) })
 
 let set_grpc_close ~base_path name close_fn =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> Atomic.set entry.grpc_close close_fn
   | None -> ()
 
@@ -368,7 +378,7 @@ let spawn_slots_available () =
   || Atomic.get running_count_atomic < max_keepers
 
 let wakeup ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> Atomic.set entry.fiber_wakeup true
   | None -> ()
 
@@ -377,10 +387,10 @@ let wakeup_all ?base_path () =
     (match base_path with
      | Some expected when not (String.equal expected entry.base_path) -> ()
      | _ -> if entry.phase = Running then Atomic.set entry.fiber_wakeup true)
-  ) !registry
+  ) (Atomic.get registry)
 
 let fiber_health_of ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Fiber_unknown
   | Some entry -> (
       match entry.phase with
@@ -421,7 +431,7 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts
     })
 
 let get_last_agent_count ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> entry.last_agent_count
   | None -> 0
 
@@ -429,7 +439,7 @@ let set_last_agent_count ~base_path name count =
   update_entry ~base_path name (fun e -> { e with last_agent_count = count })
 
 let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> true
   | Some entry ->
       let now_ts = Time_compat.now () in
@@ -445,7 +455,7 @@ let clear_board_wakeups ~base_path name =
 
 let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
+  match StringMap.find_opt key (Atomic.get registry) with
   | Some entry ->
       put_entry key
         { entry with
@@ -458,14 +468,13 @@ let cleanup_tracking ~base_path name =
   | None -> ()
 
 let clear () =
-  Stdlib.Mutex.protect registry_mutex (fun () ->
-    registry := StringMap.empty;
-    Atomic.set running_count_atomic 0)
+  Atomic.set registry StringMap.empty;
+  Atomic.set running_count_atomic 0
 
 (* -- Board cursor -------------------------------------------------- *)
 
 let get_board_cursor_ts ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> entry.board_cursor_ts
   | None -> 0.0
 
@@ -478,7 +487,7 @@ let set_board_cursor_ts ~base_path name ts =
     { e with board_cursor_ts = ts; board_cursor_post_id })
 
 let get_board_cursor ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> (entry.board_cursor_ts, entry.board_cursor_post_id)
   | None -> (0.0, None)
 
@@ -508,7 +517,7 @@ let record_tool_use ~base_path name ~tool_name ~success =
     { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage })
 
 let tool_usage_of ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> []
   | Some entry ->
     StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
@@ -521,7 +530,7 @@ let find_by_name name =
       match acc with
       | Some _ -> acc
       | None -> if String.equal v.name name then Some v else None)
-    !registry None
+    (Atomic.get registry) None
 
 let find_by_agent_name agent_name =
   StringMap.fold
@@ -530,7 +539,7 @@ let find_by_agent_name agent_name =
       | Some _ -> acc
       | None ->
         if String.equal v.meta.agent_name agent_name then Some v else None)
-    !registry None
+    (Atomic.get registry) None
 
 let tool_usage_of_by_name name =
   match find_by_name name with
@@ -557,7 +566,7 @@ let tool_usage_path ~base_path name =
   Filename.concat dir (name ^ ".json")
 
 let flush_tool_usage ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) !registry with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> ()
   | Some entry ->
     let items =
@@ -587,7 +596,7 @@ let restore_tool_usage ~base_path name =
   let path = tool_usage_path ~base_path name in
   if not (Fs_compat.file_exists path) then ()
   else
-    match StringMap.find_opt (registry_key ~base_path name) !registry with
+    match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
     | None -> ()
     | Some _entry ->
       (try
@@ -673,7 +682,7 @@ let dispatch_event_with_audit
     (event : Keeper_state_machine.event)
   =
   let key = registry_key ~base_path name in
-  match StringMap.find_opt key !registry with
+  match StringMap.find_opt key (Atomic.get registry) with
   | None ->
     Error (Keeper_state_machine.Invalid_transition {
       from_phase = Keeper_state_machine.Offline;

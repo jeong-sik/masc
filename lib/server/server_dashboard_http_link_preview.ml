@@ -386,10 +386,11 @@ let fetch_preview ~clock ~net url =
                       Option.value ~default:false
                         (Option.map
                            (fun value ->
-                             String.starts_with ~prefix:"image/"
-                               (lower_trim
-                                  (List.hd
-                                     (String.split_on_char ';' value))))
+                             match String.split_on_char ';' value with
+                             | head :: _ ->
+                                 String.starts_with ~prefix:"image/"
+                                   (lower_trim head)
+                             | [] -> false)
                            content_type)
                     then
                       Ok

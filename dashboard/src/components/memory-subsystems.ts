@@ -48,7 +48,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
   return html`
-    <div class="border border-zinc-800 rounded-lg p-3 mb-2">
+    <div class="border border-zinc-800 rounded-lg p-3 mb-2 hover:border-zinc-700 transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
@@ -56,11 +56,12 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
         </div>
         <span class="text-xs text-zinc-500 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
       </div>
-      <div class="flex items-center gap-2 text-xs text-zinc-500 mb-1">
+      <div class="flex items-center gap-2 text-xs text-zinc-500 mb-1 flex-wrap">
         <span class="bg-zinc-800 px-1.5 py-0.5 rounded">${ep.event_type}</span>
         ${ep.participants.map(
           (p: string) => html`<span class="font-mono">${p}</span>`,
         )}
+        <span class="text-zinc-600 font-mono text-[10px]">${ep.id}</span>
       </div>
       ${
         ep.learnings.length > 0
@@ -99,9 +100,19 @@ export function MemorySubsystems() {
     data: MemorySubsystemsResponse | null
   }>({ loading: true, error: null, data: null })
 
+  const keeperFilter = useSignal<string>('')
+  const outcomeFilter = useSignal<string>('')
+  const searchQuery = useSignal<string>('')
+
   async function refresh(signal?: AbortSignal) {
     try {
-      const data = await fetchMemorySubsystems({ limit: 50, signal })
+      const data = await fetchMemorySubsystems({
+        limit: 100,
+        keeper: keeperFilter.value || undefined,
+        outcome: outcomeFilter.value || undefined,
+        q: searchQuery.value || undefined,
+        signal,
+      })
       state.value = { loading: false, error: null, data }
     } catch (err) {
       if (isAbortError(err)) return
@@ -121,7 +132,7 @@ export function MemorySubsystems() {
       ac.abort()
       cleanup()
     }
-  }, [])
+  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value])
 
   const { loading, error, data } = state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
@@ -132,6 +143,22 @@ export function MemorySubsystems() {
   const lastConsolidation = data?.hebbian?.last_consolidation ?? 0
   const episodes = data?.episodes?.items ?? []
   const totalEpisodes = data?.episodes?.total ?? 0
+  const filteredTotal = data?.episodes?.filtered ?? episodes.length
+  const knownKeepers = data?.filters?.keepers ?? []
+  const knownOutcomes = data?.filters?.outcomes ?? ['success', 'partial', 'failure']
+
+  const onSearchInput = (e: Event) => {
+    const v = (e.target as HTMLInputElement).value
+    searchQuery.value = v
+  }
+
+  const clearFilters = () => {
+    keeperFilter.value = ''
+    outcomeFilter.value = ''
+    searchQuery.value = ''
+  }
+
+  const hasFilter = Boolean(keeperFilter.value || outcomeFilter.value || searchQuery.value)
 
   return html`
     <div class="space-y-6">
@@ -180,14 +207,60 @@ export function MemorySubsystems() {
 
       <!-- Episodes -->
       <section>
-        <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 class="text-base font-semibold text-zinc-200">에피소드 기록</h3>
-          <span class="text-xs text-zinc-500">${totalEpisodes}개 중 최근 ${episodes.length}개</span>
+          <span class="text-xs text-zinc-500">
+            총 ${totalEpisodes}개 · 필터 ${filteredTotal}개 · 표시 ${episodes.length}개
+          </span>
         </div>
+
+        <!-- Filter Bar -->
+        <div class="flex items-center gap-2 mb-3 flex-wrap">
+          <input
+            type="text"
+            placeholder="검색 (summary, learnings, event_type...)"
+            value=${searchQuery.value}
+            onInput=${onSearchInput}
+            class="flex-1 min-w-[200px] bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+          />
+          <select
+            value=${keeperFilter.value}
+            onChange=${(e: Event) => (keeperFilter.value = (e.target as HTMLSelectElement).value)}
+            class="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:border-zinc-500 focus:outline-none"
+          >
+            <option value="">모든 키퍼</option>
+            ${knownKeepers.map(
+              (k: string) => html`<option value=${k}>${k}</option>`,
+            )}
+          </select>
+          <select
+            value=${outcomeFilter.value}
+            onChange=${(e: Event) => (outcomeFilter.value = (e.target as HTMLSelectElement).value)}
+            class="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm text-zinc-200 focus:border-zinc-500 focus:outline-none"
+          >
+            <option value="">모든 결과</option>
+            ${knownOutcomes.map(
+              (o: string) => html`<option value=${o}>${o}</option>`,
+            )}
+          </select>
+          ${
+            hasFilter
+              ? html`<button
+                  onClick=${clearFilters}
+                  class="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 border border-zinc-700 rounded hover:border-zinc-500"
+                >
+                  필터 해제
+                </button>`
+              : null
+          }
+        </div>
+
         ${
           episodes.length === 0
             ? html`<div class="text-sm text-zinc-500 bg-zinc-900 rounded-lg p-4 text-center">
-                에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.
+                ${hasFilter
+                  ? '필터 조건에 맞는 에피소드가 없습니다.'
+                  : '에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.'}
               </div>`
             : html`
                 <div class="space-y-1">

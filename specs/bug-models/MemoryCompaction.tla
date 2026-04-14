@@ -83,22 +83,19 @@ TriggerCompaction ==
 SafeCompact ==
     /\ phase = "compacting"
     /\ LET
-         \* Constraint notes: take up to ConstraintCap
+         \* Phase 1: kind-capped selection (respects per-kind caps)
          constraints == SelectSeq(bank, LAMBDA n : n.kind = "constraint")
          kept_constraints == SubSeq(constraints, 1, IF Len(constraints) > ConstraintCap
                                                     THEN ConstraintCap
                                                     ELSE Len(constraints))
-         \* Long-term notes: take up to LongTermCap
          longtermNotes == SelectSeq(bank, LAMBDA n : n.kind = "long_term")
          kept_longterm == SubSeq(longtermNotes, 1, IF Len(longtermNotes) > LongTermCap
                                                    THEN LongTermCap
                                                    ELSE Len(longtermNotes))
-         \* Decision notes: take up to ConstraintCap (same cap in code)
          decisions == SelectSeq(bank, LAMBDA n : n.kind = "decision")
          kept_decisions == SubSeq(decisions, 1, IF Len(decisions) > ConstraintCap
                                                 THEN ConstraintCap
                                                 ELSE Len(decisions))
-         \* Progress notes: fill remaining slots
          progress == SelectSeq(bank, LAMBDA n : n.kind = "progress")
          remaining == TargetNotes - Len(kept_constraints)
                                   - Len(kept_longterm)
@@ -106,8 +103,17 @@ SafeCompact ==
          kept_progress == SubSeq(progress, 1, IF Len(progress) > remaining
                                               THEN IF remaining > 0 THEN remaining ELSE 0
                                               ELSE Len(progress))
+         capped == kept_constraints \o kept_longterm \o kept_decisions \o kept_progress
+         \* Phase 2: fallback fill (ignore kind caps to reach TargetNotes).
+         \* Models keeper_memory_bank.ml:407-408:
+         \*   if !selected_count < target_notes then
+         \*     List.iter (fun row -> add_row ~ignore_kind_cap:true row) by_recency;
+         deficit == TargetNotes - Len(capped)
+         extra == IF deficit > 0
+                  THEN SubSeq(bank, 1, IF Len(bank) > deficit THEN deficit ELSE Len(bank))
+                  ELSE <<>>
        IN
-         /\ result' = kept_constraints \o kept_longterm \o kept_decisions \o kept_progress
+         /\ result' = capped \o extra
          /\ phase' = "done"
          /\ UNCHANGED <<bank>>
 
@@ -167,5 +173,27 @@ NeverEmpty ==
 \* Result never exceeds target.
 ResultBounded ==
     phase = "done" => Len(result) <= TargetNotes
+
+\* Long-term notes are preserved up to their cap.
+\* Mirrors ConstraintsPreserved but for the long_term kind.
+LongTermProtected ==
+    phase = "done" =>
+        KindCount(result, "long_term") >=
+            IF KindCount(bank, "long_term") > LongTermCap
+            THEN LongTermCap
+            ELSE KindCount(bank, "long_term")
+
+\* Recent floor: compaction keeps at least min(bank_size, RecentFloor) notes.
+\* OCaml: let recent_floor = max 16 (min 64 (target_notes / 5))
+\* For our small model (TargetNotes=8), RecentFloor = max(16, min(64, 8/5)) = 16,
+\* but bank never reaches 16 in the model, so the effective floor is Len(bank).
+\* We express the general property: result is never smaller than
+\* min(Len(bank), TargetNotes).  This catches a hypothetical bug where
+\* compaction over-prunes below the available input.
+RecentFloorRespected ==
+    phase = "done" =>
+        Len(result) >= IF Len(bank) < TargetNotes
+                       THEN Len(bank)
+                       ELSE TargetNotes
 
 ====

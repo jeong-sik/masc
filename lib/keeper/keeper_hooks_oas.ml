@@ -296,7 +296,6 @@ let make_hooks
      At >= streak_threshold, pre_tool_use blocks the call with Override. *)
   let tool_name_streak : (string * int) ref = ref ("", 0) in
   let streak_threshold = 5 in
-  let cross_turn_polling_threshold = 2 in
   { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
@@ -469,15 +468,6 @@ let make_hooks
           if prev_name = tool_name then prev_count + 1 else 1
         in
         tool_name_streak := (tool_name, new_count);
-        let recent_entries =
-          if is_cross_turn_polling_tool tool_name then
-            Keeper_tool_call_log.read_recent ~keeper_name ~n:8 ()
-          else []
-        in
-        let cross_turn_streak =
-          if recent_entries = [] then 0
-          else recent_tool_streak_count ~tool_name recent_entries + 1
-        in
         if new_count >= streak_threshold then begin
           Log.Keeper.warn
             "keeper:%s streak_gate: %s called %d times consecutively, blocking"
@@ -491,24 +481,6 @@ let make_hooks
                ~reason_text:(Printf.sprintf
                  "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
                  tool_name new_count))
-        end
-        else if should_block_cross_turn_polling
-                  ~within_sec:900.0
-                  ~threshold:cross_turn_polling_threshold
-                  ~tool_name
-                  ~recent_entries then begin
-          Log.Keeper.warn
-            "keeper:%s cross_turn_polling_gate: %s called %d recent tool calls in a row, blocking"
-            keeper_name tool_name cross_turn_streak;
-          broadcast_tool_skipped ~keeper_name ~tool_name
-            ~reason_code:"cross_turn_polling_gate";
-          Agent_sdk.Hooks.Override
-            (render_inline_skip_reason
-               ~tool_name
-               ~reason_code:"cross_turn_polling_gate"
-               ~reason_text:(Printf.sprintf
-                 "%s was already the last recent polling tool. Do real work with a different tool or use keeper_stay_silent"
-                 tool_name))
         end
         else
         (* Safety gate 0: Keeper deny list *)

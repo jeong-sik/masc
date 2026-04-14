@@ -51,9 +51,23 @@ type breaker_state = {
 
 let states : (string, breaker_state) Hashtbl.t = Hashtbl.create 16
 
+(** Mutex protecting [states] and every per-keeper [breaker_state].
+    Every production path goes through [Keeper_exec_tools.apply_circuit_breaker]
+    which runs on whichever keeper fiber handled the tool call — multiple
+    keepers execute tools concurrently, so [Hashtbl.find_opt] + conditional
+    [Hashtbl.replace] in [get_or_create] is a textbook TOCTOU, and the
+    per-record [consecutive_count] increment in [record_failure] is a
+    read-modify-write racing against [record_success].  [Eio_guard]
+    lets the module still work before the Eio scheduler starts (module
+    init, non-Eio tests). *)
+let states_mu = Eio.Mutex.create ()
+let with_states_rw f = Eio_guard.with_mutex states_mu f
+let with_states_ro f = Eio_guard.with_mutex_ro states_mu f
+
 let threshold = 3
 
-let get_or_create keeper_name =
+(* Caller must hold [states_mu]. *)
+let get_or_create_locked keeper_name =
   match Hashtbl.find_opt states keeper_name with
   | Some s -> s
   | None ->
@@ -67,27 +81,30 @@ let get_or_create keeper_name =
 (* ================================================================ *)
 
 let record_success ~keeper_name =
-  let s = get_or_create keeper_name in
-  s.consecutive_count <- 0
+  with_states_rw (fun () ->
+    let s = get_or_create_locked keeper_name in
+    s.consecutive_count <- 0)
 
 let rec record_failure ~keeper_name ~(error_msg : string) : string option =
   let cls = classify_error error_msg in
-  let s = get_or_create keeper_name in
-  if cls = s.consecutive_class then
-    s.consecutive_count <- s.consecutive_count + 1
-  else begin
-    s.consecutive_class <- cls;
-    s.consecutive_count <- 1
-  end;
-  if s.consecutive_count >= threshold then begin
-    s.total_tripped <- s.total_tripped + 1;
-    s.consecutive_count <- 0;
-    Log.Keeper.warn
-      "circuit_breaker tripped for %s: %d consecutive %s failures (total trips: %d)"
-      keeper_name threshold (error_class_to_string cls) s.total_tripped;
-    Some (corrective_hint cls keeper_name)
-  end else
-    None
+  with_states_rw (fun () ->
+    let s = get_or_create_locked keeper_name in
+    if cls = s.consecutive_class then
+      s.consecutive_count <- s.consecutive_count + 1
+    else begin
+      s.consecutive_class <- cls;
+      s.consecutive_count <- 1
+    end;
+    if s.consecutive_count >= threshold then begin
+      s.total_tripped <- s.total_tripped + 1;
+      s.consecutive_count <- 0;
+      let tripped = s.total_tripped in
+      Log.Keeper.warn
+        "circuit_breaker tripped for %s: %d consecutive %s failures (total trips: %d)"
+        keeper_name threshold (error_class_to_string cls) tripped;
+      Some (corrective_hint cls keeper_name)
+    end else
+      None)
 
 and corrective_hint cls keeper_name =
   let base =
@@ -149,7 +166,9 @@ let maybe_enrich_error ~keeper_name ~(error_msg : string) : string =
          in
          Yojson.Safe.to_string (`Assoc with_breaker)
        | _ -> error_msg ^ hint
-     with _ -> error_msg ^ hint)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> error_msg ^ hint)
 
 (* ================================================================ *)
 (* Diagnostics                                                      *)
@@ -157,13 +176,14 @@ let maybe_enrich_error ~keeper_name ~(error_msg : string) : string =
 
 let snapshot_json () : Yojson.Safe.t =
   let entries =
-    Hashtbl.fold (fun name state acc ->
-      `Assoc [
-        "keeper", `String name;
-        "consecutive_class", `String (error_class_to_string state.consecutive_class);
-        "consecutive_count", `Int state.consecutive_count;
-        "total_tripped", `Int state.total_tripped;
-      ] :: acc
-    ) states []
+    with_states_ro (fun () ->
+      Hashtbl.fold (fun name state acc ->
+        `Assoc [
+          "keeper", `String name;
+          "consecutive_class", `String (error_class_to_string state.consecutive_class);
+          "consecutive_count", `Int state.consecutive_count;
+          "total_tripped", `Int state.total_tripped;
+        ] :: acc
+      ) states [])
   in
   `List entries

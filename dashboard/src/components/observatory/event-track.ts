@@ -1,8 +1,12 @@
-// Observatory Event Track (RFC-MASC-006 Phase 2a)
+// Observatory Event Track (RFC-MASC-006 Phase 2a+2b)
 // Renders discrete telemetry events as vertical markers on a shared time axis.
+// Phase 2b: mousemove updates cursor-store, CursorLine renders across track.
 
 import { html } from 'htm/preact'
+import { useRef } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
+import { setCursorFromEvent, clearCursor } from './cursor-store'
+import { CursorLine } from './cursor-line'
 
 function entryTimestampMs(entry: TelemetryEntry): number | null {
   if (typeof entry.ts === 'number') return entry.ts * 1000
@@ -39,6 +43,7 @@ interface Props {
 }
 
 export function EventTrack({ events, windowStart, windowEnd }: Props) {
+  const trackRef = useRef<HTMLDivElement | null>(null)
   const span = windowEnd - windowStart
   if (span <= 0) return null
 
@@ -53,7 +58,14 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
       <div class="w-24 shrink-0 text-[11px] font-semibold text-text-muted">
         이벤트 (${markers.length})
       </div>
-      <div class="relative flex-1 h-8 rounded-md bg-bg-1/40 border border-card-border/50">
+      <div
+        ref=${trackRef}
+        class="relative flex-1 h-8 rounded-md bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        onMouseMove=${(e: MouseEvent) => {
+          if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
+        }}
+        onMouseLeave=${clearCursor}
+      >
         ${markers.length === 0
           ? html`<div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">이 시간 범위에 이벤트 없음</div>`
           : markers.map(({ entry, ts }) => {
@@ -69,6 +81,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
               `
             })
         }
+        <${CursorLine} />
       </div>
     </div>
   `

@@ -1,0 +1,107 @@
+// Observatory Tool Call Track (RFC-MASC-006 Phase 2b)
+// Renders tool call events (from telemetry) as markers, colored by outcome.
+
+import { html } from 'htm/preact'
+import { useRef } from 'preact/hooks'
+import type { TelemetryEntry } from '../../api/dashboard'
+import { setCursorFromEvent, clearCursor } from './cursor-store'
+import { CursorLine } from './cursor-line'
+
+function entryTimestampMs(entry: TelemetryEntry): number | null {
+  if (typeof entry.ts === 'number') return entry.ts * 1000
+  if (typeof entry.ts_unix === 'number') return entry.ts_unix * 1000
+  if (typeof entry.timestamp === 'number') return entry.timestamp
+  if (typeof entry.ts_iso === 'string') {
+    const parsed = Date.parse(entry.ts_iso)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  return null
+}
+
+function isToolCall(entry: TelemetryEntry): boolean {
+  const src = typeof entry.source === 'string' ? entry.source : ''
+  return src === 'tool_call_io' || src === 'tool_usage'
+}
+
+function toolCallOutcome(entry: TelemetryEntry): 'success' | 'failure' | 'unknown' {
+  if (entry.success === true) return 'success'
+  if (entry.success === false) return 'failure'
+  const errorField = entry.error
+  if (errorField != null && errorField !== '') return 'failure'
+  return 'unknown'
+}
+
+function outcomeColor(outcome: ReturnType<typeof toolCallOutcome>): string {
+  switch (outcome) {
+    case 'success': return 'bg-emerald-400'
+    case 'failure': return 'bg-red-400'
+    default: return 'bg-text-dim'
+  }
+}
+
+function toolName(entry: TelemetryEntry): string {
+  if (typeof entry.tool_name === 'string') return entry.tool_name
+  if (typeof entry.name === 'string') return entry.name
+  return '?'
+}
+
+interface Props {
+  events: TelemetryEntry[]
+  windowStart: number
+  windowEnd: number
+}
+
+export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  const span = windowEnd - windowStart
+  if (span <= 0) return null
+
+  const markers = events
+    .filter(isToolCall)
+    .map(entry => ({ entry, ts: entryTimestampMs(entry) }))
+    .filter((m): m is { entry: TelemetryEntry; ts: number } =>
+      m.ts !== null && m.ts >= windowStart && m.ts <= windowEnd,
+    )
+
+  const successCount = markers.filter(m => toolCallOutcome(m.entry) === 'success').length
+  const failureCount = markers.filter(m => toolCallOutcome(m.entry) === 'failure').length
+
+  return html`
+    <div class="flex items-center gap-3">
+      <div class="w-24 shrink-0">
+        <div class="text-[11px] font-semibold text-text-muted">도구 호출</div>
+        <div class="text-[10px] text-text-dim">
+          <span class="text-emerald-400">${successCount}</span>
+          <span class="text-text-dim/60 mx-0.5">·</span>
+          <span class="text-red-400">${failureCount}</span>
+        </div>
+      </div>
+      <div
+        ref=${trackRef}
+        class="relative flex-1 h-8 rounded-md bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        onMouseMove=${(e: MouseEvent) => {
+          if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
+        }}
+        onMouseLeave=${clearCursor}
+      >
+        ${markers.length === 0
+          ? html`<div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">이 시간 범위에 도구 호출 없음</div>`
+          : markers.map(({ entry, ts }) => {
+              const pct = ((ts - windowStart) / span) * 100
+              const outcome = toolCallOutcome(entry)
+              const color = outcomeColor(outcome)
+              const name = toolName(entry)
+              return html`
+                <span
+                  class="absolute top-1 bottom-1 w-[3px] ${color} rounded-[1px] hover:w-1.5 transition-all"
+                  style="left: ${pct}%;"
+                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${outcome}`}
+                ></span>
+              `
+            })
+        }
+        <${CursorLine} />
+      </div>
+    </div>
+  `
+}

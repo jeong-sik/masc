@@ -353,19 +353,28 @@ let flush_pending_votes () =
     end
   ) snapshot
 
+(* The record_* helpers below all mutate an [agent_stats] returned by
+   [get_stats].  [get_stats] re-acquires [ts_mu] around the lookup, but
+   returns the record to the caller which then mutated fields lock-free —
+   so two fibers racing [record_selection ~agent_name:"X"] could both
+   read [s.selections] at the same value and both write the same +1,
+   silently dropping a selection.  Wrap each mutation sequence in
+   [with_ts_rw] so the read-modify-write stays atomic. *)
 let record_selection ~agent_name =
   let s = get_stats agent_name in
-  s.selections <- s.selections + 1;
-  s.last_selected_at <- Time_compat.now ();
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    s.selections <- s.selections + 1;
+    s.last_selected_at <- Time_compat.now ();
+    s.updated_at <- Time_compat.now ())
 
 let record_action ~agent_name ~action =
   let s = get_stats agent_name in
-  (match action with
-   | `Post -> s.posts_created <- s.posts_created + 1
-   | `Comment -> s.comments_created <- s.comments_created + 1
-   | `Skip -> s.skips <- s.skips + 1);
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    (match action with
+     | `Post -> s.posts_created <- s.posts_created + 1
+     | `Comment -> s.comments_created <- s.comments_created + 1
+     | `Skip -> s.skips <- s.skips + 1);
+    s.updated_at <- Time_compat.now ())
 
 (** {1 Quality Signal Integration} *)
 
@@ -400,20 +409,22 @@ let guard_penalty_beta_nudge =
     Penalty cap (1/cycle) is enforced by the caller. *)
 let record_guard_penalty ~agent_name =
   let s = get_stats agent_name in
-  s.beta <- s.beta +. guard_penalty_beta_nudge;
-  s.beta <- Float.max min_prior s.beta;
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    s.beta <- s.beta +. guard_penalty_beta_nudge;
+    s.beta <- Float.max min_prior s.beta;
+    s.updated_at <- Time_compat.now ())
 
 (** Record Post Verifier result into Thompson Sampling priors. *)
 let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
   let s = get_stats agent_name in
-  (match verdict with
-   | Post_verifier.Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
-   | Post_verifier.Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
-   | Post_verifier.Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
-  s.alpha <- Float.max min_prior s.alpha;
-  s.beta <- Float.max min_prior s.beta;
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    (match verdict with
+     | Post_verifier.Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
+     | Post_verifier.Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
+     | Post_verifier.Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
+    s.alpha <- Float.max min_prior s.alpha;
+    s.beta <- Float.max min_prior s.beta;
+    s.updated_at <- Time_compat.now ())
 
 (** {1 Selection Algorithm} *)
 

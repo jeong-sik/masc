@@ -425,7 +425,16 @@ let run_named
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
            Error (Oas.Error.Internal
              (Printf.sprintf "cascade %s: %s" cascade_name reason))
-         | Llm_provider.Cascade_fsm.Accept _ -> assert false)
+         | Llm_provider.Cascade_fsm.Accept { response; _ } ->
+           (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
+           Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name response.model;
+           let observation =
+             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
+               ~candidate_cfgs ~selected_model_raw:(Some response.model) ~capture
+           in
+           let result = { result with cascade_observation = Some observation } in
+           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+           Ok result)
       | Error sdk_err ->
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with

@@ -1341,10 +1341,19 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         | Some sub, Some bus -> Agent_sdk.Event_bus.unsubscribe bus sub
         | _ -> ()
       in
+      (* Mark turn boundary for the composite observer (issue #7122).
+         [mark_turn_started] installs [current_turn_observation = Some _]
+         so the composite observer can surface live in-turn states like
+         [`Executing`]. The matching [mark_turn_finished] in the finally
+         block clears the field, preventing stale state on idle keepers. *)
+      Keeper_registry.mark_turn_started
+        ~base_path:config.base_path meta.name;
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           Keeper_exec_tools.remove_tool_call_observer side_effect_observer;
-          unsubscribe_event_bus ())
+          unsubscribe_event_bus ();
+          Keeper_registry.mark_turn_finished
+            ~base_path:config.base_path meta.name)
         (fun () ->
         Keeper_exec_context.timed (fun () ->
           let clock = Eio_context.get_clock () in

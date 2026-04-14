@@ -18,6 +18,9 @@ module WO = Masc_mcp.Keeper_world_observation
 module DA = Masc_mcp.Keeper_decision_audit
 module TS = Masc_mcp.Tool_shard
 module KTP = Masc_mcp.Keeper_tool_policy
+module Reg = Masc_mcp.Keeper_registry
+module Obs = Masc_mcp.Keeper_composite_observer
+module KTypes = Masc_mcp.Keeper_types
 
 (* ── E1: NEL Invariant ──────────────────────────────── *)
 
@@ -194,6 +197,135 @@ let test_cascade_mermaid_healthy_no_reason_note () =
   check bool "healthy provider does not emit unhealthy note"
     false (substring_present ~haystack:out ~needle:"unhealthy")
 
+(* ── Composite Observer: turn-scoped state (issue #7122) ─ *)
+
+let test_obs_bp = "/tmp/test-composite-obs"
+
+let make_obs_meta name =
+  let json = `Assoc [
+    ("name", `String name);
+    ("agent_name", `String ("agent-" ^ name));
+    ("trace_id", `String ("trace-obs-" ^ name));
+    ("goal", `String "observer test");
+  ] in
+  match KTypes.meta_of_json json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
+
+let test_observer_idle_when_no_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-idle" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "registered keeper not found"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "idle keeper has Idle turn phase"
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
+
+let test_observer_executing_during_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-active" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  (match Reg.get ~base_path:test_obs_bp name with
+   | None -> Alcotest.fail "entry missing after mark_turn_started"
+   | Some entry ->
+     let snap = Obs.observe entry in
+     check string "in-turn keeper has Executing turn phase"
+       "executing" (Obs.turn_phase_to_string snap.ktc_turn_phase))
+
+let test_observer_no_stale_after_turn_end () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-no-stale" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing after mark_turn_finished"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "post-turn keeper reverts to Idle (no stale Executing)"
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
+
+let test_observer_finished_idempotent () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-idempotent" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  (* mark_turn_finished without prior mark_turn_started must not crash. *)
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "stays Idle through repeated mark_turn_finished"
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase);
+    check bool "no last_outcome when no turn ever started"
+      true (snap.last_outcome = None)
+
+(* ── Phase 2 (RFC-0003): is_live + last_outcome ──────── *)
+
+let test_observer_is_live_during_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-is-live" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "is_live = true during turn" true snap.is_live
+
+let test_observer_is_live_false_when_idle () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-not-live" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "is_live = false on fresh keeper" false snap.is_live
+
+let test_observer_last_outcome_populated_after_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-last-outcome" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "is_live = false after turn" false snap.is_live;
+    (match snap.last_outcome with
+     | None -> Alcotest.fail "last_outcome should be Some after a finished turn"
+     | Some lo ->
+       check bool "last_outcome.turn_id positive" true (lo.turn_id > 0);
+       check bool "last_outcome.ended_at non-zero" true (lo.ended_at > 0.0))
+
+let test_observer_last_outcome_preserved_across_finish_idempotent () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-preserve-last" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  let lo_first =
+    match Reg.get ~base_path:test_obs_bp name with
+    | Some e -> (Obs.observe e).last_outcome
+    | None -> None
+  in
+  (* mark_turn_finished again without a new mark_turn_started: previous
+     last_completed_turn must be preserved (no current → no new freeze). *)
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  let lo_second =
+    match Reg.get ~base_path:test_obs_bp name with
+    | Some e -> (Obs.observe e).last_outcome
+    | None -> None
+  in
+  check bool "last_outcome preserved across redundant mark_turn_finished"
+    true (lo_first = lo_second)
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -228,5 +360,17 @@ let () =
       test_case "other reason passes through" `Quick test_cascade_mermaid_renders_other_reason;
       test_case "other reason sanitizes newline and colon" `Quick test_cascade_mermaid_other_sanitizes_newline_colon;
       test_case "healthy has no unhealthy note" `Quick test_cascade_mermaid_healthy_no_reason_note;
+    ];
+    "composite_observer_turn_scope", [
+      test_case "idle when no turn" `Quick test_observer_idle_when_no_turn;
+      test_case "Executing during turn" `Quick test_observer_executing_during_turn;
+      test_case "no stale Executing after turn end" `Quick test_observer_no_stale_after_turn_end;
+      test_case "mark_turn_finished is idempotent" `Quick test_observer_finished_idempotent;
+    ];
+    "composite_observer_phase_2", [
+      test_case "is_live = true during turn" `Quick test_observer_is_live_during_turn;
+      test_case "is_live = false on idle keeper" `Quick test_observer_is_live_false_when_idle;
+      test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
+      test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
     ];
   ]

@@ -34,6 +34,9 @@ val handle_select_agent : context -> Yojson.Safe.t -> bool * string
 (** Handle masc_collaboration_graph *)
 val handle_collaboration_graph : context -> Yojson.Safe.t -> bool * string
 
+(** Handle masc_preferred_partner *)
+val handle_preferred_partner : context -> Yojson.Safe.t -> bool * string
+
 (** Handle masc_consolidate_learning *)
 val handle_consolidate_learning : context -> Yojson.Safe.t -> bool * string
 

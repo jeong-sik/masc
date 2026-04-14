@@ -326,6 +326,32 @@ let handle_collaboration_graph ctx args =
     else
       (true, String.concat "\n" lines)
 
+(** Handle masc_preferred_partner — closes the Hebbian read loop.
+    Returns the agent with the strongest learned collaboration weight
+    for the given agent_id, so keepers can use it when deciding whom
+    to @mention or delegate to. *)
+let handle_preferred_partner ctx args =
+  let agent_id = match get_string_opt args "agent_id" with
+    | Some id when id <> "" -> id
+    | _ -> ctx.agent_name
+  in
+  match Hebbian_eio.get_preferred_partner ctx.config ~agent_id with
+  | None ->
+    (true, Printf.sprintf "No learned partner for %s yet. Complete tasks together to build affinity." agent_id)
+  | Some partner ->
+    let (synapses, _) = Hebbian_eio.get_graph_data ctx.config in
+    let weight = List.find_opt (fun s ->
+      s.Hebbian_eio.from_agent = agent_id && s.Hebbian_eio.to_agent = partner
+    ) synapses in
+    let w = match weight with Some s -> s.Hebbian_eio.weight | None -> 0.0 in
+    let json = `Assoc [
+      ("agent_id", `String agent_id);
+      ("preferred_partner", `String partner);
+      ("affinity_weight", `Float w);
+      ("note", `String "Based on Hebbian learning from shared task completions. Higher weight = more successful past collaboration.");
+    ] in
+    (true, Yojson.Safe.to_string json)
+
 (** Handle masc_consolidate_learning *)
 let handle_consolidate_learning ctx args =
   let decay_after_days = get_int args "decay_after_days" 7 in
@@ -383,6 +409,7 @@ let dispatch ctx ~name ~args =
   | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
   | "masc_select_agent" -> Some (handle_select_agent ctx args)
   | "masc_collaboration_graph" -> Some (handle_collaboration_graph ctx args)
+  | "masc_preferred_partner" -> Some (handle_preferred_partner ctx args)
   | "masc_consolidate_learning" -> Some (handle_consolidate_learning ctx args)
   | "masc_agent_card" -> Some (handle_agent_card ctx args)
   | "masc_agent_relations" -> Some (handle_agent_relations ctx args)
@@ -403,6 +430,7 @@ let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 let tool_required_permission = function
   | "masc_agents" | "masc_agent_card" | "masc_agent_fitness"
   | "masc_select_agent" | "masc_collaboration_graph"
+  | "masc_preferred_partner"
   | "masc_get_metrics" | "masc_agent_relations"
   | "masc_meta_cognition_snapshot" ->
       Some Types.CanReadState

@@ -41,6 +41,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_dashboard", CanReadState);
     ("masc_check", CanReadState);
     ("masc_collaboration_graph", CanReadState);
+    ("masc_preferred_partner", CanReadState);
     ("masc_feature_flags", CanReadState);
     ("masc_get_metrics", CanReadState);
     ("masc_meta_cognition_snapshot", CanReadState);

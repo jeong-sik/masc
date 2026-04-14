@@ -585,7 +585,12 @@ jobs:
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 
       - name: Run TLA+ model checking
-        run: make -C specs check-all
+        # -j 2 runs check-clean and check-buggy as parallel top-level targets
+        # on the ubuntu-latest 4-vCPU / 16GB runner. Each target still runs
+        # its own for-loop serially, so TLC workers inside (auto=4 cores)
+        # aren't oversubscribed. Expected saving: clean + buggy roughly
+        # equal-cost, so wall time drops from ~sum to ~max(≈50%).
+        run: make -C specs -j 2 check-all
 
   ci-gate:
     name: CI Gate

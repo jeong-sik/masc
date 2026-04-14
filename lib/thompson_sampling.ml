@@ -444,6 +444,14 @@ let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
 (** {1 Selection Algorithm} *)
 
 let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
+  (* Drain any pending votes so Beta posteriors reflect recorded feedback
+     before sampling. [record_vote] batches into [pending_votes], and
+     without this flush the batched evidence never reaches [stats_table] —
+     the sampler would read only the initial priors and votes are silently
+     discarded over time. This sampling entry point is the natural "tick
+     end" the .mli refers to. Safe to call under no lock: [flush] acquires
+     [ts_mu] itself. *)
+  flush_pending_votes ();
   (* Initialize stats for all agents *)
   List.iter init_agent agents;
 

@@ -35,13 +35,10 @@ let env_keys =
   ]
 
 let unset_all_keys () =
-  List.iter
-    (fun k ->
-      try Unix.putenv k "" with _ -> ();
-      (* Real "unset" via empty string is not equivalent; OCaml has no portable unsetenv.
-         Use Sys.command for the test cleanup since these are scoped. *)
-      ignore (Sys.command (Printf.sprintf "unset %s" k)))
-    env_keys
+  (* CI may set these env vars globally; we must truly unset (not set to "")
+     because [Sys.getenv_opt] treats "" as Some "", which our skip-if-set
+     logic interprets as "caller provided it". *)
+  List.iter (fun k -> try Unix.unsetenv k with _ -> ()) env_keys
 
 let test_missing_file_returns_zero () =
   unset_all_keys ();

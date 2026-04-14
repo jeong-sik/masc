@@ -1,11 +1,13 @@
-// Observatory Tool Call Track (RFC-MASC-006 Phase 2b)
+// Observatory Tool Call Track (RFC-MASC-006 Phase 2b+2d)
 // Renders tool call events (from telemetry) as markers, colored by outcome.
+// Phase 2d: click marker → selectEntity → DetailPane opens.
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { TelemetryEntry } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
+import { selectEntity, detailSelection } from './detail-selection-store'
 
 function entryTimestampMs(entry: TelemetryEntry): number | null {
   if (typeof entry.ts === 'number') return entry.ts * 1000
@@ -91,11 +93,20 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
               const outcome = toolCallOutcome(entry)
               const color = outcomeColor(outcome)
               const name = toolName(entry)
+              const selected = detailSelection.value
+              const isSelected = selected !== null
+                && selected.kind === 'tool_call'
+                && selected.entry === entry
+              const ringClass = isSelected ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-1' : ''
               return html`
                 <span
-                  class="absolute top-1 bottom-1 w-[3px] ${color} rounded-[1px] hover:w-1.5 transition-all"
+                  class="absolute top-1 bottom-1 w-[3px] ${color} rounded-[1px] hover:w-1.5 transition-all cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
                   title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${outcome}`}
+                  onClick=${(e: MouseEvent) => {
+                    e.stopPropagation()
+                    selectEntity({ kind: 'tool_call', entry, ts })
+                  }}
                 ></span>
               `
             })

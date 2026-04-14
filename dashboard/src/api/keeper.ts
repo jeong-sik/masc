@@ -407,6 +407,11 @@ export interface KeeperCompositeMeasurement {
   }
 }
 
+export interface KeeperLastOutcome {
+  turn_id: number
+  ended_at: number
+}
+
 export interface KeeperCompositeSnapshot {
   correlation_id: string
   run_id: string
@@ -419,6 +424,13 @@ export interface KeeperCompositeSnapshot {
   measurement: KeeperCompositeMeasurement
   recovery: { data_record: boolean; fsm_condition: boolean }
   invariants: KeeperCompositeInvariants
+  /** RFC-0003 Phase 2 (#7122): true when a turn is actively
+      executing. Sub-FSM fields reflect live in-turn state only
+      when is_live is true; otherwise they revert to Idle/Undecided. */
+  is_live: boolean
+  /** RFC-0003 Phase 2 (#7122): frozen snapshot of the most recent
+      completed turn. null until the first turn ends. */
+  last_outcome: KeeperLastOutcome | null
 }
 
 export async function fetchKeeperComposite(name: string): Promise<KeeperCompositeSnapshot> {

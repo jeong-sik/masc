@@ -339,11 +339,21 @@ function RecoveryStatePanel({
 
 function SnapshotMeta({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const date = new Date(snapshot.ts * 1000)
+  const liveClass = snapshot.is_live
+    ? 'text-emerald-400 border-emerald-500/40'
+    : 'text-[var(--text-dim)] border-white/10'
+  const lastOutcomeText = snapshot.last_outcome
+    ? `last turn #${snapshot.last_outcome.turn_id} ended ${new Date(snapshot.last_outcome.ended_at * 1000).toLocaleTimeString()}`
+    : 'no completed turn'
   return html`
-    <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)] font-mono">
+    <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)] font-mono items-center">
+      <span class=${`px-1.5 py-0.5 border rounded ${liveClass}`}>
+        ${snapshot.is_live ? '● LIVE' : '○ idle'}
+      </span>
       <span>correlation ${snapshot.correlation_id}</span>
       <span>run ${snapshot.run_id}</span>
       <span>ts ${date.toISOString()}</span>
+      <span class="opacity-70">${lastOutcomeText}</span>
     </div>
   `
 }

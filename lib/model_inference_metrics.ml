@@ -398,7 +398,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
   let models_with_buckets =
     List.map (fun (s : model_stats) ->
       let model_entries =
-        match StringMap.find_opt by_model_map s.model_id with
+        match StringMap.find_opt s.model_id by_model_map with
         | Some es -> es
         | None -> []
       in

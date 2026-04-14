@@ -107,6 +107,7 @@ type agent_runtime_state =
   ; board_reactive_turn_count : int
   ; mention_reactive_turn_count : int
   ; noop_turn_count : int
+  ; consecutive_noop_count : int
   ; last_speech_act : string
   ; last_blocker : string
   ; last_need : string
@@ -728,6 +729,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "board_reactive_turn_count", `Int rt.board_reactive_turn_count
     ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
     ; "noop_turn_count", `Int rt.noop_turn_count
+    ; "consecutive_noop_count", `Int rt.consecutive_noop_count
     ; "last_speech_act", `String rt.last_speech_act
     ; "last_blocker", `String rt.last_blocker
     ; "last_need", `String rt.last_need
@@ -1104,6 +1106,7 @@ let parse_keeper_state
     Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
   in
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
+  let consecutive_noop_count = Safe_ops.json_int ~default:0 "consecutive_noop_count" json in
   let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
   let last_blocker = Safe_ops.json_string ~default:"" "last_blocker" json in
   let last_need = Safe_ops.json_string ~default:"" "last_need" json in
@@ -1138,6 +1141,7 @@ let parse_keeper_state
       ; board_reactive_turn_count
       ; mention_reactive_turn_count
       ; noop_turn_count
+      ; consecutive_noop_count
       ; last_speech_act
       ; last_blocker
       ; last_need
@@ -1320,6 +1324,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "board_reactive_turn_count"
   ; "mention_reactive_turn_count"
   ; "noop_turn_count"
+  ; "consecutive_noop_count"
   ; "last_speech_act"
   ; "last_blocker"
   ; "last_need"

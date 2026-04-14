@@ -337,6 +337,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           board_reactive_turn_count = 0;
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
+          consecutive_noop_count = 0;
           last_speech_act = "";
           last_blocker = "";
           last_need = "";

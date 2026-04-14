@@ -946,6 +946,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         rt.noop_turn_count
         + (if is_autonomous_turn && not has_text && not has_substantive_tools
               && not has_validated_evidence then 1 else 0);
+      consecutive_noop_count =
+        (if is_autonomous_turn && not has_text && not has_substantive_tools
+            && not has_validated_evidence
+         then rt.consecutive_noop_count + 1
+         else 0);
       (* This timestamp stays scoped to substantive tool actions.
          Validated evidence affects proactive visibility, but it does not
          redefine the autonomous action counter semantics. *)

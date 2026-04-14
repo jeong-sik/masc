@@ -260,7 +260,71 @@ let test_observer_finished_idempotent () =
   | Some entry ->
     let snap = Obs.observe entry in
     check string "stays Idle through repeated mark_turn_finished"
-      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
+      "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase);
+    check bool "no last_outcome when no turn ever started"
+      true (snap.last_outcome = None)
+
+(* ── Phase 2 (RFC-0003): is_live + last_outcome ──────── *)
+
+let test_observer_is_live_during_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-is-live" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "is_live = true during turn" true snap.is_live
+
+let test_observer_is_live_false_when_idle () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-not-live" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "is_live = false on fresh keeper" false snap.is_live
+
+let test_observer_last_outcome_populated_after_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-last-outcome" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "is_live = false after turn" false snap.is_live;
+    (match snap.last_outcome with
+     | None -> Alcotest.fail "last_outcome should be Some after a finished turn"
+     | Some lo ->
+       check bool "last_outcome.turn_id positive" true (lo.turn_id > 0);
+       check bool "last_outcome.ended_at non-zero" true (lo.ended_at > 0.0))
+
+let test_observer_last_outcome_preserved_across_finish_idempotent () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-preserve-last" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  let lo_first =
+    match Reg.get ~base_path:test_obs_bp name with
+    | Some e -> (Obs.observe e).last_outcome
+    | None -> None
+  in
+  (* mark_turn_finished again without a new mark_turn_started: previous
+     last_completed_turn must be preserved (no current → no new freeze). *)
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
+  let lo_second =
+    match Reg.get ~base_path:test_obs_bp name with
+    | Some e -> (Obs.observe e).last_outcome
+    | None -> None
+  in
+  check bool "last_outcome preserved across redundant mark_turn_finished"
+    true (lo_first = lo_second)
 
 (* ── Test Suite ──────────────────────────────────────── *)
 
@@ -302,5 +366,11 @@ let () =
       test_case "Executing during turn" `Quick test_observer_executing_during_turn;
       test_case "no stale Executing after turn end" `Quick test_observer_no_stale_after_turn_end;
       test_case "mark_turn_finished is idempotent" `Quick test_observer_finished_idempotent;
+    ];
+    "composite_observer_phase_2", [
+      test_case "is_live = true during turn" `Quick test_observer_is_live_during_turn;
+      test_case "is_live = false on idle keeper" `Quick test_observer_is_live_false_when_idle;
+      test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
+      test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
     ];
   ]

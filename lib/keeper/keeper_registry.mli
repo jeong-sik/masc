@@ -85,18 +85,22 @@ type registry_entry = {
           successful drain. Stable per session (= [meta.runtime.trace_id]
           as passed to OAS). *)
   current_turn_observation : turn_observation option;
-      (** Live, turn-scoped observation record (issue #7122).
+      (** Live, turn-scoped observation record (issue #7122 Phase 1).
+          [Some _] while a turn is actively executing. [None] outside
+          any turn. Anti-stale barrier: sub-FSM live states are only
+          observable while [Some]. *)
+  last_completed_turn : completed_turn_observation option;
+      (** Frozen snapshot of the most recently completed turn
+          (RFC-0003 Phase 2 design A3). Populated by
+          [mark_turn_finished] when [current_turn_observation] is
+          [Some]; carries terminal data for the composite observer's
+          [last_outcome] snapshot field.
 
-          [Some _] while a turn is actively executing (between
-          [mark_turn_started] and [mark_turn_finished]). [None]
-          outside any turn, meaning the keeper is idle w.r.t. the
-          decision pipeline / cascade layers.
-
-          Anti-stale barrier for the composite observer: sub-FSM
-          states like [`Executing`] are only observable while the
-          turn is live. Once the turn ends, this field is cleared so
-          idle keepers cannot surface stale states from a previous
-          turn. *)
+          Distinct from [current_turn_observation] so the observer
+          can distinguish "live in-turn state" from "previous turn
+          result": idle keepers never surface stale terminal states
+          on the live sub-FSM fields, but operators can still see
+          the most recent outcome in [last_outcome]. *)
 }
 
 and turn_observation = {
@@ -105,6 +109,12 @@ and turn_observation = {
           [meta.runtime.usage.total_turns] + 1). *)
   started_at : float;
       (** Unix timestamp when this turn record was installed. *)
+}
+
+and completed_turn_observation = {
+  ct_turn_id : int;
+  ct_started_at : float;
+  ct_ended_at : float;
 }
 
 (** Register a keeper with an already-live fiber. Primarily used by tests and

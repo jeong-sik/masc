@@ -33,6 +33,11 @@ type invariants_check = {
   recovery_two_store_sync : bool;
 }
 
+type last_outcome = {
+  turn_id : int;
+  ended_at : float;
+}
+
 type snapshot = {
   correlation_id : string;
   run_id : string;
@@ -46,6 +51,8 @@ type snapshot = {
   reconcile_data : bool;
   reconcile_fsm : bool;
   invariants : invariants_check;
+  is_live : bool;
+  last_outcome : last_outcome option;
 }
 
 let turn_phase_to_string = function
@@ -276,6 +283,15 @@ let observe
     reconcile_data;
     reconcile_fsm;
     invariants;
+    is_live = (entry.current_turn_observation <> None);
+    last_outcome =
+      (match entry.last_completed_turn with
+       | Some lc ->
+         Some {
+           turn_id = lc.ct_turn_id;
+           ended_at = lc.ct_ended_at;
+         }
+       | None -> None);
   }
 
 (* ================================================================ *)
@@ -334,4 +350,11 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       "fsm_condition", `Bool s.reconcile_fsm;
     ];
     "invariants", invariants_to_json s.invariants;
+    "is_live", `Bool s.is_live;
+    "last_outcome", (match s.last_outcome with
+      | Some lo -> `Assoc [
+          "turn_id", `Int lo.turn_id;
+          "ended_at", `Float lo.ended_at;
+        ]
+      | None -> `Null);
   ]

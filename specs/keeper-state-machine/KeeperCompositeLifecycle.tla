@@ -185,6 +185,19 @@ CascadeDone ==
                    shared_measurement, measurement_turn, reconcile_data,
                    reconcile_fsm, turn_tick>>
 
+\* FinishTurn — closes the current turn and resets per-turn sub-FSM state.
+\* Without this, the next StartTurn would keep kcl_cascade_state stale
+\* while the measurement is re-cleared, violating NoCascadeBeforeMeasurement.
+FinishTurn ==
+    /\ ktc_turn_phase = "finalizing"
+    /\ ktc_turn_phase' = "idle"
+    /\ kcl_cascade_state' = "idle"
+    /\ kdp_decision' = "undecided"
+    /\ shared_measurement' = 0
+    /\ measurement_turn' = 0
+    /\ UNCHANGED <<ksm_phase, kmc_compaction, reconcile_data,
+                   reconcile_fsm, turn_tick>>
+
 \* Compaction is coupled: parent phase + turn phase + memory phase
 \* must co-advance (CompactionAtomicity).
 StartCompaction ==
@@ -218,8 +231,13 @@ EnterFailing ==
     /\ reconcile_fsm' = TRUE
     /\ ksm_phase' = "Failing"
     /\ ktc_turn_phase' = "idle"
-    /\ UNCHANGED <<kdp_decision, kcl_cascade_state, kmc_compaction,
-                   shared_measurement, measurement_turn, turn_tick>>
+    \* Abort the in-flight turn: reset sub-FSMs so the next StartTurn
+    \* begins from a clean per-turn state.
+    /\ kdp_decision' = "undecided"
+    /\ kcl_cascade_state' = "idle"
+    /\ shared_measurement' = 0
+    /\ measurement_turn' = 0
+    /\ UNCHANGED <<kmc_compaction, turn_tick>>
 
 ClearDataRecord ==
     /\ ksm_phase = "Failing"
@@ -247,6 +265,7 @@ Next ==
     \/ DecideGuard
     \/ SelectCascade
     \/ CascadeDone
+    \/ FinishTurn
     \/ StartCompaction
     \/ FinishCompaction
     \/ EnterFailing
@@ -258,6 +277,7 @@ Fairness ==
     /\ WF_vars(DecideGuard)
     /\ WF_vars(SelectCascade)
     /\ WF_vars(CascadeDone)
+    /\ WF_vars(FinishTurn)
     /\ WF_vars(FinishCompaction)
     /\ WF_vars(ClearDataRecord)
     /\ WF_vars(ClearFsmCondition)
@@ -296,17 +316,18 @@ EventPriorityMonotone ==
     (shared_measurement /= 0) => (measurement_turn <= turn_tick)
 
 \* I5 — RecoveryTwoStoreSync  (absorbs state-fsm-gap-2026-04-13.md P4)
-\* The filesystem reconcile record and the FSM condition must never
-\* reach a permanent disagreement: the FSM condition may only be true
-\* while the data record is also either pending (true) or already
-\* cleared in the same Failing episode. The failure mode is
-\* reconcile_data = FALSE (cleared) but reconcile_fsm still TRUE and
-\* phase stuck at Failing — exactly Bug #1 (PR #6834).
+\* The FSM condition must not be cleared while the filesystem reconcile
+\* record is still set. This is the reverse-order failure: OCaml code
+\* dispatches Manual_reconcile_cleared before Keeper_manual_reconcile.clear.
+\* BugFsmClearsWithoutData reconstructs this pattern.
+\*
+\* Note: the stuck-at (reconcile_data=FALSE, reconcile_fsm=TRUE) pattern
+\* from Bug #1 (PR #6834) is a liveness violation, not a safety one. It is
+\* caught by RecoveryEventuallyCompletes with WF on ClearFsmCondition.
+\* Normal ordering (T,T)->(F,T)->(F,F) does NOT violate this invariant
+\* because reconcile_data=TRUE always implies reconcile_fsm=TRUE here.
 RecoveryTwoStoreSync ==
-    (ksm_phase = "Failing" /\ reconcile_data = FALSE /\ reconcile_fsm)
-        => FALSE                          \* this state is unreachable
-\* Note: this invariant reads as "the bad state must not exist";
-\* TLC will report a violation only via a buggy transition.
+    ~(reconcile_data /\ ~reconcile_fsm)
 
 SafetyInvariant ==
     /\ TypeOK

@@ -184,7 +184,7 @@ let pre_compact_event_of_json json =
         message_count = Safe_ops.json_int ~default:0 "message_count" json;
         token_count = Safe_ops.json_int ~default:0 "token_count" json;
         strategies = Safe_ops.json_string_list "strategies" json;
-        context_window = Safe_ops.json_int ~default:128_000 "context_window" json;
+        context_window = Safe_ops.json_int ~default:Oas_model_resolve.fallback_context_window "context_window" json;
         is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json;
         trigger = string_field json "trigger";
       }

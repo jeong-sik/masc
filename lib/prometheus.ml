@@ -235,6 +235,26 @@ let init () =
      first observation. *)
   add "masc_llm_provider_http_status_total"
     "Total HTTP responses from LLM providers, labeled by provider, model, and status code"
+    Counter;
+  (* Orphan metrics — used via inc_counter/set_gauge but previously
+     never registered.  Auto-create still works, but registering here
+     gives them a HELP description in /metrics output and a zero-value
+     baseline so dashboards see "0" instead of "no data" before the
+     first observation. *)
+  add "masc_keeper_write_meta_failures_total"
+    "Total keeper meta-file write failures, labeled by keeper and phase"
+    Counter;
+  add "masc_keeper_collision_detected_total"
+    "Total keeper-name collision detections during evidence assembly"
+    Counter;
+  add "masc_board_truncated_posts_total"
+    "Total board posts truncated due to size limits"
+    Counter;
+  add "masc_agent_heartbeat_age_seconds"
+    "Maximum observed heartbeat age across active agents (seconds)"
+    Gauge;
+  add "masc_agent_stale_total"
+    "Total agents marked stale due to missed heartbeats"
     Counter
 
 let start_time = Time_compat.now ()

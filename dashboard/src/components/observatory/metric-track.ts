@@ -1,8 +1,12 @@
-// Observatory Metric Track (RFC-MASC-006 Phase 2a)
+// Observatory Metric Track (RFC-MASC-006 Phase 2a+2b)
 // Renders tool call success rate over time as an SVG line on shared time axis.
+// Phase 2b: mousemove updates cursor-store, CursorLine renders across track.
 
 import { html } from 'htm/preact'
+import { useRef } from 'preact/hooks'
 import type { ToolQualityHourlyPoint } from '../../api/dashboard'
+import { setCursorFromEvent, clearCursor } from './cursor-store'
+import { CursorLine } from './cursor-line'
 
 interface Props {
   points: ToolQualityHourlyPoint[]
@@ -16,6 +20,7 @@ function hourToMs(hour: string): number | null {
 }
 
 export function MetricTrack({ points, windowStart, windowEnd }: Props) {
+  const trackRef = useRef<HTMLDivElement | null>(null)
   const span = windowEnd - windowStart
   if (span <= 0) return null
 
@@ -54,7 +59,14 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
           </div>
         ` : html`<div class="text-[10px] text-text-dim">데이터 없음</div>`}
       </div>
-      <div class="relative flex-1 h-12 rounded-md bg-bg-1/40 border border-card-border/50">
+      <div
+        ref=${trackRef}
+        class="relative flex-1 h-12 rounded-md bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        onMouseMove=${(e: MouseEvent) => {
+          if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
+        }}
+        onMouseLeave=${clearCursor}
+      >
         ${windowed.length === 0 ? html`
           <div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">
             hourly_trend 데이터 부족
@@ -92,6 +104,7 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
             })}
           </svg>
         `}
+        <${CursorLine} />
       </div>
     </div>
   `

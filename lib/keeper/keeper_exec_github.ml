@@ -897,7 +897,9 @@ let handle_keeper_pr_submit
                    | Some groups -> found_url := Re.Group.get groups 0
                    | None -> ()
                ) lines
-             with _ -> ());
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _ -> ());
             if !found_url <> "" then begin
               pr_url := !found_url;
               Ok (Printf.sprintf "PR created: %s" !found_url)

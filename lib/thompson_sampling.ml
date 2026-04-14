@@ -315,25 +315,43 @@ let record_vote ~agent_name ~direction =
     Hashtbl.replace pending_votes agent_name (up', down'))
 
 let flush_pending_votes () =
+  (* [ts_mu] is documented as protecting [pending_votes], but this
+     function was the only access path that ignored the lock: callers
+     of [record_vote] held it and could mutate [pending_votes] between
+     [Hashtbl.iter] and [Hashtbl.clear], silently dropping those votes.
+     Snapshot+clear the table atomically, release the lock, then apply
+     the accumulated stat updates individually under the lock.  The
+     two-step structure is required because [get_stats] re-acquires
+     [ts_mu], and doing that inside a [Hashtbl.iter] held under the
+     lock would either deadlock or skip the outer critical section. *)
   let decay = Env_config.AgentSelection.vote_decay_factor in
-  Hashtbl.iter (fun agent_name (votes_up, votes_down) ->
+  let snapshot =
+    with_ts_rw (fun () ->
+      let xs =
+        Hashtbl.fold (fun name counts acc -> (name, counts) :: acc)
+          pending_votes []
+      in
+      Hashtbl.clear pending_votes;
+      xs)
+  in
+  List.iter (fun (agent_name, (votes_up, votes_down)) ->
     let total = votes_up + votes_down in
     if total > 0 then begin
       let s = get_stats agent_name in
       let success_rate = float_of_int votes_up /. float_of_int total in
-      (* Apply decay to existing priors, then add new evidence *)
-      s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
-      s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
-      (* Clamp to minimum *)
-      s.alpha <- Float.max min_prior s.alpha;
-      s.beta <- Float.max min_prior s.beta;
-      (* Update totals *)
-      s.total_votes_up <- s.total_votes_up + votes_up;
-      s.total_votes_down <- s.total_votes_down + votes_down;
-      s.updated_at <- Time_compat.now ()
+      with_ts_rw (fun () ->
+        (* Apply decay to existing priors, then add new evidence *)
+        s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
+        s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
+        (* Clamp to minimum *)
+        s.alpha <- Float.max min_prior s.alpha;
+        s.beta <- Float.max min_prior s.beta;
+        (* Update totals *)
+        s.total_votes_up <- s.total_votes_up + votes_up;
+        s.total_votes_down <- s.total_votes_down + votes_down;
+        s.updated_at <- Time_compat.now ())
     end
-  ) pending_votes;
-  Hashtbl.clear pending_votes
+  ) snapshot
 
 let record_selection ~agent_name =
   let s = get_stats agent_name in

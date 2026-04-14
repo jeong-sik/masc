@@ -1,0 +1,111 @@
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+void vi
+
+const route = { value: { tab: 'command' as string, params: {} as Record<string, string> } }
+
+async function flushUi(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+async function loadPanel() {
+  vi.resetModules()
+  vi.doMock('../router', () => ({ route }))
+  vi.doMock('./ops', () => ({
+    Ops: () => html`<div data-testid="ops">Ops</div>`,
+  }))
+  vi.doMock('./governance', () => ({
+    Governance: () => html`<div data-testid="governance">Governance</div>`,
+  }))
+  return import('./operations-panel')
+}
+
+describe('OperationsPanel', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    route.value = { tab: 'command', params: { section: 'operations' } }
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.clearAllMocks()
+    vi.restoreAllMocks()
+    vi.resetModules()
+    vi.doUnmock('../router')
+    vi.doUnmock('./ops')
+    vi.doUnmock('./governance')
+  })
+
+  it('renders both Ops and Governance when view is not set (default)', async () => {
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Ops')
+    expect(container.textContent).toContain('Governance')
+  })
+
+  it('renders only Ops when view is ops', async () => {
+    route.value.params = { section: 'operations', view: 'ops' }
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Ops')
+    expect(container.textContent).not.toContain('Governance')
+  })
+
+  it('renders only Governance when view is governance', async () => {
+    route.value.params = { section: 'operations', view: 'governance' }
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).not.toContain('Ops')
+    expect(container.textContent).toContain('Governance')
+  })
+
+  it('renders 3 FilterChips options', async () => {
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    const buttons = container.querySelectorAll('button[type="button"]')
+    expect(buttons.length).toBe(3)
+    const labels = Array.from(buttons).map(b => b.textContent?.trim())
+    expect(labels).toContain('전체')
+    expect(labels).toContain('개입')
+    expect(labels).toContain('거버넌스')
+  })
+
+  it('falls back to default for unknown view param', async () => {
+    route.value.params = { section: 'operations', view: 'unknown' }
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Ops')
+    expect(container.textContent).toContain('Governance')
+  })
+
+  it('marks the active chip with aria-pressed=true', async () => {
+    route.value.params = { section: 'operations', view: 'governance' }
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    const buttons = container.querySelectorAll('button[type="button"]')
+    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === '거버넌스')
+    expect(governanceBtn?.getAttribute('aria-pressed')).toBe('true')
+
+    const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === '전체')
+    expect(defaultBtn?.getAttribute('aria-pressed')).toBe('false')
+  })
+})

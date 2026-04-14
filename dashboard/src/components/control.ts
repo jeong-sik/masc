@@ -3,8 +3,7 @@
 
 import { html } from 'htm/preact'
 import { route } from '../router'
-import { Ops } from './ops'
-import { Governance } from './governance'
+import { OperationsPanel } from './operations-panel'
 import { ConnectorStatusPanel } from './connector-status'
 import { LabInspector } from './lab-inspector'
 
@@ -24,15 +23,7 @@ function renderSection(section: OperationsSection) {
     case 'inspector':
       return html`<${LabInspector} />`
     case 'operations':
-      // Phase 1 interim: render Ops (intervention) and Governance (approval
-      // queue) vertically. Phase 5 merges them into a unified operations-panel
-      // with broadcast/message/approve sections.
-      return html`
-        <${Ops} />
-        <div class="mt-4">
-          <${Governance} />
-        </div>
-      `
+      return html`<${OperationsPanel} />`
   }
 }
 

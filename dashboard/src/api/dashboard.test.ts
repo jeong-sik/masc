@@ -80,6 +80,9 @@ describe('fetchDashboardTools', () => {
 describe('fetchToolQuality', () => {
   it('passes through the requested sample window', async () => {
     const rawResponse = {
+      generated_at: '2026-04-14T00:00:00Z',
+      sampling_mode: 'recent_n',
+      sample_limit: 250,
       total: 1,
       success: 1,
       failure: 0,
@@ -102,6 +105,38 @@ describe('fetchToolQuality', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?n=250')
     expect(result.total).toBe(1)
+    expect(result.sample_limit).toBe(250)
+  })
+
+  it('passes through the requested time window', async () => {
+    const rawResponse = {
+      generated_at: '2026-04-15T00:00:00Z',
+      sampling_mode: 'window_hours',
+      sample_limit: null,
+      window_hours: 24,
+      total: 3,
+      success: 3,
+      failure: 0,
+      success_rate: 100,
+      by_tool: [],
+      by_keeper: [],
+      failure_categories: [],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchToolQuality({ windowHours: 24 })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tool-quality?window_hours=24')
+    expect(result.window_hours).toBe(24)
+    expect(result.sampling_mode).toBe('window_hours')
   })
 })
 

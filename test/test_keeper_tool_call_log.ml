@@ -130,6 +130,9 @@ let test_turn_context_fields_stored () =
       ~tool_choice:"required"
       ~thinking_enabled:false
       ~thinking_budget:1024
+      ~trace_id:"trace-k"
+      ~session_id:"trace-k"
+      ~turn:7
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
@@ -149,7 +152,15 @@ let test_turn_context_fields_stored () =
        | `Bool false -> true
        | _ -> false);
     Alcotest.(check int) "thinking_budget field" 1024
-      (Safe_ops.json_int ~default:0 "thinking_budget" entry))
+      (Safe_ops.json_int ~default:0 "thinking_budget" entry);
+    Alcotest.(check (option string)) "trace_id field"
+      (Some "trace-k")
+      (Safe_ops.json_string_opt "trace_id" entry);
+    Alcotest.(check (option string)) "session_id field"
+      (Some "trace-k")
+      (Safe_ops.json_string_opt "session_id" entry);
+    Alcotest.(check int) "turn field" 7
+      (Safe_ops.json_int ~default:0 "turn" entry))
 
 let test_turn_context_fields_absent_without_context () =
   with_tmp_log (fun () ->
@@ -172,6 +183,18 @@ let test_turn_context_fields_absent_without_context () =
        | _ -> false);
     Alcotest.(check bool) "thinking_budget absent" true
       (match Yojson.Safe.Util.member "thinking_budget" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "trace_id absent" true
+      (match Yojson.Safe.Util.member "trace_id" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "session_id absent" true
+      (match Yojson.Safe.Util.member "session_id" entry with
+       | `Null -> true
+       | _ -> false);
+    Alcotest.(check bool) "turn absent" true
+      (match Yojson.Safe.Util.member "turn" entry with
        | `Null -> true
        | _ -> false))
 
@@ -198,6 +221,11 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~tool_choice:"auto"
       ~thinking_enabled:true ~thinking_budget:4096 ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check (option string)) "sampling mode present"
+      (Some "recent_n")
+      (Safe_ops.json_string_opt "sampling_mode" summary);
+    Alcotest.(check int) "sample limit echoed" 10
+      (Safe_ops.json_int ~default:0 "sample_limit" summary);
     let by_model = Yojson.Safe.Util.member "by_model" summary in
     let by_lane = Yojson.Safe.Util.member "by_lane" summary in
     let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
@@ -255,6 +283,49 @@ let test_dashboard_hourly_trend_numeric_ts () =
       (Safe_ops.json_int ~default:0 "calls" bucket);
     Alcotest.(check int) "hour bucket success" 1
       (Safe_ops.json_int ~default:0 "success" bucket))
+
+let test_dashboard_aggregate_window_hours () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let now = Unix.gettimeofday () in
+    let inside = now -. (30.0 *. 60.0) in
+    let outside = now -. (48.0 *. 3600.0) in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float inside)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float outside)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "error: {\"ok\":false,\"error\":\"stale\"}")
+         ; ("success", `Bool false)
+         ; ("duration_ms", `Float 5.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 ~window_hours:24.0 () in
+    Alcotest.(check (option string)) "window sampling mode"
+      (Some "window_hours")
+      (Safe_ops.json_string_opt "sampling_mode" summary);
+    Alcotest.(check int) "window total" 1
+      (Safe_ops.json_int ~default:0 "total" summary);
+    Alcotest.(check (option int)) "sample limit omitted"
+      None
+      (Safe_ops.json_int_opt "sample_limit" summary);
+    Alcotest.(check (option (float 0.0001))) "window echoed"
+      (Some 24.0)
+      (Safe_ops.json_float_opt "window_hours" summary))
 
 (* ── UTF-8 sanitization ────────────────────────────── *)
 
@@ -330,6 +401,8 @@ let () =
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
+        ; eio_test "dashboard aggregate window hours"
+            test_dashboard_aggregate_window_hours
         ] )
     ; ( "utf8_sanitize",
         [ eio_test "invalid UTF-8 bytes scrubbed before persist"

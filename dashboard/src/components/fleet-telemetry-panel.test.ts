@@ -102,7 +102,7 @@ function requireResolver<T>(
 
 async function loadPanel(mocks: {
   fetchDashboardExecution: (opts?: { signal?: AbortSignal }) => Promise<DashboardExecutionResponse>
-  fetchToolQuality: (opts?: { n?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
+  fetchToolQuality: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
   fetchTelemetrySummary: (opts?: { signal?: AbortSignal }) => Promise<TelemetrySummaryResponse>
 }) {
   vi.resetModules()
@@ -767,7 +767,7 @@ describe('FleetTelemetryPanel', () => {
 
     const fetchDashboardExecution = createAbortableResponse(executionResponse)
     const abortableToolQuality = createAbortableResponse(toolQualityResponse)
-    const fetchToolQuality = vi.fn().mockImplementation((opts?: { n?: number; signal?: AbortSignal }) => (
+    const fetchToolQuality = vi.fn().mockImplementation((opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => (
       abortableToolQuality(opts)
     ))
     const fetchTelemetrySummary = createAbortableResponse(telemetrySummaryResponse)

@@ -119,14 +119,7 @@ let () =
   Keeper_exec_tools.on_keeper_tool_call :=
     (fun ~tool_name ~success ~duration_ms ->
        Tool_registry.record_call ~source:Keeper_internal
-         ~tool_name ~success ~duration_ms ();
-       Tool_metrics_persist.enqueue {
-         Tool_result.success; tool_name;
-         duration_ms = Float.of_int duration_ms;
-         data = `Null;
-       };
-       Tool_usage_log.log_call ~tool_name ~success
-         ~caller:(Some "keeper_internal"));
+         ~tool_name ~success ~duration_ms ());
   (* Wire tag-based dispatch for keeper masc_* tools.
      Breaks the same Config dependency cycle as on_keeper_tool_call.
      See #4579: keeper_exec_tools uses handler registry (Tool_Board only),

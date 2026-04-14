@@ -32,6 +32,9 @@ val set_turn_context :
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?turn:int ->
   unit ->
   unit
 (** [set_turn_context ...] stores the current effective turn policy for
@@ -41,8 +44,10 @@ val get_turn_context :
   keeper_name:string ->
   unit ->
   string option * string option * bool option * int option
-(** Returns [(lane, tool_choice, thinking_enabled, thinking_budget)] for
-    the keeper, or [None] values when no turn context has been recorded. *)
+  * string option * string option * int option
+(** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
+    session_id, turn)] for the keeper, or [None] values when no turn context
+    has been recorded. *)
 
 val init : base_path:string -> unit
 (** [init ~base_path] creates the Dated_jsonl store. Call once at startup. *)
@@ -59,6 +64,9 @@ val log_call :
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?turn:int ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   unit ->
@@ -78,6 +86,14 @@ val read_recent :
   Yojson.Safe.t list
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
     optionally filtered by keeper name. Default [n=100]. *)
+
+val read_window :
+  ?keeper_name:string ->
+  window_hours:float ->
+  unit ->
+  Yojson.Safe.t list
+(** [read_window ?keeper_name ~window_hours ()] returns entries within the
+    trailing [window_hours]. Non-positive windows return [[]]. *)
 
 val read_latest :
   ?keeper_name:string ->

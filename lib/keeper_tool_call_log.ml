@@ -27,6 +27,9 @@ type turn_context = {
   tool_choice: string option;
   thinking_enabled: bool option;
   thinking_budget: int option;
+  trace_id: string option;
+  session_id: string option;
+  turn: int option;
 }
 
 let empty_turn_context = {
@@ -34,6 +37,9 @@ let empty_turn_context = {
   tool_choice = None;
   thinking_enabled = None;
   thinking_budget = None;
+  trace_id = None;
+  session_id = None;
+  turn = None;
 }
 
 let pending_turn_context : (string, turn_context) Hashtbl.t = Hashtbl.create 8
@@ -47,9 +53,17 @@ let consume_truncation_info ~keeper_name () =
   | None -> (0, None)
 
 let set_turn_context ~keeper_name ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget () =
+    ?thinking_budget ?trace_id ?session_id ?turn () =
   Hashtbl.replace pending_turn_context keeper_name
-    { lane; tool_choice; thinking_enabled; thinking_budget }
+    {
+      lane;
+      tool_choice;
+      thinking_enabled;
+      thinking_budget;
+      trace_id;
+      session_id;
+      turn;
+    }
 
 let get_turn_context ~keeper_name () =
   let ctx =
@@ -57,7 +71,13 @@ let get_turn_context ~keeper_name () =
     | Some ctx -> ctx
     | None -> empty_turn_context
   in
-  (ctx.lane, ctx.tool_choice, ctx.thinking_enabled, ctx.thinking_budget)
+  ( ctx.lane
+  , ctx.tool_choice
+  , ctx.thinking_enabled
+  , ctx.thinking_budget
+  , ctx.trace_id
+  , ctx.session_id
+  , ctx.turn )
 
 let store_ref : Dated_jsonl.t option ref = ref None
 
@@ -87,13 +107,19 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
 let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
     ~(output_text : string) ~(success : bool) ~(duration_ms : float)
     ?(model : string = "") ?lane ?tool_choice ?thinking_enabled
-    ?thinking_budget ?result_bytes ?truncated_to () =
+    ?thinking_budget ?trace_id ?session_id ?turn ?result_bytes ?truncated_to () =
   if Observability_redact.is_denied_tool ~tool_name then ()
   else
     match !store_ref with
     | None -> ()
     | Some store ->
-      let ctx_lane, ctx_tool_choice, ctx_thinking_enabled, ctx_thinking_budget =
+      let ( ctx_lane
+          , ctx_tool_choice
+          , ctx_thinking_enabled
+          , ctx_thinking_budget
+          , ctx_trace_id
+          , ctx_session_id
+          , ctx_turn ) =
         get_turn_context ~keeper_name ()
       in
       let lane = match lane with Some _ -> lane | None -> ctx_lane in
@@ -110,6 +136,11 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         | Some _ -> thinking_budget
         | None -> ctx_thinking_budget
       in
+      let trace_id = match trace_id with Some _ -> trace_id | None -> ctx_trace_id in
+      let session_id =
+        match session_id with Some _ -> session_id | None -> ctx_session_id
+      in
+      let turn = match turn with Some _ -> turn | None -> ctx_turn in
       let model_field =
         if model = "" then [] else [("model", `String model)]
       in
@@ -137,6 +168,18 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
         | Some value -> [("thinking_budget", `Int value)]
         | None -> []
       in
+      let trace_id_field = match trace_id with
+        | Some value -> [("trace_id", `String value)]
+        | None -> []
+      in
+      let session_id_field = match session_id with
+        | Some value -> [("session_id", `String value)]
+        | None -> []
+      in
+      let turn_field = match turn with
+        | Some value -> [("turn", `Int value)]
+        | None -> []
+      in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
       let json =
@@ -150,6 +193,7 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
           ; ("duration_ms", `Float duration_ms)
           ] @ model_field @ lane_field @ tool_choice_field
             @ thinking_enabled_field @ thinking_budget_field
+            @ trace_id_field @ session_id_field @ turn_field
             @ result_bytes_field @ truncated_to_field)
       in
       (* Sanitize UTF-8 before persisting.  Tool output may contain invalid
@@ -194,6 +238,50 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
     else
       let start = if !total <= n then 0 else !pos mod n in
       List.init count (fun i -> buf.((start + i) mod n))
+
+let iso_date_of_unix ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02d"
+    (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1)
+    tm.Unix.tm_mday
+
+let ts_of_entry (json : Yojson.Safe.t) : float option =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "ts" fields with
+      | Some (`Float f) -> Some f
+      | Some (`Int i) -> Some (Float.of_int i)
+      | _ -> None)
+  | _ -> None
+
+let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
+  if window_hours <= 0.0 then []
+  else
+    match !store_ref with
+    | None -> []
+    | Some store ->
+        let now = Time_compat.now () in
+        let since_ts = now -. (window_hours *. 3600.0) in
+        let since_date = iso_date_of_unix since_ts in
+        let until_date = iso_date_of_unix now in
+        let keeper_matches name json =
+          match Safe_ops.json_string_opt "keeper" json with
+          | Some k -> String.equal k name
+          | None -> false
+        in
+        Dated_jsonl.read_range store ~since:since_date ~until:until_date
+        |> List.filter (fun json ->
+               let in_window =
+                 match ts_of_entry json with
+                 | Some ts -> ts >= since_ts
+                 | None -> false
+               in
+               in_window
+               &&
+               match keeper_name with
+               | None -> true
+               | Some name -> keeper_matches name json)
 
 let read_latest ?keeper_name () : Yojson.Safe.t option =
   let keeper_matches name json =

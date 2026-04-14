@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ToolQualityResponse } from '../api/dashboard'
 
 vi.setConfig({
   testTimeout: 40000,
@@ -9,6 +10,10 @@ vi.setConfig({
 })
 
 const payload = {
+  generated_at: '2026-04-14T00:00:00Z',
+  sampling_mode: 'window_hours',
+  sample_limit: null,
+  window_hours: 24,
   total: 22,
   success: 21,
   failure: 1,
@@ -40,6 +45,22 @@ async function flushUi(): Promise<void> {
   })
 }
 
+async function loadPanel(mocks?: {
+  fetchToolQuality?: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
+}) {
+  vi.resetModules()
+  if (mocks?.fetchToolQuality) {
+    vi.doMock('../api/dashboard', async () => {
+      const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
+      return {
+        ...actual,
+        fetchToolQuality: mocks.fetchToolQuality,
+      }
+    })
+  }
+  return import('./tool-quality-panel')
+}
+
 describe('ToolQualityPanel', () => {
   let container: HTMLDivElement
   const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
@@ -59,7 +80,9 @@ describe('ToolQualityPanel', () => {
     container.remove()
     vi.unstubAllGlobals()
     vi.clearAllMocks()
+    vi.clearAllTimers()
     vi.resetModules()
+    vi.doUnmock('../api/dashboard')
     vi.useRealTimers()
     if (originalVisibility) {
       Object.defineProperty(document, 'visibilityState', originalVisibility)
@@ -67,12 +90,8 @@ describe('ToolQualityPanel', () => {
   })
 
   it('auto-refreshes tool quality while visible', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => payload,
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const fetchToolQuality = vi.fn().mockResolvedValue(payload)
+    const { ToolQualityPanel } = await loadPanel({ fetchToolQuality })
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -80,14 +99,16 @@ describe('ToolQualityPanel', () => {
     })
     await flushUi()
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('30초 자동 갱신')
     expect(container.textContent).toContain('95.5%')
+    expect(container.textContent).toContain('최근 24시간 기준 집계')
+    expect(container.textContent).toContain('Window Calls')
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    vi.advanceTimersByTime(30_000)
     await flushUi()
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(2)
   })
 
   it('normalizes missing tool metric fields before rendering', async () => {
@@ -189,7 +210,7 @@ describe('ToolQualityPanel', () => {
       await Promise.resolve()
     })
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    vi.advanceTimersByTime(30_000)
     await flushUi()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -246,7 +267,7 @@ describe('ToolQualityPanel', () => {
       get: () => 'hidden',
     })
 
-    await vi.advanceTimersByTimeAsync(35_000)
+    vi.advanceTimersByTime(35_000)
     await flushUi()
 
     expect(container.textContent).toContain('request timeout (35s)')

@@ -14,6 +14,8 @@ import {
 } from './fleet-data-core'
 import { route } from '../router'
 
+const TOOL_QUALITY_WINDOW_HOURS = 24
+
 interface ToolStat {
   name: string
   calls: number
@@ -41,13 +43,24 @@ interface HourlyPoint {
   success_rate: number
 }
 
-type ToolQualityData = Omit<ToolQualityResponse, 'by_tool'> & {
+type ToolQualityData = Omit<
+  ToolQualityResponse,
+  'by_tool' | 'generated_at' | 'sampling_mode' | 'sample_limit' | 'window_hours'
+> & {
+  generated_at: string | null
+  sampling_mode: string
+  sample_limit: number
+  window_hours: number | null
   by_tool: ToolStat[]
 }
 
 function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
   return {
     ...json,
+    generated_at: json.generated_at ?? null,
+    sampling_mode: json.sampling_mode ?? 'recent_n',
+    sample_limit: json.sample_limit ?? json.total,
+    window_hours: json.window_hours ?? null,
     by_tool: json.by_tool.map(t => ({
       ...t,
       output_truncated_count: t.output_truncated_count ?? 0,
@@ -71,7 +84,7 @@ const error = sharedToolQualityError
  * The underlying fetch is shared across panels via fleet-data-core.
  */
 export async function refreshToolQuality(): Promise<void> {
-  await refreshSharedToolQuality()
+  await refreshSharedToolQuality({ windowHours: TOOL_QUALITY_WINDOW_HOURS })
 }
 
 function handleRefreshToolQualityClick() {
@@ -231,7 +244,11 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 export function ToolQualityPanel() {
   useEffect(() => {
     const lifecycleController = new AbortController()
-    const runRefresh = () => refreshSharedToolQuality({ signal: lifecycleController.signal })
+    const runRefresh = () =>
+      refreshSharedToolQuality({
+        signal: lifecycleController.signal,
+        windowHours: TOOL_QUALITY_WINDOW_HOURS,
+      })
 
     void runRefresh()
     const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
@@ -254,7 +271,14 @@ export function ToolQualityPanel() {
   return html`
     <div class="flex flex-col gap-4 p-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-medium">도구 호출 품질</h2>
+        <div>
+          <h2 class="text-sm font-medium">도구 호출 품질</h2>
+          <div class="text-[10px] text-[var(--text-dim)]">
+            ${d.sampling_mode === 'recent_n'
+              ? `최근 ${d.sample_limit.toLocaleString()}건 기준 집계`
+              : `최근 ${(d.window_hours ?? TOOL_QUALITY_WINDOW_HOURS).toLocaleString()}시간 기준 집계`}
+          </div>
+        </div>
         <button
           class="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-subtle)] text-[var(--text-dim)] hover:text-[var(--text)]"
           onClick=${handleRefreshToolQualityClick}
@@ -270,7 +294,9 @@ export function ToolQualityPanel() {
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--text)]">${d.total.toLocaleString()}</div>
-          <div class="text-[9px] text-[var(--text-dim)] uppercase">Total Calls</div>
+          <div class="text-[9px] text-[var(--text-dim)] uppercase">
+            ${d.sampling_mode === 'recent_n' ? 'Sampled Calls' : 'Window Calls'}
+          </div>
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-red-400/80">${d.failure}</div>

@@ -1,14 +1,16 @@
 {
   "default_models": [
-    "glm-coding:glm-5.1",
-    "ollama:qwen3.5:35b-a3b-nvfp4"
+    {"model": "glm-coding:glm-5.1", "weight": 50},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
+    {"model": "ollama:gemma4:26b", "weight": 20}
   ],
   "local_only_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "keeper_unified_models": [
-    "glm-coding:glm-5.1",
-    "ollama:qwen3.5:35b-a3b-nvfp4"
+    {"model": "glm-coding:glm-5.1", "weight": 50},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
+    {"model": "ollama:gemma4:26b", "weight": 20}
   ],
   "_comment": "Only endpoints the operator actually pays for. glm-coding = Coding Plan subscription (api.z.ai/api/coding/paas/v4). ollama = local MLX fallback. Removed 2026-04-12: (a) glm:glm-5.1 general API — operator has no pay-per-use balance, every call returned HTTP 429 code=1113 'Insufficient balance or no resource package. Please recharge.'. (b) groq:qwen/qwen3-32b — Groq model advertises context_window >= max_tokens, but qwen3-32b caps max_tokens at 40960 while cascade defaults carry 65536, so every call returned HTTP 400 'max_tokens must be less than or equal to 40960'. Both failures committed mutating tools (masc_add_task, keeper_board_vote, keeper_board_comment) before the cascade could fall through to ollama, driving keepers into ambiguous_partial_commit + manual_reconcile. coding_first profile removed 2026-04-12: all keepers now use keeper_unified.",
   "local_recovery_models": [

@@ -1324,6 +1324,13 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         paused_meta_override := Some paused_meta
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
+      let event_bus_sub =
+        match Keeper_event_bus.get () with
+        | Some bus ->
+          Some (Agent_sdk.Event_bus.subscribe
+                  ~filter:(Agent_sdk.Event_bus.filter_agent meta.name) bus)
+        | None -> None
+      in
       let evidence_before_hash =
         try Keeper_evidence.snapshot_before_turn
           ~base_path:config.base_path ~keeper_name:meta.name
@@ -1613,6 +1620,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             end else
               Error (Oas.Error.Internal msg))))
       in
+      (match event_bus_sub, Keeper_event_bus.get () with
+       | Some sub, Some bus ->
+         let events = Agent_sdk.Event_bus.drain sub in
+         Agent_sdk.Event_bus.unsubscribe bus sub;
+         (match events with
+          | ev :: _ ->
+            Keeper_registry.set_last_correlation_id
+              ~base_path:config.base_path meta.name
+              ev.Agent_sdk.Event_bus.meta.correlation_id
+          | [] -> ())
+       | _ -> ());
       match run_result with
       | Error err ->
           let e_str = Oas.Error.to_string err in

@@ -79,6 +79,11 @@ type registry_entry = {
           (RFC-0003 §6) can surface the last measurement without reading
           history files. [None] until the first [Context_measured] event
           has been dispatched. *)
+  last_event_bus_correlation : string option;
+      (** Most recent OAS Event_bus [correlation_id] extracted after a
+          keeper turn via [Event_bus.drain]. [None] until the first
+          successful drain. Stable per session (= [meta.runtime.trace_id]
+          as passed to OAS). *)
 }
 
 (** Register a keeper with an already-live fiber. Primarily used by tests and
@@ -117,6 +122,9 @@ val record_error : base_path:string -> string -> string -> unit
 
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
+
+(** Store the OAS Event_bus [correlation_id] from the most recent turn. *)
+val set_last_correlation_id : base_path:string -> string -> string -> unit
 
 (** Increment turn consecutive failure counter. *)
 val increment_turn_failures : base_path:string -> string -> unit

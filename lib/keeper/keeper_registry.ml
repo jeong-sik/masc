@@ -115,11 +115,7 @@ type registry_entry = {
           Does not affect state machine phase derivation. *)
   last_auto_rules :
     (float * Keeper_state_machine.auto_rule_summary) option;
-      (** Snapshot of the most recent [Context_measured] auto-rule summary.
-          Stored as [(wall_clock, summary)] so the composite observer
-          (RFC-0003 §6) can surface the last measurement without reading
-          history files. [None] until the first [Context_measured] event
-          has been dispatched. *)
+  last_event_bus_correlation : string option;
 }
 
 
@@ -220,6 +216,7 @@ let register_with_state ~base_path name meta
     transition_seq = 0;
     waiting_for_inference = Atomic.make false;
     last_auto_rules = None;
+    last_event_bus_correlation = None;
   } in
   put_entry key entry;
   if phase = Running then
@@ -329,6 +326,10 @@ let record_error ~base_path name err =
 
 let set_failure_reason ~base_path name reason =
   update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
+
+let set_last_correlation_id ~base_path name cid =
+  update_entry ~base_path name (fun e ->
+    { e with last_event_bus_correlation = Some cid })
 
 let increment_turn_failures ~base_path name =
   update_entry ~base_path name (fun e ->

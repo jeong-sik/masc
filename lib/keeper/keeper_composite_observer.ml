@@ -203,7 +203,10 @@ let observe
   let correlation_id =
     match correlation_id with
     | Some s when String.length s > 0 -> s
-    | _ -> stable_correlation_id entry
+    | _ ->
+      match entry.last_event_bus_correlation with
+      | Some cid -> cid
+      | None -> stable_correlation_id entry
   in
   let run_id =
     match run_id with

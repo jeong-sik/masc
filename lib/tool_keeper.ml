@@ -700,11 +700,16 @@ let handle_keeper_compact ctx args : tool_result =
                ("after_tokens", `Int recovery.compaction.after_tokens);
              ]))
         | None ->
-          (* Compaction infrastructure unavailable — checkpoint may be absent. *)
+          (* Compaction infrastructure unavailable — emit [Compaction_failed]
+             so [context_overflow] stays set and [derive_phase] re-projects
+             to Overflowed.  A subsequent [Compact_retry_exhausted] dispatch
+             (owned by the retry-loop caller) will latch the keeper to Paused.
+             Emitting [Compaction_completed] here would be a false success
+             signal. *)
           Keeper_exec_context.dispatch_keeper_phase_event
             ~config:ctx.config ~keeper_name:name
-            (Keeper_state_machine.Compaction_completed {
-               before_tokens = 0; after_tokens = 0;
+            (Keeper_state_machine.Compaction_failed {
+               reason = "no_valid_checkpoint";
             });
           (false,
            Printf.sprintf

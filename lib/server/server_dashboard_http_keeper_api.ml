@@ -614,6 +614,7 @@ let handle_keeper_get_subroutes state req request reqd =
           ~thompson_beta:stats.beta
           ~tool_count
           ~recovery_floor_count
+          ()
       in
       let cascade_fsm_mermaid =
         match meta with
@@ -626,10 +627,10 @@ let handle_keeper_get_subroutes state req request reqd =
             if last_model <> "" then Some last_model else None
           in
           Keeper_decision_audit.cascade_fsm_to_mermaid
-            ~models ~last_provider_result
+            ~models ~last_provider_result ()
         | _ ->
           Keeper_decision_audit.cascade_fsm_to_mermaid
-            ~models:["(unknown)"] ~last_provider_result:None
+            ~models:["(unknown)"] ~last_provider_result:None ()
       in
       let cascade_models =
         match meta with
@@ -644,21 +645,90 @@ let handle_keeper_get_subroutes state req request reqd =
           `String m.runtime.usage.last_model_used
         | _ -> `Null
       in
+      (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
+         summary). Each kind reports used / cap so the dashboard tier
+         panel can render saturation without re-reading the memory file. *)
+      let memory_kind_usage : Yojson.Safe.t =
+        let caps = Keeper_memory_policy.kind_caps () in
+        let used_by_kind =
+          match meta with
+          | Ok (Some _) ->
+            (try
+              let summary =
+                Keeper_memory.read_keeper_memory_summary
+                  state.Mcp_server.room_config
+                  ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
+              in
+              summary.Keeper_memory.kind_counts
+            with _ -> [])
+          | _ -> []
+        in
+        let lookup_used k =
+          try List.assoc k used_by_kind with Not_found -> 0
+        in
+        `List (List.map (fun (kind, cap) ->
+          `Assoc [
+            "kind", `String kind;
+            "used", `Int (lookup_used kind);
+            "cap", `Int cap;
+            "priority", `Int (Keeper_memory_policy.priority_for_kind ~kind);
+          ]) caps)
+      in
+      (* Compaction sub-FSM: only emit a diagram when the keeper is in
+         the [Compacting] phase. The three nodes mirror
+         [specs/bug-models/MemoryCompaction.tla]. *)
+      let compaction_submachine_mermaid =
+        match current with
+        | Keeper_state_machine.Compacting ->
+          let b = Buffer.create 256 in
+          Buffer.add_string b "stateDiagram-v2\n";
+          Buffer.add_string b "    [*] --> Accumulating\n";
+          Buffer.add_string b "    Accumulating --> Compacting: ratio_gate\n";
+          Buffer.add_string b "    Compacting --> Done: Compaction_completed\n";
+          Buffer.add_string b "    Compacting --> Accumulating: Compaction_failed\n";
+          Buffer.add_string b "    Done --> [*]\n";
+          Buffer.add_string b
+            "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
+          Buffer.add_string b "    class Compacting active\n";
+          `String (Buffer.contents b)
+        | _ -> `Null
+      in
       let json = `Assoc [
         "keeper", `String name;
         "current_phase", `String phase_str;
         "mermaid", `String mermaid;
         "decision_pipeline_mermaid", `String decision_pipeline_mermaid;
         "cascade_fsm_mermaid", `String cascade_fsm_mermaid;
+        "compaction_submachine_mermaid", compaction_submachine_mermaid;
         "thompson_alpha", `Float stats.alpha;
         "thompson_beta", `Float stats.beta;
         "tool_count", `Int tool_count;
         "recovery_floor_count", `Int recovery_floor_count;
         "cascade_models", `List (List.map (fun s -> `String s) cascade_models);
         "last_provider_result", last_provider;
+        "memory_kind_usage", memory_kind_usage;
       ] in
       Http.Response.json ~compress:true ~request:req
         (Yojson.Safe.to_string json) reqd
+  else if ends_with "/composite" then
+    (* RFC-0003 §7: composite lifecycle snapshot derived from the
+       registry entry via the [Keeper_composite_observer] pure
+       projection. No mutation, no I/O, no provider/token access. *)
+    let name = extract_name "/composite" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let base_path = state.Mcp_server.room_config.base_path in
+      (match Keeper_registry.get ~base_path name with
+       | None ->
+         Http.Response.json ~status:`Not_found
+           (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
+       | Some entry ->
+         let snapshot = Keeper_composite_observer.observe entry in
+         let json = Keeper_composite_observer.snapshot_to_json snapshot in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd)
   else
     Http.Response.json ~status:`Not_found
       {|{"error":"not found"}|} reqd

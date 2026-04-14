@@ -268,16 +268,25 @@ let load_stats () =
   if Fs_compat.file_exists path then begin
     try
       let entries = Fs_compat.load_jsonl path in
-      List.iter (fun json ->
-        match stats_of_json json with
-        | Some s ->
-            Hashtbl.replace stats_table s.name s
-        | None ->
-            Log.Thompson.warn "Failed to parse stats line: %s"
-              (Yojson.Safe.to_string json)
-      ) entries;
-      Log.Metrics.debug "thompson sampling loaded stats for %d agents"
-        (Hashtbl.length stats_table)
+      (* Parse outside the lock — [stats_of_json] is pure and avoids
+         holding [ts_mu] across per-line work — then install the whole
+         batch under one critical section. *)
+      let parsed =
+        List.filter_map (fun json ->
+          match stats_of_json json with
+          | Some s -> Some s
+          | None ->
+              Log.Thompson.warn "Failed to parse stats line: %s"
+                (Yojson.Safe.to_string json);
+              None
+        ) entries
+      in
+      let count =
+        with_ts_rw (fun () ->
+          List.iter (fun s -> Hashtbl.replace stats_table s.name s) parsed;
+          Hashtbl.length stats_table)
+      in
+      Log.Metrics.debug "thompson sampling loaded stats for %d agents" count
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -288,14 +297,20 @@ let load_stats () =
 let save_stats () =
   let path = stats_path () in
   try
-    let content =
-      Hashtbl.fold (fun _ s acc ->
-        acc ^ Yojson.Safe.to_string (stats_to_json s) ^ "\n"
-      ) stats_table ""
+    (* Serialise the table under the lock so a concurrent [record_*]
+       cannot [Hashtbl.replace] mid-[Hashtbl.fold] and corrupt the
+       iteration. *)
+    let content, count =
+      with_ts_ro (fun () ->
+        let content =
+          Hashtbl.fold (fun _ s acc ->
+            acc ^ Yojson.Safe.to_string (stats_to_json s) ^ "\n"
+          ) stats_table ""
+        in
+        (content, Hashtbl.length stats_table))
     in
     Fs_compat.save_file path content;
-    Log.Metrics.debug "thompson sampling saved stats for %d agents"
-      (Hashtbl.length stats_table)
+    Log.Metrics.debug "thompson sampling saved stats for %d agents" count
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
@@ -315,39 +330,66 @@ let record_vote ~agent_name ~direction =
     Hashtbl.replace pending_votes agent_name (up', down'))
 
 let flush_pending_votes () =
+  (* [ts_mu] is documented as protecting [pending_votes], but this
+     function was the only access path that ignored the lock: callers
+     of [record_vote] held it and could mutate [pending_votes] between
+     [Hashtbl.iter] and [Hashtbl.clear], silently dropping those votes.
+     Snapshot+clear the table atomically, release the lock, then apply
+     the accumulated stat updates individually under the lock.  The
+     two-step structure is required because [get_stats] re-acquires
+     [ts_mu], and doing that inside a [Hashtbl.iter] held under the
+     lock would either deadlock or skip the outer critical section. *)
   let decay = Env_config.AgentSelection.vote_decay_factor in
-  Hashtbl.iter (fun agent_name (votes_up, votes_down) ->
+  let snapshot =
+    with_ts_rw (fun () ->
+      let xs =
+        Hashtbl.fold (fun name counts acc -> (name, counts) :: acc)
+          pending_votes []
+      in
+      Hashtbl.clear pending_votes;
+      xs)
+  in
+  List.iter (fun (agent_name, (votes_up, votes_down)) ->
     let total = votes_up + votes_down in
     if total > 0 then begin
       let s = get_stats agent_name in
       let success_rate = float_of_int votes_up /. float_of_int total in
-      (* Apply decay to existing priors, then add new evidence *)
-      s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
-      s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
-      (* Clamp to minimum *)
-      s.alpha <- Float.max min_prior s.alpha;
-      s.beta <- Float.max min_prior s.beta;
-      (* Update totals *)
-      s.total_votes_up <- s.total_votes_up + votes_up;
-      s.total_votes_down <- s.total_votes_down + votes_down;
-      s.updated_at <- Time_compat.now ()
+      with_ts_rw (fun () ->
+        (* Apply decay to existing priors, then add new evidence *)
+        s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
+        s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
+        (* Clamp to minimum *)
+        s.alpha <- Float.max min_prior s.alpha;
+        s.beta <- Float.max min_prior s.beta;
+        (* Update totals *)
+        s.total_votes_up <- s.total_votes_up + votes_up;
+        s.total_votes_down <- s.total_votes_down + votes_down;
+        s.updated_at <- Time_compat.now ())
     end
-  ) pending_votes;
-  Hashtbl.clear pending_votes
+  ) snapshot
 
+(* The record_* helpers below all mutate an [agent_stats] returned by
+   [get_stats].  [get_stats] re-acquires [ts_mu] around the lookup, but
+   returns the record to the caller which then mutated fields lock-free —
+   so two fibers racing [record_selection ~agent_name:"X"] could both
+   read [s.selections] at the same value and both write the same +1,
+   silently dropping a selection.  Wrap each mutation sequence in
+   [with_ts_rw] so the read-modify-write stays atomic. *)
 let record_selection ~agent_name =
   let s = get_stats agent_name in
-  s.selections <- s.selections + 1;
-  s.last_selected_at <- Time_compat.now ();
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    s.selections <- s.selections + 1;
+    s.last_selected_at <- Time_compat.now ();
+    s.updated_at <- Time_compat.now ())
 
 let record_action ~agent_name ~action =
   let s = get_stats agent_name in
-  (match action with
-   | `Post -> s.posts_created <- s.posts_created + 1
-   | `Comment -> s.comments_created <- s.comments_created + 1
-   | `Skip -> s.skips <- s.skips + 1);
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    (match action with
+     | `Post -> s.posts_created <- s.posts_created + 1
+     | `Comment -> s.comments_created <- s.comments_created + 1
+     | `Skip -> s.skips <- s.skips + 1);
+    s.updated_at <- Time_compat.now ())
 
 (** {1 Quality Signal Integration} *)
 
@@ -382,20 +424,22 @@ let guard_penalty_beta_nudge =
     Penalty cap (1/cycle) is enforced by the caller. *)
 let record_guard_penalty ~agent_name =
   let s = get_stats agent_name in
-  s.beta <- s.beta +. guard_penalty_beta_nudge;
-  s.beta <- Float.max min_prior s.beta;
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    s.beta <- s.beta +. guard_penalty_beta_nudge;
+    s.beta <- Float.max min_prior s.beta;
+    s.updated_at <- Time_compat.now ())
 
 (** Record Post Verifier result into Thompson Sampling priors. *)
 let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
   let s = get_stats agent_name in
-  (match verdict with
-   | Post_verifier.Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
-   | Post_verifier.Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
-   | Post_verifier.Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
-  s.alpha <- Float.max min_prior s.alpha;
-  s.beta <- Float.max min_prior s.beta;
-  s.updated_at <- Time_compat.now ()
+  with_ts_rw (fun () ->
+    (match verdict with
+     | Post_verifier.Pass -> s.alpha <- s.alpha +. quality_pass_alpha_boost
+     | Post_verifier.Warn _ -> s.beta <- s.beta +. quality_warn_beta_nudge
+     | Post_verifier.Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
+    s.alpha <- Float.max min_prior s.alpha;
+    s.beta <- Float.max min_prior s.beta;
+    s.updated_at <- Time_compat.now ())
 
 (** {1 Selection Algorithm} *)
 

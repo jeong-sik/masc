@@ -504,9 +504,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           fs = state.Mcp_server.fs; proc_mgr = state.Mcp_server.proc_mgr;
           sw = Some sw } in
         Tool_handover.dispatch ctx ~name ~args:coerced_args
-    | Mod_relay ->
-        Tool_relay.dispatch { Tool_relay.config; agent_name; sw;
-          proc_mgr = state.Mcp_server.proc_mgr } ~name ~args:coerced_args
     | Mod_heartbeat ->
         Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:coerced_args
     | Mod_auth ->

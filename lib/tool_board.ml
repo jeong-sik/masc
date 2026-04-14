@@ -287,6 +287,32 @@ let normalize_board_post_meta args =
   in
   if base_fields = [] then None else Some (`Assoc base_fields)
 
+(** Detect markdown that was cut mid-write by an LLM max_tokens limit.
+    Symptoms: odd count of triple-backtick fences (unclosed ```code```
+    block), or odd count of single backticks outside fenced regions.
+    Evidence: ani1999 board post p-c0494a2e body_len=467 ending in a
+    lone '`'. Walks the string once with a tiny state machine so
+    backticks inside a fenced block don't count. *)
+let detect_truncated_markdown (text : string) : bool =
+  let len = String.length text in
+  let in_fence = ref false in
+  let inline_outside = ref 0 in
+  let fences = ref 0 in
+  let i = ref 0 in
+  while !i < len do
+    if !i + 2 < len
+       && text.[!i] = '`' && text.[!i + 1] = '`' && text.[!i + 2] = '`'
+    then begin
+      incr fences;
+      in_fence := not !in_fence;
+      i := !i + 3
+    end else begin
+      if text.[!i] = '`' && not !in_fence then incr inline_outside;
+      incr i
+    end
+  done;
+  !fences mod 2 = 1 || !inline_outside mod 2 = 1
+
 let handle_post_create args =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles *)
@@ -296,7 +322,23 @@ let handle_post_create args =
   | _ ->
   let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
-  let content = strip_state_blocks_text raw_content in
+  let content =
+    let stripped = strip_state_blocks_text raw_content in
+    if detect_truncated_markdown stripped then begin
+      let author_label =
+        match get_string_opt args "author" |> Option.map String.trim with
+        | Some a when a <> "" -> a
+        | _ -> "unknown"
+      in
+      Prometheus.inc_counter "masc_board_truncated_posts_total"
+        ~labels:[("author", author_label)] ();
+      Log.BoardLog.warn
+        "board_post: detected truncated markdown (author=%s body_len=%d) — appending 잘림 marker"
+        author_label (String.length stripped);
+      stripped ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
+    end else
+      stripped
+  in
   let author = get_string_opt args "author" |> Option.map String.trim in
   let title_is_empty =
     match title with

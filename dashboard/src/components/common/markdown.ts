@@ -112,18 +112,41 @@ function sanitizeMermaidSvg(raw: string): SVGElement | null {
   return document.importNode(svg, true) as unknown as SVGElement
 }
 
+// ── Repair truncated markdown ────────────────────────────────
+// Keeper tool outputs occasionally arrive with an unclosed code fence
+// (```) or an odd count of inline backticks (`) — the LLM ran out of
+// max_tokens mid-write and the `board_post` payload is stored as-is.
+// Marked's parser then "swallows" everything after the opening backtick.
+// Repair: close any dangling fence/inline and append a visible marker
+// so the operator can tell the post was cut, not just strangely rendered.
+function repairTruncatedMarkdown(text: string): string {
+  const fenceCount = (text.match(/```/g) ?? []).length
+  if (fenceCount % 2 === 1) {
+    return `${text}\n…[잘림]\n\`\`\``
+  }
+  // Only count inline backticks OUTSIDE fenced blocks, otherwise
+  // a balanced fence would be miscounted as odd.
+  const outsideFences = text.replace(/```[\s\S]*?```/g, '')
+  const inlineCount = (outsideFences.match(/`/g) ?? []).length
+  if (inlineCount % 2 === 1) {
+    return `${text}…[잘림]\``
+  }
+  return text
+}
+
 // ── Parse markdown with <think> block extraction ─────────────
 // Think blocks are extracted first, their content is parsed
 // separately as markdown, then reassembled as <details>.
 function renderMarkdown(text: string): string {
+  const repaired = repairTruncatedMarkdown(text)
   const parts: string[] = []
   let lastIdx = 0
   const thinkRe = /<think>([\s\S]*?)<\/think\s*>/g
   let m: RegExpExecArray | null
 
-  while ((m = thinkRe.exec(text)) !== null) {
+  while ((m = thinkRe.exec(repaired)) !== null) {
     if (m.index > lastIdx) {
-      parts.push(md.parse(text.slice(lastIdx, m.index)) as string)
+      parts.push(md.parse(repaired.slice(lastIdx, m.index)) as string)
     }
     const innerHtml = md.parse((m[1] as string).trim()) as string
     parts.push(
@@ -132,8 +155,8 @@ function renderMarkdown(text: string): string {
     lastIdx = m.index + m[0].length
   }
 
-  if (lastIdx < text.length) {
-    parts.push(md.parse(text.slice(lastIdx)) as string)
+  if (lastIdx < repaired.length) {
+    parts.push(md.parse(repaired.slice(lastIdx)) as string)
   }
 
   return sanitize(parts.join(''))

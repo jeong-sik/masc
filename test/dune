@@ -49,6 +49,7 @@
         test_keeper_adaptive_thinking
         test_keeper_lifecycle
         test_keeper_lifecycle_chaos
+        test_keeper_rollover_gate
         test_keeper_deliberation
         test_keeper_registry
         test_keeper_supervisor
@@ -128,6 +129,7 @@
         test_keeper_adaptive_thinking
           test_keeper_lifecycle
           test_keeper_lifecycle_chaos
+          test_keeper_rollover_gate
           test_keeper_deliberation
           test_keeper_registry
           test_keeper_supervisor

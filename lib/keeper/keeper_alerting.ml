@@ -103,6 +103,18 @@ let alert_dedup_window_sec = Env_config.AlertDedup.window_sec
 
 let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
 
+(** Mutex protecting [alert_dedup_table].  [is_alert_deduplicated] runs
+    from every keeper's alert scoring path, and keepers execute
+    concurrently in the same room — so the previous implementation
+    interleaved [Hashtbl.length] / [Hashtbl.filter_map_inplace] /
+    [Hashtbl.find_opt] / [Hashtbl.replace] from multiple fibers with
+    no serialisation.  The [find_opt + replace] pair is a TOCTOU that
+    can let the same alert fire twice even within the dedup window,
+    and [filter_map_inplace] concurrent with [find_opt] invalidates
+    the iteration (OCaml [Hashtbl] does not support mutate-during-
+    fold). *)
+let alert_dedup_mu = Eio.Mutex.create ()
+
 let alert_dedup_key ~(keeper_name : string) ~(reasons : string list) : string =
   let sorted = List.sort String.compare reasons in
   keeper_name ^ ":" ^ String.concat "," sorted
@@ -110,17 +122,18 @@ let alert_dedup_key ~(keeper_name : string) ~(reasons : string list) : string =
 let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : bool =
   let key = alert_dedup_key ~keeper_name ~reasons in
   let now = Time_compat.now () in
-  if Hashtbl.length alert_dedup_table > 64 then begin
-    let stale_threshold = alert_dedup_window_sec *. 2.0 in
-    Hashtbl.filter_map_inplace (fun _k ts ->
-      if now -. ts > stale_threshold then None else Some ts
-    ) alert_dedup_table
-  end;
-  match Hashtbl.find_opt alert_dedup_table key with
-  | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
-  | _ ->
-    Hashtbl.replace alert_dedup_table key now;
-    false
+  Eio_guard.with_mutex alert_dedup_mu (fun () ->
+    if Hashtbl.length alert_dedup_table > 64 then begin
+      let stale_threshold = alert_dedup_window_sec *. 2.0 in
+      Hashtbl.filter_map_inplace (fun _k ts ->
+        if now -. ts > stale_threshold then None else Some ts
+      ) alert_dedup_table
+    end;
+    match Hashtbl.find_opt alert_dedup_table key with
+    | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
+    | _ ->
+      Hashtbl.replace alert_dedup_table key now;
+      false)
 
 (** {1 Alert Signal Weights}
 

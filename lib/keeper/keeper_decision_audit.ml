@@ -198,11 +198,15 @@ let flush_if_needed ~base_path ~keeper_name =
 (* ================================================================ *)
 
 let decision_pipeline_to_mermaid
+    ?(guard_penalty_this_cycle : int option)
+    ?(tool_policy_mode : [`Preset of string | `Custom] option)
+    ?(turn_outcome : [`Ok | `Failed | `Blocked] option)
     ~(phase : Keeper_state_machine.phase)
     ~(thompson_alpha : float)
     ~(thompson_beta : float)
     ~(tool_count : int)
     ~(recovery_floor_count : int)
+    ()
     : string =
   let b = Buffer.create 512 in
   let p fmt = Printf.bprintf b fmt in
@@ -242,10 +246,28 @@ let decision_pipeline_to_mermaid
      p "    class Running off\n";
      p "    class Failing off\n");
   p "\n";
+  let penalty_str = match guard_penalty_this_cycle with
+    | Some n -> string_of_int n
+    | None -> "n/a"
+  in
+  let policy_str = match tool_policy_mode with
+    | Some (`Preset name) -> Printf.sprintf "preset:%s" name
+    | Some `Custom -> "custom"
+    | None -> "n/a"
+  in
+  let outcome_str = match turn_outcome with
+    | Some `Ok -> "ok"
+    | Some `Failed -> "failed"
+    | Some `Blocked -> "blocked"
+    | None -> "n/a"
+  in
   p "    note right of Running\n";
   p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
   p "      Tools: %d / floor %d\n" tool_count recovery_floor_count;
   p "      Level: %d\n" level;
+  p "      Guard pen this cycle: %s\n" penalty_str;
+  p "      Tool policy: %s\n" policy_str;
+  p "      Turn outcome: %s\n" outcome_str;
   p "    end note\n";
   Buffer.contents b
 
@@ -253,14 +275,27 @@ let decision_pipeline_to_mermaid
 (* Cascade FSM Mermaid diagram                                      *)
 (* ================================================================ *)
 
+type provider_health = [`Healthy | `Unhealthy | `Unknown]
+
 let cascade_fsm_to_mermaid
+    ?(provider_health : (string * provider_health) list option)
+    ?(slot_state : (int * int) option)
+    ?(effective_cascade_reason : string option)
     ~(models : string list)
     ~(last_provider_result : string option)
+    ()
     : string =
   let b = Buffer.create 512 in
   let p fmt = Printf.bprintf b fmt in
+  (* Look up provider health by label (mirrors CascadeLiveness.tla phealth). *)
+  let health_for label =
+    match provider_health with
+    | None -> `Unknown
+    | Some pairs ->
+      (try List.assoc label pairs with Not_found -> `Unknown)
+  in
   p "stateDiagram-v2\n";
-  p "    [*] --> SelectProvider\n";
+  p "    [*] --> SelectProvider: AdmitKeeper\n";
   (* Provider nodes *)
   let n = List.length models in
   List.iteri (fun i label ->
@@ -268,19 +303,19 @@ let cascade_fsm_to_mermaid
       if c = ':' || c = '/' then '_' else c) label
     in
     let display = label in
+    let is_last = (i = n - 1) in
+    let try_edge = if is_last then "TryLast" else "TryNonLast" in
     if i = 0 then
-      p "    SelectProvider --> P%d: try %s\n" i display
+      p "    SelectProvider --> P%d: %s\n" i try_edge
     else
-      p "    P%d --> P%d: cascade (try %s)\n" (i - 1) i display;
+      p "    P%d --> P%d: CascadableError\n" (i - 1) i;
     p "    state \"%s\" as P%d\n" display i;
-    p "    P%d --> Accept: Call_ok\n" i;
-    if i < n - 1 then begin
-      p "    P%d --> P%d: 429/500/timeout\n" i (i + 1);
-      p "    P%d --> P%d: Slot_full\n" i (i + 1);
-      p "    P%d --> P%d: Accept_rejected\n" i (i + 1)
+    p "    P%d --> Accept: RespondOk\n" i;
+    if not is_last then begin
+      p "    P%d --> P%d: SlotUnavailable\n" i (i + 1)
     end else begin
-      p "    P%d --> AcceptExhaust: Accept_rejected\\n(accept_on_exhaustion)\n" i;
-      p "    P%d --> Exhausted: non-cascadeable error\n" i
+      p "    P%d --> AcceptExhaust: LastProviderFail\\n(accept_on_exhaustion)\n" i;
+      p "    P%d --> Exhausted: LastProviderFail\n" i
     end;
     ignore safe
   ) models;
@@ -295,7 +330,14 @@ let cascade_fsm_to_mermaid
   p "    class Accept ok\n";
   p "    class AcceptExhaust warn\n";
   p "    class Exhausted err\n";
-  (* Highlight last result provider *)
+  (* Provider health styling: unhealthy providers get warn class. *)
+  List.iteri (fun i label ->
+    match health_for label with
+    | `Unhealthy -> p "    class P%d warn\n" i
+    | `Unknown -> p "    class P%d dim\n" i
+    | `Healthy -> ()
+  ) models;
+  (* Highlight last result provider (overrides health styling). *)
   (match last_provider_result with
    | Some r when String.length r > 0 ->
      List.iteri (fun i label ->
@@ -307,5 +349,11 @@ let cascade_fsm_to_mermaid
   p "    note right of SelectProvider\n";
   p "      Models: %d\n" n;
   p "      Order: %s\n" (String.concat " > " models);
+  (match slot_state with
+   | Some (used, max) -> p "      Slots: %d / %d\n" used max
+   | None -> ());
+  (match effective_cascade_reason with
+   | Some r when String.length r > 0 -> p "      Reason: %s\n" r
+   | _ -> ());
   p "    end note\n";
   Buffer.contents b

@@ -298,7 +298,6 @@
    tool_worktree
    tool_a2a
    tool_handover
-   tool_relay
    worktree_live_context
    tool_operator
    tool_heartbeat
@@ -468,6 +467,7 @@
    keeper_agent_run
    keeper_world_observation
    keeper_decision_audit
+   keeper_composite_observer
    keeper_unified_prompt
    keeper_unified_turn
 

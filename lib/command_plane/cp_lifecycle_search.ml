@@ -376,7 +376,7 @@ let detachment_semantic_equal (left : detachment_record) (right : detachment_rec
   && left.runtime_kind = right.runtime_kind
   && left.runtime_ref = right.runtime_ref
   && String.equal left.source right.source
-  && String.equal left.status right.status
+  && left.status = right.status
   && left.last_event_at = right.last_event_at
   && left.last_progress_at = right.last_progress_at
   && left.heartbeat_deadline = right.heartbeat_deadline
@@ -427,7 +427,7 @@ let make_detachment_runtime config (target_unit : unit_record) (operation : oper
         (if target_count = 1 then option_first_some session_id (Some target_unit.unit_id)
          else Some target_unit.unit_id);
       source = "managed";
-      status = string_of_operation_status operation.status;
+      status = detachment_status_of_operation_status operation.status;
       last_event_at;
       last_progress_at;
       heartbeat_deadline;
@@ -473,7 +473,7 @@ let default_detachment_for_operation config units (operation : operation_record)
         runtime_kind = None;
         runtime_ref = None;
         source = "managed";
-        status = string_of_operation_status operation.status;
+        status = detachment_status_of_operation_status operation.status;
         last_event_at = None;
         last_progress_at = Some operation.updated_at;
         heartbeat_deadline = None;
@@ -557,7 +557,7 @@ let sync_managed_detachments config units (operation : operation_record) =
                           runtime_kind = None;
                           runtime_ref = None;
                           source = "managed";
-                          status = string_of_operation_status operation.status;
+                          status = detachment_status_of_operation_status operation.status;
                           last_event_at = None;
                           last_progress_at = Some operation.updated_at;
                           heartbeat_deadline = None;

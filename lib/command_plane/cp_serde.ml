@@ -1,5 +1,46 @@
 include Cp_paths
 
+let detachment_status_to_string = function
+  | Det_active -> "active"
+  | Det_awaiting_approval -> "awaiting_approval"
+  | Det_stalled -> "stalled"
+  | Det_completed -> "completed"
+  | Det_cancelled -> "cancelled"
+  | Det_failed -> "failed"
+  | Det_stopped -> "stopped"
+
+let detachment_status_of_string = function
+  | "active" -> Det_active
+  | "awaiting_approval" -> Det_awaiting_approval
+  | "stalled" -> Det_stalled
+  | "completed" -> Det_completed
+  | "cancelled" -> Det_cancelled
+  | "failed" -> Det_failed
+  | "stopped" -> Det_stopped
+  | _ -> Det_active
+
+let decision_status_to_string = function
+  | Dec_pending -> "pending"
+  | Dec_approved -> "approved"
+  | Dec_denied -> "denied"
+  | Dec_expired -> "expired"
+
+let decision_status_of_string = function
+  | "pending" -> Dec_pending
+  | "approved" -> Dec_approved
+  | "denied" -> Dec_denied
+  | "expired" -> Dec_expired
+  | _ -> Dec_pending
+
+(** Map operation lifecycle to detachment lifecycle.
+    Used when synthesizing detachments from operations in lifecycle_search. *)
+let detachment_status_of_operation_status = function
+  | Active | Planned -> Det_active
+  | Paused -> Det_stalled
+  | Completed -> Det_completed
+  | Cancelled -> Det_cancelled
+  | Failed -> Det_failed
+
 let nonempty_string = function
   | Some raw ->
       let value = String.trim raw in
@@ -585,7 +626,7 @@ let detachment_to_json (detachment : detachment_record) =
       ("runtime_kind", Json_util.string_opt_to_json detachment.runtime_kind);
       ("runtime_ref", Json_util.string_opt_to_json detachment.runtime_ref);
       ("source", `String detachment.source);
-      ("status", `String detachment.status);
+      ("status", `String (detachment_status_to_string detachment.status));
       ("last_event_at", Json_util.string_opt_to_json detachment.last_event_at);
       ("last_progress_at", Json_util.string_opt_to_json detachment.last_progress_at);
       ("heartbeat_deadline", Json_util.string_opt_to_json detachment.heartbeat_deadline);
@@ -608,7 +649,7 @@ let detachment_of_json json =
           runtime_kind = get_string_opt json "runtime_kind";
           runtime_ref = get_string_opt json "runtime_ref";
           source = get_string_default json "source" "managed";
-          status = get_string_default json "status" "active";
+          status = detachment_status_of_string (get_string_default json "status" "active");
           last_event_at = get_string_opt json "last_event_at";
           last_progress_at = get_string_opt json "last_progress_at";
           heartbeat_deadline = get_string_opt json "heartbeat_deadline";
@@ -628,7 +669,7 @@ let policy_decision_to_json (decision : policy_decision_record) =
       ("operation_id", Json_util.string_opt_to_json decision.operation_id);
       ("target_unit_id", Json_util.string_opt_to_json decision.target_unit_id);
       ("requested_by", `String decision.requested_by);
-      ("status", `String decision.status);
+      ("status", `String (decision_status_to_string decision.status));
       ("reason", Json_util.string_opt_to_json decision.reason);
       ("source", `String decision.source);
       ("detail", decision.detail);
@@ -665,7 +706,7 @@ let policy_decision_of_json json =
           operation_id = get_string_opt json "operation_id";
           target_unit_id = get_string_opt json "target_unit_id";
           requested_by;
-          status;
+          status = decision_status_of_string status;
           reason = get_string_opt json "reason";
           source = get_string_default json "source" "managed";
           detail;

@@ -135,21 +135,21 @@ let dashboard_detachments_json_from_state (state : snapshot_state) =
                (List.length
                   (List.filter
                      (fun (detachment : detachment_record) ->
-                       String.equal detachment.status "active")
+                       detachment.status = Det_active)
                      detachments)) );
            ( "awaiting_approval",
              `Int
                (List.length
                   (List.filter
                      (fun (detachment : detachment_record) ->
-                       String.equal detachment.status "awaiting_approval")
+                       detachment.status = Det_awaiting_approval)
                      detachments)) );
            ( "stalled",
              `Int
                (List.length
                   (List.filter
                      (fun (detachment : detachment_record) ->
-                       String.equal detachment.status "stalled")
+                       detachment.status = Det_stalled)
                      detachments)) );
            ("projected", `Int projected_count);
          ]);
@@ -165,18 +165,18 @@ let dashboard_detachments_json_from_state (state : snapshot_state) =
                          ("detachment_id", `String detachment.detachment_id);
                          ("operation_id", `String detachment.operation_id);
                          ("session_id", json_string_option detachment.session_id);
-                         ("status", `String detachment.status);
+                         ("status", `String (Cp_serde.detachment_status_to_string detachment.status));
                        ] );
                  ])
              detachments) );
     ]
 
 let dashboard_decisions_json_from_state (state : snapshot_state) =
-  let count_status status =
+  let count_status (status : decision_status) =
     List.length
       (List.filter
          (fun (decision : policy_decision_record) ->
-           String.equal decision.status status)
+           decision.status = status)
          state.decisions)
   in
   `Assoc
@@ -185,9 +185,9 @@ let dashboard_decisions_json_from_state (state : snapshot_state) =
        `Assoc
          [
            ("total", `Int (List.length state.decisions));
-           ("pending", `Int (count_status "pending"));
-           ("approved", `Int (count_status "approved"));
-           ("denied", `Int (count_status "denied"));
+           ("pending", `Int (count_status Dec_pending));
+           ("approved", `Int (count_status Dec_approved));
+           ("denied", `Int (count_status Dec_denied));
          ]);
     ]
 
@@ -219,7 +219,7 @@ let company_scope_id_for units source_unit_id target_unit_id =
 let find_pending_decision config ~requested_action ?operation_id ?target_unit_id () =
   all_policy_decisions config
   |> List.find_opt (fun (decision : policy_decision_record) ->
-         String.equal decision.status "pending"
+         decision.status = Dec_pending
          && String.equal decision.requested_action requested_action
          &&
          match operation_id, decision.operation_id with
@@ -244,7 +244,7 @@ let create_policy_decision config ~(actor : string) ~requested_action ~scope_typ
       operation_id;
       target_unit_id;
       requested_by = actor;
-      status = "pending";
+      status = Dec_pending;
       reason;
       source;
       detail;
@@ -280,9 +280,9 @@ let check_expired_decisions config =
   let expired_count = ref 0 in
   let updated = List.map (fun (d : policy_decision_record) ->
     match d.status, d.expires_at with
-    | "pending", Some exp when exp < now ->
+    | Dec_pending, Some exp when exp < now ->
         incr expired_count;
-        { d with status = "expired"; decided_at = Some now }
+        { d with status = Dec_expired; decided_at = Some now }
     | _ -> d
   ) decisions in
   if !expired_count > 0 then

@@ -114,14 +114,43 @@ let sync_test_base_path_env resolved_path =
         Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 
+(** Dedupe MASC-base-path log lines across back-to-back identical resolutions.
+
+    [resolve_masc_base_path] is called on every HTTP request (see
+    [server_mcp_transport_http_session.default_base_path]). cwd and
+    [MASC_BASE_PATH] are invariant per server lifetime, so every call
+    produces the same log lines — which used to spam the log every few
+    seconds. The resolver still runs in full (so env changes in tests
+    are honored); only log emission is suppressed when the exact message
+    has been logged before.
+
+    The set is unbounded because the number of distinct log lines the
+    resolver can produce is small and fixed (~4 patterns × realistic
+    input paths). [Stdlib.Mutex] is used instead of [Eio.Mutex] because
+    this resolver is called from both test executables (no Eio context)
+    and the server (with Eio); [Eio.Mutex] raises Unhandled on the
+    former. See feedback: ocaml5-mutex-selection. *)
+let logged_lines : (string, unit) Hashtbl.t = Hashtbl.create 8
+let logged_lines_mutex = Mutex.create ()
+
+let log_once_info fmt =
+  Format.kasprintf (fun msg ->
+    Mutex.lock logged_lines_mutex;
+    let fresh =
+      if Hashtbl.mem logged_lines msg then false
+      else begin Hashtbl.add logged_lines msg (); true end
+    in
+    Mutex.unlock logged_lines_mutex;
+    if fresh then Log.Room.info "%s" msg) fmt
+
 let resolve_requested_base_path path =
   let requested = normalize_base_path path in
   match find_git_root requested with
   | Some git_root ->
-      Log.Room.info "MASC base resolved: %s → %s (git root)" requested git_root;
+      log_once_info "MASC base resolved: %s → %s (git root)" requested git_root;
       git_root
   | None ->
-      Log.Room.info "MASC base: %s (no git root found)" requested;
+      log_once_info "MASC base: %s (no git root found)" requested;
       requested
 
 (** Resolve base_path with a single authority:
@@ -137,7 +166,7 @@ let resolve_masc_base_path path =
          && not
               (Env_config_core.get_bool ~default:false
                  "MASC_TEST_ALLOW_INHERITED_BASE_PATH") ->
-      Log.Room.info
+      log_once_info
         "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
         explicit path;
       requested
@@ -147,12 +176,12 @@ let resolve_masc_base_path path =
               (Env_config_core.get_bool ~default:false
                  "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
          && not (String.equal explicit requested) ->
-      Log.Room.info
+      log_once_info
         "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
         explicit path;
       requested
   | Some explicit ->
-      Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
+      log_once_info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
   | None -> requested
 

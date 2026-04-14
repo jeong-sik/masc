@@ -1336,9 +1336,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           ~base_path:config.base_path ~keeper_name:meta.name
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
       in
+      let unsubscribe_event_bus () =
+        match event_bus_sub, Keeper_event_bus.get () with
+        | Some sub, Some bus -> Agent_sdk.Event_bus.unsubscribe bus sub
+        | _ -> ()
+      in
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
-          Keeper_exec_tools.remove_tool_call_observer side_effect_observer)
+          Keeper_exec_tools.remove_tool_call_observer side_effect_observer;
+          unsubscribe_event_bus ())
         (fun () ->
         Keeper_exec_context.timed (fun () ->
           let clock = Eio_context.get_clock () in
@@ -1620,11 +1626,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             end else
               Error (Oas.Error.Internal msg))))
       in
+      (* Drain correlation_id from the subscription created before the
+         turn. Unsubscribe is handled by [unsubscribe_event_bus] in the
+         Fun.protect ~finally above, so this path only drains. *)
       (match event_bus_sub, Keeper_event_bus.get () with
-       | Some sub, Some bus ->
-         let events = Agent_sdk.Event_bus.drain sub in
-         Agent_sdk.Event_bus.unsubscribe bus sub;
-         (match events with
+       | Some sub, Some _bus ->
+         (match Agent_sdk.Event_bus.drain sub with
           | ev :: _ ->
             Keeper_registry.set_last_correlation_id
               ~base_path:config.base_path meta.name

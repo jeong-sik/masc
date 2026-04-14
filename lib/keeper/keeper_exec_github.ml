@@ -53,6 +53,83 @@ let gh_not_found_hint ~(st : Unix.process_status) ~(out : string) =
          Use 'issue list' or 'pr list' to find valid targets first." ]
   else []
 
+(** gh subcommands that take a numeric PR/issue target as their first
+    positional argument. We pre-validate the number against the
+    Keeper_gh_cache before dispatching the subprocess.
+
+    [view] is intentionally excluded from the cache check -- list-style
+    [pr view] (with no number) is valid and we don't want to reject it. *)
+let gh_pr_number_subcmds =
+  [ "view"; "close"; "reopen"; "merge"; "comment"; "edit"
+  ; "diff"; "checks"; "review"; "ready"; "status" ]
+
+let gh_issue_number_subcmds =
+  [ "view"; "close"; "reopen"; "comment"; "edit"
+  ; "develop"; "lock"; "unlock"; "pin"; "unpin"; "transfer" ]
+
+(** Parse a gh command string and return [Some (kind, number)] when the
+    command references a specific PR/issue number that we should
+    pre-validate. Returns [None] for list/create/status commands, and
+    for any command whose first positional after the subcommand is not
+    a positive integer (e.g. branch names for [gh pr view my-branch]).
+
+    Examples:
+      "pr view 123"           -> Some (PR, 123)
+      "pr view my-branch"     -> None  (not an integer)
+      "pr list --state open"  -> None
+      "pr create --title foo" -> None
+      "issue comment 456 -b hi" -> Some (Issue, 456)
+      "pr merge 789 --squash" -> Some (PR, 789) *)
+let extract_gh_target_number (cmd : string)
+    : (Keeper_gh_cache.entity_kind * int) option
+  =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  let rec first_positional_int = function
+    | [] -> None
+    | tok :: rest ->
+      if String.length tok > 0 && tok.[0] = '-' then
+        (* Flag: skip over its value too, if this flag takes one.
+           We use a conservative heuristic -- skip the next token only
+           when it doesn't also look like a flag. *)
+        (match rest with
+         | next :: rest' when String.length next > 0 && next.[0] <> '-' ->
+           first_positional_int rest'
+         | _ -> first_positional_int rest)
+      else
+        (match int_of_string_opt tok with
+         | Some n when n > 0 -> Some n
+         | _ -> None)  (* first non-flag positional wasn't a number *)
+  in
+  match parts with
+  | "pr" :: sub :: rest when List.mem (String.lowercase_ascii sub) gh_pr_number_subcmds ->
+    Option.map (fun n -> Keeper_gh_cache.PR, n) (first_positional_int rest)
+  | "issue" :: sub :: rest when List.mem (String.lowercase_ascii sub) gh_issue_number_subcmds ->
+    Option.map (fun n -> Keeper_gh_cache.Issue, n) (first_positional_int rest)
+  | _ -> None
+
+(** Return the kind whose cached number list should be invalidated after
+    this command runs successfully. Covers creation (new number appears),
+    state transitions that close/reopen (membership changes under
+    [state=all] is unchanged, but we still invalidate to resync state
+    filters used elsewhere), and merges. *)
+let gh_mutates_entity (cmd : string) : Keeper_gh_cache.entity_kind option =
+  let parts =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+    |> List.map String.lowercase_ascii
+  in
+  match parts with
+  | "pr" :: sub :: _
+    when List.mem sub [ "create"; "close"; "reopen"; "merge"; "ready"; "edit" ] ->
+    Some Keeper_gh_cache.PR
+  | "issue" :: sub :: _
+    when List.mem sub [ "create"; "close"; "reopen"; "edit"; "transfer"; "delete" ] ->
+    Some Keeper_gh_cache.Issue
+  | _ -> None
+
 (** Truncate gh output to prevent context explosion.
     65KB responses were observed causing 300s timeout via token overflow. *)
 let max_gh_output_bytes = 8192
@@ -255,6 +332,72 @@ let handle_keeper_github
             ; "reason", `String reason
             ])
     | Ok () ->
+      (* Pre-execution hallucination gate. When the command targets a
+         specific PR/issue number, verify that number actually exists in
+         the repo's cached list. On mismatch, return the valid
+         alternatives as a JSON array -- the LLM picks from the list
+         instead of guessing. On `Unknown (cache miss / fetch failure),
+         fallthrough to normal execution (fail-open). See
+         [keeper_gh_cache.ml]. *)
+      let invalid_number =
+        match extract_gh_target_number gh_raw with
+        | None -> None
+        | Some (kind, number) ->
+          let slug =
+            match repo_slug with
+            | Some s -> s
+            | None -> Option.value ~default:"" (project_repo_slug ())
+          in
+          (match
+             Keeper_gh_cache.validate_number ~config ~repo_slug:slug ~kind ~number
+           with
+           | `Valid | `Unknown -> None
+           | `Invalid valids -> Some (kind, number, valids, slug))
+      in
+      (match invalid_number with
+       | Some (kind, number, valids, slug) ->
+         let kind_label =
+           match kind with Keeper_gh_cache.PR -> "PR" | Issue -> "issue"
+         in
+         (* Cap the suggestion list so the tool response doesn't balloon
+            when a repo has 100 PRs -- 20 numbers is enough for the LLM
+            to recognize the range and pick a recent one. *)
+         let shown =
+           let rec take n = function
+             | [] -> []
+             | _ when n <= 0 -> []
+             | x :: rest -> x :: take (n - 1) rest
+           in
+           take 20 valids
+         in
+         let valid_str =
+           shown |> List.map string_of_int |> String.concat ", "
+         in
+         Log.Keeper.warn
+           "keeper_github hallucination-gate: %s #%d not in %s (keeper=%s)"
+           kind_label number slug meta.name;
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool false
+               ; "error", `String "number_not_found"
+               ; ( "reason"
+                 , `String
+                     (Printf.sprintf
+                        "%s #%d does not exist in %s."
+                        kind_label number slug) )
+               ; "valid_numbers", `List (List.map (fun n -> `Int n) shown)
+               ; ( "hint"
+                 , `String
+                     (Printf.sprintf
+                        "Valid %s numbers in %s: [%s]. \
+                         Use one of these instead. \
+                         Do not guess. If you need a number not in this \
+                         list, run '%s list' first to refresh."
+                        kind_label slug valid_str
+                        (match kind with PR -> "pr" | Issue -> "issue")) )
+               ; "cmd", `String ("gh " ^ gh_raw)
+               ])
+       | None ->
       let preset_allows_workflow =
         match Keeper_types.tool_access_preset meta.tool_access with
         | Some preset -> Keeper_tool_policy.allows_workflow_for_preset preset
@@ -351,6 +494,18 @@ let handle_keeper_github
           let shell_cmd = Printf.sprintf "cd %s && %s 2>&1" (Filename.quote root) scoped_cmd in
           let st, raw_out = Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ] in
           let out, trunc_fields = truncate_gh_output raw_out in
+          (* Invalidate cache on successful mutation so the next validation
+             sees the new/removed number. Applies to pr merge explicitly. *)
+          (if st = Unix.WEXITED 0 then
+             match gh_mutates_entity gh_raw with
+             | None -> ()
+             | Some kind ->
+               let slug =
+                 match repo_slug with
+                 | Some s -> s
+                 | None -> Option.value ~default:"" (project_repo_slug ())
+               in
+               if slug <> "" then Keeper_gh_cache.invalidate ~repo_slug:slug ~kind);
           Yojson.Safe.to_string
             (`Assoc
                 ([ "ok", `Bool (st = Unix.WEXITED 0)
@@ -364,12 +519,23 @@ let handle_keeper_github
           Process_eio.run_argv_with_status ~timeout_sec [ "/bin/zsh"; "-lc"; shell_cmd ]
         in
         let out, trunc_fields = truncate_gh_output raw_out in
+        (* See merge-path comment above -- same invalidation rationale. *)
+        (if st = Unix.WEXITED 0 then
+           match gh_mutates_entity gh_raw with
+           | None -> ()
+           | Some kind ->
+             let slug =
+               match repo_slug with
+               | Some s -> s
+               | None -> Option.value ~default:"" (project_repo_slug ())
+             in
+             if slug <> "" then Keeper_gh_cache.invalidate ~repo_slug:slug ~kind);
         Yojson.Safe.to_string
           (`Assoc
               ([ "ok", `Bool (st = Unix.WEXITED 0)
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "output", `String out
-               ] @ trunc_fields @ gh_not_found_hint ~st ~out))))
+               ] @ trunc_fields @ gh_not_found_hint ~st ~out)))))
 ;;
 
 let handle_keeper_pr_workflow
@@ -965,6 +1131,14 @@ let handle_keeper_pr_submit
               else
                 Ok (Printf.sprintf "PR verified: %s" verified)
         ) in
+        (* Invalidate the PR cache on success so that a keeper issuing
+           [gh pr view <new-number>] on the next turn validates against
+           the refreshed list instead of rejecting the just-created PR. *)
+        if !step_ok then begin
+          let slug = Option.value ~default:"" (project_repo_slug ()) in
+          if slug <> "" then
+            Keeper_gh_cache.invalidate ~repo_slug:slug ~kind:Keeper_gh_cache.PR
+        end;
         (* Record PR in playground history (best-effort, JSONL append) *)
         if !step_ok && !pr_url <> "" then begin
           try

@@ -2433,12 +2433,13 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation result
   in
-  check string "speech act" "defer"
+  check string "speech act" "inform"
     (KSM.speech_act_to_string state.speech_act);
-  check string "delivery surface" "silent"
+  check string "delivery surface" "visible_reply"
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
-  check string "visible response suppressed" "" routed.response_text;
+  check bool "tool-only turn synthesizes visible response" true
+    (contains_substring routed.response_text "Tools used: masc_status.");
   check (list string) "tool list preserved" ["masc_status"] routed.tools_used
 
 let test_social_model_infers_board_comment_from_tool_use () =
@@ -2455,7 +2456,9 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check string "delivery surface" "board_comment"
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
-  check string "visible response empty" "" routed.response_text;
+  check bool "tool turn keeps synthesized visible response" true
+    (contains_substring routed.response_text
+       "Tools used: keeper_board_comment, masc_status.");
   check (list string) "tool list preserved"
     ["keeper_board_comment"; "masc_status"] routed.tools_used
 
@@ -2622,33 +2625,6 @@ let test_recent_tool_streak_count_ignores_stale_entries () =
   check int "stale entry does not extend streak" 1
     (HK.recent_tool_streak_count ~within_sec:60.0 ~tool_name:"masc_status"
        entries)
-
-let test_cross_turn_polling_tool_excludes_stay_silent () =
-  (* Boring concept retired — every tool is non-polling. *)
-  check bool "masc_status no longer flagged as polling" false
-    (HK.is_cross_turn_polling_tool "masc_status");
-  check bool "stay_silent excluded" false
-    (HK.is_cross_turn_polling_tool "keeper_stay_silent");
-  check bool "productive tool excluded" false
-    (HK.is_cross_turn_polling_tool "keeper_fs_edit")
-
-let test_should_block_cross_turn_polling_on_second_attempt () =
-  (* Boring concept retired — cross-turn polling block is a no-op. *)
-  let recent_entries =
-    [ tool_log_entry "masc_status" ]
-  in
-  check bool "cross-turn polling block retired" false
-    (HK.should_block_cross_turn_polling ~within_sec:900.0 ~threshold:2
-       ~tool_name:"masc_status" ~recent_entries)
-
-let test_should_not_block_cross_turn_polling_without_prior_match () =
-  let recent_entries =
-    [ tool_log_entry "keeper_fs_edit" ]
-  in
-  check bool "no prior polling match means no block" false
-    (HK.should_block_cross_turn_polling ~within_sec:900.0 ~threshold:2
-       ~tool_name:"masc_status" ~recent_entries)
-
 (* ---------- Test runner ---------- *)
 
 let () =
@@ -2749,12 +2725,6 @@ let () =
             test_recent_tool_streak_count_counts_tail_matches;
           test_case "recent tool streak ignores stale entries" `Quick
             test_recent_tool_streak_count_ignores_stale_entries;
-          test_case "cross-turn polling tool excludes stay_silent" `Quick
-            test_cross_turn_polling_tool_excludes_stay_silent;
-          test_case "cross-turn polling blocks second attempt" `Quick
-            test_should_block_cross_turn_polling_on_second_attempt;
-          test_case "cross-turn polling allows non-matching history" `Quick
-            test_should_not_block_cross_turn_polling_without_prior_match;
         ] );
       ( "config",
         [
@@ -2962,34 +2932,8 @@ let () =
           test_case "run_unified_turn skips paused keeper" `Quick
             test_run_unified_turn_skips_non_executable_phase;
         ] );
-      ( "boring_tools",
+      ( "tool_classification",
         [
-          (* Boring concept retired — these tests previously asserted
-             particular tools were classified boring. After neutralization,
-             the classification is empty and [is_boring_tool] is constant
-             false. The suite is retained as a regression guard against
-             accidental reintroduction of the classification. *)
-          test_case "no tool is classified boring" `Quick (fun () ->
-            List.iter
-              (fun name ->
-                check bool
-                  (Printf.sprintf "%s not boring" name)
-                  false
-                  (Masc_mcp.Keeper_tool_registry.is_boring_tool name))
-              [ "masc_status"; "keeper_tasks_list"; "keeper_tools_list";
-                "keeper_context_status"; "keeper_stay_silent";
-                "keeper_board_list"; "keeper_fs_read"; "keeper_board_post";
-                "keeper_task_claim"; "keeper_bash"; "masc_heartbeat" ]);
-          test_case "prune_boring_tools_for_actionable_turn is identity"
-            `Quick (fun () ->
-              let input =
-                [ "masc_status"; "keeper_tasks_list"; "keeper_board_post" ]
-              in
-              let pruned =
-                Masc_mcp.Keeper_tool_registry
-                  .prune_boring_tools_for_actionable_turn input
-              in
-              check (list string) "no tools removed" input pruned);
           test_case "keeper allowed tools exclude heartbeat" `Quick
             test_keeper_allowed_tools_exclude_heartbeat;
         ] );

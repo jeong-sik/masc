@@ -200,15 +200,10 @@ let inferred_tool_surface tools =
 let tool_only_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) =
-  let visible_reply =
-    Keeper_text_processing.strip_internal_reply_markup result.response_text
-  in
   let speech_act, delivery_surface =
     match inferred_tool_surface result.tools_used with
     | Some routed -> routed
-    | None ->
-        if String.trim visible_reply <> "" then (Inform, Visible_reply)
-        else (Defer, Silent)
+    | None -> (Inform, Visible_reply)
   in
   {
     social_model = meta.social_model;
@@ -379,7 +374,17 @@ let apply_to_result ~(meta : keeper_meta)
   | Stay_silent, Silent when result.tools_used = [] ->
       ({ result with response_text = "" }, state)
   | _ ->
-      ({ result with response_text = visible_response_body }, state)
+      let response_text =
+        match
+          Keeper_tool_disclosure.normalize_response_text
+            ~text:visible_response_body
+            ~tool_names:result.tools_used
+            ()
+        with
+        | Ok normalized -> normalized
+        | Error _ -> visible_response_body
+      in
+      ({ result with response_text }, state)
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)

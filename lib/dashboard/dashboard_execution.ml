@@ -51,6 +51,20 @@ let messages_safe config =
 let assoc_upsert fields key value =
   (key, value) :: List.remove_assoc key fields
 
+let model_map_of_keeper_rows keepers =
+  let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
+  let open Yojson.Safe.Util in
+  List.iter
+    (function
+      | `Assoc _ as keeper_json -> (
+          match member "name" keeper_json, member "active_model" keeper_json with
+          | `String name, `String model when String.trim model <> "" ->
+              Hashtbl.replace model_map name model
+          | _ -> ())
+      | _ -> ())
+    keepers;
+  model_map
+
 
 let task_updated_at (task : Types.task) =
   match task.task_status with
@@ -223,14 +237,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ("continuity_briefs", `List (List.map (fun (row : continuity_context) -> row.json) continuity_rows));
           ("offline_worker_briefs", `List (List.map (fun (row : worker_context) -> row.json) offline_worker_briefs));
           ("agents",
-           let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
-           List.iter (fun name ->
-             match Keeper_types.read_meta config name with
-             | Ok (Some m) ->
-               Hashtbl.replace model_map name
-                 (Keeper_exec_status.active_model_of_meta m)
-             | _ -> ()
-           ) (Keeper_types.keeper_names config);
+           let model_map = model_map_of_keeper_rows keepers in
            `List (List.map (agent_json ~model_map) agents));
           (* pipeline_stage is now included in the snapshot keepers_json,
              so no redundant read_meta + parse_agent_status needed here. *)

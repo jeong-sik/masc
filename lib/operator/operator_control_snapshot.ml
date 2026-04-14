@@ -476,56 +476,110 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
   let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
-let persistent_agents_json ?keeper_names config =
-  ignore keeper_names;
-  let names = Keeper_types.persistent_agent_names config in
+let persistent_agents_json ?keeper_names ?keeper_rows config =
+  let rows_from_keeper_rows names rows =
+    let wanted = List.sort_uniq String.compare names in
+    let wanted_tbl = Hashtbl.create (List.length wanted) in
+    List.iter (fun name -> Hashtbl.replace wanted_tbl name ()) wanted;
+    rows
+    |> List.filter_map (function
+         | `Assoc fields -> (
+             match List.assoc_opt "name" fields with
+             | Some (`String name) when Hashtbl.mem wanted_tbl name ->
+                 let field_or_null key =
+                   match List.assoc_opt key fields with
+                   | Some value -> value
+                   | None -> `Null
+                 in
+                 Some
+                   (`Assoc
+                     [
+                       ("runtime_class", `String "keeper");
+                       ("name", field_or_null "name");
+                       ("agent_name", field_or_null "agent_name");
+                       ("trace_id", field_or_null "trace_id");
+                       ("goal", field_or_null "goal");
+                       ("short_goal", field_or_null "short_goal");
+                       ("mid_goal", field_or_null "mid_goal");
+                       ("long_goal", field_or_null "long_goal");
+                       ("status", field_or_null "status");
+                       ("generation", field_or_null "generation");
+                       ("turn_count", field_or_null "turn_count");
+                       ("context_ratio", field_or_null "context_ratio");
+                       ("context_tokens", field_or_null "context_tokens");
+                       ("last_model_used", field_or_null "last_model_used");
+                       ("active_model", field_or_null "active_model");
+                       ("next_model_hint", field_or_null "next_model_hint");
+                       ("active_goal_ids", field_or_null "active_goal_ids");
+                       ("last_autonomous_action_at", field_or_null "last_autonomous_action_at");
+                       ("autonomous_action_count", field_or_null "autonomous_action_count");
+                       ("updated_at", field_or_null "updated_at");
+                       ("created_at", field_or_null "created_at");
+                     ])
+             | _ -> None)
+         | _ -> None)
+  in
   let rows =
-    List.filter_map
-      (fun name ->
-        match Keeper_types.read_meta config name with
-        | Error _ | Ok None -> None
-        | Ok (Some meta) ->
-            let agent_json =
-              Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
-            in
-            let agent_status =
-              match agent_json with
-              | `Assoc _ -> (
-                  match agent_json |> U.member "status" with
-                  | `String status -> status
-                  | _ -> "unknown")
-              | _ -> "unknown"
-            in
-            Some
-              (`Assoc
-                [
-                  ("runtime_class", `String "keeper");
-                  ("name", `String meta.name);
-                  ("agent_name", `String meta.agent_name);
-                  ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-                  ("goal", `String meta.goal);
-                  ("short_goal", `String meta.short_goal);
-                  ("mid_goal", `String meta.mid_goal);
-                  ("long_goal", `String meta.long_goal);
-                  ("status", `String agent_status);
-                  ("generation", `Int meta.runtime.generation);
-                  ("turn_count", `Int meta.runtime.usage.total_turns);
-                  ("context_ratio",
-                    (match compute_context_ratio meta with
-                     | Some r -> `Float r
-                     | None -> `Null));
-                  ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
-                  ("last_model_used", `String meta.runtime.usage.last_model_used);
-                  ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
-                  ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
-                  ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
-                  ("last_autonomous_action_at",
-                    if String.trim meta.runtime.last_autonomous_action_at = "" then `Null else `String meta.runtime.last_autonomous_action_at);
-                  ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
-                  ("updated_at", `String meta.updated_at);
-                  ("created_at", `String meta.created_at);
-                ]))
-      names
+    match keeper_rows with
+    | Some rows ->
+        let names =
+          match keeper_names with
+          | Some names -> names
+          | None -> Keeper_types.persistent_agent_names config
+        in
+        rows_from_keeper_rows names rows
+    | None ->
+        let names =
+          match keeper_names with
+          | Some names -> names
+          | None -> Keeper_types.persistent_agent_names config
+        in
+        List.filter_map
+          (fun name ->
+            match Keeper_types.read_meta config name with
+            | Error _ | Ok None -> None
+            | Ok (Some meta) ->
+                let agent_json =
+                  Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
+                in
+                let agent_status =
+                  match agent_json with
+                  | `Assoc _ -> (
+                      match agent_json |> U.member "status" with
+                      | `String status -> status
+                      | _ -> "unknown")
+                  | _ -> "unknown"
+                in
+                Some
+                  (`Assoc
+                    [
+                      ("runtime_class", `String "keeper");
+                      ("name", `String meta.name);
+                      ("agent_name", `String meta.agent_name);
+                      ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+                      ("goal", `String meta.goal);
+                      ("short_goal", `String meta.short_goal);
+                      ("mid_goal", `String meta.mid_goal);
+                      ("long_goal", `String meta.long_goal);
+                      ("status", `String agent_status);
+                      ("generation", `Int meta.runtime.generation);
+                      ("turn_count", `Int meta.runtime.usage.total_turns);
+                      ("context_ratio",
+                        (match compute_context_ratio meta with
+                         | Some r -> `Float r
+                         | None -> `Null));
+                      ("context_tokens", `Int meta.runtime.usage.last_total_tokens);
+                      ("last_model_used", `String meta.runtime.usage.last_model_used);
+                      ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                      ("next_model_hint", string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta));
+                      ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+                      ("last_autonomous_action_at",
+                        if String.trim meta.runtime.last_autonomous_action_at = "" then `Null else `String meta.runtime.last_autonomous_action_at);
+                      ("autonomous_action_count", `Int meta.runtime.autonomous_action_count);
+                      ("updated_at", `String meta.updated_at);
+                      ("created_at", `String meta.created_at);
+                    ]))
+          names
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
@@ -821,6 +875,11 @@ let snapshot_json ?actor ?view ?(include_messages = true)
       Keeper_types.keeper_names config
     else []
   in
+  let persistent_keeper_names =
+    if initialized && include_keepers then
+      Keeper_types.persistent_agent_names config
+    else []
+  in
   let result =
     `Assoc
       ([
@@ -850,17 +909,27 @@ let snapshot_json ?actor ?view ?(include_messages = true)
              ignore (lightweight_summary, status_cache);
              sessions_ref := empty_section);
            (fun () ->
-             keepers_ref :=
+             let keepers_json_value =
                timed "keepers_json" (fun () ->
                  if initialized && include_keepers then
                    keepers_json ~keeper_names ~lightweight:lightweight_summary
                      ~include_recent_activity:(not lightweight_summary) config
-                 else empty_section));
-           (fun () ->
+                 else empty_section)
+             in
+             keepers_ref := keepers_json_value;
              persistent_ref :=
                timed "persistent_agents_json" (fun () ->
                  if initialized && include_keepers then
-                   persistent_agents_json ~keeper_names config
+                   let keeper_rows =
+                     match keepers_json_value with
+                     | `Assoc fields -> (
+                         match List.assoc_opt "items" fields with
+                         | Some (`List rows) -> rows
+                         | _ -> [])
+                     | _ -> []
+                   in
+                   persistent_agents_json ~keeper_names:persistent_keeper_names
+                     ~keeper_rows config
                  else empty_section));
            (fun () ->
              let cp = timed "command_plane_json" (fun () ->

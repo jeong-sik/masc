@@ -56,7 +56,20 @@ let notify_error config exn =
   | Some f -> Safe_ops.protect ~default:() (fun () -> f exn)
   | None -> ()
 
-let start ~sw ~clock ~config ~compute ~on_result =
+let start ~sw ~clock ~config:raw_config ~compute ~on_result =
+  (* Clamp timeout below interval to prevent overlapping refreshes.
+     When timeout >= interval, a timed-out compute runs past the next
+     scheduled refresh, causing cascading failures (#7164). *)
+  let config =
+    if raw_config.timeout_s >= raw_config.interval_s then begin
+      let clamped = raw_config.interval_s *. 0.8 in
+      Log.Dashboard.warn
+        "%s: timeout_s (%.0f) >= interval_s (%.0f), clamping to %.0fs"
+        raw_config.label raw_config.timeout_s raw_config.interval_s clamped;
+      { raw_config with timeout_s = clamped }
+    end else
+      raw_config
+  in
   Eio.Fiber.fork ~sw (fun () ->
     if config.warm_delay_s > 0.0 then begin
       Log.Dashboard.debug "%s warm cache delayed %.0fs" config.label config.warm_delay_s;

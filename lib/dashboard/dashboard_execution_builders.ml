@@ -1,5 +1,32 @@
 include Dashboard_execution_sessions
 
+(** Keeper lifecycle phase — deterministic from status, context ratio,
+    and activity timestamps. Serialized to string at JSON boundary only. *)
+type keeper_lifecycle =
+  | Lc_offline
+  | Lc_handoff_imminent
+  | Lc_preparing
+  | Lc_compacting
+  | Lc_active
+  | Lc_idle
+
+let keeper_lifecycle_to_string = function
+  | Lc_offline -> "offline"
+  | Lc_handoff_imminent -> "handoff-imminent"
+  | Lc_preparing -> "preparing"
+  | Lc_compacting -> "compacting"
+  | Lc_active -> "active"
+  | Lc_idle -> "idle"
+
+(** Keeper execution state — derived from lifecycle and turn metrics.
+    Maps 1:1 with [tone] but serialized separately for dashboard consumers. *)
+type keeper_exec_state = Exec_critical | Exec_warning | Exec_healthy
+
+let keeper_exec_state_to_string = function
+  | Exec_critical -> "critical"
+  | Exec_warning -> "warning"
+  | Exec_healthy -> "healthy"
+
 (** Signal-age guardrail thresholds (seconds).
     SSOT: [Env_config.Dashboard] module (configurable via env vars). *)
 let signal_stale_sec = Env_config.Dashboard.signal_stale_sec
@@ -207,29 +234,32 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
-    if is_keeper_offline status then "offline"
-    else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then "handoff-imminent"
-    else if Option.value ~default:0.0 context_ratio >= ctx_preparing then "preparing"
-    else if Option.value ~default:0.0 context_ratio >= ctx_compacting then "compacting"
-    else if last_action_ts > 0.0 then "active"
-    else if last_signal_ts > 0.0 then "idle"
-    else "idle"
+    if is_keeper_offline status then Lc_offline
+    else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
+    else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
+    else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting
+    else if last_action_ts > 0.0 then Lc_active
+    else if last_signal_ts > 0.0 then Lc_idle
+    else Lc_idle
   in
   let (state, tone, note) =
     if is_keeper_offline status then
-      ("critical", Tone_bad, "keeper 오프라인")
-    else if lifecycle = "handoff-imminent" then
-      ("critical", Tone_bad, "핸드오프 임박")
-    else if lifecycle = "preparing" || lifecycle = "compacting" then
-      ("warning", Tone_warn, "연속성 압력이 높습니다")
-    else if autonomous_turn_count = 0 && turn_count > 0 then
-      ("warning", Tone_warn,
-       Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
-    else if effective_activity_age_s >= keeper_action_stale_sec then
-      ("warning", Tone_warn,
-       Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. 3600.0))
+      (Exec_critical, Tone_bad, "keeper 오프라인")
     else
-      ("healthy", Tone_ok, "정상 동작 중")
+      match lifecycle with
+      | Lc_handoff_imminent ->
+          (Exec_critical, Tone_bad, "핸드오프 임박")
+      | Lc_preparing | Lc_compacting ->
+          (Exec_warning, Tone_warn, "연속성 압력이 높습니다")
+      | Lc_offline | Lc_active | Lc_idle ->
+          if autonomous_turn_count = 0 && turn_count > 0 then
+            (Exec_warning, Tone_warn,
+             Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
+          else if effective_activity_age_s >= keeper_action_stale_sec then
+            (Exec_warning, Tone_warn,
+             Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. 3600.0))
+          else
+            (Exec_healthy, Tone_ok, "정상 동작 중")
   in
   let continuity =
     Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d · Goals %d"
@@ -281,7 +311,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("agent_name", member_assoc "agent_name" keeper);
            ("status", `String status);
            ("tone", `String (string_of_tone tone));
-           ("state", `String state);
+           ("state", `String (keeper_exec_state_to_string state));
            ("note", `String note);
            ("focus", `String focus);
            ("last_signal_at", json_string_option last_signal_at);
@@ -290,7 +320,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
            ("continuity", `String continuity);
-           ("lifecycle", `String lifecycle);
+           ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
            ("related_session_id", json_string_option related_session_id);
            ("recent_input_preview", json_string_option recent_input_preview);
            ("recent_output_preview", json_string_option recent_output_preview);

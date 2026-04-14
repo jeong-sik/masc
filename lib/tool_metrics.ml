@@ -18,19 +18,32 @@ type accumulator = {
   mutable durations : float list;  (* newest first *)
 }
 
+(** [metrics] is updated from the tool_dispatch post-hook which runs on
+    whichever fiber executed the tool.  Concurrent tool calls would
+    otherwise race on the Hashtbl add and on the mutable accumulator
+    fields (successes/failures/durations).  Stdlib.Mutex because HTTP
+    stats endpoints may run on a different domain. *)
 let metrics : (string, accumulator) Hashtbl.t = Hashtbl.create 32
+let metrics_mu = Stdlib.Mutex.create ()
+
+let with_lock f =
+  Stdlib.Mutex.lock metrics_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mu)
+    f
 
 let record (result : Tool_result.t) =
-  let acc = match Hashtbl.find_opt metrics result.tool_name with
-    | Some a -> a
-    | None ->
-      let a = { successes = 0; failures = 0; durations = [] } in
-      Hashtbl.replace metrics result.tool_name a;
-      a
-  in
-  if result.success then acc.successes <- acc.successes + 1
-  else acc.failures <- acc.failures + 1;
-  acc.durations <- result.duration_ms :: acc.durations
+  with_lock (fun () ->
+    let acc = match Hashtbl.find_opt metrics result.tool_name with
+      | Some a -> a
+      | None ->
+        let a = { successes = 0; failures = 0; durations = [] } in
+        Hashtbl.replace metrics result.tool_name a;
+        a
+    in
+    if result.success then acc.successes <- acc.successes + 1
+    else acc.failures <- acc.failures + 1;
+    acc.durations <- result.duration_ms :: acc.durations)
 
 let percentile sorted_arr p =
   let n = Array.length sorted_arr in
@@ -57,14 +70,18 @@ let compute_stats tool_name acc =
   }
 
 let stats_for tool_name =
-  match Hashtbl.find_opt metrics tool_name with
-  | Some acc -> Some (compute_stats tool_name acc)
-  | None -> None
+  with_lock (fun () ->
+    match Hashtbl.find_opt metrics tool_name with
+    | Some acc -> Some (compute_stats tool_name acc)
+    | None -> None)
 
 let all_stats () =
-  let all = Hashtbl.fold (fun name acc lst ->
-    compute_stats name acc :: lst
-  ) metrics [] in
+  let all =
+    with_lock (fun () ->
+      Hashtbl.fold (fun name acc lst ->
+        compute_stats name acc :: lst
+      ) metrics [])
+  in
   List.sort (fun a b -> Int.compare b.call_count a.call_count) all
 
 let to_json s =
@@ -82,7 +99,7 @@ let to_json s =
 let all_to_json () =
   `List (List.map to_json (all_stats ()))
 
-let clear () = Hashtbl.clear metrics
+let clear () = with_lock (fun () -> Hashtbl.clear metrics)
 
 let install () =
   Tool_dispatch.register_post_hook (fun result ->

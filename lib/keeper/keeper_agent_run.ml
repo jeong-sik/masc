@@ -753,6 +753,8 @@ let run_turn
     ; "masc_keeper_list", "키퍼 목록 현황"
     ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
     ; "masc_keeper_status", "키퍼 상태 확인"
+    ; "masc_keeper_compact", "키퍼 컨텍스트 압축 컴팩트 요약"
+    ; "masc_keeper_clear", "키퍼 컨텍스트 초기화 클리어 비우기"
     ; "masc_worktree_create", "워크트리 생성 브랜치"
     ; "masc_worktree_list", "워크트리 목록 현황"
     ; "masc_worktree_remove", "워크트리 삭제 정리"

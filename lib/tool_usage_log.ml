@@ -1,3 +1,6 @@
+module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
+
 (** Tool_usage_log -- Durable call logging for System_internal surface tools.
 
     Persists tool invocations to [.masc/tool_usage/YYYY-MM/DD.jsonl] via
@@ -9,15 +12,13 @@
 
     @since 2.190.0 -- Issue #5120 *)
 
-(* -- System_internal membership set (O(1) lookup) -- *)
+(* -- System_internal membership set (O(log n) lookup) -- *)
 
-let system_internal_set : (string, unit) Hashtbl.t =
+let system_internal_set : StringSet.t =
   let tools = Tool_catalog_surfaces.system_internal_surface_tools in
-  let tbl = Hashtbl.create (List.length tools) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
-  tbl
+  List.fold_left (fun s name -> StringSet.add name s) StringSet.empty tools
 
-let is_system_internal name = Hashtbl.mem system_internal_set name
+let is_system_internal name = StringSet.mem name system_internal_set
 
 (* -- Store management -- *)
 
@@ -92,14 +93,15 @@ let read_recent ?(n = 10_000) () : Yojson.Safe.t list =
 
 let summary () : (string * int) list =
   let entries = read_recent ~n:100_000 () in
-  let counts : (string, int) Hashtbl.t = Hashtbl.create 64 in
-  List.iter (fun json ->
-    match Safe_ops.json_string_opt "tool_name" json with
-    | Some name ->
-        let c = match Hashtbl.find_opt counts name with
-          | Some n -> n | None -> 0 in
-        Hashtbl.replace counts name (c + 1)
-    | None -> ()
-  ) entries;
-  let pairs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) counts [] in
+  let counts =
+    List.fold_left (fun counts json ->
+      match Safe_ops.json_string_opt "tool_name" json with
+      | Some name ->
+          let c = match StringMap.find_opt name counts with
+            | Some n -> n | None -> 0 in
+          StringMap.add name (c + 1) counts
+      | None -> counts
+    ) StringMap.empty entries
+  in
+  let pairs = StringMap.bindings counts in
   List.sort (fun (_, a) (_, b) -> Int.compare b a) pairs

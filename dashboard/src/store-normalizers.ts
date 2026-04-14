@@ -71,15 +71,54 @@ export function normalizeTask(raw: unknown): Task | null {
   const id = asString(raw.id)
   const title = asString(raw.title)
   if (!id || !title) return null
+  const contract = isRecord(raw.contract)
+    ? {
+        strict: asBoolean(raw.contract.strict),
+        completion_contract: asStringArray(raw.contract.completion_contract),
+        required_evidence: asStringArray(raw.contract.required_evidence),
+        inspect_gate_evidence: asStringArray(raw.contract.inspect_gate_evidence),
+        verify_gate_evidence: asStringArray(raw.contract.verify_gate_evidence),
+        links: isRecord(raw.contract.links)
+          ? {
+              operation_id: asString(raw.contract.links.operation_id) ?? null,
+              session_id: asString(raw.contract.links.session_id) ?? null,
+              autoresearch_loop_id: asString(raw.contract.links.autoresearch_loop_id) ?? null,
+            }
+          : null,
+      }
+    : null
+  const handoffContext = isRecord(raw.handoff_context)
+    ? {
+        summary: asString(raw.handoff_context.summary, ''),
+        reason: asString(raw.handoff_context.reason) ?? null,
+        next_step: asString(raw.handoff_context.next_step) ?? null,
+        failure_mode: asString(raw.handoff_context.failure_mode) ?? null,
+        evidence_refs: asStringArray(raw.handoff_context.evidence_refs),
+        updated_at: asString(raw.handoff_context.updated_at) ?? null,
+        updated_by: asString(raw.handoff_context.updated_by) ?? null,
+      }
+    : null
+  const executionLinks = isRecord(raw.execution_links)
+    ? {
+        operation_id: asString(raw.execution_links.operation_id) ?? null,
+        session_id: asString(raw.execution_links.session_id) ?? null,
+        autoresearch_loop_id: asString(raw.execution_links.autoresearch_loop_id) ?? null,
+      }
+    : null
   return {
     id,
     title,
     status: normalizeTaskStatus(raw.status),
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),
+    assignee_kind: asString(raw.assignee_kind) ?? null,
     description: asString(raw.description),
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
+    completed_at: asString(raw.completed_at),
+    contract,
+    handoff_context: handoffContext,
+    execution_links: executionLinks,
   }
 }
 

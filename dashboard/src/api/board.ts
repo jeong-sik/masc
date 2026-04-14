@@ -276,13 +276,14 @@ export function sanitizeBoardTitle(title: string, fallbackBody = ''): string {
 
 function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   if (!isRecord(raw)) return null
-  const source = asString(raw.source, '').trim() || null
-  const stateBlock = asString(raw.state_block, '').trim() || null
-  if (!source && !stateBlock) return null
-  return {
-    source,
-    state_block: stateBlock,
-  }
+  const next: Record<string, unknown> = { ...raw }
+  const source = asString(raw.source, '').trim()
+  const stateBlock = asString(raw.state_block, '').trim()
+  const classificationReason = asString(raw.classification_reason, '').trim()
+  if (source) next.source = source
+  if (stateBlock) next.state_block = stateBlock
+  if (classificationReason) next.classification_reason = classificationReason
+  return Object.keys(next).length > 0 ? next : null
 }
 
 function normalizeBoardPost(raw: unknown): BoardPost | null {

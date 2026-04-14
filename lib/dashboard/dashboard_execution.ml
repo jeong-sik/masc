@@ -48,27 +48,51 @@ let messages_safe config =
     Room.get_messages_raw config ~since_seq:0 ~limit:50
   else []
 
+let assoc_upsert fields key value =
+  (key, value) :: List.remove_assoc key fields
+
+
+let task_updated_at (task : Types.task) =
+  match task.task_status with
+  | Types.Done { completed_at; _ } -> completed_at
+  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Types.InProgress { started_at; _ } -> started_at
+  | Types.Claimed { claimed_at; _ } -> claimed_at
+  | Types.Todo -> task.created_at
+
+let task_completed_at (task : Types.task) =
+  match task.task_status with
+  | Types.Done { completed_at; _ } -> Some completed_at
+  | Types.Cancelled { cancelled_at; _ } -> Some cancelled_at
+  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> None
+
+let task_execution_links_json (task : Types.task) =
+  match task.contract with
+  | Some contract -> Types.task_execution_links_to_yojson contract.links
+  | None -> `Null
 
 let task_json (task : Types.task) =
-  let base =
-    [
-      ("id", `String task.id);
-      ("title", `String task.title);
-      ("description", `String task.description);
-      ("status", `String (Types.string_of_task_status task.task_status));
-      ("priority", `Int task.priority);
-      ("assignee", Json_util.string_opt_to_json (task_assignee task));
-      ("created_at", `String task.created_at);
-    ]
-  in
-  let extra = match task.task_status with
-    | Types.Done { completed_at; _ } ->
-      [("completed_at", `String completed_at)]
-    | Types.Cancelled { cancelled_at; _ } ->
-      [("completed_at", `String cancelled_at)]
+  let fields =
+    match Types.task_to_yojson task with
+    | `Assoc assoc -> assoc
     | _ -> []
   in
-  `Assoc (base @ extra)
+  let fields =
+    assoc_upsert fields "assignee"
+      (Json_util.string_opt_to_json (task_assignee task))
+  in
+  let fields =
+    assoc_upsert fields "updated_at" (`String (task_updated_at task))
+  in
+  let fields =
+    assoc_upsert fields "execution_links" (task_execution_links_json task)
+  in
+  let fields =
+    match task_completed_at task with
+    | Some timestamp -> assoc_upsert fields "completed_at" (`String timestamp)
+    | None -> List.remove_assoc "completed_at" fields
+  in
+  `Assoc fields
 
 let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Types.agent) =
   let (emoji, korean_name) = get_agent_identity agent.name in

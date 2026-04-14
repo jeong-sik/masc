@@ -1,8 +1,9 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { TextInput, TextArea } from '../common/input'
+import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { ActionButton } from '../common/button'
+import { RichComposer } from '../common/rich-composer'
 import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
 
 const title = signal('')
@@ -60,11 +61,13 @@ export function TaskCreateForm() {
         <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
           <div class="flex flex-col gap-1.5">
             <label class="text-[11px] font-medium text-text-muted">설명</label>
-            <${TextArea}
+            <${RichComposer}
               value=${description.value}
-              placeholder="배경, 재현 조건, 원하는 결과를 적으면 backlog 카드에서 바로 보입니다."
+              placeholder="배경, 재현 조건, 원하는 결과를 적으면 backlog 카드와 Task 상세에서 그대로 렌더링됩니다."
               rows=${4}
-              onInput=${(e: Event) => { description.value = (e.target as HTMLTextAreaElement).value }}
+              onValueChange=${(next: string) => { description.value = next }}
+              helpText="Markdown, fenced code block, URL 링크 카드, 단독 이미지 URL을 지원합니다."
+              previewLimit=${2}
             />
           </div>
 

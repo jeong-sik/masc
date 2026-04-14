@@ -6,12 +6,14 @@ import { showToast } from './common/toast'
 import { requestConfirm } from './common/confirm-dialog'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
-import { Markdown } from './common/markdown'
-import { TextInput, TextArea } from './common/input'
+import { TextInput } from './common/input'
+import { RichComposer } from './common/rich-composer'
+import { RichContent } from './common/rich-content'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate, navigateToPost, route } from '../router'
 import { PostDetail } from './memory-post-detail'
 import { stripInlineMarkdown, navigateToAuthor } from '../lib/board-utils'
+import { hasRichMarkdownSignals } from './common/rich-content-utils'
 import {
   boardPosts,
   boardSortMode,
@@ -53,10 +55,6 @@ import {
   deleteBoardPost,
 } from './memory-state'
 import type { BoardPost } from './memory-state'
-
-function hasRichMarkdownPreview(text: string): boolean {
-  return /(^|\n)(`{3,}|~{3,}|#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s+)/m.test(text)
-}
 
 // ── Render section (paginated group) ───────────────────────────────
 function renderSection(
@@ -105,10 +103,13 @@ function NewPostForm() {
         value=${newPostTitle.value}
         onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
       />
-      <${TextArea}
-        placeholder="내용을 입력하세요..."
+      <${RichComposer}
         value=${newPostContent.value}
-        onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}
+        onValueChange=${(next: string) => { newPostContent.value = next }}
+        rows=${8}
+        placeholder="내용을 입력하세요. Markdown, 코드 스니펫, URL, 이미지 링크를 그대로 붙일 수 있습니다."
+        helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
+        previewLimit=${2}
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
@@ -253,7 +254,7 @@ function PostCard({ post }: { post: BoardPost }) {
   const kind = boardPostKind(post)
   const isDeleting = deletingPostId.value === post.id
   const previewBody = stripStateBlocks(post.body)
-  const richPreview = hasRichMarkdownPreview(previewBody)
+  const richPreview = hasRichMarkdownSignals(previewBody)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -322,7 +323,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
         <!-- Content preview: rendered markdown, height-capped -->
         <div class="board-post-preview text-[13px] text-[var(--text-body)] leading-[1.55] mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
-          <${Markdown} text=${previewBody} class="board-post-preview__content" />
+          <${RichContent} text=${previewBody} class="board-post-preview__content" previewLimit=${1} />
           <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
         </div>
 

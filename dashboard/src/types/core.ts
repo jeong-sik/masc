@@ -98,6 +98,13 @@ export interface Message {
 
 // --- Board ---
 
+export type BoardPostMeta = Record<string, unknown> & {
+  source?: string | null
+  state_block?: string | null
+  classification_reason?: string | null
+  judgment?: unknown
+}
+
 export interface BoardPost {
   id: string
   author: string
@@ -106,10 +113,7 @@ export interface BoardPost {
   title: string
   body: string
   content: string
-  meta?: {
-    source?: string | null
-    state_block?: string | null
-  } | null
+  meta?: BoardPostMeta | null
   tags: string[]
   votes: number
   vote_balance?: number

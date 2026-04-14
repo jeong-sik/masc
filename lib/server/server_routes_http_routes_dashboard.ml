@@ -66,6 +66,30 @@ let handle_broadcast state agent_name reqd body_str =
   | Yojson.Json_error msg -> reply false (Some ("invalid JSON: " ^ msg))
   | e -> reply false (Some (Printexc.to_string e))
 
+let handle_dashboard_link_previews state req reqd body_str =
+  let respond_error message =
+    Http.Response.json ~status:`Bad_request ~request:req
+      (Yojson.Safe.to_string
+         (`Assoc
+           [
+             ("ok", `Bool false);
+             ("error", `String message);
+           ]))
+      reqd
+  in
+  try
+    let args = Yojson.Safe.from_string body_str in
+    match
+      Server_dashboard_http_link_preview.dashboard_link_previews_http_json
+        ~state ~args
+    with
+    | Ok json ->
+        Http.Response.json ~compress:true ~request:req
+          (Yojson.Safe.to_string json) reqd
+    | Error message -> respond_error message
+  with Yojson.Json_error message ->
+    respond_error ("invalid json: " ^ message)
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -222,6 +246,12 @@ let rec add_routes ~sw ~clock router =
          let json = dashboard_memory_http_json req in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/link-previews" (fun request reqd ->
+       with_permission_auth ~permission:Types.CanReadState
+         (fun state req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             handle_dashboard_link_previews state req reqd body_str))
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/memory-subsystems" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in

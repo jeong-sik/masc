@@ -56,8 +56,6 @@ let counter_misses = Atomic.make 0
 let counter_bypasses = Atomic.make 0
 let counter_fetch_errors = Atomic.make 0
 
-(* GH credential isolation — SSOT in Keeper_exec_shared. *)
-
 (* ------------------------------------------------------------------ *)
 (* REST-based number fetch. qa-king observed that [gh pr view] via
    GraphQL returns false negatives ("Could not resolve" for real PRs),

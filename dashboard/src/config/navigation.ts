@@ -2,6 +2,7 @@ import type { RouteState, TabId } from '../types'
 
 export type SurfaceId = TabId
 export type SurfaceSectionId =
+  | 'observatory'
   | 'agents'
   | 'activity'
   | 'board'
@@ -115,6 +116,12 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   monitoring: [
+    {
+      id: 'observatory',
+      label: '관찰소 (beta)',
+      description: '이벤트/메트릭을 단일 timeline에 통합. RFC-MASC-006 Phase 2a.',
+      params: { section: 'observatory' },
+    },
     {
       id: 'agents',
       label: '에이전트 & 키퍼',

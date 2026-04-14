@@ -25,7 +25,25 @@ type synapse = {
   failure_count: int;   (* Number of failed collaborations *)
   last_updated: float;  (* Unix timestamp *)
   created_at: float;
+  weight_history: (float * float) list;
+    (* (ts, weight) newest first, capped at [history_cap]. Enables
+       sparkline visualization of learning direction (strengthening
+       vs weakening over time). *)
 }
+
+(** Cap for [weight_history]. Newer entries evict older ones. *)
+let history_cap = 30
+
+(** Prepend [(ts, w)] to [history] and trim to [history_cap].
+    Back-to-back writes at the same fractional tick produce separate
+    entries — this preserves trajectory resolution and keeps the
+    append deterministic (no dependence on clock granularity). *)
+let append_history ~ts ~w history =
+  let rec take n xs = match n, xs with
+    | 0, _ | _, [] -> []
+    | n, x :: rest -> x :: take (n - 1) rest
+  in
+  take history_cap ((ts, w) :: history)
 
 (** Synapse graph *)
 type synapse_graph = {
@@ -119,6 +137,9 @@ let with_graph_lock config f =
 
 (** Synapse to JSON *)
 let synapse_to_json (s : synapse) : Yojson.Safe.t =
+  let history_json =
+    `List (List.map (fun (ts, w) -> `List [`Float ts; `Float w]) s.weight_history)
+  in
   `Assoc [
     ("from_agent", `String s.from_agent);
     ("to_agent", `String s.to_agent);
@@ -127,9 +148,26 @@ let synapse_to_json (s : synapse) : Yojson.Safe.t =
     ("failure_count", `Int s.failure_count);
     ("last_updated", `Float s.last_updated);
     ("created_at", `Float s.created_at);
+    ("weight_history", history_json);
   ]
 
-(** Synapse from JSON *)
+(** Parse [weight_history] from JSON, tolerating missing field (backward
+    compat with graph.json files written before this field existed). *)
+let weight_history_of_json json =
+  let open Yojson.Safe.Util in
+  match member "weight_history" json with
+  | `Null -> []
+  | `List items ->
+    List.filter_map (fun item ->
+      match item with
+      | `List [`Float ts; `Float w] -> Some (ts, w)
+      | `List [`Int ts; `Float w] -> Some (float_of_int ts, w)
+      | _ -> None
+    ) items
+  | _ -> []
+
+(** Synapse from JSON. [weight_history] defaults to [] for files written
+    before the field was introduced. *)
 let synapse_of_json json : synapse option =
   let open Yojson.Safe.Util in
   try
@@ -141,6 +179,7 @@ let synapse_of_json json : synapse option =
       failure_count = json |> member "failure_count" |> to_int;
       last_updated = json |> member "last_updated" |> to_float;
       created_at = json |> member "created_at" |> to_float;
+      weight_history = weight_history_of_json json;
     }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "Failed to parse synapse: %s" (Printexc.to_string exn);
@@ -193,7 +232,8 @@ let find_synapse graph ~from_agent ~to_agent : synapse option =
     s.from_agent = from_agent && s.to_agent = to_agent
   ) graph.synapses
 
-(** Create new synapse - pure *)
+(** Create new synapse - pure. Seeds [weight_history] with the initial
+    neutral weight so sparklines have a reference point from tick 0. *)
 let create_synapse ~from_agent ~to_agent : synapse =
   let now = Time_compat.now () in
   {
@@ -204,6 +244,7 @@ let create_synapse ~from_agent ~to_agent : synapse =
     failure_count = 0;
     last_updated = now;
     created_at = now;
+    weight_history = [(now, 0.5)];
   }
 
 (** Update synapse in graph - pure *)
@@ -223,11 +264,13 @@ let strengthen config ?params ~from_agent ~to_agent () : unit =
       | None -> create_synapse ~from_agent ~to_agent
     in
     let new_weight = min params.max_weight (synapse.weight +. params.strengthen_rate) in
+    let now = Time_compat.now () in
     let updated = {
       synapse with
       weight = new_weight;
       success_count = synapse.success_count + 1;
-      last_updated = Time_compat.now ();
+      last_updated = now;
+      weight_history = append_history ~ts:now ~w:new_weight synapse.weight_history;
     } in
     let new_graph = update_synapse graph updated in
     save_graph config new_graph
@@ -242,11 +285,13 @@ let weaken config ?params ~from_agent ~to_agent () : unit =
     | None -> ()  (* No synapse to weaken *)
     | Some synapse ->
       let new_weight = max 0.0 (synapse.weight -. params.weaken_rate) in
+      let now = Time_compat.now () in
       let updated = {
         synapse with
         weight = new_weight;
         failure_count = synapse.failure_count + 1;
-        last_updated = Time_compat.now ();
+        last_updated = now;
+        weight_history = append_history ~ts:now ~w:new_weight synapse.weight_history;
       } in
       let new_graph = update_synapse graph updated in
       save_graph config new_graph
@@ -290,7 +335,12 @@ let consolidate config ?params ~decay_after_days () : int =
           (* Prune weak synapse *)
           (acc, count + 1)
         else
-          let updated = { synapse with weight = new_weight; last_updated = now } in
+          let updated = {
+            synapse with
+            weight = new_weight;
+            last_updated = now;
+            weight_history = append_history ~ts:now ~w:new_weight synapse.weight_history;
+          } in
           (updated :: acc, count)
       else
         (synapse :: acc, count)

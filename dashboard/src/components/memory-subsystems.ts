@@ -196,12 +196,45 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   `
 }
 
+// Render a tiny polyline of weight history. Input is newest-first from
+// the backend; reverse for chronological left-to-right rendering.
+function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
+  if (!history || history.length < 2) {
+    return html`<span class="text-zinc-700 text-[10px] w-20 text-center">—</span>`
+  }
+  const chronological = [...history].reverse()
+  const w = 80
+  const h = 16
+  const n = chronological.length
+  const points = chronological
+    .map(([, weight], i) => {
+      const x = (i / (n - 1)) * (w - 2) + 1
+      const y = h - 1 - Math.max(0, Math.min(1, weight)) * (h - 2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  const first = chronological[0]?.[1] ?? 0
+  const last = chronological[n - 1]?.[1] ?? 0
+  const trendColor = last > first + 0.02 ? '#10b981' : last < first - 0.02 ? '#f87171' : '#94a3b8'
+  return html`
+    <svg
+      viewBox="0 0 ${w} ${h}"
+      width=${w}
+      height=${h}
+      class="shrink-0"
+      aria-label=${`weight trend: ${n} points`}
+    >
+      <polyline fill="none" stroke=${trendColor} stroke-width="1.25" points=${points} />
+    </svg>
+  `
+}
+
 function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   if (synapses.length === 0) return null
   const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, 5)
   return html`
     <div class="bg-zinc-900 rounded-lg p-3 mt-3">
-      <div class="text-xs text-zinc-500 mb-2">강한 연결 Top 5</div>
+      <div class="text-xs text-zinc-500 mb-2">강한 연결 Top 5 · sparkline = 학습 궤적</div>
       <div class="space-y-1.5">
         ${top.map(s => {
           const pct = Math.round(s.weight * 100)
@@ -222,6 +255,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
                 <div class="${barColor} rounded h-1.5" style="width:${pct}%"></div>
               </div>
               <span class="text-zinc-300 w-10 text-right">${pct}%</span>
+              <${WeightSparkline} history=${s.weight_history} />
               <span class="text-emerald-400 w-8 text-right">${s.success_count}</span>
               <span class="text-red-400 w-8 text-right">${s.failure_count}</span>
             </div>

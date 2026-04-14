@@ -626,10 +626,10 @@ let handle_keeper_get_subroutes state req request reqd =
             if last_model <> "" then Some last_model else None
           in
           Keeper_decision_audit.cascade_fsm_to_mermaid
-            ~models ~last_provider_result
+            ~models ~last_provider_result ()
         | _ ->
           Keeper_decision_audit.cascade_fsm_to_mermaid
-            ~models:["(unknown)"] ~last_provider_result:None
+            ~models:["(unknown)"] ~last_provider_result:None ()
       in
       let cascade_models =
         match meta with

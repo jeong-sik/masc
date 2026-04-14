@@ -342,12 +342,20 @@ export interface KeeperTransitionsResponse {
   transitions: KeeperTransition[]
 }
 
+export interface MemoryKindUsageEntry {
+  kind: string
+  used: number
+  cap: number
+  priority: number
+}
+
 export interface KeeperStateDiagramResponse {
   keeper: string
   current_phase: string
   mermaid: string
   decision_pipeline_mermaid?: string
   cascade_fsm_mermaid?: string
+  compaction_submachine_mermaid?: string | null
   // Structured data for Cytoscape FSM rendering
   thompson_alpha?: number
   thompson_beta?: number
@@ -355,6 +363,7 @@ export interface KeeperStateDiagramResponse {
   recovery_floor_count?: number
   cascade_models?: string[]
   last_provider_result?: string | null
+  memory_kind_usage?: MemoryKindUsageEntry[]
 }
 
 export async function fetchKeeperTransitions(name: string, limit = 20): Promise<KeeperTransitionsResponse> {

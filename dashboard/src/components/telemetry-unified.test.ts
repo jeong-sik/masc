@@ -119,6 +119,28 @@ describe('TelemetryUnified', () => {
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
   })
 
+  it('surfaces summary fetch errors to the panel error banner (regression: Phase 0 fleet-data-core)', async () => {
+    // Before Phase 0, telemetry-unified awaited fetchTelemetrySummary directly
+    // inside Promise.all, so any rejection flowed to the outer catch and set
+    // state.error. Phase 0 moved the fetch into fleet-data-core which swallows
+    // the rejection into sharedTelemetrySummaryError; the panel must re-surface
+    // that to preserve the prior user-visible failure UI.
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockRejectedValue(
+      new Error('GET /api/v1/dashboard/telemetry/summary: 503 Service Unavailable'),
+    )
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetrySummary).toHaveBeenCalled()
+    expect(container.textContent).toContain('503 Service Unavailable')
+  })
+
   it('renders runtime diagnosis metadata for operators', async () => {
     const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(baseSummary)

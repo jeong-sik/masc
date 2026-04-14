@@ -352,14 +352,30 @@ let load_persona_profile (persona_name : string) : agent_profile option =
             primary_value = None;
           }
 
-(** Neo4j agent identity cache. Loaded lazily on first access. *)
+(** Neo4j agent identity cache. Loaded lazily on first access.
+
+    Serialised by [neo4j_cache_mu] because get_agent_profile is invoked
+    from dashboard HTTP handlers which run on multiple fibers.  Without
+    the mutex:
+    - Two fibers both enter the load branch
+    - First fiber starts the 10-second GraphQL request
+    - Second fiber sees [neo4j_cache_loaded = true] (set too early),
+      skips loading, and reads the still-empty Hashtbl
+    The flag is now set AFTER the Hashtbl is populated, and the whole
+    critical section runs under the mutex so only one fiber performs
+    the fetch.  [Stdlib.Mutex] because the HTTP handler may cross a
+    domain boundary. *)
 let neo4j_identity_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 32
 let neo4j_cache_loaded = ref false
+let neo4j_cache_mu = Stdlib.Mutex.create ()
 
 let load_neo4j_identity_cache () =
+  Stdlib.Mutex.lock neo4j_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock neo4j_cache_mu)
+    (fun () ->
   if !neo4j_cache_loaded then ()
   else begin
-    neo4j_cache_loaded := true;
     let body =
       {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
     in
@@ -424,8 +440,14 @@ let load_neo4j_identity_cache () =
               end)
             edges
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn))
-  end
+          Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn));
+    (* Set [loaded] only after the populate attempt finishes.  This
+       prevents a second fiber from reading the still-empty Hashtbl
+       during a slow GraphQL round-trip, and matches the original
+       intent of "don't retry on failure" (flag stays true even if the
+       GraphQL call errored). *)
+    neo4j_cache_loaded := true
+  end)
 
 (** Merge two profiles: prefer non-default values from [overlay] over [base]. *)
 let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_profile =
@@ -443,7 +465,12 @@ let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_pr
 let get_agent_profile (name : string) : agent_profile =
   let persona_name = extract_persona_name name in
   load_neo4j_identity_cache ();
-  let neo4j_profile = Hashtbl.find_opt neo4j_identity_cache persona_name in
+  let neo4j_profile =
+    Stdlib.Mutex.lock neo4j_cache_mu;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock neo4j_cache_mu)
+      (fun () -> Hashtbl.find_opt neo4j_identity_cache persona_name)
+  in
   let persona_profile = load_persona_profile persona_name in
   match (persona_profile, neo4j_profile) with
   | (Some persona, Some neo4j) ->

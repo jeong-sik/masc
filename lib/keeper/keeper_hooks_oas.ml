@@ -359,7 +359,13 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
-        let lane, tool_choice, thinking_enabled, thinking_budget =
+        let ( lane
+            , tool_choice
+            , thinking_enabled
+            , thinking_budget
+            , trace_id
+            , session_id
+            , turn ) =
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
         in
@@ -371,6 +377,7 @@ let make_hooks
              ~model:(let m = (!meta_ref).runtime.usage.last_model_used in
                      if m = "" then (!meta_ref).cascade_name else m)
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
+             ?trace_id ?session_id ?turn
              ~result_bytes ?truncated_to ()
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
         (try

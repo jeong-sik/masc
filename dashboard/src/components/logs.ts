@@ -99,6 +99,29 @@ function detailLabel(details: Record<string, unknown> | null, key: string): stri
   return null
 }
 
+function interpolateStructuredMessage(
+  message: string,
+  details: Record<string, unknown> | null,
+): string {
+  if (!details || !/%[sd]/.test(message)) return message
+  const replacements = [
+    detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool'),
+    detailLabel(details, 'fixes'),
+    detailLabel(details, 'count'),
+    detailLabel(details, 'client_name'),
+    detailLabel(details, 'phase'),
+    detailLabel(details, 'request_id'),
+    detailLabel(details, 'session_id'),
+  ].filter((value): value is string => !!value)
+
+  let rendered = message
+  for (const value of replacements) {
+    if (!/%[sd]/.test(rendered)) break
+    rendered = rendered.replace(/%[sd]/, value)
+  }
+  return rendered
+}
+
 function nestedRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -137,6 +160,13 @@ export function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
     operator_action: nestedString(envelope.operator_action),
     evidence_ref: nestedRecord(envelope.evidence_ref),
   }
+}
+
+export function renderLogMessage(entry: LogEntry): string {
+  const details = entryDetails(entry)
+  const message = interpolateStructuredMessage(entry.message, details)
+  const failure = failureEnvelope(entry)
+  return failure ? `${message} (${failure.summary})` : message
 }
 
 function sourceTone(source: string): string {
@@ -197,12 +227,14 @@ function renderLogRow(entry: LogEntry) {
   const source = entry.source || 'structured'
   const details = entryDetails(entry)
   const clientName = detailLabel(details, 'client_name')
-  const toolName = detailLabel(details, 'tool_name')
+  const toolName = detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool')
   const phase = detailLabel(details, 'phase')
   const requestId = detailLabel(details, 'request_id')
   const sessionId = detailLabel(details, 'session_id')
+  const fixes = detailLabel(details, 'fixes')
   const failure = failureEnvelope(entry)
   const sourceClass = sourceTone(source)
+  const renderedMessage = renderLogMessage(entry)
   let backgroundClass = 'bg-[rgba(255,255,255,0.02)]'
   if (level === 'ERROR') {
     backgroundClass = 'bg-[rgba(224,80,80,0.08)]'
@@ -240,6 +272,9 @@ function renderLogRow(entry: LogEntry) {
         ${toolName
           ? html`<span class="inline-flex items-center gap-1 rounded-full border border-[var(--white-10)] px-2 py-0.5 text-[10px]"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--text-muted)]">${toolName}</span></span>`
           : null}
+        ${fixes
+          ? html`<span class="rounded-full border border-[var(--white-10)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">fixes ${fixes}</span>`
+          : null}
         ${phase
           ? html`<span class="rounded-full border border-[var(--white-10)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${phase}</span>`
           : null}
@@ -261,7 +296,7 @@ function renderLogRow(entry: LogEntry) {
       </div>
       <div
         class="text-[12px] leading-relaxed text-[var(--text-body)]"
-        title=${failure ? `${entry.message}\n${failure.summary}` : entry.message}
+        title=${failure ? `${renderedMessage}\n${failure.summary}` : renderedMessage}
         style=${{
           display: '-webkit-box',
           overflow: 'hidden',
@@ -269,7 +304,7 @@ function renderLogRow(entry: LogEntry) {
           WebkitLineClamp: 2,
         }}
       >
-        ${failure ? `${entry.message} (${failure.summary})` : entry.message}
+        ${renderedMessage}
       </div>
     </div>
   `

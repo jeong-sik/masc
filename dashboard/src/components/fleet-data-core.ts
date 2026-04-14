@@ -51,6 +51,8 @@ export interface RefreshSharedOptions {
   signal?: AbortSignal
   /** Override default n=5000 for tool-quality fetches. */
   n?: number
+  /** Use an operational time window instead of a sample tail. */
+  windowHours?: number
 }
 
 export async function refreshSharedToolQuality(opts: RefreshSharedOptions = {}): Promise<void> {
@@ -70,7 +72,11 @@ export async function refreshSharedToolQuality(opts: RefreshSharedOptions = {}):
   sharedToolQualityError.value = null
 
   try {
-    const json = await fetchToolQuality({ n: opts.n ?? 5000, signal: controller.signal })
+    const json = await fetchToolQuality({
+      n: opts.n ?? 5000,
+      windowHours: opts.windowHours,
+      signal: controller.signal,
+    })
     if (requestId !== toolQualityRequestId) return
     sharedToolQuality.value = json
   } catch (e) {

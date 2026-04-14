@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogEntry } from '../api/dashboard'
-import { failureEnvelope, mergeLogEntries } from './logs'
+import { failureEnvelope, mergeLogEntries, renderLogMessage } from './logs'
 
 function entry(seq: number, overrides: Partial<LogEntry> = {}): LogEntry {
   return {
@@ -90,5 +90,22 @@ describe('failureEnvelope', () => {
         }),
       ),
     ).toBeNull()
+  })
+})
+
+describe('renderLogMessage', () => {
+  it('interpolates structured printf-style placeholders from details', () => {
+    expect(
+      renderLogMessage(
+        entry(9, {
+          module: 'oas:agent_tools',
+          message: 'tool %s: correction_pipeline fixed %d field(s)',
+          details: {
+            tool: 'keeper_github',
+            fixes: 2,
+          },
+        }),
+      ),
+    ).toBe('tool keeper_github: correction_pipeline fixed 2 field(s)')
   })
 })

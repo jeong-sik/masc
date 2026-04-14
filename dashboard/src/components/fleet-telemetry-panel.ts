@@ -246,7 +246,7 @@ export function FleetTelemetryPanel() {
     try {
       const [executionResult, toolQualityResult, telemetrySummaryResult] = await Promise.allSettled([
         fetchDashboardExecution({ signal: controller.signal }),
-        fetchToolQuality({ n: 5000, signal: controller.signal }),
+        fetchToolQuality({ n: 5000, windowHours: 24, signal: controller.signal }),
         fetchTelemetrySummary({ signal: controller.signal }),
       ])
 
@@ -374,8 +374,10 @@ export function FleetTelemetryPanel() {
           title="Tool Success"
           value=${value.tool_quality.total > 0 ? formatPercent(value.tool_quality.success_rate, 1) : 'n/a'}
           detail=${value.tool_quality.total > 0
-            ? `${value.tool_quality.failure.toLocaleString()} failures across ${value.tool_quality.total.toLocaleString()} recent calls.`
-            : 'No recent tool quality samples were recorded.'}
+            ? `${value.tool_quality.failure.toLocaleString()} failures across ${value.tool_quality.total.toLocaleString()}${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` calls in the last ${value.tool_quality.window_hours}h.` : ' recent calls.'}`
+            : value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null
+              ? `No tool quality samples were recorded in the last ${value.tool_quality.window_hours}h.`
+              : 'No recent tool quality samples were recorded.'}
           tone=${value.tool_quality.total > 0 ? toneForToolSuccess(value.tool_quality.success_rate) : 'neutral'}
         />
         <${SummaryCard}

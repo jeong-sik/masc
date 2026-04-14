@@ -145,32 +145,83 @@ let role_of_string = function
     Log.Misc.warn "keeper_context_core: unknown role %S, defaulting to User" unknown;
     Agent_sdk.Types.User
 
+let content_blocks_to_json
+    (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
+  `List (List.map Agent_sdk.Api.content_block_to_json blocks)
+
+let content_blocks_of_json
+    (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
+  let open Yojson.Safe.Util in
+  match json |> member "content_blocks" with
+  | `List blocks ->
+      let parsed =
+        List.filter_map Agent_sdk.Api.content_block_of_json blocks
+      in
+      if List.length parsed = List.length blocks then Some parsed else None
+  | _ -> None
+
+let string_field_opt key value =
+  match value with
+  | Some text -> [ (key, `String text) ]
+  | None -> []
+
 let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
+  let tool_call_id =
+    match m.tool_call_id with
+    | Some _ as explicit -> explicit
+    | None ->
+        (match m.role with
+         | Agent_sdk.Types.Tool ->
+             List.find_map
+               (function
+                 | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+                 | _ -> None)
+               m.content
+         | _ -> None)
+  in
   let base = [
     ("role", `String (role_to_string m.role));
     ("content", `String (text_of_message m));
+    ("content_blocks", content_blocks_to_json m.content);
   ] in
-  let with_tool_id = match m.role with
-    | Agent_sdk.Types.Tool ->
-      let tool_id = List.find_map (function
-        | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-        | _ -> None) m.content in
-      (match tool_id with Some id -> ("tool_call_id", `String id) :: base | None -> base)
-    | _ -> base
-  in
-  `Assoc with_tool_id
+  `Assoc
+    (base
+     @ string_field_opt "name" m.name
+     @ string_field_opt "tool_call_id" tool_call_id)
 
 let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
-  let text = json |> member "content" |> to_string |> Inference_utils.sanitize_text_utf8 in
-  match role with
-  | Agent_sdk.Types.Tool ->
-    let tool_use_id = json |> member "tool_call_id" |> to_string_option |> Option.value ~default:"masc-tool" in
-    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false; json = None }]; name = None; tool_call_id = None }
-  | _ ->
-    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+  let text =
+    match json |> member "content" |> to_string_option with
+    | Some value -> Inference_utils.sanitize_text_utf8 value
+    | None -> ""
+  in
+  let content =
+    match content_blocks_of_json json with
+    | Some blocks ->
+        if blocks <> [] then blocks else
+        (* Legacy checkpoints stored only flattened text + role. For Tool
+           messages that means the original assistant ToolUse block is gone,
+           so rebuilding a structured ToolResult here creates an invalid
+           orphaned pair on the next Anthropic request. Fall back to plain
+           text so old checkpoints remain readable without breaking turns. *)
+        [ Agent_sdk.Types.Text text ]
+    | None ->
+        [ Agent_sdk.Types.Text text ]
+  in
+  Inference_utils.sanitize_message_utf8
+    {
+      Agent_sdk.Types.role;
+      content;
+      name =
+        (json |> member "name" |> to_string_option
+         |> Option.map Inference_utils.sanitize_text_utf8);
+      tool_call_id =
+        (json |> member "tool_call_id" |> to_string_option
+         |> Option.map Inference_utils.sanitize_text_utf8);
+    }
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [

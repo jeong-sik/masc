@@ -337,7 +337,18 @@ let rec add_routes ~sw ~clock router =
            in
            max 1 (min 50000 raw)
          in
-         let json = Dashboard_http_tool_quality.aggregate ~n () in
+         let window_hours =
+           match Server_utils.query_param req "window_hours" with
+           | Some s ->
+             (try
+                let value = float_of_string s in
+                Some (max 0.1 (min 168.0 value))
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | _ -> None)
+           | None -> None
+         in
+         let json = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

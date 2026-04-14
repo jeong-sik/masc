@@ -149,15 +149,44 @@ let render_rate_table ~field table =
   |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
   |> List.map snd
 
-let aggregate ?(n = 5000) () : Yojson.Safe.t =
-  let records = Keeper_tool_call_log.read_recent ~n () in
+let empty_summary ~window_hours ~n ~sampling_mode =
+  `Assoc
+    [ ("generated_at", `String (Types.now_iso ()))
+    ; ("sampling_mode", `String sampling_mode)
+    ; ( "sample_limit",
+        match sampling_mode with
+        | "recent_n" -> `Int n
+        | _ -> `Null )
+    ; ( "window_hours",
+        match window_hours with
+        | Some hours -> `Float hours
+        | None -> `Null )
+    ; ("total", `Int 0)
+    ; ("success", `Int 0)
+    ; ("failure", `Int 0)
+    ; ("success_rate", `Float 0.0)
+    ; ("by_tool", `List [])
+    ; ("by_keeper", `List [])
+    ; ("by_model", `List [])
+    ; ("by_lane", `List [])
+    ; ("by_thinking_mode", `List [])
+    ; ("by_tool_choice", `List [])
+    ; ("failure_categories", `List [])
+    ; ("hourly_trend", `List [])
+    ]
+
+let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
+  let records, sampling_mode, window_hours =
+    match window_hours with
+    | Some hours when hours > 0.0 ->
+      ( Keeper_tool_call_log.read_window ~window_hours:hours ()
+      , "window_hours"
+      , Some hours )
+    | _ ->
+      (Keeper_tool_call_log.read_recent ~n (), "recent_n", None)
+  in
   if records = [] then
-    `Assoc [("total", `Int 0); ("success", `Int 0); ("failure", `Int 0);
-            ("success_rate", `Float 0.0);
-            ("by_tool", `List []); ("by_keeper", `List []);
-            ("by_model", `List []); ("by_lane", `List []);
-            ("by_thinking_mode", `List []); ("by_tool_choice", `List []);
-            ("failure_categories", `List []); ("hourly_trend", `List [])]
+    empty_summary ~window_hours ~n ~sampling_mode
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -345,6 +374,16 @@ let aggregate ?(n = 5000) () : Yojson.Safe.t =
     |> List.map snd
   in
   `Assoc [
+    ("generated_at", `String (Types.now_iso ()));
+    ("sampling_mode", `String sampling_mode);
+    ( "sample_limit",
+      match sampling_mode with
+      | "recent_n" -> `Int n
+      | _ -> `Null );
+    ( "window_hours",
+      match window_hours with
+      | Some hours -> `Float hours
+      | None -> `Null );
     ("total", `Int total_n);
     ("success", `Int success_n);
     ("failure", `Int (total_n - success_n));

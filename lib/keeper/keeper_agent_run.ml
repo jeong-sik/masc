@@ -1502,6 +1502,9 @@ let run_turn
                   tool_choice)
                 ~thinking_enabled:(Keeper_config.keeper_enable_thinking ())
                 ?thinking_budget:current_params.thinking_budget
+                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                ~turn
                 ();
               (* Tool disclosure telemetry: emitted after all allow-list rewrites
            (last-turn intersect, max_tools cap) so that

@@ -1043,6 +1043,16 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
     tool_call_id = None;
   }
 
+let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
+    : Agent_sdk.Types.message =
+  {
+    Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+    content =
+      [ Agent_sdk.Types.ToolUse { id; name; input } ];
+    name = None;
+    tool_call_id = None;
+  }
+
 let test_keeper_checkpoint_store_oas_roundtrip () =
   let base_dir = temp_dir "keeper_oas_store" in
   Fun.protect
@@ -1169,6 +1179,79 @@ let test_keeper_checkpoint_legacy_fallback () =
           Alcotest.(check string) "legacy message restored" "legacy-only"
             (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
       | None -> Alcotest.fail "expected legacy fallback context")
+
+let test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs () =
+  let base_dir = temp_dir "keeper_legacy_tool_pair_roundtrip" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-legacy-tool-pair" in
+      let session =
+        Keeper_exec_context.create_session ~session_id:trace_id ~base_dir
+      in
+      let tool_id = "call_legacy_pair" in
+      let legacy_ctx =
+        Keeper_exec_context.create ~system_prompt:"legacy tool history" ~max_tokens:4096
+        |> fun ctx ->
+        Keeper_exec_context.append_many ctx
+          [
+            Agent_sdk.Types.user_msg "read the file";
+            tool_use_msg ~id:tool_id (`Assoc [ ("path", `String "README.md") ]);
+            tool_result_msg ~id:tool_id "contents";
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+      in
+      ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:2);
+      let (_session, loaded_opt) =
+        Keeper_exec_context.load_context_from_checkpoint
+          ~max_checkpoint_messages:120
+          ~trace_id
+          ~primary_model_max_tokens:1024 ~base_dir
+      in
+      match loaded_opt with
+      | None -> Alcotest.fail "expected legacy structured roundtrip context"
+      | Some loaded ->
+          Alcotest.(check int) "all messages restored" 4
+            (List.length loaded.messages);
+          (match List.nth loaded.messages 1 with
+           | { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
+               content =
+                 [ Agent_sdk.Types.ToolUse { id; name; input } ];
+               _ } ->
+               Alcotest.(check string) "tool use id preserved" tool_id id;
+               Alcotest.(check string) "tool use name preserved"
+                 "keeper_fs_read" name;
+               Alcotest.(check string) "tool use input preserved"
+                 {|{"path":"README.md"}|}
+                 (Yojson.Safe.to_string input)
+           | _ -> Alcotest.fail "expected assistant tool_use after roundtrip");
+          (match List.nth loaded.messages 2 with
+           | { Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+               content =
+                 [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ];
+               _ } ->
+               Alcotest.(check string) "tool result id preserved" tool_id
+                 tool_use_id;
+               Alcotest.(check string) "tool result content preserved"
+                 "contents" content
+           | _ -> Alcotest.fail "expected tool result after roundtrip"))
+
+let test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text () =
+  let json =
+    `Assoc
+      [
+        ("role", `String "tool");
+        ("content", `String "legacy tool output");
+        ("tool_call_id", `String "call_old");
+      ]
+  in
+  match Masc_mcp.Keeper_exec_context.message_of_json json with
+  | { Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+      content = [ Agent_sdk.Types.Text text ];
+      _ } ->
+      Alcotest.(check string) "legacy tool text preserved"
+        "legacy tool output" text
+  | _ -> Alcotest.fail "expected legacy tool message to degrade to plain text"
 
 let test_keeper_checkpoint_prefers_newer_legacy_during_migration () =
   let base_dir = temp_dir "keeper_checkpoint_migration" in
@@ -1755,6 +1838,10 @@ let () =
         test_keeper_checkpoint_prefers_oas_checkpoint;
       Alcotest.test_case "legacy fallback still works" `Quick
         test_keeper_checkpoint_legacy_fallback;
+      Alcotest.test_case "legacy checkpoint roundtrip preserves tool pairs" `Quick
+        test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs;
+      Alcotest.test_case "legacy old tool messages degrade to text" `Quick
+        test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text;
       Alcotest.test_case "OAS handoff rollover increments generation" `Quick
         test_keeper_oas_handoff_rollover_increments_generation;
       Alcotest.test_case "OAS handoff rollover noops below threshold" `Quick
@@ -1777,6 +1864,10 @@ let () =
         test_keeper_checkpoint_prefers_oas_checkpoint;
       Alcotest.test_case "legacy fallback still works" `Quick
         test_keeper_checkpoint_legacy_fallback;
+      Alcotest.test_case "legacy checkpoint roundtrip preserves tool pairs" `Quick
+        test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs;
+      Alcotest.test_case "legacy old tool messages degrade to text" `Quick
+        test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text;
       Alcotest.test_case "prefers newer legacy during migration" `Quick
         test_keeper_checkpoint_prefers_newer_legacy_during_migration;
       Alcotest.test_case "OAS handoff rollover increments generation" `Quick

@@ -262,6 +262,10 @@ export type ToolQualityHourlyPoint = {
 }
 
 export type ToolQualityResponse = {
+  generated_at?: string
+  sampling_mode?: 'recent_n' | 'window_hours' | string
+  sample_limit?: number | null
+  window_hours?: number | null
   total: number
   success: number
   failure: number
@@ -272,9 +276,10 @@ export type ToolQualityResponse = {
   hourly_trend?: ToolQualityHourlyPoint[]
 }
 
-export function fetchToolQuality(opts?: { n?: number; signal?: AbortSignal }): Promise<ToolQualityResponse> {
+export function fetchToolQuality(opts?: { n?: number; windowHours?: number; signal?: AbortSignal }): Promise<ToolQualityResponse> {
   const params = new URLSearchParams()
   if (opts?.n != null) params.set('n', String(opts.n))
+  if (opts?.windowHours != null) params.set('window_hours', String(opts.windowHours))
   const qs = params.toString()
   return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`, { signal: opts?.signal })
 }

@@ -369,8 +369,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      with structured metadata before metrics/OTEL hooks see them. *)
   Tool_output_validation.install ();
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
-     Also registers a post-hook so every tool call is enqueued for persistence. *)
+     The shared post-hook is the canonical write path for persisted tool
+     metrics so keeper-internal calls are counted exactly once. *)
   Tool_dispatch.register_post_hook (fun result ->
+    Tool_metrics.record result;
     Tool_metrics_persist.enqueue result;
     result);
   Tool_metrics_persist.start_flush_fiber ~sw ~clock

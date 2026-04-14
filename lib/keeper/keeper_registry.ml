@@ -113,6 +113,13 @@ type registry_entry = {
       (** Ephemeral flag: true when keeper is blocked in admission queue.
           Set/cleared around [Admission_queue.with_permit].
           Does not affect state machine phase derivation. *)
+  last_auto_rules :
+    (float * Keeper_state_machine.auto_rule_summary) option;
+      (** Snapshot of the most recent [Context_measured] auto-rule summary.
+          Stored as [(wall_clock, summary)] so the composite observer
+          (RFC-0003 §6) can surface the last measurement without reading
+          history files. [None] until the first [Context_measured] event
+          has been dispatched. *)
 }
 
 
@@ -212,6 +219,7 @@ let register_with_state ~base_path name meta
     tool_usage = StringMap.empty;
     transition_seq = 0;
     waiting_for_inference = Atomic.make false;
+    last_auto_rules = None;
   } in
   put_entry key entry;
   if phase = Running then
@@ -691,6 +699,16 @@ let dispatch_event_with_audit
     })
   | Some entry ->
     let now = Time_compat.now () in
+    (* Retain the last auto-rule summary emitted with a [Context_measured]
+       event so downstream read-only observers (RFC-0003 composite
+       observer) can project it without reading history files. Other
+       events leave the field untouched. *)
+    let last_auto_rules =
+      match event with
+      | Keeper_state_machine.Context_measured { auto_rules; _ } ->
+        Some (now, auto_rules)
+      | _ -> entry.last_auto_rules
+    in
     let result =
       Keeper_state_machine.apply_event
         ~current_phase:entry.phase
@@ -756,6 +774,7 @@ let dispatch_event_with_audit
          conditions = tr.updated_conditions;
          dead_since_ts;
          transition_seq = new_seq;
+         last_auto_rules;
        };
        List.iter
          (execute_entry_action_observability
@@ -778,6 +797,7 @@ let dispatch_event_with_audit
          entry with
          conditions = tr.updated_conditions;
          transition_seq = new_seq;
+         last_auto_rules;
        };
        Ok tr
      | Error e ->

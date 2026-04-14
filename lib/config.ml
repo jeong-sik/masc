@@ -1,13 +1,15 @@
 (** Tool schema registry and visibility helpers. *)
 
+module StringSet = Set.Make (String)
+
 let dedupe_schemas (schemas : Types.tool_schema list) =
-  let seen = Hashtbl.create (List.length schemas) in
+  let seen = ref StringSet.empty in
   List.filter
     (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
+      if StringSet.mem schema.name !seen then
         false
       else (
-        Hashtbl.add seen schema.name ();
+        seen := StringSet.add schema.name !seen;
         true))
     schemas
 
@@ -43,13 +45,13 @@ let raw_all_tool_schemas : Types.tool_schema list =
     input_schema.type not "object". Does not block startup. *)
 let validate_schemas (schemas : Types.tool_schema list) =
   let errors = ref [] in
-  let seen = Hashtbl.create (List.length schemas) in
+  let seen = ref StringSet.empty in
   List.iter
     (fun (schema : Types.tool_schema) ->
-      if Hashtbl.mem seen schema.name then
+      if StringSet.mem schema.name !seen then
         errors :=
           Printf.sprintf "Duplicate tool name: %s" schema.name :: !errors
-      else Hashtbl.replace seen schema.name ();
+      else seen := StringSet.add schema.name !seen;
       if schema.name = "" then
         errors := "Empty tool name found" :: !errors;
       if schema.description = "" then

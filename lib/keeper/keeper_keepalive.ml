@@ -3,7 +3,13 @@
     Per-keeper lifecycle (start, stop, wakeup) is managed through
     [Keeper_registry] (SSOT).  This module provides the heartbeat loop
     body, board-reactive wakeup filtering, and optional gRPC heartbeat
-    fiber. *)
+    fiber.
+
+    [MASC_KEEPER_*] env vars read here (semaphore timeout, concurrency,
+    fairness cooldown, autoboot max) can also be set in
+    [<base_path>/.masc/config/keeper_runtime.toml].
+    See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
+    section 1.3. *)
 
 open Keeper_types
 open Keeper_memory

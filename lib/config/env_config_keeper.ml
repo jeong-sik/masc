@@ -1,3 +1,16 @@
+(** Env_config_keeper — keeper runtime parameters from environment.
+
+    All [MASC_KEEPER_*] env vars in this module can also be set
+    declaratively in [<base_path>/.masc/config/keeper_runtime.toml].
+    The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs at
+    server startup and populates unset env vars via [Unix.putenv]
+    before this module initializes.
+
+    Precedence: process env > TOML > hardcoded default below.
+
+    See [docs/BOOT-ENV-STATE-INVENTORY.md] section 1.3 for the full
+    TOML schema and section mapping. *)
+
 open Env_config_core
 
 (** {1 Keeper Bootstrap Configuration} *)

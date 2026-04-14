@@ -372,10 +372,7 @@ let cascade_metrics_for_candidates
              latency internally but never exports it — the global
              Llm_metric_bridge sink is not consulted because this
              per-call metrics object takes precedence. *)
-          Prometheus.observe_histogram
-            Llm_metric_bridge.request_latency_metric
-            ~labels:[("model", model_id)]
-            (Float.of_int latency_ms /. 1000.0));
+          Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms);
       on_error =
         (fun ~model_id ~error ->
           ensure_terminal_attempt capture ~candidate_cfgs ~model_id

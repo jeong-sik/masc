@@ -57,6 +57,17 @@ let emit_http_status ~provider ~model_id ~status =
     observability so a broken hook does not blank out the dashboard. *)
 let request_latency_metric = "masc_llm_provider_request_latency_seconds"
 
+(** Emit a single latency observation to the Prometheus histogram.
+
+    Exposed so that per-call metrics sinks (e.g. the cascade-observation
+    capture in [Oas_worker_cascade]) can forward [on_request_end] to the
+    same histogram without duplicating the label shape.  This is the
+    single source of truth for the label key names. *)
+let emit_request_latency ~model_id ~latency_ms =
+  let seconds = Float.of_int latency_ms /. 1000.0 in
+  Prometheus.observe_histogram request_latency_metric
+    ~labels:[("model", model_id)] seconds
+
 (** Build the OAS Metrics.t sink.
 
     Currently wired through:
@@ -76,9 +87,7 @@ let make_sink () : Llm_provider.Metrics.t =
         emit_http_status ~provider ~model_id ~status);
     on_request_end =
       (fun ~model_id ~latency_ms ->
-        let seconds = Float.of_int latency_ms /. 1000.0 in
-        Prometheus.observe_histogram request_latency_metric
-          ~labels:[("model", model_id)] seconds);
+        emit_request_latency ~model_id ~latency_ms);
   }
 
 (** Install the sink as the process-wide default.  Idempotent — calling

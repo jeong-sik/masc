@@ -46,13 +46,27 @@ let emit_http_status ~provider ~model_id ~status =
       ]
     ()
 
+(** Per-HTTP-request latency histogram.  Distinct from
+    [masc_llm_inference_duration_seconds] (turn-scope, populated by the
+    keeper AfterTurn hook): this metric is per provider HTTP call, so
+    streaming retries / cascade fallbacks each add an observation.
+
+    Populated unconditionally by the OAS [on_request_end] callback,
+    which fires for every completed HTTP request regardless of whether
+    the AfterTurn hook later runs.  Provides redundant latency
+    observability so a broken hook does not blank out the dashboard. *)
+let request_latency_metric = "masc_llm_provider_request_latency_seconds"
+
 (** Build the OAS Metrics.t sink.
 
-    Currently only [on_http_status] is wired through; the other
-    callbacks inherit the default no-op behaviour from
-    [Llm_provider.Metrics.noop].  Future extensions (error type
-    counters, latency histograms) can add more relays without
-    breaking the signature. *)
+    Currently wired through:
+    - [on_http_status]   → masc_llm_provider_http_status_total
+    - [on_request_end]   → masc_llm_provider_request_latency_seconds
+
+    Other callbacks ([on_cache_hit/miss], [on_request_start], [on_error],
+    [on_cascade_fallback]) inherit the default no-op from
+    [Llm_provider.Metrics.noop].  Add more relays here as their
+    consuming dashboards land. *)
 let make_sink () : Llm_provider.Metrics.t =
   let open Llm_provider.Metrics in
   {
@@ -60,6 +74,11 @@ let make_sink () : Llm_provider.Metrics.t =
     on_http_status =
       (fun ~provider ~model_id ~status ->
         emit_http_status ~provider ~model_id ~status);
+    on_request_end =
+      (fun ~model_id ~latency_ms ->
+        let seconds = Float.of_int latency_ms /. 1000.0 in
+        Prometheus.observe_histogram request_latency_metric
+          ~labels:[("model", model_id)] seconds);
   }
 
 (** Install the sink as the process-wide default.  Idempotent — calling

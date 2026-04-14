@@ -202,19 +202,6 @@ let init () =
     "Total provider prefix cache read tokens (Anthropic)" Counter;
   register_histogram ~name:"masc_tool_call_duration_seconds"
     ~help:"Tool call latency in seconds" ();
-  (* Delta checkpoint metrics *)
-  add "masc_delta_shadow_match_total"
-    "Shadow-apply delta: rebuilt hash matches current checkpoint" Counter;
-  add "masc_delta_shadow_mismatch_total"
-    "Shadow-apply delta: rebuilt hash differs from current checkpoint" Counter;
-  add "masc_delta_shadow_error_total"
-    "Shadow-apply delta: compute or apply raised an error" Counter;
-  register_histogram ~name:"masc_delta_checkpoint_size_bytes"
-    ~help:"Size in bytes of serialized delta checkpoint" ();
-  register_histogram ~name:"masc_full_checkpoint_size_bytes"
-    ~help:"Size in bytes of serialized full checkpoint" ();
-  register_gauge ~name:"masc_delta_size_ratio"
-    ~help:"Ratio of delta size to full checkpoint size (last observation)" ();
   (* Inference admission queue metrics *)
   add "masc_inference_queue_inflight"
     "Concurrent inference calls holding an admission permit" Gauge;

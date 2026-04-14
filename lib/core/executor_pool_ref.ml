@@ -3,21 +3,26 @@
     Set once at server startup in [server_runtime_bootstrap.ml].
     Used by dashboard compute and (future) chain adapter offloading.
 
+    Uses [Atomic.t] rather than a plain [ref] because Executor_pool
+    workers run on separate OCaml 5 domains; a plain [ref] provides no
+    memory barrier between [set] on the main domain and [get] on a
+    worker domain.  [Atomic.get]/[set] give cross-domain visibility.
+
     [submit_or_inline] provides graceful fallback: if the pool is not
     available (e.g. during tests or before server init), the computation
     runs inline in the current fiber. *)
 
-let pool : Eio.Executor_pool.t option ref = ref None
+let pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 
-let get () = !pool
+let get () = Atomic.get pool
 
-let set p = pool := Some p
+let set p = Atomic.set pool (Some p)
 
 (** Submit [f] to the executor pool if available, or run inline.
     Inline fallback ensures callers work in tests and before server init.
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)
 let submit_or_inline ?(weight = 1.0) f =
-  match !pool with
+  match Atomic.get pool with
   | Some p ->
       (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
          Eio.Switch.run (fun _sw -> f ()))

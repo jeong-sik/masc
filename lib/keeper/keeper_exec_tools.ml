@@ -179,6 +179,7 @@ let execute_keeper_tool_call
     | "keeper_task_force_done"
     | "keeper_broadcast"
     | "keeper_task_claim"
+    | "keeper_task_create"
     | "keeper_task_done" -> Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args
     | n when String.starts_with ~prefix:"masc_autoresearch_" n ->
       Keeper_exec_masc.handle_keeper_autoresearch_tool ~config ~meta ~name ~args

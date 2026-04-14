@@ -77,6 +77,9 @@ let synonyms : (string * string list) list =
     ("keeper_tasks_list",
      [ "backlog"; "todo list"; "task list"; "available tasks"; "task board";
        "work items"; "assignee" ]);
+    ("keeper_task_create",
+     [ "create task"; "new task"; "add task"; "make task"; "propose work";
+       "found work"; "needs doing"; "backlog item"; "discovered issue" ]);
     ("keeper_task_claim",
      [ "claim task"; "pick up task"; "assign me task"; "take task";
        "next task"; "give me work" ]);

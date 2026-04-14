@@ -94,6 +94,19 @@ let handle_keeper_task_tool
         Room.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "broadcast", `String message ]))
+  | "keeper_task_create" ->
+    let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
+    let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
+    let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
+    if title = ""
+    then error_json "title is required. Provide a clear, actionable task title."
+    else if description = ""
+    then error_json "description is required. Explain what needs to be done and why."
+    else (
+      let result =
+        Room_task.add_task config ~title ~priority ~description
+      in
+      Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String result ]))
   | "keeper_task_claim" ->
     let preset_name = match Keeper_types.tool_access_preset meta.tool_access with
       | Some p -> Some (Keeper_types.tool_preset_to_string p)

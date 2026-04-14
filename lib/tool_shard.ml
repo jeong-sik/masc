@@ -602,42 +602,37 @@ Use keeper_task_force_release to reassign orphaned tasks.";
   {
     name = "keeper_task_force_release";
     description = "Release a stuck task back to Todo status, removing the current assignee. \
-Use when an agent went offline and left a task claimed. Broadcasts the \
-release to the room. Provide a reason for audit.";
+Applies when the assignee is offline (no heartbeat >10 min). Broadcasts the release to the room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit (REQUIRED)")]);
-        ("reason", `Assoc [("type", `String "string"); ("description", `String "Reason for force release")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit"); ("minLength", `Int 1)]);
+        ("reason", `Assoc [("type", `String "string"); ("description", `String "Why this task is being released (audit trail)"); ("minLength", `Int 1)]);
       ]);
-      ("required", `List [`String "task_id"]);
+      ("required", `List [`String "task_id"; `String "reason"]);
     ];
   };
   {
     name = "keeper_task_force_done";
-    description = "Mark a task Done when the work is confirmed complete but the assignee \
-did not transition it (e.g. they finished but went offline). Requires notes \
-explaining the completion evidence. Broadcasts to room.";
+    description = "Mark a task Done when the assignee completed the work but did not transition it \
+(e.g. went offline after finishing). Broadcasts completion to room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit (REQUIRED)")]);
-        ("notes", `Assoc [("type", `String "string"); ("description", `String "Evidence that the task is actually complete")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_tasks_list or keeper_tasks_audit"); ("minLength", `Int 1)]);
+        ("notes", `Assoc [("type", `String "string"); ("description", `String "Completion evidence: PR merged, test output, file diff"); ("minLength", `Int 1)]);
       ]);
-      ("required", `List [`String "task_id"]);
+      ("required", `List [`String "task_id"; `String "notes"]);
     ];
   };
   {
     name = "keeper_broadcast";
     description = "Send a message visible to all agents in the MASC room. \
-message is REQUIRED (non-empty). \
-Good: message='Build complete, all tests pass.'. \
-Bad: message=''. \
 Use for status updates, announcements, warnings, or coordination.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("message", `Assoc [("type", `String "string"); ("description", `String "Message to broadcast")]);
+        ("message", `Assoc [("type", `String "string"); ("description", `String "Message content to broadcast"); ("minLength", `Int 1)]);
       ]);
       ("required", `List [`String "message"]);
     ];
@@ -655,32 +650,28 @@ After claiming, do the work and call keeper_task_done when finished.";
   {
     name = "keeper_task_done";
     description = "Mark your claimed task as complete with a result summary. \
-task_id is REQUIRED. Get task_id from keeper_task_claim response. \
-The task must be claimed by you. Provide a clear summary of what was \
-accomplished so other agents can verify.";
+The task must be claimed by you. Other agents verify completion from the result field.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID from keeper_task_claim (REQUIRED)")]);
-        ("result", `Assoc [("type", `String "string"); ("description", `String "Summary of what was accomplished")]);
+        ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID returned by keeper_task_claim"); ("minLength", `Int 1)]);
+        ("result", `Assoc [("type", `String "string"); ("description", `String "What was done: files changed, tests run, outcome observed"); ("minLength", `Int 1)]);
       ]);
-      ("required", `List [`String "task_id"]);
+      ("required", `List [`String "task_id"; `String "result"]);
     ];
   };
   {
     name = "keeper_task_create";
-    description = "Create a new task on the MASC backlog. Use when you identify work \
-that should be done — from GitHub issues, board discussions, codebase problems, \
-or your own analysis. Provide a clear title, actionable description, and priority (1=critical, 5=low). \
-The task will appear on the backlog for any keeper to claim.";
+    description = "Create a new task on the MASC backlog. The task appears for any keeper to claim. \
+Duplicate titles are rejected automatically (dedup by normalized title).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("title", `Assoc [("type", `String "string"); ("description", `String "Clear, actionable task title (REQUIRED)")]);
-        ("description", `Assoc [("type", `String "string"); ("description", `String "What needs to be done and why. Include enough context for another keeper to pick this up. (REQUIRED)")]);
+        ("title", `Assoc [("type", `String "string"); ("description", `String "Task title: verb + object + scope (e.g. 'Fix CI timeout in keeper_agent_run.ml')"); ("minLength", `Int 5); ("maxLength", `Int 200)]);
+        ("description", `Assoc [("type", `String "string"); ("description", `String "What to do, why, and acceptance criteria. Another keeper reads this to start working."); ("minLength", `Int 10)]);
         ("priority", `Assoc [
           ("type", `String "integer");
-          ("description", `String "1=critical, 2=high, 3=medium (default), 4=low, 5=backlog");
+          ("description", `String "1=critical 2=high 3=medium 4=low 5=backlog");
           ("minimum", `Int 1);
           ("maximum", `Int 5);
           ("default", `Int 3);

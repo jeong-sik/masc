@@ -2,11 +2,11 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
-import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
-import { TextInput } from './common/input'
+import { RichComposer } from './common/rich-composer'
+import { RichContent } from './common/rich-content'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate } from '../router'
 import { navigateToAuthor } from '../lib/board-utils'
@@ -90,7 +90,7 @@ function CommentItem({
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}</button>
         </div>
-        <div class="text-[13px] text-[var(--text-body)] leading-[1.55]"><${Markdown} text=${displayText} /></div>
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.55]"><${RichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
           <button type="button"
             class="mt-1 text-[11px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
@@ -98,26 +98,29 @@ function CommentItem({
           >${expanded ? '접기' : '더 보기...'}</button>
         ` : null}
         ${isReplying ? html`
-          <div class="mt-2 flex gap-2">
-            <${TextInput}
-              class="flex-1"
-              placeholder="답글 작성..."
+          <div class="mt-2">
+            <${RichComposer}
               value=${commentText.value}
-              onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
-              onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId, comment.id) }}
+              placeholder="답글 작성..."
+              rows=${4}
               disabled=${commentSubmitting.value}
+              onValueChange=${(next: string) => { commentText.value = next }}
+              helpText="Markdown과 코드 스니펫을 그대로 붙일 수 있습니다."
+              previewLimit=${1}
             />
-            <button type="button"
-              class="py-1.5 px-3 rounded-lg text-[12px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
-                ${commentSubmitting.value || commentText.value.trim() === ''
-                  ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
-                  : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
-                }"
-              onClick=${() => submitComment(postId, comment.id)}
-              disabled=${commentSubmitting.value || commentText.value.trim() === ''}
-            >
-              ${commentSubmitting.value ? '...' : '등록'}
-            </button>
+            <div class="mt-2 flex justify-end">
+              <button type="button"
+                class="py-1.5 px-3 rounded-lg text-[12px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+                  ${commentSubmitting.value || commentText.value.trim() === ''
+                    ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
+                    : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
+                  }"
+                onClick=${() => submitComment(postId, comment.id)}
+                disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+              >
+                ${commentSubmitting.value ? '...' : '등록'}
+              </button>
+            </div>
           </div>
         ` : null}
       </div>
@@ -163,26 +166,29 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
 // ── Comment form ───────────────────────────────────────────────────
 function CommentForm({ postId }: { postId: string }) {
   return html`
-    <div class="mt-4 flex gap-2">
-      <${TextInput}
-        class="flex-1"
-        placeholder="댓글 추가..."
+    <div class="mt-4">
+      <${RichComposer}
         value=${commentText.value}
-        onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
-        onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') submitComment(postId) }}
+        placeholder="댓글 추가..."
+        rows=${5}
         disabled=${commentSubmitting.value}
+        onValueChange=${(next: string) => { commentText.value = next }}
+        helpText="Markdown, 코드 스니펫, URL 링크 카드를 지원합니다."
+        previewLimit=${1}
       />
-      <button type="button"
-        class="py-2 px-4 rounded-lg text-[13px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
-          ${commentSubmitting.value || commentText.value.trim() === ''
-            ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
-            : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
-          }"
-        onClick=${() => submitComment(postId)}
-        disabled=${commentSubmitting.value || commentText.value.trim() === ''}
-      >
-        ${commentSubmitting.value ? '...' : '등록'}
-      </button>
+      <div class="mt-2 flex justify-end">
+        <button type="button"
+          class="py-2 px-4 rounded-lg text-[13px] font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+            ${commentSubmitting.value || commentText.value.trim() === ''
+              ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
+              : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
+            }"
+          onClick=${() => submitComment(postId)}
+          disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+        >
+          ${commentSubmitting.value ? '...' : '등록'}
+        </button>
+      </div>
     </div>
   `
 }
@@ -219,7 +225,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <div class="text-[13px] text-[var(--text-body)] leading-[1.65]">
-            <${Markdown} text=${stripStateBlocks(post.body)} />
+            <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
           </div>
 
           <!-- Author and meta -->

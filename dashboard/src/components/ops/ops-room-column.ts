@@ -5,6 +5,7 @@ import { JsonViewerCard } from '../common/json-viewer'
 import { signal } from '@preact/signals'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
+import { RichComposer } from '../common/rich-composer'
 import { useRef } from 'preact/hooks'
 import { EmptyState, LoadingState } from '../common/feedback-state'
 import {
@@ -303,14 +304,15 @@ export function OpsRoomColumn() {
               onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
               disabled=${operatorActionBusy.value}
             />
-            <textarea
-              class="control-textarea"
-              rows=${3}
-              placeholder="작업 설명"
+            <${RichComposer}
               value=${taskDescription.value}
-              onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
+              rows=${5}
+              placeholder="작업 설명"
               disabled=${operatorActionBusy.value}
-            ></textarea>
+              onValueChange=${(next: string) => { taskDescription.value = next }}
+              helpText="개입 화면에서도 Markdown, 코드 스니펫, URL 링크 카드를 그대로 기록할 수 있습니다."
+              previewLimit=${1}
+            />
             <div class="control-row items-stretch">
               <select
                 class="control-input min-w-[92px]"

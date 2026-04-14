@@ -7,6 +7,7 @@ import { DialogOverlay } from '../common/dialog'
 import { StatusBadge } from '../common/status-badge'
 import { EmptyState } from '../common/empty-state'
 import { ErrorState, LoadingState } from '../common/feedback-state'
+import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { findKeeper } from '../../lib/keeper-utils'
 import {
@@ -68,7 +69,7 @@ function TaskEventsSection() {
                 <span class="text-[12px] font-medium text-text-strong">${evt.label}</span>
                 ${evt.agent ? html`<span class="text-[10px] text-accent">@${evt.agent}${evt.actorKind ? ` · ${evt.actorKind}` : ''}</span>` : null}
               </div>
-              ${evt.notes ? html`<div class="mt-0.5 text-[11px] text-text-muted whitespace-pre-wrap">${evt.notes}</div>` : null}
+              ${evt.notes ? html`<div class="mt-1 text-[11px] text-text-muted"><${RichContent} text=${evt.notes} previewLimit=${1} /></div>` : null}
             </div>
             ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} class="text-[10px] text-text-dim shrink-0" />` : null}
           </div>
@@ -191,7 +192,7 @@ function HandoffSection({ task }: { task: Task }) {
     <div>
       <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">최근 Handoff</div>
       <div class="rounded-xl border border-warn/20 bg-warn/8 px-4 py-3">
-        <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap">${handoff.summary}</div>
+        <div class="text-[13px] leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
         ${handoff.reason ? html`<div class="mt-2 text-[11px] text-text-muted">reason: ${handoff.reason}</div>` : null}
         ${handoff.next_step ? html`<div class="mt-1 text-[11px] text-text-muted">next: ${handoff.next_step}</div>` : null}
         ${handoff.failure_mode ? html`<div class="mt-1 text-[11px] text-text-muted">failure: ${handoff.failure_mode}</div>` : null}
@@ -295,7 +296,9 @@ export function TaskDetailOverlay() {
           ${task.description ? html`
             <div>
               <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted mb-2">설명</div>
-              <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap break-words">${task.description}</div>
+              <div class="rounded-xl border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-[13px] leading-relaxed text-text-body">
+                <${RichContent} text=${task.description} previewLimit=${2} />
+              </div>
             </div>
           ` : null}
 

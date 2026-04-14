@@ -9,12 +9,12 @@ import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
+import { RichContent } from '../common/rich-content'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
 import { tasksByStatus, refreshExecution, executionLoading, executionLoaded, executionError } from '../../store'
 import { deleteTask } from '../../api/actions'
 import type { Task } from '../../types'
-import { truncate } from '../../lib/truncate'
 import {
   expandedTasks,
   toggleTaskExpand,
@@ -65,8 +65,7 @@ export function KanbanCard({ task }: { task: Task }) {
   const hasDescription = Boolean(task.description)
   const isDeleting = deletingTaskId.value === task.id
   const description = task.description ?? ''
-  const canExpand = description.length > 140
-  const preview = isExpanded || !canExpand ? description : truncate(description, 140)
+  const canExpand = description.length > 160
   const scope = taskScope(task)
   const link = taskLink(task)
 
@@ -115,7 +114,9 @@ export function KanbanCard({ task }: { task: Task }) {
 
       ${hasDescription ? html`
         <div class="flex flex-col gap-2">
-          <div class="text-[13px] leading-relaxed text-text-body whitespace-pre-wrap break-words">${preview}</div>
+          <div class=${`overflow-hidden text-[13px] leading-relaxed text-text-body ${isExpanded || !canExpand ? '' : 'max-h-[9rem]'}`}>
+            <${RichContent} text=${description} previewLimit=${1} />
+          </div>
           ${canExpand ? html`
             <button
               type="button"

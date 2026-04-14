@@ -108,6 +108,7 @@
    server_meta_cognition_feedback
    server_dashboard_http
    server_dashboard_http_cache
+   server_dashboard_http_link_preview
    server_dashboard_http_core
    server_routes_http
    server_routes_http_common

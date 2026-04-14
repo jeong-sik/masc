@@ -242,6 +242,12 @@ let base_reward_for_kind = function
 
 (** {1 Core Operations} *)
 
+(** Read the current cached balance.  Caller must hold [economy_mu]. *)
+let current_balance_locked ~base_path ~agent_name =
+  match Hashtbl.find_opt balance_cache (base_path, agent_name) with
+  | Some b -> b
+  | None -> initial_balance ()
+
 let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Null) () =
   if not (enabled ()) then Ok (get_balance ~base_path ~agent_name)
   else
@@ -257,13 +263,46 @@ let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Nu
         else 1.0
       in
       let amount = base_amount *. multiplier in
-      let current = get_balance ~base_path ~agent_name in
-      let balance_after = current +. amount in
+      (* Load ledger outside the lock (has its own locking + load-once
+         semantics), then run read-compute-write under the lock so two
+         concurrent earn/spend cannot both read the same [current] and
+         both append a wrong [balance_after] to the ledger (the ledger
+         would then record inconsistent running balances even though
+         the file itself is append-safe). *)
+      load_balances_from_ledger base_path;
+      with_economy_rw (fun () ->
+        let current = current_balance_locked ~base_path ~agent_name in
+        let balance_after = current +. amount in
+        let txn = {
+          id = generate_txn_id ();
+          agent_name;
+          kind;
+          amount;
+          balance_after;
+          reason;
+          counterparty = "system";
+          metadata;
+          timestamp = Unix.gettimeofday ();
+        } in
+        match append_transaction base_path txn with
+        | Error msg -> Error msg
+        | Ok () ->
+          Hashtbl.replace balance_cache (base_path, agent_name) balance_after;
+          Ok balance_after)
+
+let spend ~base_path ~agent_name ~amount ~kind ~reason ?(metadata = `Null) () =
+  if not (enabled ()) then Ok (get_balance ~base_path ~agent_name)
+  else
+    let neg_amount = -.(abs_float amount) in
+    load_balances_from_ledger base_path;
+    with_economy_rw (fun () ->
+      let current = current_balance_locked ~base_path ~agent_name in
+      let balance_after = current +. neg_amount in
       let txn = {
         id = generate_txn_id ();
         agent_name;
         kind;
-        amount;
+        amount = neg_amount;
         balance_after;
         reason;
         counterparty = "system";
@@ -274,36 +313,14 @@ let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Nu
       | Error msg -> Error msg
       | Ok () ->
         Hashtbl.replace balance_cache (base_path, agent_name) balance_after;
-        Ok balance_after
-
-let spend ~base_path ~agent_name ~amount ~kind ~reason ?(metadata = `Null) () =
-  if not (enabled ()) then Ok (get_balance ~base_path ~agent_name)
-  else
-    let neg_amount = -.(abs_float amount) in
-    let current = get_balance ~base_path ~agent_name in
-    let balance_after = current +. neg_amount in
-    let txn = {
-      id = generate_txn_id ();
-      agent_name;
-      kind;
-      amount = neg_amount;
-      balance_after;
-      reason;
-      counterparty = "system";
-      metadata;
-      timestamp = Unix.gettimeofday ();
-    } in
-    match append_transaction base_path txn with
-    | Error msg -> Error msg
-    | Ok () ->
-      Hashtbl.replace balance_cache (base_path, agent_name) balance_after;
-      Ok balance_after
+        Ok balance_after)
 
 (** {1 Behavioral Pressure} *)
 
 let reset_cache () =
-  Hashtbl.clear balance_cache;
-  Hashtbl.clear loaded_paths
+  with_economy_rw (fun () ->
+    Hashtbl.clear balance_cache;
+    Hashtbl.clear loaded_paths)
 
 let economic_pressure ~base_path ~agent_name =
   if not (enabled ()) then Normal

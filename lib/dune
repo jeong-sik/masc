@@ -396,6 +396,7 @@
    keeper_cascade_routing
    keeper_config
    keeper_toml_loader
+   keeper_runtime_config
    keeper_cdal_contract
    proof_artifact_reader
    violation_record

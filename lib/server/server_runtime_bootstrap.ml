@@ -181,6 +181,16 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Unix.putenv "MASC_BASE_PATH_INPUT" (Option.value ~default:"" input_base_path);
   Unix.putenv "MASC_BASE_PATH" base_path;
   bootstrap_base_path_config_root ~base_path;
+  (* Apply per-base-path keeper runtime overrides from
+     config/keeper_runtime.toml. Must run before any module that reads
+     [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
+     process env vars take precedence — TOML only fills unset slots. *)
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok 0 -> ()
+   | Ok n ->
+       Log.Server.info "keeper_runtime.toml: applied %d override(s)" n
+   | Error msg ->
+       Log.Server.warn "keeper_runtime.toml load failed: %s (continuing with env defaults)" msg);
   (* RFC-0001 Gate A: initialize instrumentation stores *)
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;

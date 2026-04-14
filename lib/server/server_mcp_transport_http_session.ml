@@ -16,7 +16,13 @@ let session_mutex = Eio.Mutex.create ()
 
 let default_base_path () =
   (* Match the launcher guard: a direct binary launch from a checkout with its
-     own .masc must not silently inherit a stale parent MASC_BASE_PATH. *)
+     own .masc must not silently inherit a stale parent MASC_BASE_PATH.
+
+     The resolver is invoked unconditionally per call so tests can change
+     cwd / MASC_BASE_PATH between calls and observe fresh resolution.
+     Per-(cwd, env) log dedup happens inside
+     [Room_utils_backend_setup.resolve_*] so production traffic still
+     sees only the first resolution log per unique input. *)
   Room_utils_backend_setup.resolve_server_default_base_path (Sys.getcwd ())
 
 let is_valid_protocol_version version =

@@ -114,14 +114,33 @@ let sync_test_base_path_env resolved_path =
         Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 
+(* Per-(input, kind) log dedup.  resolve_* runs unconditionally each
+   call so callers always see fresh resolution (important for tests
+   that change cwd/env between invocations).  Logs, however, only
+   fire on the first occurrence of each unique tuple — subsequent
+   identical resolutions stay silent so production HTTP request
+   traffic does not spam the log with the same message dozens of
+   times per minute. *)
+let logged_resolutions : (string * string, unit) Hashtbl.t =
+  Hashtbl.create 8
+
+let log_once kind fmt =
+  Printf.ksprintf (fun msg ->
+    let key = (kind, msg) in
+    if not (Hashtbl.mem logged_resolutions key) then begin
+      Hashtbl.add logged_resolutions key ();
+      Log.Room.info "%s" msg
+    end)
+    fmt
+
 let resolve_requested_base_path path =
   let requested = normalize_base_path path in
   match find_git_root requested with
   | Some git_root ->
-      Log.Room.info "MASC base resolved: %s → %s (git root)" requested git_root;
+      log_once "resolved" "MASC base resolved: %s → %s (git root)" requested git_root;
       git_root
   | None ->
-      Log.Room.info "MASC base: %s (no git root found)" requested;
+      log_once "no_git" "MASC base: %s (no git root found)" requested;
       requested
 
 (** Resolve base_path with a single authority:
@@ -137,7 +156,7 @@ let resolve_masc_base_path path =
          && not
               (Env_config_core.get_bool ~default:false
                  "MASC_TEST_ALLOW_INHERITED_BASE_PATH") ->
-      Log.Room.info
+      log_once "ignore_inherited"
         "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
         explicit path;
       requested
@@ -147,12 +166,12 @@ let resolve_masc_base_path path =
               (Env_config_core.get_bool ~default:false
                  "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
          && not (String.equal explicit requested) ->
-      Log.Room.info
+      log_once "ignore_inherited_mismatch"
         "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
         explicit path;
       requested
   | Some explicit ->
-      Log.Room.info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
+      log_once "explicit" "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
   | None -> requested
 

@@ -703,7 +703,9 @@ let handle_keeper_get_subroutes state req request reqd =
                   ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
               in
               summary.Keeper_memory.kind_counts
-            with _ -> [])
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> [])
           | _ -> []
         in
         let lookup_used k =

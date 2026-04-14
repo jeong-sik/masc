@@ -1,3 +1,5 @@
+module StringMap = Map.Make (String)
+
 (** Post Verifier — 3-dimension output verification gate for agents.
 
     Pure deterministic heuristic checks across three dimensions:
@@ -100,13 +102,14 @@ let is_repetitive_tokens s =
   let n = List.length tokens in
   if n < 6 then false  (* too few tokens to judge *)
   else
-    let tbl = Hashtbl.create 16 in
-    List.iter (fun t ->
-      let lower = String.lowercase_ascii t in
-      let prev = Option.value ~default:0 (Hashtbl.find_opt tbl lower) in
-      Hashtbl.replace tbl lower (prev + 1)
-    ) tokens;
-    let max_count = Hashtbl.fold (fun _ v acc -> max v acc) tbl 0 in
+    let tbl : int StringMap.t =
+      List.fold_left (fun m t ->
+        let lower = String.lowercase_ascii t in
+        let prev = Option.value ~default:0 (StringMap.find_opt lower m) in
+        StringMap.add lower (prev + 1) m
+      ) StringMap.empty tokens
+    in
+    let max_count = StringMap.fold (fun _ v acc -> max v acc) tbl 0 in
     float_of_int max_count /. float_of_int n > 0.6
 
 (* ================================================================ *)

@@ -346,6 +346,14 @@ let pause_keeper_for_overflow
     meta.name reason;
   paused_meta
 
+(* Dedupe "mixed cascade context budget" log: the values are constant
+   per (keeper_name, model_labels) because cascade config is static at
+   startup.  Logging per turn produces 15-20 duplicates per keeper per
+   minute under load. Track (name, primary, cascade_max) tuples we've
+   already announced and skip subsequent identical log lines. *)
+let cascade_budget_logged : (string * int * int, unit) Hashtbl.t =
+  Hashtbl.create 16
+
 let resolved_max_context_for_turn
     ~(meta : keeper_meta)
     (model_labels : string list) : int =
@@ -370,10 +378,15 @@ let resolved_max_context_for_turn
           Oas_model_resolve.clamp_context_for_pure_local_labels
             ~labels:model_labels ~max_context:resolved
         in
-        if primary < cascade_max then
-          Log.Keeper.info
-            "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
-            meta.name primary cascade_max;
+        if primary < cascade_max then begin
+          let key = (meta.name, primary, cascade_max) in
+          if not (Hashtbl.mem cascade_budget_logged key) then begin
+            Hashtbl.add cascade_budget_logged key ();
+            Log.Keeper.info
+              "%s: mixed cascade context budget primary=%d cascade_max=%d; using primary for initial turn budget"
+              meta.name primary cascade_max
+          end
+        end;
         primary
   in
   if raw < min_keeper_context then begin

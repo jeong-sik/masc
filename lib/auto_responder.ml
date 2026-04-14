@@ -56,27 +56,41 @@ let activity_log ~mode ~from_agent ~mention ~status ~detail =
 
 (** Per-agent-type timestamp list for rate limiting.
     Key = agent_type, Value = recent response timestamps (newest first).
-    O(1) lookup per agent_type — no string prefix scanning. *)
+    O(1) lookup per agent_type — no string prefix scanning.
+
+    [should_throttle] does read-filter-write on [response_times].
+    [maybe_respond] is invoked from the broadcast path for every message
+    and can run concurrently for different mentions; without a mutex the
+    throttle counter silently loses updates.  [Stdlib.Mutex] because the
+    broadcast handler may cross a domain boundary. *)
 let response_times : (string, float list) Hashtbl.t = Hashtbl.create 8
+let response_times_mu = Stdlib.Mutex.create ()
 let chain_limit = 3
 let chain_window_sec = 60.0
 
+let with_throttle_lock f =
+  Stdlib.Mutex.lock response_times_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock response_times_mu)
+    f
+
 let should_throttle ~agent_type =
   let now = Time_compat.now () in
-  let recent =
-    (match Hashtbl.find_opt response_times agent_type with
-     | None -> []
-     | Some times -> List.filter (fun ts -> now -. ts < chain_window_sec) times)
-  in
-  if List.length recent >= chain_limit then (
-    debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs"
-      agent_type (List.length recent) chain_window_sec);
-    Hashtbl.replace response_times agent_type recent;
-    true
-  ) else (
-    Hashtbl.replace response_times agent_type (now :: recent);
-    false
-  )
+  with_throttle_lock (fun () ->
+    let recent =
+      (match Hashtbl.find_opt response_times agent_type with
+       | None -> []
+       | Some times -> List.filter (fun ts -> now -. ts < chain_window_sec) times)
+    in
+    if List.length recent >= chain_limit then (
+      debug_log (Printf.sprintf "THROTTLE: %s has %d responses in last %.0fs"
+        agent_type (List.length recent) chain_window_sec);
+      Hashtbl.replace response_times agent_type recent;
+      true
+    ) else (
+      Hashtbl.replace response_times agent_type (now :: recent);
+      false
+    ))
 
 (* --- Mention helpers (re-export) --- *)
 

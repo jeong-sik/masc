@@ -1580,6 +1580,25 @@ type fiber_health =
   | Fiber_dead (** Restart budget exhausted, manual recovery needed *)
   | Fiber_unknown (** Not in supervised registry *)
 
+(** Keeper-level health state — derived from agent status, keepalive
+    fiber, and supervisor monitoring. Serialized to string at JSON
+    boundaries only. Defined here (not in Keeper_exec_status) so
+    operator_control_snapshot can parse JSON into the same type. *)
+type keeper_health =
+  | KH_healthy  (** Keepalive alive, recent turns, no quiet_reason *)
+  | KH_idle     (** Keepalive alive but no recent activity *)
+  | KH_offline  (** Agent not present or status=offline/inactive *)
+  | KH_stale    (** Last seen too long ago or zombie flag from agent *)
+  | KH_degraded (** graphql_error or model_error quiet_reason *)
+  | KH_zombie   (** Fiber terminated but registry entry exists *)
+  | KH_dead     (** Restart budget exhausted *)
+
+(** Keeper continuity state — derived from health + keepalive status. *)
+type keeper_continuity =
+  | Continuity_healthy    (** Runtime aligned with durable state *)
+  | Continuity_recovering (** Reconciling back into live presence *)
+  | Continuity_not_running (** Keepalive fiber not running *)
+
 (** Per-tool usage entry for keeper tool tracking.
     Defined here so Keeper_registry can embed it without depending
     on Keeper_tools_oas (avoids module init order issues). *)

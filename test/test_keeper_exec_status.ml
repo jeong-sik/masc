@@ -7,6 +7,11 @@ module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 module Room = Masc_mcp.Room
 
+let keeper_health_testable : KT.keeper_health Alcotest.testable =
+  Alcotest.testable
+    (fun fmt h -> Format.pp_print_string fmt (ES.keeper_health_to_string h))
+    (=)
+
 let make_meta ?(name = "keeper-exec-status-test")
     ?(trace_id = "trace-keeper-exec-status") () =
   match
@@ -102,9 +107,9 @@ let test_health_keepalive_running_overrides_stale_last_seen () =
   in
   (* keepalive is running and last_seen has not exceeded 2x the max keepalive interval *)
   check bool "keepalive running + last_seen at boundary is NOT stale"
-    true (health <> "stale");
+    true (health <> KT.KH_stale);
   check bool "keepalive running + last_seen at boundary is NOT offline"
-    true (health <> "offline")
+    true (health <> KT.KH_offline)
 
 let test_health_keepalive_stuck_secondary_timeout () =
   let meta = make_meta () in
@@ -114,7 +119,7 @@ let test_health_keepalive_stuck_secondary_timeout () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check string "keepalive running but last_seen > 2x interval → stale (stuck fiber)" "stale" health
+  check keeper_health_testable "keepalive running but last_seen > 2x interval → stale (stuck fiber)" KT.KH_stale health
 
 let test_health_keepalive_below_secondary_timeout () =
   let meta = make_meta () in
@@ -125,7 +130,7 @@ let test_health_keepalive_below_secondary_timeout () =
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
   check bool "keepalive running + last_seen just below 2x interval is NOT stale"
-    true (health <> "stale")
+    true (health <> KT.KH_stale)
 
 let test_health_keepalive_stuck_respects_interval () =
   let meta = make_meta () in
@@ -135,7 +140,7 @@ let test_health_keepalive_stuck_respects_interval () =
     ES.keeper_health_state ~keepalive_interval_s:30.0 ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check string "keepalive running + last_seen > 2x configured interval → stale" "stale" health
+  check keeper_health_testable "keepalive running + last_seen > 2x configured interval → stale" KT.KH_stale health
 
 let test_health_keepalive_not_running_respects_stale_last_seen () =
   let meta = make_meta () in
@@ -144,7 +149,7 @@ let test_health_keepalive_not_running_respects_stale_last_seen () =
     ES.keeper_health_state ~meta ~keepalive_running:false
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check string "no keepalive + stale last_seen → stale" "stale" health
+  check keeper_health_testable "no keepalive + stale last_seen → stale" KT.KH_stale health
 
 let test_health_zombie_overrides_keepalive () =
   let meta = make_meta () in
@@ -153,7 +158,7 @@ let test_health_zombie_overrides_keepalive () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check string "zombie overrides keepalive" "stale" health
+  check keeper_health_testable "zombie overrides keepalive" KT.KH_stale health
 
 let test_health_keepalive_running_fresh_is_healthy () =
   let meta =
@@ -169,7 +174,7 @@ let test_health_keepalive_running_fresh_is_healthy () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check string "keepalive + fresh + turns → healthy" "healthy" health
+  check keeper_health_testable "keepalive + fresh + turns → healthy" KT.KH_healthy health
 
 let test_health_keepalive_running_recent_live_signal_avoids_idle () =
   let now_ts = Time_compat.now () in
@@ -194,8 +199,8 @@ let test_health_keepalive_running_recent_live_signal_avoids_idle () =
     ES.keeper_health_state ~meta ~keepalive_running:true
       ~agent_status ~quiet_reason:None ~now_ts ()
   in
-  check string "fresh live signal keeps keeper healthy despite stale last turn"
-    "healthy" health
+  check keeper_health_testable "fresh live signal keeps keeper healthy despite stale last turn"
+    KT.KH_healthy health
 
 let test_health_keepalive_not_running_not_stale_is_offline () =
   let meta = make_meta () in
@@ -204,7 +209,7 @@ let test_health_keepalive_not_running_not_stale_is_offline () =
     ES.keeper_health_state ~meta ~keepalive_running:false
       ~agent_status ~quiet_reason:None ~now_ts:(Time_compat.now ()) ()
   in
-  check string "no keepalive + not stale → offline" "offline" health
+  check keeper_health_testable "no keepalive + not stale → offline" KT.KH_offline health
 
 let test_diagnostic_ignores_stale_error_when_live_signal_is_newer () =
   let now_ts = Time_compat.now () in

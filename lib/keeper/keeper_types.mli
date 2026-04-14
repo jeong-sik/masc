@@ -255,6 +255,22 @@ type fiber_health =
   | Fiber_dead
   | Fiber_unknown
 
+(** {1 Keeper health state} *)
+
+type keeper_health =
+  | KH_healthy
+  | KH_idle
+  | KH_offline
+  | KH_stale
+  | KH_degraded
+  | KH_zombie
+  | KH_dead
+
+type keeper_continuity =
+  | Continuity_healthy
+  | Continuity_recovering
+  | Continuity_not_running
+
 (** {1 Per-tool usage tracking} *)
 
 type tool_call_entry = {

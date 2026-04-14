@@ -25,6 +25,10 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
+val keeper_health_to_string : keeper_health -> string
+val keeper_health_of_string : string -> keeper_health
+val keeper_continuity_to_string : keeper_continuity -> string
+
 val keeper_health_state :
   ?fiber_health:fiber_health ->
   ?keepalive_interval_s:float ->
@@ -34,7 +38,7 @@ val keeper_health_state :
   quiet_reason:string option ->
   now_ts:float ->
   unit ->
-  string
+  keeper_health
 
 val keeper_surface_status :
   agent_status:Yojson.Safe.t ->

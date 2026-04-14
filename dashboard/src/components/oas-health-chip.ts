@@ -29,7 +29,9 @@ const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {
   reputation_changed: '평판',
 }
 
-function describeAgentEvent(evt: OasAgentEvent): string {
+/** Render an OasAgentEvent into a single-line summary.
+ *  Exposed for unit testing. */
+export function describeAgentEvent(evt: OasAgentEvent): string {
   const label = EVENT_TYPE_LABELS[evt.type]
   const action = evt.action ?? evt.event ?? evt.trigger
   const target = evt.secondary_agent ? ` → ${evt.secondary_agent}` : ''

@@ -255,7 +255,11 @@ let init () =
     Gauge;
   add "masc_agent_stale_total"
     "Total agents marked stale due to missed heartbeats"
-    Counter
+    Counter;
+  register_histogram ~name:"masc_llm_provider_request_latency_seconds"
+    ~help:"Per-HTTP-request LLM latency from OAS on_request_end callback. \
+           Independent from masc_llm_inference_duration_seconds (turn-scope) — \
+           this fires per provider HTTP call regardless of keeper hook health." ()
 
 let start_time = Time_compat.now ()
 

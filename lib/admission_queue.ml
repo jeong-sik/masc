@@ -162,16 +162,31 @@ and _release_slot t =
 
 (* ── Public API ────────────────────────────────────────── *)
 
-let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name:_ ~cascade_name:_ f =
+let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
   (* Passthrough: provider-level throttling belongs in OAS (cascade),
      not in MASC.  The cascade distributes requests across providers
      and handles 429/timeout by falling to the next provider.
      Gating here starves cloud-routed keepers behind a serial local
-     decode and cannot express per-provider capacity. *)
-  f ()
+     decode and cannot express per-provider capacity.
+     Metric observation tracks real inflight even though gating is off. *)
+  Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
+  match f () with
+  | result ->
+    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+    result
+  | exception exn ->
+    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+    raise exn
 
-let try_with_permit ~priority:_ ~keeper_name:_ ~cascade_name:_ f =
-  Some (f ())
+let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
+  Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
+  match f () with
+  | result ->
+    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+    Some result
+  | exception exn ->
+    Admission_queue_metrics.on_release ~keeper_name ~cascade_name;
+    raise exn
 
 let snapshot () =
   Eio.Mutex.use_ro global.mutex (fun () ->

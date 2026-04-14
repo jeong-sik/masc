@@ -22,78 +22,11 @@
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
-(** Percent-encode field value for structured [tool_skipped] output.
-    Matches [Keeper_agent_run.escape_field_value] encoding.
-    Local copy to avoid circular dependency. *)
-let escape_field s =
-  let buf = Buffer.create (String.length s * 3 / 2 + 1) in
-  String.iter (fun ch ->
-    match ch with
-    | ' ' -> Buffer.add_string buf "%20"
-    | '=' -> Buffer.add_string buf "%3D"
-    | '\n' -> Buffer.add_string buf "%0A"
-    | '\r' -> Buffer.add_string buf "%0D"
-    | '\t' -> Buffer.add_string buf "%09"
-    | '%' -> Buffer.add_string buf "%25"
-    | _ -> Buffer.add_char buf ch) s;
-  Buffer.contents buf
-
-(** Render structured skip reason for inline Override injection.
-    The LLM sees this as the ToolResult content immediately within
-    the same turn, enabling in-turn reasoning about alternatives.
-    @since Phase 8 — Skip→Override migration *)
-let render_inline_skip_reason ~tool_name ~reason_code ~reason_text : string =
-  let replacement_hint =
-    match (Tool_catalog.metadata tool_name).Tool_catalog.replacement with
-    | Some replacement ->
-      Printf.sprintf " replacement=%s" (escape_field replacement)
-    | None -> ""
-  in
-  Printf.sprintf
-    "[tool_skipped] tool=%s source=keeper_hook code=%s reason=%s%s"
-    (escape_field tool_name)
-    (escape_field reason_code)
-    (escape_field reason_text)
-    replacement_hint
-
-(** Broadcast a tool skip event via SSE for dashboard visibility.
-    Also records the event in [Dashboard_governance_metrics] so the
-    governance monitor endpoint can aggregate (tool, reason) counts
-    without tailing the SSE stream. *)
-let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  Dashboard_governance_metrics.record_tool_skipped
-    ~keeper_name ~tool_name ~reason_code;
-  (try
-    Sse.broadcast
-      (`Assoc [
-        ("type", `String "keeper_tool_skipped");
-        ("name", `String keeper_name);
-        ("tool_name", `String tool_name);
-        ("reason_code", `String reason_code);
-        ("ts_unix", `Float (Unix.gettimeofday ()));
-      ])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Keeper.warn
-        "tool skip SSE broadcast failed: keeper=%s tool=%s reason=%s err=%s"
-        keeper_name tool_name reason_code (Printexc.to_string exn))
-
-(** Extract command or content string from tool input JSON for screening.
-    Reads "command", "cmd" (keeper_github), or "content" keys. *)
-let extract_command_from_input (input : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
-  try
-    match input |> member "command" with
-    | `String s -> s
-    | `Null | _ ->
-      (match input |> member "cmd" with
-       | `String s -> s
-       | `Null | _ ->
-         (match input |> member "content" with
-          | `String s -> s
-          | _ -> ""))
-  with Yojson.Safe.Util.Type_error _ -> ""
+(* [escape_field], [render_inline_skip_reason], [broadcast_tool_skipped],
+   and [extract_command_from_input] now live in [Keeper_guards]. They
+   are used only by the decomposed pre_tool_use guard chain, so keeping
+   them there avoids a circular dependency and concentrates the
+   gate-level concerns in one module. *)
 
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
@@ -277,15 +210,27 @@ let make_hooks
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
-  (* Same-name streak gate: track consecutive calls to the same tool
-     name (regardless of args). OAS idle detection requires exact
-     name+args match, so board_get("a") → board_get("b") is never
-     detected. This catches the "same operation, different targets"
-     pattern (e.g., janitor reading 20 board posts one by one).
-     At >= streak_threshold, pre_tool_use blocks the call with Override. *)
-  let tool_name_streak : (string * int) ref = ref ("", 0) in
+  (* Streak gate state: tracks consecutive calls to the same tool
+     name (regardless of args). Lives across invocations via the
+     [make_hooks] closure — one state per keeper. *)
+  let streak_state = Keeper_guards.make_streak_state () in
   let streak_threshold = 5 in
-  { Agent_sdk.Hooks.empty with
+  (* Build the pre_tool_use guard chain via Hooks.compose. Each guard
+     lives in Keeper_guards and emits its own masc:keeper_gate event
+     on override/approval decisions. *)
+  let guard_chain =
+    Keeper_guards.build_chain
+      ~meta_ref
+      ~tool_start_time
+      ~streak_state
+      ~streak_threshold
+      ~denied:keeper_denied_tools
+      ~max_cost_usd
+      ~destructive_check
+      ~pre_tool_use_guard
+  in
+  let non_gate_hooks =
+    { Agent_sdk.Hooks.empty with
 
     after_turn = Some (fun event ->
       match event with
@@ -375,7 +320,7 @@ let make_hooks
         (* Reset same-name streak at turn boundary so it doesn't
            carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
            should not hit threshold 5). *)
-        tool_name_streak := ("", 0);
+        streak_state.Keeper_guards.entry <- ("", 0);
         tool_call_count_ref := 0;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
@@ -444,122 +389,10 @@ let make_hooks
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 
-    pre_tool_use = Some (fun event ->
-      match event with
-      | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
-        tool_start_time := Time_compat.now ();
-        let keeper_name = (!meta_ref).name in
-        (match pre_tool_use_guard ~tool_name ~input with
-         | Some reason ->
-           Log.Keeper.info
-             "keeper:%s pre_tool_use guard blocked %s"
-             keeper_name tool_name;
-           broadcast_tool_skipped ~keeper_name ~tool_name
-             ~reason_code:"pre_tool_use_guard";
-           Agent_sdk.Hooks.Override
-             (render_inline_skip_reason
-                ~tool_name
-                ~reason_code:"pre_tool_use_guard"
-                ~reason_text:reason)
-         | None ->
-        (* Same-name streak gate: block when the same tool name is called
-           streak_threshold+ times consecutively, regardless of args.
-           Returns Override (tool NOT executed) with a directive to switch tools.
-           Uses >= so EVERY call after the threshold is blocked, not just one. *)
-        let prev_name, prev_count = !tool_name_streak in
-        let new_count =
-          if prev_name = tool_name then prev_count + 1 else 1
-        in
-        tool_name_streak := (tool_name, new_count);
-        if new_count >= streak_threshold then begin
-          Log.Keeper.warn
-            "keeper:%s streak_gate: %s called %d times consecutively, blocking"
-            keeper_name tool_name new_count;
-          broadcast_tool_skipped ~keeper_name ~tool_name
-            ~reason_code:"streak_gate";
-          Agent_sdk.Hooks.Override
-            (render_inline_skip_reason
-               ~tool_name
-               ~reason_code:"streak_gate"
-               ~reason_text:(Printf.sprintf
-                 "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
-                 tool_name new_count))
-        end
-        else
-        (* Safety gate 0: Keeper deny list *)
-        if List.mem tool_name keeper_denied_tools then begin
-          Log.Keeper.warn "keeper:%s deny list: blocked %s"
-            keeper_name tool_name;
-          broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code:"keeper_deny";
-          Agent_sdk.Hooks.Override
-            (render_inline_skip_reason
-               ~tool_name
-               ~reason_code:"keeper_deny"
-               ~reason_text:"tool is on the keeper deny list")
-        end
-        else
-        (* Safety gate 1: Cost budget *)
-        (match max_cost_usd with
-         | Some limit when accumulated_cost_usd >= limit ->
-           let reason_text =
-             Printf.sprintf "accumulated_cost_usd=%.4f exceeded limit=%.4f"
-               accumulated_cost_usd limit
-           in
-           Log.Keeper.warn "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
-             keeper_name accumulated_cost_usd limit tool_name;
-           broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code:"cost_gate";
-           Agent_sdk.Hooks.Override
-             (render_inline_skip_reason
-                ~tool_name ~reason_code:"cost_gate" ~reason_text)
-         | _ ->
-           (* Safety gate 2: Destructive pattern detection *)
-           if destructive_check && Tool_dispatch.is_destructive tool_name then
-             let cmd = extract_command_from_input input in
-             match Eval_gate.detect_destructive cmd with
-             | Some (pattern, desc) ->
-               let reason_text =
-                 Printf.sprintf "pattern='%s' (%s)" pattern desc
-               in
-               Log.Keeper.warn "keeper:%s destructive pattern in %s: '%s' (%s)"
-                 keeper_name tool_name pattern desc;
-               broadcast_tool_skipped ~keeper_name ~tool_name
-                 ~reason_code:"destructive_guard";
-               Agent_sdk.Hooks.Override
-                 (render_inline_skip_reason
-                    ~tool_name ~reason_code:"destructive_guard" ~reason_text)
-             | None ->
-               (* Governance approval gate: check risk level and request
-                  approval for high-risk tools via OAS ApprovalRequired.
-                  The approval_callback (Keeper_approval_queue) will
-                  suspend the fiber until operator resolves. (#5907) *)
-               let governance_level = Env_config_core.governance_level () in
-               let risk = Governance_pipeline.assess_risk ~tool_name ~input in
-               let needs_approval =
-                 match Governance_pipeline.keeper_confirm_threshold governance_level with
-                 | Some threshold ->
-                   Governance_pipeline.risk_level_to_int risk
-                   >= Governance_pipeline.risk_level_to_int threshold
-                 | None -> false
-               in
-               if needs_approval then
-                 Agent_sdk.Hooks.ApprovalRequired
-               else
-                 Agent_sdk.Hooks.Continue
-           else
-             let governance_level = Env_config_core.governance_level () in
-             let risk = Governance_pipeline.assess_risk ~tool_name ~input in
-             let needs_approval =
-               match Governance_pipeline.keeper_confirm_threshold governance_level with
-               | Some threshold ->
-                 Governance_pipeline.risk_level_to_int risk
-                 >= Governance_pipeline.risk_level_to_int threshold
-               | None -> false
-             in
-             if needs_approval then
-               Agent_sdk.Hooks.ApprovalRequired
-             else
-               Agent_sdk.Hooks.Continue))
-      | _ -> Agent_sdk.Hooks.Continue);
+    (* pre_tool_use is provided by [guard_chain] below via Hooks.compose.
+       The guard chain (timing + custom + streak + deny + cost +
+       destructive + governance_approval) is composed with these
+       non-gate hooks at the end of [make_hooks]. *)
 
     on_idle = Some (fun event ->
       match event with
@@ -613,6 +446,12 @@ let make_hooks
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
   }
+  in
+  (* Guards fire first (outer). If all return Continue, non_gate_hooks
+     fire for the remaining slots (inner). pre_tool_use lives in
+     guard_chain only; non_gate_hooks has it None, so Hooks.compose
+     keeps guard_chain's pre_tool_use verbatim. *)
+  Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
 
 (** Static introspection of hook slot configuration.
     Returns a JSON summary of which hook slots are active, their gates/effects,

@@ -183,8 +183,13 @@ jobs:
             dashboard=true
             health=true
             health_snapshot=true
-            tla=true
             oas_pin=true
+            # Note: tla is intentionally NOT forced on by ci_core. TLA+ model
+            # checking takes ~14 min and only meaningfully depends on specs/,
+            # lib/keeper/, lib/oas_*.ml, or Makefile. A pure workflow/action
+            # change has no effect on TLA spec correctness, so forcing it here
+            # spent ~14 min per unrelated CI-config PR. tla stays driven by its
+            # narrow path filter only.
           fi
 
           echo "build=${build}" >> "$GITHUB_OUTPUT"

@@ -52,117 +52,216 @@ const ARCHITECTURE_FLOW = `graph LR
     class M1,M3,H1,H2,T2 action
     class UI ui`
 
-function HebbianNetwork({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
+const shortAgentLabel = (name: string) => {
+  const trimmed = name.replace(/^keeper-/, '').replace(/-agent$/, '')
+  return trimmed.length > 12 ? trimmed.slice(0, 11) + '…' : trimmed
+}
+
+const weightColor = (w: number) =>
+  w >= 0.7 ? '#10b981' : w >= 0.4 ? '#f59e0b' : '#f87171'
+
+// Perceptual linearization: √weight maps linear data to perceived brightness.
+// Ghoniem et al. 2005 — in-cell encoding beats on-edge encoding for weight tasks.
+const weightOpacity = (w: number) => 0.25 + 0.75 * Math.sqrt(Math.max(0, Math.min(1, w)))
+
+function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   if (synapses.length === 0) return null
 
-  const nodes = new Map<string, number>()
+  // Sort by activity total (success + failure on either side) — hubs appear top-left.
+  // Canonical in Hebbian literature (Sadeh & Clopath, PNAS 2024): sort rows by a feature.
+  const activity = new Map<string, number>()
   synapses.forEach(s => {
-    nodes.set(s.from_agent, (nodes.get(s.from_agent) ?? 0) + 1)
-    nodes.set(s.to_agent, (nodes.get(s.to_agent) ?? 0) + 1)
+    const n = s.success_count + s.failure_count
+    activity.set(s.from_agent, (activity.get(s.from_agent) ?? 0) + n)
+    activity.set(s.to_agent, (activity.get(s.to_agent) ?? 0) + n)
   })
+  const agents = Array.from(activity.keys()).sort(
+    (a, b) => (activity.get(b) ?? 0) - (activity.get(a) ?? 0),
+  )
 
-  const nodeNames = Array.from(nodes.keys())
-  const width = 600
-  const height = 360
-  const cx = width / 2
-  const cy = height / 2
-  const radius = Math.min(width, height) / 2 - 60
+  const cellMap = new Map<string, MemorySubsystemsSynapse>()
+  synapses.forEach(s => cellMap.set(`${s.from_agent}|${s.to_agent}`, s))
 
-  const positions = new Map<string, { x: number; y: number }>()
-  nodeNames.forEach((name, i) => {
-    const angle = (i / nodeNames.length) * Math.PI * 2 - Math.PI / 2
-    positions.set(name, {
-      x: cx + radius * Math.cos(angle),
-      y: cy + radius * Math.sin(angle),
-    })
-  })
-
-  const shortLabel = (name: string) => {
-    const trimmed = name.replace(/^keeper-/, '').replace(/-agent$/, '')
-    return trimmed.length > 10 ? trimmed.slice(0, 9) + '…' : trimmed
-  }
+  const n = agents.length
+  const cell = n <= 8 ? 32 : n <= 12 ? 26 : 22
+  const leftPad = 120
+  const topPad = 96
+  const legendW = 70
+  const width = leftPad + n * cell + legendW
+  const height = topPad + n * cell + 30
 
   return html`
-    <div class="bg-zinc-900 rounded-lg p-2 overflow-x-auto">
-      <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" style="max-height:400px">
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" class="text-zinc-600" />
-          </marker>
-        </defs>
-        ${synapses.map(s => {
-          const from = positions.get(s.from_agent)
-          const to = positions.get(s.to_agent)
-          if (!from || !to) return null
-          const pct = Math.round(s.weight * 100)
-          const stroke =
-            pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#f87171'
-          const sw = Math.max(1, s.weight * 4)
-          const dx = to.x - from.x
-          const dy = to.y - from.y
-          const len = Math.sqrt(dx * dx + dy * dy)
-          const ux = dx / len
-          const uy = dy / len
-          const sx = from.x + ux * 22
-          const sy = from.y + uy * 22
-          const ex = to.x - ux * 22
-          const ey = to.y - uy * 22
-          return html`<line
-            x1=${sx}
-            y1=${sy}
-            x2=${ex}
-            y2=${ey}
-            stroke=${stroke}
-            stroke-width=${sw}
-            opacity="0.7"
-            marker-end="url(#arrow)"
-          />`
-        })}
-        ${nodeNames.map(name => {
-          const pos = positions.get(name)!
-          const label = shortLabel(name)
-          const isKeeper = name.startsWith('keeper-')
-          const fill = isKeeper ? '#1e293b' : '#0f172a'
-          const stroke = isKeeper ? '#3b82f6' : '#64748b'
-          const onNodeClick = () => openAgentDetail(name)
-          const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              openAgentDetail(name)
-            }
-          }
-          return html`
-            <g
-              class="cursor-pointer hover:opacity-80 transition-opacity"
-              role="button"
-              tabindex="0"
-              onClick=${onNodeClick}
-              onKeyDown=${onKeyDown}
-              aria-label=${'에이전트 상세 열기: ' + label}
-            >
-              <circle
-                cx=${pos.x}
-                cy=${pos.y}
-                r="22"
-                fill=${fill}
-                stroke=${stroke}
-                stroke-width="2"
-              />
+    <div class="bg-zinc-900 rounded-lg p-3 overflow-x-auto">
+      <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" style="max-height:560px">
+        ${agents.map(
+          (name, i) => html`
+            <g transform="translate(${leftPad + i * cell + cell / 2}, ${topPad - 6}) rotate(-45)">
               <text
-                x=${pos.x}
-                y=${pos.y + 4}
-                text-anchor="middle"
-                font-size="11"
-                fill="#f1f5f9"
+                text-anchor="start"
+                font-size="10"
+                fill="#cbd5e1"
                 font-family="monospace"
-                class="pointer-events-none select-none"
-              >
-                ${label}
-              </text>
+                class="cursor-pointer hover:fill-sky-400"
+                onClick=${() => openAgentDetail(name)}
+              >${shortAgentLabel(name)}</text>
             </g>
+          `,
+        )}
+
+        ${agents.map(
+          (name, i) => html`
+            <text
+              x=${leftPad - 6}
+              y=${topPad + i * cell + cell / 2 + 4}
+              text-anchor="end"
+              font-size="10"
+              fill="#cbd5e1"
+              font-family="monospace"
+              class="cursor-pointer hover:fill-sky-400"
+              onClick=${() => openAgentDetail(name)}
+            >${shortAgentLabel(name)}</text>
+          `,
+        )}
+
+        ${agents.flatMap((from, r) =>
+          agents.map((to, c) => {
+            const s = cellMap.get(`${from}|${to}`)
+            const x = leftPad + c * cell
+            const y = topPad + r * cell
+            if (!s) {
+              return html`<rect
+                x=${x}
+                y=${y}
+                width=${cell - 1}
+                height=${cell - 1}
+                fill="#1e293b"
+                stroke="#0f172a"
+                stroke-width="0.5"
+              />`
+            }
+            const pct = Math.round(s.weight * 100)
+            const isDiag = from === to
+            return html`
+              <g>
+                <title>${`${from} → ${to}\nweight ${pct}% · 성공 ${s.success_count} · 실패 ${s.failure_count}`}</title>
+                <rect
+                  x=${x}
+                  y=${y}
+                  width=${cell - 1}
+                  height=${cell - 1}
+                  fill=${weightColor(s.weight)}
+                  opacity=${weightOpacity(s.weight)}
+                  stroke=${isDiag ? '#64748b' : '#0f172a'}
+                  stroke-dasharray=${isDiag ? '2 2' : ''}
+                  stroke-width="0.5"
+                  class="cursor-pointer hover:stroke-zinc-300"
+                  role="button"
+                  aria-label=${`${from} to ${to}: ${pct}%`}
+                  onClick=${() => openAgentDetail(to)}
+                />
+              </g>
+            `
+          }),
+        )}
+
+        <g transform="translate(${leftPad + n * cell + 16}, ${topPad})">
+          <text x="0" y="-8" font-size="9" fill="#94a3b8">weight</text>
+          ${[1.0, 0.75, 0.5, 0.25, 0.05].map(
+            (v, i) => html`
+              <g>
+                <rect
+                  x="0"
+                  y=${i * 16}
+                  width="14"
+                  height="13"
+                  fill=${weightColor(v)}
+                  opacity=${weightOpacity(v)}
+                />
+                <text
+                  x="20"
+                  y=${i * 16 + 10}
+                  font-size="9"
+                  fill="#94a3b8"
+                  font-family="monospace"
+                >${Math.round(v * 100)}%</text>
+              </g>
+            `,
+          )}
+        </g>
+      </svg>
+      <div class="mt-2 text-xs text-zinc-500 text-center">
+        행 = from · 열 = to · 셀 = 시냅스 가중치 · 정렬 = 활동량 내림차순
+      </div>
+    </div>
+  `
+}
+
+// Render a tiny polyline of weight history. Input is newest-first from
+// the backend; reverse for chronological left-to-right rendering.
+function WeightSparkline({ history }: { history?: Array<[number, number]> }) {
+  if (!history || history.length < 2) {
+    return html`<span class="text-zinc-700 text-[10px] w-20 text-center">—</span>`
+  }
+  const chronological = [...history].reverse()
+  const w = 80
+  const h = 16
+  const n = chronological.length
+  const points = chronological
+    .map(([, weight], i) => {
+      const x = (i / (n - 1)) * (w - 2) + 1
+      const y = h - 1 - Math.max(0, Math.min(1, weight)) * (h - 2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  const first = chronological[0]?.[1] ?? 0
+  const last = chronological[n - 1]?.[1] ?? 0
+  const trendColor = last > first + 0.02 ? '#10b981' : last < first - 0.02 ? '#f87171' : '#94a3b8'
+  return html`
+    <svg
+      viewBox="0 0 ${w} ${h}"
+      width=${w}
+      height=${h}
+      class="shrink-0"
+      aria-label=${`weight trend: ${n} points`}
+    >
+      <polyline fill="none" stroke=${trendColor} stroke-width="1.25" points=${points} />
+    </svg>
+  `
+}
+
+function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
+  if (synapses.length === 0) return null
+  const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, 5)
+  return html`
+    <div class="bg-zinc-900 rounded-lg p-3 mt-3">
+      <div class="text-xs text-zinc-500 mb-2">강한 연결 Top 5 · sparkline = 학습 궤적</div>
+      <div class="space-y-1.5">
+        ${top.map(s => {
+          const pct = Math.round(s.weight * 100)
+          const barColor =
+            pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-400'
+          return html`
+            <div class="flex items-center gap-2 text-xs font-mono">
+              <button
+                class="text-zinc-300 hover:text-sky-400 truncate w-32 text-right"
+                onClick=${() => openAgentDetail(s.from_agent)}
+              >${shortAgentLabel(s.from_agent)}</button>
+              <span class="text-zinc-600">→</span>
+              <button
+                class="text-zinc-300 hover:text-sky-400 truncate w-32 text-left"
+                onClick=${() => openAgentDetail(s.to_agent)}
+              >${shortAgentLabel(s.to_agent)}</button>
+              <div class="flex-1 bg-zinc-800 rounded h-1.5 min-w-[60px]">
+                <div class="${barColor} rounded h-1.5" style="width:${pct}%"></div>
+              </div>
+              <span class="text-zinc-300 w-10 text-right">${pct}%</span>
+              <${WeightSparkline} history=${s.weight_history} />
+              <span class="text-emerald-400 w-8 text-right">${s.success_count}</span>
+              <span class="text-red-400 w-8 text-right">${s.failure_count}</span>
+            </div>
           `
         })}
-      </svg>
+      </div>
     </div>
   `
 }
@@ -371,7 +470,10 @@ export function MemorySubsystems() {
         </div>
         ${
           synapses.length > 0
-            ? html`<div class="mb-3"><${HebbianNetwork} synapses=${synapses} /></div>`
+            ? html`<div class="mb-3">
+                <${HebbianMatrix} synapses=${synapses} />
+                <${HebbianTopLinks} synapses=${synapses} />
+              </div>`
             : null
         }
         ${

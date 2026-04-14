@@ -180,6 +180,102 @@ let test_weaken_nonexistent () =
   );
   print_endline "✓ test_weaken_nonexistent passed"
 
+let test_weight_history_appends_on_strengthen () =
+  with_temp_masc_dir (fun config ->
+    let params = {
+      Hebbian_eio.strengthen_rate = 0.1;
+      weaken_rate = 0.05;
+      decay_rate = 0.01;
+      min_weight = 0.05;
+      max_weight = 1.0;
+    } in
+    Hebbian_eio.strengthen config ~params ~from_agent:"a" ~to_agent:"b" ();
+    Hebbian_eio.strengthen config ~params ~from_agent:"a" ~to_agent:"b" ();
+    Hebbian_eio.strengthen config ~params ~from_agent:"a" ~to_agent:"b" ();
+
+    let (synapses, _) = Hebbian_eio.get_graph_data config in
+    let s = List.hd synapses in
+    (* Initial (0.5) + 3 strengthen appends = 4 entries, newest first. *)
+    assert (List.length s.Hebbian_eio.weight_history = 4);
+    let (_, newest_w) = List.hd s.Hebbian_eio.weight_history in
+    assert (Float.abs (newest_w -. s.Hebbian_eio.weight) < 1e-9);
+  );
+  print_endline "✓ test_weight_history_appends_on_strengthen passed"
+
+let test_weight_history_caps_at_history_cap () =
+  with_temp_masc_dir (fun config ->
+    for _ = 1 to Hebbian_eio.history_cap + 15 do
+      Hebbian_eio.strengthen config ~from_agent:"a" ~to_agent:"b" ()
+    done;
+    let (synapses, _) = Hebbian_eio.get_graph_data config in
+    let s = List.hd synapses in
+    assert (List.length s.Hebbian_eio.weight_history = Hebbian_eio.history_cap);
+  );
+  print_endline "✓ test_weight_history_caps_at_history_cap passed"
+
+let test_weight_history_backward_compat_missing_field () =
+  (* Simulate a graph.json produced by a pre-sparkline binary: no
+     weight_history field. Loader must default to []. *)
+  let legacy_json = {|
+    {
+      "synapses": [
+        {
+          "from_agent": "legacy_a",
+          "to_agent": "legacy_b",
+          "weight": 0.7,
+          "success_count": 4,
+          "failure_count": 1,
+          "last_updated": 1700000000.0,
+          "created_at": 1699000000.0
+        }
+      ],
+      "last_consolidation": 0.0
+    }
+  |} in
+  let parsed = Hebbian_eio.graph_of_json (Yojson.Safe.from_string legacy_json) in
+  assert (List.length parsed.Hebbian_eio.synapses = 1);
+  let s = List.hd parsed.Hebbian_eio.synapses in
+  assert (s.Hebbian_eio.weight_history = []);
+  assert (Float.abs (s.Hebbian_eio.weight -. 0.7) < 1e-9);
+  print_endline "✓ test_weight_history_backward_compat_missing_field passed"
+
+let test_weight_history_json_roundtrip () =
+  let s : Hebbian_eio.synapse = {
+    from_agent = "rt_a";
+    to_agent = "rt_b";
+    weight = 0.62;
+    success_count = 5;
+    failure_count = 2;
+    last_updated = 1700000100.5;
+    created_at = 1699000000.0;
+    weight_history = [(1700000100.5, 0.62); (1700000050.0, 0.55); (1700000000.0, 0.5)];
+  } in
+  let json = Hebbian_eio.synapse_to_json s in
+  match Hebbian_eio.synapse_of_json json with
+  | None -> assert false
+  | Some s' ->
+    assert (s'.weight_history = s.weight_history);
+    assert (s'.success_count = 5);
+    print_endline "✓ test_weight_history_json_roundtrip passed"
+
+let test_append_history_caps_and_preserves_order () =
+  (* Newest entry is head; overflow evicts the oldest tail. *)
+  let h =
+    let rec fill i h =
+      if i > Hebbian_eio.history_cap + 5 then h
+      else
+        Hebbian_eio.append_history
+          ~ts:(float_of_int i)
+          ~w:(float_of_int i /. 100.0)
+          (fill (i + 1) h)
+    in
+    fill 1 []
+  in
+  assert (List.length h = Hebbian_eio.history_cap);
+  let (head_ts, _) = List.hd h in
+  assert (Float.equal head_ts 1.0);
+  print_endline "✓ test_append_history_caps_and_preserves_order passed"
+
 let () =
   Alcotest.run "Hebbian_eio"
     [
@@ -205,5 +301,18 @@ let () =
           Alcotest.test_case "custom learning params" `Quick
             test_custom_params;
           Alcotest.test_case "lock stats" `Quick test_lock_stats;
+        ] );
+      ( "weight_history",
+        [
+          Alcotest.test_case "appends on strengthen" `Quick
+            test_weight_history_appends_on_strengthen;
+          Alcotest.test_case "caps at history_cap" `Quick
+            test_weight_history_caps_at_history_cap;
+          Alcotest.test_case "backward compat missing field" `Quick
+            test_weight_history_backward_compat_missing_field;
+          Alcotest.test_case "JSON roundtrip" `Quick
+            test_weight_history_json_roundtrip;
+          Alcotest.test_case "caps and preserves order" `Quick
+            test_append_history_caps_and_preserves_order;
         ] );
     ]

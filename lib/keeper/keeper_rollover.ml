@@ -20,6 +20,61 @@ type handoff_rollover = {
   message_count : int;
 }
 
+(** [blocker_indicates_overflow blocker] returns true when [blocker] matches any
+    of the provider-specific context-overflow strings. Provider-agnostic list
+    covers GLM, OpenAI, Ollama, and Anthropic wording.
+
+    Exposed for unit testing. Pure — no runtime dependency. *)
+let blocker_indicates_overflow (blocker : string) : bool =
+  let b = String.lowercase_ascii blocker in
+  let blen = String.length b in
+  let contains needle =
+    let nlen = String.length needle in
+    if nlen = 0 || blen < nlen then false
+    else
+      let rec scan i =
+        if i + nlen > blen then false
+        else if String.sub b i nlen = needle then true
+        else scan (i + 1)
+      in
+      scan 0
+  in
+  contains "exceeds max length"
+  || contains "context_length_exceeded"
+  || contains "prompt is too long"
+  || contains "prompt too long"
+  || contains "maximum context length"
+
+type rollover_gate_decision =
+  | Skip of string
+  | Go of string
+
+(** [classify_rollover_gate] returns the gate verdict without any side effects.
+
+    The ratio gate reflects the *checkpoint* history. The signal gate reflects
+    the *actual* LLM response for the last turn: when a proactive turn errored
+    with an overflow-class blocker, rollover is triggered regardless of the
+    checkpoint ratio — the ratio gate structurally cannot fire once compaction
+    shrinks the checkpoint below the threshold (umbrella #7036). *)
+let classify_rollover_gate
+    ~(auto_handoff : bool) ~(cooldown_elapsed : bool)
+    ~(ratio : float) ~(handoff_threshold : float)
+    ~(last_outcome : proactive_cycle_outcome)
+    ~(last_blocker : string) : rollover_gate_decision =
+  if not auto_handoff then Skip "auto_handoff_disabled"
+  else if not cooldown_elapsed then Skip "cooldown"
+  else
+    let ratio_gate = ratio >= handoff_threshold in
+    let signal_gate =
+      last_outcome = Proactive_error
+      && blocker_indicates_overflow last_blocker
+    in
+    match ratio_gate, signal_gate with
+    | true, true -> Go "ratio+signal"
+    | false, true -> Go "persistent_overflow_blocker"
+    | true, false -> Go "ratio"
+    | false, false -> Skip "below_thresholds"
+
 let maybe_rollover_oas_handoff
     ~(on_started : unit -> unit)
     ~(base_dir : string)
@@ -54,6 +109,15 @@ let maybe_rollover_oas_handoff
         || Time_compat.now () -. base_meta.runtime.last_handoff_ts
            >= float_of_int base_meta.handoff_cooldown_sec
       in
+      let gate_decision =
+        classify_rollover_gate
+          ~auto_handoff:base_meta.auto_handoff
+          ~cooldown_elapsed
+          ~ratio
+          ~handoff_threshold:base_meta.handoff_threshold
+          ~last_outcome:base_meta.runtime.proactive_rt.last_outcome
+          ~last_blocker:base_meta.runtime.last_blocker
+      in
       let rollover_base =
         {
           updated_meta = base_meta;
@@ -66,13 +130,9 @@ let maybe_rollover_oas_handoff
           message_count = message_count ctx;
         }
       in
-      if
-        not base_meta.auto_handoff
-        || ratio < base_meta.handoff_threshold
-        || not cooldown_elapsed
-      then
-        rollover_base
-      else
+      (match gate_decision with
+      | Skip _ -> rollover_base
+      | Go trigger_reason ->
         let now_ts = Time_compat.now () in
         let prev_trace_id = base_meta.runtime.trace_id in
         let new_trace_id = Keeper_identity.generate_trace_id () in
@@ -127,12 +187,13 @@ let maybe_rollover_oas_handoff
                        ("new_trace_id", `String new_trace_id);
                        ("to_model", `String model);
                        ("context_ratio", `Float ratio);
+                       ("trigger_reason", `String trigger_reason);
                      ]
                  in
                  Log.Keeper.info
-                   "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f"
+                   "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
                    base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
-                   next_generation ratio;
+                   next_generation ratio trigger_reason;
                  { rollover_base with
                    updated_meta;
                    handoff_json = Some handoff_json;
@@ -146,4 +207,4 @@ let maybe_rollover_oas_handoff
             { rollover_base with
               attempted = true;
               failure_reason = Some (Printexc.to_string exn);
-            })
+            }))

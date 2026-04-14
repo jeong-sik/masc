@@ -428,6 +428,23 @@ let has_substantive_tool_calls (tools_used : string list) : bool =
   List.exists (fun name ->
     not (String.equal name "keeper_stay_silent")) tools_used
 
+(** Observation-only tools that do not constitute productive work.
+    A cycle using only these tools (or none) is a "noop" and triggers
+    exponential cooldown backoff to prevent token waste. *)
+let observation_only_tools =
+  [ "keeper_stay_silent"
+  ; "keeper_board_list"
+  ; "keeper_context_status"
+  ; "keeper_tool_search"
+  ]
+
+(** A cycle is noop when it produced no text AND all tools used (if any)
+    are observation-only.  Productive cycles reset consecutive_noop_count. *)
+let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
+  not has_text
+  && List.for_all (fun name ->
+       List.mem name observation_only_tools) tools_used
+
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =
   match result.run_validation with
@@ -925,6 +942,12 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.proactive_rt.work_discovery_count
           + (if observation.work_discovery_due && has_substantive_tools then 1
              else 0);
+        consecutive_noop_count =
+          (if update_proactive_rt && is_scheduled_autonomous_cycle then
+             if is_noop_cycle ~has_text ~tools_used:result.tools_used
+             then rt.proactive_rt.consecutive_noop_count + 1
+             else 0
+           else rt.proactive_rt.consecutive_noop_count);
       };
       (* Autonomous action tracking from tool calls *)
       autonomous_action_count =

@@ -72,6 +72,12 @@ type proactive_runtime =
   ; last_preview : string
   ; last_work_discovery_ts : float
   ; work_discovery_count : int
+  ; consecutive_noop_count : int
+      (** Consecutive autonomous cycles where only observation tools
+          (board_list, stay_silent, context_status) were used with no
+          substantive action.  Resets to 0 on any productive cycle.
+          Used by [effective_scheduled_autonomous_cooldown] for exponential
+          backoff: cooldown *= 2^min(n, 3), capping at 8x. *)
   }
 
 type scheduled_autonomous_runtime = proactive_runtime
@@ -715,6 +721,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_proactive_preview", `String rt.proactive_rt.last_preview
     ; "last_work_discovery_ts", `Float rt.proactive_rt.last_work_discovery_ts
     ; "work_discovery_count", `Int rt.proactive_rt.work_discovery_count
+    ; "consecutive_noop_count", `Int rt.proactive_rt.consecutive_noop_count
     ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
     ; "last_compaction_decision", `String rt.compaction_rt.last_decision
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
@@ -1057,6 +1064,8 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
       Safe_ops.json_float ~default:0.0 "last_work_discovery_ts" json
   ; work_discovery_count =
       Safe_ops.json_int ~default:0 "work_discovery_count" json
+  ; consecutive_noop_count =
+      Safe_ops.json_int ~default:0 "consecutive_noop_count" json
   }
 ;;
 

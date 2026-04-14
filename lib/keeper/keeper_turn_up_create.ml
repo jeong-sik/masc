@@ -323,6 +323,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             last_work_discovery_ts = 0.0;
             work_discovery_count = 0;
+            consecutive_noop_count = 0;
           };
           generation = 0;
           trace_id = trace_id_t;

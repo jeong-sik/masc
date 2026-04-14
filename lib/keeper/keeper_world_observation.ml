@@ -692,20 +692,30 @@ let actionable_signal_present (observation : world_observation) =
     additional period, down to a configurable floor.  This prevents
     permanent silence when no external events arrive. *)
 let effective_scheduled_autonomous_cooldown
-    ~(base_cooldown : int) ~(since_last : int) : int =
+    ~(base_cooldown : int) ~(since_last : int)
+    ?(consecutive_noop_count = 0) () : int =
+  (* Noop backoff: consecutive observation-only cycles multiply the base
+     cooldown by 2^min(n, 3), capping at 8x. This prevents token waste when
+     the keeper repeatedly reads board_list without taking action. *)
+  let noop_multiplier =
+    if consecutive_noop_count <= 0 then 1
+    else 1 lsl (min consecutive_noop_count 3)  (* 1, 2, 4, 8 *)
+  in
+  let effective_base = base_cooldown * noop_multiplier in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
-  (* Floor must not exceed the base cooldown — otherwise decay would
+  (* Floor must not exceed the effective base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
-  let floor = min min_cooldown base_cooldown in
-  if since_last <= base_cooldown then base_cooldown
+  let floor = min min_cooldown effective_base in
+  if since_last <= effective_base then effective_base
   else
-    let decay_periods = (since_last - base_cooldown) / (max 1 base_cooldown) in
+    let decay_periods = (since_last - effective_base) / (max 1 effective_base) in
     let capped_periods = min decay_periods 4 in
     let factor = 1.0 /. (Float.pow 2.0 (float_of_int capped_periods)) in
-    max floor (int_of_float (float_of_int base_cooldown *. factor))
+    max floor (int_of_float (float_of_int effective_base *. factor))
 
 let effective_proactive_cooldown =
   effective_scheduled_autonomous_cooldown
+
 
 let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation) =
   let reactive_triggers =
@@ -749,6 +759,8 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
+            ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
+            ()
         in
         let task_cooldown_divisor =
           Keeper_config.keeper_proactive_task_cooldown_divisor ()

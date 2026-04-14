@@ -131,14 +131,6 @@ let dispatch
           sw = Eio_context.get_switch_opt () }
         ~name ~args
 
-  | Mod_relay ->
-      (match require_sw () with
-       | Ok sw ->
-           Tool_relay.dispatch
-             { Tool_relay.config; agent_name; sw;
-               proc_mgr = get_proc_mgr_opt () } ~name ~args
-       | Error e -> Some (false, e))
-
   | Mod_handover ->
       Tool_handover.dispatch
         { Tool_handover.config; agent_name;

@@ -119,7 +119,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'sessions',
       label: '세션',
-      description: '실시간 세션 상태, 블로커, 내부 신호, 주의 큐를 한 화면에서 봅니다.',
+      description: '읽기 전용 관찰: 세션 상태, 블로커, 주의 큐. 개입은 운영 › 실시간 개입에서.',
       params: { section: 'sessions' },
     },
     {
@@ -148,8 +148,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'governance',
-      label: 'tool 이벤트',
-      description: 'tool rejection 집계 + approval queue depth/latency.',
+      label: '도구 이벤트',
+      description: '읽기 전용: 도구 거부 집계, 승인 큐 깊이/지연. 승인 액션은 운영 › 거버넌스에서.',
       params: { section: 'governance' },
     },
     {
@@ -161,7 +161,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'metrics',
       label: 'Prometheus',
-      description: 'counter, gauge, summary 원시 메트릭 (/metrics endpoint).',
+      description: '저수준 raw 지표(/metrics): counter·gauge·summary. 디버깅과 알림 소스용.',
       params: { section: 'metrics' },
     },
   ],
@@ -169,13 +169,13 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'intervene',
       label: '실시간 개입',
-      description: '네임스페이스 브로드캐스트, 키퍼 개별 메시지 발송 등 운영 메시지 개입.',
+      description: '쓰기 액션: 네임스페이스 브로드캐스트, 키퍼에게 직접 메시지 발송. 세션 읽기는 모니터링 › 세션에서.',
       params: { section: 'intervene' },
     },
     {
       id: 'governance',
       label: '거버넌스',
-      description: '에이전트 자율 결정의 검토/승인 기록. 위험 행동 방지 레이어.',
+      description: '쓰기 액션: 자율 결정 검토·승인·반려. 추이 관찰은 모니터링 › 도구 이벤트에서.',
       params: { section: 'governance' },
     },
     {
@@ -194,14 +194,14 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'planning',
-      label: '계획 및 메트릭',
-      description: '태스크 kanban과 backlog 관리. 목표 계층은 별도 탭에서 봅니다.',
+      label: '작업 큐',
+      description: '실행 단위의 칸반과 백로그. 상위 의도 구조는 목표 트리에서.',
       params: { section: 'planning' },
     },
     {
       id: 'goals',
       label: '목표 트리',
-      description: '목표의 부모-자식 계층 구조와 수렴도. 태스크 연결, 에이전트 배정 상태 시각화.',
+      description: '의도의 부모-자식 계층과 수렴도. 실행 단위 태스크는 작업 큐에서.',
       params: { section: 'goals' },
     },
   ],

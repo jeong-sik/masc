@@ -87,19 +87,21 @@ vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
 
 \* ── Enumerated value sets ───────────────────────────────
 
-\* Comment A — 11->6 phase projection (from RFC-0002 Transition Matrix):
+\* Comment A — 12->7 phase projection (from RFC-0002 Transition Matrix):
 \*   Running     -> Running
 \*   Failing     -> Failing
+\*   Overflowed  -> Overflowed     (added 2026-04, MASC-1)
 \*   Compacting  -> Compacting
 \*   HandingOff  -> HandingOff
 \*   Draining    -> Draining
 \*   Offline, Paused, Stopped, Crashed, Restarting, Dead -> Stable
 \* This is a LOSSY projection; the joint invariants here hold for all
 \* states that collapse to Stable by construction (they are outside the
-\* turn cycle).
+\* turn cycle). Overflowed is tracked as its own phase because it couples
+\* KSM with KMC (memory compaction) via the Start_compaction entry action.
 
-PhaseSet       == {"Running", "Failing", "Compacting", "HandingOff",
-                   "Draining", "Stable"}
+PhaseSet       == {"Running", "Failing", "Overflowed", "Compacting",
+                   "HandingOff", "Draining", "Stable"}
 TurnPhaseSet   == {"idle", "prompting", "executing", "compacting",
                    "finalizing"}
 DecisionSet    == {"undecided", "guard_ok", "gate_rejected",
@@ -257,6 +259,32 @@ ClearFsmCondition ==
                    kmc_compaction, shared_measurement, measurement_turn,
                    reconcile_data, turn_tick>>
 
+\* Overflowed orchestration (Context overflow detected).
+\* Entry aborts the in-flight turn so the auto-compaction that follows
+\* cannot race an active SelectCascade/Attempt (mirror of EnterFailing).
+EnterOverflowed ==
+    /\ ksm_phase = "Running"
+    /\ ksm_phase' = "Overflowed"
+    /\ ktc_turn_phase' = "idle"
+    /\ kdp_decision' = "undecided"
+    /\ kcl_cascade_state' = "idle"
+    /\ shared_measurement' = 0
+    /\ measurement_turn' = 0
+    /\ UNCHANGED <<kmc_compaction, reconcile_data, reconcile_fsm, turn_tick>>
+
+\* Overflowed -> Compacting (Start_compaction entry action).
+\* Atomically moves KSM, KTC, KMC so CompactionAtomicity is preserved:
+\* kmc_compaction="compacting" is never observed with ksm_phase="Overflowed"
+\* at a reached state.
+OverflowedAutoCompact ==
+    /\ ksm_phase = "Overflowed"
+    /\ ksm_phase' = "Compacting"
+    /\ ktc_turn_phase' = "compacting"
+    /\ kmc_compaction' = "compacting"
+    /\ UNCHANGED <<kdp_decision, kcl_cascade_state, shared_measurement,
+                   measurement_turn, reconcile_data, reconcile_fsm,
+                   turn_tick>>
+
 \* ── Next-state relation ──────────────────────────────────
 
 Next ==
@@ -271,6 +299,8 @@ Next ==
     \/ EnterFailing
     \/ ClearDataRecord
     \/ ClearFsmCondition
+    \/ EnterOverflowed
+    \/ OverflowedAutoCompact
 
 Fairness ==
     /\ WF_vars(MeasurementBroadcast)
@@ -281,6 +311,7 @@ Fairness ==
     /\ WF_vars(FinishCompaction)
     /\ WF_vars(ClearDataRecord)
     /\ WF_vars(ClearFsmCondition)
+    /\ WF_vars(OverflowedAutoCompact)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -354,6 +385,13 @@ EventualMeasurementResolves ==
 \* this fails, which is the lesson from Bug #1.
 RecoveryEventuallyCompletes ==
     (ksm_phase = "Failing") ~> (ksm_phase = "Running")
+
+\* L3 — OverflowedEventuallyResolves
+\* Overflowed must not be a terminal sink — it has to advance into Compacting
+\* (auto-compaction entry action), or collapse into the Stable bucket on
+\* operator action. Relies on WF_vars(OverflowedAutoCompact).
+OverflowedEventuallyResolves ==
+    (ksm_phase = "Overflowed") ~> (ksm_phase /= "Overflowed")
 
 \* ── Bug models (three, each violates a distinct invariant) ──
 

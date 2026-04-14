@@ -44,6 +44,18 @@ let parse_conditions (json : Yojson.Safe.t) : (SM.conditions, string) result =
   let* backoff_elapsed = get_bool json "backoff_elapsed" in
   let* guardrail_triggered = get_bool json "guardrail_triggered" in
   let* drain_complete = get_bool json "drain_complete" in
+  (* Newer fields are tolerated as optional so historical trace files
+     recorded before the Overflowed phase existed still parse. *)
+  let context_overflow =
+    match Yojson.Safe.Util.member "context_overflow" json with
+    | `Bool b -> b
+    | _ -> false
+  in
+  let compact_retry_exhausted =
+    match Yojson.Safe.Util.member "compact_retry_exhausted" json with
+    | `Bool b -> b
+    | _ -> false
+  in
   Ok SM.{
     launch_pending;
     fiber_alive; heartbeat_healthy; turn_healthy; manual_reconcile_required;
@@ -51,6 +63,7 @@ let parse_conditions (json : Yojson.Safe.t) : (SM.conditions, string) result =
     compaction_active; handoff_active; operator_paused;
     stop_requested; restart_budget_remaining;
     backoff_elapsed; guardrail_triggered; drain_complete;
+    context_overflow; compact_retry_exhausted;
   }
 
 let parse_step (line : string) : (step, string) result =

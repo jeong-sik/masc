@@ -234,6 +234,7 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
 type overflow_retry_plan = {
   retry_max_context : int;
   retry_generation : int;
+  compaction : compaction_event;
 }
 
 (** Recover from context overflow by compacting and reducing max_context.
@@ -284,12 +285,66 @@ let recover_context_overflow_retry
         {
           retry_max_context;
           retry_generation = recovery.turn_generation;
+          compaction = recovery.compaction;
         }
   | None ->
       Log.Keeper.warn
         "%s: context overflow detected but checkpoint recovery unavailable: %s"
         meta.name (short_preview (Oas.Error.to_string error));
       None
+
+let context_overflow_event_of_error
+    ~(fallback_tokens : int)
+    (err : Oas.Error.sdk_error) : Keeper_state_machine.event =
+  match err with
+  | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; used; limit }) ->
+      Keeper_state_machine.Context_overflow_detected
+        {
+          source = `Oas_signal;
+          token_count = used;
+          limit_tokens = Some limit;
+        }
+  | Oas.Error.Api (ContextOverflow { limit; _ }) ->
+      Keeper_state_machine.Context_overflow_detected
+        {
+          source = `Prompt_rejected;
+          token_count = Option.value ~default:(max 0 fallback_tokens) limit;
+          limit_tokens = limit;
+        }
+  | _ ->
+      Keeper_state_machine.Context_overflow_detected
+        {
+          source = `Oas_signal;
+          token_count = max 0 fallback_tokens;
+          limit_tokens = None;
+        }
+
+let pause_keeper_for_overflow
+    ~(config : Room.config)
+    ~(meta : keeper_meta)
+    ~(reason : string) : keeper_meta =
+  let paused_meta =
+    {
+      meta with
+      paused = true;
+      updated_at = now_iso ();
+    }
+  in
+  (match write_meta config paused_meta with
+   | Ok () -> ()
+   | Error err ->
+       Log.Keeper.error
+         "%s: overflow pause write_meta failed: %s"
+         meta.name err);
+  Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
+  dispatch_keeper_phase_event
+    ~config
+    ~keeper_name:meta.name
+    Keeper_state_machine.Operator_pause;
+  Log.Keeper.warn
+    "%s: keeper paused after unresolved context overflow (%s)"
+    meta.name reason;
+  paused_meta
 
 let resolved_max_context_for_turn
     ~(meta : keeper_meta)
@@ -1250,6 +1305,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          cross-turn contamination when multiple keepers execute concurrently. *)
       let mutating_tools_committed = ref [] in
       let post_commit_failure_reason = ref None in
+      let paused_meta_override = ref None in
       let side_effect_observer ~keeper_name ~tool_name ~input ~success =
         if success
            && String.equal keeper_name meta.name
@@ -1257,6 +1313,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 ~tool_name ~input
         then
           mutating_tools_committed := tool_name :: !mutating_tools_committed
+      in
+      let mark_paused_after_overflow ~run_meta ~reason =
+        let paused_meta =
+          pause_keeper_for_overflow
+            ~config
+            ~meta:run_meta
+            ~reason
+        in
+        paused_meta_override := Some paused_meta
       in
       Keeper_exec_tools.add_tool_call_observer side_effect_observer;
       let evidence_before_hash =
@@ -1414,28 +1479,68 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   retry_loop ~run_meta ~max_context ~run_generation
                     ~attempt:(attempt + 1)
                     ~is_retry:true ~overflow_retry_used
-                end else if (not overflow_retry_used)
-                             && is_context_overflow err then (
-                      match
-                        recover_context_overflow_retry ~meta ~base_dir
-                      ~max_cascade_context:max_context ~error:err
-                  with
-                  | Some retry_plan ->
-                      let retry_meta =
-                        if retry_plan.retry_generation = run_meta.runtime.generation
-                        then run_meta
-                        else
-                          map_runtime
-                            (fun rt ->
-                              { rt with generation = retry_plan.retry_generation })
-                            run_meta
-                      in
-                      Eio.Fiber.yield ();
-                      retry_loop ~run_meta:retry_meta
-                        ~max_context:retry_plan.retry_max_context
-                        ~run_generation:retry_plan.retry_generation ~attempt:1
-                        ~is_retry:true ~overflow_retry_used:true
-                  | None -> Error err)
+                end else if is_context_overflow err then begin
+                  dispatch_keeper_phase_event
+                    ~config
+                    ~keeper_name:meta.name
+                    (context_overflow_event_of_error
+                       ~fallback_tokens:max_context
+                       err);
+                  if not overflow_retry_used then
+                    match
+                      recover_context_overflow_retry
+                        ~meta:run_meta
+                        ~base_dir
+                        ~max_cascade_context:max_context
+                        ~error:err
+                    with
+                    | Some retry_plan ->
+                        dispatch_keeper_phase_event
+                          ~config
+                          ~keeper_name:meta.name
+                          Keeper_state_machine.Compaction_started;
+                        dispatch_keeper_phase_event
+                          ~config
+                          ~keeper_name:meta.name
+                          (Keeper_state_machine.Compaction_completed
+                             {
+                               before_tokens =
+                                 retry_plan.compaction.before_tokens;
+                               after_tokens =
+                                 retry_plan.compaction.after_tokens;
+                             });
+                        let retry_meta =
+                          if retry_plan.retry_generation = run_meta.runtime.generation
+                          then run_meta
+                          else
+                            map_runtime
+                              (fun rt ->
+                                {
+                                  rt with
+                                  generation = retry_plan.retry_generation;
+                                })
+                              run_meta
+                        in
+                        Eio.Fiber.yield ();
+                        retry_loop
+                          ~run_meta:retry_meta
+                          ~max_context:retry_plan.retry_max_context
+                          ~run_generation:retry_plan.retry_generation
+                          ~attempt:1
+                          ~is_retry:true
+                          ~overflow_retry_used:true
+                    | None ->
+                        mark_paused_after_overflow
+                          ~run_meta
+                          ~reason:"auto_compact_recovery_unavailable";
+                        Error err
+                  else begin
+                    mark_paused_after_overflow
+                      ~run_meta
+                      ~reason:"overflow_persisted_after_auto_compact_retry";
+                    Error err
+                  end
+                end
                 else
                   Error err
           in
@@ -1529,8 +1634,17 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let social_state =
             Social.derive_failure_state ~meta ~observation ~reason:e_str
           in
+          let failure_meta_base =
+            match !paused_meta_override with
+            | Some paused_meta -> paused_meta
+            | None -> meta
+          in
           let updated_meta =
-            update_metrics_from_failure meta ~latency_ms ~observation ~reason:e_str
+            update_metrics_from_failure
+              failure_meta_base
+              ~latency_ms
+              ~observation
+              ~reason:e_str
               ~is_transient ~social_state ()
           in
           if is_ambiguous_partial then begin

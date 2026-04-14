@@ -28,9 +28,11 @@
 \*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
 \*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
 \*
-\* Phase simplification (11 -> 5):
+\* Phase simplification (12 -> 6):
 \*   Running    = {Running}               -- healthy, can run turns
 \*   Failing    = {Failing}               -- degraded, needs cheap recovery
+\*   Overflowed = {Overflowed}            -- context overflow, no new turns
+\*                                           (added 2026-04, MASC-1)
 \*   Compacting = {Compacting, HandingOff} -- buffer ops, local sufficient
 \*   Draining   = {Draining, Paused}      -- winding down, complete in-progress
 \*   Terminal   = {Stopped, Dead, Offline, Crashed, Restarting}
@@ -68,7 +70,7 @@ MaxTokensFor(cascade) ==
 \* ── Variables ────────────────────────────────────────────
 
 VARIABLES
-    phase,               \* "Running" | "Failing" | "Compacting" | "Draining" | "Terminal"
+    phase,               \* "Running" | "Failing" | "Overflowed" | "Compacting" | "Draining" | "Terminal"
     turn_status,         \* "idle" | "selecting" | "executing" | "retrying" | "done"
     effective_cascade,   \* "keeper_unified" | "local_recovery" | "local_only" | "none"
     provider_idx,        \* 0..NumProviders (0 = exhausted or not started)
@@ -84,7 +86,7 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 
 \* ── Type Invariant ───────────────────────────────────────
 
-Phases == {"Running", "Failing", "Compacting", "Draining", "Terminal"}
+Phases == {"Running", "Failing", "Overflowed", "Compacting", "Draining", "Terminal"}
 TurnStatuses == {"idle", "selecting", "executing", "retrying", "done"}
 Cascades == {"keeper_unified", "local_recovery", "local_only", "none"}
 ProviderResults == {"pending", "ok", "error", "capability_exceeded"}
@@ -160,13 +162,36 @@ BecomeTerminal ==
                    provider_result, has_side_effect, retry_count,
                    turn_outcome>>
 
+\* Context overflow detection: Running -> Overflowed.
+\* Mirrors Context_overflow_detected event in keeper_state_machine.ml.
+\* Guard: turn must be idle/done; mid-attempt overflow is left to the
+\* in-flight cascade (it will fail naturally via ProviderError path).
+BecomeOverflowed ==
+    /\ phase = "Running"
+    /\ turn_status \in {"idle", "done"}
+    /\ phase' = "Overflowed"
+    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+                   requested_max_tokens, provider_result, has_side_effect,
+                   retry_count, turn_outcome>>
+
+\* Auto-compaction: Overflowed -> Compacting (Start_compaction entry action).
+OverflowedBecomeCompacting ==
+    /\ phase = "Overflowed"
+    /\ turn_status \in {"idle", "done"}
+    /\ phase' = "Compacting"
+    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+                   requested_max_tokens, provider_result, has_side_effect,
+                   retry_count, turn_outcome>>
+
 \* ── Turn Lifecycle: Select Cascade ───────────────────────
 \* Mirrors: Keeper_cascade_routing.select_cascade
 \* Pure function: phase -> effective cascade profile.
 
 SelectCascade ==
     /\ turn_status = "idle"
-    /\ phase \notin {"Terminal"}    \* Terminal blocks all turns
+    /\ phase \notin {"Terminal", "Overflowed"}
+       \* Terminal blocks all turns; Overflowed waits for auto-compaction
+       \* (can_execute_turn=false in keeper_state_machine.ml).
     /\ turn_status' = "selecting"
     /\ effective_cascade' =
         IF phase = "Failing"    THEN "local_recovery"
@@ -289,6 +314,8 @@ Next ==
     \* Phase transitions (external events; BecomeRunning via TurnComplete)
     \/ BecomeFailing
     \/ BecomeCompacting
+    \/ BecomeOverflowed
+    \/ OverflowedBecomeCompacting
     \/ BecomeDraining
     \/ BecomeTerminal
     \* Turn lifecycle

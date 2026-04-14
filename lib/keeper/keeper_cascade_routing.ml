@@ -19,7 +19,7 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
   | Failing ->
       { effective_cascade = Keeper_config.local_recovery_cascade_name;
         reason = "failing phase: cheap local recovery" }
-  | Compacting | HandingOff ->
+  | Compacting | HandingOff | Overflowed ->
       { effective_cascade = Keeper_config.local_only_cascade_name;
         reason = "buffer operation: local model sufficient" }
   | Draining | Paused ->

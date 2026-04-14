@@ -895,7 +895,27 @@ let keeper_config_json (config : Room.config) (name : string)
         let recovery_floor_count =
           List.length (Keeper_tool_policy.failing_minimum_tool_names ())
         in
+        let tool_policy_mode : [`Preset of string | `Custom] option =
+          match Keeper_types.tool_access_custom_allowlist m.tool_access with
+          | Some _ -> Some `Custom
+          | None ->
+            (match Keeper_types.tool_access_preset m.tool_access with
+             | Some preset ->
+               Some (`Preset (Keeper_types.tool_preset_to_string preset))
+             | None -> None)
+        in
+        let turn_outcome : [`Ok | `Failed | `Blocked] option =
+          match Keeper_registry.get ~base_path:config.base_path m.name with
+          | Some entry when entry.turn_consecutive_failures > 0 ->
+            Some `Failed
+          | Some entry when entry.conditions.manual_reconcile_required ->
+            Some `Blocked
+          | Some _ -> Some `Ok
+          | None -> None
+        in
         Keeper_decision_audit.decision_pipeline_to_mermaid
+          ?tool_policy_mode
+          ?turn_outcome
           ~phase
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta

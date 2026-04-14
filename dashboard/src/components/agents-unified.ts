@@ -14,8 +14,9 @@ import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { KeeperFleetOverview } from './keeper-fleet-overview'
+import { FsmHub } from './fsm-hub'
 
-type AgentsView = 'all' | 'agents' | 'keepers'
+type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm-hub'
 
 const activeView = signal<AgentsView>('all')
 
@@ -23,6 +24,7 @@ const CHIPS: { id: AgentsView; label: string; description: string }[] = [
   { id: 'all', label: '전체 보기', description: '에이전트와 키퍼를 한 목록에서 봅니다.' },
   { id: 'agents', label: '일반 에이전트', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
   { id: 'keepers', label: '키퍼', description: '키퍼만 따로 봅니다.' },
+  { id: 'fsm-hub', label: 'FSM Hub', description: 'RFC-0003 Composite Lifecycle — 5개 서브 FSM 실시간 관찰' },
 ]
 
 export function AgentsUnified() {
@@ -34,7 +36,7 @@ export function AgentsUnified() {
 
   const viewParam = route.value.params.view as string | undefined
   const routeView =
-    viewParam === 'keepers' || viewParam === 'agents'
+    viewParam === 'keepers' || viewParam === 'agents' || viewParam === 'fsm-hub'
       ? viewParam
       : null
   const currentView = routeView ?? activeView.value
@@ -83,17 +85,21 @@ export function AgentsUnified() {
         class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_var(--white-3)]"
       />
 
-      ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
+      ${currentView === 'fsm-hub' ? html`
+        <${FsmHub} />
+      ` : html`
+        ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
 
-      ${currentView !== 'agents' && keepers.value.length > 0 ? html`
-        <${KeeperFleetOverview} keepers=${keepers.value} />
-      ` : null}
+        ${currentView !== 'agents' && keepers.value.length > 0 ? html`
+          <${KeeperFleetOverview} keepers=${keepers.value} />
+        ` : null}
 
-      <${AgentRoster}
-        keeperFilter=${currentView === 'keepers' ? 'keeper-only'
-          : currentView === 'agents' ? 'agent-only'
-          : 'all'}
-      />
+        <${AgentRoster}
+          keeperFilter=${currentView === 'keepers' ? 'keeper-only'
+            : currentView === 'agents' ? 'agent-only'
+            : 'all'}
+        />
+      `}
     </div>
   `
 }

@@ -67,10 +67,62 @@ The versioned config tree currently contains:
 | --- | --- |
 | `config/cascade.json` | Provider/model cascade and routing defaults. |
 | `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
+| `config/keeper_runtime.toml` | Per-base-path keeper runtime tuning (turn budgets, timeouts, alerts, etc.). See section 1.3. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
+
+### 1.3 keeper_runtime.toml — per-base-path runtime tuning
+
+All `MASC_KEEPER_*` environment variables can be set declaratively in
+`<config_root>/keeper_runtime.toml`. The TOML file is loaded at server
+startup by `Keeper_runtime_config.load_and_apply` (called from
+`server_runtime_bootstrap.ml`) before any module that reads these env
+vars initializes.
+
+**Precedence** (highest first):
+1. Process env var (caller/CI override — never overwritten by TOML)
+2. TOML value from `keeper_runtime.toml`
+3. Hardcoded default in `Env_config_keeper` / `Keeper_keepalive`
+
+Missing file is not an error (returns 0 overrides, uses env/defaults).
+Parse errors log a warning and fall back to env defaults.
+
+**Sections** (53 knobs total):
+
+| Section | Count | Key examples |
+| --- | --- | --- |
+| `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
+| `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
+| `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
+| `[heartbeat]` | 7 | `interval_sec`, `max_silence_sec`, `smart_heartbeat` |
+| `[turn]` | 5 | `timeout_sec`, `oas_timeout_sec`, `admission_wait_timeout_sec` |
+| `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
+| `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
+| `[budget]` | 1 | `daily_usd` |
+| `[metrics]` | 2 | `max_bytes`, `max_rotated` |
+| `[alert]` | 16 | `slack_enabled`, `slack_dm_user_id`, `github_enabled` |
+| `[debug]` | 1 | `enabled` |
+
+**Example** (`<base_path>/.masc/config/keeper_runtime.toml`):
+
+```toml
+[autonomous]
+max_turns_per_call = 7           # default: 2
+semaphore_wait_timeout_sec = 150 # default: 60
+
+[reactive]
+max_turns_per_call = 15
+
+[bootstrap]
+max_active_keepers = 12
+```
+
+**Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
+`key_to_env` table mapping TOML dotted keys to env var names. Values
+are injected via `Unix.putenv` so existing `Env_config_keeper` call
+sites work without API change.
 
 ## 2. Canonical Root and Path Resolution
 

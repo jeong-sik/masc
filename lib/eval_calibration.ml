@@ -1,3 +1,5 @@
+module StringMap = Map.Make (String)
+
 (** Eval_calibration — Verdict logging and evaluator calibration loop.
 
     Persists every anti-rationalization verdict to a date-partitioned JSONL
@@ -208,21 +210,19 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
       Dated_jsonl.read_range store ~since:s ~until:u
   in
   (* Separate verdicts and labels *)
-  let verdicts = Hashtbl.create 64 in
-  let labels = Hashtbl.create 64 in
-  List.iter (fun json ->
-    let rt = string_field json "record_type" in
-    let hash = string_field json "notes_hash" in
-    if rt = "verdict" then
-      Hashtbl.replace verdicts hash json
-    else if rt = "label" then
-      Hashtbl.replace labels hash json
-  ) records;
+  let (verdicts, labels) : Yojson.Safe.t StringMap.t * Yojson.Safe.t StringMap.t =
+    List.fold_left (fun (vs, ls) json ->
+      let rt = string_field json "record_type" in
+      let hash = string_field json "notes_hash" in
+      if rt = "verdict" then (StringMap.add hash json vs, ls)
+      else if rt = "label" then (vs, StringMap.add hash json ls)
+      else (vs, ls)
+    ) (StringMap.empty, StringMap.empty) records
+  in
   (* Find disagreements *)
-  let divergences = ref [] in
-  Hashtbl.iter (fun hash v_json ->
-    match Hashtbl.find_opt labels hash with
-    | None -> ()
+  StringMap.fold (fun hash v_json acc ->
+    match StringMap.find_opt hash labels with
+    | None -> acc
     | Some l_json ->
       let ev = string_field v_json "verdict" in
       let hv = string_field l_json "human_verdict" in
@@ -231,15 +231,11 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
                         String.sub ev 0 7 = "reject:") then "reject"
                     else ev in
       if ev_norm <> hv then
-        divergences := {
-          notes_hash = hash;
-          evaluator_verdict = ev;
-          human_verdict = hv;
-          gate = string_field v_json "gate";
-          task_title = string_field v_json "task_title";
-        } :: !divergences
-  ) verdicts;
-  !divergences
+        { notes_hash = hash; evaluator_verdict = ev; human_verdict = hv;
+          gate = string_field v_json "gate"; task_title = string_field v_json "task_title";
+        } :: acc
+      else acc
+  ) verdicts []
 
 (* ================================================================ *)
 (* Few-shot example selection                                        *)
@@ -289,91 +285,88 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       let u = if until = "" then "2099-12-31" else until in
       Dated_jsonl.read_range store ~since:s ~until:u
   in
-  let total_verdicts = ref 0 in
-  let approve_count = ref 0 in
-  let reject_count = ref 0 in
-  let gate_counts : (string, int) Hashtbl.t = Hashtbl.create 8 in
-  let labeled_hashes : (string, string) Hashtbl.t = Hashtbl.create 64 in
-  let verdict_hashes : (string, string) Hashtbl.t = Hashtbl.create 64 in
-  let recent_fallback_reasons : string list ref = ref [] in
   let max_fallback_reasons = 5 in
   let fallback_tag = Anti_rationalization.gate_to_string Fallback in
-  (* Cross-model accounting: how many verdicts were produced by an
-     evaluator cascade distinct from the generator cascade? This is
-     the *runtime enforcement* rate of the cross-model review policy
-     declared in anti_rationalization.mli (#3067). *)
-  let verdicts_with_generator = ref 0 in
-  let cross_model_match = ref 0 in
-  List.iter (fun json ->
-    let rt = string_field json "record_type" in
-    let hash = string_field json "notes_hash" in
-    if rt = "verdict" then begin
-      incr total_verdicts;
-      let v = string_field json "verdict" in
-      if v = "approve" then incr approve_count
-      else incr reject_count;
-      let gate = string_field json "gate" in
-      let prev = Option.value ~default:0 (Hashtbl.find_opt gate_counts gate) in
-      Hashtbl.replace gate_counts gate (prev + 1);
-      Hashtbl.replace verdict_hashes hash v;
-      let ev_cascade = string_field json "evaluator_cascade" in
-      let gen_cascade = string_field json "generator_cascade" in
-      if gen_cascade <> "" && ev_cascade <> "" then begin
-        incr verdicts_with_generator;
-        if not (String.equal gen_cascade ev_cascade) then
-          incr cross_model_match
-      end;
-      if gate = fallback_tag && List.length !recent_fallback_reasons < max_fallback_reasons then
-        (let reason = string_field json "fallback_reason" in
-         if reason <> "" then
-           recent_fallback_reasons := reason :: !recent_fallback_reasons)
-    end else if rt = "label" then
-      Hashtbl.replace labeled_hashes hash (string_field json "human_verdict")
-  ) records;
+  (* Single fold to accumulate all counters and maps immutably *)
+  let total_verdicts, approve_count, reject_count,
+      gate_counts, verdict_hashes, labeled_hashes,
+      recent_fallback_reasons,
+      verdicts_with_generator, cross_model_match =
+    List.fold_left (fun (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm) json ->
+      let rt = string_field json "record_type" in
+      let hash = string_field json "notes_hash" in
+      if rt = "verdict" then begin
+        let v = string_field json "verdict" in
+        let ac', rc' = if v = "approve" then ac + 1, rc else ac, rc + 1 in
+        let gate = string_field json "gate" in
+        let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
+        let gc' = StringMap.add gate (prev + 1) gc in
+        let vh' = StringMap.add hash v vh in
+        let ev_cascade = string_field json "evaluator_cascade" in
+        let gen_cascade = string_field json "generator_cascade" in
+        let vwg', cmm' =
+          if gen_cascade <> "" && ev_cascade <> "" then
+            vwg + 1,
+            (if not (String.equal gen_cascade ev_cascade) then cmm + 1 else cmm)
+          else vwg, cmm
+        in
+        let fbr' =
+          if gate = fallback_tag && List.length fbr < max_fallback_reasons then
+            let reason = string_field json "fallback_reason" in
+            if reason <> "" then reason :: fbr else fbr
+          else fbr
+        in
+        (tv + 1, ac', rc', gc', vh', lh, fbr', vwg', cmm')
+      end else if rt = "label" then
+        (tv, ac, rc, gc, vh, StringMap.add hash (string_field json "human_verdict") lh,
+         fbr, vwg, cmm)
+      else
+        (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+    ) (0, 0, 0, StringMap.empty, StringMap.empty, StringMap.empty,
+       [], 0, 0) records
+  in
   (* Count divergences *)
-  let false_pos = ref 0 in
-  let false_neg = ref 0 in
-  let agree = ref 0 in
-  Hashtbl.iter (fun hash ev ->
-    match Hashtbl.find_opt labeled_hashes hash with
-    | None -> ()
-    | Some hv ->
-      let ev_norm = if ev = "reject" ||
-                       (String.length ev >= 7 &&
-                        String.sub ev 0 7 = "reject:") then "reject"
-                    else ev in
-      if ev_norm = hv then incr agree
-      else if ev_norm = "approve" && hv = "reject" then incr false_pos
-      else incr false_neg
-  ) verdict_hashes;
-  let labeled_total = !false_pos + !false_neg + !agree in
+  let false_pos, false_neg, agree =
+    StringMap.fold (fun hash ev (fp, fn, ag) ->
+      match StringMap.find_opt hash labeled_hashes with
+      | None -> (fp, fn, ag)
+      | Some hv ->
+        let ev_norm = if ev = "reject" ||
+                         (String.length ev >= 7 &&
+                          String.sub ev 0 7 = "reject:") then "reject"
+                      else ev in
+        if ev_norm = hv then (fp, fn, ag + 1)
+        else if ev_norm = "approve" && hv = "reject" then (fp + 1, fn, ag)
+        else (fp, fn + 1, ag)
+    ) verdict_hashes (0, 0, 0)
+  in
+  let labeled_total = false_pos + false_neg + agree in
   let agreement_rate =
     if labeled_total = 0 then 0.0
-    else float_of_int !agree /. float_of_int labeled_total
+    else float_of_int agree /. float_of_int labeled_total
   in
-  let gate_json = Hashtbl.fold (fun k v acc ->
-    (k, `Int v) :: acc) gate_counts [] in
+  let gate_json = StringMap.bindings gate_counts |> List.map (fun (k, v) -> (k, `Int v)) in
   let fallback_count =
     Option.value ~default:0
-      (Hashtbl.find_opt gate_counts (Anti_rationalization.gate_to_string Fallback))
+      (StringMap.find_opt (Anti_rationalization.gate_to_string Fallback) gate_counts)
   in
   let cross_model_rate =
-    if !verdicts_with_generator = 0 then 0.0
-    else float_of_int !cross_model_match /. float_of_int !verdicts_with_generator
+    if verdicts_with_generator = 0 then 0.0
+    else float_of_int cross_model_match /. float_of_int verdicts_with_generator
   in
   `Assoc [
-    ("total_verdicts", `Int !total_verdicts);
-    ("approve_count", `Int !approve_count);
-    ("reject_count", `Int !reject_count);
+    ("total_verdicts", `Int total_verdicts);
+    ("approve_count", `Int approve_count);
+    ("reject_count", `Int reject_count);
     ("gate_distribution", `Assoc gate_json);
     ("labeled_count", `Int labeled_total);
-    ("false_positive_count", `Int !false_pos);
-    ("false_negative_count", `Int !false_neg);
+    ("false_positive_count", `Int false_pos);
+    ("false_negative_count", `Int false_neg);
     ("agreement_rate", `Float agreement_rate);
     ("fallback_count", `Int fallback_count);
-    ("verdicts_with_generator_cascade", `Int !verdicts_with_generator);
-    ("cross_model_match_count", `Int !cross_model_match);
+    ("verdicts_with_generator_cascade", `Int verdicts_with_generator);
+    ("cross_model_match_count", `Int cross_model_match);
     ("cross_model_rate", `Float cross_model_rate);
     ("recent_fallback_reasons",
-     `List (List.rev_map (fun s -> `String s) !recent_fallback_reasons));
+     `List (List.rev_map (fun s -> `String s) recent_fallback_reasons));
   ]

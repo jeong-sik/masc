@@ -1445,7 +1445,19 @@ let keepalive_keeper_names config =
     | _ -> None)
 ;;
 
-let persistent_agent_names _config = []
+(** Names of keepers that should be running across sessions.
+    A keeper is "persistent" when its on-disk meta has autoboot enabled
+    and is not currently paused — i.e. the operator expects the runtime
+    to keep it alive after restart.
+
+    Mirrors [keepalive_keeper_names] for readers that care about
+    durability rather than the keepalive fiber. *)
+let persistent_agent_names config =
+  configured_keeper_names config
+  |> List.filter_map (fun name ->
+    match read_meta_file_path (keeper_meta_path config name) with
+    | Ok (Some meta) when not meta.paused && meta.autoboot_enabled -> Some meta.name
+    | _ -> None)
 
 let fresher_meta config (meta : keeper_meta) : keeper_meta =
   match read_meta_file_path (keeper_meta_path config meta.name) with

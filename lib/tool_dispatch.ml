@@ -196,7 +196,7 @@ type module_tag =
   | Mod_worktree
   | Mod_code | Mod_code_write
   | Mod_a2a | Mod_handover
-  | Mod_relay | Mod_heartbeat
+  | Mod_heartbeat
   | Mod_auth | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room

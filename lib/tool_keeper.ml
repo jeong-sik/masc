@@ -757,6 +757,7 @@ let handle_keeper_clear ctx args : tool_result =
           ~primary_model_max_tokens:max_tokens
           ~base_dir
       in
+      let checkpoint_found = Option.is_some ctx_opt in
       let cleared_count =
         match ctx_opt with
         | None -> 0
@@ -802,6 +803,7 @@ let handle_keeper_clear ctx args : tool_result =
                | Some entry -> Keeper_state_machine.phase_to_string entry.phase
                | None -> "unknown"));
            ("cleared_message_count", `Int cleared_count);
+           ("checkpoint_found", `Bool checkpoint_found);
            ("preserve_system_prompt", `Bool preserve_system);
            ("reason", `String reason);
          ]))

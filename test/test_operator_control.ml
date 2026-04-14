@@ -87,6 +87,10 @@ let () =
           Alcotest.test_case "keeper status accepts agent alias" `Quick
             Test_operator_control_keeper
             .test_keeper_status_accepts_agent_name_alias;
+          Alcotest.test_case "keeper status exposes model observability"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_status_exposes_model_observability;
           Alcotest.test_case "keeper down accepts agent alias" `Quick
             Test_operator_control_keeper
             .test_keeper_down_accepts_agent_name_alias;

@@ -15,6 +15,7 @@ import { AgentJournalStream } from './agent-detail-journal'
 import { AgentSessionReport } from './agent-detail-session-report'
 import { AgentTimelineSection } from './agent-detail-timeline'
 import { AgentWorkerBrief } from './agent-detail-worker'
+import { AgentDetailMemory } from './agent-detail-memory'
 import { CollapsibleSection } from './common/collapsible'
 import { SessionTraceView } from './session-trace/session-trace-view'
 import {
@@ -203,6 +204,7 @@ export function AgentDetailOverlay() {
         <div class="flex flex-col gap-5">
           <${AgentJournalStream} agentName=${agentName} />
           <${AgentTimelineSection} />
+          <${AgentDetailMemory} agentName=${agentName} />
           <${AgentWorkerBrief} agentName=${agentName} />
           ${agentFitness.value ? html`
             <${Card} title="적합도 (7일)">

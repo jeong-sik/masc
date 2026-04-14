@@ -540,11 +540,11 @@ let detachments_summary_json_from_state (state : snapshot_state) =
          (fun (detachment : detachment_record) -> detachment.source <> "managed")
          state.detachments)
   in
-  let count_status status =
+  let count_status (status : detachment_status) =
     List.length
       (List.filter
          (fun (detachment : detachment_record) ->
-           String.equal detachment.status status)
+           detachment.status = status)
          state.detachments)
   in
   `Assoc
@@ -555,9 +555,9 @@ let detachments_summary_json_from_state (state : snapshot_state) =
         `Assoc
           [
             ("total", `Int (List.length state.detachments));
-            ("active", `Int (count_status "active"));
-            ("awaiting_approval", `Int (count_status "awaiting_approval"));
-            ("stalled", `Int (count_status "stalled"));
+            ("active", `Int (count_status Det_active));
+            ("awaiting_approval", `Int (count_status Det_awaiting_approval));
+            ("stalled", `Int (count_status Det_stalled));
             ("projected", `Int projected_count);
           ] );
     ]

@@ -119,6 +119,23 @@ type event_record = {
   detail : Yojson.Safe.t;
 }
 
+(** Detachment lifecycle status — set by dispatch, policy, and heartbeat logic. *)
+type detachment_status =
+  | Det_active
+  | Det_awaiting_approval
+  | Det_stalled
+  | Det_completed
+  | Det_cancelled
+  | Det_failed
+  | Det_stopped
+
+(** Policy decision lifecycle — set at creation, resolved by approval/denial/expiry. *)
+type decision_status =
+  | Dec_pending
+  | Dec_approved
+  | Dec_denied
+  | Dec_expired
+
 type detachment_record = {
   detachment_id : string;
   operation_id : string;
@@ -130,7 +147,7 @@ type detachment_record = {
   runtime_kind : string option;
   runtime_ref : string option;
   source : string;
-  status : string;
+  status : detachment_status;
   last_event_at : string option;
   last_progress_at : string option;
   heartbeat_deadline : string option;
@@ -147,7 +164,7 @@ type policy_decision_record = {
   operation_id : string option;
   target_unit_id : string option;
   requested_by : string;
-  status : string;
+  status : decision_status;
   reason : string option;
   source : string;
   detail : Yojson.Safe.t;

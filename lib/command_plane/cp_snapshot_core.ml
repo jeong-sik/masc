@@ -326,21 +326,21 @@ let list_detachments_json_from_state ?operation_id ?detachment_id
                 (List.length
                    (List.filter
                       (fun (row : detachment_record) ->
-                        String.equal row.status "active")
+                        row.status = Det_active)
                       detachments)) );
             ( "awaiting_approval",
               `Int
                 (List.length
                    (List.filter
                       (fun (row : detachment_record) ->
-                        String.equal row.status "awaiting_approval")
+                        row.status = Det_awaiting_approval)
                       detachments)) );
             ( "stalled",
               `Int
                 (List.length
                    (List.filter
                       (fun (row : detachment_record) ->
-                        String.equal row.status "stalled")
+                        row.status = Det_stalled)
                       detachments)) );
             ("projected", `Int projected_count);
           ] );
@@ -363,8 +363,8 @@ let list_policy_decisions_json_from_state ?decision_id (state : snapshot_state) 
     |> List.sort (fun (a : policy_decision_record) (b : policy_decision_record) ->
            String.compare b.created_at a.created_at)
   in
-  let count_status status =
-    List.length (List.filter (fun (decision : policy_decision_record) -> String.equal decision.status status) decisions)
+  let count_status (status : decision_status) =
+    List.length (List.filter (fun (decision : policy_decision_record) -> decision.status = status) decisions)
   in
   `Assoc
     [
@@ -374,9 +374,9 @@ let list_policy_decisions_json_from_state ?decision_id (state : snapshot_state) 
         `Assoc
           [
             ("total", `Int (List.length decisions));
-            ("pending", `Int (count_status "pending"));
-            ("approved", `Int (count_status "approved"));
-            ("denied", `Int (count_status "denied"));
+            ("pending", `Int (count_status Dec_pending));
+            ("approved", `Int (count_status Dec_approved));
+            ("denied", `Int (count_status Dec_denied));
           ] );
       ("decisions", `List (List.map policy_decision_to_json decisions));
     ]
@@ -520,7 +520,7 @@ let list_alerts_json_from_state _config (state : snapshot_state) =
     operations;
   state.decisions
   |> List.iter (fun (decision : policy_decision_record) ->
-         if String.equal decision.status "pending" then
+         if decision.status = Dec_pending then
            push_alert ~severity:"warn" ~kind:"approval_pending"
              ~scope_type:decision.scope_type ~scope_id:decision.scope_id
              ~title:(Printf.sprintf "%s waiting for approval" decision.requested_action)

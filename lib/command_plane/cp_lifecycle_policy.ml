@@ -430,10 +430,9 @@ let update_decision_status config ~(actor : string) ~decision_id ~status ?reason
              decisions);
       append_cp_event config ~trace_id:updated.trace_id
         ~event_type:
-          (if String.equal status "approved" then "policy_decision_approved"
-           else "policy_decision_denied")
+          (match status with Dec_approved -> "policy_decision_approved" | _ -> "policy_decision_denied")
         ?operation_id:updated.operation_id ?unit_id:updated.target_unit_id ~actor
-        (`Assoc [ ("decision_id", `String decision_id); ("status", `String status) ]);
+        (`Assoc [ ("decision_id", `String decision_id); ("status", `String (Cp_serde.decision_status_to_string status)) ]);
       Ok updated
 
 let policy_approve_json config ~(actor : string) json =
@@ -448,12 +447,12 @@ let policy_approve_json config ~(actor : string) json =
        with
       | None -> Error "decision not found or is legacy projected decision"
       | Some decision ->
-          if not (String.equal decision.status "pending") then
+          if not (decision.status = Dec_pending) then
             Error "decision is not pending"
           else
             let* result = apply_policy_decision config ~actor decision in
             let* updated =
-              update_decision_status config ~actor ~decision_id ~status:"approved" ()
+              update_decision_status config ~actor ~decision_id ~status:Dec_approved ()
                 ?reason:(get_string_opt json "reason")
             in
             Ok
@@ -471,7 +470,7 @@ let policy_deny_json config ~(actor : string) json =
   | None -> Error "decision_id is required. Call masc_policy_status to find pending decisions."
   | Some decision_id ->
       let* updated =
-        update_decision_status config ~actor ~decision_id ~status:"denied" ()
+        update_decision_status config ~actor ~decision_id ~status:Dec_denied ()
           ?reason:(get_string_opt json "reason")
       in
       Ok
@@ -528,8 +527,8 @@ let detachment_status_detail_json config units agents operations
           (heartbeat_expired
            || String.equal leader_status "offline"
            || String.equal leader_status "missing"
-           || String.equal detachment.status "stalled"
-           || String.equal detachment.status "awaiting_approval") );
+           || detachment.status = Det_stalled
+           || detachment.status = Det_awaiting_approval) );
     ]
 
 let detachment_status_json config json =
@@ -710,7 +709,7 @@ let dispatch_tick_json config ~(actor : string) json =
               {
                 detachment with
                 leader_id = Some next_leader;
-                status = "active";
+                status = Det_active;
                 last_event_at = Some (Types.now_iso ());
                 heartbeat_deadline =
                   (match lookup_unit units detachment.assigned_unit_id with
@@ -755,8 +754,8 @@ let dispatch_tick_json config ~(actor : string) json =
                     detachment with
                     status =
                       (match pending with
-                      | Some _ -> "awaiting_approval"
-                      | None -> "stalled");
+                      | Some _ -> Det_awaiting_approval
+                      | None -> Det_stalled);
                     updated_at = Types.now_iso ();
                   }
                 in

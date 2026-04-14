@@ -6,7 +6,7 @@ module Cp_types = Masc_mcp.Cp_types
 let make_detachment ?(leader = None) ~id roster : Cp_types.detachment_record =
   { detachment_id = id; operation_id = "op-1"; assigned_unit_id = "u-1";
     leader_id = leader; roster; session_id = None; checkpoint_ref = None;
-    runtime_kind = None; runtime_ref = None; source = "test"; status = "active";
+    runtime_kind = None; runtime_ref = None; source = "test"; status = Cp_types.Det_active;
     last_event_at = None; last_progress_at = None; heartbeat_deadline = None;
     created_at = "2026-01-01T00:00:00Z"; updated_at = "2026-01-01T00:00:00Z" }
 

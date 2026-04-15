@@ -80,13 +80,13 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
            fiber also fires, discarding even stale data.  Fixes #5090. *)
         let shell_fiber_timeout_s = 12.0 in
         let shell_timeout_s =
-          if !(Execution_surfaces._shell_warmed) then shell_fiber_timeout_s
+          if Atomic.get Execution_surfaces._shell_warmed then shell_fiber_timeout_s
           else Float.max cold_timeout_s (shell_fiber_timeout_s +. 4.0)
         in
         (* Graceful degradation: on timeout fall back to the last successful
            shell result rather than empty JSON, which would zero out namespace
            counts and focus data (61x/day under I/O contention). *)
-        let shell_fallback = !(Execution_surfaces._last_good_shell) in
+        let shell_fallback = Atomic.get Execution_surfaces._last_good_shell in
         (* Sequential fetch to avoid PG connection concurrent usage (#3305). *)
         shell_ref :=
           fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
@@ -99,9 +99,9 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         let shell_json = !shell_ref in
         (* Update last-known-good shell on success. *)
         if shell_json <> `Assoc [] && shell_json <> shell_fallback then
-          Execution_surfaces._last_good_shell := shell_json;
-        if (not !(Execution_surfaces._shell_warmed)) && shell_json <> `Assoc [] then
-          Execution_surfaces._shell_warmed := true;
+          Atomic.set Execution_surfaces._last_good_shell shell_json;
+        if (not (Atomic.get Execution_surfaces._shell_warmed)) && shell_json <> `Assoc [] then
+          Atomic.set Execution_surfaces._shell_warmed true;
         let execution_json = !execution_ref in
         let command_summary_json = !command_ref in
         let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
@@ -137,14 +137,14 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
   else
     let config = state.Mcp_server.room_config in
     let shell_json =
-      if !(Execution_surfaces._shell_warmed) then
+      if Atomic.get Execution_surfaces._shell_warmed then
         (try
            let result = dashboard_shell_http_json ?clock:state.Mcp_server.clock config in
-           Execution_surfaces._last_good_shell := result;
+           Atomic.set Execution_surfaces._last_good_shell result;
            result
          with Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> !(Execution_surfaces._last_good_shell))
-      else !(Execution_surfaces._last_good_shell)
+            | _ -> Atomic.get Execution_surfaces._last_good_shell)
+      else Atomic.get Execution_surfaces._last_good_shell
     in
     let execution_json = cached_surface_json Execution_surfaces._execution_cache in
     let command_summary_json =

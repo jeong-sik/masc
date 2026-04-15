@@ -33,6 +33,7 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 - `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md` records the OAS observability producer -> bridge -> durable store -> dashboard consumer chain.
 
 ---
 
@@ -315,15 +316,33 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 
 ### 8.2 SSE Relay (oas_sse_bridge.ml)
 
-`oas_sse_bridge.ml`이 Event_bus의 `masc:*` 이벤트를 SSE로 중계한다.
+`oas_sse_bridge.ml`이 Event_bus의 native OAS events와 `masc:*` custom events를 모두 SSE로 중계하고 durable JSONL로도 기록한다.
 
 동작:
-1. `Event_bus.subscribe`로 `masc:` prefix 필터 구독
+1. `Event_bus.subscribe`로 전체 OAS event bus를 구독
 2. 배경 fiber가 `drain_interval_s` (기본 0.25초) 간격으로 poll
-3. `Custom(name, payload)` -> `{"type":"oas:<name>","payload":...,"ts_unix":...}` SSE broadcast
-4. `Sse.broadcast_to Coordinators`로 dashboard 클라이언트에 전달
+3. native/custom event를 `oas:*` envelope JSON으로 직렬화하고 `correlation_id`, `run_id`, `ts_unix`를 포함
+4. `.masc/oas-events/`에 durable append
+5. `Sse.broadcast_to Coordinators`로 dashboard 클라이언트에 전달
 
 환경변수: `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` (범위: 0.05-5.0초)
+
+### 8.3 Dashboard Observability Read Path
+
+Dashboard OAS runtime health is not a live-only counter.
+
+Read path:
+
+1. durable replay source: `/api/v1/dashboard/telemetry?source=oas_event`
+2. client runtime ledger: `dashboard/src/oas-runtime-store.ts`
+3. live overlay: `dashboard/src/sse.ts` -> same `applyOasRuntimeEvent()` ingestion path
+4. UI consumer: `dashboard/src/components/oas-health-chip.ts`
+
+SSOT rules:
+
+- OAS runtime health = `durable oas_event replay + live SSE tail`
+- dashboard `counts` = active runtime truth
+- dashboard `configured_keepers` = configured keeper inventory
 
 ---
 
@@ -397,7 +416,9 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 |------|------|------|
 | Agent 실행 | Complete | `oas_worker.ml`이 모든 MODEL 호출을 Agent.run으로 라우팅 |
 | Context compaction | Complete | OAS Context_reducer 직접 위임, MASC Custom closure 주입 |
-| Event_bus bridge | Complete | `masc:*` 이벤트 13종 publish + SSE relay |
+| Event_bus bridge | Complete | OAS native/custom events are relayed to SSE and persisted under `.masc/oas-events/` |
+| Dashboard OAS runtime health | Complete | dashboard health uses `durable replay + live tail`, not live-only counters |
+| Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
 | Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_exec_context.ml`의 wrapper + serialized context를 유지 |
 | Memory bridge | Partial | Long_term + Episodic + Procedural bridged. Working/Scratchpad는 OAS 내부. 전체 통합은 미완 |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |

@@ -209,8 +209,15 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                 key);
           Eio.Condition.broadcast cond
         | exception exn ->
-          Log.Dashboard.warn "cache bg-revalidate failed (%s): %s"
-            key (Printexc.to_string exn);
+          (* Compute_timeout was already logged by
+             [get_or_compute_with_timeout] at WARN; suppress the outer
+             duplicate so one timeout does not produce two WARN lines.
+             Other exceptions still surface here. *)
+          (match exn with
+           | Compute_timeout _ -> ()
+           | _ ->
+             Log.Dashboard.warn "cache bg-revalidate failed (%s): %s"
+               key (Printexc.to_string exn));
           Eio.Mutex.use_rw ~protect:true mu (fun () ->
             match Hashtbl.find_opt table key with
             | Some (Computing { cond = c; _ }) when c == cond ->

@@ -76,7 +76,6 @@ let capability_classification : (string * capability_class list) list = [
   ("keeper_fs_edit",           [State_modification]);
   ("keeper_pr_submit",         [State_modification]);
   ("keeper_pr_workflow",       [State_modification]);
-  ("keeper_github",            [State_modification]);
 ]
 
 let tool_capabilities name =
@@ -112,11 +111,11 @@ let assess_trifecta ~active_tool_names =
 let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input =
   if trifecta_active then
     let caps = tool_capabilities tool_name in
-    let read_only_keeper_github =
-      String.equal tool_name "keeper_github"
+    let read_only_shell_gh =
+      String.equal tool_name "keeper_shell"
       && Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
     in
-    if has_capability State_modification caps && not read_only_keeper_github then
+    if has_capability State_modification caps && not read_only_shell_gh then
       max_risk_level base_risk High
     else
       base_risk
@@ -297,8 +296,10 @@ let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
   | "keeper_fs_edit" | "keeper_write"
   | "keeper_pr_submit" | "keeper_pr_workflow" -> true
-  | "keeper_github" ->
-    not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+  | "keeper_shell" ->
+    (* keeper_shell is mutating only when op=gh AND the gh command mutates *)
+    Keeper_tool_registry.is_shell_gh_op input
+    && not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
   | _ -> false
 
 let assess_risk ~tool_name ~input =

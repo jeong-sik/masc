@@ -41,7 +41,7 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
 
 (* Write/VCS tools that require coding/delivery/full presets *)
 let write_vcs_tools =
-  [ "keeper_fs_edit"; "keeper_pr_workflow"; "keeper_github" ]
+  [ "keeper_fs_edit"; "keeper_pr_workflow" ]
 
 (* ── Test 1: Core discovery tools respect preset ──────────────── *)
 

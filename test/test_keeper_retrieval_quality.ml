@@ -42,9 +42,8 @@ let build_keeper_index () =
     "keeper_board_stats", "게시판 통계 활동 참여 게시글수";
     "keeper_fs_read", "파일 읽기 소스코드 설정";
     "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
-    "keeper_shell", "명령어 조회 검색 탐색";
+    "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci 풀리퀘스트 이슈";
     "keeper_bash", "명령어 실행 쉘 빌드 테스트";
-    "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI";
     "keeper_memory_search", "기억 검색 대화 이전 메시지";
     "keeper_library_search", "라이브러리 지식 문서 검색";
     "keeper_library_read", "라이브러리 문서 읽기 지식";
@@ -123,7 +122,6 @@ let build_keeper_index () =
            || name = "keeper_shell"
            || name = "keeper_bash"
            || name = "keeper_write" then Some "filesystem"
-      else if name = "keeper_github" then Some "vcs"
       else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
       else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
       else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
@@ -293,12 +291,12 @@ let test_voice_speak_kr () =
 let test_github_pr_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_pr_en" idx
-    "check the status of open pull requests" "keeper_github")
+    "check the status of open pull requests" "keeper_shell")
 
 let test_github_issue_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_issue_kr" idx
-    "깃허브 이슈 풀리퀘스트" "keeper_github")
+    "깃허브 이슈 풀리퀘스트" "keeper_shell")
 
 (* ================================================================ *)
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)

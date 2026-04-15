@@ -48,9 +48,8 @@ let test_tools = [
   make_tool "keeper_board_list" "List recent board posts";
   make_tool "keeper_fs_read" "Read a file from the filesystem";
   make_tool "keeper_fs_edit" "Edit a file on the filesystem";
-  make_tool "keeper_shell" "Execute a read-only shell command";
+  make_tool "keeper_shell" "Execute a read-only shell command (op=gh for GitHub CLI)";
   make_tool "keeper_bash" "Execute a shell command";
-  make_tool "keeper_github" "Interact with GitHub API";
   make_tool "keeper_memory_search" "Search agent memory";
   make_tool "keeper_broadcast" "Broadcast a message to all agents";
   make_tool "keeper_tasks_list" "List all tasks";

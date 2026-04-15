@@ -210,23 +210,43 @@ let check_recovery_two_store_sync
     : bool =
   not (reconcile_data && not reconcile_fsm)
 
+(* NoCascadeBeforeMeasurement from KeeperCompositeLifecycle.tla:
+   when the cascade sub-FSM is active, a measurement snapshot must
+   already have been captured. Cascade work pulled through a provider
+   without a preceding measurement indicates the auto-rule gate was
+   bypassed.
+
+   With [derive_cascade_state] projecting [`Trying`] when is_live (#7319),
+   this invariant is now observable from a single snapshot: cascade
+   non-idle AND measurement absent is the violation. *)
+let check_no_cascade_before_measurement
+    ~(cascade_state : cascade_state)
+    ~(measurement_captured : bool)
+    : bool =
+  match cascade_state with
+  | `Idle -> true
+  | `Selecting | `Trying | `Done | `Exhausted -> measurement_captured
+
 let compute_invariants
     ~(phase : Keeper_state_machine.phase)
     ~(conds : Keeper_state_machine.conditions)
     ~(turn_phase : turn_phase)
+    ~(cascade_state : cascade_state)
+    ~(measurement_captured : bool)
     ~(reconcile_data : bool)
     ~(reconcile_fsm : bool)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
-    no_cascade_before_measurement = true;
-    (* trivially true until cascade state is observable — see
-       [derive_cascade_state]. *)
+    no_cascade_before_measurement =
+      check_no_cascade_before_measurement
+        ~cascade_state
+        ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase conds;
     event_priority_monotone = true;
     (* per-snapshot view cannot witness event ordering; this invariant
        becomes checkable when the event-bus broadcast carries priority
-       annotations (follow-up). *)
+       annotations (follow-up to #7122). *)
     recovery_two_store_sync =
       check_recovery_two_store_sync ~reconcile_data ~reconcile_fsm;
   }
@@ -268,11 +288,14 @@ let observe
   let decision_stage = derive_decision_stage conds ~is_live in
   let cascade_state = derive_cascade_state ~is_live in
   let (reconcile_data, reconcile_fsm) = derive_reconcile entry in
+  let measurement_captured = entry.last_auto_rules <> None in
   let invariants =
     compute_invariants
       ~phase:entry.phase
       ~conds
       ~turn_phase
+      ~cascade_state
+      ~measurement_captured
       ~reconcile_data
       ~reconcile_fsm
   in

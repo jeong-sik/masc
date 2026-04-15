@@ -219,8 +219,8 @@ let test_messaging_preset_tools () =
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
   check bool "has keeper_shell" true (List.mem "keeper_shell" tools);
-  (* github removed from messaging to reduce surface; available in coding/delivery *)
-  check bool "no keeper_github in messaging" false (List.mem "keeper_github" tools)
+  (* keeper_github tool was removed in #7306 (use keeper_shell op=gh). *)
+  check bool "no keeper_github (removed)" false (List.mem "keeper_github" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
@@ -302,7 +302,6 @@ let test_extract_non_string_command () =
 let test_destructive_check_tools_membership () =
   check bool "keeper_bash is destructive" true (Tool_dispatch.is_destructive "keeper_bash");
   check bool "keeper_fs_edit is destructive" true (Tool_dispatch.is_destructive "keeper_fs_edit");
-  check bool "keeper_github is destructive" true (Tool_dispatch.is_destructive "keeper_github");
   check bool "keeper_fs_read not destructive" false (Tool_dispatch.is_destructive "keeper_fs_read");
   check bool "keeper_board_post not destructive" false (Tool_dispatch.is_destructive "keeper_board_post")
 
@@ -329,7 +328,7 @@ let test_integration_github_force_push () =
   let cmd = Keeper_guards.extract_command_from_input input in
   (* The actual command seen by the gate would be "push --force origin main",
      but detect_destructive looks for "git push --force" which requires "git" prefix.
-     The keeper_github tool prepends "gh" not "git", so this would NOT match
+     The keeper_shell op=gh path prepends "gh" not "git", so this would NOT match
      the git-specific patterns. This verifies the actual behavior. *)
   match Eval_gate.detect_destructive cmd with
   | None -> ()  (* Expected: "push --force" without "git" prefix is not detected *)

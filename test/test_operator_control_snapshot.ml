@@ -349,7 +349,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "namespace"
+      Alcotest.(check string) "target_type" "root"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);

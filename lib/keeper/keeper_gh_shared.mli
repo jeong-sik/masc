@@ -1,4 +1,4 @@
-(** Shared GH primitives used by keeper_github + PR workflow handlers.
+(** Shared GH primitives used by PR workflow handlers and keeper_shell op=gh.
 
     Contains the in-memory entity cache (hallucination gate), gh output
     handling (truncation + not-found hint), command parsers, and repo-slug

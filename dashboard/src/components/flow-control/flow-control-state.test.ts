@@ -18,9 +18,13 @@ vi.mock('../../namespace-truth-store', () => ({
   namespaceTruthInitializing,
 }))
 
-vi.mock('../../store', () => ({
-  serverStatus,
-}))
+vi.mock('../../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store')>()
+  return {
+    ...actual,
+    serverStatus,
+  }
+})
 
 describe('flow-control-state', () => {
   beforeEach(async () => {

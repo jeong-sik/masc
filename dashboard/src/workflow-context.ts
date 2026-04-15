@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals'
 import type { OperatorAttentionItem, OperatorRecommendedAction, RouteState } from './types'
 import { isRecord } from './components/common/normalize'
+import { isRootTarget } from './components/ops/helpers'
 
 const STORAGE_KEY = 'masc_dashboard_workflow_context'
 const CONTEXT_TTL_MS = 15 * 60 * 1000
@@ -307,10 +308,7 @@ export function missionInterveneParams(context: DashboardWorkflowContext): Recor
 
 export function workflowTargetLabel(context?: DashboardWorkflowContext | null): string {
   if (!context?.target_type) return '대상 정보 없음'
-  const targetType =
-    context.target_type === 'room' || context.target_type === 'namespace'
-      ? '프로젝트'
-      : context.target_type
+  const targetType = isRootTarget(context.target_type) ? '프로젝트' : context.target_type
   return context.target_id ? `${targetType} · ${context.target_id}` : targetType
 }
 

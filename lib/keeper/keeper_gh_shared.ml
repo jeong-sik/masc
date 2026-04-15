@@ -9,7 +9,7 @@ let with_keeper_gh_env = Keeper_gh_env.with_env
 (* not GraphQL -- GraphQL has known false negatives, see board post  *)
 (* p-10f3f0914beeb9e0d22f80e0b0e107a8).                              *)
 (*                                                                   *)
-(* Used below by [handle_keeper_github] to reject hallucinated       *)
+(* Used by PR workflow handlers to reject hallucinated              *)
 (* PR/issue numbers BEFORE invoking gh, returning the valid number   *)
 (* list as alternatives. Thread-safe via Eio.Mutex, fail-open on     *)
 (* fetch errors (returns [`Unknown] -> caller proceeds normally).    *)

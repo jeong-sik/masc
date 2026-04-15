@@ -64,7 +64,7 @@ let test_digest_defaults_to_namespace_target () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "default target_type" "namespace"
+      Alcotest.(check string) "default target_type" "root"
         Yojson.Safe.Util.(digest_json |> member "target_type" |> to_string))
 
 let review_item_from_room_digest ctx =

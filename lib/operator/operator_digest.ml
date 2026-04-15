@@ -55,7 +55,7 @@ let recent_tool_host_failures ~now () =
                     severity =
                       operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
-                    target_type = "namespace";
+                    target_type = "root";
                     target_id = None;
                     actor = None;
                     evidence =
@@ -128,7 +128,7 @@ let build_room_attention_items ?command_plane_summary config =
                    kind;
                    severity = operator_severity_of_string tone;
                    summary;
-                   target_type = "namespace";
+                   target_type = "root";
                    target_id = None;
                    actor = None;
                    evidence = signal_json;
@@ -154,7 +154,7 @@ let build_room_attention_items ?command_plane_summary config =
                    kind;
                    severity = if count >= 3 then Sev_bad else Sev_warn;
                    summary;
-                   target_type = "namespace";
+                   target_type = "root";
                    target_id = None;
                    actor = None;
                    evidence =
@@ -176,7 +176,7 @@ let build_room_attention_items ?command_plane_summary config =
           summary =
             Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
               (List.length pending_confirms);
-          target_type = "namespace";
+          target_type = "root";
           target_id = None;
           actor = None;
           evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
@@ -256,7 +256,7 @@ let room_recommendations ?command_plane_summary config =
                    Some
                      {
                        action_type;
-                       target_type = "namespace";
+                       target_type = "root";
                        target_id = None;
                        severity = operator_severity_of_string tone;
                        reason;
@@ -267,7 +267,7 @@ let room_recommendations ?command_plane_summary config =
                Some
                  {
                    action_type;
-                   target_type = "namespace";
+                   target_type = "root";
                    target_id = None;
                    severity = if count >= 3 then Sev_bad else Sev_warn;
                    reason;
@@ -368,8 +368,9 @@ let urgency_rank = function
   | "now" -> 1
   | _ -> 0
 
-let target_rank = function
-  | "room" | "namespace" -> 3
+let target_rank value =
+  if Operator_digest_types.is_root_alias value then 3
+  else match value with
   | "keeper" -> 1
   | _ -> 0
 
@@ -507,7 +508,7 @@ let namespace_gate_review_item ~room_json =
       Some
         {
           action_type = "namespace_resume";
-          target_type = "namespace";
+          target_type = "root";
           target_id = None;
           severity = Sev_warn;
           reason = pause_reason;
@@ -518,7 +519,7 @@ let namespace_gate_review_item ~room_json =
       {
         id = "namespace_gate:" ^ room_id;
         kind = "namespace_gate";
-        target_type = "namespace";
+        target_type = "root";
         target_id = None;
         severity = Sev_warn;
         urgency = "soon";
@@ -530,7 +531,7 @@ let namespace_gate_review_item ~room_json =
         stale_sec = None;
         confirm_required = false;
         recommended_action;
-        truth_ref = review_truth_ref_json ~target_type:"namespace" ~target_id:None;
+        truth_ref = review_truth_ref_json ~target_type:"root" ~target_id:None;
         friction =
           `Assoc
             [
@@ -673,7 +674,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
       (`Assoc
         [
           ("trace_id", `String (trace_id "opsd"));
-          ("target_type", `String "namespace");
+          ("target_type", `String "root");
           ("target_id", `Null);
           ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
@@ -717,7 +718,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           Swarm_status.build_json ~timeline_limit_override:6 config
     in
     match target_type with
-    | "namespace" ->
+    | "root" ->
         let confirm_scope = pending_confirm_scope ?actor config in
         let attention_items =
           build_room_attention_items ~command_plane_summary:command_plane_digest_json config
@@ -731,7 +732,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           summary_of_recommendations ~actor:actor_name recommended_actions
         in
         let active_guidance =
-          active_guidance_fields ~config ~actor:actor_name ~target_type:"namespace"
+          active_guidance_fields ~config ~actor:actor_name ~target_type:"root"
             ~target_id:None ~fallback_recommendations:recommended_actions
             ~fallback_summary:fallback_recommendation_summary
         in
@@ -754,7 +755,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           (`Assoc
             ([
               ("trace_id", `String (trace_id "opsd"));
-              ("target_type", `String "namespace");
+              ("target_type", `String "root");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
@@ -783,3 +784,5 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
             @ active_guidance))
     | _ -> Error "unsupported target_type"
+(* Note: normalize_digest_target_type accepts "root"/"namespace"/"room" and
+   returns canonical "root" — the match above only needs the canonical case. *)

@@ -18,7 +18,7 @@ let all_schema_names =
 let test_workflow_guide_tools_exist () =
   let guide_tools = [
     "masc_start"; "masc_join"; "masc_status";
-    "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
+    "masc_claim"; "masc_claim_next"; "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
     "masc_plan_set_task"; "masc_set_current_task";
     "masc_heartbeat"; "masc_broadcast";

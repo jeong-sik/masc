@@ -218,11 +218,6 @@ let test_permission_for_tool_claim_next () =
   | Some Types.CanClaimTask -> ()
   | _ -> fail "expected CanClaimTask"
 
-let test_permission_for_tool_done () =
-  match Auth.permission_for_tool "masc_done" with
-  | Some Types.CanCompleteTask -> ()
-  | _ -> fail "expected CanCompleteTask"
-
 let test_permission_for_tool_broadcast () =
   match Auth.permission_for_tool "masc_broadcast" with
   | Some Types.CanBroadcast -> ()
@@ -716,7 +711,6 @@ let () =
       test_case "add_task" `Quick test_permission_for_tool_add_task;
       test_case "claim" `Quick test_permission_for_tool_claim;
       test_case "claim_next" `Quick test_permission_for_tool_claim_next;
-      test_case "done" `Quick test_permission_for_tool_done;
       test_case "broadcast" `Quick test_permission_for_tool_broadcast;
       test_case "webrtc_offer" `Quick test_permission_for_tool_webrtc_offer;
       test_case "webrtc_answer" `Quick test_permission_for_tool_webrtc_answer;

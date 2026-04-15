@@ -281,31 +281,37 @@ export function FsmHub() {
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
         <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
-        ${/* ── Zone 2b: Transition History Trail + Top Transitions (collapsible) ── */ ''}
-        <${CollapsibleZone} id="transition-trail" title="전환 이력" defaultOpen=${true}>
-          <div class="flex flex-col gap-2">
-            <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
-            <${TopTransitionsPanel} transitions=${topTransitions} hoveredSegment=${hoveredSegment} />
-          </div>
-        <//>
-
-        ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
+        ${/* ── Zone 2b: Turn Pipeline Strip (always visible) ── */ ''}
         <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
 
-        ${/* ── Zone 3b: Swimlane Timeline (collapsible) ── */ ''}
-        <${CollapsibleZone} id="swimlane" title="상태 타임라인" defaultOpen=${true}>
-          <${SwimlaneTimeline}
-            observations=${view.observations}
-            now=${now}
-            hoveredSegment=${hoveredSegment}
-            onHoverSegment=${setHoveredSegment}
-          />
-        <//>
-
-        ${/* ── Zone 3c: Dwell Time Histogram (collapsible) ── */ ''}
-        <${CollapsibleZone} id="dwell-histogram" title="상태 체류 시간" defaultOpen=${true}>
-          <${DwellHistogramPanel} histograms=${dwellHistograms} hoveredSegment=${hoveredSegment} />
-        <//>
+        ${/* ── Zone 3: Timeline + Analytics (2-column on wide screens) ── */ ''}
+        <div class="grid gap-3 lg:grid-cols-2">
+          <div class="flex flex-col gap-3">
+            ${/* ── Zone 3a: Swimlane Timeline ── */ ''}
+            <${CollapsibleZone} id="swimlane" title="상태 타임라인" defaultOpen=${true}>
+              <${SwimlaneTimeline}
+                observations=${view.observations}
+                now=${now}
+                hoveredSegment=${hoveredSegment}
+                onHoverSegment=${setHoveredSegment}
+              />
+            <//>
+            ${/* ── Zone 3b: Transition History ── */ ''}
+            <${CollapsibleZone} id="transition-trail" title="전환 이력" defaultOpen=${true}>
+              <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
+            <//>
+          </div>
+          <div class="flex flex-col gap-3">
+            ${/* ── Zone 3c: State Dwell Time ── */ ''}
+            <${CollapsibleZone} id="dwell-histogram" title="상태 체류 시간" defaultOpen=${true}>
+              <${DwellHistogramPanel} histograms=${dwellHistograms} hoveredSegment=${hoveredSegment} />
+            <//>
+            ${/* ── Zone 3d: Top Transitions ── */ ''}
+            <${CollapsibleZone} id="top-transitions" title="빈발 전환" defaultOpen=${true}>
+              <${TopTransitionsPanel} transitions=${topTransitions} hoveredSegment=${hoveredSegment} />
+            <//>
+          </div>
+        </div>
 
         ${/* ── Zone 4: Health Grid (collapsible) ── */ ''}
         <${CollapsibleZone} id="health-grid" title="상태 격자" defaultOpen=${true}>

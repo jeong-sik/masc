@@ -29,6 +29,7 @@ interface ActionButtonProps {
   disabled?: boolean
   /** Full width */
   block?: boolean
+  ariaLabel?: string
   onClick?: (e: Event) => void
   children: ComponentChildren
 }
@@ -39,6 +40,7 @@ export function ActionButton({
   class: cx,
   disabled,
   block,
+  ariaLabel,
   onClick,
   children,
 }: ActionButtonProps) {
@@ -52,6 +54,6 @@ export function ActionButton({
   ].filter(Boolean).join(' ')
 
   return html`
-    <button type="button" class=${cls} onClick=${onClick} disabled=${disabled}>${children}</button>
+    <button type="button" class=${cls} onClick=${onClick} disabled=${disabled} aria-label=${ariaLabel}>${children}</button>
   `
 }

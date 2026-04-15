@@ -15,7 +15,7 @@
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
-  config:Room.config ->
+  config:Coord.config ->
   bus:Agent_sdk.Event_bus.t ->
   unit
 

@@ -534,7 +534,7 @@ function OperationsHubCard() {
             <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">정책 승인</div>
               <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingApprovals}</div>
-              <div class="mt-1 text-[11px] text-[var(--text-muted)]">command-plane pending approvals</div>
+              <div class="mt-1 text-[11px] text-[var(--text-muted)]">pending approvals</div>
             </div>
             <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">운영 확인</div>

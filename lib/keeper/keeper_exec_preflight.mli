@@ -3,7 +3,7 @@
     before starting work. All checks are read-only. *)
 
 val handle_keeper_preflight_check :
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string

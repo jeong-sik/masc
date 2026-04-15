@@ -231,7 +231,7 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
       ("cache_hit", `Bool cache_hit);
       ("probe", probe);
     ]
-let runtime_resolution_json (config : Room.config) =
+let runtime_resolution_json (config : Coord.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.commit in
   let workspace_commit = git_rev_parse_short config.workspace_path in
@@ -305,7 +305,7 @@ let runtime_resolution_json (config : Room.config) =
       ("base_path", path_item_json ~source:"input" base_path_input);
       ("workspace_path", path_item_json ~source:"workspace" config.workspace_path);
       ("resolved_base_path", path_item_json ~source:"resolved_base" config.base_path);
-      ("data_root", path_item_json ~source:"runtime_data" (Room.masc_root_dir config));
+      ("data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config));
       ("prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir);
       ( "workspace_git_commit",
         Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit
@@ -320,7 +320,7 @@ let runtime_resolution_json (config : Room.config) =
       ("build", Build_identity.to_yojson build);
     ]
 
-let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
+let dashboard_tools_http_json ?actor (config : Coord.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
     {
       config;
@@ -375,7 +375,7 @@ let parse_benchmark_timestamp path =
       (String.sub base (String.length prefix)
          (String.length base - String.length prefix - String.length suffix))
 
-let current_worktree_results_dir (config : Room.config) =
+let current_worktree_results_dir (config : Coord.config) =
   let cwd = Sys.getcwd () in
   let worktrees_root = Filename.concat config.base_path ".worktrees" in
   if String.equal cwd worktrees_root then
@@ -392,12 +392,12 @@ let current_worktree_results_dir (config : Room.config) =
     Some (Filename.concat worktree_root "benchmarks/results")
   else None
 
-let display_benchmark_path (config : Room.config) path =
+let display_benchmark_path (config : Coord.config) path =
   match path_relative_to ~root:config.base_path path with
   | Some relative -> relative
   | None -> Filename.basename path
 
-let benchmark_results_dir_candidates (config : Room.config) =
+let benchmark_results_dir_candidates (config : Coord.config) =
   let env_dir =
     match Sys.getenv_opt "MASC_BENCHMARK_RESULTS_DIR" with
     | Some "" | None -> None
@@ -436,7 +436,7 @@ let latest_file_by_mtime files =
   |> List.map fst
   |> list_hd_opt
 
-let latest_benchmark_result_file (config : Room.config) =
+let latest_benchmark_result_file (config : Coord.config) =
   benchmark_results_dir_candidates config
   |> List.concat_map benchmark_result_files
   |> latest_file_by_mtime
@@ -645,7 +645,7 @@ let verdict_counts_json rows =
       ("regressed", `Int regressed);
     ]
 
-let dashboard_perf_http_json (config : Room.config) : Yojson.Safe.t =
+let dashboard_perf_http_json (config : Coord.config) : Yojson.Safe.t =
   match latest_benchmark_result_file config with
   | None ->
       `Assoc

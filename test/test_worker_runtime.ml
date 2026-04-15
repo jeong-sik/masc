@@ -180,7 +180,7 @@ let test_rewrite_custom_model_label_for_container () =
 let test_run_process_with_timeout_returns_124_on_timeout () =
   with_eio @@ fun env ->
   let result =
-    Lib.Tool_command_plane_support.run_process_with_timeout
+    Lib.Worker_runtime_docker.run_process_with_timeout
       ~clock_opt:(Some (Eio.Stdenv.clock env)) ~timeout_sec:1
       ~prog:"/bin/sh" ~argv:[ "/bin/sh"; "-c"; "trap '' TERM; kill -STOP $$" ]
       ~env:(Unix.environment ()) ()

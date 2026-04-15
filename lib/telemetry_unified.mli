@@ -2,7 +2,7 @@
 
     Provides a single, time-sorted view over six separate JSONL stores.
     Paths under [.masc/] are resolved via the cluster-aware [masc_root]
-    (use [Room.masc_root_dir config]):
+    (use [Coord.masc_root_dir config]):
     - [<masc_root>/keepers/<name>/metrics/] — Per-keeper turn metrics
     - [<masc_root>/telemetry/]              — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
@@ -46,7 +46,7 @@ val read_unified :
     entries (default 100) sorted by timestamp descending (newest first).
 
     [masc_root] is the cluster-aware .masc directory (use
-    [Room.masc_root_dir config] to obtain it).  [base_path] is the
+    [Coord.masc_root_dir config] to obtain it).  [base_path] is the
     project root, used only for [data/] paths.
 
     Each entry is a JSON object with an added ["source"] field. *)

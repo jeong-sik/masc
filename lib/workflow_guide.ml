@@ -255,7 +255,6 @@ let next_steps ~tool_name ~success =
   | "masc_add_task" | "masc_batch_add_tasks" -> after_add_task ~success
   | "masc_plan_set_task" -> after_plan_set_task ~success
   | "masc_heartbeat" -> after_heartbeat ~success
-  | "masc_done" -> after_done ~success
   | "masc_transition" -> after_transition_generic ~success
   (* Common *)
   | "masc_broadcast" -> after_broadcast ~success
@@ -315,8 +314,6 @@ let workflow_context ~tool_name =
         [ "masc_plan_set_task" ]
     | "masc_heartbeat" ->
         [ "masc_join" ]
-    | "masc_done" ->
-        [ "masc_plan_set_task" ]
     | "masc_transition" ->
         [ "masc_join"; "masc_status" ]
     | _ -> []

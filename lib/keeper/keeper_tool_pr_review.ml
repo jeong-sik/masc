@@ -5,7 +5,7 @@
 open Keeper_types
 open Keeper_exec_shared
 let handle_keeper_pr_review_read
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -44,7 +44,7 @@ let handle_keeper_pr_review_read
 ;;
 
 let handle_keeper_pr_review_comment
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -100,7 +100,7 @@ let handle_keeper_pr_review_comment
 ;;
 
 let handle_keeper_pr_review_reply
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

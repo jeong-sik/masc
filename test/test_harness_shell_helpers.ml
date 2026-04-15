@@ -114,6 +114,81 @@ let test_mcp_jsonrpc_temp_helper () =
       | lines ->
         failf "unexpected helper output:\n%s" (String.concat "\n" lines))
 
+let test_keeper_campaign_harness_dry_run () =
+  with_temp_dir "keeper-campaign-dry-run" (fun dir ->
+      let script =
+        Filename.concat (source_root ()) "scripts/harness_keeper_campaign.sh"
+      in
+      let run_dir = Filename.concat dir "artifacts" in
+      let code, _stdout, stderr =
+        run_bash ~cwd:(source_root ())
+          (Printf.sprintf
+             "DRY_RUN=1 START_SERVER=0 RUN_DIR=%s %s"
+             (quote run_dir) (quote script))
+      in
+      if code <> 0 then
+        failf "keeper campaign dry run failed (%d): %s" code stderr;
+      let summary_path = Filename.concat run_dir "summary.json" in
+      let manifest_path = Filename.concat run_dir "manifest.json" in
+      let campaign_state_path = Filename.concat run_dir "campaign-state.json" in
+      let campaign_events_path = Filename.concat run_dir "campaign-events.jsonl" in
+      check bool "summary.json exists" true (Sys.file_exists summary_path);
+      check bool "manifest.json exists" true (Sys.file_exists manifest_path);
+      check bool "campaign-state.json exists" true (Sys.file_exists campaign_state_path);
+      check bool "campaign-events.jsonl exists" true (Sys.file_exists campaign_events_path);
+      let summary = read_file summary_path in
+      let campaign_state = read_file campaign_state_path in
+      check bool "classification present" true
+        (contains_substring summary "\"classification\": \"DRY_RUN\"");
+      check bool "verdict present" true
+        (contains_substring summary "\"verdict\": \"reached\"");
+      check bool "campaign phase present" true
+        (contains_substring summary "\"campaign_phase\": \"continuity_verified\"");
+      check bool "target reached present" true
+        (contains_substring summary "\"target_reached\": true");
+      check bool "campaign state verdict present" true
+        (contains_substring campaign_state "\"verdict\": \"reached\""))
+
+let test_keeper_campaign_cli_replay () =
+  with_temp_dir "keeper-campaign-cli" (fun dir ->
+      let exe =
+        Filename.concat (source_root ()) "_build/default/bin/keeper_campaign_fsm.exe"
+      in
+      let events_path = Filename.concat dir "events.jsonl" in
+      let output_path = Filename.concat dir "state.json" in
+      let events =
+        String.concat "\n"
+          [
+            {|{"event":"bootstrap_ok","goal":"cli replay goal"}|};
+            {|{"event":"task_bound_observed","task_id":"task-001","current_task_id":"task-001"}|};
+            {|{"event":"autoresearch_started","loop_id":"ar-001","target_score":1.0}|};
+            {|{"event":"target_reached"}|};
+            {|{"event":"pressure_started"}|};
+            {|{"event":"handoff_observed","count":1,"generation":2,"trace_id":"trace-2"}|};
+            {|{"event":"continuity_observed","goal_matches":true,"current_task_id":"task-001"}|};
+            "";
+          ]
+      in
+      let oc = open_out events_path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc events);
+      let code, stdout, stderr =
+        run_bash ~cwd:(source_root ())
+          (Printf.sprintf "%s replay %s %s"
+             (quote exe) (quote events_path) (quote output_path))
+      in
+      if code <> 0 then
+        failf "keeper campaign replay failed (%d): %s" code stderr;
+      check bool "state output exists" true (Sys.file_exists output_path);
+      let output = read_file output_path in
+      check bool "stdout verdict present" true
+        (contains_substring stdout "\"verdict\": \"reached\"");
+      check bool "file verdict present" true
+        (contains_substring output "\"verdict\": \"reached\"");
+      check bool "continuity phase present" true
+        (contains_substring output "\"phase\": \"continuity_verified\""))
+
 let () =
   run "harness_shell_helpers"
     [
@@ -123,5 +198,9 @@ let () =
             test_server_bootstrap_temp_helpers;
           test_case "mcp jsonrpc temp helper" `Quick
             test_mcp_jsonrpc_temp_helper;
+          test_case "keeper campaign dry run" `Quick
+            test_keeper_campaign_harness_dry_run;
+          test_case "keeper campaign cli replay" `Quick
+            test_keeper_campaign_cli_replay;
         ] );
     ]

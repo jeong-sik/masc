@@ -25,6 +25,7 @@ type loop_state = {
   metric_fn : string;
   model_model : string;
   target_file : string;  (** File the MODEL reads and modifies, relative to workdir *)
+  target_score : float option;  (** Optional success threshold for the metric *)
   status : status;
   error_message : string option;
   current_cycle : int;
@@ -75,6 +76,7 @@ type persisted_summary = {
   metric_fn : string;
   model_model : string;
   target_file : string;
+  target_score : float option;
   workdir : string;
   cycle_timeout_s : float;
   max_cycles : int;

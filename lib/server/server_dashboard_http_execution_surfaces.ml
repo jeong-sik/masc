@@ -91,7 +91,7 @@ let _execution_cache =
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
-    Called via [Room_hooks.on_task_mutation_fn] after task add,
+    Called via [Coord_hooks.on_task_mutation_fn] after task add,
     batch_add, and all transitions (claim, start, done, cancel,
     release) routed through [observe_task_transition].
     Best-effort: never raises — cache staleness must not break
@@ -189,7 +189,7 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 
-let running_keeper_names (config : Room.config) =
+let running_keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
   |> List.filter_map (fun name ->
          match Keeper_types.read_meta config name with
@@ -198,7 +198,7 @@ let running_keeper_names (config : Room.config) =
              Some name
          | _ -> None)
 
-let patch_surface_json_for_running_keepers (config : Room.config) = function
+let patch_surface_json_for_running_keepers (config : Coord.config) = function
   | `Assoc fields as json ->
       let running = running_keeper_names config in
       if running = [] then json
@@ -294,7 +294,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                ~extra:
                  [
                    ( "readonly_pool",
-                     Room_utils.domain_local_pg_backend_diagnostics_json () );
+                     Coord_utils.domain_local_pg_backend_diagnostics_json () );
                  ])
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -360,7 +360,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
              ~extra:
                [
                  ( "readonly_pool",
-                   Room_utils.domain_local_pg_backend_diagnostics_json () );
+                   Coord_utils.domain_local_pg_backend_diagnostics_json () );
                ])
   in
   match fixture, actor, full_mode with

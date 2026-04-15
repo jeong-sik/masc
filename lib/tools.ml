@@ -20,8 +20,8 @@ let filter_retired_front_door_schemas (schemas : tool_schema list) =
 (** Tool schemas from modules that do NOT depend on Config
     (avoids Tools -> Config -> Tools cycle) *)
 let raw_schemas : tool_schema list =
-  Tool_schemas_room_core.schemas
-  @ Tool_schemas_room_extra.schemas
+  Tool_schemas_coord_core.schemas
+  @ Tool_schemas_coord_extra.schemas
   @ Tool_schemas_inline.schemas
   @ Tool_schemas_plan.schemas
   @ Tool_schemas_agent.schemas

@@ -16,6 +16,8 @@ type audit_event = {
   previous_keeper : string;
 }
 
+module Names = Channel_gate_discord_names
+
 let connector_id = "discord"
 let display_name = "Discord"
 let channel = "discord"
@@ -33,48 +35,28 @@ let legacy_binding_audit_path =
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"
 
-let resolve_path raw_path =
-  if Filename.is_relative raw_path then
-    Filename.concat (Env_config_core.base_path ()) raw_path
-  else
-    raw_path
-
-let configured_write_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None -> resolve_path default
-
-let configured_read_path env_name ~default ~legacy =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None ->
-      let preferred = resolve_path default in
-      let legacy = resolve_path legacy in
-      if Sys.file_exists preferred then preferred
-      else if Sys.file_exists legacy then legacy
-      else preferred
-
 let status_path () =
-  configured_read_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
-    ~legacy:legacy_status_path
+  Names.configured_read_path "MASC_DISCORD_STATUS_PATH"
+    ~default:default_status_path ~legacy:legacy_status_path
 
 let status_write_path () =
-  configured_write_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
+  Names.configured_write_path "MASC_DISCORD_STATUS_PATH"
+    ~default:default_status_path
 
 let binding_store_path () =
-  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
+  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_store_read_path () =
-  configured_read_path "MASC_DISCORD_BINDING_STORE_PATH"
+  Names.configured_read_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path ~legacy:legacy_binding_store_path
 
 let binding_audit_path () =
-  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
 let binding_audit_read_path () =
-  configured_read_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  Names.configured_read_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
 
 let read_json_file_opt path =
@@ -225,6 +207,8 @@ let status_json ?(audit_limit = 10) () =
   let live_status = read_json_file_opt status_path in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
+  let names_path = Names.names_read_path () in
+  let name_map = Names.read () in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let channel = "discord" in
@@ -258,6 +242,8 @@ let status_json ?(audit_limit = 10) () =
       ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
+      ("names_path", `String names_path);
+      ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
       ( "last_ready_at",
         `String (status_field "last_ready_at" string_member "") );
@@ -325,6 +311,7 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
         ( "binding_store_path",
           `String (string_member status "binding_store_path") );
         ("audit_path", `String (string_member status "audit_path"));
+        ("names_path", `String (string_member status "names_path"));
       ]
   in
   let runtime_summary =
@@ -378,6 +365,8 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("status_path", `String (string_member status "status_path"));
       ("binding_store_path", `String (string_member status "binding_store_path"));
       ("audit_path", `String (string_member status "audit_path"));
+      ("names_path", `String (string_member status "names_path"));
+      ("names", status |> U.member "names");
       ("updated_at", `String (string_member status "updated_at"));
       ("last_ready_at", `String (string_member status "last_ready_at"));
       ("bot_user_name", `String (string_member status "bot_user_name"));
@@ -434,11 +423,14 @@ let bind ~channel_id ~keeper_name ~actor_name =
     in
     try
       save_bindings updated_bindings;
+      let guild_id =
+        Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
+      in
       append_audit_event
         {
           timestamp = Server_utils.iso8601_of_unix (Unix.gettimeofday ());
           action = "bind";
-          guild_id = "";
+          guild_id;
           channel_id;
           keeper_name;
           actor_id = actor_name;
@@ -472,11 +464,14 @@ let unbind ~channel_id ~actor_name =
         in
         try
           save_bindings updated_bindings;
+          let guild_id =
+            Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
+          in
           append_audit_event
             {
               timestamp = Server_utils.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
-              guild_id = "";
+              guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;

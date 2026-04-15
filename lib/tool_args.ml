@@ -12,13 +12,12 @@
     {b Error response format} (canonical):
     Use [error_response] and [ok_response] below for all new tool handlers.
 
-    TODO(M-2): Unify the 6 existing error response formats across tool modules:
+    TODO(M-2): Unify the existing error response formats across tool modules:
     1. [error_response] below — [\{"status":"error","message":...\}]
-    2. [Tool_command_plane_support.json_error] — [\{"status":"error","message":...\}]
-    3. Plain string returns — some tools return bare error strings
-    4. [isError: true] — MCP protocol-level error flag (correct for transport)
-    5. [Printf.sprintf] ad-hoc JSON — hand-built JSON strings
-    6. [Yojson.Safe.to_string] inline — direct JSON construction without helper
+    2. Plain string returns — some tools return bare error strings
+    3. [isError: true] — MCP protocol-level error flag (correct for transport)
+    4. [Printf.sprintf] ad-hoc JSON — hand-built JSON strings
+    5. [Yojson.Safe.to_string] inline — direct JSON construction without helper
     Preferred format: [\{"status":"error","message":"..."\}] via [error_response].
 *)
 

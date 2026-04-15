@@ -187,11 +187,26 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
 
 (** Extract the effective gh command string from keeper_shell op=gh input.
     [keeper_exec_shell] uses the [cmd] field. *)
+let normalize_gh_command (cmd : string) : string =
+  let tokens =
+    cmd
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun token -> token <> "")
+  in
+  let rec drop_leading_gh = function
+    | token :: rest when String.lowercase_ascii token = "gh" ->
+        drop_leading_gh rest
+    | remaining -> remaining
+  in
+  String.concat " " (drop_leading_gh tokens)
+
 let gh_effective_cmd (input : Yojson.Safe.t) : string =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "cmd" fields with
-     | Some (`String s) -> String.trim s
+     | Some (`String s) -> normalize_gh_command s
      | _ -> "")
   | _ -> ""
 

@@ -227,7 +227,7 @@ module Masc = struct
     | Register_capabilities
     | Release_task
     | Reset
-    | Room_status
+    | Coord_status
     | Set_current_task
     | Status
     | Task_history
@@ -319,7 +319,7 @@ module Masc = struct
     | Register_capabilities -> "masc_register_capabilities"
     | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
-    | Room_status -> "masc_room_status"
+    | Coord_status -> "masc_room_status"
     | Set_current_task -> "masc_set_current_task"
     | Status -> "masc_status"
     | Task_history -> "masc_task_history"
@@ -411,7 +411,7 @@ module Masc = struct
     | "masc_register_capabilities" -> Some Register_capabilities
     | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
-    | "masc_room_status" -> Some Room_status
+    | "masc_room_status" -> Some Coord_status
     | "masc_set_current_task" -> Some Set_current_task
     | "masc_status" -> Some Status
     | "masc_task_history" -> Some Task_history

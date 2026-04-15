@@ -17,13 +17,13 @@ module Error = Error
    ============================================================ *)
 
 let test_is_recoverable_room_locked () =
-  check bool "room locked" true (Error.is_recoverable (Error.Room (Error.RoomLocked "test")))
+  check bool "room locked" true (Error.is_recoverable (Error.Coord (Error.RoomLocked "test")))
 
 let test_is_recoverable_room_full () =
-  check bool "room full" false (Error.is_recoverable (Error.Room (Error.RoomFull 10)))
+  check bool "room full" false (Error.is_recoverable (Error.Coord (Error.RoomFull 10)))
 
 let test_is_recoverable_room_not_found () =
-  check bool "not found" false (Error.is_recoverable (Error.Room (Error.RoomNotFound "test")))
+  check bool "not found" false (Error.is_recoverable (Error.Coord (Error.RoomNotFound "test")))
 
 let test_is_recoverable_task_claimed () =
   check bool "claimed" true (Error.is_recoverable (Error.Task (Error.TaskAlreadyClaimed "agent")))
@@ -54,22 +54,22 @@ let test_is_recoverable_internal () =
    ============================================================ *)
 
 let test_to_string_room_not_found () =
-  let e = Error.Room (Error.RoomNotFound "test-room") in
+  let e = Error.Coord (Error.RoomNotFound "test-room") in
   let s = Error.to_string e in
-  check bool "contains room" true (String.length s > 0 && String.sub s 0 4 = "Room")
+  check bool "contains room" true (String.length s > 0 && String.sub s 0 5 = "Coord")
 
 let test_to_string_room_already_exists () =
-  let e = Error.Room (Error.RoomAlreadyExists "test") in
+  let e = Error.Coord (Error.RoomAlreadyExists "test") in
   let s = Error.to_string e in
   check bool "contains room" true (String.length s > 0)
 
 let test_to_string_room_locked () =
-  let e = Error.Room (Error.RoomLocked "test") in
+  let e = Error.Coord (Error.RoomLocked "test") in
   let s = Error.to_string e in
   check bool "contains locked" true (String.length s > 0)
 
 let test_to_string_room_full () =
-  let e = Error.Room (Error.RoomFull 10) in
+  let e = Error.Coord (Error.RoomFull 10) in
   let s = Error.to_string e in
   check bool "contains full" true (String.length s > 0)
 
@@ -188,7 +188,7 @@ let test_to_string_internal () =
    ============================================================ *)
 
 let test_severity_room_locked () =
-  let e = Error.Room (Error.RoomLocked "test") in
+  let e = Error.Coord (Error.RoomLocked "test") in
   check bool "warning" true (Error.severity_of_error e = Error.Warning)
 
 let test_severity_task_claimed () =
@@ -220,7 +220,7 @@ let test_severity_internal () =
   check bool "critical" true (Error.severity_of_error e = Error.Critical)
 
 let test_severity_default_error () =
-  let e = Error.Room (Error.RoomNotFound "test") in
+  let e = Error.Coord (Error.RoomNotFound "test") in
   check bool "error level" true (Error.severity_of_error e = Error.Error)
 
 (* ============================================================

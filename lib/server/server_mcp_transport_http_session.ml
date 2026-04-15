@@ -27,7 +27,7 @@ let default_base_path () =
         | Some home -> home
         | None -> Sys.getcwd ())
   in
-  Room_utils_backend_setup.resolve_server_default_base_path requested_path
+  Coord_utils_backend_setup.resolve_server_default_base_path requested_path
 
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions

@@ -64,7 +64,7 @@ val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float ->
 val reset_autonomous_completion_for_test : unit -> unit
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Room.config -> Board_dispatch.keeper_board_signal -> unit
+  config:Coord.config -> Board_dispatch.keeper_board_signal -> unit
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)

@@ -302,8 +302,8 @@ let test_tool_exec_observer_bridges_to_telemetry () =
       in
       try rm base_dir with _ -> ())
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
       let on_exec ~tool_name ~success ~duration_ms =
         Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
           ~duration_ms ~agent_id:"llama-local-worker" ()
@@ -531,6 +531,34 @@ let () =
         match Worker_dev_tools.validate_command_coding "dune test 2>&1" with
         | Ok () -> ()
         | Error e -> Alcotest.fail ("should allow 2>&1: " ^ e));
+      Alcotest.test_case "single-command contract rejects pipe" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~allow_pipes:false
+            ~allowed_commands:["dune"; "git"; "head"]
+            "dune build 2>&1 | tail -5"
+        with
+        | Error reason when String.starts_with ~prefix:"Pipes are not allowed" reason -> ()
+        | Error reason -> Alcotest.fail ("wrong rejection: " ^ reason)
+        | Ok () -> Alcotest.fail "should reject pipe under single-command contract");
+      Alcotest.test_case "single-command contract keeps redirect" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~allow_pipes:false
+            ~allowed_commands:["dune"; "git"; "head"]
+            "dune build 2>&1"
+        with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("should allow direct build with fd redirect: " ^ e));
+      Alcotest.test_case "single-command contract enforces custom allowlist" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~allow_pipes:false
+            ~allowed_commands:["git"]
+            "dune build"
+        with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "should reject command outside custom allowlist");
     ];
     "is_destructive_bash_operation", [
       Alcotest.test_case "blocks force push" `Quick (fun () ->

@@ -8,7 +8,7 @@ type t = {
     target_file:string ->
     (Yojson.Safe.t, string) Stdlib.result)
     option;
-  config : Room.config option;
+  config : Coord.config option;
   sw : Eio.Switch.t option;
   clock : float Eio.Time.clock_ty Eio.Resource.t option;
 }

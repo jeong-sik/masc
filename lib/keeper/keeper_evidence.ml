@@ -90,7 +90,7 @@ let capture_turn_evidence
   let files_changed = List.length status_lines in
   (* Collision detection *)
   let collision_warnings =
-    if files_changed > 0 then
+    if delta_detected && files_changed > 0 then
       Keeper_file_tracker.record_turn_files ~keeper_name ~files:status_lines
     else []
   in
@@ -138,8 +138,8 @@ let capture_turn_evidence
     let evidence_dir =
       Filename.concat base_path
         (Printf.sprintf ".masc/evidence/%s/%s"
-          (Room_utils.safe_filename keeper_name)
-          (Room_utils.safe_filename trace_id))
+          (Coord_utils.safe_filename keeper_name)
+          (Coord_utils.safe_filename trace_id))
     in
     Fs_compat.mkdir_p evidence_dir;
     let evidence_file = Filename.concat evidence_dir
@@ -163,8 +163,8 @@ let verify_evidence_chain ~base_path ~keeper_name ~trace_id
   let evidence_dir =
     Filename.concat base_path
       (Printf.sprintf ".masc/evidence/%s/%s"
-        (Room_utils.safe_filename keeper_name)
-        (Room_utils.safe_filename trace_id))
+        (Coord_utils.safe_filename keeper_name)
+        (Coord_utils.safe_filename trace_id))
   in
   if not (Fs_compat.file_exists evidence_dir) then Ok ()
   else
@@ -222,8 +222,8 @@ let latest_evidence ~base_path ~keeper_name ~trace_id
   let evidence_dir =
     Filename.concat base_path
       (Printf.sprintf ".masc/evidence/%s/%s"
-        (Room_utils.safe_filename keeper_name)
-        (Room_utils.safe_filename trace_id))
+        (Coord_utils.safe_filename keeper_name)
+        (Coord_utils.safe_filename trace_id))
   in
   if not (Fs_compat.file_exists evidence_dir) then None
   else

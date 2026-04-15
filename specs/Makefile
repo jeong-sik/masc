@@ -14,7 +14,18 @@ JAVA_OPTS := -XX:+UseParallelGC -Xmx2g
 TLC_STOP  := 180
 TLC_FLAGS := -workers auto -cleanup
 
-TLA2TOOLS := keeper-state-machine/tla2tools.jar
+LOCAL_TLA2TOOLS := keeper-state-machine/tla2tools.jar
+HOME_TLA2TOOLS  := $(HOME)/.local/lib/tla/tla2tools-1.8.0.jar
+
+ifeq ($(origin TLA2TOOLS), undefined)
+  ifneq ($(wildcard $(LOCAL_TLA2TOOLS)),)
+    TLA2TOOLS := $(LOCAL_TLA2TOOLS)
+  else ifneq ($(wildcard $(HOME_TLA2TOOLS)),)
+    TLA2TOOLS := $(HOME_TLA2TOOLS)
+  else
+    TLA2TOOLS := $(LOCAL_TLA2TOOLS)
+  endif
+endif
 
 # Specs with known failures (parsing/evaluation errors under CI tla2tools).
 # Remove from this list as specs are fixed. Each entry is a basename (no .cfg).

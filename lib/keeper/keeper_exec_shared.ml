@@ -1,6 +1,8 @@
 open Keeper_types
 open Keeper_alerting
 
+module StringMap = Map.Make (String)
+
 let count_context_tokens (ctx : working_context) =
   Keeper_exec_context.token_count ctx
 ;;
@@ -44,7 +46,7 @@ let max_suggested_entries = 12
 
 let file_not_found_prefix = "File not found:"
 
-let missing_file_error_json ~(config : Room.config) ~(target : string)
+let missing_file_error_json ~(config : Coord.config) ~(target : string)
       ~(fallback_dir : string) ~(error : string) =
   ignore config;
   let parent = Filename.dirname target in
@@ -92,18 +94,18 @@ let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_write_allowed_paths ~meta
 ;;
 
-let keeper_playground_root ~(config : Room.config) ~(meta : keeper_meta) =
+let keeper_playground_root ~(config : Coord.config) ~(meta : keeper_meta) =
   ignore (Keeper_alerting_path.ensure_playground_bundle ~config ~name:meta.name);
   Filename.concat
     (Keeper_alerting_path.project_root_of_config config)
     (Keeper_alerting_path.playground_path_of_keeper meta.name)
 ;;
 
-let keeper_default_write_root ~(config : Room.config) ~(meta : keeper_meta) =
+let keeper_default_write_root ~(config : Coord.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
-let keeper_default_read_root ~(config : Room.config) ~(meta : keeper_meta) =
+let keeper_default_read_root ~(config : Coord.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
@@ -127,7 +129,7 @@ let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
    doubled) because they concatenate the playground root they see in tool
    output with the playground-relative path from the prompt.  Stripping early
    prevents the downstream resolver from doubling the prefix again. *)
-let playground_relative_unless_allowed_root ~(config : Room.config)
+let playground_relative_unless_allowed_root ~(config : Coord.config)
     ~(meta : keeper_meta) (raw : string) : string =
   let trimmed = String.trim raw in
   (* 1. Strip keeper's playground prefix from relative paths.
@@ -173,7 +175,7 @@ let playground_relative_unless_allowed_root ~(config : Room.config)
     let pg = keeper_playground_root ~config ~meta in
     Filename.concat pg trimmed
 
-let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path : string)
+let resolve_keeper_path ~(config : Coord.config) ~(meta : keeper_meta) ~(raw_path : string)
   =
   resolve_keeper_target_path
     ~config
@@ -181,7 +183,7 @@ let resolve_keeper_path ~(config : Room.config) ~(meta : keeper_meta) ~(raw_path
     ~raw_path:(playground_relative_unless_allowed_root ~config ~meta raw_path)
 ;;
 
-let resolve_keeper_read_path ~(config : Room.config) ~(meta : keeper_meta)
+let resolve_keeper_read_path ~(config : Coord.config) ~(meta : keeper_meta)
       ~(raw_path : string) =
   Keeper_alerting_path.resolve_keeper_read_path
     ~config
@@ -234,7 +236,7 @@ let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
 ;;
 
 let tag_dispatch_fn
-  : (config:Room.config
+  : (config:Coord.config
      -> agent_name:string
      -> tag:Tool_dispatch.module_tag
      -> name:string
@@ -258,13 +260,14 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     else if String.starts_with ~prefix:"keeper_memory" n then "memory"
     else "core"
   in
-  let map = Hashtbl.create 8 in
-  List.iter (fun n ->
-    let cat = categorize n in
-    let list = match Hashtbl.find_opt map cat with Some l -> l | None -> [] in
-    Hashtbl.replace map cat (n :: list)
-  ) names;
-  let assoc = Hashtbl.fold (fun cat list acc ->
+  let map =
+    List.fold_left (fun acc n ->
+      let cat = categorize n in
+      let list = try StringMap.find cat acc with Not_found -> [] in
+      StringMap.add cat (n :: list) acc)
+      StringMap.empty names
+  in
+  let assoc = StringMap.fold (fun cat list acc ->
     (cat, `List (List.map (fun s -> `String s) list)) :: acc
   ) map [] in
   Yojson.Safe.to_string (`Assoc assoc)

@@ -41,7 +41,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
 
 (** Dispatch a tool by its module tag using keeper-available context.
 
-    @param config   Room configuration
+    @param config   Coord configuration
     @param agent_name  Keeper's agent name (meta.name)
     @param tag      Module tag from [Tool_dispatch.lookup_tag]
     @param name     Tool name
@@ -50,7 +50,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
     Returns [Some (success, message)] or [None] if module dispatch
     does not recognize the tool name (should not happen when tag is correct). *)
 let dispatch
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(agent_name : string)
     ~(tag : Tool_dispatch.module_tag)
     ~(name : string)
@@ -88,7 +88,7 @@ let dispatch
          (masc_get_metrics, masc_collaboration_graph) are safe. *)
       Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
   | Mod_room ->
-      Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args
+      Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
   | Mod_control ->
       (* masc_pause_status is read-only — safe for keeper dispatch.
          masc_pause/masc_resume modify room lifecycle — blocked. *)
@@ -177,12 +177,6 @@ let dispatch
         Printf.sprintf
           "tool '%s' is an internal context tool (use MCP client)" name)
 
-  (* ── Tier E: Hybrid (option fields degrade gracefully) ─────── *)
-
-  | Mod_command_plane ->
-      Some (false,
-        Printf.sprintf
-          "tool '%s' belongs to the removed command-plane compatibility surface; keeper runtime stays on OAS Agent.run" name)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

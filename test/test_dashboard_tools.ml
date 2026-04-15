@@ -29,8 +29,8 @@ let test_dashboard_tools_projection () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       let json = Lib.Server_dashboard_http.dashboard_tools_http_json config in
       let open Yojson.Safe.Util in
       let inventory = json |> member "tool_inventory" in

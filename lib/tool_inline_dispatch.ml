@@ -1,7 +1,7 @@
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules:
-    - Tool_inline_dispatch_room: masc_start, masc_join, masc_leave
+    - Tool_inline_dispatch_coord: masc_start, masc_join, masc_leave
     - Tool_inline_dispatch_comm: masc_broadcast, masc_messages, masc_who
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
@@ -14,7 +14,7 @@
     without knowing about the types sub-module. *)
 type tool_result = Tool_inline_dispatch_types.tool_result
 type context = Tool_inline_dispatch_types.context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   registry : Session.registry;
   state : Mcp_server.server_state;
@@ -30,10 +30,10 @@ type context = Tool_inline_dispatch_types.context = {
     Yojson.Safe.t option;
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
   save_governance :
-    Room.config -> Mcp_server_eio_governance.governance_config -> unit;
-  load_mcp_sessions : Room.config -> Mcp_server_eio_governance.mcp_session_record list;
+    Coord.config -> Mcp_server_eio_governance.governance_config -> unit;
+  load_mcp_sessions : Coord.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
-    Room.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
 let safe_exec = Tool_inline_dispatch_types.safe_exec
@@ -76,10 +76,10 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   in
 
   match name with
-  (* ── Room lifecycle (delegated) ─────────────────────────────── *)
-  | "masc_start" -> Tool_inline_dispatch_room.handle_start ctx
-  | "masc_join" -> Tool_inline_dispatch_room.handle_join ctx
-  | "masc_leave" -> Tool_inline_dispatch_room.handle_leave ctx
+  (* ── Coord lifecycle (delegated) ─────────────────────────────── *)
+  | "masc_start" -> Tool_inline_dispatch_coord.handle_start ctx
+  | "masc_join" -> Tool_inline_dispatch_coord.handle_join ctx
+  | "masc_leave" -> Tool_inline_dispatch_coord.handle_leave ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_broadcast" -> Tool_inline_dispatch_comm.handle_broadcast ctx
@@ -200,7 +200,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
               if String.contains raw ':' then raw else Provider_adapter.make_local_label raw
             in
             (* Validate the label parses without retaining model_spec *)
-            (match Llm_provider.Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
+            (match Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
         | _ ->
             (match Provider_adapter.preferred_execution_model_labels () with _ :: _ -> Ok () | [] -> Error "no execution model")
       in

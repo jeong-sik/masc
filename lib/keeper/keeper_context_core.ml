@@ -10,6 +10,8 @@
 open Printf
 open Keeper_types
 
+module StringSet = Set.Make (String)
+
 (* ================================================================ *)
 (* Constants                                                         *)
 (* ================================================================ *)
@@ -510,14 +512,14 @@ let render_jsonl_lines (lines : string list) : string =
   | _ -> String.concat "\n" lines ^ "\n"
 
 let dedupe_preserve_order (lines : string list) : string list =
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create (List.length lines) in
-  List.filter
-    (fun line ->
-       if Hashtbl.mem seen line then false
-       else (
-         Hashtbl.add seen line ();
-         true))
-    lines
+  let rec go seen acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      if StringSet.mem line seen
+      then go seen acc rest
+      else go (StringSet.add line seen) (line :: acc) rest
+  in
+  go StringSet.empty [] lines
 
 let migrate_session_history_logs
     ~(session_dir : string) : history_migration_stats =

@@ -95,13 +95,13 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
         | None -> false)
   |> List.rev
 
-let runtime_registry_entry (config : Room_utils.config) name =
+let runtime_registry_entry (config : Coord_utils.config) name =
   Keeper_registry.get ~base_path:config.base_path name
 
-let runtime_keepalive_running (config : Room_utils.config) (meta : keeper_meta) =
+let runtime_keepalive_running (config : Coord_utils.config) (meta : keeper_meta) =
   Keeper_registry.is_running ~base_path:config.base_path meta.name
 
-let runtime_keepalive_started_at (config : Room_utils.config)
+let runtime_keepalive_started_at (config : Coord_utils.config)
     (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 
@@ -130,7 +130,7 @@ let runtime_blocker_surface_of_reason (reason : string) =
     None
 
 let runtime_blocker_fields_json
-    (_config : Room_utils.config)
+    (_config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
     match runtime_blocker_surface_of_reason meta.runtime.last_blocker with

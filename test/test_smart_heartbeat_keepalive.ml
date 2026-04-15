@@ -5,7 +5,7 @@
     paused), and that the env-config feature flag controls activation.
 
     These are unit-level tests of the mapping logic, not full keepalive
-    loop integration tests (which require Eio fibers + Room I/O). *)
+    loop integration tests (which require Eio fibers + Coord I/O). *)
 
 open Alcotest
 module HS = Masc_mcp.Heartbeat_smart

@@ -239,14 +239,13 @@ describe('ConnectorStatusPanel', () => {
     expect(fetchGateConnectors).toHaveBeenCalled()
     expect(fetchGateKeepers).toHaveBeenCalled()
     expect(text).toContain('Channel Gate Connectors')
-    expect(text).toContain('Gate-Advertised Connector')
     expect(text).toContain('connected')
     expect(text).toContain('Discord')
     expect(text).toContain('sangsu')
-    expect(text).toContain('keeper dir 2')
+    expect(text).toContain('luna')
+    expect(text).toContain('nova')
     expect(text).toContain('keeper-luna-agent')
     expect(text).toContain('Observed room bindings')
-    expect(text).toContain('Recent binding audit')
     expect(text).toContain('Recent gate events')
     expect(text).toContain('keeper_error')
     expect(text).toContain('/tmp/discord_status.json')
@@ -275,7 +274,7 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
-    expect(text).toContain('Gate-Advertised Connector')
+    expect(text).toContain('Discord')
     expect(text).toContain('stale')
     expect(text).toContain('Gate metrics unavailable')
     expect(text).toContain('Gate-advertised connector runtime is visible')
@@ -341,7 +340,20 @@ describe('ConnectorStatusPanel', () => {
 
   it('posts bind and unbind actions through the dashboard endpoints', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
-    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const initialState = sampleConnectorsResponse()
+    const afterBindState = sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        configured_bindings: [
+          { channel_id: '123456', keeper_name: 'luna' },
+          { channel_id: '999999', keeper_name: 'nova' },
+        ],
+        runtime_bindings_count: 2,
+      }],
+    })
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(initialState)
+      .mockResolvedValue(afterBindState)
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
     const post = vi.fn<(path: string, body: unknown) => Promise<unknown>>().mockResolvedValue({ ok: true })
     const showToast = vi.fn()
@@ -358,24 +370,21 @@ describe('ConnectorStatusPanel', () => {
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
 
+    const addChannelButton = container.querySelector<HTMLButtonElement>('button[aria-label="add channel to nova"]')
+    expect(addChannelButton).not.toBeNull()
+    addChannelButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
     const channelInput = container.querySelector<HTMLInputElement>('input[aria-label="Discord channel id"]')
-    const keeperInput = container.querySelector<HTMLInputElement>('input[aria-label="Keeper name"]')
     expect(channelInput).not.toBeNull()
-    expect(keeperInput).not.toBeNull()
-
-    if (!channelInput || !keeperInput) {
-      throw new Error('expected bind form inputs to exist')
-    }
-
-    channelInput.value = '999999'
-    channelInput.dispatchEvent(new Event('input', { bubbles: true }))
-    keeperInput.value = 'nova'
-    keeperInput.dispatchEvent(new Event('input', { bubbles: true }))
+    channelInput!.value = '999999'
+    channelInput!.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi()
 
     const bindButton = Array.from(container.querySelectorAll('button'))
-      .find(candidate => candidate.textContent?.trim() === 'Bind')
-    bindButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      .find(candidate => candidate.textContent?.trim() === 'bind')
+    expect(bindButton).toBeDefined()
+    bindButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
     expect(post).toHaveBeenCalledWith('/api/v1/gate/connector/bind?name=discord', {
@@ -384,9 +393,9 @@ describe('ConnectorStatusPanel', () => {
     })
     expect(showToast).toHaveBeenCalledWith('Bound 999999 -> nova', 'success')
 
-    const unbindButton = Array.from(container.querySelectorAll('button'))
-      .find(candidate => candidate.textContent?.trim() === 'Unbind')
-    unbindButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    const unbindButton = container.querySelector<HTMLButtonElement>('button[aria-label="unbind 999999"]')
+    expect(unbindButton).not.toBeNull()
+    unbindButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
     expect(post).toHaveBeenCalledWith('/api/v1/gate/connector/unbind?name=discord', {
@@ -395,7 +404,7 @@ describe('ConnectorStatusPanel', () => {
     expect(showToast).toHaveBeenCalledWith('Unbound 999999', 'success')
   })
 
-  it('shows selected keeper runtime metadata from the keeper directory', async () => {
+  it('renders one section per directory keeper (keeper-first grouping)', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
@@ -410,19 +419,153 @@ describe('ConnectorStatusPanel', () => {
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
 
-    const keeperSelect = container.querySelector<HTMLSelectElement>('select')
-    expect(keeperSelect).not.toBeNull()
-    if (!keeperSelect) {
-      throw new Error('expected keeper select to exist')
-    }
+    const lunaGroup = container.querySelector('[data-keeper="luna"]')
+    const novaGroup = container.querySelector('[data-keeper="nova"]')
+    expect(lunaGroup).not.toBeNull()
+    expect(novaGroup).not.toBeNull()
+    expect(lunaGroup!.textContent).toContain('luna')
+    expect(lunaGroup!.querySelector('[data-channel-id="123456"]')).not.toBeNull()
+    expect(novaGroup!.textContent).toContain('(no channels)')
+  })
 
-    keeperSelect.value = 'nova'
-    keeperSelect.dispatchEvent(new Event('change', { bubbles: true }))
+  it('groups bindings for unknown keepers under a warning section', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        configured_bindings: [
+          { channel_id: '123456', keeper_name: 'luna' },
+          { channel_id: '999888', keeper_name: 'bob_keeper' },
+        ],
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    expect(text).toContain('status busy')
-    expect(text).toContain('model gemini-2.5-flash')
-    expect(text).toContain('runtime keeper-nova-agent')
+    expect(text).toContain('⚠')
+    expect(text).toContain('bob_keeper')
+    expect(text).toContain('binding references undefined keeper')
+    const bobGroup = container.querySelector('[data-keeper="bob_keeper"]')
+    expect(bobGroup).not.toBeNull()
+    expect(bobGroup!.querySelector('[data-channel-id="999888"]')).not.toBeNull()
+  })
+
+  it('shows sidecar-off empty state when no bindings and sidecar offline', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        available: false,
+        connected: false,
+        stale: false,
+        status: 'offline',
+        configured_bindings: [],
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(text).toContain('Sidecar not started')
+    expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
+  })
+
+  it('shows no-keepers empty state when keeper directory is empty', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [{
+        ...sampleConnectorsResponse().connectors[0],
+        available: false,
+        connected: false,
+        status: 'offline',
+        configured_bindings: [],
+      }],
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue({ count: 0, keepers: [] })
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(text).toContain('No keepers configured')
+  })
+
+  it('expands [▾] header toggle to show per-dot liveness and metadata', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const beforeText = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(beforeText).not.toContain('Browser → Server')
+    expect(beforeText).not.toContain('keeper dir 2')
+
+    const toggleButton = container.querySelector<HTMLButtonElement>('button[aria-label="toggle header details"]')
+    expect(toggleButton).not.toBeNull()
+    toggleButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    const afterText = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    expect(afterText).toContain('Browser → Server')
+    expect(afterText).toContain('Server → Sidecar')
+    expect(afterText).toContain('keeper dir 2')
+  })
+
+  it('shows keeper metadata in each group header', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const novaGroup = container.querySelector('[data-keeper="nova"]')
+    expect(novaGroup).not.toBeNull()
+    const novaText = novaGroup!.textContent ?? ''
+    expect(novaText).toContain('status busy')
+    expect(novaText).toContain('model gemini-2.5-flash')
+    expect(novaText).toContain('runtime keeper-nova-agent')
   })
 })

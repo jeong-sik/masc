@@ -41,7 +41,7 @@ let with_test_env f =
       with_env "SB_PG_URL" "" @@ fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env
         ~net:(Eio.Stdenv.net env)

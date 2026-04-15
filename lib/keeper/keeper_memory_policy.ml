@@ -305,6 +305,29 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
   in
   if lines = [] then "No continuity snapshot available." else String.concat "\n" lines
 
+let continuity_fallback_summary_text
+    ~(continuity_summary : string)
+    ~(last_continuity_update_ts : float) : string =
+  let trimmed = String.trim continuity_summary in
+  if trimmed = "" then
+    "No continuity snapshot available."
+  else
+    let freshness_line =
+      if last_continuity_update_ts > 0.0 then
+        let age_s = max 0.0 (Time_compat.now () -. last_continuity_update_ts) in
+        Printf.sprintf "Freshness: %.0fs since last continuity update." age_s
+      else
+        "Freshness: unknown (last continuity update timestamp unavailable)."
+    in
+    String.concat "\n"
+      [
+        "Continuity source: persisted keeper meta fallback.";
+        freshness_line;
+        "Checkpoint note: latest checkpoint [STATE] snapshot unavailable.";
+        "Treat the following as prior context only and re-verify blockers, constraints, and repo state against the live world state before acting.";
+        trimmed;
+      ]
+
 let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
   `Assoc [
     ("goal", Json_util.string_opt_to_json snapshot.goal);

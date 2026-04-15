@@ -24,17 +24,17 @@ let with_temp_masc_dir f =
       (Printf.sprintf "masc-hebbian-eio-%d-%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000000.)))
   in
   Unix.mkdir base 0o755;
-  let config = Room.default_config base in
-  let _ = Room.init config ~agent_name:None in
+  let config = Coord.default_config base in
+  let _ = Coord.init config ~agent_name:None in
   (* Reset lock stats before each test *)
   Hebbian_eio.reset_lock_stats ();
   try
     let result = f config in
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     rm_rf base;
     result
   with e ->
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     rm_rf base;
     raise e
 

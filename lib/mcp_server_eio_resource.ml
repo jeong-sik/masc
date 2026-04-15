@@ -23,7 +23,7 @@ let handle_read_resource_eio state id params =
         let registry = state.Mcp_server.session_registry in
 
         let read_messages_json ~since_seq ~limit =
-          let msgs_path = Room.messages_dir config in
+          let msgs_path = Coord.messages_dir config in
           if Sys.file_exists msgs_path then
             let extract_seq name =
               match String.index_opt name '_' with
@@ -38,7 +38,7 @@ let handle_read_resource_eio state id params =
             List.iter (fun name ->
               if !count < limit then begin
                 let path = Filename.concat msgs_path name in
-                let json = Room.read_json config path in
+                let json = Coord.read_json config path in
                 match Types.message_of_yojson json with
                 | Ok msg when msg.Types.seq > since_seq ->
                     msgs := (Types.message_to_yojson msg) :: !msgs;
@@ -94,10 +94,10 @@ let handle_read_resource_eio state id params =
                 | None -> None
               in
               ("text/markdown", text_opt)
-          | "status" -> ("text/markdown", Some (Room.status config))
+          | "status" -> ("text/markdown", Some (Coord.status config))
           | "status.json" ->
-              let state_json = Types.room_state_to_yojson (Room.read_state config) in
-              let backlog_json = Types.backlog_to_yojson (Room.read_backlog config) in
+              let state_json = Types.room_state_to_yojson (Coord.read_state config) in
+              let backlog_json = Types.backlog_to_yojson (Coord.read_backlog config) in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
@@ -106,24 +106,24 @@ let handle_read_resource_eio state id params =
                 ("connected_agents", `List connected_agents);
               ] in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "tasks" -> ("text/markdown", Some (Room.list_tasks config))
+          | "tasks" -> ("text/markdown", Some (Coord.list_tasks config))
           | "tasks.json" ->
-              let backlog_json = Types.backlog_to_yojson (Room.read_backlog config) in
+              let backlog_json = Types.backlog_to_yojson (Coord.read_backlog config) in
               ("application/json", Some (Yojson.Safe.pretty_to_string backlog_json))
           | "who" -> ("text/markdown", Some (Session.status_string registry))
           | "who.json" ->
               let statuses = Session.get_agent_statuses registry in
               ("application/json", Some (Yojson.Safe.pretty_to_string (`List statuses)))
           | "agents" ->
-              let json = Room.get_agents_status config in
+              let json = Coord.get_agents_status config in
               ("text/markdown", Some (Yojson.Safe.pretty_to_string json))
           | "agents.json" ->
-              let json = Room.get_agents_status config in
+              let json = Coord.get_agents_status config in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "messages" | "messages/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
-              ("text/markdown", Some (Room.get_messages config ~since_seq ~limit))
+              ("text/markdown", Some (Coord.get_messages config ~since_seq ~limit))
           | "messages.json" | "messages.json/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
@@ -137,10 +137,10 @@ let handle_read_resource_eio state id params =
               let json = read_events_json ~limit in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "worktrees" ->
-              let json = Room.worktree_list config in
+              let json = Coord.worktree_list config in
               ("text/markdown", Some (Yojson.Safe.pretty_to_string json))
           | "worktrees.json" ->
-              let json = Room.worktree_list config in
+              let json = Coord.worktree_list config in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "schema" ->
               ("text/markdown", Some Mcp_server.schema_markdown)
@@ -150,7 +150,7 @@ let handle_read_resource_eio state id params =
               let file = Filename.concat config.base_path ".masc/institution.json" in
               if Sys.file_exists file then
                 try
-                  let json = Room.read_json config file in
+                  let json = Coord.read_json config file in
                   let inst = Institution_eio.institution_of_json json in
                   ("text/markdown", Some (Institution_eio.format_for_injection inst))
                 with

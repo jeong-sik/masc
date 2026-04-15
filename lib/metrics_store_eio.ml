@@ -42,11 +42,11 @@ type agent_metrics = {
 } [@@deriving yojson, show]
 
 (** Config type alias for clarity *)
-type config = Room_utils.config
+type config = Coord_utils.config
 
 (** Get metrics directory *)
 let metrics_dir (config : config) =
-  Filename.concat config.Room_utils.base_path ".masc/metrics"
+  Filename.concat (Coord_utils.masc_dir config) "metrics"
 
 (** Get agent-specific metrics directory *)
 let agent_metrics_dir config agent_id =

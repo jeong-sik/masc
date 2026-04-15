@@ -26,15 +26,15 @@ let with_temp_masc_dir f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* Reset cached entry count to prevent cross-test contamination *)
   Cache_eio.reset_cached_entry_count ();
-  let config = Room.default_config base in
-  let _ = Room.init config ~agent_name:None in
+  let config = Coord.default_config base in
+  let _ = Coord.init config ~agent_name:None in
   try
     let result = f config in
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     rm_rf base;
     result
   with e ->
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     rm_rf base;
     raise e
 

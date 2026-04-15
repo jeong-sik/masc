@@ -49,11 +49,11 @@ let load_config () =
 (** Check if orchestration is needed *)
 let should_orchestrate room_config =
   (* Check if room is paused first *)
-  if Room.is_paused room_config then begin
+  if Coord.is_paused room_config then begin
     Log.Orchestrator.debug "room is paused, skipping";
     false
   end else begin
-  match Room.read_backlog_r room_config with
+  match Coord.read_backlog_r room_config with
   | Error msg ->
       Log.Orchestrator.error
         "backlog unavailable, skipping orchestration check: %s" msg;
@@ -65,7 +65,7 @@ let should_orchestrate room_config =
       ) backlog.tasks in
 
       (* Get active (non-zombie) agents *)
-      let agents = Room.get_agents_raw room_config in
+      let agents = Coord.get_agents_raw room_config in
       let active_agents = List.filter (fun (agent: Types.agent) ->
         not (Resilience.Zombie.is_zombie agent.last_seen)
       ) agents in
@@ -121,15 +121,15 @@ Start by calling mcp__masc__masc_status to see the current room state.|}
 
 (** Spawn the orchestrator agent. *)
 let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =
-  if Room.is_paused room_config then begin
+  if Coord.is_paused room_config then begin
     Log.Orchestrator.debug "room paused before spawn, aborting";
-    { Spawn.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
+    { Spawn.success = false; output = "Coord paused"; exit_code = 0; elapsed_ms = 0;
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
       cache_read_tokens = None; cost_usd = None }
   end else begin
   Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
 
-  let _msg = Room.broadcast room_config ~from_agent:"system"
+  let _msg = Coord.broadcast room_config ~from_agent:"system"
     ~content:"Auto-orchestrator activated - spawning coordinator with MCP tools" in
 
   let prompt = make_orchestrator_prompt ~port:config.port in
@@ -186,7 +186,7 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
   end)
 
 (** Build the zero-zombie cleanup consumer.
-    Runs Room.cleanup_zombies and logs if zombies were found. *)
+    Runs Coord.cleanup_zombies and logs if zombies were found. *)
 let make_zero_zombie_consumer ~sw ~room_config
     : (module Pulse.Consumer) =
   (module struct
@@ -198,7 +198,7 @@ let make_zero_zombie_consumer ~sw ~room_config
          cleanup_zombies I/O. See RFC #3646 M5 / #3626. *)
       Eio.Fiber.fork ~sw (fun () ->
         try
-          let status = Room.cleanup_zombies room_config in
+          let status = Coord.cleanup_zombies room_config in
           let status_trimmed = String.trim status in
           if String.length status_trimmed > 0 then begin
             let has_zombie_indicator =
@@ -214,7 +214,7 @@ let make_zero_zombie_consumer ~sw ~room_config
           end;
           let ttl = Env_config_runtime.Claim.ttl_seconds in
           (try
-            let released = Room_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
+            let released = Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
             if released <> [] then
               Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
                 (List.length released)

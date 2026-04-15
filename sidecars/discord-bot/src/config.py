@@ -19,10 +19,12 @@ from pydantic_settings import BaseSettings
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".masc/connectors/discord/bindings.json"
 DEFAULT_BINDING_AUDIT_PATH: Final[str] = ".masc/connectors/discord/binding_audit.jsonl"
 DEFAULT_STATUS_PATH: Final[str] = ".masc/connectors/discord/status.json"
+DEFAULT_NAMES_PATH: Final[str] = ".masc/connectors/discord/names.json"
 
 LEGACY_BINDING_STORE_PATH: Final[str] = ".gate/discord_bindings.json"
 LEGACY_BINDING_AUDIT_PATH: Final[str] = ".gate/discord_binding_audit.jsonl"
 LEGACY_STATUS_PATH: Final[str] = ".gate/discord_status.json"
+LEGACY_NAMES_PATH: Final[str] = ".gate/discord_names.json"
 LEGACY_BASE_ROOT: Final[Path] = Path("sidecars/discord-bot")
 
 
@@ -80,6 +82,13 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices(
             "DISCORD_STATUS_PATH",
             "discord_status_path",
+        ),
+    )
+    discord_names_path: str = Field(
+        default=DEFAULT_NAMES_PATH,
+        validation_alias=AliasChoices(
+            "DISCORD_NAMES_PATH",
+            "discord_names_path",
         ),
     )
 
@@ -166,6 +175,7 @@ class BotConfig(BaseSettings):
         "discord_binding_store_path",
         "discord_binding_audit_path",
         "discord_status_path",
+        "discord_names_path",
     )
     @classmethod
     def validate_non_empty_path(cls, v: str) -> str:
@@ -244,6 +254,9 @@ class BotConfig(BaseSettings):
     def status_path(self) -> Path:
         return self._resolve_storage_path(self.discord_status_path)
 
+    def names_path(self) -> Path:
+        return self._resolve_storage_path(self.discord_names_path)
+
     def legacy_binding_store_path(self) -> Path:
         return self._resolve_legacy_storage_path(LEGACY_BINDING_STORE_PATH)
 
@@ -252,6 +265,9 @@ class BotConfig(BaseSettings):
 
     def legacy_status_path(self) -> Path:
         return self._resolve_legacy_storage_path(LEGACY_STATUS_PATH)
+
+    def legacy_names_path(self) -> Path:
+        return self._resolve_legacy_storage_path(LEGACY_NAMES_PATH)
 
     def gate_message_url(self) -> str:
         base = self.gate_base_url.rstrip("/")

@@ -26,8 +26,8 @@ type cache_entry = {
 }
 
 (** Get cache directory *)
-let cache_dir (config : Room_utils.config) =
-  Filename.concat config.base_path ".masc/cache"
+let cache_dir (config : Coord_utils.config) =
+  Filename.concat (Coord_utils.masc_dir config) "cache"
 
 (** Ensure cache directory exists *)
 let ensure_cache_dir config =

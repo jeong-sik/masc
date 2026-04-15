@@ -218,7 +218,7 @@ let action_matches_incident incident action =
       let action_type = string_field "action_type" action in
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
-let build_keeper_briefs (config : Room.config) (keepers : Yojson.Safe.t list) =
+let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
   let all_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_lookup name =
     List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries
@@ -373,14 +373,11 @@ let build_operation_contexts command_plane_json =
            let linked_session_id, detachment_status =
              match Hashtbl.find_opt detachments operation_id with
              | Some (session_id, status_str) ->
-                 (session_id, Option.map Cp_serde.detachment_status_of_string status_str)
+                 (session_id, status_str)
              | None ->
                  (trim_to_option (string_field "detachment_session_id" operation), None)
            in
-           let status =
-             Option.bind (trim_to_option (string_field "status" operation))
-               Cp_serde.operation_status_of_string
-           in
+           let status = trim_to_option (string_field "status" operation) in
            Some
              {
                operation_id;
@@ -395,11 +392,11 @@ let build_operation_contexts command_plane_json =
 let operation_badge_json (operation : operation_context) =
   let status_str =
     match operation.status with
-    | Some s -> Cp_serde.string_of_operation_status s
+    | Some s -> s
     | None -> "unknown"
   in
   let detachment_status_str =
-    Option.map Cp_serde.detachment_status_to_string operation.detachment_status
+    operation.detachment_status
   in
   `Assoc
     [

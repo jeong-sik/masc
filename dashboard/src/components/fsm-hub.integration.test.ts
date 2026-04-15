@@ -19,17 +19,19 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import {
+  normalizeKeeperCompositeSnapshot,
+  type KeeperCompositeSnapshot,
+} from '../api/keeper'
 import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { deriveStateEntries, deriveSwimlaneSegments } from './fsm-hub'
 
-/** Server-shaped keeper composite snapshot matching the actual
-    `/api/v1/keepers/:name/composite` response observed from a live
-    MASC v0.8.0 server on 2026-04-15. If the server changes this
-    shape, the parse should fail here, not silently produce undefined
-    in the swimlane. */
-const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
+/** Legacy server-shaped keeper composite snapshot observed from a live
+    `/api/v1/keepers/:name/composite` response before recovery wiring.
+    The dashboard must normalize this shape instead of crashing at
+    `snapshot.recovery.data_record`. */
+const LEGACY_COMPOSITE_PAYLOAD = {
   correlation_id: '10510-64f79d602ce6c-60c',
   run_id: 'r-1776233076-0',
   ts: 1776235685.221697,
@@ -39,17 +41,18 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   cascade: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: false },
-  recovery: { data_record: false, fsm_condition: false },
   invariants: {
     phase_turn_alignment: true,
     no_cascade_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
-    recovery_two_store_sync: true,
   },
   is_live: false,
   last_outcome: { turn_id: 353, ended_at: 1776234638.709722 },
 }
+
+const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot =
+  normalizeKeeperCompositeSnapshot(LEGACY_COMPOSITE_PAYLOAD)
 
 /** Server-shaped gate keepers response. */
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
@@ -80,6 +83,14 @@ describe('FSM Hub integration — API response shape', () => {
   })
 
   describe('composite snapshot response', () => {
+    it('normalizes legacy payloads that omit recovery wiring', () => {
+      expect(REAL_COMPOSITE_SHAPE.recovery).toEqual({
+        data_record: false,
+        fsm_condition: false,
+      })
+      expect(REAL_COMPOSITE_SHAPE.invariants.recovery_two_store_sync).toBe(true)
+    })
+
     it('carries all 5 sub-FSM fields the FsmHub renders', () => {
       expect(REAL_COMPOSITE_SHAPE.phase).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.turn_phase).toBeDefined()

@@ -251,8 +251,8 @@ let result_to_json = function
           ("drift_type", `String (drift_type_to_string details.drift_type));
         ]
 
-let drift_log_file (config : Room.config) =
-  Filename.concat (Room.masc_dir config) "drift_guard.jsonl"
+let drift_log_file (config : Coord.config) =
+  Filename.concat (Coord.masc_dir config) "drift_guard.jsonl"
 
 let ensure_dir path =
   Fs_compat.mkdir_p path
@@ -264,7 +264,7 @@ let verify_and_log config ~from_agent ~to_agent ~task_id ~original ~received
     ?threshold () =
   let result = verify_handoff ~original ~received ?threshold () in
   let log_path = drift_log_file config in
-  ensure_dir (Room.masc_dir config);
+  ensure_dir (Coord.masc_dir config);
   let entry =
     `Assoc
       [

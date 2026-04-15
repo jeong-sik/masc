@@ -177,11 +177,11 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 (** {1 File Operations} *)
 
-type config = Room_utils.config
+type config = Coord_utils.config
 
 (** Legacy single-file path (for fallback reads). *)
 let legacy_audit_path (config : config) =
-  let masc_dir = Room_utils.masc_dir config in
+  let masc_dir = Coord_utils.masc_dir config in
   Filename.concat masc_dir "audit.jsonl"
 
 (** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
@@ -200,7 +200,7 @@ let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty
 let audit_store_cache_mu = Eio.Mutex.create ()
 
 let get_audit_store (config : config) : Dated_jsonl.t =
-  let base = Filename.concat (Room_utils.masc_dir config) "audit" in
+  let base = Filename.concat (Coord_utils.masc_dir config) "audit" in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->
     match StringMap.find_opt base !audit_store_cache with
     | Some store -> store

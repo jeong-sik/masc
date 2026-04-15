@@ -81,7 +81,7 @@ let emit_cost_event
     2. Destructive pattern detection — reject dangerous bash/edit commands
     3. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta_ref Mutable ref to keeper metadata
     @param session Session context for checkpoint persistence
     @param ctx_snapshot Immutable snapshot of working context (reserved, unused)
@@ -111,7 +111,7 @@ let suggest_alternatives ~(allowed_tools : string list)
      if len <= max_suggestions then candidates
      else List.filteri (fun i _ -> i < max_suggestions) candidates
 
-(** Pure decision logic for the on_idle hook.  Testable without Room.config.
+(** Pure decision logic for the on_idle hook.  Testable without Coord.config.
 
     Graduated response to repeated tool calls uses the configured
     [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
@@ -185,7 +185,7 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   loop 0 (List.rev entries)
 
 let make_hooks
-    ~config:(_config : Room.config)
+    ~config:(_config : Coord.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~session:(_session : Keeper_exec_context.session_context)
     ~ctx_snapshot:(_ctx_snapshot : Keeper_exec_context.working_context)

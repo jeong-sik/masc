@@ -1,5 +1,5 @@
 import type { Agent, Keeper, KeeperPhase, PipelineStage } from '../types'
-import { keeperDisplayStatus } from './keeper-runtime-display'
+import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-display'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -40,6 +40,7 @@ const CANONICAL_PHASE_KEYS = new Set([
   'Offline',
   'Running',
   'Failing',
+  'Overflowed',
   'Compacting',
   'HandingOff',
   'Draining',
@@ -51,7 +52,7 @@ const CANONICAL_PHASE_KEYS = new Set([
 ])
 
 const OFFLINE_PHASES = new Set<string>(['Offline', 'Stopped', 'Dead'])
-const ATTENTION_PHASES = new Set<string>(['Failing', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
+const ATTENTION_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
 
 const UNKNOWN_PHASE_META: PhaseMeta = {
   key: 'unknown',
@@ -69,6 +70,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: '오프라인', description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
   Running: { key: 'Running', label: '실행중', description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
   Failing: { key: 'Failing', label: '오류중', description: '최근 실행에서 오류를 감지했습니다.' },
+  Overflowed: { key: 'Overflowed', label: '오버플로우', description: '하드 context overflow가 발생해 자동 복구 경로를 기다리는 상태입니다.' },
   Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
   HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
   Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
@@ -163,6 +165,7 @@ function normalizePhase(phase: KeeperPhase | string | null | undefined): string 
     offline: 'Offline',
     running: 'Running',
     failing: 'Failing',
+    overflowed: 'Overflowed',
     compacting: 'Compacting',
     handing_off: 'HandingOff',
     handingoff: 'HandingOff',
@@ -201,34 +204,6 @@ function isHeartbeatStale(keeper: Keeper): boolean {
   return Date.now() - ts > HEARTBEAT_STALE_MS
 }
 
-function runtimeBlockerHint(keeper: Keeper): string | null {
-  const blockerClass = keeper.runtime_blocker_class
-  if (!blockerClass) return null
-  if (keeper.runtime_blocker_summary?.trim()) return keeper.runtime_blocker_summary.trim()
-  if (blockerClass === 'ambiguous_post_commit_timeout') {
-    return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'ambiguous_post_commit_failure') {
-    return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'autonomous_slot_wait_timeout') {
-    return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
-  }
-  if (blockerClass === 'admission_queue_wait_timeout') {
-    return 'OAS admission queue 대기 시간이 초과되었습니다.'
-  }
-  if (blockerClass === 'turn_timeout_after_queue_wait') {
-    return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
-  }
-  if (blockerClass === 'turn_timeout') {
-    return '턴 실행 시간이 제한 시간을 초과했습니다.'
-  }
-  if (blockerClass === 'completion_contract_violation') {
-    return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
-  }
-  return '런타임 차단 상태를 확인해야 합니다.'
-}
-
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
   if (keeper.paused || phaseKey === 'Paused' || lifecycleKey === 'paused') return 'paused'
   if (
@@ -253,7 +228,7 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
 }
 
 function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string | null {
-  const runtimeBlocker = runtimeBlockerHint(keeper)
+  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   if (runtimeBlocker) return runtimeBlocker
   const blocker = keeper.last_blocker?.trim()
   if (blocker) return blocker

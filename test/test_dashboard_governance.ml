@@ -55,8 +55,8 @@ let test_empty_governance_structure () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
@@ -264,8 +264,8 @@ let test_governance_dir_created_before_read () =
       (* read_recent on empty dir returns [] — dashboard_json should still work *)
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
@@ -281,8 +281,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       Eio.Switch.run @@ fun sw ->
       let decision_result = ref None in
       Eio.Fiber.fork ~sw (fun () ->
@@ -291,7 +291,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~keeper_name:"dashboard-keeper"
             ~tool_name:"masc_code_delete"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
-            ~risk_level:"critical"
+            ~risk_level:Lib.Keeper_approval_queue.Critical
         in
         decision_result := Some decision);
       Eio.Fiber.yield ();

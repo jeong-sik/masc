@@ -26,8 +26,8 @@ let cleanup_dir dir =
   if Sys.file_exists dir then rm dir
 
 let setup_room config =
-  (* Use Room.init to properly initialize MASC *)
-  ignore (Lib.Room.init config ~agent_name:(Some "test-agent"))
+  (* Use Coord.init to properly initialize MASC *)
+  ignore (Lib.Coord.init config ~agent_name:(Some "test-agent"))
 
 (* ===== format_section Tests ===== *)
 
@@ -69,7 +69,7 @@ let test_generate_compact () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate_compact config in
   Alcotest.(check bool) "contains MASC" true (contains output "MASC");
@@ -83,7 +83,7 @@ let test_generate_full () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate config in
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
@@ -99,7 +99,7 @@ let test_agents_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.agents_section (Unix.gettimeofday ()) [] in
   Alcotest.(check string) "title" "Agents" section.title;
@@ -110,7 +110,7 @@ let test_tasks_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.tasks_section [] in
   Alcotest.(check string) "title" "Tasks" section.title;
@@ -121,7 +121,7 @@ let test_messages_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.messages_section [] in
   Alcotest.(check string) "title" "Recent Messages" section.title;
@@ -132,7 +132,7 @@ let test_worktrees_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let section = Lib.Dashboard.worktrees_section config in
   Alcotest.(check string) "title" "Worktrees" section.title;
@@ -187,7 +187,7 @@ let test_generate_full_contains_keepers () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate config in
   Alcotest.(check bool) "contains Keepers section" true (contains output "Keepers");
@@ -197,7 +197,7 @@ let test_generate_compact_contains_keepers () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Room_utils.default_config dir in
+  let config = Coord_utils.default_config dir in
   setup_room config;
   let output = Lib.Dashboard.generate_compact config in
   Alcotest.(check bool) "contains KEEPERS line" true (contains output "KEEPERS:");

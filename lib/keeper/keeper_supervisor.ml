@@ -13,6 +13,8 @@
 open Keeper_types
 open Keeper_execution
 
+module StringMap = Map.Make (String)
+
 (* ── Pure helpers ────────────────────────────────────────── *)
 
 let backoff_delay attempt =
@@ -57,7 +59,7 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
   let keepers_dir =
-    Filename.concat (Room.masc_root_dir ctx.config) "keepers" in
+    Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in
   (match Keeper_registry.dispatch_event ~base_path meta.name
            Keeper_state_machine.Fiber_started with
    | Ok _ -> ()
@@ -159,10 +161,10 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     let reg =
       Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
     in
-    (* Room initialization *)
+    (* Coord initialization *)
     (try
-       if not (Room_utils.is_initialized ctx.config) then
-         let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ()
+       if not (Coord_utils.is_initialized ctx.config) then
+         let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in ()
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Keeper.error "supervisor room init failed: %s"
          (Printexc.to_string exn));
@@ -279,14 +281,14 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
      && n_candidates >= sp_min
   then begin
     (* Group by failure_reason ADT variant (not string prefix) *)
-    let cohorts = Hashtbl.create 4 in
-    List.iter (fun ((entry : Keeper_registry.registry_entry), _msg) ->
+    let insert_cohort acc (entry : Keeper_registry.registry_entry) _msg =
       let key = cohort_key_of_reason entry.last_failure_reason in
-      let prev = Option.value ~default:[] (Hashtbl.find_opt cohorts key) in
-      Hashtbl.replace cohorts key ((entry, _msg) :: prev)
-    ) to_restart;
+      let prev = try StringMap.find key acc with Not_found -> [] in
+      StringMap.add key ((entry, _msg) :: prev) acc
+    in
+    let cohorts = List.fold_left (fun acc ((e, m) : _ * string) -> insert_cohort acc e m) StringMap.empty to_restart in
     let dominant_key, dominant_entries =
-      Hashtbl.fold (fun k v (best_k, best_v) ->
+      StringMap.fold (fun k v (best_k, best_v) ->
         if List.length v > List.length best_v then (k, v) else (best_k, best_v)
       ) cohorts ("", [])
     in
@@ -379,7 +381,7 @@ let sweep_and_recover (ctx : _ context) =
     ) entries) in
   let restart_list =
     let keepers_dir =
-      Filename.concat (Room.masc_root_dir ctx.config) "keepers" in
+      Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in
     apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart in
   (* Restart crashed keepers *)
   List.iter (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->

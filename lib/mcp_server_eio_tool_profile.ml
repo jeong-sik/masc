@@ -160,7 +160,7 @@ let label_words_from_identifier ident =
 (** Custom human-readable titles for key tools.
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
-  (* Room lifecycle *)
+  (* Coord lifecycle *)
   ("masc_join", "Join Project");
   ("masc_leave", "Leave Project");
   ("masc_status", "Project Status");

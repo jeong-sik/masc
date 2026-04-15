@@ -23,37 +23,37 @@ let with_config f =
       in
       rm dir)
     (fun () ->
-      let config = Room.default_config dir in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config dir in
+      ignore (Coord.init config ~agent_name:None);
       f config)
 
 let select_room config _room_id =
-  Room.ensure_room_bootstrap config;
+  Coord.ensure_room_bootstrap config;
   config
 
 let test_current_room_defaults_to_default () =
   with_config (fun config ->
       check (option string) "default room" (Some "default")
-        (Room.read_current_room config))
+        (Coord.read_current_room config))
 
 let test_current_room_write_and_resolve_scope () =
   with_config (fun config ->
       let focused = select_room config "focus-room" in
       check (option string) "compat pointer stays default" (Some "default")
-        (Room.read_current_room focused);
+        (Coord.read_current_room focused);
       check string "resolved scope stays default" "default"
         focused.backend_config.Backend_types.cluster_name;
-      check bool "focused scope initialized" true (Room.is_initialized focused))
+      check bool "focused scope initialized" true (Coord.is_initialized focused))
 
 let test_current_room_writes_stay_canonical () =
   with_config (fun config ->
       let focused = select_room config "focus-room" in
-      ignore (Room.add_task focused ~title:"focus task" ~priority:1 ~description:"");
+      ignore (Coord.add_task focused ~title:"focus task" ~priority:1 ~description:"");
       check int "default namespace task count" 1
-        (List.length (Room.get_tasks_raw config));
+        (List.length (Coord.get_tasks_raw config));
       (* All rooms are flattened to default — get_tasks_safe is the single path *)
       check int "same tasks regardless of former room" 1
-        (List.length (Room.get_tasks_safe config)))
+        (List.length (Coord.get_tasks_safe config)))
 
 let read_lines path =
   let ic = open_in path in
@@ -71,7 +71,7 @@ let read_lines path =
    computing the path from wall-clock time, which is racy around UTC
    day/month boundaries (#4792 review). *)
 let find_latest_event_log config =
-  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
   let rec collect_jsonl dir =
     if not (Sys.file_exists dir) then []
     else
@@ -90,15 +90,15 @@ let find_latest_event_log config =
 let test_join_uses_default_namespace () =
   with_config (fun config ->
       let captured_event_kind = ref None in
-      let previous_hook = !Room_hooks.observe_agent_lifecycle_fn in
+      let previous_hook = !Coord_hooks.observe_agent_lifecycle_fn in
       Fun.protect
-        ~finally:(fun () -> Room_hooks.observe_agent_lifecycle_fn := previous_hook)
+        ~finally:(fun () -> Coord_hooks.observe_agent_lifecycle_fn := previous_hook)
         (fun () ->
-          Room_hooks.observe_agent_lifecycle_fn :=
+          Coord_hooks.observe_agent_lifecycle_fn :=
             (fun _config ~agent_id:_ ~event_kind ~details:_ ->
               captured_event_kind := Some event_kind);
           let result =
-            Room.join config ~agent_name:"claude"
+            Coord.join config ~agent_name:"claude"
               ~capabilities:[ "debug" ] ()
           in
           check bool "join succeeds" true

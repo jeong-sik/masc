@@ -12,6 +12,6 @@ val service_name : string
     @param tool_dispatcher Function that dispatches tool calls:
       [tool_name -> arguments_json -> (result_json, error_message) result]. *)
 val create_service :
-  room_config:Room_utils_backend_setup.config ->
+  room_config:Coord_utils_backend_setup.config ->
   tool_dispatcher:(string -> string -> (string, string) result) ->
   Grpc_eio.Service.t

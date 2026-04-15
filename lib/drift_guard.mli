@@ -53,10 +53,10 @@ val verify_handoff :
 
 val result_to_json : verification_result -> Yojson.Safe.t
 
-val drift_log_file : Room.config -> string
+val drift_log_file : Coord.config -> string
 
 val verify_and_log :
-  Room.config ->
+  Coord.config ->
   from_agent:string ->
   to_agent:string ->
   task_id:string ->
@@ -66,4 +66,4 @@ val verify_and_log :
   unit ->
   verification_result
 
-val get_drift_stats : Room.config -> days:int -> int * int * float
+val get_drift_stats : Coord.config -> days:int -> int * int * float

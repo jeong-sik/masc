@@ -10,7 +10,7 @@
    activity_graph_reducer)
  (wrapped false)
  (libraries
-   masc_room
+   masc_coord
    masc_core
    masc_types
    masc_log

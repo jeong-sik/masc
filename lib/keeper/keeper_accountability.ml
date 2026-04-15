@@ -104,7 +104,7 @@ let keeper_name_of_agent agent_name =
 let accountability_dir base_path =
   Filename.concat base_path ".masc/accountability"
 
-let get_store (config : Room_query.config) : Dated_jsonl.t =
+let get_store (config : Coord_query.config) : Dated_jsonl.t =
   let base_path = config.base_path in
   Eio.Mutex.use_rw ~protect:true store_cache_mu (fun () ->
       match Hashtbl.find_opt store_cache base_path with
@@ -246,7 +246,7 @@ let resolution_event_of_json json =
       | None -> None)
   | _ -> None
 
-let read_window_entries (config : Room_query.config) =
+let read_window_entries (config : Coord_query.config) =
   let now = Time_compat.now () in
   let since = event_date_string (now -. (float_of_int summary_window_days *. 86400.0)) in
   let until = event_date_string now in
@@ -314,14 +314,14 @@ let make_claim_id ~agent_name ~kind ~subject ~task_id ~created_at =
   let digest = Digest.to_hex (Digest.string raw) in
   "acct-" ^ String.sub digest 0 12
 
-let append_claim (config : Room_query.config) (event : claim_event) =
+let append_claim (config : Coord_query.config) (event : claim_event) =
   Dated_jsonl.append (get_store config) (claim_event_to_json event)
 
-let append_resolution (config : Room_query.config) (event : resolution_event) =
+let append_resolution (config : Coord_query.config) (event : resolution_event) =
   Dated_jsonl.append (get_store config) (resolution_event_to_json event)
 
-let task_title_for_id (config : Room_query.config) task_id =
-  Room_query.get_tasks_safe config
+let task_title_for_id (config : Coord_query.config) task_id =
+  Coord_query.get_tasks_safe config
   |> List.find_opt (fun (task : Types.task) -> String.equal task.id task_id)
   |> Option.map (fun task -> task.title)
 
@@ -429,7 +429,7 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
           supporting_evidence_refs = normalize_refs evidence_refs;
         }
 
-let record_task_transition (config : Room_query.config) ~agent_name ~task_id
+let record_task_transition (config : Coord_query.config) ~agent_name ~task_id
     ~transition ~details =
   if not (is_keeper_agent_name agent_name) then ()
   else
@@ -459,7 +459,7 @@ let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
   normalize_refs
     (("turn:" ^ trace_id ^ ":" ^ string_of_int turn_number) :: strong_evidence_refs)
 
-let record_completion_claim (config : Room_query.config) ~keeper_name ~agent_name
+let record_completion_claim (config : Coord_query.config) ~keeper_name ~agent_name
     ~trace_id ~turn_number ~subject ?task_id ?(evidence_refs = [])
     ?(surface = "keeper_turn") ~strong_evidence ~strong_evidence_refs () =
   if not (is_keeper_agent_name agent_name) then ()
@@ -533,7 +533,7 @@ let risk_band_of_metrics ~evidence_coverage ~unsupported_completion_rate
   else
     "high"
 
-let accountability_summary_json (config : Room_query.config) ~keeper_name
+let accountability_summary_json (config : Coord_query.config) ~keeper_name
     ~agent_name =
   let now = Time_compat.now () in
   let cutoff = now -. (float_of_int summary_window_days *. 86400.0) in

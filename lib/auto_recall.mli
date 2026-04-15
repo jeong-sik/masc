@@ -81,7 +81,7 @@ val estimate_tokens : string -> int
     @return Recall result with items and metadata
 *)
 val fetch_context :
-  Room_utils.config ->
+  Coord_utils.config ->
   config:recall_config ->
   ?query:string ->
   unit ->
@@ -101,7 +101,7 @@ val fetch_context_eio :
   sw:Eio.Switch.t ->
   env:< net : _ Eio.Net.t; .. > ->
   clock:_ Eio.Time.clock ->
-  Room_utils.config ->
+  Coord_utils.config ->
   config:recall_config ->
   ?query:string ->
   unit ->
@@ -116,7 +116,7 @@ val fetch_context_eio :
     @return Recall result with boosted relevance
 *)
 val fetch_context_smart :
-  Room_utils.config ->
+  Coord_utils.config ->
   config:recall_config ->
   query:string ->
   unit ->

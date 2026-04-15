@@ -18,6 +18,7 @@ type delivery_surface =
 
 type model_id =
   | Bdi_speech_v1
+  | Magentic_ledger_v1
 
 type transition_reason =
   | Tool_only_stay_silent
@@ -26,6 +27,7 @@ type transition_reason =
   | Tool_only_broadcast
   | Tool_only_claim_task
   | Tool_only_visible_reply
+  | Tool_only_progress_ledger
   | Explicit_social_headers
   | Missing_headers_fallback_visible_reply
   | Invalid_headers_fallback_visible_reply
@@ -96,10 +98,12 @@ let delivery_surface_of_string value =
 
 let model_id_to_string = function
   | Bdi_speech_v1 -> "bdi_speech_v1"
+  | Magentic_ledger_v1 -> "magentic_ledger_v1"
 
 let model_id_of_string value =
   match String.lowercase_ascii (String.trim value) with
   | "bdi_speech_v1" -> Some Bdi_speech_v1
+  | "magentic_ledger_v1" -> Some Magentic_ledger_v1
   | _ -> None
 
 let default_model_id = Bdi_speech_v1
@@ -116,6 +120,7 @@ let transition_reason_to_string = function
   | Tool_only_broadcast -> "tool_only:broadcast"
   | Tool_only_claim_task -> "tool_only:claim_task"
   | Tool_only_visible_reply -> "tool_only:visible_reply"
+  | Tool_only_progress_ledger -> "tool_only:progress_ledger"
   | Explicit_social_headers -> "headers:explicit_social_headers"
   | Missing_headers_fallback_visible_reply ->
       "headers_missing:fallback_visible_reply"

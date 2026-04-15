@@ -130,7 +130,7 @@ let stale_sec_of_iso = Operator_digest_review_types.stale_sec_of_iso
 let review_action_copy = Operator_digest_review_types.review_action_copy
 
 let room_state_json config =
-  if not (Room.is_initialized config) then
+  if not (Coord.is_initialized config) then
     `Assoc
       [
         ("project", `String (Filename.basename config.base_path));
@@ -139,7 +139,7 @@ let room_state_json config =
         ("pause_reason", `Null);
       ]
   else
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     `Assoc
       [
         ("project", `String state.project);
@@ -490,7 +490,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     ?command_plane_summary ?swarm_status (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
-  if not (Room.is_initialized config) then
+  if not (Coord.is_initialized config) then
     let recent_reviews = Operator_review_state.recent_review_decisions_json ~limit:12 config in
     Ok
       (`Assoc

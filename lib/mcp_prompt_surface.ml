@@ -88,7 +88,7 @@ let string_contains = Dashboard_utils.string_contains
 let string_contains_ci = Dashboard_utils.string_contains_ci
 
 let run_tokens run_id =
-  let safe = Room_utils.safe_filename run_id |> String.lowercase_ascii in
+  let safe = Coord_utils.safe_filename run_id |> String.lowercase_ascii in
   [ run_id; safe; "run_id=" ^ run_id; "run_id=" ^ safe; "swarm-live:" ^ run_id; "swarm-live:" ^ safe ]
 
 let rec json_contains_run_tokens tokens = function

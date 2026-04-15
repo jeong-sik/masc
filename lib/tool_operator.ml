@@ -2,7 +2,7 @@ open Types
 open Tool_args
 
 type 'a context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;

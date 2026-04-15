@@ -550,6 +550,7 @@ export type KeeperPhase =
   | 'Offline'
   | 'Running'
   | 'Failing'
+  | 'Overflowed'
   | 'Compacting'
   | 'HandingOff'
   | 'Draining'

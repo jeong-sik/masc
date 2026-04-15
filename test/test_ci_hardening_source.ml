@@ -318,8 +318,8 @@ let test_dashboard_component_split_contracts () =
   check bool "mission attention card exported from split file" true
     (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
        "export function AttentionCard");
-  check bool "room backend setup no longer references transaction companion after PG removal" true
-    (file_not_contains_pattern "lib/room/room_utils_backend_setup.ml"
+  check bool "coord backend setup no longer references transaction companion after PG removal" true
+    (file_not_contains_pattern "lib/coord/coord_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
 let test_mission_briefing_memory_guard_contracts () =
@@ -360,15 +360,15 @@ let test_activity_surface_contracts () =
     (not
        (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
           {|"/api/v1/social-graph"|}));
-  check bool "room top-level module emits activity events" true
-    (file_contains_pattern "lib/room.ml"
+  check bool "coord top-level module emits activity events" true
+    (file_contains_pattern "lib/coord.ml"
        "Activity_graph.emit config");
-  check bool "room task lifecycle emits activity events via hook" true
-    (file_contains_pattern "lib/room/room_task.ml"
-       "!Room_hooks.activity_emit_fn config");
-  check bool "room broadcast emits activity events via hook" true
-    (file_contains_pattern "lib/room/room_state.ml"
-       "!Room_hooks.activity_emit_fn config");
+  check bool "coord task lifecycle emits activity events via hook" true
+    (file_contains_pattern "lib/coord/coord_task.ml"
+       "!Coord_hooks.activity_emit_fn config");
+  check bool "coord broadcast emits activity events via hook" true
+    (file_contains_pattern "lib/coord/coord_broadcast.ml"
+       "!Coord_hooks.activity_emit_fn config");
   check bool "board success paths emit activity events" true
     (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"
        "Activity_graph.emit config")
@@ -506,7 +506,7 @@ let test_transport_health_contracts () =
   check bool "transport health avoids room message scans" true
     (not
        (file_contains_pattern "lib/transport_metrics.ml"
-          {|Room.get_messages_raw_in_room|}))
+          {|Coord.get_messages_raw_in_room|}))
   (* command plane topology reads guard removed (CP purge: Command_plane_v2 deleted) *)
 
 let test_worktree_list_contracts () =

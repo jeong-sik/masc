@@ -11,7 +11,7 @@
 
 
 (** Config type alias *)
-type config = Room_utils.config
+type config = Coord_utils.config
 
 (** Telemetry event types *)
 type event =
@@ -81,7 +81,7 @@ let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
 
 (** Legacy single-file path (for fallback reads). *)
 let telemetry_file config =
-  Filename.concat (Room_utils.masc_dir config) "telemetry.jsonl"
+  Filename.concat (Coord_utils.masc_dir config) "telemetry.jsonl"
 
 (** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
@@ -90,7 +90,7 @@ let telemetry_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 let telemetry_store_cache_mu = Eio.Mutex.create ()
 
 let get_telemetry_store config : Dated_jsonl.t =
-  let base = Filename.concat (Room_utils.masc_dir config) "telemetry" in
+  let base = Filename.concat (Coord_utils.masc_dir config) "telemetry" in
   Eio_guard.with_mutex telemetry_store_cache_mu (fun () ->
     match Hashtbl.find_opt telemetry_store_cache base with
     | Some store -> store

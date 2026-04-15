@@ -20,10 +20,10 @@ let test_confirm_rejects_expired_token () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      let pending_dir = Filename.concat (Room.masc_dir config) "operator" in
-      Room_utils.mkdir_p pending_dir;
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let pending_dir = Filename.concat (Coord.masc_dir config) "operator" in
+      Coord_utils.mkdir_p pending_dir;
       let path = Filename.concat pending_dir "pending_confirms.json" in
       let oc = open_out path in
       Fun.protect
@@ -64,8 +64,8 @@ let test_swarm_run_continue_removed_from_operator_actions () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
       Operator_control.action_json ctx
         (`Assoc
@@ -86,8 +86,8 @@ let test_swarm_run_abandon_removed_from_operator_actions () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
       Operator_control.action_json ctx
         (`Assoc
@@ -108,8 +108,8 @@ let test_swarm_run_rerun_removed_from_operator_actions () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
       Operator_control.action_json ctx
         (`Assoc

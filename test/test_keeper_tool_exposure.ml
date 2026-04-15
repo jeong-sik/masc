@@ -340,7 +340,7 @@ let test_path_relative_within_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
     check bool "relative path within root ok" true (Result.is_ok result)))
@@ -349,7 +349,7 @@ let test_path_absolute_outside_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
     check bool "absolute outside root rejected" true (Result.is_error result);
@@ -370,7 +370,7 @@ let test_path_traversal_attack () =
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir base) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config deep in
+    let config = Coord.default_config deep in
     (* ../../../../etc/passwd should escape any reasonable root *)
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"../../../../etc/passwd" in
@@ -380,7 +380,7 @@ let test_path_allowed_paths_filter () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     (* lib is allowed, src is not *)
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
@@ -398,7 +398,7 @@ let test_path_allowed_paths_filter_strips_all_trailing_slashes () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib//"] ~raw_path:"lib/foo.ml" in
     check bool "lib path allowed with repeated trailing slash" true
@@ -411,7 +411,7 @@ let test_path_absolute_allowed_paths_filter () =
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let ok_result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[lib_dir] ~raw_path:"lib/foo.ml" in
     check bool "absolute lib path allowed" true (Result.is_ok ok_result);
@@ -429,7 +429,7 @@ let test_absolute_allowed_paths_normalization () =
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let normalized =
       Keeper_alerting_path.absolute_allowed_paths
         ~config
@@ -443,7 +443,7 @@ let test_absolute_allowed_paths_slashes_only_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let normalized =
       Keeper_alerting_path.absolute_allowed_paths
         ~config
@@ -459,7 +459,7 @@ let test_absolute_allowed_paths_result_rejects_invalid_explicit_allowlist () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result =
       Keeper_alerting_path.absolute_allowed_paths_result
         ~config
@@ -472,7 +472,7 @@ let test_path_allowed_paths_single_trailing_slash () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let exact_match = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib/"] ~raw_path:"lib" in
     check bool "exact dir match with single trailing slash" true
@@ -486,7 +486,7 @@ let test_path_empty_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"" in
     check bool "empty path rejected" true (Result.is_error result)))
@@ -495,7 +495,7 @@ let test_path_whitespace_only_rejected () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"   " in
     check bool "whitespace path rejected" true (Result.is_error result)))
@@ -504,7 +504,7 @@ let test_path_empty_allowed_permits_all_within_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     (* Empty allowed_paths = permit all within root *)
     let r1 = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:[] ~raw_path:"lib/a.ml" in
@@ -521,7 +521,7 @@ let test_read_path_empty_allowlist_permits_full_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let read_lib = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"lib/foo.ml" in
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
@@ -533,7 +533,7 @@ let test_read_path_respects_allowed_paths () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let read_lib = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
     let read_src = Keeper_alerting_path.resolve_keeper_read_path
@@ -545,7 +545,7 @@ let test_read_path_rejects_outside_root () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"/etc/passwd" in
     check bool "read outside root rejected" true (Result.is_error result)))
@@ -554,7 +554,7 @@ let test_read_vs_write_path_alignment () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     (* Write: lib allowed, src rejected *)
     let write_lib = Keeper_alerting_path.resolve_keeper_target_path
       ~config ~allowed_paths:["lib"] ~raw_path:"lib/foo.ml" in
@@ -578,7 +578,7 @@ let test_read_path_rejects_nonexistent () =
   let dir = make_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     (* Path within root but does not exist on disk *)
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:[] ~raw_path:"nonexistent-repo/" in
@@ -602,7 +602,7 @@ let test_read_path_resolves_unique_nested_repo_suffix () =
     mkdir repo;
     mkdir lib_dir;
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["workspace"] ~raw_path:"masc-mcp/lib" in
     check bool "unique nested repo suffix resolved" true (Result.is_ok result);
@@ -629,7 +629,7 @@ let test_read_path_rejects_ambiguous_nested_repo_suffix () =
     make_repo "workspace-a";
     make_repo "workspace-b";
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let result = Keeper_alerting_path.resolve_keeper_read_path
       ~config ~allowed_paths:["workspace-a"; "workspace-b"] ~raw_path:"masc-mcp/lib" in
     check bool "ambiguous nested repo suffix rejected" true (Result.is_error result);
@@ -660,7 +660,7 @@ let test_read_path_does_not_follow_symlink_outside_root () =
       mkdir outside_lib;
       Unix.symlink outside link_path;
       run_with_isolated_base_path (fun () ->
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let result = Keeper_alerting_path.resolve_keeper_read_path
         ~config ~allowed_paths:[] ~raw_path:"masc-mcp/lib" in
       check bool "symlink escape is rejected" true (Result.is_error result);
@@ -702,7 +702,7 @@ let test_keeper_reported_nonexistent_subdir () =
   let dir = make_masc_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let allowed = [
       ".masc/playground/goal-default-demo/";
       ".masc/keepers/goal-default-demo/";
@@ -726,7 +726,7 @@ let test_keeper_reported_observe_only_scope () =
   let dir = make_masc_path_test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_path_test_dir dir) (fun () ->
     run_with_isolated_base_path (fun () ->
-    let config = Room.default_config dir in
+    let config = Coord.default_config dir in
     let allowed = [
       ".masc/playground/observer/";
       ".masc/keepers/observer/";

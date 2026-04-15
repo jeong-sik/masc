@@ -82,7 +82,7 @@ let estimate_tokens = Inference_utils.estimate_tokens
 (** {1 Source Fetchers} *)
 
 (** Fetch from MASC cache *)
-let fetch_from_cache (room_config : Room_utils.config) ~(config : recall_config) ~query:_ =
+let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config) ~query:_ =
   let entries =
     match config.cache_tags with
     | [] -> Cache_eio.list room_config ()
@@ -107,8 +107,8 @@ let fetch_from_cache (room_config : Room_utils.config) ~(config : recall_config)
   ) entries
 
 (** Fetch recent broadcasts *)
-let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_config) ~query:_ =
-  let messages = Room.get_messages_raw room_config
+let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_config) ~query:_ =
+  let messages = Coord.get_messages_raw room_config
     ~since_seq:0
     ~limit:config.max_broadcasts
   in
@@ -129,8 +129,8 @@ let fetch_from_broadcasts (room_config : Room_utils.config) ~(config : recall_co
   ) messages
 
 (** Fetch recently modified files from working directory *)
-let fetch_from_file_context (room_config : Room_utils.config) ~config:(_config : recall_config) ~query =
-  let masc_dir = Room_utils.masc_dir room_config in
+let fetch_from_file_context (room_config : Coord_utils.config) ~config:(_config : recall_config) ~query =
+  let masc_dir = Coord_utils.masc_dir room_config in
   let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
   
   (* Get recently modified files without shelling out (no find/xargs). *)
@@ -252,7 +252,7 @@ let fetch_source room_config ~config ~query = function
     @return Recall result with items sorted by relevance, truncated to token budget
 *)
 let fetch_context
-    (room_config : Room_utils.config)
+    (room_config : Coord_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
     ()
@@ -293,7 +293,7 @@ let fetch_context
 *)
 let fetch_context_eio
     ~sw:_ ~env:_ ~clock:_
-    (room_config : Room_utils.config)
+    (room_config : Coord_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
     ()
@@ -403,7 +403,7 @@ let content_matches_query content query =
 
 (** Fetch context with query-based relevance boosting *)
 let fetch_context_smart
-    (room_config : Room_utils.config)
+    (room_config : Coord_utils.config)
     ~(config : recall_config)
     ~(query : string)
     ()

@@ -302,8 +302,8 @@ let test_tool_exec_observer_bridges_to_telemetry () =
       in
       try rm base_dir with _ -> ())
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
       let on_exec ~tool_name ~success ~duration_ms =
         Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
           ~duration_ms ~agent_id:"llama-local-worker" ()

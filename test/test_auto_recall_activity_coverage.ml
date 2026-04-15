@@ -252,8 +252,8 @@ let write_file path content =
 
 let test_recent_activity_skips_malformed_jsonl_lines () =
   with_temp_dir "activity-feed-jsonl" @@ fun base_path ->
-  let config = Room.default_config base_path in
-  let masc_dir = Room.masc_dir config in
+  let config = Coord.default_config base_path in
+  let masc_dir = Coord.masc_dir config in
   Fs_compat.mkdir_p masc_dir;
   let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
   write_file board_posts_path
@@ -280,8 +280,8 @@ let test_recent_activity_skips_malformed_jsonl_lines () =
 
 let test_recent_activity_skips_bad_task_file () =
   with_temp_dir "activity-feed-task" @@ fun base_path ->
-  let config = Room.default_config base_path in
-  let masc_dir = Room.masc_dir config in
+  let config = Coord.default_config base_path in
+  let masc_dir = Coord.masc_dir config in
   let tasks_dir = Filename.concat masc_dir "tasks" in
   Fs_compat.mkdir_p tasks_dir;
   write_file (Filename.concat tasks_dir "good.json")
@@ -305,8 +305,8 @@ let test_recent_activity_skips_bad_task_file () =
 
 let test_recent_activity_falls_back_from_bad_task_timestamp () =
   with_temp_dir "activity-feed-ts" @@ fun base_path ->
-  let config = Room.default_config base_path in
-  let masc_dir = Room.masc_dir config in
+  let config = Coord.default_config base_path in
+  let masc_dir = Coord.masc_dir config in
   let tasks_dir = Filename.concat masc_dir "tasks" in
   Fs_compat.mkdir_p tasks_dir;
   write_file (Filename.concat tasks_dir "task.json")

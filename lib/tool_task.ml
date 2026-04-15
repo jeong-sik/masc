@@ -9,7 +9,7 @@ open Yojson.Safe.Util
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
   sw: Eio.Switch.t option;
 }
@@ -230,7 +230,7 @@ let handle_add_task ctx args =
     | Error error -> (false, error)
     | Ok contract ->
         ( true,
-          Room.add_task ?contract ?required_preset ctx.config ~title:trimmed_title ~priority
+          Coord.add_task ?contract ?required_preset ctx.config ~title:trimmed_title ~priority
             ~description )
 
 let handle_batch_add_tasks ctx args =
@@ -273,7 +273,7 @@ let handle_batch_add_tasks ctx args =
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
-    (true, Room.batch_add_tasks_with_contracts ctx.config tasks)
+    (true, Coord.batch_add_tasks_with_contracts ctx.config tasks)
 
 (** Extract preset token from capabilities (e.g., ["keeper"; "preset:delivery"]). *)
 let preset_from_capabilities caps =
@@ -304,11 +304,11 @@ let resolve_agent_preset config agent_name =
   | Some _ as preset -> preset
   | None ->
       let agent_file =
-        Filename.concat (Room.agents_dir config)
-          (Room.safe_filename agent_name ^ ".json")
+        Filename.concat (Coord.agents_dir config)
+          (Coord.safe_filename agent_name ^ ".json")
       in
       try
-        let json = Room.read_json config agent_file in
+        let json = Coord.read_json config agent_file in
         let caps =
           Yojson.Safe.Util.(
             json |> member "capabilities" |> to_list |> List.map to_string)
@@ -340,7 +340,7 @@ let preset_task_filter ~agent_preset (task : Types.task) =
   |> Result.is_ok
 
 let handle_claim ctx args =
-  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
+  if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
   else
   let task_id = get_string args "task_id" "" in
@@ -353,7 +353,7 @@ let handle_claim ctx args =
   in
   let preset_warning =
     let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
-    let tasks = Room.get_tasks_raw ctx.config in
+    let tasks = Coord.get_tasks_raw ctx.config in
     match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
     | None -> None
     | Some task ->
@@ -362,7 +362,7 @@ let handle_claim ctx args =
         | Error reason ->
             Some (Printf.sprintf "preset_mismatch: task %s %s" task_id reason)
   in
-  let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
+  let result = Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
   (match result with
    | Ok _ ->
        (match preset_warning with
@@ -382,21 +382,21 @@ let handle_claim ctx args =
   | _ -> (ok, msg)
 
 let handle_claim_next ctx _args =
-  if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
+  if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
   let agent_preset = resolve_agent_preset ctx.config ctx.agent_name in
   let task_filter = preset_task_filter ~agent_preset in
-  let result = Room.claim_next_r ctx.config ~agent_name:ctx.agent_name ~task_filter () in
+  let result = Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ~task_filter () in
   let message = match result with
-    | Room.Claim_next_claimed { task_id; message; _ } ->
+    | Coord.Claim_next_claimed { task_id; message; _ } ->
         Planning_eio.set_current_task ctx.config ~task_id;
         message
-    | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
-    | Room.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
+    | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+    | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
         Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset)" preset_filtered
-    | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
-    | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+    | Coord.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+    | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
   in
   (true, message)
 
@@ -406,7 +406,7 @@ let handle_release ctx args =
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
-  let tasks = Room.get_tasks_raw ctx.config in
+  let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
   (match handoff_context with
@@ -417,7 +417,7 @@ let handle_release ctx args =
          (false, "Strict task release requires handoff_context.summary")
        else
          result_to_response
-           (Room.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+           (Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
               ?expected_version ?handoff_context ()))
 
 let handle_done ctx args =
@@ -427,7 +427,7 @@ let handle_done ctx args =
   | Ok task_id ->
   let notes = get_string args "notes" "" in
   (* Get task info BEFORE completion to extract actual start time *)
-  let tasks = Room.get_tasks_raw ctx.config in
+  let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
@@ -445,14 +445,14 @@ let handle_done ctx args =
   in
   let result =
     if not (can_review_completion ~task_opt ~agent_name:ctx.agent_name) then
-      Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
+      Coord.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
     else if task_has_persisted_contract task_opt then
       (match
          persisted_contract_rejection ~ctx ~task_opt ~notes
        with
       | Some reason -> Error (Types.TaskInvalidState reason)
       | None ->
-          Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+          Coord.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
             ~notes)
     else
       let gate_rejection =
@@ -468,7 +468,7 @@ let handle_done ctx args =
       | Some reason ->
           Error (Types.TaskInvalidState (completion_rejection_message reason))
       | None ->
-          Room.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
+          Coord.complete_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~notes
   in
   (* Notify A2A subscribers on successful completion *)
   (match result with
@@ -524,7 +524,7 @@ let handle_cancel_task ctx args =
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
   let reason = get_string args "reason" "" in
-  let tasks = Room.get_tasks_raw ctx.config in
+  let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
@@ -535,7 +535,7 @@ let handle_cancel_task ctx args =
         | _ -> Time_compat.now () -. 60.0)
     | None -> Time_compat.now () -. 60.0
   in
-  let result = Room.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~reason in
+  let result = Coord.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~reason in
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
@@ -628,7 +628,7 @@ let handle_transition ctx args =
         false
     else false
   in
-  let tasks = Room.get_tasks_raw ctx.config in
+  let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
   match handoff_context with
   | Error error -> (false, error)
@@ -687,7 +687,7 @@ let handle_transition ctx args =
   in
   let rec try_transition attempt =
     let ev = if attempt = 0 then expected_version else None in
-    let r = Room.transition_task_r ctx.config ~agent_name:ctx.agent_name
+    let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
               ~task_id ~action ?expected_version:ev ~notes ~reason
               ?handoff_context () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
@@ -762,7 +762,7 @@ let handle_transition ctx args =
 let handle_update_priority ctx args =
   let task_id = get_string args "task_id" "" in
   let priority = get_int args "priority" 3 in
-  (true, Room.update_priority ctx.config ~task_id ~priority)
+  (true, Coord.update_priority ctx.config ~task_id ~priority)
 
 let handle_tasks ctx args =
   let include_done = get_bool args "include_done" false in
@@ -772,7 +772,7 @@ let handle_tasks ctx args =
     | `String s when s <> "" -> Some s
     | _ -> None
   in
-  (true, Room.list_tasks ctx.config ~include_done ~include_cancelled ?status)
+  (true, Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 
 let handle_task_history ctx args =
   let task_id = get_string args "task_id" "" in

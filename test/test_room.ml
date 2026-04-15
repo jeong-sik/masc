@@ -1,4 +1,4 @@
-(** Tests for Room module *)
+(** Tests for Coord module *)
 
 open Masc_mcp
 
@@ -23,7 +23,7 @@ let contains_portal result = String.sub result 0 4 = "\xF0\x9F\x8C\x80"  (* 🌀
 
 let room_config tmp_dir =
   Unix.putenv "MASC_BASE_PATH" tmp_dir;
-  Room.default_config tmp_dir
+  Coord.default_config tmp_dir
 
 let test_init_creates_folder () =
   Eio_main.run @@ fun env ->
@@ -35,17 +35,17 @@ let test_init_creates_folder () =
   let config = room_config tmp_dir in
 
   (* Initially not initialized *)
-  Alcotest.(check bool) "not init" false (Room.is_initialized config);
+  Alcotest.(check bool) "not init" false (Coord.is_initialized config);
 
   (* Initialize *)
-  let result = Room.init config ~agent_name:None in
+  let result = Coord.init config ~agent_name:None in
   Alcotest.(check bool) "success msg" true (contains_check result);
 
   (* Now initialized *)
-  Alcotest.(check bool) "init" true (Room.is_initialized config);
+  Alcotest.(check bool) "init" true (Coord.is_initialized config);
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_join_creates_agent () =
@@ -56,21 +56,21 @@ let test_join_creates_agent () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
+  let _ = Coord.init config ~agent_name:None in
 
   (* Join - now returns auto-generated nickname like "test_agent-swift-fox" *)
-  let result = Room.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
+  let result = Coord.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
   Alcotest.(check bool) "join success" true (contains_check result);
 
-  (* Check agent exists via Room.read_state - nickname starts with agent_type *)
-  let state = Room.read_state config in
+  (* Check agent exists via Coord.read_state - nickname starts with agent_type *)
+  let state = Coord.read_state config in
   let has_test_agent = List.exists (fun name ->
     String.length name >= 10 && String.sub name 0 10 = "test_agent"
   ) state.active_agents in
   Alcotest.(check bool) "agent in active_agents" true has_test_agent;
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_add_and_claim_task () =
@@ -81,22 +81,22 @@ let test_add_and_claim_task () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
 
   (* Add task *)
-  let add_result = Room.add_task config ~title:"Test Task" ~priority:1 ~description:"Test" in
+  let add_result = Coord.add_task config ~title:"Test Task" ~priority:1 ~description:"Test" in
   Alcotest.(check bool) "add success" true (contains_check add_result);
 
   (* Claim task *)
-  let claim_result = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+  let claim_result = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
   Alcotest.(check bool) "claim success" true (contains_check claim_result);
 
   (* Try to claim again - should fail *)
-  let claim2_result = Room.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+  let claim2_result = Coord.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
   Alcotest.(check bool) "double claim blocked" true (contains_warning claim2_result);
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_add_task_uses_archive_max_id () =
@@ -107,7 +107,7 @@ let test_add_task_uses_archive_max_id () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
+  let _ = Coord.init config ~agent_name:None in
 
   let archive_path = Filename.concat (Filename.concat tmp_dir ".masc") "tasks-archive.json" in
   let archive_json =
@@ -120,10 +120,10 @@ let test_add_task_uses_archive_max_id () =
   in
   Yojson.Safe.to_file archive_path archive_json;
 
-  let result = Room.add_task config ~title:"Archive Test" ~priority:1 ~description:"" in
+  let result = Coord.add_task config ~title:"Archive Test" ~priority:1 ~description:"" in
   Alcotest.(check bool) "uses archive max id" true (str_contains result "task-006");
 
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_broadcast_message () =
@@ -134,18 +134,18 @@ let test_broadcast_message () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
 
   (* Broadcast *)
-  let result = Room.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!" in
+  let result = Coord.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!" in
   Alcotest.(check bool) "broadcast success" true (String.contains result '[');
 
   (* Get messages *)
-  let msgs = Room.get_messages config ~since_seq:0 ~limit:10 in
+  let msgs = Coord.get_messages config ~since_seq:0 ~limit:10 in
   Alcotest.(check bool) "has messages" true (String.length msgs > 50);
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_worktree_list_no_git () =
@@ -156,10 +156,10 @@ let test_worktree_list_no_git () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
+  let _ = Coord.init config ~agent_name:None in
 
   (* worktree_list should return error for non-git dir *)
-  let result = Room.worktree_list config in
+  let result = Coord.worktree_list config in
   let has_error = match result with
     | `Assoc fields -> List.mem_assoc "error" fields
     | _ -> false
@@ -167,7 +167,7 @@ let test_worktree_list_no_git () =
   Alcotest.(check bool) "error for non-git" true has_error;
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_worktree_create_no_git () =
@@ -178,14 +178,14 @@ let test_worktree_create_no_git () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
+  let _ = Coord.init config ~agent_name:None in
 
   (* worktree_create_r should fail for non-git dir *)
-  let result = Room.worktree_create_r config ~agent_name:"claude" ~task_id:"test" ~base_branch:"main" in
+  let result = Coord.worktree_create_r config ~agent_name:"claude" ~task_id:"test" ~base_branch:"main" in
   Alcotest.(check bool) "returns error" true (match result with Error _ -> true | Ok _ -> false);
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let write_file path content =
@@ -207,7 +207,7 @@ let test_worktree_project_root_for_nested_subdir () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
   let nested = Filename.concat repo_root "nested" in
@@ -215,8 +215,8 @@ let test_worktree_project_root_for_nested_subdir () =
   let nested_config = { config with base_path = nested } in
   Alcotest.(check string) "nested path resolves to repo root"
     repo_root
-    (Room.project_root nested_config);
-  let _ = Room.reset config in
+    (Coord.project_root nested_config);
+  let _ = Coord.reset config in
   rm_rf tmp_dir
 
 let test_worktree_project_root_for_gitfile_worktree () =
@@ -226,7 +226,7 @@ let test_worktree_project_root_for_gitfile_worktree () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
   let worktrees_dir = Filename.concat repo_root ".worktrees" in
@@ -238,8 +238,8 @@ let test_worktree_project_root_for_gitfile_worktree () =
   let worktree_config = { config with base_path = worktree_root } in
   Alcotest.(check string) "worktree path resolves to shared repo root"
     repo_root
-    (Room.project_root worktree_config);
-  let _ = Room.reset config in
+    (Coord.project_root worktree_config);
+  let _ = Coord.reset config in
   rm_rf tmp_dir
 
 let test_worktree_project_root_for_nested_gitfile_worktree_subdir () =
@@ -249,7 +249,7 @@ let test_worktree_project_root_for_nested_gitfile_worktree_subdir () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
   let worktrees_dir = Filename.concat repo_root ".worktrees" in
@@ -263,8 +263,8 @@ let test_worktree_project_root_for_nested_gitfile_worktree_subdir () =
   let nested_config = { config with base_path = nested } in
   Alcotest.(check string) "nested worktree path resolves to shared repo root"
     repo_root
-    (Room.project_root nested_config);
-  let _ = Room.reset config in
+    (Coord.project_root nested_config);
+  let _ = Coord.reset config in
   rm_rf tmp_dir
 
 let test_worktree_project_root_for_masc_dir_base () =
@@ -274,14 +274,14 @@ let test_worktree_project_root_for_masc_dir_base () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
   let repo_root = config.base_path in
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
   let masc_config = { config with base_path = Filename.concat repo_root ".masc" } in
   Alcotest.(check string) ".masc base path resolves to repo root"
     repo_root
-    (Room.project_root masc_config);
-  let _ = Room.reset config in
+    (Coord.project_root masc_config);
+  let _ = Coord.reset config in
   rm_rf tmp_dir
 
 let test_event_log () =
@@ -292,17 +292,17 @@ let test_event_log () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
+  let _ = Coord.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
-  let result = Room.broadcast config ~from_agent:"claude" ~content:"Test event" in
+  let result = Coord.broadcast config ~from_agent:"claude" ~content:"Test event" in
 
   (* Verify broadcast returned a valid response (contains timestamp marker) *)
   Alcotest.(check bool) "broadcast returns response" true (String.length result > 0);
   Alcotest.(check bool) "broadcast has timestamp" true (String.contains result '[');
 
   (* Cleanup *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 (* ============================================================ *)
@@ -313,7 +313,7 @@ let contains_error result = String.sub result 0 3 = "\xE2\x9D\x8C"  (* ❌ *)
 
 (* Helper to create fresh test environment.
    Eio context + Fs_compat.set_fs are set up in the top-level runner,
-   so Room.default_config gets FileSystem backend. *)
+   so Coord.default_config gets FileSystem backend. *)
 let with_test_env f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -321,13 +321,13 @@ let with_test_env f =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
   try
     f config;
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     Unix.rmdir tmp_dir
   with e ->
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     Unix.rmdir tmp_dir;
     raise e
 
@@ -345,20 +345,20 @@ let with_memory_test_env f =
     pubsub_max_messages = 1000;
   } in
   let memory_backend = Backend.Memory.create () in
-  let config : Room_utils.config = {
+  let config : Coord_utils.config = {
     base_path = tmp_dir;
     workspace_path = tmp_dir;
     lock_expiry_minutes = 30;
     backend_config;
-    backend = Room_utils.Memory memory_backend;
+    backend = Coord_utils.Memory memory_backend;
   } in
-  let _ = Room.init config ~agent_name:(Some "claude") in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
   try
     f config;
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     Unix.rmdir tmp_dir
   with e ->
-    let _ = Room.reset config in
+    let _ = Coord.reset config in
     Unix.rmdir tmp_dir;
     raise e
 
@@ -367,43 +367,43 @@ let with_memory_test_env f =
 let test_complete_without_claim () =
   with_test_env (fun config ->
     (* Add task but don't claim *)
-    let _ = Room.add_task config ~title:"Unclaimed" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Unclaimed" ~priority:1 ~description:"" in
 
     (* Try to complete without claiming - should fail *)
-    let result = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     Alcotest.(check bool) "complete without claim blocked" true (contains_warning result)
   )
 
 let test_complete_by_wrong_agent () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
     (* Gemini tries to complete claude's task - should fail *)
-    let result = Room.complete_task config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" in
+    let result = Coord.complete_task config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" in
     Alcotest.(check bool) "wrong agent blocked" true (contains_warning result)
   )
 
 let test_complete_nonexistent_task () =
   with_test_env (fun config ->
-    let result = Room.complete_task config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
+    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     Alcotest.(check bool) "nonexistent task" true (contains_error result)
   )
 
 let test_claim_nonexistent_task () =
   with_test_env (fun config ->
-    let result = Room.claim_task config ~agent_name:"claude" ~task_id:"task-999" in
+    let result = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-999" in
     Alcotest.(check bool) "claim nonexistent" true (contains_error result)
   )
 
 let test_double_complete () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"first" in
+    let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"first" in
 
     (* Try to complete again - should fail (already done) *)
-    let result = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"second" in
+    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"second" in
     Alcotest.(check bool) "double complete blocked" true (contains_warning result)
   )
 
@@ -411,23 +411,23 @@ let test_double_complete () =
 
 let test_leave_removes_agent () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["test"] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["test"] () in
 
     (* Check agent exists *)
-    let status1 = Room.status config in
+    let status1 = Coord.status config in
     Alcotest.(check bool) "gemini in status" true (String.length status1 > 0);
 
     (* Leave *)
-    let result = Room.leave config ~agent_name:"gemini" in
+    let result = Coord.leave config ~agent_name:"gemini" in
     Alcotest.(check bool) "leave success" true (contains_check result)
   )
 
 let test_double_join () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["test"] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["test"] () in
 
     (* Join again - should update or warn *)
-    let result = Room.join config ~agent_name:"gemini" ~capabilities:["updated"] () in
+    let result = Coord.join config ~agent_name:"gemini" ~capabilities:["updated"] () in
     (* Either success (update) or warning is acceptable *)
     Alcotest.(check bool) "double join handled" true (String.length result > 0)
   )
@@ -436,12 +436,12 @@ let test_double_join () =
 
 let test_portal_open_and_status () =
   with_test_env (fun config ->
-    let result = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let result = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
     (match result with
      | Ok msg -> Alcotest.(check bool) "portal open" true (contains_portal msg)
      | Error _ -> Alcotest.fail "portal_open_r should succeed");
 
-    let status = Room.portal_status config ~agent_name:"claude" in
+    let status = Coord.portal_status config ~agent_name:"claude" in
     Alcotest.(check bool) "portal status has fields" true
       (match status with `Assoc _ -> true | _ -> false)
   )
@@ -449,15 +449,15 @@ let test_portal_open_and_status () =
 let test_portal_send_without_open () =
   with_test_env (fun config ->
     (* Send without opening portal first - returns Error *)
-    let result = Room.portal_send_r config ~agent_name:"claude" ~message:"hello" in
+    let result = Coord.portal_send_r config ~agent_name:"claude" ~message:"hello" in
     Alcotest.(check bool) "send without open returns error" true
       (match result with Error _ -> true | Ok _ -> false)
   )
 
 let test_portal_close () =
   with_test_env (fun config ->
-    let _ = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-    let result = Room.portal_close config ~agent_name:"claude" in
+    let _ = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let result = Coord.portal_close config ~agent_name:"claude" in
     (* Portal close uses 🚪 emoji *)
     Alcotest.(check bool) "portal close" true (String.length result > 0)
   )
@@ -471,7 +471,7 @@ let test_portal_close () =
 let test_empty_task_title () =
   with_test_env (fun config ->
     (* Empty title should still work (or fail gracefully) *)
-    let result = Room.add_task config ~title:"" ~priority:1 ~description:"" in
+    let result = Coord.add_task config ~title:"" ~priority:1 ~description:"" in
     (* Should either succeed or give clear error *)
     Alcotest.(check bool) "empty title handled" true (String.length result > 0)
   )
@@ -479,7 +479,7 @@ let test_empty_task_title () =
 let test_very_long_task_title () =
   with_test_env (fun config ->
     let long_title = String.make 1000 'x' in
-    let result = Room.add_task config ~title:long_title ~priority:1 ~description:"" in
+    let result = Coord.add_task config ~title:long_title ~priority:1 ~description:"" in
     Alcotest.(check bool) "long title handled" true (contains_check result)
   )
 
@@ -487,22 +487,22 @@ let test_special_chars_in_message () =
   with_test_env (fun config ->
     (* Test special characters, unicode, JSON-unsafe chars *)
     let msg = "Hello \"world\" with 'quotes' and\nnewlines\tand\t한글!" in
-    let result = Room.broadcast config ~from_agent:"claude" ~content:msg in
+    let result = Coord.broadcast config ~from_agent:"claude" ~content:msg in
     Alcotest.(check bool) "special chars handled" true (String.length result > 0)
   )
 
 let test_agent_name_with_special_chars () =
   with_test_env (fun config ->
     (* Agent name with dots, dashes should work *)
-    let result = Room.join config ~agent_name:"claude-3.5-sonnet" ~capabilities:[] () in
+    let result = Coord.join config ~agent_name:"claude-3.5-sonnet" ~capabilities:[] () in
     Alcotest.(check bool) "special agent name" true (contains_check result)
   )
 
 let test_priority_boundaries () =
   with_test_env (fun config ->
     (* Test priority 0 and very high priority *)
-    let r1 = Room.add_task config ~title:"Zero" ~priority:0 ~description:"" in
-    let r2 = Room.add_task config ~title:"High" ~priority:999 ~description:"" in
+    let r1 = Coord.add_task config ~title:"Zero" ~priority:0 ~description:"" in
+    let r2 = Coord.add_task config ~title:"High" ~priority:999 ~description:"" in
     Alcotest.(check bool) "priority 0" true (contains_check r1);
     Alcotest.(check bool) "priority 999" true (contains_check r2)
   )
@@ -511,11 +511,11 @@ let test_priority_boundaries () =
 
 let test_task_state_after_claim () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"State Test" ~priority:1 ~description:"" in
-    let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Coord.add_task config ~title:"State Test" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
     (* Verify task list shows claimed state *)
-    let tasks = Room.list_tasks config in
+    let tasks = Coord.list_tasks config in
     Alcotest.(check bool) "shows claimed" true (String.length tasks > 0);
     Alcotest.(check bool) "has claude" true (str_contains tasks "claude" ||
                                               str_contains tasks "Claimed")
@@ -524,17 +524,17 @@ let test_task_state_after_claim () =
 let test_multiple_tasks_independent () =
   with_test_env (fun config ->
     (* Add multiple tasks *)
-    let _ = Room.add_task config ~title:"Task A" ~priority:1 ~description:"" in
-    let _ = Room.add_task config ~title:"Task B" ~priority:2 ~description:"" in
-    let _ = Room.add_task config ~title:"Task C" ~priority:3 ~description:"" in
+    let _ = Coord.add_task config ~title:"Task A" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Task B" ~priority:2 ~description:"" in
+    let _ = Coord.add_task config ~title:"Task C" ~priority:3 ~description:"" in
 
     (* Claim one, complete another - verify independence *)
-    let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-002" in
-    let _ = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-002" in
+    let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
 
     (* Task 002 should still be claimable to complete *)
-    let result = Room.complete_task config ~agent_name:"claude" ~task_id:"task-002" ~notes:"" in
+    let result = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-002" ~notes:"" in
     Alcotest.(check bool) "independent tasks" true (contains_check result)
   )
 
@@ -542,12 +542,12 @@ let test_multiple_tasks_independent () =
 
 let test_rapid_claim_sequence () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Race" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Race" ~priority:1 ~description:"" in
 
     (* Simulate rapid claims from different agents *)
-    let r1 = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let r2 = Room.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
-    let r3 = Room.claim_task config ~agent_name:"codex" ~task_id:"task-001" in
+    let r1 = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let r2 = Coord.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let r3 = Coord.claim_task config ~agent_name:"codex" ~task_id:"task-001" in
 
     (* Only first should succeed *)
     Alcotest.(check bool) "first wins" true (contains_check r1);
@@ -558,23 +558,23 @@ let test_rapid_claim_sequence () =
 let test_multiple_agents_multiple_tasks () =
   with_test_env (fun config ->
     (* Setup: 3 tasks, 3 agents *)
-    let _ = Room.add_task config ~title:"A" ~priority:1 ~description:"" in
-    let _ = Room.add_task config ~title:"B" ~priority:2 ~description:"" in
-    let _ = Room.add_task config ~title:"C" ~priority:3 ~description:"" in
+    let _ = Coord.add_task config ~title:"A" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"B" ~priority:2 ~description:"" in
+    let _ = Coord.add_task config ~title:"C" ~priority:3 ~description:"" in
 
     (* Each agent claims different task *)
-    let r1 = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let r2 = Room.claim_task config ~agent_name:"gemini" ~task_id:"task-002" in
-    let r3 = Room.claim_task config ~agent_name:"codex" ~task_id:"task-003" in
+    let r1 = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let r2 = Coord.claim_task config ~agent_name:"gemini" ~task_id:"task-002" in
+    let r3 = Coord.claim_task config ~agent_name:"codex" ~task_id:"task-003" in
 
     Alcotest.(check bool) "claude gets 001" true (contains_check r1);
     Alcotest.(check bool) "gemini gets 002" true (contains_check r2);
     Alcotest.(check bool) "codex gets 003" true (contains_check r3);
 
     (* Each completes their own *)
-    let c1 = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
-    let c2 = Room.complete_task config ~agent_name:"gemini" ~task_id:"task-002" ~notes:"" in
-    let c3 = Room.complete_task config ~agent_name:"codex" ~task_id:"task-003" ~notes:"" in
+    let c1 = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let c2 = Coord.complete_task config ~agent_name:"gemini" ~task_id:"task-002" ~notes:"" in
+    let c3 = Coord.complete_task config ~agent_name:"codex" ~task_id:"task-003" ~notes:"" in
 
     Alcotest.(check bool) "claude done" true (contains_check c1);
     Alcotest.(check bool) "gemini done" true (contains_check c2);
@@ -586,7 +586,7 @@ let test_multiple_agents_multiple_tasks () =
 let test_reinit_existing_room () =
   with_test_env (fun config ->
     (* Init again on already initialized room *)
-    let result = Room.init config ~agent_name:None in
+    let result = Coord.init config ~agent_name:None in
     (* Should handle gracefully - either warn or succeed *)
     Alcotest.(check bool) "reinit handled" true (String.length result > 0)
   )
@@ -594,12 +594,12 @@ let test_reinit_existing_room () =
 let test_operations_preserve_state () =
   with_test_env (fun config ->
     (* Do a bunch of operations *)
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["test"] () in
-    let _ = Room.add_task config ~title:"X" ~priority:1 ~description:"" in
-    let _ = Room.broadcast config ~from_agent:"claude" ~content:"hello" in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["test"] () in
+    let _ = Coord.add_task config ~title:"X" ~priority:1 ~description:"" in
+    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"hello" in
 
     (* Status should show all state *)
-    let status = Room.status config in
+    let status = Coord.status config in
     Alcotest.(check bool) "status not empty" true (String.length status > 100)
   )
 
@@ -613,17 +613,17 @@ let test_event_log_on_join () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
-  let _ = Room.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
+  let _ = Coord.init config ~agent_name:None in
+  let _ = Coord.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
 
   (* Verify join was recorded - agent has auto-generated nickname starting with "test_agent-" *)
-  let state = Room.read_state config in
+  let state = Coord.read_state config in
   let has_test_agent = List.exists (fun name ->
     String.length name >= 10 && String.sub name 0 10 = "test_agent"
   ) state.active_agents in
   Alcotest.(check bool) "join event recorded" true has_test_agent;
 
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 let test_event_log_on_claim_done () =
@@ -634,19 +634,19 @@ let test_event_log_on_claim_done () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
-  let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
-  let _ = Room.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-  let _ = Room.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"done" in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
+  let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
+  let _ = Coord.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+  let _ = Coord.complete_task config ~agent_name:"claude" ~task_id:"task-001" ~notes:"done" in
 
-  (* Verify task state via Room.read_backlog (backend-agnostic) *)
-  let backlog = Room.read_backlog config in
+  (* Verify task state via Coord.read_backlog (backend-agnostic) *)
+  let backlog = Coord.read_backlog config in
   let is_done = List.exists (fun t ->
     match t.Types.task_status with Types.Done _ -> true | _ -> false
   ) backlog.Types.tasks in
   Alcotest.(check bool) "task completed" true is_done;
 
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 (* ============================================================ *)
@@ -657,17 +657,17 @@ let contains_heartbeat result = String.sub result 0 4 = "\xF0\x9F\x92\x93"  (* �
 
 let test_heartbeat_updates_lastseen () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
 
     (* Send heartbeat *)
-    let result = Room.heartbeat config ~agent_name:"gemini" in
+    let result = Coord.heartbeat config ~agent_name:"gemini" in
     Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
   )
 
 let test_is_agent_joined_after_default_join () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
-    let agents : Types.agent list = Room.get_agents_raw config in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
+    let agents : Types.agent list = Coord.get_agents_raw config in
     let gemini_name =
       match List.find_opt (fun (agent : Types.agent) ->
         String.length agent.name >= 6 && String.sub agent.name 0 6 = "gemini"
@@ -676,14 +676,14 @@ let test_is_agent_joined_after_default_join () =
       | None -> failwith "expected gemini agent"
     in
     Alcotest.(check bool) "joined agent detected" true
-      (Room.is_agent_joined config ~agent_name:gemini_name)
+      (Coord.is_agent_joined config ~agent_name:gemini_name)
   )
 
 let test_room_bootstrap_preserves_backend_state () =
   with_memory_test_env (fun config ->
-    Room.ensure_room_bootstrap config;
+    Coord.ensure_room_bootstrap config;
     let _ =
-      Room.update_state config (fun state ->
+      Coord.update_state config (fun state ->
         { state with message_seq = 41 })
     in
     let backlog =
@@ -693,29 +693,29 @@ let test_room_bootstrap_preserves_backend_state () =
         version = 7;
       }
     in
-    Room_utils.write_json config (Room.backlog_path config)
+    Coord_utils.write_json config (Coord.backlog_path config)
       (Types.backlog_to_yojson backlog);
 
-    Room.ensure_room_bootstrap config;
+    Coord.ensure_room_bootstrap config;
 
-    let state = Room.read_state config in
-    let saved_backlog = Room.read_backlog config in
+    let state = Coord.read_state config in
+    let saved_backlog = Coord.read_backlog config in
     Alcotest.(check int) "state preserved" 41 state.message_seq;
     Alcotest.(check int) "backlog preserved" 7 saved_backlog.version
   )
 
 let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Room.ensure_room_bootstrap config;
+    Coord.ensure_room_bootstrap config;
     Alcotest.(check bool) "root state initialized" true
-      (Room.is_initialized config)
+      (Coord.is_initialized config)
   )
 
 let test_read_backlog_r_reports_parse_error () =
   with_test_env (fun config ->
-    Out_channel.with_open_text (Room.backlog_path config) (fun oc ->
+    Out_channel.with_open_text (Coord.backlog_path config) (fun oc ->
       output_string oc "{\n  \"tasks\": [\n");
-    match Room.read_backlog_r config with
+    match Coord.read_backlog_r config with
     | Ok _ -> Alcotest.fail "expected backlog parse error"
     | Error msg ->
         Alcotest.(check bool) "mentions backlog decode/read failure" true
@@ -724,9 +724,9 @@ let test_read_backlog_r_reports_parse_error () =
 
 let test_release_stale_claims_skips_invalid_backlog () =
   with_test_env (fun config ->
-    Out_channel.with_open_text (Room.backlog_path config) (fun oc ->
+    Out_channel.with_open_text (Coord.backlog_path config) (fun oc ->
       output_string oc "{\n  \"tasks\": [\n");
-    let released = Room.release_stale_claims config ~ttl_seconds:60.0 in
+    let released = Coord.release_stale_claims config ~ttl_seconds:60.0 in
     Alcotest.(check (list (pair string string))) "no stale claims released" [] released
   )
 
@@ -734,16 +734,16 @@ let test_release_stale_claims_skips_invalid_backlog () =
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-joined agent *)
-    let result = Room.heartbeat config ~agent_name:"nonexistent" in
+    let result = Coord.heartbeat config ~agent_name:"nonexistent" in
     Alcotest.(check bool) "heartbeat for nonexistent" true (contains_warning result)
   )
 
 let test_get_agents_status () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["python"] () in
-    let _ = Room.join config ~agent_name:"codex" ~capabilities:["rust"] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["python"] () in
+    let _ = Coord.join config ~agent_name:"codex" ~capabilities:["rust"] () in
 
-    let status = Room.get_agents_status config in
+    let status = Coord.get_agents_status config in
     (* Should be a JSON with agents array *)
     let has_agents = match status with
       | `Assoc fields -> List.mem_assoc "agents" fields
@@ -755,7 +755,7 @@ let test_get_agents_status () =
 let test_cleanup_zombies_empty () =
   with_test_env (fun config ->
     (* Cleanup with no zombies *)
-    let result = Room.cleanup_zombies config in
+    let result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "cleanup result" true (String.length result > 0)
   )
 
@@ -769,22 +769,22 @@ let iso_ago seconds =
 
 (** Helper: join an agent then overwrite its last_seen to simulate staleness *)
 let make_stale_agent config ~name ~age_seconds =
-  let _ = Room.join config ~agent_name:name ~capabilities:[] () in
+  let _ = Coord.join config ~agent_name:name ~capabilities:[] () in
   (* Overwrite the agent file with a stale last_seen *)
-  let agents_path = Filename.concat (Room.masc_dir config) "agents" in
-  let path = Filename.concat agents_path (Room.safe_filename name ^ ".json") in
+  let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
+  let path = Filename.concat agents_path (Coord.safe_filename name ^ ".json") in
   let stale_ts = iso_ago age_seconds in
   let agent_json = Printf.sprintf
     {|{"name":"%s","agent_type":"test","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
     name stale_ts stale_ts
   in
-  Room.write_json config path (Yojson.Safe.from_string agent_json)
+  Coord.write_json config path (Yojson.Safe.from_string agent_json)
 
 let test_cleanup_zombies_detects_regular () =
   with_test_env (fun config ->
     (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
     make_stale_agent config ~name:"stale-regular-agent" ~age_seconds:700.0;
-    let result = Room.cleanup_zombies config in
+    let result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "regular zombie detected"
       true (str_contains result "stale-regular-agent")
   )
@@ -793,7 +793,7 @@ let test_cleanup_zombies_detects_keeper () =
   with_test_env (fun config ->
     (* Create a keeper agent idle for 2 hours (> 3600s keeper threshold) *)
     make_stale_agent config ~name:"keeper-longplay-agent" ~age_seconds:7200.0;
-    let result = Room.cleanup_zombies config in
+    let result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "keeper zombie detected after keeper threshold"
       true (str_contains result "keeper-longplay-agent")
   )
@@ -802,7 +802,7 @@ let test_cleanup_zombies_spares_recent_keeper () =
   with_test_env (fun config ->
     (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
     make_stale_agent config ~name:"keeper-active-agent" ~age_seconds:600.0;
-    let result = Room.cleanup_zombies config in
+    let result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "recent keeper spared"
       true (not (str_contains result "keeper-active-agent"))
   )
@@ -810,12 +810,12 @@ let test_cleanup_zombies_spares_recent_keeper () =
 let test_cleanup_zombies_removes_broken_agent_file () =
   with_test_env (fun config ->
     (* Write an empty JSON object — unparseable as agent *)
-    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
+    let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
     let path = Filename.concat agents_path "broken-agent.json" in
-    Room.write_json config path (Yojson.Safe.from_string "{}");
+    Coord.write_json config path (Yojson.Safe.from_string "{}");
     Alcotest.(check bool) "broken file exists before GC"
       true (Sys.file_exists path);
-    let _result = Room.cleanup_zombies config in
+    let _result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "broken file removed by GC"
       false (Sys.file_exists path)
   )
@@ -823,14 +823,14 @@ let test_cleanup_zombies_removes_broken_agent_file () =
 let test_cleanup_zombies_preserves_non_json_files () =
   with_test_env (fun config ->
     (* Place a non-JSON file in the agents directory *)
-    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
+    let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
     let path = Filename.concat agents_path ".gitkeep" in
     let oc = open_out path in
     output_string oc "";
     close_out oc;
     Alcotest.(check bool) "non-json file exists before GC"
       true (Sys.file_exists path);
-    let _result = Room.cleanup_zombies config in
+    let _result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "non-json file preserved by GC"
       true (Sys.file_exists path)
   )
@@ -843,21 +843,21 @@ let contains_antenna result = String.sub result 0 4 = "\xF0\x9F\x93\xA1"  (* �
 
 let test_register_capabilities () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:[] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:[] () in
 
     (* Register capabilities *)
-    let result = Room.register_capabilities config ~agent_name:"gemini"
+    let result = Coord.register_capabilities config ~agent_name:"gemini"
       ~capabilities:["python"; "web-search"; "code-review"] in
     Alcotest.(check bool) "capabilities registered" true (contains_antenna result)
   )
 
 let test_find_by_capability () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["python"; "search"] () in
-    let _ = Room.join config ~agent_name:"codex" ~capabilities:["python"; "rust"] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["python"; "search"] () in
+    let _ = Coord.join config ~agent_name:"codex" ~capabilities:["python"; "rust"] () in
 
     (* Find agents with python capability *)
-    let result = Room.find_agents_by_capability config ~capability:"python" in
+    let result = Coord.find_agents_by_capability config ~capability:"python" in
     (* Verify result has correct structure (agents array exists) *)
     let has_agents_key = match result with
       | `Assoc fields -> List.mem_assoc "agents" fields && List.mem_assoc "count" fields
@@ -868,10 +868,10 @@ let test_find_by_capability () =
 
 let test_find_by_capability_no_match () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["python"] () in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["python"] () in
 
     (* Find agents with nonexistent capability *)
-    let result = Room.find_agents_by_capability config ~capability:"haskell" in
+    let result = Coord.find_agents_by_capability config ~capability:"haskell" in
     let agents = match result with
       | `Assoc fields -> (
           match List.assoc_opt "agents" fields with
@@ -886,12 +886,12 @@ let test_find_by_capability_no_match () =
 let test_register_capabilities_nonexistent_agent () =
   with_test_env (fun config ->
     (* Register for non-joined agent *)
-    let result = Room.register_capabilities config ~agent_name:"ghost"
+    let result = Coord.register_capabilities config ~agent_name:"ghost"
       ~capabilities:["magic"] in
     Alcotest.(check bool) "register for nonexistent" true (contains_warning result)
   )
 
-(* Room_vote / Room_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
+(* Coord_vote / Coord_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
 
 (* ============================================================ *)
 (* Input Validation Tests                                       *)
@@ -899,23 +899,23 @@ let test_register_capabilities_nonexistent_agent () =
 
 let test_empty_agent_name_claim () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Test" ~priority:1 ~description:"" in
+    let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
     (* Empty agent name should be rejected *)
-    let result = Room.claim_task config ~agent_name:"" ~task_id:"task-001" in
+    let result = Coord.claim_task config ~agent_name:"" ~task_id:"task-001" in
     Alcotest.(check bool) "empty agent rejected" true (contains_error result)
   )
 
 let test_empty_task_id_claim () =
   with_test_env (fun config ->
     (* Empty task_id should be rejected *)
-    let result = Room.claim_task config ~agent_name:"claude" ~task_id:"" in
+    let result = Coord.claim_task config ~agent_name:"claude" ~task_id:"" in
     Alcotest.(check bool) "empty task_id rejected" true (contains_error result)
   )
 
 let test_very_long_agent_name () =
   with_test_env (fun config ->
     let long_name = String.make 100 'x' in
-    let result = Room.claim_task config ~agent_name:long_name ~task_id:"task-001" in
+    let result = Coord.claim_task config ~agent_name:long_name ~task_id:"task-001" in
     (* Should be rejected (max 64 chars) *)
     Alcotest.(check bool) "long name rejected" true (contains_error result)
   )
@@ -927,7 +927,7 @@ let test_very_long_agent_name () =
 let test_korean_agent_name () =
   with_test_env (fun config ->
     (* Korean characters should work *)
-    let result = Room.join config ~agent_name:"클로드" ~capabilities:["한글"] () in
+    let result = Coord.join config ~agent_name:"클로드" ~capabilities:["한글"] () in
     Alcotest.(check bool) "korean agent name" true (contains_check result)
   )
 
@@ -935,13 +935,13 @@ let test_emoji_in_message () =
   with_test_env (fun config ->
     (* Emoji characters should be preserved *)
     let msg = "🚀 Launching feature! 🎉" in
-    let result = Room.broadcast config ~from_agent:"claude" ~content:msg in
+    let result = Coord.broadcast config ~from_agent:"claude" ~content:msg in
     Alcotest.(check bool) "emoji preserved" true (str_contains result "🚀")
   )
 
 let test_unicode_task_title () =
   with_test_env (fun config ->
-    let result = Room.add_task config ~title:"日本語タスク" ~priority:1 ~description:"中文描述" in
+    let result = Coord.add_task config ~title:"日本語タスク" ~priority:1 ~description:"中文描述" in
     Alcotest.(check bool) "unicode task" true (contains_check result)
   )
 
@@ -957,15 +957,15 @@ let test_reset_clears_all_state () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
-  let _ = Room.add_task config ~title:"Task" ~priority:1 ~description:"" in
-  let _ = Room.broadcast config ~from_agent:"claude" ~content:"Hello" in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
+  let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"" in
+  let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Hello" in
 
   (* Reset *)
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
 
   (* Verify cleared *)
-  Alcotest.(check bool) "not initialized after reset" false (Room.is_initialized config);
+  Alcotest.(check bool) "not initialized after reset" false (Coord.is_initialized config);
 
   Unix.rmdir tmp_dir
 
@@ -977,13 +977,13 @@ let test_reinit_after_reset () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = room_config tmp_dir in
-  let _ = Room.init config ~agent_name:(Some "claude") in
-  let _ = Room.reset config in
+  let _ = Coord.init config ~agent_name:(Some "claude") in
+  let _ = Coord.reset config in
   (* Reinit should work *)
-  let result = Room.init config ~agent_name:(Some "claude") in
+  let result = Coord.init config ~agent_name:(Some "claude") in
   Alcotest.(check bool) "reinit after reset" true (contains_check result);
 
-  let _ = Room.reset config in
+  let _ = Coord.reset config in
   Unix.rmdir tmp_dir
 
 (* ============================================================ *)
@@ -993,7 +993,7 @@ let test_reinit_after_reset () =
 let test_very_long_message () =
   with_test_env (fun config ->
     let long_msg = String.make 10000 'x' in
-    let result = Room.broadcast config ~from_agent:"claude" ~content:long_msg in
+    let result = Coord.broadcast config ~from_agent:"claude" ~content:long_msg in
     Alcotest.(check bool) "long message handled" true (String.length result > 0)
   )
 
@@ -1001,18 +1001,18 @@ let test_message_with_json_chars () =
   with_test_env (fun config ->
     (* JSON special characters should be escaped properly *)
     let msg = "{\"key\": \"value\", \"array\": [1,2,3]}" in
-    let result = Room.broadcast config ~from_agent:"claude" ~content:msg in
+    let result = Coord.broadcast config ~from_agent:"claude" ~content:msg in
     Alcotest.(check bool) "json chars handled" true (String.length result > 0)
   )
 
 let test_message_sequence () =
   with_test_env (fun config ->
     (* Messages should have incrementing sequence numbers *)
-    let _ = Room.broadcast config ~from_agent:"claude" ~content:"First" in
-    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Second" in
-    let _ = Room.broadcast config ~from_agent:"claude" ~content:"Third" in
+    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"First" in
+    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Second" in
+    let _ = Coord.broadcast config ~from_agent:"claude" ~content:"Third" in
 
-    let msgs = Room.get_messages config ~since_seq:0 ~limit:10 in
+    let msgs = Coord.get_messages config ~since_seq:0 ~limit:10 in
     Alcotest.(check bool) "has messages" true (str_contains msgs "First" || str_contains msgs "Third")
   )
 
@@ -1024,11 +1024,11 @@ let test_many_tasks () =
   with_test_env (fun config ->
     (* Add many tasks *)
     for i = 1 to 20 do
-      let _ = Room.add_task config ~title:(Printf.sprintf "Task %d" i) ~priority:i ~description:"" in
+      let _ = Coord.add_task config ~title:(Printf.sprintf "Task %d" i) ~priority:i ~description:"" in
       ()
     done;
 
-    let tasks = Room.list_tasks config in
+    let tasks = Coord.list_tasks config in
     Alcotest.(check bool) "20 tasks created" true (str_contains tasks "Task 20")
   )
 
@@ -1036,11 +1036,11 @@ let test_many_agents () =
   with_test_env (fun config ->
     (* Join many agents *)
     for i = 1 to 10 do
-      let _ = Room.join config ~agent_name:(Printf.sprintf "agent%d" i) ~capabilities:["test"] () in
+      let _ = Coord.join config ~agent_name:(Printf.sprintf "agent%d" i) ~capabilities:["test"] () in
       ()
     done;
 
-    let status = Room.get_agents_status config in
+    let status = Coord.get_agents_status config in
     let count = match status with
       | `Assoc fields -> (
           match List.assoc_opt "count" fields with
@@ -1059,11 +1059,11 @@ let test_many_agents () =
 
 let test_portal_reopen_after_close () =
   with_test_env (fun config ->
-    let _ = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-    let _ = Room.portal_close config ~agent_name:"claude" in
+    let _ = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let _ = Coord.portal_close config ~agent_name:"claude" in
 
     (* Should be able to reopen *)
-    let result = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"codex" ~initial_message:None in
+    let result = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"codex" ~initial_message:None in
     (match result with
      | Ok msg -> Alcotest.(check bool) "reopen portal" true (contains_portal msg)
      | Error _ -> Alcotest.fail "portal reopen should succeed")
@@ -1071,15 +1071,15 @@ let test_portal_reopen_after_close () =
 
 let test_portal_send_multiple () =
   with_test_env (fun config ->
-    let _ = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let _ = Coord.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
 
     (* Send multiple messages *)
     let check_send label r =
       match r with Ok msg -> Alcotest.(check bool) label true (String.length msg > 0) | Error _ -> Alcotest.fail label
     in
-    check_send "send 1" (Room.portal_send_r config ~agent_name:"claude" ~message:"First");
-    check_send "send 2" (Room.portal_send_r config ~agent_name:"claude" ~message:"Second");
-    check_send "send 3" (Room.portal_send_r config ~agent_name:"claude" ~message:"Third")
+    check_send "send 1" (Coord.portal_send_r config ~agent_name:"claude" ~message:"First");
+    check_send "send 2" (Coord.portal_send_r config ~agent_name:"claude" ~message:"Second");
+    check_send "send 3" (Coord.portal_send_r config ~agent_name:"claude" ~message:"Third")
   )
 
 (* ============================================================ *)
@@ -1088,7 +1088,7 @@ let test_portal_send_multiple () =
 
 let test_negative_priority () =
   with_test_env (fun config ->
-    let result = Room.add_task config ~title:"Urgent" ~priority:(-1) ~description:"" in
+    let result = Coord.add_task config ~title:"Urgent" ~priority:(-1) ~description:"" in
     (* Negative priority should work (lower = more urgent) *)
     Alcotest.(check bool) "negative priority" true (contains_check result)
   )
@@ -1099,9 +1099,9 @@ let test_negative_priority () =
 
 let test_xss_in_message () =
   with_test_env (fun config ->
-    ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+    ignore (Coord.join config ~agent_name:"tester" ~capabilities:[] ());
     let xss_payload = "<script>alert('xss')</script>" in
-    let result = Room.broadcast config ~from_agent:"tester" ~content:xss_payload in
+    let result = Coord.broadcast config ~from_agent:"tester" ~content:xss_payload in
     (* Check that raw script tags are not in the result *)
     let has_raw_script = str_contains result "<script>" || str_contains result "</script>" in
     Alcotest.(check bool) "xss sanitized" false has_raw_script
@@ -1110,11 +1110,11 @@ let test_xss_in_message () =
 let test_xss_in_agent_name () =
   with_test_env (fun config ->
     let xss_name = "<img src=x onerror=alert('xss')>" in
-    let result = Room.join config ~agent_name:xss_name ~capabilities:[] () in
+    let result = Coord.join config ~agent_name:xss_name ~capabilities:[] () in
     Alcotest.(check bool) "join with xss name" true (contains_check result);
     (* Backend-agnostic: verify agent was registered (original test checked filename sanitization,
        which is FileSystem-specific. For other backends, we just verify the join worked) *)
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
   )
 
@@ -1128,55 +1128,55 @@ let test_agent_z = "agent-test-zombie"
 
 let test_force_release_bypasses_assignee () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
-    let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Coord.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
+    let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Different agent cannot release without force *)
-    let normal = Room.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
+    let normal = Coord.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
         ~action:Types.Release () in
     Alcotest.(check bool) "normal release blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force release succeeds *)
-    let forced = Room.force_release_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001" () in
+    let forced = Coord.force_release_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001" () in
     Alcotest.(check bool) "force release ok" true
       (match forced with Ok _ -> true | Error _ -> false);
     (* Task should be back to Todo *)
-    let tasks = Room.list_tasks config in
+    let tasks = Coord.list_tasks config in
     Alcotest.(check bool) "task is todo" true (str_contains tasks "Todo" || str_contains tasks "todo")
   )
 
 let test_force_done_bypasses_assignee () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Force Done Task" ~priority:1 ~description:"" in
-    let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Coord.add_task config ~title:"Force Done Task" ~priority:1 ~description:"" in
+    let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Normal done by different agent fails *)
-    let normal = Room.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
+    let normal = Coord.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
         ~action:Types.Done_action ~notes:"forced" () in
     Alcotest.(check bool) "normal done blocked" true
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force done succeeds *)
-    let forced = Room.force_done_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
+    let forced = Coord.force_done_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
         ~notes:"auto-closed by admin" () in
     Alcotest.(check bool) "force done ok" true
       (match forced with Ok _ -> true | Error _ -> false);
     (* Task should be done *)
-    let tasks = Room.list_tasks ~include_done:true config in
+    let tasks = Coord.list_tasks ~include_done:true config in
     Alcotest.(check bool) "task is done" true (str_contains tasks "Done" || str_contains tasks "done")
   )
 
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
-    let _ = Room.join config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Room.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Coord.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
+    let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* While agent is active, no orphans *)
-    let orphans_before = Room.audit_orphan_tasks config in
+    let orphans_before = Coord.audit_orphan_tasks config in
     Alcotest.(check int) "no orphans while active" 0 (List.length orphans_before);
     (* Remove agent file to simulate it disappearing *)
-    let _ = Room.leave config ~agent_name:test_agent_a in
+    let _ = Coord.leave config ~agent_name:test_agent_a in
     (* Now the task is orphaned (claimed by test_agent_a but agent is gone) *)
-    let orphans_after = Room.audit_orphan_tasks config in
+    let orphans_after = Coord.audit_orphan_tasks config in
     Alcotest.(check int) "one orphan detected" 1 (List.length orphans_after);
     let (task, assignee) = List.hd orphans_after in
     Alcotest.(check string) "orphan assignee" test_agent_a assignee;
@@ -1185,14 +1185,14 @@ let test_audit_orphan_tasks () =
 
 let test_cleanup_zombies_releases_tasks () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
-    let _ = Room.join config ~agent_name:test_agent_z ~capabilities:[] () in
-    let _ = Room.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
+    let _ = Coord.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
+    let _ = Coord.join config ~agent_name:test_agent_z ~capabilities:[] () in
+    let _ = Coord.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
     (* Manually set agent's last_seen to a very old timestamp to make it a zombie *)
     let agents_path = Filename.concat
       (Filename.concat config.base_path ".masc") "agents" in
     let agent_file = Filename.concat agents_path (test_agent_z ^ ".json") in
-    let json = Room.read_json config agent_file in
+    let json = Coord.read_json config agent_file in
     let updated_json = match json with
       | `Assoc pairs ->
           `Assoc (List.map (fun (k, v) ->
@@ -1200,12 +1200,12 @@ let test_cleanup_zombies_releases_tasks () =
           ) pairs)
       | other -> other
     in
-    Room.write_json config agent_file updated_json;
+    Coord.write_json config agent_file updated_json;
     (* Run cleanup — should remove zombie agent AND release its tasks *)
-    let result = Room.cleanup_zombies config in
+    let result = Coord.cleanup_zombies config in
     Alcotest.(check bool) "cleanup ran" true (String.length result > 0);
     (* Verify task is released (back to Todo) *)
-    let tasks = Room.list_tasks config in
+    let tasks = Coord.list_tasks config in
     Alcotest.(check bool) "task released to todo" true
       (str_contains tasks "Todo" || str_contains tasks "todo")
   )
@@ -1215,31 +1215,31 @@ let test_cleanup_zombies_releases_tasks () =
 let test_rejoin_preserves_identity () =
   with_test_env (fun config ->
     (* 1. Join: get a nickname *)
-    let join1 = Room.join config ~agent_name:"claude" ~capabilities:["code"] () in
+    let join1 = Coord.join config ~agent_name:"claude" ~capabilities:["code"] () in
     Alcotest.(check bool) "first join success" true (contains_check join1);
 
     (* Extract nickname from active_agents *)
-    let state1 = Room.read_state config in
+    let state1 = Coord.read_state config in
     let nick1 = List.find (fun name ->
       String.length name > 6 && String.sub name 0 6 = "claude"
     ) state1.active_agents in
 
     (* 2. Leave *)
-    let leave_result = Room.leave config ~agent_name:"claude" in
+    let leave_result = Coord.leave config ~agent_name:"claude" in
     Alcotest.(check bool) "leave success" true (contains_check leave_result);
 
     (* Agent should be removed from active_agents but file preserved *)
-    let state2 = Room.read_state config in
+    let state2 = Coord.read_state config in
     let still_active = List.exists (fun name ->
       String.length name > 6 && String.sub name 0 6 = "claude"
     ) state2.active_agents in
     Alcotest.(check bool) "not in active_agents after leave" false still_active;
 
     (* 3. Re-join: should get the SAME nickname *)
-    let join2 = Room.join config ~agent_name:"claude" ~capabilities:["code"; "review"] () in
+    let join2 = Coord.join config ~agent_name:"claude" ~capabilities:["code"; "review"] () in
     Alcotest.(check bool) "rejoin success" true (contains_check join2);
 
-    let state3 = Room.read_state config in
+    let state3 = Coord.read_state config in
     let nick2 = List.find (fun name ->
       String.length name > 6 && String.sub name 0 6 = "claude"
     ) state3.active_agents in
@@ -1250,15 +1250,15 @@ let test_rejoin_preserves_identity () =
 
 let test_rejoin_restores_active_status () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["search"] () in
-    let _ = Room.leave config ~agent_name:"gemini" in
+    let _ = Coord.join config ~agent_name:"gemini" ~capabilities:["search"] () in
+    let _ = Coord.leave config ~agent_name:"gemini" in
 
     (* Re-join *)
-    let result = Room.join config ~agent_name:"gemini" ~capabilities:["search"] () in
+    let result = Coord.join config ~agent_name:"gemini" ~capabilities:["search"] () in
     Alcotest.(check bool) "rejoin success" true (contains_check result);
 
     (* Should be back in active_agents *)
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     let is_active = List.exists (fun name ->
       String.length name > 6 && String.sub name 0 6 = "gemini"
     ) state.active_agents in
@@ -1267,20 +1267,20 @@ let test_rejoin_restores_active_status () =
 
 let test_multiple_rejoin_cycles () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"codex" ~capabilities:["impl"] () in
-    let state1 = Room.read_state config in
+    let _ = Coord.join config ~agent_name:"codex" ~capabilities:["impl"] () in
+    let state1 = Coord.read_state config in
     let nick1 = List.find (fun name ->
       String.length name > 5 && String.sub name 0 5 = "codex"
     ) state1.active_agents in
 
     (* Three leave/rejoin cycles *)
     for _ = 1 to 3 do
-      let _ = Room.leave config ~agent_name:"codex" in
-      let _ = Room.join config ~agent_name:"codex" ~capabilities:["impl"] () in
+      let _ = Coord.leave config ~agent_name:"codex" in
+      let _ = Coord.join config ~agent_name:"codex" ~capabilities:["impl"] () in
       ()
     done;
 
-    let state_final = Room.read_state config in
+    let state_final = Coord.read_state config in
     let nick_final = List.find (fun name ->
       String.length name > 5 && String.sub name 0 5 = "codex"
     ) state_final.active_agents in
@@ -1294,7 +1294,7 @@ let test_multiple_rejoin_cycles () =
 
 (** Read today's event log and return all lines *)
 let read_event_log config =
-  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
   let open Unix in
   let tm = gmtime (gettimeofday ()) in
   let month_dir = Filename.concat events_dir
@@ -1312,15 +1312,15 @@ let read_event_log config =
   end else
     []
 
-(** BUG-1: Room-scoped rejoin records event log *)
+(** BUG-1: Coord-scoped rejoin records event log *)
 let test_rejoin_event_log () =
   with_test_env (fun config ->
     (* Join then leave to create Inactive agent *)
-    let _ = Room.join config ~agent_name:"logcheck" ~capabilities:[] () in
-    let _ = Room.leave config ~agent_name:"logcheck" in
+    let _ = Coord.join config ~agent_name:"logcheck" ~capabilities:[] () in
+    let _ = Coord.leave config ~agent_name:"logcheck" in
 
     (* Rejoin — should produce event log with "rejoin":true *)
-    let _ = Room.join config ~agent_name:"logcheck" ~capabilities:[] () in
+    let _ = Coord.join config ~agent_name:"logcheck" ~capabilities:[] () in
 
     (* Read event log and check for rejoin entry *)
     let events = read_event_log config in
@@ -1337,21 +1337,21 @@ let test_zombie_file_delete_failure_keeps_state () =
     make_stale_agent config ~name:"unremovable-agent" ~age_seconds:700.0;
 
     (* Make the agent file read-only to prevent deletion *)
-    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
-    let path = Filename.concat agents_path (Room.safe_filename "unremovable-agent" ^ ".json") in
+    let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
+    let path = Filename.concat agents_path (Coord.safe_filename "unremovable-agent" ^ ".json") in
     Unix.chmod path 0o444;
     (* Make directory non-writable so Sys.remove fails *)
     Unix.chmod agents_path 0o555;
 
     (* Run cleanup — file deletion should fail *)
-    let _result = Room.cleanup_zombies config in
+    let _result = Coord.cleanup_zombies config in
 
     (* Restore permissions for cleanup *)
     Unix.chmod agents_path 0o755;
     Unix.chmod path 0o644;
 
     (* Key assertion: agent should still be in active_agents since file deletion failed *)
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     let still_present = List.exists (fun name ->
       str_contains name "unremovable"
     ) state.active_agents in
@@ -1370,19 +1370,19 @@ let test_zombie_cleanup_transitions_to_inactive () =
     make_stale_agent config ~name:"transition-test-agent" ~age_seconds:700.0;
 
     (* Make file undeletable to observe Inactive transition without removal *)
-    let agents_path = Filename.concat (Room.masc_dir config) "agents" in
-    let path = Filename.concat agents_path (Room.safe_filename "transition-test-agent" ^ ".json") in
+    let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
+    let path = Filename.concat agents_path (Coord.safe_filename "transition-test-agent" ^ ".json") in
     Unix.chmod path 0o444;
     Unix.chmod agents_path 0o555;
 
-    let _result = Room.cleanup_zombies config in
+    let _result = Coord.cleanup_zombies config in
 
     (* Restore permissions *)
     Unix.chmod agents_path 0o755;
     Unix.chmod path 0o644;
 
     (* Read agent file — should be Inactive now (Phase 2 ran before Phase 4 failed) *)
-    let json = Room.read_json config path in
+    let json = Coord.read_json config path in
     let status = Yojson.Safe.Util.(member "status" json |> to_string) in
     Alcotest.(check string) "status transitioned to inactive" "inactive" status
   )
@@ -1432,21 +1432,21 @@ let test_heartbeat_concurrent_start_stop () =
 let test_bug006_transition_with_unsuffixed_name () =
   with_test_env (fun config ->
     (* Join with canonical agent name to establish the identity recorded at claim time *)
-    let _ = Room.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
-    let _ = Room.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
+    let _ = Coord.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Coord.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
     (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)
-    (match Room.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+    (match Coord.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Types.show_masc_error e));
     (* Transition (start) using the unsuffixed name — should resolve to "keeper-coder-agent" *)
-    (match Room.transition_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (match Coord.transition_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
              ~action:Types.Start () with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
            (Types.show_masc_error e));
     (* Complete using the unsuffixed name — same resolution path *)
-    (match Room.complete_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (match Coord.complete_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
              ~notes:"done" with
      | Ok _ -> ()
      | Error e ->
@@ -1456,13 +1456,13 @@ let test_bug006_transition_with_unsuffixed_name () =
 
 let test_bug006_cancel_with_unsuffixed_name () =
   with_test_env (fun config ->
-    let _ = Room.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
-    let _ = Room.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
-    (match Room.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+    let _ = Coord.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Coord.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
+    (match Coord.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Types.show_masc_error e));
     (* Cancel using the unsuffixed name — should resolve to "keeper-coder-agent" *)
-    (match Room.cancel_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (match Coord.cancel_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
              ~reason:"test" with
      | Ok _ -> ()
      | Error e ->
@@ -1474,31 +1474,31 @@ let test_bug006_cancel_with_unsuffixed_name () =
 
 let test_empty_backlog_stop_signal () =
   with_test_env (fun config ->
-    let result = Room.list_tasks config in
+    let result = Coord.list_tasks config in
     Alcotest.(check bool) "contains STOP signal"
       true (str_contains result "STOP calling keeper_tasks_list"))
 
 let test_no_active_tasks_stop_signal () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
-    let _ = Room.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
-    let _ = Room.complete_task config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
-    let result = Room.list_tasks config in
+    let _ = Coord.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Coord.complete_task config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
+    let result = Coord.list_tasks config in
     Alcotest.(check bool) "contains STOP signal"
       true (str_contains result "STOP calling keeper_tasks_list"))
 
 let test_no_unclaimed_tasks_stop_signal () =
   with_test_env (fun config ->
-    let _ = Room.add_task config ~title:"Claimed" ~priority:1 ~description:"" in
-    let _ = Room.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
-    let result = Room.claim_next config ~agent_name:"bob" in
+    let _ = Coord.add_task config ~title:"Claimed" ~priority:1 ~description:"" in
+    let _ = Coord.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let result = Coord.claim_next config ~agent_name:"bob" in
     Alcotest.(check bool) "contains ACTION stop signal"
       true (str_contains result "ACTION: Stop task-checking"))
 
 let () =
   Eio_guard.enable ();
   Random.init 42;
-  Alcotest.run "Room" [
+  Alcotest.run "Coord" [
     (* === Happy Path Tests === *)
     "init", [
       Alcotest.test_case "creates folder" `Quick test_init_creates_folder;

@@ -75,13 +75,13 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
              redacted = Safe_ops.json_bool ~default:false "redacted" json;
            })
 
-let read_internal_history_lines ~(config : Room.config) ~(trace_id : string)
+let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
     : Trajectory.trajectory_line list =
   let path = Keeper_types.keeper_internal_history_path config trace_id in
   Fs_compat.load_jsonl path
   |> List.filter_map internal_history_json_to_trajectory_line
 
-let merge_keeper_trace_lines ~(config : Room.config) ~(trace_id : string)
+let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
     (trajectory_lines : Trajectory.trajectory_line list)
     : Trajectory.trajectory_line list =
   let internal_lines = read_internal_history_lines ~config ~trace_id in
@@ -474,7 +474,7 @@ let handle_keeper_get_subroutes state req request reqd =
            (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
     else
       let config = state.Mcp_server.room_config in
-      let masc_root = Room.masc_root_dir config in
+      let masc_root = Coord.masc_root_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
           ~default:24
@@ -561,7 +561,7 @@ let handle_keeper_get_subroutes state req request reqd =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
          in
-         let masc_root = Room.masc_root_dir config in
+         let masc_root = Coord.masc_root_dir config in
          let trajectory_lines =
            Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
              ~trace_id
@@ -869,7 +869,9 @@ let handle_keeper_get_subroutes state req request reqd =
          Http.Response.json ~status:`Not_found
            (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
        | Some entry ->
-         let snapshot = Keeper_composite_observer.observe entry in
+         let snapshot =
+           Keeper_composite_observer.observe entry
+         in
          let json = Keeper_composite_observer.snapshot_to_json snapshot in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

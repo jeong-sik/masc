@@ -7,7 +7,7 @@
 
 (** {1 Domain-Specific Errors} *)
 
-(** Room/Coordination errors *)
+(** Coord/Coordination errors *)
 type room_error =
   | RoomNotFound of string
   | RoomAlreadyExists of string
@@ -54,7 +54,7 @@ type mcp_error =
 
 (** Top-level error type combining all domains *)
 type t =
-  | Room of room_error
+  | Coord of room_error
   | Task of task_error
   | Agent of agent_error
   | Federation of federation_error

@@ -14,9 +14,9 @@ open Masc_mcp
 (* Initialize crypto RNG for subscription ID generation *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
-(* Wire Room_hooks for subscribe — needed because Room module side-effects
-   may not execute in test binaries that don't reference Room directly. *)
-let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->
+(* Wire Coord_hooks for subscribe — needed because Coord module side-effects
+   may not execute in test binaries that don't reference Coord directly. *)
+let () = Coord_hooks.subscribe_messages_fn := (fun ~subscriber ->
   let _ = Subscriptions.SubscriptionStore.subscribe
     ~subscriber ~resource:Subscriptions.Messages () in ())
 
@@ -47,7 +47,7 @@ let with_eio_env f =
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
   let tmp_dir = make_test_dir () in
-  let config = Room_eio.test_config ~fs tmp_dir in
+  let config = Coord_eio.test_config ~fs tmp_dir in
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
     (fun () ->
@@ -68,23 +68,23 @@ let test_broadcast_delivery () =
   let agent_b = "gemini" in
 
   (* Both agents register *)
-  (match Room_eio.register_agent config ~name:agent_a ~capabilities:["code"] () with
+  (match Coord_eio.register_agent config ~name:agent_a ~capabilities:["code"] () with
    | Ok _ -> ()
    | Error e -> failf "Agent A registration failed: %s" e);
 
-  (match Room_eio.register_agent config ~name:agent_b ~capabilities:["review"] () with
+  (match Coord_eio.register_agent config ~name:agent_b ~capabilities:["review"] () with
    | Ok _ -> ()
    | Error e -> failf "Agent B registration failed: %s" e);
 
   (* Agent A broadcasts *)
   let msg_content = "Hello from Agent A! Testing A2A." in
-  let msg_result = Room_eio.broadcast config ~from_agent:agent_a ~content:msg_content in
+  let msg_result = Coord_eio.broadcast config ~from_agent:agent_a ~content:msg_content in
 
   (match msg_result with
    | Error e -> failf "Broadcast failed: %s" e
    | Ok msg ->
        (* Agent B retrieves the message *)
-       (match Room_eio.get_message config ~seq:msg.seq with
+       (match Coord_eio.get_message config ~seq:msg.seq with
         | Ok retrieved_msg ->
             check string "content matches" msg_content retrieved_msg.content;
             check string "sender matches" agent_a retrieved_msg.from_agent
@@ -97,21 +97,21 @@ let test_message_persistence () =
   let agent_a = "claude" in
 
   (* Agent A registers and broadcasts *)
-  let _ = Room_eio.register_agent config ~name:agent_a () in
+  let _ = Coord_eio.register_agent config ~name:agent_a () in
   let msg_content = "Persistent message for offline agents" in
 
   let msg_seq =
-    match Room_eio.broadcast config ~from_agent:agent_a ~content:msg_content with
+    match Coord_eio.broadcast config ~from_agent:agent_a ~content:msg_content with
     | Ok msg -> msg.seq
     | Error e -> failf "Broadcast failed: %s" e
   in
 
   (* Simulate "new session" - Agent B joins later but can still read *)
   let agent_b = "gemini" in
-  let _ = Room_eio.register_agent config ~name:agent_b () in
+  let _ = Coord_eio.register_agent config ~name:agent_b () in
 
   (* B should be able to retrieve the message by sequence *)
-  match Room_eio.get_message config ~seq:msg_seq with
+  match Coord_eio.get_message config ~seq:msg_seq with
   | Ok msg ->
       check string "persisted content" msg_content msg.content;
       check string "persisted sender" agent_a msg.from_agent
@@ -122,11 +122,11 @@ let test_message_persistence () =
 let test_message_ordering () =
   with_eio_env @@ fun config ->
   let agent_a = "claude" in
-  let _ = Room_eio.register_agent config ~name:agent_a () in
+  let _ = Coord_eio.register_agent config ~name:agent_a () in
 
   (* Send multiple messages *)
   let send_msg content =
-    match Room_eio.broadcast config ~from_agent:agent_a ~content with
+    match Coord_eio.broadcast config ~from_agent:agent_a ~content with
     | Ok msg -> msg.seq
     | Error e -> failf "Broadcast failed: %s" e
   in
@@ -140,22 +140,22 @@ let test_message_ordering () =
   check bool "seq2 < seq3" true (seq2 < seq3);
 
   (* Verify content *)
-  (match Room_eio.get_message config ~seq:seq1 with
+  (match Coord_eio.get_message config ~seq:seq1 with
    | Ok msg -> check string "first message" "msg-1" msg.content
    | Error e -> failf "get msg1 failed: %s" e);
 
-  (match Room_eio.get_message config ~seq:seq3 with
+  (match Coord_eio.get_message config ~seq:seq3 with
    | Ok msg -> check string "third message" "msg-3" msg.content
    | Error e -> failf "get msg3 failed: %s" e)
 
 (** Test 4: Mention extraction (@agent) *)
 let test_mention_extraction () =
   with_eio_env @@ fun config ->
-  let _ = Room_eio.register_agent config ~name:"claude" () in
-  let _ = Room_eio.register_agent config ~name:"gemini" () in
+  let _ = Coord_eio.register_agent config ~name:"claude" () in
+  let _ = Coord_eio.register_agent config ~name:"gemini" () in
 
   (* Send message with @mention *)
-  match Room_eio.broadcast config ~from_agent:"claude" ~content:"@gemini please review this" with
+  match Coord_eio.broadcast config ~from_agent:"claude" ~content:"@gemini please review this" with
   | Ok msg ->
       check (option string) "mention extracted" (Some "gemini") msg.mention
   | Error e ->
@@ -169,7 +169,7 @@ let test_concurrent_broadcasts () =
 
   (* All agents register *)
   List.iter (fun a ->
-    ignore (Room_eio.register_agent config ~name:a ())
+    ignore (Coord_eio.register_agent config ~name:a ())
   ) agents;
 
   (* Concurrent broadcasts using Eio fibers *)
@@ -177,7 +177,7 @@ let test_concurrent_broadcasts () =
     fun () ->
       for i = 1 to msgs_per_agent do
         let content = Printf.sprintf "%s-msg-%d" agent i in
-        ignore (Room_eio.broadcast config ~from_agent:agent ~content)
+        ignore (Coord_eio.broadcast config ~from_agent:agent ~content)
       done
   ) agents);
 
@@ -186,13 +186,13 @@ let test_concurrent_broadcasts () =
   let total_expected = List.length agents * msgs_per_agent in
 
   (* Try to get the message at expected final sequence *)
-  match Room_eio.get_message config ~seq:total_expected with
+  match Coord_eio.get_message config ~seq:total_expected with
   | Ok _ -> ()  (* Message exists at expected position *)
   | Error _ ->
       (* Might be at different seq, check a few positions *)
       let found = ref false in
       for seq = 1 to total_expected + 5 do
-        match Room_eio.get_message config ~seq with
+        match Coord_eio.get_message config ~seq with
         | Ok _ -> found := true
         | Error _ -> ()
       done;
@@ -206,7 +206,7 @@ let test_auto_subscribe () =
   let agent = "claude" in
 
   (* Register agent *)
-  (match Room_eio.register_agent config ~name:agent () with
+  (match Coord_eio.register_agent config ~name:agent () with
    | Ok _ -> ()
    | Error e -> failf "Registration failed: %s" e);
 
@@ -227,16 +227,16 @@ let test_event_logging () =
   (* Note: In real impl, counter persists - this tests from current state *)
 
   (* Register → should log AgentJoin *)
-  let _ = Room_eio.register_agent config ~name:agent () in
+  let _ = Coord_eio.register_agent config ~name:agent () in
 
   (* Broadcast → should log Broadcast *)
-  let _ = Room_eio.broadcast config ~from_agent:agent ~content:"test event" in
+  let _ = Coord_eio.broadcast config ~from_agent:agent ~content:"test event" in
 
   (* Remove → should log AgentLeave *)
-  let _ = Room_eio.remove_agent config ~name:agent in
+  let _ = Coord_eio.remove_agent config ~name:agent in
 
   (* Verify events were logged *)
-  let events = Room_eio.get_recent_events config ~limit:10 in
+  let events = Coord_eio.get_recent_events config ~limit:10 in
 
   check bool "events were logged" true (List.length events >= 3);
 
@@ -256,12 +256,12 @@ let test_event_retrieval () =
   let agent = "test-agent" in
 
   (* Create some events *)
-  let _ = Room_eio.register_agent config ~name:agent () in
-  let _ = Room_eio.broadcast config ~from_agent:agent ~content:"msg1" in
-  let _ = Room_eio.broadcast config ~from_agent:agent ~content:"msg2" in
+  let _ = Coord_eio.register_agent config ~name:agent () in
+  let _ = Coord_eio.broadcast config ~from_agent:agent ~content:"msg1" in
+  let _ = Coord_eio.broadcast config ~from_agent:agent ~content:"msg2" in
 
   (* Get events *)
-  let events = Room_eio.get_recent_events config ~limit:5 in
+  let events = Coord_eio.get_recent_events config ~limit:5 in
 
   (* Should have at least the events we created *)
   check bool "has events" true (List.length events >= 3);

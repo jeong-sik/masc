@@ -16,13 +16,15 @@
 
 ## 1. Context
 
-Phase 1 (#7126)이 `current_turn_observation : turn_observation option` 필드를 도입해 **anti-stale barrier**를 확립했다. `derive_turn_phase`는 이 필드를 통해 `Executing` variant에 정직하게 도달한다. 그러나 다음 갭이 남는다:
+Phase 1 (#7126)이 `current_turn_observation : turn_observation option` 필드를 도입해 **anti-stale barrier**를 확립했다. 이후 runtime write point가 추가되면서 현재 KTC live domain은 다음과 같이 닫혀 있다:
 
-| Sub-FSM | 현재 도달 가능 variant | 미도달 |
-|---------|---------------------|--------|
-| `derive_decision_stage` | `Undecided`, `Gate_rejected` | `Guard_ok`, `Tool_policy_selected` |
-| `derive_cascade_state` | `Idle` | `Selecting`, `Trying`, `Done`, `Exhausted` |
-| `derive_turn_phase` | `Idle`, `Executing`, `Compacting`, `Finalizing` | `Prompting`, `ToolCall` |
+| Sub-FSM | 현재 runtime variant |
+|---------|----------------------|
+| `decision_stage` | `Undecided`, `Guard_ok`, `Gate_rejected`, `Tool_policy_selected` |
+| `cascade_state` | `Idle`, `Selecting`, `Trying`, `Done`, `Exhausted` |
+| `turn_phase` | `Idle`, `Prompting`, `Executing`, `Compacting`, `Finalizing` |
+
+따라서 남은 과제는 "variant를 더 만들기"가 아니라, 이 runtime 3축 contract를 `KeeperTurnCycle.tla`와 1:1로 정렬하고 overflow retry 같은 모호한 edge를 선명하게 만드는 것이다.
 
 Phase 2의 목표는 이 갭을 메우되 **세 가지 invariant**를 모두 보존하는 것:
 1. **Single-writer**: `registry_entry`는 단일 writer (`keeper_unified_turn` 호출 경로)만 변경

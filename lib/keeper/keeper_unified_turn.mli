@@ -13,7 +13,7 @@
     3. Observes tool history from result to update metrics
     4. Returns updated keeper_meta
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param generation Current generation counter *)
@@ -47,7 +47,7 @@ val update_metrics_from_failure :
   Keeper_types.keeper_meta
 
 val append_metrics_snapshot :
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
@@ -131,7 +131,7 @@ val resolved_max_context_for_turn :
   int
 
 val run_keeper_cycle :
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   generation:int ->
@@ -142,7 +142,7 @@ val run_keeper_cycle :
   (Keeper_types.keeper_meta, Oas.Error.sdk_error) result
 
 val run_unified_turn :
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   generation:int ->

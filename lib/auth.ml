@@ -363,7 +363,7 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
   | Ok role -> authorize_tool_for_role ~agent_name ~role ~tool_name
 
 (* ============================================ *)
-(* Room secret (for room-level auth)            *)
+(* Coord secret (for room-level auth)            *)
 (* ============================================ *)
 
 (** Initialize room secret *)

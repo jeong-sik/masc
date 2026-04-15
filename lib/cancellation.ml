@@ -6,6 +6,8 @@
     MCP Spec MAY: Support for client request cancellation
 *)
 
+module StringMap = Map.Make (String)
+
 (** Cancellation token state.
     [cancelled] uses [Atomic.t] for fiber-safe cross-fiber visibility in OCaml 5.
     [reason] is written before [cancelled] transitions to [true], ensuring fibers that
@@ -21,7 +23,7 @@ type token = {
 
 (** Token store - Thread-safe with Eio.Mutex protection *)
 module TokenStore = struct
-  let tokens : (string, token) Hashtbl.t = Hashtbl.create 64
+  let tokens : token StringMap.t ref = ref StringMap.empty
   let lock : Eio.Mutex.t option ref = ref None
   let last_cleanup : float ref = ref 0.0
   let cleanup_interval = Env_config.InternalTimers.cancellation_cleanup_sec
@@ -39,10 +41,10 @@ module TokenStore = struct
   (** Internal cleanup - removes tokens older than max_age *)
   let cleanup_internal ~(max_age : float) : int =
     let now = Time_compat.now () in
-    let old_tokens = Hashtbl.fold (fun id t acc ->
+    let old_tokens = StringMap.fold (fun id t acc ->
       if now -. t.created_at > max_age then id :: acc else acc
-    ) tokens [] in
-    List.iter (Hashtbl.remove tokens) old_tokens;
+    ) !tokens [] in
+    List.iter (fun id -> tokens := StringMap.remove id !tokens) old_tokens;
     List.length old_tokens
 
   (** Auto-cleanup on access if interval elapsed *)
@@ -76,21 +78,21 @@ module TokenStore = struct
         callbacks = [];
         created_at = Time_compat.now ();
       } in
-      Hashtbl.add tokens token.id token;
+      tokens := StringMap.add token.id token !tokens;
       token
     )
 
   (** Get token by ID *)
   let get (id : string) : token option =
-    with_lock (fun () -> Hashtbl.find_opt tokens id)
+    with_lock (fun () -> StringMap.find_opt id !tokens)
 
   (** Remove token *)
   let remove (id : string) : unit =
-    with_lock (fun () -> Hashtbl.remove tokens id)
+    with_lock (fun () -> tokens := StringMap.remove id !tokens)
 
   (** List all tokens *)
   let list_all () : token list =
-    with_lock (fun () -> Hashtbl.fold (fun _ t acc -> t :: acc) tokens [])
+    with_lock (fun () -> StringMap.fold (fun _ t acc -> t :: acc) !tokens [])
 
   (** Cleanup old tokens (older than max_age seconds) *)
   let cleanup ~(max_age : float) : int =
@@ -104,7 +106,7 @@ module TokenStore = struct
   (** Create token with explicit ID (for testing/stress tests) *)
   let create_with_id (id : string) : unit =
     with_lock (fun () ->
-      if not (Hashtbl.mem tokens id) then begin
+      if not (StringMap.mem id !tokens) then begin
         let token = {
           id;
           cancelled = Atomic.make false;
@@ -112,14 +114,14 @@ module TokenStore = struct
           callbacks = [];
           created_at = Time_compat.now ();
         } in
-        Hashtbl.add tokens id token
+        tokens := StringMap.add id token !tokens
       end
     )
 
   (** Check if token is cancelled by ID *)
   let is_cancelled (id : string) : bool =
     with_lock (fun () ->
-      match Hashtbl.find_opt tokens id with
+      match StringMap.find_opt id !tokens with
       | Some t -> Atomic.get t.cancelled
       | None -> false
     )
@@ -127,7 +129,7 @@ module TokenStore = struct
   (** Cancel token by ID *)
   let cancel (id : string) : unit =
     with_lock (fun () ->
-      match Hashtbl.find_opt tokens id with
+      match StringMap.find_opt id !tokens with
       | Some t ->
         if not (Atomic.get t.cancelled) then begin
           Atomic.set t.cancelled true;

@@ -290,7 +290,7 @@ let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
   | Some other -> (false, Printf.sprintf "Unknown action: %s" other)
   | None -> (false, "action required: subscribe, unsubscribe, list, poll")
 
-(** Hook function to notify task changes - call from Room module *)
+(** Hook function to notify task changes - call from Coord module *)
 let notify_task_change ~(change : change_type) ~(task_id : string) ~(data : Yojson.Safe.t) : unit =
   let _ = notify_change ~resource:Tasks ~change ~resource_id:task_id ~data in
   ()

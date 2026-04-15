@@ -270,7 +270,7 @@ let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the room state
      directly so downstream masc_join and other tools can work. *)
   ignore
-    (Masc_mcp.Room.init fixture.state.room_config
+    (Masc_mcp.Coord.init fixture.state.room_config
        ~agent_name:(Some fixture.agent_name))
 
 let ensure_joined fixture =
@@ -395,7 +395,7 @@ let ensure_verification_request fixture =
   | Some req_id -> req_id
   | None ->
       let base_path =
-        Masc_mcp.Room.masc_dir fixture.state.room_config
+        Masc_mcp.Coord.masc_dir fixture.state.room_config
       in
       let req =
         match

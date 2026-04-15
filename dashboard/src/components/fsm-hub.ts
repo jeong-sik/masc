@@ -29,6 +29,46 @@ export function FsmHub() {
   const [lastFetchAt, setLastFetchAt] = useState(0)
   const [now, setNow] = useState(() => Date.now() / 1000)
   const [graphOpen, setGraphOpen] = useState(false)
+  // Transition history: client-side log of observed state changes.
+  const [history, setHistory] = useState<{ ts: number; from: string; to: string; field: string }[]>([])
+  const prevSnapshotRef = useRef<{ phase: string; turn: string; decision: string; cascade: string; compaction: string } | null>(null)
+  // Phase sparkline: every observed KSM phase, newest last (max 30).
+  const [phaseLog, setPhaseLog] = useState<string[]>([])
+
+  // Track transitions whenever snapshot changes
+  useEffect(() => {
+    if (!snapshot) return
+    const cur = {
+      phase: snapshot.phase,
+      turn: snapshot.turn_phase,
+      decision: snapshot.decision.stage,
+      cascade: snapshot.cascade.state,
+      compaction: snapshot.compaction.stage,
+    }
+    const prev = prevSnapshotRef.current
+    if (prev) {
+      const entries: { ts: number; from: string; to: string; field: string }[] = []
+      const now_ts = Date.now() / 1000
+      if (prev.phase !== cur.phase) entries.push({ ts: now_ts, from: prev.phase, to: cur.phase, field: 'KSM' })
+      if (prev.turn !== cur.turn) entries.push({ ts: now_ts, from: prev.turn, to: cur.turn, field: 'KTC' })
+      if (prev.decision !== cur.decision) entries.push({ ts: now_ts, from: prev.decision, to: cur.decision, field: 'KDP' })
+      if (prev.cascade !== cur.cascade) entries.push({ ts: now_ts, from: prev.cascade, to: cur.cascade, field: 'KCL' })
+      if (prev.compaction !== cur.compaction) entries.push({ ts: now_ts, from: prev.compaction, to: cur.compaction, field: 'KMC' })
+      if (entries.length > 0) {
+        setHistory(h => [...entries, ...h].slice(0, 20))
+      }
+    }
+    prevSnapshotRef.current = cur
+    // Append current phase to sparkline log
+    setPhaseLog(log => [...log, cur.phase].slice(-30))
+  }, [snapshot])
+
+  // Reset history + sparkline when switching keepers
+  useEffect(() => {
+    setHistory([])
+    setPhaseLog([])
+    prevSnapshotRef.current = null
+  }, [selected])
 
   const keeperList = keepers.value
   const keeperNames = useMemo(
@@ -100,7 +140,10 @@ export function FsmHub() {
         <${EmptyState} message=${error} compact />
       ` : snapshot ? html`
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
-        <${HeroPhase} snapshot=${snapshot} />
+        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} />
+
+        ${/* ── Zone 2b: Transition History Trail ── */ ''}
+        <${TransitionTrail} history=${history} now=${now} />
 
         ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
         <${TurnPipelineStrip} snapshot=${snapshot} />
@@ -198,7 +241,36 @@ function StatusBar({
 
 // ── Zone 2: Hero Phase ──────────────────────────────────
 
-function HeroPhase({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+const PHASE_DOT_COLOR: Record<string, string> = {
+  Running: 'bg-emerald-400',
+  Compacting: 'bg-amber-400',
+  HandingOff: 'bg-violet-400',
+  Failing: 'bg-red-400',
+  Crashed: 'bg-red-500',
+  Draining: 'bg-amber-300',
+  Restarting: 'bg-blue-400',
+  Offline: 'bg-zinc-600',
+  Paused: 'bg-zinc-600',
+  Stopped: 'bg-zinc-600',
+  Dead: 'bg-zinc-800',
+}
+
+function PhaseSparkline({ log }: { log: string[] }) {
+  if (log.length < 2) return null
+  return html`
+    <div class="flex items-center gap-[3px] mt-2" title="Phase history (oldest → newest)">
+      <span class="text-[8px] text-[var(--text-dim)] mr-1">history</span>
+      ${log.map((phase, i) => {
+        const isLast = i === log.length - 1
+        const dotColor = PHASE_DOT_COLOR[phase] ?? 'bg-[var(--accent)]'
+        const size = isLast ? 'w-2.5 h-2.5 ring-1 ring-white/20' : 'w-1.5 h-1.5'
+        return html`<span class=${`rounded-full ${dotColor} ${size} shrink-0`} title=${phase}></span>`
+      })}
+    </div>
+  `
+}
+
+function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; phaseLog: string[] }) {
   const prevRef = useRef(snapshot.phase)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -234,6 +306,7 @@ function HeroPhase({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
         </div>
         ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono">phase changed</span>` : null}
       </div>
+      <${PhaseSparkline} log=${phaseLog} />
     </div>
   `
 }
@@ -435,6 +508,55 @@ function CompositeGraphPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }
   ])
 
   return html`<${CytoscapeFsm} spec=${spec} height="320px" />`
+}
+
+// ── Zone 2b: Transition History Trail ────────────────────
+
+const FIELD_COLOR: Record<string, string> = {
+  KSM: 'text-[var(--accent)]',
+  KTC: 'text-[#818cf8]',
+  KDP: 'text-[#818cf8]',
+  KCL: 'text-[#818cf8]',
+  KMC: 'text-[#f59e0b]',
+}
+
+function TransitionTrail({
+  history,
+  now,
+}: {
+  history: { ts: number; from: string; to: string; field: string }[]
+  now: number
+}) {
+  if (history.length === 0) {
+    return html`
+      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+        관찰 시작 이후 상태 전이 없음 — 전이가 발생하면 여기에 기록됩니다
+      </div>
+    `
+  }
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+      <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        Transition History (${history.length})
+      </div>
+      <div class="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto">
+        ${history.map(entry => {
+          const ago = fmtDuration(Math.max(0, now - entry.ts))
+          const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
+          return html`
+            <div class="flex items-center gap-2 text-[10px] font-mono leading-tight">
+              <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>
+              <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
+              <span class="text-[var(--text-dim)]">${entry.from}</span>
+              <span class="text-[var(--text-muted)]">→</span>
+              <span class="text-[var(--text-strong)]">${entry.to}</span>
+            </div>
+          `
+        })}
+      </div>
+    </div>
+  `
 }
 
 // ── Utilities ───────────────────────────────────────────

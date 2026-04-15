@@ -404,7 +404,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 (let effective_models =
                    Oas_model_resolve.models_of_cascade_name m.cascade_name
                  in
-                 let cfgs = Llm_provider.Cascade_config.parse_model_strings effective_models in
+                 let cfgs = Cascade_config.parse_model_strings effective_models in
                  match cfgs with
                  | [] when effective_models <> [] ->
                      `Assoc [("has_checkpoint", `Bool false)]

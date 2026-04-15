@@ -1217,15 +1217,15 @@ let run_turn
                           single-provider rerank API. Graceful degradation via
                           BM25 fallback lives inside [default_rerank_fn]. *)
                        let model_strings =
-                         Llm_provider.Cascade_config.resolve_model_strings
+                         Cascade_config.resolve_model_strings
                            ?config_path ~name:rerank_cascade ~defaults ()
-                         |> Llm_provider.Cascade_config.expand_model_strings_for_execution
+                         |> Cascade_config.expand_model_strings_for_execution
                        in
                        let providers =
-                         Llm_provider.Cascade_config.parse_model_strings model_strings
+                         Cascade_config.parse_model_strings model_strings
                        in
                        let healthy =
-                         Llm_provider.Cascade_config.filter_healthy ~sw ~net providers
+                         Cascade_config.filter_healthy ~sw ~net providers
                        in
                        (match healthy with
                         | [] ->

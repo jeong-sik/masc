@@ -1,7 +1,7 @@
 (** Dashboard projection for cascade configuration and runtime health.
 
     Exposes the current cascade.json profiles (raw JSON, parsed with weights)
-    alongside the live {!Llm_provider.Cascade_health_tracker.global} snapshot
+    alongside the live {!Cascade_health_tracker.global} snapshot
     so operators can see *why* a given provider is preferred without
     re-running a turn.
 

@@ -1,7 +1,7 @@
 (** OAS model label resolution — resolve model labels to max_context and
     API key availability via OAS Cascade_config and Provider_registry.
 
-    Context resolution delegates to OAS {!Llm_provider.Cascade_config.resolve_label_context}
+    Context resolution delegates to OAS {!Cascade_config.resolve_label_context}
     which uses the same routing logic as cascade execution.
     API key availability is checked via {!Llm_provider.Provider_registry}.
     MASC does NOT guess routing — OAS owns resolution end-to-end.
@@ -82,12 +82,12 @@ let effective_discovered_ctx ~static_ctx ~(discovered : int option) : int =
   | _ -> static_ctx
 
 (** Resolve max_context for a model label.
-    Delegates routing to OAS {!Llm_provider.Cascade_config.resolve_label_context} —
+    Delegates routing to OAS {!Cascade_config.resolve_label_context} —
     MASC does not guess which endpoint serves the request.  Discovered
     values below {!context_floor} fall back to the static registry.
 
     Resolution chain:
-    1. OAS {!Llm_provider.Cascade_config.resolve_label_context} (model-aware
+    1. OAS {!Cascade_config.resolve_label_context} (model-aware
        endpoint lookup for local providers, round-robin fallback).
     2. Apply {!context_floor} guard on the discovered value.
     3. If OAS returns [None], use static registry entry's [max_context].
@@ -101,7 +101,7 @@ let max_context_of_label (label : string) : int =
       | Some entry -> entry.max_context
       | None -> fallback_context_window
   in
-  match Llm_provider.Cascade_config.resolve_label_context label with
+  match Cascade_config.resolve_label_context label with
   | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
   | None -> static_ctx
 
@@ -118,7 +118,7 @@ let context_if_available (label : string) : int option =
       if entry.is_available () then
         let static_ctx = entry.max_context in
         let ctx =
-          match Llm_provider.Cascade_config.resolve_label_context label with
+          match Cascade_config.resolve_label_context label with
           | Some discovered -> effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
           | None -> static_ctx
         in
@@ -290,7 +290,7 @@ let models_of_cascade_name (cascade_name : string) : string list =
      the first call and Eio.Mutex.Poisoned on subsequent calls.
      Fall back to defaults in both cases. *)
   try
-    Llm_provider.Cascade_config.resolve_model_strings
+    Cascade_config.resolve_model_strings
       ?config_path
       ~name:cascade_name
       ~defaults

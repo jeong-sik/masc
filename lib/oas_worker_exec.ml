@@ -124,7 +124,7 @@ let proof_result_status_to_string status =
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
 let resolve_provider_of_label (label : string) : Oas.Provider.config =
-  match Llm_provider.Cascade_config.parse_model_string label with
+  match Cascade_config.parse_model_string label with
   | Some pc -> Oas.Provider.config_of_provider_config pc
   | None ->
       Log.error ~ctx:"oas_worker_exec"

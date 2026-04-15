@@ -44,7 +44,7 @@ let docker_llama_server_url () =
 
 let rewrite_model_label_for_container model_label =
   if String.starts_with ~prefix:"custom:" model_label then
-    match Llm_provider.Cascade_config.parse_model_string model_label with
+    match Cascade_config.parse_model_string model_label with
     | Some cfg ->
         let rewritten = rewrite_loopback_url cfg.Llm_provider.Provider_config.base_url in
         if String.equal rewritten cfg.Llm_provider.Provider_config.base_url then
@@ -156,7 +156,7 @@ let mount_args (spec : Worker_execution_spec.t) =
   base_mount @ config_mount
 
 let auth_requirements_of_model_label model_label =
-  match Llm_provider.Cascade_config.parse_model_string model_label with
+  match Cascade_config.parse_model_string model_label with
   | None -> Ok []
   | Some cfg ->
     let keys = Provider_adapter.docker_auth_env_keys_of_provider_config cfg in

@@ -20,7 +20,7 @@ type t = {
 let empty = { temperature = None; max_tokens = None }
 
 (** Convert OAS inference_params to MASC t. *)
-let of_oas (p : Llm_provider.Cascade_config.inference_params) : t =
+let of_oas (p : Cascade_config.inference_params) : t =
   { temperature = p.temperature; max_tokens = p.max_tokens }
 
 (** Extract inference parameters from a parsed JSON value for a named cascade.
@@ -55,7 +55,7 @@ let for_cascade ~(name : string) : t =
   match Oas_worker.default_config_path () with
   | None -> empty
   | Some config_path ->
-      (try of_oas (Llm_provider.Cascade_config.resolve_inference_params ~config_path ~name)
+      (try of_oas (Cascade_config.resolve_inference_params ~config_path ~name)
        with Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             Log.warn ~ctx:"cascade"

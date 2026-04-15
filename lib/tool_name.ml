@@ -158,14 +158,21 @@ module Masc = struct
     | Agent_fitness
     | Agent_update
     | Agents
+    | Autoresearch_cycle
+    | Autoresearch_inject
+    | Autoresearch_start
+    | Autoresearch_status
+    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
     | Board_delete
     | Board_get
+    | Board_hearths
     | Board_list
     | Board_post
+    | Board_profile
     | Board_search
     | Board_stats
     | Board_vote
@@ -175,11 +182,6 @@ module Masc = struct
     | Claim_next
     | Claim_task
     | Cleanup_zombies
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Code_delete
     | Code_edit
     | Code_git
@@ -252,8 +254,10 @@ module Masc = struct
     | Board_comment_vote -> "masc_board_comment_vote"
     | Board_delete -> "masc_board_delete"
     | Board_get -> "masc_board_get"
+    | Board_hearths -> "masc_board_hearths"
     | Board_list -> "masc_board_list"
     | Board_post -> "masc_board_post"
+    | Board_profile -> "masc_board_profile"
     | Board_search -> "masc_board_search"
     | Board_stats -> "masc_board_stats"
     | Board_vote -> "masc_board_vote"
@@ -340,8 +344,10 @@ module Masc = struct
     | "masc_board_comment_vote" -> Some Board_comment_vote
     | "masc_board_delete" -> Some Board_delete
     | "masc_board_get" -> Some Board_get
+    | "masc_board_hearths" -> Some Board_hearths
     | "masc_board_list" -> Some Board_list
     | "masc_board_post" -> Some Board_post
+    | "masc_board_profile" -> Some Board_profile
     | "masc_board_search" -> Some Board_search
     | "masc_board_stats" -> Some Board_stats
     | "masc_board_vote" -> Some Board_vote

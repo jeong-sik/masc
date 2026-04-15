@@ -19,7 +19,8 @@ let all_masc : Tool_name.Masc.t list =
   ; Autoresearch_cycle; Autoresearch_inject; Autoresearch_start
   ; Autoresearch_status; Autoresearch_stop
   ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
-  ; Board_delete; Board_get; Board_list; Board_post; Board_search
+  ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
+  ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Cancel_task; Check; Claim_next
   ; Claim_task; Cleanup_zombies; Code_delete; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task

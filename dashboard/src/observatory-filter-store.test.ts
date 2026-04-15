@@ -30,6 +30,8 @@ import {
   setKeeperFilter,
   setTimeRangeFilter,
   timeRangeLabel,
+  timeRangeShortLabel,
+  timeRangeToMs,
 } from './observatory-filter-store'
 
 const setRoute = (router as unknown as {
@@ -111,7 +113,29 @@ describe('observatory-filter-store', () => {
   it('timeRangeLabel returns human-readable Korean label', () => {
     expect(timeRangeLabel('5m')).toBe('최근 5분')
     expect(timeRangeLabel('1h')).toBe('최근 1시간')
+    expect(timeRangeLabel('6h')).toBe('최근 6시간')
     expect(timeRangeLabel('24h')).toBe('최근 24시간')
     expect(timeRangeLabel('7d')).toBe('최근 7일')
+  })
+
+  it('timeRangeShortLabel returns short label without prefix', () => {
+    expect(timeRangeShortLabel('5m')).toBe('5분')
+    expect(timeRangeShortLabel('1h')).toBe('1시간')
+    expect(timeRangeShortLabel('6h')).toBe('6시간')
+    expect(timeRangeShortLabel('24h')).toBe('24시간')
+    expect(timeRangeShortLabel('7d')).toBe('7일')
+  })
+
+  it('timeRangeToMs converts presets to milliseconds', () => {
+    expect(timeRangeToMs('5m')).toBe(5 * 60_000)
+    expect(timeRangeToMs('1h')).toBe(60 * 60_000)
+    expect(timeRangeToMs('6h')).toBe(6 * 60 * 60_000)
+    expect(timeRangeToMs('24h')).toBe(24 * 60 * 60_000)
+    expect(timeRangeToMs('7d')).toBe(7 * 24 * 60 * 60_000)
+  })
+
+  it('accepts 6h as valid time range preset', () => {
+    setRoute('monitoring', { range: '6h' })
+    expect(currentTimeRangeFilter()).toBe('6h')
   })
 })

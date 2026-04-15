@@ -20,6 +20,8 @@ import {
   currentTimeRangeFilter,
   setTimeRangeFilter,
   timeRangeLabel,
+  timeRangeShortLabel,
+  timeRangeToMs,
   TIME_RANGE_PRESETS,
   type TimeRangePreset,
 } from '../../observatory-filter-store'
@@ -37,19 +39,6 @@ import { CrossSignalReadout } from './cross-signal-readout'
 import { DetailPane } from './detail-pane'
 import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
-
-// --- Time range utilities ---
-
-const RANGE_TO_MS: Record<TimeRangePreset, number> = {
-  '5m': 5 * 60_000,
-  '1h': 60 * 60_000,
-  '24h': 24 * 60 * 60_000,
-  '7d': 7 * 24 * 60 * 60_000,
-}
-
-export function timeRangeToMs(preset: TimeRangePreset): number {
-  return (RANGE_TO_MS[preset] ?? RANGE_TO_MS['1h'] ?? 3_600_000)
-}
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
 
@@ -71,7 +60,7 @@ function emptyData(): ObservatoryData {
     error: null,
     events: [],
     hourlyTrend: [],
-    windowStart: now - RANGE_TO_MS[DEFAULT_RANGE],
+    windowStart: now - timeRangeToMs(DEFAULT_RANGE),
     windowEnd: now,
   }
 }
@@ -127,7 +116,7 @@ function RangeSelector() {
           onClick=${() => setTimeRangeFilter(preset)}
           aria-pressed=${current === preset}
         >
-          ${timeRangeLabel(preset).replace('최근 ', '')}
+          ${timeRangeShortLabel(preset)}
         </button>
       `)}
     </div>
@@ -161,7 +150,7 @@ export function Observatory() {
     const requestId = ++latestRequestId.current
 
     const now = Date.now()
-    const windowStart = now - RANGE_TO_MS[range]
+    const windowStart = now - timeRangeToMs(range)
     const windowEnd = now
 
     state.value = { ...state.value, loading: true, error: null }

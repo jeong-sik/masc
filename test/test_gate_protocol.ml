@@ -180,8 +180,11 @@ let test_outbound_emits_destination_id () =
   } in
   let json = Gate_protocol.outbound_to_json out in
   let open Yojson.Safe.Util in
-  check string "keeper_name still emitted" "luna" (json |> member "keeper_name" |> to_string);
-  check string "destination_id mirrors keeper_name" "luna" (json |> member "destination_id" |> to_string)
+  check string "destination_id present" "luna" (json |> member "destination_id" |> to_string);
+  (* B2 Phase 3 — legacy keeper_name key is no longer emitted. *)
+  (match json |> member "keeper_name" with
+   | `Null -> ()
+   | _ -> fail "keeper_name should no longer be emitted")
 
 let test_outbound_to_json_roundtrip () =
   let out : Gate_protocol.outbound_message = {
@@ -194,7 +197,7 @@ let test_outbound_to_json_roundtrip () =
   let open Yojson.Safe.Util in
   check bool "ok" true (json |> member "ok" |> to_bool);
   check string "reply" "reply text" (json |> member "reply" |> to_string);
-  check string "keeper" "luna" (json |> member "keeper_name" |> to_string);
+  check string "destination_id" "luna" (json |> member "destination_id" |> to_string);
   let stats = json |> member "turn_stats" in
   check int "duration" 100 (stats |> member "duration_ms" |> to_int)
 

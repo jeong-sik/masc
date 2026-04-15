@@ -352,105 +352,95 @@ let load_persona_profile (persona_name : string) : agent_profile option =
             primary_value = None;
           }
 
-(** Neo4j agent identity cache. Loaded lazily on first access.
+(** Neo4j agent identity cache.  Loaded lazily on first lookup; once
+    populated the Hashtbl is read-only.
 
-    Serialised because get_agent_profile is invoked from dashboard HTTP
-    handlers running on multiple fibers (and potentially the executor
-    pool worker domain via [run_dashboard_compute]).  Without the mutex:
-    - Two fibers both enter the load branch
-    - First fiber starts the 10-second GraphQL request
-    - Second fiber sees [neo4j_cache_loaded = true] (set too early),
-      skips loading, and reads the still-empty Hashtbl
-    The flag is set AFTER the Hashtbl is populated, and the whole
-    critical section runs under the mutex so only one fiber performs
-    the fetch.
+    Invariant: [neo4j_cache_loaded] flips to true only after the
+    populate attempt finishes (success or error), so any fiber that
+    observes it set will never read an empty Hashtbl, and a failed
+    GraphQL load is not retried within the process lifetime.
 
-    [Eio.Mutex] (via [Eio_guard.with_mutex]) — Stdlib.Mutex would block
-    the entire OS thread (= the whole Eio domain) for the GraphQL
-    duration, freezing all unrelated fibers; Eio.Mutex suspends only
-    the waiting fiber.  Eio_guard.with_mutex skips locking before the
-    Eio runtime is enabled (module load, certain unit tests) so this
-    cache stays usable in both contexts. *)
+    Locking via [Eio_guard.with_mutex] so a contending fiber suspends
+    instead of freezing the whole Eio domain during the up to 10 s
+    GraphQL round-trip on first load. *)
 let neo4j_identity_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 32
 let neo4j_cache_loaded = ref false
 let neo4j_cache_mu = Eio.Mutex.create ()
 
-let load_neo4j_identity_cache () =
-  Eio_guard.with_mutex neo4j_cache_mu (fun () ->
-  if !neo4j_cache_loaded then ()
-  else begin
-    let body =
-      {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
-    in
-    match Graphql_client.request ~timeout_sec:10.0 body with
-    | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
-    | Ok output -> (
-        try
-          let json = Yojson.Safe.from_string output in
-          let open Yojson.Safe.Util in
-          let edges =
-            json |> member "data" |> member "agents" |> member "edges"
-            |> to_list
-          in
-          List.iter
-            (fun edge ->
-              let node = edge |> member "node" in
-              let name =
-                try node |> member "name" |> to_string with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
+let populate_neo4j_identity_cache_locked () =
+  let body =
+    {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
+  in
+  match Graphql_client.request ~timeout_sec:10.0 body with
+  | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
+  | Ok output -> (
+      try
+        let json = Yojson.Safe.from_string output in
+        let open Yojson.Safe.Util in
+        let edges =
+          json |> member "data" |> member "agents" |> member "edges"
+          |> to_list
+        in
+        List.iter
+          (fun edge ->
+            let node = edge |> member "node" in
+            let name =
+              try node |> member "name" |> to_string with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
+            in
+            if name <> "" then begin
+              let emoji =
+                (try Some (node |> member "emoji" |> to_string)
+                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+                |> Option.value ~default:"🤖"
               in
-              if name <> "" then begin
-                let emoji =
-                  (try Some (node |> member "emoji" |> to_string)
-                   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
-                  |> Option.value ~default:"🤖"
-                in
-                let korean_name =
-                  (try Some (node |> member "koreanName" |> to_string)
-                   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
-                  |> Option.value ~default:name
-                in
-                let model =
-                  try Some (node |> member "model" |> to_string)
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-                in
-                let traits =
-                  try node |> member "traits" |> to_list |> List.map to_string
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-                in
-                let interests =
-                  try
-                    node |> member "interests" |> to_list |> List.map to_string
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
-                in
-                let activity_level =
-                  try Some (node |> member "activityLevel" |> to_float)
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-                in
-                let primary_value =
-                  try Some (node |> member "primaryValue" |> to_string)
-                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
-                in
-                Hashtbl.replace neo4j_identity_cache name
-                  {
-                    emoji;
-                    korean_name;
-                    model;
-                    traits;
-                    interests;
-                    activity_level;
-                    primary_value;
-                  }
-              end)
-            edges
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn));
-    (* Set [loaded] only after the populate attempt finishes.  This
-       prevents a second fiber from reading the still-empty Hashtbl
-       during a slow GraphQL round-trip, and matches the original
-       intent of "don't retry on failure" (flag stays true even if the
-       GraphQL call errored). *)
-    neo4j_cache_loaded := true
-  end)
+              let korean_name =
+                (try Some (node |> member "koreanName" |> to_string)
+                 with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+                |> Option.value ~default:name
+              in
+              let model =
+                try Some (node |> member "model" |> to_string)
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+              in
+              let traits =
+                try node |> member "traits" |> to_list |> List.map to_string
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+              in
+              let interests =
+                try
+                  node |> member "interests" |> to_list |> List.map to_string
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+              in
+              let activity_level =
+                try Some (node |> member "activityLevel" |> to_float)
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+              in
+              let primary_value =
+                try Some (node |> member "primaryValue" |> to_string)
+                with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+              in
+              Hashtbl.replace neo4j_identity_cache name
+                {
+                  emoji;
+                  korean_name;
+                  model;
+                  traits;
+                  interests;
+                  activity_level;
+                  primary_value;
+                }
+            end)
+          edges
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn))
+
+let lookup_neo4j_profile persona_name =
+  Eio_guard.with_mutex neo4j_cache_mu (fun () ->
+    if not !neo4j_cache_loaded then begin
+      populate_neo4j_identity_cache_locked ();
+      neo4j_cache_loaded := true
+    end;
+    Hashtbl.find_opt neo4j_identity_cache persona_name)
 
 (** Merge two profiles: prefer non-default values from [overlay] over [base]. *)
 let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_profile =
@@ -467,11 +457,7 @@ let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_pr
 (** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
 let get_agent_profile (name : string) : agent_profile =
   let persona_name = extract_persona_name name in
-  load_neo4j_identity_cache ();
-  let neo4j_profile =
-    Eio_guard.with_mutex neo4j_cache_mu (fun () ->
-      Hashtbl.find_opt neo4j_identity_cache persona_name)
-  in
+  let neo4j_profile = lookup_neo4j_profile persona_name in
   let persona_profile = load_persona_profile persona_name in
   match (persona_profile, neo4j_profile) with
   | (Some persona, Some neo4j) ->

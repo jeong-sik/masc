@@ -1203,16 +1203,16 @@ let run_turn
                 let llm_selected =
                   if llm_rerank_enabled then
                     (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-                     | Some sw, Some net ->
-                       let rerank_cascade =
-                         Keeper_config.keeper_llm_rerank_cascade ()
-                       in
-                       let defaults =
-                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
-                       in
-                       let config_path = Oas_worker.default_config_path () in
-                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
-                          no longer owns cascade orchestration — MASC picks one
+	                     | Some sw, Some net ->
+	                       let rerank_cascade =
+	                         Keeper_config.keeper_llm_rerank_cascade ()
+	                       in
+	                       let defaults =
+	                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+	                       in
+	                       let config_path = Oas_worker.default_config_path () in
+	                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
+	                          no longer owns cascade orchestration — MASC picks one
                           provider from the cascade and passes it to the
                           single-provider rerank API. Graceful degradation via
                           BM25 fallback lives inside [default_rerank_fn]. *)
@@ -1224,16 +1224,16 @@ let run_turn
                        let providers =
                          Cascade_config.parse_model_strings model_strings
                        in
-                       let healthy =
-                         Cascade_config.filter_healthy ~sw ~net providers
-                       in
-                       (match healthy with
-                        | [] ->
-                          Log.Keeper.warn
-                            "keeper:%s TopK_llm: no healthy provider for cascade \
-                             '%s', falling back to core+prefilter+discovered"
-                            meta.name
-                            rerank_cascade;
+	                       let healthy =
+	                         Cascade_config.filter_healthy ~sw ~net providers
+	                       in
+	                       (match healthy with
+	                        | [] ->
+	                          Log.Keeper.warn
+	                            "keeper:%s TopK_llm: no healthy provider for cascade \
+	                             '%s', falling back to core+prefilter+discovered"
+	                            meta.name
+	                            rerank_cascade;
                           []
                         | first_provider :: _ ->
                           let rerank_fn =
@@ -1275,16 +1275,16 @@ let run_turn
                              selected
                            with
                            | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.warn
-                               "keeper:%s TopK_llm failed (%s), falling back to \
-                                core+prefilter+discovered"
-                             meta.name
-                             (Printexc.to_string exn);
-                             []))
-                     | _ ->
-                       Log.Keeper.warn
-                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
+	                           | exn ->
+	                             Log.Keeper.warn
+	                               "keeper:%s TopK_llm failed (%s), falling back to \
+	                                core+prefilter+discovered"
+	                               meta.name
+	                               (Printexc.to_string exn);
+	                             []))
+	                     | _ ->
+	                       Log.Keeper.warn
+	                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
                           to core+prefilter+discovered"
                          meta.name;
                        [])

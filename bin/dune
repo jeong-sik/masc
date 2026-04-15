@@ -32,6 +32,11 @@
  (modules trace_to_tla)
  (libraries yojson))
 
+(executable
+ (name keeper_campaign_fsm)
+ (modules keeper_campaign_fsm)
+ (libraries masc_mcp yojson))
+
 ;; TUI Dashboard - Terminal interface for multi-agent coordination
 (executable
  (name masc_tui)

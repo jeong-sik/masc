@@ -125,12 +125,46 @@ resolve_base_path() {
 
 build_dashboard_spa() {
     local dashboard_dir="$SCRIPT_DIR/dashboard"
+    local dashboard_index="$SCRIPT_DIR/assets/dashboard/index.html"
     local log_file=""
     local dashboard_pm=()
     local dashboard_pm_label=""
 
     if [ ! -f "$dashboard_dir/package.json" ]; then
         return 0
+    fi
+
+    if is_truthy "${MASC_SKIP_DASHBOARD_BUILD:-0}"; then
+        echo "[dashboard] Skipping SPA build (MASC_SKIP_DASHBOARD_BUILD=1)." >&2
+        return 0
+    fi
+
+    if ! is_truthy "${MASC_DASHBOARD_BUILD_ALWAYS:-0}"; then
+        local stale=0
+        if [ ! -f "$dashboard_index" ]; then
+            stale=1
+        fi
+        for candidate in \
+            "$dashboard_dir/package.json" \
+            "$dashboard_dir/pnpm-lock.yaml" \
+            "$dashboard_dir/tsconfig.json" \
+            "$dashboard_dir/vite.config.ts"
+        do
+            if [ -f "$candidate" ] && [ "$candidate" -nt "$dashboard_index" ]; then
+                stale=1
+                break
+            fi
+        done
+        if [ "$stale" -eq 0 ] && [ -d "$dashboard_dir/src" ] && find "$dashboard_dir/src" -type f -newer "$dashboard_index" | head -n 1 | grep -q .; then
+            stale=1
+        fi
+        if [ "$stale" -eq 0 ] && [ -d "$dashboard_dir/public" ] && find "$dashboard_dir/public" -type f -newer "$dashboard_index" | head -n 1 | grep -q .; then
+            stale=1
+        fi
+        if [ "$stale" -eq 0 ]; then
+            echo "[dashboard] Build output is fresh; skipping SPA build." >&2
+            return 0
+        fi
     fi
 
     echo "[dashboard] Building SPA before server start..." >&2

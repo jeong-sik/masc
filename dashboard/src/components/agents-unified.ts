@@ -48,8 +48,8 @@ export function AgentsUnified() {
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
-    namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
-    namespaceTruthConfiguredKeepers: namespaceTruth.value?.namespace.configured_keepers,
+    namespaceTruthCounts: namespaceTruth.value?.root.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })

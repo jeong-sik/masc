@@ -21,7 +21,7 @@ interface ResolveRuntimeCountsOptions {
   agentsCount: number
   keepersCount: number
   tasksCount?: number
-  namespaceTruthCounts?: DashboardNamespaceTruthResponse['namespace']['counts']
+  namespaceTruthCounts?: DashboardNamespaceTruthResponse['root']['counts']
   namespaceTruthConfiguredKeepers?: number
   shellCounts?: DashboardShellResponse['counts'] | null
   shellConfiguredKeepers?: number
@@ -34,7 +34,7 @@ function normalizeCount(value: unknown): number {
 }
 
 function normalizeCounts(
-  raw: DashboardNamespaceTruthResponse['namespace']['counts'] | DashboardShellResponse['counts'] | null | undefined,
+  raw: DashboardNamespaceTruthResponse['root']['counts'] | DashboardShellResponse['counts'] | null | undefined,
 ) {
   if (!raw) return null
   return {

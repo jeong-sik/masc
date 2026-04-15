@@ -343,14 +343,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
-    namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
-    namespaceTruthConfiguredKeepers: namespaceTruth.value?.namespace.configured_keepers,
+    namespaceTruthCounts: namespaceTruth.value?.root.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
-  const namespaceStatus = namespaceTruth.value?.namespace.status ?? serverStatus.value
+  const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
 
   const briefMap = useMemo(

@@ -40,7 +40,7 @@ describe('flow-control-state', () => {
 
   it('reuses namespace truth pause state before calling MCP', async () => {
     namespaceTruth.value = {
-      namespace: {
+      root: {
         status: {
           paused: true,
         },
@@ -94,7 +94,7 @@ describe('flow-control-state', () => {
 
     namespaceTruthInitializing.value = false
     namespaceTruth.value = {
-      namespace: {
+      root: {
         status: {
           paused: false,
         },

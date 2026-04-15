@@ -6,6 +6,7 @@
 open Types
 open Room_utils
 open Room_state
+open Room_broadcast
 
 (* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
    All coordination scoped by cluster basepath only. *)

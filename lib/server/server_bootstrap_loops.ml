@@ -186,7 +186,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Keeper_keepalive.wakeup_all_keepers
           ~base_path:state.room_config.base_path ();
         Log.Keeper.info "broadcast → wakeup all keepers (reactive push)") in
-  Room_state.on_broadcast_mention := broadcast_mention_handler;
+  Room_broadcast.on_broadcast_mention := broadcast_mention_handler;
   Room_eio.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try

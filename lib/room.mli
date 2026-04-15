@@ -7,6 +7,7 @@
 
 include module type of Room_utils
 include module type of Room_state
+include module type of Room_broadcast
 include module type of Room_lifecycle
 include module type of Room_init
 include module type of Room_status

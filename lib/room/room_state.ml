@@ -1,19 +1,43 @@
-(** Room State - Foundation state management functions.
+(** Room State - Coordination state I/O, sequence, and pause.
 
-    Contains: state read/write/update, backlog management, broadcast,
-    agent name resolution, and zombie detection helpers.
+    After responsibility split (Epic #7261 Step 5), this module retains:
+    - State read/write/update with file locking
+    - Sequence counter (next_seq)
+    - Pause state (is_paused, pause_info)
+    - State recovery (recover_room_state)
+    - Shared string utilities (non_empty_string_opt, normalized_string_list)
 
-    Extracted from room.ml to enable Room_gc and other
-    sub-modules to access these without circular dependencies. *)
+    Extracted to separate modules:
+    - Room_bootstrap: default_room_state, ensure_room_bootstrap
+    - Room_identity: generate_session_id, get_hostname, get_tty, resolve_agent_name
+    - Room_task_id: task_id_to_int, archive management, next_task_number
+    - Room_backlog: read_backlog, write_backlog
+    - Room_broadcast: broadcast, emit_message_activity *)
 
 open Types
 open Room_utils
 
 (* ============================================ *)
-(* State Read / Write / Update                  *)
+(* Re-exports (backward compat)                 *)
 (* ============================================ *)
 
 let default_room_state = Room_bootstrap.default_room_state
+let ensure_room_bootstrap = Room_bootstrap.ensure_room_bootstrap
+let generate_session_id = Room_identity.generate_session_id
+let get_hostname = Room_identity.get_hostname
+let get_tty = Room_identity.get_tty
+let resolve_agent_name = Room_identity.resolve_agent_name
+let task_id_to_int = Room_task_id.task_id_to_int
+let read_archive_task_ids = Room_task_id.read_archive_task_ids
+let append_archive_tasks = Room_task_id.append_archive_tasks
+let next_task_number = Room_task_id.next_task_number
+let read_backlog_r = Room_backlog.read_backlog_r
+let read_backlog = Room_backlog.read_backlog
+let write_backlog = Room_backlog.write_backlog
+
+(* ============================================ *)
+(* Shared String Utilities                      *)
+(* ============================================ *)
 
 let non_empty_string_opt = function
   | Some value ->
@@ -31,6 +55,10 @@ let normalized_string_list values =
          else (
            Hashtbl.add seen value ();
            true))
+
+(* ============================================ *)
+(* State Recovery                               *)
+(* ============================================ *)
 
 let recover_active_agent_name = function
   | `String name -> non_empty_string_opt (Some name)
@@ -81,18 +109,14 @@ let recover_room_state config json =
       Safe_ops.json_int_opt "speculation_budget" json;
   }
 
-(** Write room state — filesystem only.
-    Room state is short-term coordination data (agent membership, heartbeats,
-    task claims). Persisting to PG adds latency and compression overhead
-    without benefit — agents re-join on server restart.
-    See: memory-tier-phase1 design (Camp 4 pragmatist). *)
+(* ============================================ *)
+(* State Read / Write / Update                  *)
+(* ============================================ *)
+
 let write_state config state =
   let json = room_state_to_yojson state in
   write_json config (state_path config) json
 
-(** Read room state — filesystem only.
-    Room state is ephemeral coordination data; filesystem is the sole source
-    of truth.  PG read path removed to eliminate ZSTD decompress dependency. *)
 let read_state config =
   let json = read_json config (state_path config) in
   match room_state_of_yojson json with
@@ -115,7 +139,6 @@ let read_state config =
              (Printexc.to_string exn));
       repaired
 
-(** Update state with function - uses file lock for atomic read-modify-write *)
 let update_state config f =
   with_file_lock config (state_path config) (fun () ->
     let state = read_state config in
@@ -124,30 +147,22 @@ let update_state config f =
     new_state
   )
 
-(* _in_room shims removed — rooms are flattened (#4638).
-   Use read_state / write_state / update_state directly. *)
-
 (* ============================================ *)
 (* Sequence Numbers                             *)
 (* ============================================ *)
 
-(** Get next message sequence *)
 let next_seq config =
   let state = update_state config (fun s -> { s with message_seq = s.message_seq + 1 }) in
   state.message_seq
-
-(* next_seq_in_room removed — rooms are flattened (#4638). Use next_seq. *)
 
 (* ============================================ *)
 (* Pause State                                  *)
 (* ============================================ *)
 
-(** Check if room is paused *)
 let is_paused config =
   let state = read_state config in
   state.paused
 
-(** Get pause info *)
 let pause_info config =
   let state = read_state config in
   if state.paused then
@@ -155,293 +170,22 @@ let pause_info config =
   else
     None
 
-(* ============================================ *)
-(* Backlog Management                           *)
-(* ============================================ *)
-
-(** Read backlog *)
-let read_backlog_r config =
-  match read_json_result config (backlog_path config) with
-  | Error msg -> Error msg
-  | Ok json ->
-      (match backlog_of_yojson json with
-       | Ok backlog -> Ok backlog
-       | Error msg ->
-           Error
-             (Printf.sprintf
-                "[read_backlog] backlog decode failed for %s: %s"
-                (backlog_path config)
-                msg))
-
-let read_backlog config =
-  match read_backlog_r config with
-  | Ok backlog -> backlog
-  | Error msg ->
-      Log.Misc.error "%s" msg;
-      { tasks = []; last_updated = now_iso (); version = 1 }
-
-(** Write backlog *)
-let write_backlog config backlog =
-  write_json config (backlog_path config) (backlog_to_yojson backlog)
-
-(* activity_room_id removed — room/namespace retired (#unify-namespace). *)
-
-let emit_message_activity config ~from_agent ~content ~mention
-    ?session_id ?operation_id ?worker_run_id ?(evidence_refs = []) () =
-  let evidence_refs = normalized_string_list evidence_refs in
-  let payload =
-    `Assoc
-      [
-        ("content", `String content);
-        ( "mention",
-          match mention with
-          | Some value -> `String value
-          | None -> `Null );
-        ( "session_id",
-          match session_id with
-          | Some value when String.trim value <> "" -> `String value
-          | _ -> `Null );
-        ( "operation_id",
-          match operation_id with
-          | Some value when String.trim value <> "" -> `String value
-          | _ -> `Null );
-        ( "worker_run_id",
-          match worker_run_id with
-          | Some value when String.trim value <> "" -> `String value
-          | _ -> `Null );
-        ( "evidence_refs",
-          `List (List.map (fun value -> `String value) evidence_refs) );
-      ]
-  in
-  let actor = Room_hooks.{ kind = "agent"; id = from_agent } in
-  let emit ?subject ~kind ~tags () =
-    try
-      !Room_hooks.activity_emit_fn config
-        ~actor ?subject ~kind ~payload ~tags ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Misc.warn "message activity emit failed (%s): %s" kind
-          (Printexc.to_string exn)
-  in
-  emit ~kind:"message.broadcast" ~tags:[ "message"; "broadcast" ] ();
-  match mention with
-  | Some target when String.trim target <> "" ->
-      emit
-        ~subject:Room_hooks.{ kind = "agent"; id = target }
-        ~kind:"message.mentioned"
-        ~tags:[ "message"; "mention" ] ()
-  | _ -> ()
-
-(* _in_room path/backlog shims removed — rooms are flattened (#4638).
-   Use tasks_dir / messages_dir / backlog_path / read_backlog directly. *)
+(* Broadcast moved to Room_broadcast (exported via Room aggregator).
+   Cannot re-export here — broadcast depends on next_seq, which would
+   create a circular dep room_state <-> room_broadcast. *)
 
 (* ============================================ *)
-(* Task ID / Archive Management                 *)
+(* Re-exports: Zombie Detection (Resilience)    *)
 (* ============================================ *)
 
-(** Parse task id like "task-001" -> 1 *)
-let task_id_to_int id =
-  let prefix = "task-" in
-  let prefix_len = String.length prefix in
-  if String.length id <= prefix_len then None
-  else if String.sub id 0 prefix_len <> prefix then None
-  else int_of_string_opt (String.sub id prefix_len (String.length id - prefix_len))
-
-(** Read archived task ids for collision-free task numbering *)
-let read_archive_task_ids config =
-  if not (Sys.file_exists (archive_path config)) then []
-  else
-    let open Yojson.Safe.Util in
-    let json = read_json config (archive_path config) in
-    let tasks =
-      match json with
-      | `List tasks -> tasks
-      | `Assoc _ -> begin
-          match json |> member "tasks" with
-          | `List tasks -> tasks
-          | _ -> []
-        end
-      | _ -> []
-    in
-    List.filter_map (fun task ->
-      match task |> member "id" |> to_string_option with
-      | Some id -> task_id_to_int id
-      | None -> None
-    ) tasks
-
-(** Append tasks to archive file (tasks-archive.json).
-
-    The read→merge→write sequence is wrapped in [with_file_lock] so
-    concurrent callers cannot lose each other's archive entries.  Prior
-    version held no lock: a second caller that read the archive between
-    the first caller's [read_json] and its [write_json] would compute a
-    merged list from a stale snapshot and overwrite the first write,
-    dropping the tasks the first caller was archiving.  Matches the
-    file-lock discipline already used by [update_state] and
-    [Hebbian_eio.consolidate] (PR #6611). *)
-let append_archive_tasks config (tasks : task list) =
-  if tasks = [] then ()
-  else
-    (* [let open Yojson.Safe.Util] below shadows [path] with the
-       Yojson accessor; use a distinct local name. *)
-    let arch_path = archive_path config in
-    with_file_lock config arch_path (fun () ->
-      let open Yojson.Safe.Util in
-      let existing = read_json config arch_path in
-      let existing_tasks =
-        match existing with
-        | `List items -> items
-        | `Assoc _ -> begin
-            match existing |> member "tasks" with
-            | `List items -> items
-            | _ -> []
-          end
-        | _ -> []
-      in
-      let new_tasks = List.map task_to_yojson tasks in
-      (* Deduplicate by task id, preserving first occurrence *)
-      let seen = Hashtbl.create 64 in
-      let dedup = List.filter (fun json ->
-        match json |> member "id" |> to_string_option with
-        | Some id ->
-            if Hashtbl.mem seen id then false
-            else (Hashtbl.add seen id (); true)
-        | None -> false
-      ) (existing_tasks @ new_tasks)
-      in
-      let archive_json = `Assoc [
-        ("tasks", `List dedup);
-        ("last_updated", `String (now_iso ()));
-      ] in
-      write_json config arch_path archive_json)
-
-(** Calculate next task id using backlog + archive to avoid reuse *)
-let next_task_number config backlog =
-  let backlog_ids = List.filter_map (fun task -> task_id_to_int task.id) backlog.tasks in
-  let archive_ids = read_archive_task_ids config in
-  let max_id = List.fold_left max 0 (backlog_ids @ archive_ids) in
-  max_id + 1
-
-(* ============================================ *)
-(* Session / Agent Helpers                      *)
-(* ============================================ *)
-
-(** Generate short session ID *)
-let generate_session_id () =
-  let t = Unix.gettimeofday () in
-  Printf.sprintf "%04x%04x" (Hashtbl.hash t land 0xFFFF) (Hashtbl.hash (t *. 1000.0) land 0xFFFF)
-
-(** Get hostname *)
-let get_hostname () =
-  try Some (Unix.gethostname ()) with Unix.Unix_error _ -> None
-
-(** Get current TTY - uses TTY environment variable or /dev/tty check *)
-let get_tty () =
-  try
-    match Sys.getenv_opt "TTY" with
-    | Some tty -> Some tty
-    | None ->
-        try
-          if Unix.isatty Unix.stdin then
-            let output = Process_eio.run_argv ~timeout_sec:5.0 ["tty"] in
-            let trimmed = String.trim output in
-            if String.length trimmed > 0 then Some trimmed else None
-          else None
-        with Unix.Unix_error _ -> None
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e ->
-    Log.Misc.error "get_tty failed: %s" (Printexc.to_string e);
-    None
-
-(** Resolve agent name - supports both exact nickname and agent_type prefix match.
-    Returns the actual agent name (nickname) if found, otherwise original name. *)
-let resolve_agent_name config agent_name =
-  let exact_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-  if Sys.file_exists exact_file then
-    agent_name
-  else begin
-    let dir = agents_dir config in
-    if Sys.file_exists dir then
-      let files = Sys.readdir dir in
-      let prefix = agent_name ^ "-" in
-      match Array.find_opt (fun f ->
-        String.length f > String.length prefix &&
-        String.sub f 0 (String.length prefix) = prefix
-      ) files with
-      | Some file -> String.sub file 0 (String.length file - 5) (* remove .json *)
-      | None -> agent_name
-    else
-      agent_name
-  end
-
-let ensure_room_bootstrap = Room_bootstrap.ensure_room_bootstrap
-
-let broadcast_channel config =
-  Printf.sprintf "broadcast:%s:default" (project_prefix config)
-
-(* ============================================ *)
-(* Broadcast                                    *)
-(* ============================================ *)
-
-(** Notification callback: invoked after a successful broadcast with the
-    mention target (if any). Set by Keeper bootstrap to wire up wakeup. *)
-let on_broadcast_mention : (string option -> unit) ref =
-  ref (fun _mention -> ())
-
-let broadcast ?trace_context config ~from_agent ~content =
-  ensure_initialized config;
-  let seq = next_seq config in
-  let mention = Mention.extract content in
-  let safe_content = sanitize_message content in
-  let safe_agent = sanitize_agent_name from_agent in
-  let msg = {
-    seq;
-    from_agent = safe_agent;
-    msg_type = "broadcast";
-    content = safe_content;
-    mention;
-    timestamp = now_iso ();
-    trace_context;
-  } in
-  let msg_file =
-    Filename.concat (messages_dir config)
-      (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
-  in
-  write_json config msg_file (message_to_yojson msg);
-  (match backend_publish config ~channel:(broadcast_channel config)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
-   | Ok _ -> ()
-   | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
-       Log.Misc.debug "broadcast publish skipped: %s" msg
-   | Error e -> Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
-  emit_message_activity config ~from_agent:safe_agent ~content:safe_content
-    ~mention ();
-  (try !on_broadcast_mention mention
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Misc.warn "on_broadcast_mention callback failed: %s"
-       (Printexc.to_string exn));
-  Printf.sprintf "📢 [%s] %s" safe_agent safe_content
-
-(* ============================================ *)
-(* Zombie Detection Helpers                     *)
-(* ============================================ *)
-
-(** Default heartbeat timeout in seconds - delegates to Resilience *)
 let heartbeat_timeout_seconds = Resilience.default_zombie_threshold
-
-(** Parse ISO timestamp to Unix time - returns None if parsing fails *)
 let parse_iso_time_opt = Resilience.Time.parse_iso8601_opt
 
-(** Parse ISO timestamp - returns current time if parsing fails (safe default) *)
 let parse_iso_time iso_str =
   match parse_iso_time_opt iso_str with
   | Some t -> t
   | None -> Resilience.Time.now ()
 
-(** Check if agent is zombie (no heartbeat for timeout period).
-    Uses keeper threshold for keeper agents, default threshold otherwise. *)
 let is_zombie_agent ~agent_name last_seen_iso =
   Resilience.Zombie.is_zombie_for_agent ~agent_name last_seen_iso
 

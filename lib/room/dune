@@ -4,8 +4,12 @@
  (public_name masc_mcp.masc_room)
  (wrapped false)
  (modules
+  room_backlog
   room_bootstrap
+  room_broadcast
   room_hooks
+  room_identity
+  room_task_id
   room_utils_backend_setup
   room_utils
   room_utils_ops

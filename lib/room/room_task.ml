@@ -3,6 +3,7 @@
 open Types
 include Room_utils
 include Room_state
+include Room_broadcast
 
 (* activity_room_id removed — namespace retired (#unify-namespace). *)
 

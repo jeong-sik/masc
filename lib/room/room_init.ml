@@ -6,6 +6,7 @@
 open Types
 open Room_utils
 open Room_state
+open Room_broadcast
 
 (** Initialize MASC room *)
 let init config ~agent_name =

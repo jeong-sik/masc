@@ -6,6 +6,7 @@
 (* Foundation: utilities and state management *)
 include Room_utils
 include Room_state
+include Room_broadcast
 
 (* Agent join/leave lifecycle *)
 include Room_lifecycle

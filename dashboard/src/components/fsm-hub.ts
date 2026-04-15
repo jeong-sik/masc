@@ -306,6 +306,11 @@ export function FsmHub() {
     [keeperNames],
   )
 
+  useGlobalShortcut(
+    (ev) => ev.key === 'g',
+    () => setGraphOpen(o => !o),
+  )
+
   const view = useMemo(
     () =>
       hub.keeperName === activeSelected
@@ -451,6 +456,7 @@ function ShortcutsOverlay({
   const rows: Array<{ keys: string; desc: string }> = [
     { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
     { keys: 'r', desc: '강제 새로고침' },
+    { keys: 'g', desc: 'Compound Graph 토글' },
     { keys: '? ', desc: '단축키 목록 토글' },
     { keys: 'Esc', desc: '오버레이 닫기' },
     { keys: '← →', desc: '키퍼 탭 이동 (탭 포커스 시)' },

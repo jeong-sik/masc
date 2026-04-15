@@ -13,6 +13,7 @@ import {
   deriveTopTransitions,
   deriveTransitionHistory,
   flagTooltip,
+  inferTransitionReason,
   invariantDescription,
   isTransitionInSegment,
   recoveryStateDescription,
@@ -238,6 +239,29 @@ describe('fsm-hub derived state', () => {
 
     expect(result.tone).toBe('info')
     expect(result.headline).toContain('Compaction currently owns the turn')
+  })
+})
+
+describe('inferTransitionReason', () => {
+  it('attributes KTC idle→executing to turn start', () => {
+    expect(inferTransitionReason('KTC', 'idle', 'executing'))
+      .toBe('턴이 시작되었습니다 — OAS worker 호출 진행')
+  })
+
+  it('attributes KDP undecided→gate_rejected to gate block', () => {
+    const reason = inferTransitionReason('KDP', 'undecided', 'gate_rejected')
+    expect(reason).not.toBeNull()
+    expect(reason).toMatch(/게이트 차단/)
+  })
+
+  it('attributes KCL idle→trying to provider call', () => {
+    expect(inferTransitionReason('KCL', 'idle', 'trying'))
+      .toMatch(/provider/)
+  })
+
+  it('returns null for unattributable transitions', () => {
+    expect(inferTransitionReason('KTC', 'unknown_a', 'unknown_b')).toBeNull()
+    expect(inferTransitionReason('UNKNOWN', 'a', 'b')).toBeNull()
   })
 })
 

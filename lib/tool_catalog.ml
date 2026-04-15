@@ -277,7 +277,7 @@ let register_metadata name (meta : metadata) =
 (* ================================================================ *)
 
 (* Delegate to surfaces sub-module *)
-let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_set
+let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_tools
 
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
 

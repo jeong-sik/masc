@@ -45,11 +45,6 @@ let keeper_internal_tools =
       Keeper Tool_search;
     ]
 
-(** Immutable alias for keeper-internal tool name membership tests.
-    Replaced mutable Hashtbl with plain list — membership via List.mem
-    is O(n) but the list is <50 elements, so the overhead is negligible. *)
-let keeper_internal_set : string list = keeper_internal_tools
-
 (* keeper_voice_* tools have no masc_* counterpart — default None. *)
 let keeper_internal_replacement name =
   let open Tool_name in
@@ -179,7 +174,6 @@ let admin_surface_tools =
       Masc Runtime_ollama_probe; Masc Tool_list;
     ]
 
-let keeper_internal_surface_tools = keeper_internal_tools
 
 let keeper_denied_surface_tools =
   List.map Tool_name.to_string Tool_name.[ Masc Reset; Masc Spawn ]
@@ -263,7 +257,7 @@ let tools_for_surface = function
   | Local_worker -> local_worker_surface_tools
   | Session_min -> session_min_surface_tools
   | Admin -> admin_surface_tools
-  | Keeper_internal -> keeper_internal_surface_tools
+  | Keeper_internal -> keeper_internal_tools
   | Keeper_denied -> keeper_denied_surface_tools
   | System_internal -> system_internal_surface_tools
 

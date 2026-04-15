@@ -453,8 +453,7 @@ let _tool_spec_system_internal = [ "masc_autoresearch_status" ]
 let tool_required_permission = function
   | "masc_autoresearch_status" ->
       Some Types.CanReadState
-  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
-  | "masc_repo_synthesis_swarm_start" | "masc_autoresearch_cycle"
+  | "masc_autoresearch_start" | "masc_autoresearch_cycle"
   | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
       Some Types.CanAdmin
   | _ -> None

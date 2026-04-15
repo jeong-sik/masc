@@ -748,8 +748,6 @@ let tool_arguments fixture (schema : Types.tool_schema) =
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_worktree_create" -> [ "base_branch" ]
       | "masc_heartbeat_start" -> [ "interval" ]
-      | "masc_listen" -> [ "timeout" ]
-      | "masc_verify_request" -> [ "verifier" ]
       | "masc_keeper_repair" ->
           [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" ->

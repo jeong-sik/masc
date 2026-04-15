@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
-import { useEffect, useRef, useState, useMemo } from 'preact/hooks'
+import { useEffect, useState, useMemo } from 'preact/hooks'
 import { useCombobox } from 'downshift'
 import { editKeeperTools, type ToolEditResponse } from '../../api/keeper'
 import { toolsData } from './tool-state'
@@ -154,12 +154,9 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
   const firstTool = tools[0] ?? null
   const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
 
-  const toolsKey = `${tools.length}:${firstTool}:${lastTool}`
-  const prevToolsKeyRef = useRef(toolsKey)
-  if (prevToolsKeyRef.current !== toolsKey) {
-    prevToolsKeyRef.current = toolsKey
+  useEffect(() => {
     setExpanded(false)
-  }
+  }, [tools.length, firstTool, lastTool])
 
   if (tools.length === 0) {
     return html`

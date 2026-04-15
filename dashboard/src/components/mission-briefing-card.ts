@@ -231,11 +231,9 @@ export function MissionBriefingCard() {
     || (briefing?.status === 'unavailable' && !briefing?.cached)
 
   useEffect(() => {
-    let cancelled = false
     if (!briefing && !missionBriefingLoading.value && !missionBriefingError.value) {
-      void refreshMissionBriefing().then(() => { if (cancelled) return })
+      void refreshMissionBriefing()
     }
-    return () => { cancelled = true }
   }, [briefing, missionBriefingLoading.value, missionBriefingError.value])
 
   const openLiveJudgeIntervene = () => {

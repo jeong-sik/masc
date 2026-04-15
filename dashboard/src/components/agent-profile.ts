@@ -300,9 +300,7 @@ function CharacterPlate({ name }: { name: string }) {
 
 export function AgentProfile({ name }: { name: string }) {
   useEffect(() => {
-    let cancelled = false
-    void loadProfile(name).then(() => { if (cancelled) return })
-    return () => { cancelled = true }
+    void loadProfile(name)
   }, [name])
 
   const ps = profileResource.state.value

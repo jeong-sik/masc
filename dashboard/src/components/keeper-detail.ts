@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
-import { useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
@@ -401,11 +401,9 @@ export function KeeperDetailOverlay() {
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
   const [diagOpen, setDiagOpen] = useState(shouldOpenDiagnostics)
-  const prevKeeperNameRef = useRef(keeper.name)
-  if (prevKeeperNameRef.current !== keeper.name) {
-    prevKeeperNameRef.current = keeper.name
+  useEffect(() => {
     setDiagOpen(shouldOpenDiagnostics)
-  }
+  }, [keeper.name, shouldOpenDiagnostics])
 
   return html`
     <${DialogOverlay}

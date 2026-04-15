@@ -506,10 +506,8 @@ function KeeperApprovalQueueSection() {
 
 export function Governance() {
   useEffect(() => {
-    let cancelled = false
-    void refreshGovernance().then(() => { if (cancelled) return })
-    void loadParamAudit().then(() => { if (cancelled) return })
-    return () => { cancelled = true }
+    void refreshGovernance()
+    void loadParamAudit()
   }, [])
 
   const caseTrackingRetired = governanceCaseTrackingRetired()

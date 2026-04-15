@@ -1,7 +1,5 @@
 
-open Server_utils
 open Server_auth
-open Server_dashboard_http
 
 module Http = Http_server_eio
 module Http_h2 = Http_server_h2

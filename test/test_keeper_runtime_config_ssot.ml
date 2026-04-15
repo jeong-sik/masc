@@ -206,6 +206,93 @@ also_allow = ["keeper_bash", "keeper_shell"]
         [ "workspace/yousleepwhen/masc-mcp" ]
         updated.allowed_paths
 
+(** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
+let test_allowed_paths_explicit_empty_clears_runtime () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "allowed-paths-explicit-empty-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+goal = "test"
+execution_scope = "workspace"
+allowed_paths = []
+|};
+  let config = Room.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-allowed-paths-explicit-empty");
+            ("execution_scope", `String "workspace");
+            ("allowed_paths", `List [ `String "workspace/yousleepwhen/masc-mcp" ]);
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check (list string) "allowed_paths cleared" [] updated.allowed_paths
+
+(** Test: persona allowed_paths is ignored and cannot inject authored allowlists. *)
+let test_persona_allowed_paths_is_ignored () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "persona-allowed-paths-clear-test" in
+  let personas_dir = Filename.concat config_dir "personas" in
+  let persona_dir = Filename.concat personas_dir keeper_name in
+  Unix.mkdir personas_dir 0o755;
+  Unix.mkdir persona_dir 0o755;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|{
+  "name": "persona clear",
+  "keeper": {
+    "goal": "test",
+    "execution_scope": "workspace",
+    "allowed_paths": ["workspace/yousleepwhen/masc-mcp"]
+  }
+}|};
+  let config = Room.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-persona-allowed-paths-ignored");
+            ("execution_scope", `String "workspace");
+            ("allowed_paths", `List []);
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check (list string) "persona allowed_paths ignored" [] updated.allowed_paths
+
 (** Test: custom tool_access stays custom when TOML omits tool_preset. *)
 let test_custom_tool_access_preserved_without_preset () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -536,6 +623,14 @@ let () =
             "custom tool_access is preserved when TOML omits preset"
             `Quick
             test_custom_tool_access_preserved_without_preset;
+          test_case
+            "explicit empty allowed_paths in TOML clears stale runtime JSON"
+            `Quick
+            test_allowed_paths_explicit_empty_clears_runtime;
+          test_case
+            "persona allowed_paths is ignored"
+            `Quick
+            test_persona_allowed_paths_is_ignored;
         ] );
       ( "none_preserve",
         [

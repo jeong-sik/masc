@@ -241,6 +241,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
+  let has key = List.mem_assoc (k key) doc in
   let removed_present =
     removed_keeper_input_key_names
     |> List.map k
@@ -297,9 +298,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            | [] -> None
            | xs -> Some xs);
         allowed_paths =
-          (match strs "allowed_paths" with
-           | [] -> None
-           | xs -> Some xs);
+          if has "allowed_paths" then Some (strs "allowed_paths")
+          else None;
         execution_scope = str "execution_scope";
         tool_preset =
           (match str "tool_preset" with
@@ -416,10 +416,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "shards" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
-                allowed_paths =
-                  (match Safe_ops.json_string_list "allowed_paths" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
+                (* Persona profiles are not allowed to own execution allowlists.
+                   Keep these in keeper TOML / runtime config only. *)
+                allowed_paths = None;
                 execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
                 tool_preset =
                   (match Safe_ops.json_string_opt "tool_preset" keeper_json with

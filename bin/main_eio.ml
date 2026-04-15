@@ -605,10 +605,55 @@ let doctor_cmd =
   let info = Cmd.info "doctor" ~doc in
   Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
 
+let init_force =
+  let doc = "Overwrite existing config files instead of skipping them" in
+  Arg.(value & flag & info ["force"] ~doc)
+
+type init_tally = { written : int; skipped : int; failed : int }
+
+let seed_one ~target_root ~force tally rel =
+  match Embedded_config.read rel with
+  | None ->
+    Printf.eprintf "init: missing embedded asset: %s\n" rel;
+    { tally with failed = tally.failed + 1 }
+  | Some content ->
+    let dest = Filename.concat target_root rel in
+    Fs_compat.mkdir_p (Filename.dirname dest);
+    if Fs_compat.file_exists dest && not force then begin
+      Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
+      { tally with skipped = tally.skipped + 1 }
+    end else
+      try
+        Fs_compat.save_file dest content;
+        Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content);
+        { tally with written = tally.written + 1 }
+      with Sys_error msg ->
+        Printf.eprintf "init: %s: %s\n" dest msg;
+        { tally with failed = tally.failed + 1 }
+
+let init_cmd_exit base_path force =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let target_root = Config_doctor.local_base_config_root ~base_path in
+  Fs_compat.mkdir_p target_root;
+  let result =
+    List.fold_left
+      (seed_one ~target_root ~force)
+      { written = 0; skipped = 0; failed = 0 }
+      Embedded_config.file_list
+  in
+  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
+    result.written result.skipped result.failed target_root;
+  if result.failed > 0 then 1 else 0
+
+let init_cmd =
+  let doc = "Seed default .masc/config/ from binary-embedded assets" in
+  let info = Cmd.info "init" ~doc in
+  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ doctor_cmd ]
+    info [ doctor_cmd; init_cmd ]
 
 let () = exit (Cmd.eval' cmd)

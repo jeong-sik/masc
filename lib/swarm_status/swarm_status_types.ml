@@ -82,11 +82,26 @@ type recommendation = {
   lane_id : string option;
 }
 
+(** Operation lifecycle status — mirrors Cp_types.operation_status for the
+    swarm_status read-only view. Parsed at JSON boundary in swarm_status_parse. *)
+type swarm_operation_status =
+  | SOp_active | SOp_planned | SOp_paused
+  | SOp_completed | SOp_cancelled | SOp_failed
+
+(** Detachment lifecycle status — mirrors Cp_types.detachment_status. *)
+type swarm_detachment_status =
+  | SDet_active | SDet_awaiting_approval | SDet_stalled
+  | SDet_completed | SDet_cancelled | SDet_failed | SDet_stopped
+
+(** Decision lifecycle status — mirrors Cp_types.decision_status. *)
+type swarm_decision_status =
+  | SDec_pending | SDec_approved | SDec_denied | SDec_expired
+
 type operation_info = {
   operation_id : string;
   objective : string;
   source : string;
-  status : string;
+  status : swarm_operation_status;
   trace_id : string;
   detachment_session_id : string option;
   note : string option;
@@ -97,7 +112,7 @@ type detachment_info = {
   detachment_id : string;
   operation_id : string;
   source : string;
-  status : string;
+  status : swarm_detachment_status;
   runtime_kind : string option;
   session_id : string option;
   roster : string list;
@@ -120,7 +135,7 @@ type alert_info = {
 type decision_info = {
   decision_id : string;
   source : string;
-  status : string;
+  status : swarm_decision_status;
   scope_type : string option;
   scope_id : string option;
   operation_id : string option;

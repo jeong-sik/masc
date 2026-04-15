@@ -16,7 +16,7 @@ type review_item = {
   kind : string;
   target_type : string;
   target_id : string option;
-  severity : string;
+  severity : operator_severity;
   urgency : string;
   summary : string;
   why_now : string;

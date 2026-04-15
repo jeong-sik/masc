@@ -39,7 +39,7 @@ let lane_for_kind kind ~now ~operations ~detachments ~alerts ~decisions ~traces
   let present = lane_present kind ~operations ~detachments ~alerts ~decisions ~traces ~sessions in
   let approvals =
     decisions
-    |> List.filter (fun (decision : decision_info) -> String.equal decision.status "pending")
+    |> List.filter (fun (decision : decision_info) -> decision.status = SDec_pending)
     |> List.length
   in
   let alerts_count = List.length alerts in

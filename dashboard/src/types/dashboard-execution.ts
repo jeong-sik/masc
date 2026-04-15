@@ -1,6 +1,5 @@
 import type { Agent, BoardPost } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
-import type { CommandPlaneSurface } from './command-plane'
 import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
@@ -146,7 +145,7 @@ export interface DashboardNamespaceTruthFocus {
   target_kind?: string | null
   target_id?: string | null
   suggested_tab?: 'command' | 'intervene' | string | null
-  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_surface?: string | null
   suggested_params?: Record<string, string>
 }
 

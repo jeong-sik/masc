@@ -95,19 +95,8 @@ let initialized_json_opt ?(allow_initializing = false) = function
       | _ -> Some json)
   | _ -> None
 
-let command_plane_summary_cache_parts ~allow_initializing ~state =
-  match
-    Server_command_plane_http_support.command_plane_summary_http_json ~state
-    |> initialized_json_opt ~allow_initializing
-  with
-  | Some (`Assoc fields) ->
-      let swarm_status =
-        match List.assoc_opt "swarm_status" fields with
-        | Some (`Assoc _ as json) -> Some json
-        | _ -> None
-      in
-      (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
-  | _ -> (None, None)
+let command_plane_summary_cache_parts ~allow_initializing:_ ~state:_ =
+  (None, None)
 
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
@@ -256,7 +245,6 @@ let operator_actor_hint request =
    Default (no-param) requests are served from a background-refreshed ref.
    Parameterized requests fall back to on-demand compute with SWR cache.
 
-   The snapshot compute can take 1-28s (command_plane_json is the bottleneck).
    Using Proactive_refresh gives circuit breaker + exponential backoff on
    repeated failures, matching the pattern used by execution and mission loops.
 

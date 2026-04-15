@@ -483,12 +483,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                     proc_mgr = state.Mcp_server.proc_mgr;
                     net = state.Mcp_server.net; mcp_session_id } in
         Tool_operator.dispatch ctx ~name ~args:coerced_args
-    | Mod_command_plane ->
-        let ctx : (_, _) Tool_command_plane.context =
-          { config; agent_name; sw = Some sw; clock = Some clock;
-            net = state.Mcp_server.net; mcp_state = Some state;
-            mcp_session_id; auth_token } in
-        Tool_command_plane.dispatch ctx ~name ~args:coerced_args
     | Mod_local_runtime ->
         Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:coerced_args
     | Mod_worktree ->

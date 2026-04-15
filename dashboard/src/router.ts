@@ -45,25 +45,6 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  // Legacy deep-link: /chains/operation/:id -> operations surface
-  if (segments[0] === 'chains') {
-    const nextParams: Record<string, string> = {
-      ...params,
-      section: 'operations',
-      source: params.source ?? 'execution',
-    }
-    if (segments[1] === 'operation' && segments[2]) {
-      nextParams.target_type = params.target_type ?? 'operation'
-      nextParams.target_id = decodeSafe(segments[2])
-      nextParams.focus_kind = params.focus_kind ?? 'operation'
-    }
-    return {
-      tab: 'command',
-      params: normalizeRouteParams('command', nextParams),
-      postId: null,
-    }
-  }
-
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])

@@ -399,33 +399,7 @@ let gc config ?(days=7) () =
   else
     results := "✅ No board artifacts" :: !results;
 
-  (* 8. CP data cleanup (dead units, stale operations, orphaned detachments) *)
-  if not !Room_hooks.cp_cleanup_connected then
-    log_event config (Printf.sprintf
-      "{\"type\":\"gc_warning\",\"msg\":\"cp_cleanup_fn not connected, CP cleanup skipped\",\"ts\":\"%s\"}"
-      (now_iso ()));
-  let cp_result = !Room_hooks.cp_cleanup_fn config in
-  let cp_total =
-    cp_result.dead_units_removed + cp_result.orphaned_units_removed
-    + cp_result.operations_archived + cp_result.detachments_removed
-    + cp_result.intents_removed
-  in
-  if cp_total > 0 then
-    results := Printf.sprintf
-      "🧹 CP cleanup: %d dead unit(s), %d orphan unit(s), %d operation(s) archived, %d orphan detachment(s), %d dropped intent(s)"
-      cp_result.dead_units_removed cp_result.orphaned_units_removed
-      cp_result.operations_archived cp_result.detachments_removed
-      cp_result.intents_removed :: !results
-  else
-    results := "✅ No stale CP data" :: !results;
-  (* Log event *)
-  let cp_json = Yojson.Safe.to_string (`Assoc [
-    ("dead_units", `Int cp_result.dead_units_removed);
-    ("orphan_units", `Int cp_result.orphaned_units_removed);
-    ("ops_archived", `Int cp_result.operations_archived);
-    ("orphan_dets", `Int cp_result.detachments_removed);
-    ("dropped_intents", `Int cp_result.intents_removed);
-  ]) in
+  let cp_json = "null" in
   (* 9. Room archival removed — rooms are flattened (#4638).
      Startup migration (migrate_room_to_flat) moves active room to root. *)
   results := "✅ Rooms flattened (no room archival needed)" :: !results;

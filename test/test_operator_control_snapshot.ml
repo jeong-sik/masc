@@ -99,15 +99,10 @@ let test_snapshot_has_expected_sections () =
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
         Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
-      Alcotest.(check string) "command plane provenance" "truth"
-        Yojson.Safe.Util.
-          (json |> member "provenance_summary" |> member "command_plane" |> to_string);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
         | `List _ -> true
-        | _ -> false);
-      Alcotest.(check bool) "swarm_status present" true
-        (Yojson.Safe.Util.member "swarm_status" json <> `Null))
+        | _ -> false))
 
 let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Eio_main.run @@ fun env ->
@@ -296,32 +291,7 @@ let test_snapshot_waiters_share_inflight_result () =
       in
       Alcotest.(check bool) "healthy inflight slot not evicted" true cached_retained)
 
-let test_orchestra_room_core_shape () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-      ignore (Room.add_task config ~title:"orchestra backlog" ~priority:2 ~description:"");
-      ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
-      let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
-      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
-      Alcotest.(check bool) "root node exists" true
-        (List.exists
-           (fun row ->
-             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "root")
-           nodes);
-      Alcotest.(check bool) "root block present" true
-        (Yojson.Safe.Util.member "root" json <> `Null);
-      Alcotest.(check int) "session count" 0
-        Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
-      Alcotest.(check string) "focus kind" "node"
-        Yojson.Safe.Util.(json |> member "focus" |> member "target_kind" |> to_string))
+(* test_orchestra_room_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
@@ -353,17 +323,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
-      Alcotest.(check bool) "command_plane present" true
-        (Yojson.Safe.Util.member "command_plane" digest <> `Null);
       Alcotest.(check bool) "operator judge runtime present" true
         (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
-      Alcotest.(check bool) "command_plane microarch present" true
-        (Yojson.Safe.Util.
-           (digest |> member "command_plane" |> member "operations"
-          |> member "microarch")
-         <> `Null);
-      Alcotest.(check bool) "swarm_status present" true
-        (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
       let review_queue = Yojson.Safe.Util.(digest |> member "review_queue" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true

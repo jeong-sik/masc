@@ -392,12 +392,12 @@ let detachment_index command_plane_json =
     detachments;
   table
 
-let operation_severity ~(status : Cp_types.operation_status) ~blocker_summary =
+let operation_severity ~(status : string) ~blocker_summary =
   match status with
-  | Cp_types.Failed | Cancelled -> Tone_bad
-  | Paused -> Tone_warn
+  | "failed" | "cancelled" -> Tone_bad
+  | "paused" -> Tone_warn
   | _ when Option.is_some blocker_summary -> Tone_warn
-  | Planned | Active | Completed -> Tone_ok
+  | _ -> Tone_ok
 
 let build_operation_contexts command_plane_json =
   let operations =
@@ -427,7 +427,7 @@ let build_operation_contexts command_plane_json =
                    None
            in
            let status_str = string_field ~default:"active" "status" operation in
-           let op_status = Option.value ~default:Cp_types.Active (Cp_serde.operation_status_of_string status_str) in
+           let op_status = status_str in
            let severity = operation_severity ~status:op_status ~blocker_summary in
            let linked_session_id, linked_detachment_id =
              match Hashtbl.find_opt detachments operation_id with

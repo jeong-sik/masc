@@ -1590,6 +1590,8 @@ export type TelemetryEntry = Record<string, unknown> & {
 export type TelemetryResponse = {
   generated_at: string
   count: number
+  total_matching_entries?: number
+  truncated?: boolean
   entries: TelemetryEntry[]
 }
 
@@ -1646,6 +1648,8 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
   return {
     generated_at: generatedAt,
     count: asNumber(raw.count, 0),
+    total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
+    truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)
       .map(decodeTelemetryEntry)
       .filter((entry): entry is TelemetryEntry => entry !== null),
@@ -1694,6 +1698,8 @@ export function fetchTelemetry(opts?: {
   session_id?: string
   operation_id?: string
   worker_run_id?: string
+  since_ms?: number
+  until_ms?: number
   n?: number
   signal?: AbortSignal
 }): Promise<TelemetryResponse> {
@@ -1703,6 +1709,8 @@ export function fetchTelemetry(opts?: {
   if (opts?.session_id) params.set('session_id', opts.session_id)
   if (opts?.operation_id) params.set('operation_id', opts.operation_id)
   if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
+  if (typeof opts?.since_ms === 'number') params.set('since_ms', String(opts.since_ms))
+  if (typeof opts?.until_ms === 'number') params.set('until_ms', String(opts.until_ms))
   if (opts?.n) params.set('n', String(opts.n))
   const qs = params.toString()
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })

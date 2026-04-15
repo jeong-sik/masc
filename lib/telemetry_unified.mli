@@ -28,6 +28,12 @@ val source_to_string : source -> string
 val source_of_string : string -> source option
 val all_sources : source list
 
+type read_result = {
+  entries : Yojson.Safe.t list;
+  total_matching_entries : int;
+  truncated : bool;
+}
+
 val read_unified :
   base_path:string ->
   masc_root:string ->
@@ -36,20 +42,39 @@ val read_unified :
   ?session_id:string ->
   ?operation_id:string ->
   ?worker_run_id:string ->
+  ?since_ts:float ->
+  ?until_ts:float ->
   ?n:int ->
   unit ->
   Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-      ?operation_id ?worker_run_id ?n ()]
+      ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()]
     reads entries from [sources] (default: all six), optionally filtered
-    by [keeper_name] and generic correlation keys, and returns at most [n]
-    entries (default 100) sorted by timestamp descending (newest first).
+    by [keeper_name], generic correlation keys, and an optional unix-second
+    window. Returns at most [n] entries (default 100) sorted by timestamp
+    descending (newest first).
 
     [masc_root] is the cluster-aware .masc directory (use
     [Room.masc_root_dir config] to obtain it).  [base_path] is the
     project root, used only for [data/] paths.
 
     Each entry is a JSON object with an added ["source"] field. *)
+
+val read_unified_result :
+  base_path:string ->
+  masc_root:string ->
+  ?sources:source list ->
+  ?keeper_name:string ->
+  ?session_id:string ->
+  ?operation_id:string ->
+  ?worker_run_id:string ->
+  ?since_ts:float ->
+  ?until_ts:float ->
+  ?n:int ->
+  unit ->
+  read_result
+(** Like {!read_unified}, but also returns the total number of matching
+    entries before truncation plus whether truncation occurred. *)
 
 val summary_json :
   base_path:string ->

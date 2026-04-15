@@ -40,6 +40,18 @@ let write_raw_jsonl_rows dir rows =
   in
   Fs_compat.append_file path content
 
+let jsonl_path_for_unix_seconds dir ts =
+  let tm = Unix.gmtime ts in
+  let month = Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday in
+  let month_dir = Filename.concat dir month in
+  Fs_compat.mkdir_p month_dir;
+  Filename.concat month_dir day
+
+let append_jsonl_entry_for_ts dir ts json =
+  let path = jsonl_path_for_unix_seconds dir ts in
+  Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n")
+
 (* ── Source roundtrip ────────────────────────────── *)
 
 let test_source_roundtrip () =
@@ -215,6 +227,67 @@ let test_n_limits_output () =
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
 
+let test_time_window_reports_total_before_limit () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_window_limit" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let now = Unix.gettimeofday () in
+  write_jsonl telemetry_dir [
+    `Assoc [("timestamp", `Float (now -. 7_200.0)); ("event", `String "too_old")];
+    `Assoc [("timestamp", `Float (now -. 1_800.0)); ("event", `String "within_1")];
+    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "within_2")];
+    `Assoc [("timestamp", `Float (now -. 60.0)); ("event", `String "within_3")];
+  ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
+      ~sources:[Telemetry_unified.Agent_event]
+      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:2 ()
+  in
+  Alcotest.(check int) "total matching preserved before limit" 3
+    result.total_matching_entries;
+  Alcotest.(check bool) "range result truncated" true result.truncated;
+  Alcotest.(check int) "returned entry count limited" 2 (List.length result.entries);
+  let events =
+    List.map (function
+      | `Assoc fields ->
+        (match List.assoc_opt "event" fields with
+         | Some (`String s) -> s
+         | _ -> "")
+      | _ -> "") result.entries
+  in
+  Alcotest.(check (list string)) "newest matching entries returned"
+    ["within_3"; "within_2"] events
+
+let test_time_window_reads_matching_day_files () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_window_days" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let now = Unix.gettimeofday () in
+  let yesterday = now -. 86_400.0 in
+  append_jsonl_entry_for_ts telemetry_dir yesterday
+    (`Assoc [("timestamp", `Float yesterday); ("event", `String "yesterday")]);
+  append_jsonl_entry_for_ts telemetry_dir now
+    (`Assoc [("timestamp", `Float now); ("event", `String "today")]);
+  let entries =
+    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+      ~sources:[Telemetry_unified.Agent_event]
+      ~since_ts:(yesterday -. 60.0) ~until_ts:(now +. 60.0) ()
+  in
+  let events =
+    List.map (function
+      | `Assoc fields ->
+        (match List.assoc_opt "event" fields with
+         | Some (`String s) -> s
+         | _ -> "")
+      | _ -> "") entries
+  in
+  Alcotest.(check (list string)) "range spans multiple day files"
+    ["today"; "yesterday"] events
+
 (* ── Summary with data ───────────────────────────── *)
 
 let test_summary_with_data () =
@@ -363,6 +436,10 @@ let () =
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;
+          Alcotest.test_case "time window reports total before limit" `Quick
+            test_time_window_reports_total_before_limit;
+          Alcotest.test_case "time window reads matching day files" `Quick
+            test_time_window_reads_matching_day_files;
         ] );
       ( "summary",
         [

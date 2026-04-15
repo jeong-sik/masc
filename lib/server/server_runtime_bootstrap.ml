@@ -959,7 +959,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
-         keeper loop startup or lazy tasks (#keeper-bootstrap-stuck). *)
+         lazy startup tasks or later keeper loop startup
+         (#keeper-bootstrap-stuck). *)
       Eio.Fiber.fork ~sw (fun () ->
         (try
            match Eio.Time.with_timeout clock 10.0 (fun () ->
@@ -974,8 +975,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          | exn ->
            Log.Dashboard.warn "shell cache pre-warm failed: %s"
              (Printexc.to_string exn)));
-      Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
-      start_lazy_startup state
+      start_lazy_startup state;
+      Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

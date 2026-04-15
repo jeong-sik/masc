@@ -41,8 +41,6 @@ function normalizeMessage(raw: unknown): Message | null {
 function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
   if (!isRecord(raw)) return {}
   return {
-    namespace_id: asString(raw.namespace_id),
-    namespace: asString(raw.namespace),
     project: asString(raw.project),
     cluster: asString(raw.cluster),
     paused: asBoolean(raw.paused),

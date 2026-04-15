@@ -681,9 +681,6 @@ let room_json config =
       [
         ("initialized", `Bool false);
         ("project", `String (Filename.basename config.base_path));
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
       ]
   else
     let state = Room.read_state config in
@@ -695,9 +692,6 @@ let room_json config =
         ("initialized", `Bool true);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("project", `String state.project);
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);

@@ -182,7 +182,7 @@ let test_compact_session_json_normalizes_missing_fields () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("goal", `Null); ("namespace_id", `Null); ("status", `Null) ]);
+              ("session", `Assoc [ ("goal", `Null); ("status", `Null) ]);
               ("summary", `Assoc []);
               ("team_health", `Assoc []);
               ("communication_metrics", `Assoc []);
@@ -192,7 +192,7 @@ let test_compact_session_json_normalizes_missing_fields () =
   in
   let compact = Briefing.compact_session_json json in
   check_string_field compact "goal" "unassigned";
-  check_string_field compact "namespace_id" "unknown-namespace";
+  check_string_field compact "project" "default";
   check_string_field compact "status" "unknown";
   check_list_field compact "agent_names" 0;
   check_int_field compact "active_agents_count" 0;
@@ -246,7 +246,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("namespace_id", `String "default"); ("status", `String "interrupted") ]);
+              ("session", `Assoc [ ("project", `String "default"); ("status", `String "interrupted") ]);
               ("summary", `Assoc []);
             ] );
         ("recent_events", `List []);
@@ -259,7 +259,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("namespace_id", `String "default"); ("status", `String "running") ]);
+              ("session", `Assoc [ ("project", `String "default"); ("status", `String "running") ]);
               ("summary", `Assoc []);
             ] );
         ( "recent_events",

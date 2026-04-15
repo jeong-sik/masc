@@ -295,8 +295,6 @@ let handle_observe_swarm (ctx : (_, _) context) args : tool_result =
               ("generated_at", `String (Types.now_iso ()));
               ("run_id", `Null);
               ("room_id", `String "default");
-              ("namespace", `String "default");
-              ("namespace_mode", `String "flattened");
               ("operation_id", string_json operation_id);
               ("recommended_next_tool", `String "masc_runtime_verify");
               ( "summary",
@@ -413,8 +411,6 @@ let handle_observe_swarm (ctx : (_, _) context) args : tool_result =
               ("generated_at", `String (Types.now_iso ()));
               ("run_id", `String run_id);
               ("room_id", `String "default");
-              ("namespace", `String "default");
-              ("namespace_mode", `String "flattened");
               ("operation_id", string_json operation_id);
               ("recommended_next_tool", `String recommended_next_tool);
               ("summary", summary);

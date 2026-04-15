@@ -248,7 +248,7 @@ let _build_session_context session_json _cards =
         created_by = trim_to_option (string_field "created_by" meta);
         origin_kind = session_origin_kind meta;
         namespace =
-          (match trim_to_option (string_field "namespace_id" meta) with
+          (match trim_to_option (string_field "project" meta) with
            | Some _ as value -> value
            | None -> trim_to_option (string_field "room_id" meta));
         status;
@@ -690,10 +690,6 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
         ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
         ("cluster", json_string_option (Some (string_field "cluster" projection.namespace_json)));
         ("project", json_string_option (Some (string_field "project" projection.namespace_json)));
-        ("namespace_id", json_string_option (Some (string_field "namespace_id" projection.namespace_json)));
-        ("namespace", json_string_option (Some (string_field "namespace" projection.namespace_json)));
-        ("namespace_mode", json_string_option (Some (string_field "namespace_mode" projection.namespace_json)));
-        ("current_room", member_assoc "current_room" projection.namespace_json);
       ]
   in
   let command_focus_json =

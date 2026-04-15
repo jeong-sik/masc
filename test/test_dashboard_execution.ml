@@ -188,12 +188,13 @@ let test_dashboard_execution_live_empty_room () =
             ()
         in
         let open Yojson.Safe.Util in
-        check string "default namespace id" "default"
-          (json |> member "status" |> member "namespace_id" |> to_string);
-        check string "default namespace" "default"
-          (json |> member "status" |> member "namespace" |> to_string);
-        check string "namespace mode flattened" "flattened"
-          (json |> member "status" |> member "namespace_mode" |> to_string);
+        let status = json |> member "status" in
+        let key_absent key j =
+          List.assoc_opt key (to_assoc j) = None
+        in
+        check bool "namespace_id carrier removed" true (key_absent "namespace_id" status);
+        check bool "namespace carrier removed" true (key_absent "namespace" status);
+        check bool "namespace_mode carrier removed" true (key_absent "namespace_mode" status);
         check int "execution queue empty" 0
           (json |> member "execution_queue" |> to_list |> List.length);
         check int "operation briefs empty" 0
@@ -229,14 +230,14 @@ let test_dashboard_execution_namespace_status () =
           List.assoc_opt key (to_assoc json) = None
         in
         let status = json |> member "status" in
-        check string "status namespace_id exposed" "default"
-          (status |> member "namespace_id" |> to_string);
-        check string "status namespace exposed" "default"
-          (status |> member "namespace" |> to_string);
-        check string "status current_namespace exposed" "default"
-          (status |> member "current_namespace" |> to_string);
-        check string "status namespace mode flattened" "flattened"
-          (status |> member "namespace_mode" |> to_string);
+        check bool "status namespace_id removed" true
+          (key_absent "namespace_id" status);
+        check bool "status namespace removed" true
+          (key_absent "namespace" status);
+        check bool "status current_namespace removed" true
+          (key_absent "current_namespace" status);
+        check bool "status namespace_mode removed" true
+          (key_absent "namespace_mode" status);
         check bool "legacy room removed" true
           (key_absent "room" status);
         check bool "legacy room base path removed" true

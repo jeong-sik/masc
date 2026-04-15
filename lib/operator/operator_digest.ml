@@ -311,9 +311,6 @@ let room_state_json config =
   if not (Room.is_initialized config) then
     `Assoc
       [
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("project", `String (Filename.basename config.base_path));
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
@@ -323,9 +320,6 @@ let room_state_json config =
     let state = Room.read_state config in
     `Assoc
       [
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
@@ -503,10 +497,7 @@ let namespace_gate_review_item ~room_json =
   if not paused then None
   else
     let room_id =
-      (match json_string_opt room_json "namespace_id" with
-       | Some id -> Some id
-       | None -> json_string_opt room_json "room_id")
-      |> Option.value ~default:"default"
+      json_string_opt room_json "project" |> Option.value ~default:"default"
     in
     let pause_reason =
       json_string_opt room_json "pause_reason" |> Option.value ~default:"운영 점검"

@@ -160,12 +160,12 @@ let test_dashboard_mission_projection () =
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
           (summary |> member "active_agents" = `Null);
-        check string "mission summary namespace_id" "default"
-          (summary |> member "namespace_id" |> to_string);
-        check string "mission summary namespace" "default"
-          (summary |> member "namespace" |> to_string);
-        check string "mission summary namespace mode" "flattened"
-          (summary |> member "namespace_mode" |> to_string);
+        check bool "mission summary namespace_id removed" true
+          (summary |> member "namespace_id" = `Null);
+        check bool "mission summary namespace removed" true
+          (summary |> member "namespace" = `Null);
+        check bool "mission summary namespace_mode removed" true
+          (summary |> member "namespace_mode" = `Null);
         check bool "sessions removed from mission payload" true
           (json |> member "sessions" = `Null);
         let alpha_input = alpha_brief |> member "recent_input_preview" |> to_string in
@@ -256,10 +256,10 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
         check bool "default mission leaves initializing placeholder" true
           (json |> member "summary" |> member "room_health" |> to_string
            <> "initializing");
-        check string "default mission exposes namespace id" "default"
-          (json |> member "summary" |> member "namespace_id" |> to_string);
-        check string "default mission exposes namespace" "default"
-          (json |> member "summary" |> member "namespace" |> to_string);
+        check bool "mission summary namespace_id removed" true
+          (json |> member "summary" |> member "namespace_id" = `Null);
+        check bool "mission summary namespace removed" true
+          (json |> member "summary" |> member "namespace" = `Null);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_fallback () =
@@ -294,10 +294,10 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
         check bool "default mission leaves initializing placeholder" true
           (json |> member "summary" |> member "room_health" |> to_string
            <> "initializing");
-        check string "default mission exposes namespace id" "default"
-          (json |> member "summary" |> member "namespace_id" |> to_string);
-        check string "default mission exposes namespace" "default"
-          (json |> member "summary" |> member "namespace" |> to_string);
+        check bool "mission summary namespace_id removed" true
+          (json |> member "summary" |> member "namespace_id" = `Null);
+        check bool "mission summary namespace removed" true
+          (json |> member "summary" |> member "namespace" = `Null);
       ))
 
 let test_dashboard_mission_http_cache_isolation () =
@@ -343,10 +343,10 @@ let test_dashboard_mission_http_cache_isolation () =
             request
         in
         let open Yojson.Safe.Util in
-        check string "first room namespace remains default" "default"
-          (json_a |> member "summary" |> member "namespace_id" |> to_string);
-        check string "second room namespace remains default" "default"
-          (json_b |> member "summary" |> member "namespace_id" |> to_string);
+        check bool "first room namespace_id removed" true
+          (json_a |> member "summary" |> member "namespace_id" = `Null);
+        check bool "second room namespace_id removed" true
+          (json_b |> member "summary" |> member "namespace_id" = `Null);
       ))
 
 let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =

@@ -150,14 +150,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       | _ -> snapshot_json |> member_assoc "room"
     in
     let current_namespace =
-      match trim_to_option (Some (scope_json |> string_field "namespace")) with
+      match trim_to_option (Some (scope_json |> string_field "project")) with
       | Some value -> value
-      | None -> (
-          match trim_to_option (Some (scope_json |> string_field "namespace_id")) with
-          | Some value -> value
-          | None ->
-              trim_to_option (Some (scope_json |> string_field "current_room"))
-              |> Option.value ~default:"default")
+      | None -> "default"
     in
     let sessions =
       Briefing_compactors.relevant_sessions_for_briefing ~current_namespace
@@ -187,8 +182,6 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       `Assoc
         [
           ("room_health", member_assoc "room_health" summary);
-          ("namespace_id", member_assoc "namespace_id" summary);
-          ("namespace", member_assoc "namespace" summary);
           ("active_agents", member_assoc "active_agents" summary);
           ("keeper_pressure", member_assoc "keeper_pressure" summary);
           ("active_operations", member_assoc "active_operations" summary);

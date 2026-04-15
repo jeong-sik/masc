@@ -578,9 +578,6 @@ export function normalizeServerStatus(raw: unknown, generatedAt?: string): Serve
   if (!isRecord(raw)) return null
   return {
     ...(raw as ServerStatus),
-    namespace_id: asString(raw.namespace_id) ?? undefined,
-    namespace: asString(raw.namespace) ?? undefined,
-    namespace_base_path: asString(raw.namespace_base_path) ?? undefined,
     generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
     build: normalizeBuildIdentity(raw.build),
   }

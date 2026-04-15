@@ -351,8 +351,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
   const namespaceStatus = namespaceTruth.value?.namespace.status ?? serverStatus.value
-  const namespaceName = namespaceStatus?.namespace ?? 'default'
-  const namespaceBasePath = namespaceStatus?.namespace_base_path ?? null
+  const namespaceName = namespaceStatus?.project ?? 'default'
 
   const briefMap = useMemo(
     () => new Map<string, DashboardMissionAgentBrief>(
@@ -531,7 +530,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
                       <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
                       ${configuredKeeperHint ? html`<span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
-                      ${namespaceBasePath ? html`<code class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px]">${namespaceBasePath}</code>` : null}
                     </div>
                   </div>
                 </div>

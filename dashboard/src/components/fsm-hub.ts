@@ -290,7 +290,7 @@ export function FsmHub() {
         <${TurnPipelineStrip} snapshot=${snapshot} />
 
         ${/* ── Zone 4: Health Grid ── */ ''}
-        <div class="grid gap-3 lg:grid-cols-3">
+        <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <${MeasurementCard} snapshot=${snapshot} />
           <${InvariantsPanel} invariants=${snapshot.invariants} />
           <${RecoveryStatePanel}
@@ -514,12 +514,12 @@ function PipelineStep({
           ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
           <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</span>
         </div>
-        <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-dim)]'} ${flash ? 'animate-pulse' : ''}`}>
+        <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'} ${flash ? 'animate-pulse' : ''}`}>
           ${value}
         </div>
         <div class="text-[8px] text-[var(--text-dim)] mt-0.5">${label}</div>
       </div>
-      ${!isLast ? html`<div class=${`w-5 shrink-0 ${connectorCls}`}></div>` : null}
+      ${!isLast ? html`<div class=${`hidden md:block w-5 shrink-0 ${connectorCls}`}></div>` : null}
     </div>
   `
 }
@@ -530,7 +530,7 @@ function TurnPipelineStrip({ snapshot }: { snapshot: KeeperCompositeSnapshot }) 
       <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Turn Pipeline
       </div>
-      <div class="flex gap-0 items-stretch">
+      <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch">
         <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} />
         <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} />
         <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} />

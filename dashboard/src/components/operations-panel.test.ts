@@ -20,6 +20,12 @@ async function loadPanel() {
   vi.doMock('./governance', () => ({
     Governance: () => html`<div data-testid="governance">Governance</div>`,
   }))
+  vi.doMock('./connector-status', () => ({
+    ConnectorStatusPanel: () => html`<div data-testid="connectors">Connectors</div>`,
+  }))
+  vi.doMock('./lab-inspector', () => ({
+    LabInspector: () => html`<div data-testid="inspector">Inspector</div>`,
+  }))
   return import('./operations-panel')
 }
 
@@ -41,6 +47,8 @@ describe('OperationsPanel', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./ops')
     vi.doUnmock('./governance')
+    vi.doUnmock('./connector-status')
+    vi.doUnmock('./lab-inspector')
   })
 
   it('renders both Ops and Governance when view is not set (default)', async () => {
@@ -72,17 +80,19 @@ describe('OperationsPanel', () => {
     expect(container.textContent).toContain('Governance')
   })
 
-  it('renders 3 FilterChips options', async () => {
+  it('renders 5 FilterChips options (Phase 6: +connectors +inspector)', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
     const buttons = container.querySelectorAll('button[type="button"]')
-    expect(buttons.length).toBe(3)
+    expect(buttons.length).toBe(5)
     const labels = Array.from(buttons).map(b => b.textContent?.trim())
     expect(labels).toContain('전체')
     expect(labels).toContain('개입')
     expect(labels).toContain('거버넌스')
+    expect(labels).toContain('커넥터')
+    expect(labels).toContain('인스펙터')
   })
 
   it('falls back to default for unknown view param', async () => {

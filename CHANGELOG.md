@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **OAS pin → v0.144.0** (from 0.141.0). OAS removed cascade orchestration
+  from the single-provider SDK across 3 breaking releases:
+  - 0.142.0: `Judge.judge` takes `~provider:Provider_config.t` (was cascade_name)
+  - 0.143.0: `Tool_selector.default_rerank_fn` takes `~provider` (was cascade_name + defaults)
+  - 0.144.0: `Cascade_executor` module deleted (dead code, 839 lines)
+- **`keeper_agent_run.ml`**: tool_selector rerank now resolves the
+  cascade locally (via `Cascade_config.resolve_model_strings` +
+  `parse_model_strings` + `filter_healthy`), picks the first healthy
+  provider, and passes that single `Provider_config.t` to the
+  single-provider `default_rerank_fn`. On no-healthy-provider, falls
+  back to `core+prefilter+discovered` (same as before).
+
+Rationale: cascade is MASC's responsibility. OAS is a single-provider SDK.
+Follow-up PRs migrate `Cascade_config`, `Cascade_fsm`, etc. into MASC's
+own `lib/cascade/` and delete them from OAS entirely.
+
 ## [0.8.0] - 2026-04-15
 
 ### Changed

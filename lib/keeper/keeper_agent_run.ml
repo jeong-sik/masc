@@ -1211,54 +1211,77 @@ let run_turn
                          Oas_worker.default_model_strings ~cascade_name:rerank_cascade
                        in
                        let config_path = Oas_worker.default_config_path () in
-                       let rerank_fn =
-                         Agent_sdk.Tool_selector.default_rerank_fn
-                           ~sw
-                           ~net
-                           ?config_path
-                           ~cascade_name:rerank_cascade
-                           ~defaults
-                           ~k:selection_limit
-                           ()
+                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
+                          no longer owns cascade orchestration — MASC picks one
+                          provider from the cascade and passes it to the
+                          single-provider rerank API. Graceful degradation via
+                          BM25 fallback lives inside [default_rerank_fn]. *)
+                       let model_strings =
+                         Llm_provider.Cascade_config.resolve_model_strings
+                           ?config_path ~name:rerank_cascade ~defaults ()
+                         |> Llm_provider.Cascade_config.expand_model_strings_for_execution
                        in
-                       let strategy =
-                         Agent_sdk.Tool_selector.TopK_llm
-                           { k = selection_limit
-                           ; bm25_prefilter_n =
-                               min
-                                 keeper_selection_bm25_prefilter_n
-                                 (List.length preset_tools)
-                           ; always_include = core
-                           ; confidence_threshold = 0.3
-                           ; rerank_fn
-                           }
+                       let providers =
+                         Llm_provider.Cascade_config.parse_model_strings model_strings
                        in
-                       (try
-                          let selected =
-                            Agent_sdk.Tool_selector.select_names
-                              ~strategy
-                              ~context:query_text
-                              ~tools:preset_tools
-                          in
-                          if Keeper_types_profile.keeper_debug
-                          then
-                            Log.Keeper.info
-                              "keeper:%s TopK_llm selected %d tools (query_len=%d, \
-                               candidates=%d)"
-                              meta.name
-                              (List.length selected)
-                              (String.length query_text)
-                              (List.length preset_tools);
-                          selected
-                        with
-                        | Eio.Cancel.Cancelled _ as e -> raise e
-                        | exn ->
+                       let healthy =
+                         Llm_provider.Cascade_config.filter_healthy ~sw ~net providers
+                       in
+                       (match healthy with
+                        | [] ->
                           Log.Keeper.warn
-                            "keeper:%s TopK_llm failed (%s), falling back to \
-                             core+prefilter+discovered"
+                            "keeper:%s TopK_llm: no healthy provider for cascade \
+                             '%s', falling back to core+prefilter+discovered"
                             meta.name
-                            (Printexc.to_string exn);
-                          [])
+                            rerank_cascade;
+                          []
+                        | first_provider :: _ ->
+                          let rerank_fn =
+                            Agent_sdk.Tool_selector.default_rerank_fn
+                              ~sw
+                              ~net
+                              ~provider:first_provider
+                              ~k:selection_limit
+                              ()
+                          in
+                          let strategy =
+                            Agent_sdk.Tool_selector.TopK_llm
+                              { k = selection_limit
+                              ; bm25_prefilter_n =
+                                  min
+                                    keeper_selection_bm25_prefilter_n
+                                    (List.length preset_tools)
+                              ; always_include = core
+                              ; confidence_threshold = 0.3
+                              ; rerank_fn
+                              }
+                          in
+                          (try
+                             let selected =
+                               Agent_sdk.Tool_selector.select_names
+                                 ~strategy
+                                 ~context:query_text
+                                 ~tools:preset_tools
+                             in
+                             if Keeper_types_profile.keeper_debug
+                             then
+                               Log.Keeper.info
+                                 "keeper:%s TopK_llm selected %d tools \
+                                  (query_len=%d, candidates=%d)"
+                                 meta.name
+                                 (List.length selected)
+                                 (String.length query_text)
+                                 (List.length preset_tools);
+                             selected
+                           with
+                           | Eio.Cancel.Cancelled _ as e -> raise e
+                           | exn ->
+                             Log.Keeper.warn
+                               "keeper:%s TopK_llm failed (%s), falling back to \
+                                core+prefilter+discovered"
+                               meta.name
+                               (Printexc.to_string exn);
+                             []))
                      | _ ->
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: Eio context unavailable, falling back \

@@ -779,7 +779,14 @@ launch_from_base_path() {
         echo "Error: failed to chdir to base path: $RESOLVED_BASE_PATH" >&2
         exit 1
     fi
-    exec "$@"
+    if [ -n "${MASC_LOG_FILE:-}" ]; then
+        mkdir -p "$(dirname "$MASC_LOG_FILE")"
+        echo "  Log file: $MASC_LOG_FILE (stdout+stderr tee'd)" >&2
+        set -o pipefail
+        exec "$@" 2>&1 | tee -a "$MASC_LOG_FILE"
+    else
+        exec "$@"
+    fi
 }
 
 # Eio server has different CLI format and is HTTP-only

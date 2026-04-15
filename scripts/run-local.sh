@@ -198,4 +198,11 @@ echo "  Port: $PORT" >&2
 echo "  Dashboard build: $(if [ "$BUILD_DASHBOARD" = "1" ]; then echo enabled; else echo skipped; fi)" >&2
 echo "  Transports: http=on grpc=${MASC_GRPC_ENABLED} ws=${MASC_WS_ENABLED} webrtc=${MASC_WEBRTC_ENABLED}" >&2
 
-exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR"
+if [ -n "${MASC_LOG_FILE:-}" ]; then
+  mkdir -p "$(dirname "$MASC_LOG_FILE")"
+  echo "  Log file: $MASC_LOG_FILE (stdout+stderr tee'd)" >&2
+  set -o pipefail
+  exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR" 2>&1 | tee -a "$MASC_LOG_FILE"
+else
+  exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR"
+fi

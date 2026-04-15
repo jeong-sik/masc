@@ -1,5 +1,5 @@
 [keeper]
-persona_name = "analyst"
+persona_name = "scholar"
 execution_scope = "workspace"
 cascade_name = "keeper_unified"
 telemetry_feedback_enabled = true

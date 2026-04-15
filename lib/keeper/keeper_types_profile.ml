@@ -122,6 +122,7 @@ let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
 
 type keeper_profile_defaults = {
   manifest_path : string option;
+  persona_name : string option;
   goal : string option;
   short_goal : string option;
   mid_goal : string option;
@@ -169,6 +170,7 @@ type persona_summary = {
 
 let empty_keeper_profile_defaults = {
   manifest_path = None;
+  persona_name = None;
   goal = None;
   short_goal = None;
   mid_goal = None;
@@ -258,6 +260,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
+        match str "persona_name" with
+        | Some raw when not (validate_name raw) ->
+            Error (Printf.sprintf "invalid persona_name '%s'" raw)
+        | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
         match str "tool_preset" with
         | Some raw -> (
             match normalize_tool_preset_raw raw with
@@ -273,6 +282,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     (fun () ->
       {
         manifest_path = None;
+        persona_name = str "persona_name";
         goal = str "goal";
         short_goal =
           str "short_goal"
@@ -388,6 +398,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
           | `Assoc _ ->
               {
                 manifest_path = Some path;
+                persona_name = Some name;
                 goal = Safe_ops.json_string_opt "goal" keeper_json;
                 short_goal =
                   normalize_goal_horizon_opt
@@ -466,12 +477,84 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
+let merge_string_list ~base overlay =
+  match overlay with [] -> base | xs -> xs
+
+let merge_keeper_profile_defaults
+    ~(base : keeper_profile_defaults)
+    ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
+  let prefer overlay_value base_value =
+    match overlay_value with Some _ -> overlay_value | None -> base_value
+  in
+  {
+    manifest_path = prefer overlay.manifest_path base.manifest_path;
+    persona_name = prefer overlay.persona_name base.persona_name;
+    goal = prefer overlay.goal base.goal;
+    short_goal = prefer overlay.short_goal base.short_goal;
+    mid_goal = prefer overlay.mid_goal base.mid_goal;
+    long_goal = prefer overlay.long_goal base.long_goal;
+    will = prefer overlay.will base.will;
+    needs = prefer overlay.needs base.needs;
+    desires = prefer overlay.desires base.desires;
+    instructions = prefer overlay.instructions base.instructions;
+    policy_voice_enabled =
+      prefer overlay.policy_voice_enabled base.policy_voice_enabled;
+    mention_targets =
+      merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
+    proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
+    proactive_cooldown_sec =
+      prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
+    room_signal_prompt_enabled =
+      prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
+    shards = prefer overlay.shards base.shards;
+    allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
+    execution_scope = prefer overlay.execution_scope base.execution_scope;
+    tool_preset = prefer overlay.tool_preset base.tool_preset;
+    tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
+    tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    work_discovery_enabled =
+      prefer overlay.work_discovery_enabled base.work_discovery_enabled;
+    work_discovery_sources =
+      prefer overlay.work_discovery_sources base.work_discovery_sources;
+    work_discovery_interval_sec =
+      prefer overlay.work_discovery_interval_sec base.work_discovery_interval_sec;
+    work_discovery_guidance =
+      prefer overlay.work_discovery_guidance base.work_discovery_guidance;
+    telemetry_feedback_enabled =
+      prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      prefer overlay.telemetry_feedback_window_hours
+        base.telemetry_feedback_window_hours;
+    cascade_name = prefer overlay.cascade_name base.cascade_name;
+    models = prefer overlay.models base.models;
+    max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
+    max_turns_per_call_scheduled_autonomous =
+      prefer overlay.max_turns_per_call_scheduled_autonomous
+        base.max_turns_per_call_scheduled_autonomous;
+  }
+
+let resolved_persona_name ~keeper_name
+    (defaults : keeper_profile_defaults) : string =
+  match defaults.persona_name with
+  | Some name when String.trim name <> "" -> name
+  | _ -> keeper_name
+
 let load_keeper_profile_defaults name : keeper_profile_defaults =
-  (* Priority: TOML config/keepers/<name>.toml > persona profile.json *)
+  (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
+     If TOML sets [persona_name], load that persona first and treat TOML as a
+     thin overlay instead of duplicating the full keeper profile. *)
   match keeper_toml_path_opt name with
   | Some toml_path ->
     (match load_keeper_toml toml_path with
-     | Ok (_name, defaults) -> defaults
+     | Ok (_name, defaults) -> (
+         match defaults.persona_name with
+         | Some persona_name ->
+             let persona_defaults =
+               load_keeper_profile_defaults_from_persona persona_name
+             in
+             merge_keeper_profile_defaults ~base:persona_defaults ~overlay:defaults
+         | None -> defaults)
      | Error e ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
        load_keeper_profile_defaults_from_persona name)

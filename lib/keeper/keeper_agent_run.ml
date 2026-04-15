@@ -510,8 +510,12 @@ let run_turn
     | None -> 0
   in
   (* 3. Build base system prompt from meta *)
+  let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   let persona_extended =
-    Keeper_types_profile.load_persona_extended meta.name |> Option.value ~default:""
+    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
+      profile_defaults
+    |> Keeper_types_profile.load_persona_extended
+    |> Option.value ~default:""
   in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt

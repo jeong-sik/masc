@@ -208,7 +208,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ignore (Keeper_alerting_path.ensure_playground_bundle ~config:ctx.config ~name:p.name);
       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
         let persona_extended =
-          Keeper_types_profile.load_persona_extended p.name
+          Keeper_types_profile.resolved_persona_name ~keeper_name:p.name
+            p.profile_defaults
+          |> Keeper_types_profile.load_persona_extended
           |> Option.value ~default:""
         in
         let system_prompt =

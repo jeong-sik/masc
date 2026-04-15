@@ -156,7 +156,7 @@ let test_tool_policy_resync () =
     {|[keeper]
 goal = "test"
 execution_scope = "workspace"
-allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
+allowed_paths = ["workspace/example/project"]
 tool_preset = "social"
 also_allow = ["keeper_bash", "keeper_shell"]
 |};
@@ -203,7 +203,7 @@ also_allow = ["keeper_bash", "keeper_shell"]
       check
         (list string)
         "allowed_paths"
-        [ "workspace/yousleepwhen/masc-mcp" ]
+        [ "workspace/example/project" ]
         updated.allowed_paths
 
 (** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
@@ -233,7 +233,7 @@ allowed_paths = []
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-allowed-paths-explicit-empty");
             ("execution_scope", `String "workspace");
-            ("allowed_paths", `List [ `String "workspace/yousleepwhen/masc-mcp" ]);
+            ("allowed_paths", `List [ `String "workspace/example/project" ]);
           ])
     with
     | Ok meta -> meta
@@ -266,7 +266,7 @@ let test_persona_allowed_paths_is_ignored () =
   "keeper": {
     "goal": "test",
     "execution_scope": "workspace",
-    "allowed_paths": ["workspace/yousleepwhen/masc-mcp"]
+    "allowed_paths": ["workspace/example/project"]
   }
 }|};
   let config = Room.default_config room_dir in
@@ -308,7 +308,7 @@ let test_custom_tool_access_preserved_without_preset () =
     {|[keeper]
 goal = "test"
 execution_scope = "workspace"
-allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
+allowed_paths = ["workspace/example/project"]
 |};
   let config = Room.default_config room_dir in
   let initial_meta =
@@ -352,8 +352,100 @@ allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
       check
         (list string)
         "allowed_paths"
-        [ "workspace/yousleepwhen/masc-mcp" ]
+        [ "workspace/example/project" ]
         updated.allowed_paths
+
+(** Test: TOML can reference a persona and only override selected fields. *)
+let test_persona_overlay_resync () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "overlay-keeper-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  let personas_dir = Filename.concat config_dir "personas" in
+  let persona_name = "scholar" in
+  let persona_dir = Filename.concat personas_dir persona_name in
+  Unix.mkdir keepers_toml_dir 0o755;
+  Unix.mkdir personas_dir 0o755;
+  Unix.mkdir persona_dir 0o755;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|{
+  "name": "학자",
+  "role": "근거와 문맥을 압축하는 연구형 페르소나",
+  "trait": "차분하고 체계적인 정리자",
+  "keeper": {
+    "goal": "자료를 읽고 핵심 쟁점을 구조화한다.",
+    "needs": "원문 자료, 논문, 긴 문맥",
+    "instructions": "먼저 읽고 구조를 잡은 뒤 요약한다.",
+    "mention_targets": ["scholar", "학자"],
+    "tool_preset": "research",
+    "proactive_enabled": true
+  }
+}|};
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+persona_name = "scholar"
+goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
+execution_scope = "workspace"
+tool_preset = "delivery"
+|};
+  let config = Room.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-persona-overlay-resync");
+            ("goal", `String "stale goal");
+            ("needs", `String "stale needs");
+            ("instructions", `String "stale instructions");
+            ("mention_targets", `List [ `String "old-target" ]);
+            ("execution_scope", `String "observe_only");
+            ( "tool_access",
+              `Assoc
+                [
+                  ("kind", `String "preset");
+                  ("preset", `String "messaging");
+                  ("also_allow", `List []);
+                ] );
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check string "toml goal overrides persona"
+        "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
+        updated.goal;
+      check string "persona needs inherited"
+        "원문 자료, 논문, 긴 문맥"
+        updated.needs;
+      check string "persona instructions inherited"
+        "먼저 읽고 구조를 잡은 뒤 요약한다."
+        updated.instructions;
+      check (list string) "persona mention_targets inherited"
+        [ "scholar"; "학자" ]
+        updated.mention_targets;
+      check string "execution_scope from toml"
+        "workspace"
+        updated.execution_scope;
+      check
+        (option string)
+        "tool_preset from toml overlay"
+        (Some "delivery")
+        (Keeper_types.tool_access_preset updated.tool_access
+         |> Option.map Keeper_types.tool_preset_to_string)
 
 (** Test: fields absent from TOML (None) preserve runtime JSON values. *)
 let test_none_preserves_runtime () =
@@ -631,6 +723,10 @@ let () =
             "persona allowed_paths is ignored"
             `Quick
             test_persona_allowed_paths_is_ignored;
+          test_case
+            "persona defaults can be overlaid by keeper TOML"
+            `Quick
+            test_persona_overlay_resync;
         ] );
       ( "none_preserve",
         [

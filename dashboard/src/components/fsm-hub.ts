@@ -138,7 +138,23 @@ export function FsmHub() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
+  const [paused, setPaused] = useState(() =>
+    typeof document !== 'undefined' && document.visibilityState === 'hidden',
+  )
   const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const handler = () => {
+      const hidden = document.visibilityState === 'hidden'
+      setPaused(hidden)
+      if (!hidden) {
+        setPollTick(t => t + 1)
+      }
+    }
+    document.addEventListener('visibilitychange', handler)
+    return () => document.removeEventListener('visibilitychange', handler)
+  }, [])
 
   // Primary source: store signal (from dashboard/shell polling).
   // Fallback: direct gate fetch — the shell endpoint omits keeper
@@ -177,14 +193,16 @@ export function FsmHub() {
   }, [keeperNames, selected])
 
   useEffect(() => {
+    if (paused) return undefined
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [])
+  }, [paused])
 
   useEffect(() => {
+    if (paused) return undefined
     const id = setInterval(() => setNow(Date.now() / 1000), 1_000)
     return () => clearInterval(id)
-  }, [])
+  }, [paused])
 
   const tick = compositeTick.value
   const shouldRefetchForTick =
@@ -259,6 +277,7 @@ export function FsmHub() {
         selected=${activeSelected}
         onSelect=${setSelected}
         loading=${loading}
+        paused=${paused}
         transitionCount=${history.length}
         observationCount=${view.observations.length}
       />
@@ -356,6 +375,7 @@ function StatusBar({
   selected,
   onSelect,
   loading,
+  paused,
   transitionCount,
   observationCount,
 }: {
@@ -366,6 +386,7 @@ function StatusBar({
   selected: string | null
   onSelect: (n: string) => void
   loading: boolean
+  paused: boolean
   transitionCount: number
   observationCount: number
 }) {
@@ -389,6 +410,14 @@ function StatusBar({
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
+          ${paused ? html`
+            <span
+              class="px-1.5 py-0.5 rounded border text-[9px] font-mono text-[var(--text-muted)] border-[var(--white-10)] bg-[var(--white-3)]"
+              title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
+            >
+              ⏸ 일시 중지
+            </span>
+          ` : null}
           ${staleSec > 120 ? html`
             <span class="text-[9px] font-mono text-red-400 animate-pulse" title="마지막 관측이 2분 이상 경과 — 대시보드 데이터가 현재 상태를 반영하지 않을 수 있습니다">
               ${fmtDuration(staleSec)} 전 갱신

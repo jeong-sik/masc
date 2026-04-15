@@ -215,25 +215,9 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.runtime.proactive_rt.last_preview = ""
                 then `Null
                 else `String m.runtime.proactive_rt.last_preview);
-              ("social_model",
-                `String (Keeper_social_model.normalize_social_model m.social_model));
-              ("last_speech_act",
-                if String.trim m.runtime.last_speech_act = ""
-                then `Null
-                else `String m.runtime.last_speech_act);
-              ("last_social_transition_reason",
-                if String.trim m.runtime.last_social_transition_reason = ""
-                then `Null
-                else `String m.runtime.last_social_transition_reason);
-              ("last_blocker",
-                if String.trim m.runtime.last_blocker = ""
-                then `Null
-                else `String m.runtime.last_blocker);
-              ("last_need",
-                if String.trim m.runtime.last_need = ""
-                then `Null
-                else `String m.runtime.last_need);
-            ] @ runtime_blocker_fields @ [
+            ]
+            @ Keeper_status_bridge.social_runtime_fields_json m
+            @ runtime_blocker_fields @ [
               ("continuity_summary",
                 if String.trim m.continuity_summary = ""
                 then `Null

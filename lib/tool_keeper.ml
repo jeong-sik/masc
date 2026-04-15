@@ -176,7 +176,7 @@ let keeper_list_row_json ~runtime_class config name =
         Keeper_exec_status.keeper_surface_status ~agent_status ~diagnostic
       in
       Some
-        (`Assoc
+        (`Assoc (
           [
             ("runtime_class", `String runtime_class);
             ("name", `String meta.name);
@@ -188,8 +188,13 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("social_model",
-              `String (Keeper_social_model.normalize_social_model meta.social_model));
+            ("skill_route", keeper_list_skill_route_json config meta);
+            ("cascade_name", `String meta.cascade_name);
+            ("created_at", `String meta.created_at);
+            ("updated_at", `String meta.updated_at);
+          ]
+          @ Keeper_status_bridge.social_model_resolution_fields_json meta
+          @ [
             ( "last_speech_act",
               if String.trim meta.runtime.last_speech_act = ""
               then `Null
@@ -198,11 +203,7 @@ let keeper_list_row_json ~runtime_class config name =
               if String.trim meta.runtime.last_social_transition_reason = ""
               then `Null
               else `String meta.runtime.last_social_transition_reason );
-            ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String meta.cascade_name);
-            ("created_at", `String meta.created_at);
-            ("updated_at", `String meta.updated_at);
-          ])
+          ]))
 
 let invalidate_status_cache name =
   Keeper_status_detail.invalidate_status_cache_for name

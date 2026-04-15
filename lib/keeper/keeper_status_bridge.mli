@@ -33,6 +33,12 @@ val runtime_keepalive_started_at :
 val runtime_blocker_fields_json :
   Coord_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
 
+val social_model_resolution_fields_json :
+  keeper_meta -> (string * Yojson.Safe.t) list
+
+val social_runtime_fields_json :
+  keeper_meta -> (string * Yojson.Safe.t) list
+
 val runtime_surface_json :
   Coord_utils.config -> keeper_meta -> Yojson.Safe.t
 

@@ -950,6 +950,11 @@ let test_social_model_registry_round_trip () =
     |> Option.map KSM.model_id_to_string);
   check bool "unknown model id rejected" true
     (Option.is_none (KSM.model_id_of_string "experimental_v99"));
+  check bool "unknown model flagged as unrecognized" false
+    (KSM.is_known_social_model "experimental_v99");
+  check (option string) "unknown model exposes explicit fallback"
+    (Some "bdi_speech_v1")
+    (KSM.fallback_social_model "experimental_v99");
   check string "unknown model normalized to baseline" "bdi_speech_v1"
     (KSM.normalize_social_model "experimental_v99")
 

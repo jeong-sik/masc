@@ -56,5 +56,7 @@ val delivery_surface_of_string : string -> delivery_surface option
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
 val default_model_id : model_id
+val is_known_social_model : string -> bool
+val fallback_social_model : string -> string option
 val normalize_social_model : string -> string
 val transition_reason_to_string : transition_reason -> string

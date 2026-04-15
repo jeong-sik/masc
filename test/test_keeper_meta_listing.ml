@@ -220,7 +220,13 @@ let test_keeper_list_normalizes_unknown_social_model () =
       match keeper_json_by_name json "sangsu" with
       | Some keeper ->
           check string "social_model normalized" "bdi_speech_v1"
-            Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
+            Yojson.Safe.Util.(keeper |> member "social_model" |> to_string);
+          check string "configured_social_model preserved" "experimental_v99"
+            Yojson.Safe.Util.(keeper |> member "configured_social_model" |> to_string);
+          check bool "social_model_recognized false" false
+            Yojson.Safe.Util.(keeper |> member "social_model_recognized" |> to_bool);
+          check string "social_model_fallback explicit" "bdi_speech_v1"
+            Yojson.Safe.Util.(keeper |> member "social_model_fallback" |> to_string)
       | None -> fail "expected sangsu row in keeper list")
 
 let test_keeper_list_exposes_last_social_transition_reason () =

@@ -65,6 +65,8 @@ let delivery_surface_to_string =
 
 let model_id_to_string = Keeper_social_model_types.model_id_to_string
 let model_id_of_string = Keeper_social_model_types.model_id_of_string
+let is_known_social_model = Keeper_social_model_types.is_known_social_model
+let fallback_social_model = Keeper_social_model_types.fallback_social_model
 let normalize_social_model = Keeper_social_model_types.normalize_social_model
 let transition_reason_to_string =
   Keeper_social_model_types.transition_reason_to_string

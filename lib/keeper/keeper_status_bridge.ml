@@ -213,6 +213,33 @@ let runtime_blocker_fields_json (config : Coord_utils.config)
         ("runtime_blocker_manual_reconcile", `Bool false);
       ]
 
+let trimmed_string_json value =
+  let trimmed = String.trim value in
+  if trimmed = "" then `Null else `String trimmed
+
+let social_model_resolution_fields_json (meta : keeper_meta) =
+  let resolved = Keeper_social_model.normalize_social_model meta.social_model in
+  let recognized = Keeper_social_model.is_known_social_model meta.social_model in
+  [
+    ("social_model", `String resolved);
+    ("configured_social_model", trimmed_string_json meta.social_model);
+    ("social_model_recognized", `Bool recognized);
+    ( "social_model_fallback",
+      match Keeper_social_model.fallback_social_model meta.social_model with
+      | Some fallback -> `String fallback
+      | None -> `Null );
+  ]
+
+let social_runtime_fields_json (meta : keeper_meta) =
+  social_model_resolution_fields_json meta
+  @ [
+      ("last_speech_act", trimmed_string_json meta.runtime.last_speech_act);
+      ( "last_social_transition_reason",
+        trimmed_string_json meta.runtime.last_social_transition_reason );
+      ("last_blocker", trimmed_string_json meta.runtime.last_blocker);
+      ("last_need", trimmed_string_json meta.runtime.last_need);
+    ]
+
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
@@ -238,6 +265,7 @@ let runtime_surface_json config (meta : keeper_meta) =
        ( "fiber_health",
          `String (Keeper_exec_status.string_of_fiber_health fiber_health) );
      ]
+     @ social_runtime_fields_json meta
      @ runtime_blocker_fields_json config meta)
 
 let source_provenance_json config (meta : keeper_meta) =

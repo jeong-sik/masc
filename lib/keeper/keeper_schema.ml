@@ -297,6 +297,11 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "How many bytes from the end of files to scan for tails (default: 60000).");
         ]);
+        ("tail_order", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "oldest_first"; `String "newest_first"]);
+          ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
+        ]);
         ("fast", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Enable fast mode (skip heavy sections unless explicitly enabled).");

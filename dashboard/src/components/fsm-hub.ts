@@ -8,6 +8,7 @@ import {
 import { fetchGateKeepers } from '../api/gate'
 import { keepers } from '../store'
 import { compositeTick } from '../composite-signals'
+import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { EmptyState } from './common/empty-state'
 
 import {
@@ -137,6 +138,40 @@ export function FsmHub() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
+  const [refreshFlash, setRefreshFlash] = useState(false)
+  const flashTimeoutRef = useRef<number | null>(null)
+  const refreshNow = () => {
+    setPollTick(t => t + 1)
+    setRefreshFlash(true)
+    if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
+    flashTimeoutRef.current = window.setTimeout(() => {
+      setRefreshFlash(false)
+      flashTimeoutRef.current = null
+    }, 800)
+  }
+
+  useEffect(() => () => {
+    if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === 'r') {
+        ev.preventDefault()
+        refreshNow()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
   const [paused, setPaused] = useState(() =>
     typeof document !== 'undefined' && document.visibilityState === 'hidden',
   )
@@ -222,7 +257,7 @@ export function FsmHub() {
     if (paused) return undefined
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [paused])
+  }, [paused, pollTick])
 
   useEffect(() => {
     if (paused) return undefined
@@ -260,26 +295,15 @@ export function FsmHub() {
     })()
   }, [activeSelected, shouldRefetchForTick, pollTick])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined
-    const handler = (ev: KeyboardEvent) => {
-      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
-      const target = ev.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-        if (target.isContentEditable) return
-      }
-      if (ev.key < '1' || ev.key > '9') return
+  useGlobalShortcut(
+    (ev) => ev.key >= '1' && ev.key <= '9',
+    (ev) => {
       const idx = ev.key.charCodeAt(0) - '1'.charCodeAt(0)
-      const target_name = keeperNames[idx]
-      if (!target_name) return
-      ev.preventDefault()
-      setSelected(target_name)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [keeperNames])
+      const name = keeperNames[idx]
+      if (name) setSelected(name)
+    },
+    [keeperNames],
+  )
 
   const view = useMemo(
     () =>
@@ -325,6 +349,8 @@ export function FsmHub() {
         onSelect=${setSelected}
         loading=${loading}
         paused=${paused}
+        onRefresh=${refreshNow}
+        refreshFlash=${refreshFlash}
         transitionCount=${history.length}
         observationCount=${view.observations.length}
       />
@@ -419,6 +445,7 @@ function ShortcutsOverlay({
   if (!open) return null
   const rows: Array<{ keys: string; desc: string }> = [
     { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
+    { keys: 'r', desc: '강제 새로고침' },
     { keys: '? ', desc: '단축키 목록 토글' },
     { keys: 'Esc', desc: '오버레이 닫기' },
     { keys: '← →', desc: '키퍼 탭 이동 (탭 포커스 시)' },
@@ -472,6 +499,8 @@ function StatusBar({
   onSelect,
   loading,
   paused,
+  onRefresh,
+  refreshFlash,
   transitionCount,
   observationCount,
 }: {
@@ -483,6 +512,8 @@ function StatusBar({
   onSelect: (n: string) => void
   loading: boolean
   paused: boolean
+  onRefresh: () => void
+  refreshFlash: boolean
   transitionCount: number
   observationCount: number
 }) {
@@ -499,6 +530,21 @@ function StatusBar({
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
+  const brokenInvariants = snapshot
+    ? Object.entries(snapshot.invariants)
+        .filter(([_, ok]) => !ok)
+        .map(([k]) => k)
+    : []
+  const recoveryDrift = snapshot != null
+    && (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition)
+  const hasAnomaly = brokenInvariants.length > 0 || recoveryDrift
+  const anomalyTitle = hasAnomaly
+    ? [
+        brokenInvariants.length > 0 ? `깨진 invariant: ${brokenInvariants.join(', ')}` : '',
+        recoveryDrift ? 'recovery 양 store 불일치' : '',
+      ].filter(Boolean).join(' · ')
+    : ''
+
   return html`
     <div class="sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md px-4 py-2.5 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
       <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -508,6 +554,18 @@ function StatusBar({
             class="hidden md:inline-flex items-center font-mono text-[9px] px-1 py-0 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]"
             title="단축키 목록 (?)"
           >?</kbd>
+          <button
+            class=${`text-[10px] font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
+              refreshFlash
+                ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)]'
+                : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
+            }`}
+            onClick=${onRefresh}
+            aria-label="강제 새로고침"
+            aria-keyshortcuts="r"
+          >
+            ${refreshFlash ? '✓' : '↻'}
+          </button>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
           ${paused ? html`
@@ -558,7 +616,9 @@ function StatusBar({
                   }
                 }}
               >
-                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}
+                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}${active && hasAnomaly ? html`
+                  <span class="ml-1 text-[#f87171]" title=${anomalyTitle} aria-label="이상 신호">⚠</span>
+                ` : null}
               </button>
             `
           })}

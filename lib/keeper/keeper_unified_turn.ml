@@ -1101,6 +1101,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
+      last_active_desire =
+        Option.value ~default:"" social_state.active_desire;
+      last_current_intention =
+        Option.value ~default:"" social_state.current_intention;
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous
          failures do not persist in the runtime JSON and mislead the
@@ -1358,6 +1362,16 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
          | Some (state : Social.social_state) ->
              Social.speech_act_to_string state.speech_act
          | None -> meta.runtime.last_speech_act);
+      last_active_desire =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.active_desire
+         | None -> meta.runtime.last_active_desire);
+      last_current_intention =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.current_intention
+         | None -> meta.runtime.last_current_intention);
       last_blocker =
         (match social_state with
          | Some (state : Social.social_state) ->
@@ -1380,6 +1394,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
     () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 0. Phase gate + state-aware cascade routing *)
   let registry_base_path = config.base_path in
+  let previous_social_state = Social.previous_state_of_meta meta in
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       Log.Keeper.info
@@ -1905,7 +1920,8 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
              else "")
             (short_preview e_str);
           let social_state =
-            Social.derive_failure_state ~meta ~observation ~reason:e_str
+            Social.derive_failure_state ~meta ~observation
+              ~previous_state:previous_social_state ~reason:e_str
           in
           let failure_meta_base =
             match !paused_meta_override with
@@ -2036,7 +2052,8 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
             Social.extract_accountability_claim result
           in
           let result, social_state =
-            Social.apply_to_result ~meta ~observation result
+            Social.apply_to_result ~meta ~observation
+              ~previous_state:previous_social_state result
           in
           let used_model_id =
             Keeper_agent_run.surface_model_used result

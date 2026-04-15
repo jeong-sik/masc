@@ -39,6 +39,7 @@
    channel_gate
    channel_gate_connector
    channel_gate_metrics
+   channel_gate_discord_names
    channel_gate_discord_state
   channel_gate_imessage_state
    gate_protocol
@@ -447,6 +448,7 @@
    keeper_decision_pipeline_contract
    keeper_turn_cycle_contract
    keeper_composite_observer
+   keeper_campaign_fsm
    keeper_unified_prompt
    keeper_unified_turn
 

@@ -116,6 +116,14 @@ export interface ConnectorStoragePaths {
   status_path: string
   binding_store_path: string
   audit_path: string
+  names_path: string
+}
+
+export interface ConnectorNames {
+  guild_names: Record<string, string>
+  channel_names: Record<string, string>
+  channel_to_guild: Record<string, string>
+  updated_at: string
 }
 
 export interface ConnectorRuntimeSummary {
@@ -177,6 +185,8 @@ export interface GateConnectorInfo {
   runtime_summary: ConnectorRuntimeSummary
   binding_summary: ConnectorBindingSummary
   observed_channel?: ChannelInfo | null
+  names_path: string
+  names: ConnectorNames
 }
 
 export interface GateConnectorsData {
@@ -352,6 +362,28 @@ function decodeStoragePaths(raw: unknown): ConnectorStoragePaths {
     status_path: asString(record.status_path, ''),
     binding_store_path: asString(record.binding_store_path, ''),
     audit_path: asString(record.audit_path, ''),
+    names_path: asString(record.names_path, ''),
+  }
+}
+
+function decodeStringMap(raw: unknown): Record<string, string> {
+  if (!isRecord(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'string' && value.length > 0) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+function decodeConnectorNames(raw: unknown): ConnectorNames {
+  const record = isRecord(raw) ? raw : {}
+  return {
+    guild_names: decodeStringMap(record.guild_names),
+    channel_names: decodeStringMap(record.channel_names),
+    channel_to_guild: decodeStringMap(record.channel_to_guild),
+    updated_at: asString(record.updated_at, ''),
   }
 }
 
@@ -434,6 +466,8 @@ function decodeGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
     runtime_summary: decodeRuntimeSummary(raw.runtime_summary),
     binding_summary: decodeBindingSummary(raw.binding_summary, configuredBindings.length),
     observed_channel: decodeChannelInfo(raw.observed_channel) ?? null,
+    names_path: asString(raw.names_path, ''),
+    names: decodeConnectorNames(raw.names),
   }
 }
 

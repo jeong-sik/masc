@@ -228,8 +228,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   match continuity_snapshot with
                   | Some s -> keeper_state_snapshot_to_summary_text s
                   | None ->
-                    let trimmed = String.trim meta.continuity_summary in
-                    if trimmed = "" then "" else trimmed
+                    continuity_fallback_summary_text
+                      ~continuity_summary:meta.continuity_summary
+                      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
                 in
                 if summary = "" || summary = "No continuity snapshot available."
                 then ""

@@ -1054,14 +1054,12 @@ let run_turn
      the LLM and triggering tool_not_allowed errors. *)
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let allowed_exec_set =
-    let set = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    let base = Keeper_tool_policy.tool_name_set allowed_exec_names in
     (* Core always-tools bypass candidate_set in can_execute, so they
        may be absent from keeper_allowed_tool_names.  Add them back to
        prevent the preset filter from dropping survival-critical tools. *)
-    List.iter
-      (fun name -> Hashtbl.replace set name ())
-      Keeper_tool_registry.core_always_tools;
-    set
+    Keeper_tool_policy.StringSet.union base
+      (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
   in
   let max_tools_per_turn =
     if is_retry
@@ -1180,7 +1178,7 @@ let run_turn
                   selection_mode =
                 let core =
                   Keeper_exec_tools.effective_core_tools ()
-                  |> List.filter (fun name -> Hashtbl.mem allowed_exec_set name)
+                  |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
                 in
                 let discovered =
                   Keeper_discovered_tools.active_names !discovered_ref ~turn
@@ -1207,14 +1205,6 @@ let run_turn
                        let rerank_cascade =
                          Keeper_config.keeper_llm_rerank_cascade ()
                        in
-                       let rerank_provider =
-                         match
-                           Oas_worker_named.resolve_cascade_providers
-                             ~cascade_name:rerank_cascade
-                         with
-                         | provider :: _ -> Some provider
-                         | [] -> None
-                       in
                        let defaults =
                          Oas_worker.default_model_strings ~cascade_name:rerank_cascade
                        in
@@ -1224,7 +1214,6 @@ let run_turn
                           provider from the cascade and passes it to the
                           single-provider rerank API. Graceful degradation via
                           BM25 fallback lives inside [default_rerank_fn]. *)
-                       let _ = rerank_provider in
                        let model_strings =
                          Cascade_config.resolve_model_strings
                            ?config_path ~name:rerank_cascade ~defaults ()
@@ -1284,16 +1273,16 @@ let run_turn
                              selected
                            with
                            | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.warn
-                               "keeper:%s TopK_llm failed (%s), falling back to \
-                                core+prefilter+discovered"
-                             meta.name
-                             (Printexc.to_string exn);
-                             []))
-                     | _ ->
-                       Log.Keeper.warn
-                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
+	                           | exn ->
+	                             Log.Keeper.warn
+	                               "keeper:%s TopK_llm failed (%s), falling back to \
+	                                core+prefilter+discovered"
+	                               meta.name
+	                               (Printexc.to_string exn);
+	                             []))
+	                     | _ ->
+	                       Log.Keeper.warn
+	                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
                           to core+prefilter+discovered"
                          meta.name;
                        [])
@@ -1345,7 +1334,7 @@ let run_turn
                 let validated, dropped_names =
                   List.partition
                     (fun n ->
-                       Hashtbl.mem universe_set n && Hashtbl.mem allowed_exec_set n)
+                       Keeper_tool_policy.StringSet.mem n universe_set && Keeper_tool_policy.StringSet.mem n allowed_exec_set)
                     raw
                 in
                 let dropped = List.length dropped_names in

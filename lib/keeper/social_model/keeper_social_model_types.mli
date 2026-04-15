@@ -33,6 +33,7 @@ type social_state = {
 val speech_act_to_string : speech_act -> string
 val speech_act_of_string : string -> speech_act option
 val delivery_surface_to_string : delivery_surface -> string
+val default_delivery_surface_of_speech_act : speech_act -> delivery_surface
 val delivery_surface_of_string : string -> delivery_surface option
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option

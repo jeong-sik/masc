@@ -42,7 +42,7 @@ let build_keeper_index () =
     "keeper_board_stats", "게시판 통계 활동 참여 게시글수";
     "keeper_fs_read", "파일 읽기 소스코드 설정";
     "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성";
-    "keeper_shell", "명령어 조회 검색 탐색 gh github pr 풀리퀘스트 이슈";
+    "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci 풀리퀘스트 이슈";
     "keeper_bash", "명령어 실행 쉘 빌드 테스트";
     "keeper_memory_search", "기억 검색 대화 이전 메시지";
     "keeper_library_search", "라이브러리 지식 문서 검색";

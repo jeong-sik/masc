@@ -708,7 +708,7 @@ let run_turn
     ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
     ; "keeper_fs_read", "파일 읽기 소스코드 설정"
     ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
-    ; "keeper_shell", "명령어 조회 검색 탐색 gh github pr 풀리퀘스트 이슈"
+    ; "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci 풀리퀘스트 이슈"
     ; "keeper_bash", "명령어 실행 쉘 빌드 테스트"
     ; "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���"
     ; "keeper_memory_search", "기억 검색 대화 이전 메시지"

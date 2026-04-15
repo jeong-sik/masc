@@ -1,6 +1,8 @@
 open Keeper_types
 open Keeper_alerting
 
+module StringMap = Map.Make (String)
+
 let count_context_tokens (ctx : working_context) =
   Keeper_exec_context.token_count ctx
 ;;
@@ -258,13 +260,14 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     else if String.starts_with ~prefix:"keeper_memory" n then "memory"
     else "core"
   in
-  let map = Hashtbl.create 8 in
-  List.iter (fun n ->
-    let cat = categorize n in
-    let list = match Hashtbl.find_opt map cat with Some l -> l | None -> [] in
-    Hashtbl.replace map cat (n :: list)
-  ) names;
-  let assoc = Hashtbl.fold (fun cat list acc ->
+  let map =
+    List.fold_left (fun acc n ->
+      let cat = categorize n in
+      let list = try StringMap.find cat acc with Not_found -> [] in
+      StringMap.add cat (n :: list) acc)
+      StringMap.empty names
+  in
+  let assoc = StringMap.fold (fun cat list acc ->
     (cat, `List (List.map (fun s -> `String s) list)) :: acc
   ) map [] in
   Yojson.Safe.to_string (`Assoc assoc)

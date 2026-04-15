@@ -12,9 +12,9 @@
 
 open Alcotest
 
-let hint = Masc_mcp.Keeper_exec_github.gh_not_found_hint
-let truncate = Masc_mcp.Keeper_exec_github.truncate_gh_output
-let max_gh_output_bytes = Masc_mcp.Keeper_exec_github.max_gh_output_bytes
+let hint = Masc_mcp.Keeper_gh_shared.gh_not_found_hint
+let truncate = Masc_mcp.Keeper_gh_shared.truncate_gh_output
+let max_gh_output_bytes = Masc_mcp.Keeper_gh_shared.max_gh_output_bytes
 
 let has_hint result =
   List.exists (fun (k, _) -> k = "hint") result

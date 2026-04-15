@@ -67,7 +67,7 @@ let core_discovery_tools =
     "keeper_board_get"; "keeper_board_post";
     "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
     (* Shell + VCS *)
-    "keeper_shell"; "keeper_github";
+    "keeper_shell";
     "keeper_pr_workflow"; "keeper_pr_submit";
     "keeper_preflight_check";
     (* Review *)
@@ -124,7 +124,7 @@ let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 
 (* ── Input-aware read-only check ─────────────────────────────
-   Some tools (keeper_github, masc_code_git) mix read-only and mutating
+   Some tools (keeper_shell, masc_code_git) mix read-only and mutating
    subcommands within a single tool name. This function inspects the
    JSON input to distinguish calls with no side effects. *)
 
@@ -183,28 +183,24 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
       in
       not has_method_flag && not has_field_flag
 
-(** Extract the effective gh command string from keeper_github JSON input.
-    [handle_keeper_github] uses [cmd] first; if empty, falls back to
-    joining [args].  This function mirrors that logic so the read-only
-    classification matches what actually executes. *)
+(** Extract the effective gh command string from keeper_shell op=gh input.
+    [keeper_exec_shell] uses the [cmd] field. *)
 let gh_effective_cmd (input : Yojson.Safe.t) : string =
   match input with
   | `Assoc fields ->
-    let cmd =
-      match List.assoc_opt "cmd" fields with
-      | Some (`String s) -> String.trim s
-      | _ -> ""
-    in
-    if cmd <> "" then cmd
-    else
-      let args =
-        match List.assoc_opt "args" fields with
-        | Some (`List items) ->
-          List.filter_map (function `String s -> Some s | _ -> None) items
-        | _ -> []
-      in
-      if args <> [] then String.concat " " args else ""
+    (match List.assoc_opt "cmd" fields with
+     | Some (`String s) -> String.trim s
+     | _ -> "")
   | _ -> ""
+
+(** Check if keeper_shell input has op="gh". *)
+let is_shell_gh_op (input : Yojson.Safe.t) : bool =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "op" fields with
+     | Some (`String s) -> String.trim s = "gh"
+     | _ -> false)
+  | _ -> false
 
 let git_read_only_actions =
   [ "diff"; "status"; "log"; "branch"; "fetch" ]
@@ -220,7 +216,7 @@ let git_action_of_input (input : Yojson.Safe.t) : string =
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   if is_effectively_read_only_tool tool_name then true
   else match tool_name with
-  | "keeper_github" ->
+  | "keeper_shell" when is_shell_gh_op input ->
     let cmd = gh_effective_cmd input in
     let cmd_lower = String.lowercase_ascii cmd in
     if cmd_lower = "" then false

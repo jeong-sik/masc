@@ -573,10 +573,10 @@ let truncate_for_log ?(max_len = 240) s =
   if String.length s <= max_len then s
   else String.sub s 0 max_len ^ "..."
 
-(* --- gh CLI validation for keeper_github --- *)
+(* --- gh CLI validation for keeper_shell op=gh / PR workflow helpers --- *)
 
-(** Top-level gh CLI commands allowed for keeper_github.
-    Commands not in this list are rejected at the allowlist gate. *)
+(** Top-level gh CLI commands allowed. Commands not in this list are
+    rejected at the allowlist gate. *)
 let gh_allowed_commands =
   [
     "api"; "cache"; "gist"; "issue"; "label"; "pr"; "project";

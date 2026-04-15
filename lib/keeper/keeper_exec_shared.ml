@@ -253,7 +253,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     if String.starts_with ~prefix:"keeper_board" n then "board"
     else if String.starts_with ~prefix:"keeper_voice" n then "voice"
     else if String.starts_with ~prefix:"keeper_task" n then "coordination"
-    else if String.starts_with ~prefix:"keeper_shell" n || n = "keeper_bash" || n = "keeper_github" then "shell"
+    else if String.starts_with ~prefix:"keeper_shell" n || n = "keeper_bash" then "shell"
     else if String.starts_with ~prefix:"keeper_fs" n then "fs"
     else if String.starts_with ~prefix:"keeper_memory" n then "memory"
     else "core"

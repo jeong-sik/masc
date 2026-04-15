@@ -68,8 +68,8 @@ let is_within_root_norm ~(root_norm : string) (path : string) : bool =
 let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
     ?(max_dirs = 2000) ?(max_matches = 8) () : string list =
   let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
-  let visited : (string, unit) Hashtbl.t = Hashtbl.create 64 in
-  let rec walk ~dirs_seen acc dir =
+  let visited = StringSet.empty in
+  let rec walk visited ~dirs_seen acc dir =
     if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
     else
       let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in

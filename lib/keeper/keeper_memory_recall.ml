@@ -585,14 +585,17 @@ let recall_candidates_with_history
   let from_checkpoint = recent_user_messages checkpoint_messages ~max_n:max_checkpoint in
   let from_history = load_history_user_messages ~path:history_path ~max_n:max_history in
   (* Deduplicate: checkpoint messages take priority *)
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   let key_of s =
     let len = min 100 (String.length s) in
     String.sub s 0 len
   in
-  List.iter (fun s -> Hashtbl.replace seen (key_of s) ()) from_checkpoint;
+  let module SS = Set.Make (String) in
+  let seen =
+    List.fold_left (fun acc s -> SS.add (key_of s) acc)
+      SS.empty from_checkpoint
+  in
   let unique_history =
-    List.filter (fun s -> not (Hashtbl.mem seen (key_of s))) from_history
+    List.filter (fun s -> not (SS.mem (key_of s) seen)) from_history
   in
   from_checkpoint @ unique_history
 

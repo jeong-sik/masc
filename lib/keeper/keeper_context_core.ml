@@ -885,10 +885,15 @@ let sanitize_checkpoint_messages
     ([], empty_checkpoint_sanitize_stats)
 
 let sanitize_oas_checkpoint
+    ?(repair_orphans = true)
     (cp : Agent_sdk.Checkpoint.t)
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
-  ({ cp with messages = repair_orphan_tool_result_messages messages }, stats)
+  let messages =
+    if repair_orphans then repair_orphan_tool_result_messages messages
+    else messages
+  in
+  ({ cp with messages }, stats)
 
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
@@ -902,21 +907,25 @@ let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
       | _ -> fallback)
 
 let context_of_oas_checkpoint
+    ?(repair_orphans = true)
     ~(max_checkpoint_messages : int)
     (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
-  let cp, _ = sanitize_oas_checkpoint cp in
+  let cp, _ = sanitize_oas_checkpoint ~repair_orphans cp in
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
   let messages =
     let n = List.length cp.messages in
-    if n <= max_checkpoint_messages then cp.messages
-    else
-      let drop = n - max_checkpoint_messages in
-      List.filteri (fun i _ -> i >= drop) cp.messages
-    |> repair_orphan_tool_result_messages
+    let messages =
+      if n <= max_checkpoint_messages then cp.messages
+      else
+        let drop = n - max_checkpoint_messages in
+        List.filteri (fun i _ -> i >= drop) cp.messages
+    in
+    if repair_orphans then repair_orphan_tool_result_messages messages
+    else messages
   in
   sync_oas_context
     {
@@ -960,6 +969,9 @@ let save_oas_checkpoint
       let drop = n - max_checkpoint_messages in
       List.filteri (fun i _ -> i >= drop) ctx.messages
   in
+  let capped_messages_were_truncated =
+    List.length capped_messages < List.length ctx.messages
+  in
   (* Stub old tool results at save time: keep only the most recent turn's
      results in full. During Agent.run the reducer uses keep_recent:3, but
      at checkpoint persistence we are more aggressive — older tool results
@@ -971,7 +983,9 @@ let save_oas_checkpoint
   in
   let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
   let capped_messages =
-    repair_orphan_tool_result_messages capped_messages
+    if capped_messages_were_truncated
+    then repair_orphan_tool_result_messages capped_messages
+    else capped_messages
   in
   let state =
     {

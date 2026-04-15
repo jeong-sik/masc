@@ -1,6 +1,7 @@
 open Alcotest
 
 module Discord_state = Masc_mcp.Channel_gate_discord_state
+module Discord_names = Masc_mcp.Channel_gate_discord_names
 module U = Yojson.Safe.Util
 
 let with_env name value f =
@@ -159,7 +160,7 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
 let test_name_map_round_trip () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    let nm : Discord_state.name_map =
+    let nm : Discord_names.name_map =
       {
         guild_names = [ ("123", "sangsu-lab") ];
         channel_names = [ ("456", "#general") ];
@@ -167,8 +168,8 @@ let test_name_map_round_trip () =
         updated_at = "2026-04-15T00:00:00Z";
       }
     in
-    Discord_state.save_name_map nm;
-    let loaded = Discord_state.read_name_map () in
+    Discord_names.save nm;
+    let loaded = Discord_names.read () in
     check string "guild name round-trips" "sangsu-lab"
       (List.assoc "123" loaded.guild_names);
     check string "channel name round-trips" "#general"
@@ -181,7 +182,7 @@ let test_name_map_round_trip () =
 let test_read_name_map_missing_returns_empty () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    let loaded = Discord_state.read_name_map () in
+    let loaded = Discord_names.read () in
     check int "no guild names" 0 (List.length loaded.guild_names);
     check int "no channel names" 0 (List.length loaded.channel_names);
     check int "no channel_to_guild entries" 0
@@ -191,7 +192,7 @@ let test_read_name_map_missing_returns_empty () =
 let test_resolve_guild_id_hits_and_misses () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Discord_state.save_name_map
+    Discord_names.save
       {
         guild_names = [ ("123", "sangsu-lab") ];
         channel_names = [ ("456", "#general") ];
@@ -199,16 +200,16 @@ let test_resolve_guild_id_hits_and_misses () =
         updated_at = "2026-04-15T00:00:00Z";
       };
     check (option string) "hit returns guild id" (Some "123")
-      (Discord_state.resolve_guild_id_for_channel ~channel_id:"456");
+      (Discord_names.resolve_guild_id_for_channel ~channel_id:"456");
     check (option string) "miss returns None" None
-      (Discord_state.resolve_guild_id_for_channel ~channel_id:"999");
+      (Discord_names.resolve_guild_id_for_channel ~channel_id:"999");
     check (option string) "empty channel_id returns None" None
-      (Discord_state.resolve_guild_id_for_channel ~channel_id:""))
+      (Discord_names.resolve_guild_id_for_channel ~channel_id:""))
 
 let test_bind_populates_guild_id_when_names_available () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Discord_state.save_name_map
+    Discord_names.save
       {
         guild_names = [ ("guild-1", "sangsu-lab") ];
         channel_names = [ ("chan-1", "#general") ];

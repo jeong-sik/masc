@@ -16,12 +16,7 @@ type audit_event = {
   previous_keeper : string;
 }
 
-type name_map = {
-  guild_names : (string * string) list;
-  channel_names : (string * string) list;
-  channel_to_guild : (string * string) list;
-  updated_at : string;
-}
+module Names = Channel_gate_discord_names
 
 let connector_id = "discord"
 let display_name = "Discord"
@@ -31,67 +26,38 @@ let channel = "discord"
 let default_status_path = ".masc/connectors/discord/status.json"
 let default_binding_store_path = ".masc/connectors/discord/bindings.json"
 let default_binding_audit_path = ".masc/connectors/discord/binding_audit.jsonl"
-let default_names_path = ".masc/connectors/discord/names.json"
 
 let legacy_status_path = "sidecars/discord-bot/.gate/discord_status.json"
 let legacy_binding_store_path = "sidecars/discord-bot/.gate/discord_bindings.json"
 let legacy_binding_audit_path =
   "sidecars/discord-bot/.gate/discord_binding_audit.jsonl"
-let legacy_names_path = "sidecars/discord-bot/.gate/discord_names.json"
 
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"
 
-let resolve_path raw_path =
-  if Filename.is_relative raw_path then
-    Filename.concat (Env_config_core.base_path ()) raw_path
-  else
-    raw_path
-
-let configured_write_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None -> resolve_path default
-
-let configured_read_path env_name ~default ~legacy =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None ->
-      let preferred = resolve_path default in
-      let legacy = resolve_path legacy in
-      if Sys.file_exists preferred then preferred
-      else if Sys.file_exists legacy then legacy
-      else preferred
-
 let status_path () =
-  configured_read_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
-    ~legacy:legacy_status_path
+  Names.configured_read_path "MASC_DISCORD_STATUS_PATH"
+    ~default:default_status_path ~legacy:legacy_status_path
 
 let status_write_path () =
-  configured_write_path "MASC_DISCORD_STATUS_PATH" ~default:default_status_path
+  Names.configured_write_path "MASC_DISCORD_STATUS_PATH"
+    ~default:default_status_path
 
 let binding_store_path () =
-  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
+  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_store_read_path () =
-  configured_read_path "MASC_DISCORD_BINDING_STORE_PATH"
+  Names.configured_read_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path ~legacy:legacy_binding_store_path
 
 let binding_audit_path () =
-  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
 let binding_audit_read_path () =
-  configured_read_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  Names.configured_read_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
-
-let names_write_path () =
-  configured_write_path "MASC_DISCORD_NAMES_PATH" ~default:default_names_path
-
-let names_read_path () =
-  configured_read_path "MASC_DISCORD_NAMES_PATH"
-    ~default:default_names_path ~legacy:legacy_names_path
 
 let read_json_file_opt path =
   if not (Sys.file_exists path) then
@@ -225,67 +191,6 @@ let bool_member json key =
 let bool_option_member json key =
   json |> U.member key |> U.to_bool_option
 
-let string_assoc_of_member key json =
-  match json |> U.member key with
-  | `Assoc items ->
-      List.filter_map (fun (k, v) ->
-        match v with
-        | `String s -> Some (k, s)
-        | _ -> None)
-        items
-  | _ -> []
-
-let empty_name_map =
-  {
-    guild_names = [];
-    channel_names = [];
-    channel_to_guild = [];
-    updated_at = "";
-  }
-
-let read_name_map () =
-  match read_json_file_opt (names_read_path ()) with
-  | None -> empty_name_map
-  | Some json ->
-      {
-        guild_names = string_assoc_of_member "guild_names" json;
-        channel_names = string_assoc_of_member "channel_names" json;
-        channel_to_guild = string_assoc_of_member "channel_to_guild" json;
-        updated_at = string_member json "updated_at";
-      }
-
-let name_map_json nm =
-  let to_assoc items =
-    `Assoc (List.map (fun (k, v) -> (k, `String v)) items)
-  in
-  `Assoc
-    [
-      ("guild_names", to_assoc nm.guild_names);
-      ("channel_names", to_assoc nm.channel_names);
-      ("channel_to_guild", to_assoc nm.channel_to_guild);
-      ("updated_at", `String nm.updated_at);
-    ]
-
-let save_name_map nm =
-  let path = names_write_path () in
-  let dir = Filename.dirname path in
-  Fs_compat.mkdir_p dir;
-  let tmp = path ^ ".tmp" in
-  let oc = open_out_bin tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      output_string oc
-        (Yojson.Safe.pretty_to_string (name_map_json nm) ^ "\n"));
-  Sys.rename tmp path
-
-let resolve_guild_id_for_channel ~channel_id =
-  let channel_id = String.trim channel_id in
-  if channel_id = "" then None
-  else
-    let nm = read_name_map () in
-    List.assoc_opt channel_id nm.channel_to_guild
-
 let stale_of_updated_at updated_at =
   match Types.parse_iso8601_opt updated_at with
   | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
@@ -302,8 +207,8 @@ let status_json ?(audit_limit = 10) () =
   let live_status = read_json_file_opt status_path in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
-  let names_path = names_read_path () in
-  let name_map = read_name_map () in
+  let names_path = Names.names_read_path () in
+  let name_map = Names.read () in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let channel = "discord" in
@@ -338,7 +243,7 @@ let status_json ?(audit_limit = 10) () =
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
       ("names_path", `String names_path);
-      ("names", name_map_json name_map);
+      ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
       ( "last_ready_at",
         `String (status_field "last_ready_at" string_member "") );
@@ -519,7 +424,7 @@ let bind ~channel_id ~keeper_name ~actor_name =
     try
       save_bindings updated_bindings;
       let guild_id =
-        Option.value (resolve_guild_id_for_channel ~channel_id) ~default:""
+        Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
       in
       append_audit_event
         {
@@ -560,7 +465,7 @@ let unbind ~channel_id ~actor_name =
         try
           save_bindings updated_bindings;
           let guild_id =
-            Option.value (resolve_guild_id_for_channel ~channel_id) ~default:""
+            Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
           in
           append_audit_event
             {

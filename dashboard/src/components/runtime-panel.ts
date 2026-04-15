@@ -1,6 +1,11 @@
 // RuntimePanel — Phase 4 runtime section with FilterChips toggle.
-// Wraps OasHealthChip, RuntimeMonitor, PrometheusMetrics with view switching.
-// Views: default (all), providers (health + monitor), prometheus (metrics only).
+// Wraps OasHealthChip, RuntimeMonitor, CascadeConfigPanel, PrometheusMetrics
+// with view switching.
+// Views:
+//   default    — all (cascade config + providers + prometheus)
+//   cascade    — cascade config + health only (설정 ↔ 실측)
+//   providers  — OAS health chip + runtime monitor only
+//   prometheus — raw Prometheus metrics only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).
 
 import { html } from 'htm/preact'
@@ -10,10 +15,11 @@ import { FilterChips } from './common/filter-chips'
 import { OasHealthChip } from './oas-health-chip'
 import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
+import { CascadeConfigPanel } from './cascade-config-panel'
 
-export type RuntimeView = 'default' | 'providers' | 'prometheus'
+export type RuntimeView = 'default' | 'cascade' | 'providers' | 'prometheus'
 
-const RUNTIME_VIEWS: RuntimeView[] = ['default', 'providers', 'prometheus']
+const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'prometheus']
 
 function isRuntimeView(v: string | undefined): v is RuntimeView {
   return !!v && (RUNTIME_VIEWS as string[]).includes(v)
@@ -26,6 +32,7 @@ const activeView = computed<RuntimeView>(() => {
 
 const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },
+  { key: 'cascade', label: 'Cascade' },
   { key: 'providers', label: '프로바이더' },
   { key: 'prometheus', label: '메트릭' },
 ]
@@ -49,7 +56,9 @@ export function RuntimePanel() {
         onChange=${updateViewParam}
       />
       <div class="grid gap-4">
-        ${view === 'providers'
+        ${view === 'cascade'
+          ? html`<${CascadeConfigPanel} />`
+        : view === 'providers'
           ? html`
             <${OasHealthChip} />
             <${RuntimeMonitor} />
@@ -57,6 +66,7 @@ export function RuntimePanel() {
         : view === 'prometheus'
           ? html`<${PrometheusMetrics} />`
         : html`
+            <${CascadeConfigPanel} />
             <${OasHealthChip} />
             <${RuntimeMonitor} />
             <${PrometheusMetrics} />

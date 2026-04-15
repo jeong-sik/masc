@@ -197,8 +197,12 @@ let test_keeper_list_normalizes_unknown_social_model () =
         ~social_model:"experimental_v99";
       let ctx = keeper_ctx env sw config "operator" in
       let ok, body =
-        Tool_keeper.handle_keeper_list ctx
-          (`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
       in
       check bool "tool keeper list ok" true ok;
       let json = parse_json_exn body in

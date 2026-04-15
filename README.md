@@ -89,6 +89,7 @@ dune build
 scripts/run-local.sh --target-dir "$PWD"
 PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
 curl "http://127.0.0.1:${PORT}/health"
+./_build/default/bin/main_eio.exe doctor --base-path "$PWD"
 ```
 
 Defaults:
@@ -106,6 +107,7 @@ Notes:
 - To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
 - For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`
 - For a full boot/path/state inventory, see [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md)
+- For active config/init diagnosis, use [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md)
 
 Other start modes:
 
@@ -155,7 +157,7 @@ Keeper definitions live in `config/keepers/*.toml`. When `MASC_KEEPER_BOOTSTRAP_
 
 ### Turn Budget
 
-Each keeper call to `Agent.run` is limited to `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` turns (default: 5). When exhausted, the keeper saves a checkpoint and resumes in the next heartbeat cycle. The keeper can call `extend_turns` to request more turns up to an absolute ceiling (200).
+Each keeper call to `Agent.run` is limited to `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` turns (default: 15). When exhausted, the keeper saves a checkpoint and resumes in the next heartbeat cycle. The keeper can call `extend_turns` to request more turns up to an absolute ceiling (200).
 
 Adaptive OAS timeout: `base 180s + 1.5s per 1K context tokens`, capped at [30, 600]s.
 
@@ -163,15 +165,21 @@ Adaptive OAS timeout: `base 180s + 1.5s per 1K context tokens`, capped at [30, 6
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MASC_KEEPER_BOOTSTRAP_ENABLED` | `false` | Enable keeper autoboot |
+| `MASC_KEEPER_BOOTSTRAP_ENABLED` | `true` | Enable keeper autoboot |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat cadence (5-300s) |
-| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | `5` | Turns per Agent.run call (1-50) |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | `15` | Turns per Agent.run call (1-50) |
 | `MASC_KEEPER_OAS_TIMEOUT_SEC` | adaptive | Override OAS timeout (30-600s) |
 | `MASC_KEEPER_TURN_TIMEOUT_SEC` | `1200` | Wall-clock turn guard (60-3600s) |
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | `5` | Restart attempts before Dead |
 | `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | `4` | Consecutive idle calls before Skip |
 
 Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers/*.toml`.
+
+Operator note:
+
+- `repo/config` is the checked-in seed, not the live config root.
+- The supported active root is `MASC_CONFIG_DIR` when set, otherwise `<base-path>/.masc/config`.
+- Use `main_eio.exe doctor` before editing config if there is any doubt.
 
 Reload contracts:
 
@@ -292,6 +300,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | Document | Description |
 |----------|-------------|
 | [docs/QUICK-START.md](docs/QUICK-START.md) | Install, health check, first workflow |
+| [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md) | Active config/init diagnosis and root selection |
 | [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP config templates |
 | [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) | Benchmark and comparison harnesses |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |

@@ -66,14 +66,13 @@ When running from a worktree but using a shared local coordination root, start t
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-$HOME}"
 MASC_BASE_PATH="$BASE_PATH" \
-MASC_ALLOW_INHERITED_BASE_PATH=1 \
 ./_build/default/bin/main_eio.exe \
   --host 127.0.0.1 \
   --port 8935 \
   --base-path "$BASE_PATH"
 ```
 
-Then re-check `/health` and confirm `effective_base_path` is the same path you intended.
+Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and re-check `/health` to confirm the effective base path is the path you intended.
 
 ## 4. Bootstrap an Admin Bearer
 

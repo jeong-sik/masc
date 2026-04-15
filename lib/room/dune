@@ -21,8 +21,6 @@
   room_status
   room_task
   room_task_schedule
-  room_tempo
-  room_vote
   room_git
   room_worktree
   mention

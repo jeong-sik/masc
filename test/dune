@@ -308,7 +308,7 @@
         test_eio_mutex_concurrency
         test_a2a_e2e
         test_board_dispatch
-        test_room_vote
+
         test_task_dispatch
         test_drift_guard_core
         test_verify_handoff_tool
@@ -457,7 +457,7 @@
         test_eio_mutex_concurrency
         test_a2a_e2e
         test_board_dispatch
-        test_room_vote
+
         test_task_dispatch
         test_drift_guard_core
         test_verify_handoff_tool

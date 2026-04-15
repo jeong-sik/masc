@@ -191,7 +191,7 @@ let test_dashboard_mission_projection () =
         check bool "internal signals are room-scoped" true
           (internal_signals
            |> List.for_all (fun row ->
-                row |> member "target_type" |> to_string = "namespace"));
+                row |> member "target_type" |> to_string = "root"));
       ))
 
 let test_dashboard_mission_http_full_contract () =

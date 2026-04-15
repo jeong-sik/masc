@@ -40,7 +40,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
       match find_action "broadcast" with
       | None -> Alcotest.fail "expected broadcast in available_actions"
       | Some row ->
-          Alcotest.(check string) "target_type" "namespace"
+          Alcotest.(check string) "target_type" "root"
             Yojson.Safe.Util.(row |> member "target_type" |> to_string);
           Alcotest.(check bool) "confirm_required false" false
             Yojson.Safe.Util.(row |> member "confirm_required" |> to_bool);

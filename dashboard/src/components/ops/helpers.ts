@@ -209,9 +209,10 @@ export function targetTypeLabel(value?: string | null): string {
   }
 }
 
-function isNamespaceTarget(value?: string | null): boolean {
-  return value === 'namespace' || value === 'room'
+export function isRootTarget(value?: string | null): boolean {
+  return value === 'root' || value === 'namespace' || value === 'room'
 }
+const isNamespaceTarget = isRootTarget
 
 export function deliveryModeLabel(confirmRequired?: boolean): string {
   return confirmRequired ? '확인 후 실행' : '즉시 실행'
@@ -326,7 +327,7 @@ export function workflowTargetReady(
 
 export async function executeAction(input: {
   action_type: 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover' | 'review_resolve' | 'review_defer'
-  target_type: 'namespace' | 'room' | 'keeper' | 'review_item'
+  target_type: 'root' | 'namespace' | 'room' | 'keeper' | 'review_item'
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string
@@ -387,7 +388,7 @@ export async function executeRecommendedAction(action: OperatorRecommendedAction
       : {}
   return executeAction({
     action_type: action.action_type as 'broadcast' | 'namespace_pause' | 'namespace_resume' | 'room_pause' | 'room_resume' | 'task_inject' | 'keeper_message' | 'keeper_probe' | 'keeper_recover',
-    target_type: action.target_type as 'namespace' | 'room' | 'keeper',
+    target_type: action.target_type as 'root' | 'namespace' | 'room' | 'keeper',
     target_id: action.target_id ?? undefined,
     payload,
     successMessage: `${actionTypeLabel(action.action_type)}을(를) 요청했습니다`,
@@ -399,7 +400,7 @@ export function primaryActionForReviewItem(item: OperatorReviewItem): OperatorRe
   if (item.kind === 'namespace_gate' || item.kind === 'room_gate') {
     return {
       action_type: 'namespace_resume',
-      target_type: 'namespace',
+      target_type: 'root',
       target_id: null,
       severity: item.severity,
       reason: item.why_now,
@@ -423,7 +424,7 @@ export async function submitBroadcast() {
   if (!message) return
   const result = await executeAction({
     action_type: 'broadcast',
-    target_type: 'namespace',
+    target_type: 'root',
     payload: { message },
     successMessage: '전체 공지를 보냈습니다',
   })
@@ -433,7 +434,7 @@ export async function submitBroadcast() {
 export async function submitPause() {
   await executeAction({
     action_type: 'namespace_pause',
-    target_type: 'namespace',
+    target_type: 'root',
     payload: { reason: pauseReason.value.trim() || '운영 점검' },
     successMessage: '프로젝트 일시정지를 요청했습니다',
   })
@@ -442,7 +443,7 @@ export async function submitPause() {
 export async function submitResume() {
   await executeAction({
     action_type: 'namespace_resume',
-    target_type: 'namespace',
+    target_type: 'root',
     payload: {},
     successMessage: '프로젝트 재개를 요청했습니다',
   })
@@ -453,7 +454,7 @@ export async function submitTaskInject() {
   if (!title) return
   const result = await executeAction({
     action_type: 'task_inject',
-    target_type: 'namespace',
+    target_type: 'root',
     payload: {
       title,
       description: taskDescription.value.trim() || '개입 화면에서 주입',

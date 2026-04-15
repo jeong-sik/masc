@@ -2,8 +2,7 @@
 // Absorbs: agent-roster + execution + keeper-roster + FSM hub into one view with chip toggle.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
 import { agents, keepers, executionLoaded, shellCounts } from '../store'
@@ -18,7 +17,14 @@ import { FsmHub } from './fsm-hub'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
 
-const activeView = signal<AgentsView>('all')
+const VALID_VIEWS: AgentsView[] = ['all', 'agents', 'keepers', 'fsm']
+
+// Derive active view from route params. Single source of truth — no
+// useEffect sync needed. Falls back to 'all' when view param is absent.
+const activeView = computed<AgentsView>(() => {
+  const v = route.value.params.view
+  return v && (VALID_VIEWS as string[]).includes(v) ? v as AgentsView : 'all'
+})
 
 const CHIPS: { id: AgentsView; label: string; description: string }[] = [
   { id: 'all', label: '전체 보기', description: '에이전트와 키퍼를 한 목록에서 봅니다.' },
@@ -34,18 +40,7 @@ export function AgentsUnified() {
     return html`<${AgentProfile} name=${agentParam} />`
   }
 
-  const viewParam = route.value.params.view as string | undefined
-  const routeView =
-    viewParam === 'keepers' || viewParam === 'agents' || viewParam === 'fsm'
-      ? viewParam
-      : null
-  const currentView = routeView ?? activeView.value
-
-  useEffect(() => {
-    if (routeView && activeView.value !== routeView) {
-      activeView.value = routeView
-    }
-  }, [routeView])
+  const currentView = activeView.value
 
   // Compute counts for chip badges.
   const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value, missionKeeperBriefs.value)
@@ -76,7 +71,7 @@ export function AgentsUnified() {
     <div class="flex flex-col gap-4">
       <${FilterChips}
         chips=${viewChips}
-        active=${activeView}
+        value=${currentView}
         onChange=${(key: AgentsView) => {
           navigate('monitoring', key === 'all' ? { section: 'agents' } : { section: 'agents', view: key })
         }}

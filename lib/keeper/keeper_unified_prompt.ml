@@ -193,7 +193,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   in
   let system_prompt =
     Printf.sprintf "%s\n\n## Turn Intent\n%s" base_system_prompt turn_intent_block
-    |> Inference_utils.sanitize_text_utf8
   in
   (* User message: structured world observation — reactive triggers + resource state only.
      Metacognition sections (tool activity, cycle outcome, diversity, behavioral stats)
@@ -290,6 +289,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
        Buffer.add_string ubuf "\n"
    | _ -> ());
   let user_message =
-    Buffer.contents ubuf |> Inference_utils.sanitize_text_utf8
+    Buffer.contents ubuf
   in
   (system_prompt, user_message)

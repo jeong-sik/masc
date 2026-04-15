@@ -316,6 +316,10 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
 let test_scheduled_turn_uses_cooldown_only () =
   let meta =
     { minimal_meta with
+      current_task_id =
+        (match Masc_mcp.Keeper_id.Task_id.of_string "task-123" with
+         | Ok value -> Some value
+         | Error err -> fail ("task id parse failed: " ^ err));
       proactive =
         { enabled = true; idle_sec = 0; cooldown_sec = 60 };
       runtime =
@@ -328,8 +332,33 @@ let test_scheduled_turn_uses_cooldown_only () =
     }
   in
   let obs = { base_observation with idle_seconds = 0 } in
-  check bool "cooldown opens scheduled turn without idle heuristic" true
+  check bool "cooldown opens scheduled turn for current task" true
     (WO.should_run_keeper_cycle ~meta obs)
+
+let test_scheduled_turn_skips_without_structured_work_signal () =
+  let meta =
+    { minimal_meta with
+      proactive =
+        { enabled = true; idle_sec = 0; cooldown_sec = 60 };
+      runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 120.0;
+            };
+        };
+    }
+  in
+  let obs = { base_observation with idle_seconds = 0 } in
+  check bool "no signal blocks scheduled turn" false
+    (WO.should_run_keeper_cycle ~meta obs);
+  let decision = WO.keeper_cycle_decision ~meta obs in
+  check bool "decision records no-signal reason" true
+    (match decision.verdict with
+     | WO.Skip { reasons = (first, rest) } ->
+         List.exists (function WO.No_signal -> true | _ -> false)
+           (first :: rest)
+     | WO.Run _ -> false)
 
 let test_scheduled_turn_respects_cooldown () =
   let meta =
@@ -460,15 +489,22 @@ let test_noop_backoff_zero_noops_unchanged () =
 
 let test_idle_decay_triggers_turn () =
   (* After extended idle, decay should make cooldown_elapsed true
-     even when since_last_proactive < base cooldown_sec. *)
+     even when since_last_proactive < base cooldown_sec, provided the
+     scheduler sees structured work for the keeper. *)
   let meta =
     { minimal_meta with
+      current_task_id =
+        (match Masc_mcp.Keeper_id.Task_id.of_string "task-123" with
+         | Ok value -> Some value
+         | Error err -> fail ("task id parse failed: " ^ err));
       proactive =
         { enabled = true; idle_sec = 0; cooldown_sec = 1800 };
       runtime =
         { minimal_meta.runtime with
+          consecutive_noop_count = 0;
           proactive_rt =
             { minimal_meta.runtime.proactive_rt with
+              consecutive_noop_count = 0;
               last_ts = Time_compat.now () -. 4000.0;
             };
         };
@@ -723,13 +759,19 @@ let test_prompt_includes_autonomous_trigger_section () =
   let meta =
     {
       minimal_meta with
+      current_task_id =
+        (match Masc_mcp.Keeper_id.Task_id.of_string "task-123" with
+         | Ok value -> Some value
+         | Error err -> fail ("task id parse failed: " ^ err));
       proactive =
         { enabled = true; idle_sec = 0; cooldown_sec = 60 };
       runtime =
         {
           minimal_meta.runtime with
+          consecutive_noop_count = 0;
           proactive_rt =
             { minimal_meta.runtime.proactive_rt with
+              consecutive_noop_count = 0;
               last_ts = Time_compat.now () -. 300.0;
             };
         };
@@ -2981,8 +3023,10 @@ let () =
             test_collect_board_events_keeps_non_mentions_as_followup_signal;
           test_case "keeps external replies after self comment" `Quick
             test_collect_board_events_keeps_external_replies_after_self_comment;
-          test_case "scheduled turn uses cooldown only" `Quick
+          test_case "scheduled turn uses cooldown only when work exists" `Quick
             test_scheduled_turn_uses_cooldown_only;
+          test_case "scheduled turn skips without structured work signal" `Quick
+            test_scheduled_turn_skips_without_structured_work_signal;
           test_case "scheduled turn respects cooldown" `Quick
             test_scheduled_turn_respects_cooldown;
           test_case "scheduled turn requires idle gate" `Quick

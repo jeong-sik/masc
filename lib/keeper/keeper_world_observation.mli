@@ -186,6 +186,7 @@ val observe :
   meta:Keeper_types.keeper_meta ->
   world_observation
 
+(** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool
 
 val apply_message_cursor_updates :

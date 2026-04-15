@@ -104,6 +104,21 @@ export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number
     : null
 }
 
+function normalizeTurnBudget(raw: unknown): Keeper['turn_budget'] {
+  if (!isRecord(raw)) return null
+  const readSlot = (v: unknown): { value: number; source: 'override' | 'env' } | null => {
+    if (!isRecord(v)) return null
+    const value = asNumber(v.value)
+    if (value == null) return null
+    const source = v.source === 'override' ? 'override' : 'env'
+    return { value, source }
+  }
+  const reactive = readSlot(raw.reactive)
+  const scheduled = readSlot(raw.scheduled_autonomous)
+  if (!reactive || !scheduled) return null
+  return { reactive, scheduled_autonomous: scheduled }
+}
+
 function normalizePromptSegments(
   raw: Record<string, unknown> | null,
   excludedKeys: Set<string>,
@@ -402,6 +417,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,
         tool_audit_source: asString(row.tool_audit_source) ?? null,
         tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
+        turn_budget: normalizeTurnBudget(row.turn_budget),
         conversation_tail_count: asNumber(row.conversation_tail_count),
         k2k_count: asNumber(row.k2k_count),
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),

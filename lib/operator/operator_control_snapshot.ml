@@ -441,6 +441,47 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("proactive_enabled", `Bool meta.proactive.enabled);
                        ("proactive_idle_sec", `Int meta.proactive.idle_sec);
                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+                       ("turn_budget",
+                         (let profile =
+                            Keeper_types_profile.load_keeper_profile_defaults
+                              meta.name
+                          in
+                          let reactive_effective =
+                            Keeper_types_profile.effective_max_turns_per_call
+                              profile
+                          in
+                          let reactive_source =
+                            match profile.max_turns_per_call with
+                            | Some n when n >= 1 && n <= 50 -> "override"
+                            | _ -> "env"
+                          in
+                          let autonomous_effective =
+                            Keeper_types_profile
+                            .effective_max_turns_per_call_scheduled_autonomous
+                              profile
+                          in
+                          let autonomous_source =
+                            match
+                              profile.max_turns_per_call_scheduled_autonomous
+                            with
+                            | Some n when n >= 1 && n <= 50 -> "override"
+                            | _ -> "env"
+                          in
+                          `Assoc
+                            [
+                              ( "reactive",
+                                `Assoc
+                                  [
+                                    ("value", `Int reactive_effective);
+                                    ("source", `String reactive_source);
+                                  ] );
+                              ( "scheduled_autonomous",
+                                `Assoc
+                                  [
+                                    ("value", `Int autonomous_effective);
+                                    ("source", `String autonomous_source);
+                                  ] );
+                            ]));
                        ("last_proactive_reason",
                          string_option_to_json
                            (let value = String.trim meta.runtime.proactive_rt.last_reason in

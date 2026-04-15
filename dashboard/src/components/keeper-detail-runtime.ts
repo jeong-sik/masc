@@ -158,6 +158,83 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
   `
 }
 
+// ── Turn Budget ──────────────────────────────────────────
+
+function BudgetRow({ label, value, source, usage }: {
+  label: string
+  value: number
+  source: 'override' | 'env'
+  usage?: string
+}) {
+  const isOverride = source === 'override'
+  return html`
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <span class="text-xs text-[var(--text-muted)]">${label}</span>
+      <div class="flex items-center gap-2">
+        ${usage ? html`<span class="text-[10px] text-[var(--text-muted)] tabular-nums">${usage}</span>` : null}
+        <span
+          class="text-xs font-medium tabular-nums ${isOverride
+            ? 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/50 underline-offset-4'
+            : 'text-[var(--text-muted)]'}"
+          title=${isOverride
+            ? `Override: config/keepers/<name>.toml 에 설정됨`
+            : `Env default: MASC_KEEPER_OAS_MAX_TURNS_PER_CALL${label.includes('자율') ? '_SCHEDULED_AUTONOMOUS' : ''}`}
+        >${value}</span>
+        ${isOverride
+          ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
+          : html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`}
+      </div>
+    </div>
+  `
+}
+
+export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
+  const budget = keeper.turn_budget
+  if (!budget) {
+    return html`
+      <div class="text-[11px] text-[var(--text-muted)] italic">
+        턴 예산 정보를 아직 수신하지 못했습니다. 서버 재시작 후 확인해주세요.
+      </div>
+    `
+  }
+
+  const turnCount = typeof keeper.turn_count === 'number' ? keeper.turn_count : null
+  const reactiveUsage =
+    turnCount != null ? `${turnCount}/${budget.reactive.value}` : undefined
+
+  const hasOverride =
+    budget.reactive.source === 'override' ||
+    budget.scheduled_autonomous.source === 'override'
+
+  return html`
+    <div class="flex flex-col gap-1.5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          턴 예산 (per OAS call)
+        </span>
+        ${hasOverride
+          ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">drift</span>`
+          : null}
+      </div>
+      <${BudgetRow}
+        label="반응형 (reactive)"
+        value=${budget.reactive.value}
+        source=${budget.reactive.source}
+        usage=${reactiveUsage}
+      />
+      <${BudgetRow}
+        label="예약 자율 (scheduled autonomous)"
+        value=${budget.scheduled_autonomous.value}
+        source=${budget.scheduled_autonomous.source}
+      />
+      <span class="text-[11px] text-[var(--text-muted)] leading-snug mt-1">
+        반응형은 보드/멘션 반응 턴, 예약 자율은 idle cycle 턴 예산입니다.
+        Override는 TOML에서 재정의된 값이고, env는 전역 기본값 상속입니다.
+      </span>
+    </div>
+  `
+}
+
 // ── Runtime Signals ──────────────────────────────────────
 
 // Helper: format a 0–1 ratio as percentage or '-'

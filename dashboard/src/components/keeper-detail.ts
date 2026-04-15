@@ -40,6 +40,7 @@ import {
 import {
   KeeperNeighborhood,
   RuntimeSignals,
+  TurnBudgetPanel,
 } from './keeper-detail-runtime'
 import {
   KeeperConfigPanel,
@@ -675,6 +676,16 @@ export function KeeperDetailOverlay() {
             </summary>
             <div class="mt-3 text-[11px] text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
             <${RuntimeSignals} keeper=${keeper} />
+          </details>
+
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open>
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              턴 예산
+            </summary>
+            <div class="mt-3">
+              <${TurnBudgetPanel} keeper=${keeper} />
+            </div>
           </details>
 
           <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">

@@ -654,6 +654,10 @@ export interface Keeper {
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null
   tool_audit_at?: string | null
+  turn_budget?: {
+    reactive: { value: number; source: 'override' | 'env' }
+    scheduled_autonomous: { value: number; source: 'override' | 'env' }
+  } | null
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>

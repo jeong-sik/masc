@@ -351,9 +351,13 @@ let weighted_shuffle
       let r = rand_int total_weight in
       (* Find the selected entry via cumulative weight *)
       let rec find_selected cumulative = function
-        | [] -> (* fallback: first entry *)
-          (List.hd entries,
-           List.tl entries)
+        | [] ->
+          (* fallback: first entry. Unreachable when total_weight > 0
+             since [entries] is non-empty in that branch, but match
+             must be exhaustive. *)
+          (match entries with
+           | first :: rest -> (first, rest)
+           | [] -> assert false)
         | (e : Cascade_config_loader.weighted_entry) :: rest ->
           let cumulative' = cumulative + e.weight in
           if r < cumulative' then (e, rest)

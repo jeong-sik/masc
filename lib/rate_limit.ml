@@ -9,6 +9,8 @@
     @since 0.4.0
 *)
 
+module StringMap = Map.Make (String)
+
 (** {1 Token Bucket Algorithm} *)
 
 type bucket = {
@@ -19,7 +21,7 @@ type bucket = {
 type t = {
   rate: float;
   burst: int;
-  buckets: (string, bucket) Hashtbl.t;
+  buckets: bucket StringMap.t ref;
   mutex: Eio.Mutex.t;
 }
 
@@ -38,7 +40,7 @@ let create ?(rate=default_rate) ?(burst=default_burst) () =
   {
     rate;
     burst;
-    buckets = Hashtbl.create 256;
+    buckets = ref StringMap.empty;
     mutex = Eio.Mutex.create ();
   }
 
@@ -56,11 +58,11 @@ let with_lock limiter f =
 let check limiter ~key =
   with_lock limiter (fun () ->
     let now = Time_compat.now () in
-    let bucket = match Hashtbl.find_opt limiter.buckets key with
+    let bucket = match StringMap.find_opt key !limiter.buckets with
       | Some b -> b
       | None ->
           let b = { tokens = float_of_int limiter.burst; last_update = now } in
-          Hashtbl.add limiter.buckets key b;
+          limiter.buckets <- StringMap.add key b !limiter.buckets;
           b
     in
     let elapsed = now -. bucket.last_update in
@@ -77,7 +79,7 @@ let check limiter ~key =
 
 let remaining limiter ~key =
   with_lock limiter (fun () ->
-    match Hashtbl.find_opt limiter.buckets key with
+    match StringMap.find_opt key !limiter.buckets with
     | Some b -> int_of_float b.tokens
     | None -> limiter.burst
   )
@@ -88,11 +90,11 @@ let cleanup limiter ~older_than_seconds =
   with_lock limiter (fun () ->
     let now = Time_compat.now () in
     let threshold = now -. float_of_int older_than_seconds in
-    let to_remove = Hashtbl.fold (fun key bucket acc ->
+    let to_remove = StringMap.fold (fun key bucket acc ->
       if bucket.last_update <= threshold then key :: acc
       else acc
-    ) limiter.buckets [] in
-    List.iter (Hashtbl.remove limiter.buckets) to_remove;
+    ) !limiter.buckets [] in
+    limiter.buckets <- List.fold_left (fun m k -> StringMap.remove k m) !limiter.buckets to_remove;
     List.length to_remove
   )
 

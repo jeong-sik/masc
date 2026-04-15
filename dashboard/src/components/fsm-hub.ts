@@ -430,7 +430,7 @@ function SkeletonLayout() {
         <div class="mt-2"><${SkeletonBar} w="w-40" h="h-8" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-20" h="h-2" /></div>
         <div class="mt-2 flex gap-1">
-          ${[1,2,3,4,5,6,7,8].map(() => html`<${SkeletonBar} w="w-2" h="h-2" />`)}
+          ${[1,2,3,4,5,6,7,8].map(i => html`<${SkeletonBar} key=${i} w="w-2" h="h-2" />`)}
         </div>
       </div>
 
@@ -438,8 +438,8 @@ function SkeletonLayout() {
       <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-2 flex gap-2">
-          ${[1,2,3,4].map(() => html`
-            <div class="flex-1 rounded-lg border border-[var(--white-8)] p-2">
+          ${[1,2,3,4].map(i => html`
+            <div key=${i} class="flex-1 rounded-lg border border-[var(--white-8)] p-2">
               <${SkeletonBar} w="w-10" h="h-2" />
               <div class="mt-1"><${SkeletonBar} w="w-16" h="h-4" /></div>
               <div class="mt-1"><${SkeletonBar} w="w-14" h="h-2" /></div>
@@ -452,8 +452,8 @@ function SkeletonLayout() {
       <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
         <${SkeletonBar} w="w-28" h="h-2" />
         <div class="mt-2 flex flex-col gap-1.5">
-          ${[1,2,3,4,5].map(() => html`
-            <div class="flex items-center gap-2">
+          ${[1,2,3,4,5].map(i => html`
+            <div key=${i} class="flex items-center gap-2">
               <${SkeletonBar} w="w-10" h="h-2" />
               <div class=${`${shimmerCls} flex-1 h-4`}></div>
             </div>
@@ -463,8 +463,8 @@ function SkeletonLayout() {
 
       ${/* Health Grid skeleton */ ''}
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        ${[1,2,3].map(() => html`
-          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+        ${[1,2,3].map(i => html`
+          <div key=${i} class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
             <${SkeletonBar} w="w-20" h="h-2" />
             <div class="mt-2 flex flex-wrap gap-1.5">
               <${SkeletonBar} w="w-14" h="h-5" />

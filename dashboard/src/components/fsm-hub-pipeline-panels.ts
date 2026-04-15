@@ -41,8 +41,8 @@ export function OperationalMeaningPanel({
   observations: CompositeObservation[]
   now: number
 }) {
-  const insight = deriveOperationalInsight(snapshot, observations, now)
   const lanes = deriveObservedLaneSummaries(snapshot, observations, now)
+  const insight = deriveOperationalInsight(snapshot, observations, now, lanes)
   const panelCls = INSIGHT_PANEL_CLS[insight.tone]
   const isAlarm = insight.tone === 'warn' || insight.tone === 'error'
 
@@ -274,8 +274,8 @@ export function PipelineStep({
     const ageSec = now - sinceTs
     if (!isActive) {
       // idle 상태에서도 장기 대기를 시각적으로 구분
-      if (ageSec > 600) return 'text-[var(--text-muted)]'   // 10분+ → muted (보임)
-      return 'text-[var(--text-dim)]'                        // 기본 dim
+      if (ageSec > 600) return 'text-[var(--text-muted)]'
+      return 'text-[var(--text-dim)]'
     }
     if (ageSec > 60) return 'text-[#f59e0b]'
     if (ageSec > 20) return 'text-[#facc15]'

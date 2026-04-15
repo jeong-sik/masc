@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from 'preact/hooks'
 import {
   type CompositeObservation,
   type HoveredSegment,
+  type LaneKey,
   fmtDuration,
   displayState,
 } from './fsm-hub-types'
@@ -22,7 +23,7 @@ const FIELD_COLOR: Record<string, string> = {
 }
 
 const SWIMLANE_LANES: Array<{
-  key: keyof Omit<CompositeObservation, 'ts'>
+  key: LaneKey
   label: string
   short: string
 }> = [

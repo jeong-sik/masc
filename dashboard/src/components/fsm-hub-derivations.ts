@@ -2,6 +2,7 @@ import type { KeeperCompositeSnapshot } from '../api/keeper'
 
 import {
   type CompositeObservation,
+  type LaneKey,
   type StateEntries,
   type SwimlaneSegment,
   type TimeAxisTick,
@@ -83,7 +84,7 @@ export function derivePhaseLog(
 
 export function laneChangedAt(
   observations: CompositeObservation[],
-  key: keyof Omit<CompositeObservation, 'ts'>,
+  key: LaneKey,
 ): number {
   const last = observations[observations.length - 1]
   if (!last) return 0
@@ -98,7 +99,7 @@ export function laneChangedAt(
 
 export function laneTransitionCount(
   observations: CompositeObservation[],
-  key: keyof Omit<CompositeObservation, 'ts'>,
+  key: LaneKey,
 ): number {
   let count = 0
   for (let index = 1; index < observations.length; index += 1) {
@@ -190,7 +191,7 @@ export function deriveTimeAxisTicks(
     at the last observation ts. */
 export function deriveSwimlaneSegments(
   observations: CompositeObservation[],
-  key: keyof Omit<CompositeObservation, 'ts'>,
+  key: LaneKey,
   boundsEnd: number,
 ): SwimlaneSegment[] {
   if (observations.length === 0) return []

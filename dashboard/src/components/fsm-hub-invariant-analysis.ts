@@ -5,6 +5,7 @@ import type {
 
 import {
   type CompositeObservation,
+  type ObservedLaneSummary,
   type OperationalInsight,
   INVARIANT_LABELS,
   fmtDuration,
@@ -90,6 +91,7 @@ export function deriveOperationalInsight(
   snapshot: KeeperCompositeSnapshot,
   observations: CompositeObservation[],
   now: number,
+  precomputedLanes?: ObservedLaneSummary[],
 ): OperationalInsight {
   const brokenInvariant = brokenInvariantKey(snapshot.invariants)
   if (brokenInvariant) {
@@ -106,7 +108,7 @@ export function deriveOperationalInsight(
     }
   }
 
-  const lanes = deriveObservedLaneSummaries(snapshot, observations, now)
+  const lanes = precomputedLanes ?? deriveObservedLaneSummaries(snapshot, observations, now)
   const stalledLane = lanes.find(lane => lane.stalled)
   if (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition) {
     return {

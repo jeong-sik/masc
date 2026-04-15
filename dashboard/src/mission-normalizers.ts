@@ -224,8 +224,6 @@ function normalizeSummary(raw: unknown): DashboardMissionSummary {
     room_health: asString(root.room_health),
     cluster: asString(root.cluster),
     project: asString(root.project),
-    namespace_id: asString(root.namespace_id) ?? null,
-    namespace: asString(root.namespace) ?? null,
     paused: asBoolean(root.paused),
     tempo_interval_s: asNumber(root.tempo_interval_s),
     active_agents: asNumber(root.active_agents),

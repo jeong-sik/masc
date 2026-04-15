@@ -181,8 +181,6 @@ function isNotInitializedEnvelope(raw: unknown): boolean {
 
 function bootstrapStatusEnvelope(generatedAt: string): Record<string, unknown> {
   return {
-    namespace_id: 'default',
-    namespace: 'default',
     project: 'initializing',
     generated_at: generatedAt,
   }

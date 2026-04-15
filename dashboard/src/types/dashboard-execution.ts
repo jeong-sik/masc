@@ -465,9 +465,6 @@ export interface DashboardGoalsTreeResponse {
 
 
 export interface ServerStatus {
-  namespace_id?: string
-  namespace?: string
-  namespace_base_path?: string
   coordination_root?: string
   workspace_path?: string
   workspace_differs?: boolean

@@ -255,8 +255,6 @@ export interface CommandPlaneOrchestraResponse {
   version?: string
   generated_at?: string
   namespace: {
-    namespace_id?: string
-    namespace?: string
     project?: string
     cluster?: string
     paused?: boolean

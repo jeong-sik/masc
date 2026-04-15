@@ -6,8 +6,6 @@ export interface DashboardMissionSummary {
   room_health?: string
   cluster?: string
   project?: string
-  namespace_id?: string | null
-  namespace?: string | null
   paused?: boolean
   tempo_interval_s?: number
   active_agents?: number
@@ -330,8 +328,6 @@ export interface DashboardProofWorkerRunEvidence {
 }
 
 export interface OperatorNamespaceSnapshot {
-  namespace_id?: string
-  namespace?: string
   project?: string
   cluster?: string
   paused?: boolean

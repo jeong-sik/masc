@@ -21,8 +21,7 @@ describe('refreshNamespaceTruth', () => {
       generated_at: '2026-03-25T08:16:21Z',
       namespace: {
         status: {
-          namespace_id: 'default',
-          namespace: 'default',
+          project: 'default',
           version: '2.148.0',
           build: {
             release_version: '2.148.0',
@@ -73,8 +72,7 @@ describe('refreshNamespaceTruth', () => {
       generated_at: '2026-03-25T08:16:21Z',
       namespace: {
         status: {
-          namespace_id: 'default',
-          namespace: 'default',
+          project: 'default',
           version: '2.148.0',
         },
       },

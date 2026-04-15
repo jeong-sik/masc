@@ -249,7 +249,7 @@ function renderTruth(item: OperatorReviewItem | null) {
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Project</div>
-          <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
+          <strong>${room.project ?? 'default'}</strong>
           <div class="text-[12px] text-[var(--text-muted)]">${room.project ?? 'project'} · ${room.cluster ?? 'cluster'}</div>
         </div>
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">

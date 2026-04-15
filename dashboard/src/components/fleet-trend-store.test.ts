@@ -19,6 +19,7 @@ function makeRow(name: string, overrides: Partial<FleetRow> = {}): FleetRow {
     runtime_blocker_class: null,
     runtime_blocker_summary: null,
     tool_audit_at: null,
+    budget_source: null,
     ...overrides,
   }
 }

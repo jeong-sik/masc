@@ -101,6 +101,7 @@ const ZERO_VIOLATIONS: InvariantViolationCounts = {
   no_cascade_before_measurement: 0,
   compaction_atomicity: 0,
   event_priority_monotone: 0,
+  recovery_two_store_sync: 0,
 }
 
 export const initialHubState: HubState = {
@@ -127,6 +128,7 @@ export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> =
   no_cascade_before_measurement: 'Cascade ordering',
   compaction_atomicity: 'Compaction atomic',
   event_priority_monotone: 'Event priority',
+  recovery_two_store_sync: 'Recovery sync',
 }
 
 export const LANE_LABELS: Record<LaneKey, string> = {

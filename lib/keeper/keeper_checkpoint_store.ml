@@ -117,7 +117,11 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
   | latest :: _ ->
     let path = Filename.concat session_dir latest in
     (try Some (parse_checkpoint_file path)
-     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+     with Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn "malformed checkpoint ignored in %s: %s"
+         path (Printexc.to_string exn);
+       None)
 
 (* ================================================================ *)
 (* OAS Checkpoint Compatibility                                      *)

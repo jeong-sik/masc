@@ -48,11 +48,16 @@ function snapshot(
     cascade: { state: 'idle' },
     compaction: { stage: 'accumulating' },
     measurement: { captured: false },
+    recovery: {
+      data_record: false,
+      fsm_condition: false,
+    },
     invariants: {
       phase_turn_alignment: true,
       no_cascade_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
+      recovery_two_store_sync: true,
     },
     is_live: false,
     last_outcome: null,
@@ -76,6 +81,10 @@ function snapshot(
     measurement: {
       ...base.measurement,
       ...(overrides.measurement ?? {}),
+    },
+    recovery: {
+      ...base.recovery,
+      ...(overrides.recovery ?? {}),
     },
     invariants: {
       ...base.invariants,
@@ -171,6 +180,7 @@ describe('fsm-hub derived state', () => {
           no_cascade_before_measurement: true,
           compaction_atomicity: true,
           event_priority_monotone: true,
+          recovery_two_store_sync: true,
         },
       }),
       [observation({ ts: 10, phase: 'Compacting', turn: 'executing' })],

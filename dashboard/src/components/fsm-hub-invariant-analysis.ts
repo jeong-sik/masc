@@ -42,6 +42,10 @@ function invariantDetail(
       return ok
         ? 'This turn has not emitted competing measurement snapshots.'
         : 'More than one measurement event appears to own the same turn.'
+    case 'recovery_two_store_sync':
+      return ok
+        ? 'Recovery data record and FSM condition agree on whether manual reconcile is required.'
+        : `recovery.data_record=${String(snapshot.recovery.data_record)} while recovery.fsm_condition=${String(snapshot.recovery.fsm_condition)}.`
   }
 }
 

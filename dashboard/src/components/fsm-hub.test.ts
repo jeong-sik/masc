@@ -354,4 +354,23 @@ describe('isTransitionInSegment', () => {
   it('returns true for a field+ts that overlap the hovered segment', () => {
     expect(isTransitionInSegment({ ts: 150, field: 'KSM' }, segKSM)).toBe(true)
   })
+
+  it('enables findIndex-based first-match lookup used by TransitionTrail auto-scroll', () => {
+    const history = [
+      { ts: 180, from: 'a', to: 'b', field: 'KSM' },
+      { ts: 150, from: 'a', to: 'b', field: 'KSM' },
+      { ts: 120, from: 'a', to: 'b', field: 'KTC' },
+    ]
+    const index = history.findIndex(e => isTransitionInSegment(e, segKSM))
+    expect(index).toBe(0)
+  })
+
+  it('returns -1 via findIndex when the hovered segment field has no matches', () => {
+    const history = [
+      { ts: 180, from: 'a', to: 'b', field: 'KCL' },
+      { ts: 150, from: 'a', to: 'b', field: 'KDP' },
+    ]
+    const index = history.findIndex(e => isTransitionInSegment(e, segKSM))
+    expect(index).toBe(-1)
+  })
 })

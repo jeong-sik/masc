@@ -1515,6 +1515,59 @@ function swimlaneSegmentColor(value: string): string {
   return 'bg-[rgba(129,140,248,0.45)]'
 }
 
+/** Keyboard navigation across swimlane segments.
+    ArrowLeft/Right: move within the same lane.
+    ArrowUp/Down: move to the adjacent lane, preserving segment index
+    (clamped to the target lane's segment count).
+    Home/End: jump to the first/last segment of the current lane. */
+function handleSwimlaneKey(
+  ev: KeyboardEvent,
+  laneIndex: number,
+  segIndex: number,
+): void {
+  const target = ev.currentTarget
+  if (!(target instanceof HTMLElement)) return
+  const root = target.closest('[data-fsm-swimlane-root]')
+  if (!root) return
+  const findButton = (ln: number, sg: number): HTMLElement | null =>
+    root.querySelector<HTMLElement>(
+      `button[data-lane-index="${ln}"][data-seg-index="${sg}"]`,
+    )
+  const lastSeg = (ln: number): number => {
+    const items = root.querySelectorAll<HTMLElement>(`button[data-lane-index="${ln}"]`)
+    return items.length - 1
+  }
+  let nextLane = laneIndex
+  let nextSeg = segIndex
+  switch (ev.key) {
+    case 'ArrowLeft':
+      nextSeg = Math.max(0, segIndex - 1)
+      break
+    case 'ArrowRight':
+      nextSeg = Math.min(lastSeg(laneIndex), segIndex + 1)
+      break
+    case 'ArrowUp':
+      nextLane = Math.max(0, laneIndex - 1)
+      nextSeg = Math.min(lastSeg(nextLane), segIndex)
+      break
+    case 'ArrowDown':
+      nextLane = Math.min(SWIMLANE_LANES.length - 1, laneIndex + 1)
+      nextSeg = Math.min(lastSeg(nextLane), segIndex)
+      break
+    case 'Home':
+      nextSeg = 0
+      break
+    case 'End':
+      nextSeg = lastSeg(laneIndex)
+      break
+    default:
+      return
+  }
+  if (nextLane === laneIndex && nextSeg === segIndex) return
+  ev.preventDefault()
+  findButton(nextLane, nextSeg)?.focus()
+}
+
 function SwimlaneTimeline({
   observations,
   now,
@@ -1550,7 +1603,7 @@ function SwimlaneTimeline({
   const fmtAbs = (ts: number) => absFormatter.format(new Date(ts * 1000))
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Swimlane Timeline
@@ -1564,15 +1617,15 @@ function SwimlaneTimeline({
         </div>
       </div>
       <div class="flex flex-col gap-1.5">
-        ${SWIMLANE_LANES.map(lane => {
+        ${SWIMLANE_LANES.map((lane, laneIndex) => {
           const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
           return html`
             <div class="flex items-center gap-2">
               <div class="w-[44px] shrink-0 text-[9px] font-mono font-semibold text-[var(--text-muted)]">
                 ${lane.short}
               </div>
-              <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="img" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
-                ${segments.map(seg => {
+              <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
+                ${segments.map((seg, segIndex) => {
                   const pct = ((seg.to - seg.from) / spanWidth) * 100
                   const holdFor = fmtDuration(Math.max(0, seg.to - seg.from))
                   const isHovered =
@@ -1581,14 +1634,24 @@ function SwimlaneTimeline({
                     hoveredSegment.from === seg.from &&
                     hoveredSegment.to === seg.to
                   const dimmed = hoveredSegment != null && !isHovered
+                  const ariaLabel = `${lane.label}, ${seg.value}, ${fmtAbs(seg.from)} to ${fmtAbs(seg.to)}, held ${holdFor}`
                   return html`
-                    <div
-                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-200 border-r border-[rgba(0,0,0,0.25)] last:border-r-0 cursor-pointer ${isHovered ? 'ring-1 ring-[var(--accent)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
+                    <button
+                      type="button"
+                      data-fsm-swimlane="true"
+                      data-lane-key=${lane.key}
+                      data-lane-index=${laneIndex}
+                      data-seg-index=${segIndex}
+                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-200 border-r border-[rgba(0,0,0,0.25)] last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset ${isHovered ? 'ring-1 ring-[var(--accent)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
                       title=${`${lane.short} · ${seg.value}\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · held ${holdFor}`}
+                      aria-label=${ariaLabel}
                       onmouseenter=${() => onHoverSegment({ field: lane.short, laneKey: lane.key, from: seg.from, to: seg.to, value: seg.value })}
                       onmouseleave=${() => onHoverSegment(null)}
-                    ></div>
+                      onfocus=${() => onHoverSegment({ field: lane.short, laneKey: lane.key, from: seg.from, to: seg.to, value: seg.value })}
+                      onblur=${() => onHoverSegment(null)}
+                      onkeydown=${(ev: KeyboardEvent) => handleSwimlaneKey(ev, laneIndex, segIndex)}
+                    ></button>
                   `
                 })}
               </div>
@@ -1644,6 +1707,21 @@ function TransitionTrail({
   now: number
   hoveredSegment: HoveredSegment | null
 }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const firstMatchIndex = useMemo(() => {
+    if (!hoveredSegment) return -1
+    return history.findIndex(entry => isTransitionInSegment(entry, hoveredSegment))
+  }, [history, hoveredSegment])
+
+  useEffect(() => {
+    if (firstMatchIndex < 0) return
+    const container = scrollRef.current
+    if (!container) return
+    const target = container.querySelector<HTMLElement>(`[data-trail-index="${firstMatchIndex}"]`)
+    if (!target) return
+    target.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [firstMatchIndex])
+
   if (history.length === 0) {
     return html`
       <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
@@ -1657,8 +1735,8 @@ function TransitionTrail({
       <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Transition History (${history.length})
       </div>
-      <div class="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto">
-        ${history.map(entry => {
+      <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto">
+        ${history.map((entry, trailIndex) => {
           const ago = fmtDuration(Math.max(0, now - entry.ts))
           const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
           const inSegment = isTransitionInSegment(entry, hoveredSegment)
@@ -1667,7 +1745,10 @@ function TransitionTrail({
             ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
             : ''
           return html`
-            <div class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}>
+            <div
+              data-trail-index=${trailIndex}
+              class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+            >
               <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
               <span class="text-[var(--text-dim)]">${entry.from}</span>

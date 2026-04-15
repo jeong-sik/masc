@@ -2,11 +2,16 @@
 
 Status: active baseline + research inventory
 
+See also:
+
+- `docs/design/keeper-social-model-fsm.md`
+
 ## Active baseline
 
 ### `bdi_speech_v1`
 
 - Role: current keeper social model
+- Implementation status: active production baseline
 - Fit: best fit for the existing keeper + board + task + status architecture
 - Core idea:
   - the model explicitly emits a typed social-state header
@@ -22,6 +27,7 @@ Status: active baseline + research inventory
 ### `magentic_ledger_v1`
 
 - Role: progress/stall-oriented planning overlay
+- Implementation status: documented candidate only
 - Best use: detect stuck work, stalled loops, replanning triggers
 - Why not default now:
   - good for task/progress ledgers
@@ -34,6 +40,7 @@ Reference:
 ### `reaction_identity_v2`
 
 - Role: history/emergence-driven keeper identity
+- Implementation status: documented candidate only
 - Best use: diversity, long-horizon persona drift, reaction-history experiments
 - Why not default now:
   - useful research track
@@ -46,6 +53,7 @@ Related local context:
 ### `tom_diversity_v1`
 
 - Role: cross-agent expectation modeling
+- Implementation status: documented candidate only
 - Best use: diversity maintenance, consensus-vs-dissent control
 - Why not default now:
   - high complexity
@@ -58,6 +66,7 @@ Reference:
 ### `hitl_intervention_v1`
 
 - Role: approval/handoff/escalation overlay
+- Implementation status: documented candidate only
 - Best use: operator gating, action previews, external approval
 - Why not default now:
   - complements social routing
@@ -76,4 +85,5 @@ Until multiple implementations are production-ready:
 
 - runtime default stays `bdi_speech_v1`
 - inventory entries are documentation-only
+- `social_model` should not be presented as a rich user-facing strategy selector yet
 - unknown runtime values should fail fast or fall back explicitly to `bdi_speech_v1`

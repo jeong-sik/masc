@@ -44,6 +44,7 @@ Keeper는 이미 다음 자기 모델 필드를 가진다.
 관련 코드:
 
 - `docs/design/keeper-social-model-inventory.md`
+- `docs/design/keeper-social-model-fsm.md`
 - `lib/keeper/keeper_social_model.ml`
 - `test/test_keeper_unified.ml`
 

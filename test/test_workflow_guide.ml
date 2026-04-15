@@ -28,8 +28,8 @@ let test_start_success () =
 let test_start_failure () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:false in
   check_not_empty "start failure has recovery steps" g.next_steps;
-  check_has_tool g.next_steps "masc_start";
-  check_has_tool g.next_steps "masc_init"
+  check_has_tool g.next_steps "masc_start"
+  (* masc_init no longer referenced — tool pruned from registry *)
 
 let test_join_success () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:true in

@@ -837,12 +837,15 @@ let () =
     (* Merged from test_keeper_deny_list_coverage.ml *)
     ("deny_list", [
       test_case "dangerous tools denied" `Quick (fun () ->
+        (* Post-pruning: keeper_denied surface narrowed to
+           [masc_reset; masc_spawn]. Most former dangerous tools
+           (masc_room_delete, masc_force_leave, masc_config_set,
+           masc_execute / masc_execute_dry_run) were removed from the
+           registry entirely. *)
         let dl = Keeper_hooks_oas.keeper_denied_tools in
         List.iter (fun name ->
           check bool (name ^ " denied") true (List.mem name dl))
-          [ "masc_room_delete"; "masc_spawn"; "masc_force_leave";
-            "masc_config_set";
-            "masc_reset"; "masc_execute"; "masc_execute_dry_run" ]);
+          [ "masc_reset"; "masc_spawn" ]);
       test_case "safe tools not denied" `Quick (fun () ->
         let dl = Keeper_hooks_oas.keeper_denied_tools in
         List.iter (fun name ->
@@ -852,7 +855,7 @@ let () =
       test_case "deny list reasonable size" `Quick (fun () ->
         let n = List.length Keeper_hooks_oas.keeper_denied_tools in
         check bool "non-empty" true (n > 0);
-        check bool "5-30 range" true (n >= 5 && n <= 30));
+        check bool "<= 30 range" true (n <= 30));
     ]);
     ("auto_tool_hints", [
       test_case "known tool has hint" `Quick (fun () ->

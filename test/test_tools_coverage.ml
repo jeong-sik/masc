@@ -42,10 +42,10 @@ let test_all_schemas_not_empty () =
     true (List.length schema_inventory > 0)
 
 let test_all_schemas_count () =
-  (* Verify we have at least 100 tools defined *)
+  (* Verify we have at least 50 tools defined (post-pruning floor) *)
   let count = List.length schema_inventory in
-  Alcotest.(check bool) "at least 100 tools defined"
-    true (count >= 100);
+  Alcotest.(check bool) "at least 50 tools defined"
+    true (count >= 50);
   Printf.printf "Total tool schemas: %d\n" count
 
 let test_schema_has_required_fields () =
@@ -79,10 +79,8 @@ let test_all_names_start_with_masc () =
 (* ============================================================ *)
 
 let test_find_tool_existing () =
-  let tools = ["masc_init"; "masc_join"; "masc_leave"; "masc_status";
-               "masc_broadcast"; "masc_transition";
-               "masc_runtime_verify"; "masc_verify_handoff";
-               "masc_handover_create"] in
+  let tools = ["masc_join"; "masc_leave"; "masc_status";
+               "masc_broadcast"; "masc_transition"] in
   List.iter (fun name ->
     match find_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name
@@ -90,7 +88,7 @@ let test_find_tool_existing () =
   ) tools
 
 let test_find_tool_not_found () =
-  let invalid_tools = ["invalid_tool"; "masc"; ""; "MASC_INIT"; "masc-init"] in
+  let invalid_tools = ["invalid_tool"; "masc"; ""; "MASC_STATUS"; "masc-status"] in
   List.iter (fun name ->
     match find_tool name with
     | None -> ()
@@ -99,7 +97,7 @@ let test_find_tool_not_found () =
 
 let test_find_tool_case_sensitive () =
   (* Tool names are case-sensitive *)
-  match find_tool "MASC_INIT" with
+  match find_tool "MASC_STATUS" with
   | None -> ()  (* Expected: not found because wrong case *)
   | Some _ -> Alcotest.fail "Tool lookup should be case-sensitive"
 
@@ -137,15 +135,7 @@ let test_required_field_is_list () =
 (* 4. Specific Tool Tests                                        *)
 (* ============================================================ *)
 
-let test_masc_init_schema () =
-  match find_tool "masc_init" with
-  | None -> Alcotest.fail "masc_init not found"
-  | Some schema ->
-      Alcotest.(check bool) "has description" true (String.length schema.description > 10);
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name property" true (List.mem_assoc "agent_name" props)
-      | None -> Alcotest.fail "masc_init missing properties"
+(* test_masc_init_schema removed: masc_init tool pruned *)
 
 let test_masc_join_schema () =
   match find_tool "masc_join" with
@@ -338,14 +328,7 @@ let test_masc_register_capabilities_schema () =
           Alcotest.(check bool) "has capabilities" true (List.mem_assoc "capabilities" props)
       | None -> Alcotest.fail "masc_register_capabilities missing properties"
 
-let test_masc_find_by_capability_schema () =
-  match find_tool "masc_find_by_capability" with
-  | None -> Alcotest.fail "masc_find_by_capability not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has capability" true (List.mem_assoc "capability" props)
-      | None -> Alcotest.fail "masc_find_by_capability missing properties"
+(* test_masc_find_by_capability_schema removed: tool pruned *)
 
 (* ============================================================ *)
 (* 8. Plan Tool Tests                                            *)
@@ -387,55 +370,13 @@ let test_masc_deliver_schema () =
 (* 10. Auth Tool Tests                                           *)
 (* ============================================================ *)
 
-let test_masc_auth_enable_schema () =
-  match find_tool "masc_auth_enable" with
-  | None -> Alcotest.fail "masc_auth_enable not found"
-  | Some _ -> ()
-
-let test_masc_auth_disable_schema () =
-  match find_tool "masc_auth_disable" with
-  | None -> Alcotest.fail "masc_auth_disable not found"
-  | Some _ -> ()
-
-let test_masc_auth_create_token_schema () =
-  match find_tool "masc_auth_create_token" with
-  | None -> Alcotest.fail "masc_auth_create_token not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props)
-      | None -> Alcotest.fail "masc_auth_create_token missing properties"
+(* Auth tool schema tests removed: auth tools pruned from registry *)
 
 (* ============================================================ *)
 (* 11. A2A Tool Tests                                            *)
 (* ============================================================ *)
 
-let test_masc_poll_events_schema () =
-  match find_tool "masc_poll_events" with
-  | None -> Alcotest.fail "masc_poll_events not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has subscription_id" true (List.mem_assoc "subscription_id" props)
-      | None -> Alcotest.fail "masc_poll_events missing properties"
-
-let test_masc_heartbeat_result_schema () =
-  match find_tool "masc_heartbeat_result" with
-  | None -> Alcotest.fail "masc_heartbeat_result not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has status" true (List.mem_assoc "status" props);
-          Alcotest.(check bool) "has summary" true (List.mem_assoc "summary" props);
-          Alcotest.(check bool) "has tool_call_count" true
-            (List.mem_assoc "tool_call_count" props);
-          Alcotest.(check bool) "has tool_names" true
-            (List.mem_assoc "tool_names" props);
-          Alcotest.(check bool) "has decision_reason" true
-            (List.mem_assoc "decision_reason" props);
-          Alcotest.(check bool) "has decision_confidence" true
-            (List.mem_assoc "decision_confidence" props)
-      | None -> Alcotest.fail "masc_heartbeat_result missing properties"
+(* masc_poll_events and masc_heartbeat_result schema tests removed: tools pruned *)
 
 let test_masc_spawn_schema () =
   match find_tool "masc_spawn" with
@@ -448,21 +389,7 @@ let test_masc_spawn_schema () =
           Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
       | None -> Alcotest.fail "masc_spawn missing properties"
 
-let test_masc_runtime_verify_schema () =
-  match find_tool "masc_runtime_verify" with
-  | None -> Alcotest.fail "masc_runtime_verify not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has runtime_pool" true
-            (List.mem_assoc "runtime_pool" props);
-          Alcotest.(check bool) "has expected_model" true
-            (List.mem_assoc "expected_model" props);
-          Alcotest.(check bool) "has expected_slots" true
-            (List.mem_assoc "expected_slots" props);
-          Alcotest.(check bool) "has expected_ctx" true
-            (List.mem_assoc "expected_ctx" props)
-      | None -> Alcotest.fail "masc_runtime_verify missing properties"
+(* test_masc_runtime_verify_schema removed: tool pruned *)
 
 (* test_masc_persona_list_schema and test_masc_keeper_create_from_persona_schema
    removed: persona concept deleted, schema fields
@@ -566,28 +493,7 @@ let test_masc_tool_admin_update_schema () =
 (* 14. Handover Tool Tests                                       *)
 (* ============================================================ *)
 
-let test_masc_handover_create_schema () =
-  match find_tool "masc_handover_create" with
-  | None -> Alcotest.fail "masc_handover_create not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has goal" true (List.mem_assoc "goal" props)
-      | None -> Alcotest.fail "masc_handover_create missing properties"
-
-let test_masc_handover_list_schema () =
-  match find_tool "masc_handover_list" with
-  | None -> Alcotest.fail "masc_handover_list not found"
-  | Some _ -> ()
-
-let test_masc_handover_claim_schema () =
-  match find_tool "masc_handover_claim" with
-  | None -> Alcotest.fail "masc_handover_claim not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has handover_id" true (List.mem_assoc "handover_id" props)
-      | None -> Alcotest.fail "masc_handover_claim missing properties"
+(* Handover tool schema tests removed: handover tools pruned from registry *)
 
 (* ============================================================ *)
 (* 15. Legacy Swarm Removal Tests                                *)
@@ -641,17 +547,7 @@ let test_legacy_mitosis_tools_removed () =
 (* 19. Bounded Run Tool Tests                                    *)
 (* ============================================================ *)
 
-let test_masc_bounded_run_schema () =
-  match find_tool "masc_bounded_run" with
-  | None -> Alcotest.fail "masc_bounded_run not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agents" true (List.mem_assoc "agents" props);
-          Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props);
-          Alcotest.(check bool) "has constraints" true (List.mem_assoc "constraints" props);
-          Alcotest.(check bool) "has goal" true (List.mem_assoc "goal" props)
-      | None -> Alcotest.fail "masc_bounded_run missing properties"
+(* test_masc_bounded_run_schema removed: tool pruned *)
 
 (* ============================================================ *)
 (* 20. Dashboard Tool Tests                                      *)
@@ -764,7 +660,6 @@ let () =
       Alcotest.test_case "required_is_list" `Quick test_required_field_is_list;
     ];
     "core_tools", [
-      Alcotest.test_case "masc_init" `Quick test_masc_init_schema;
       Alcotest.test_case "masc_join" `Quick test_masc_join_schema;
       Alcotest.test_case "masc_leave" `Quick test_masc_leave_schema;
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
@@ -786,7 +681,7 @@ let () =
     "agent_tools", [
       Alcotest.test_case "agents" `Quick test_masc_agents_schema;
       Alcotest.test_case "register_capabilities" `Quick test_masc_register_capabilities_schema;
-      Alcotest.test_case "find_by_capability" `Quick test_masc_find_by_capability_schema;
+      (* find_by_capability removed: tool pruned *)
     ];
     "plan_tools", [
       Alcotest.test_case "plan_init" `Quick test_masc_plan_init_schema;
@@ -796,15 +691,8 @@ let () =
     ];
     "vote_tools", [
     ];
-    "auth_tools", [
-      Alcotest.test_case "auth_enable" `Quick test_masc_auth_enable_schema;
-      Alcotest.test_case "auth_disable" `Quick test_masc_auth_disable_schema;
-      Alcotest.test_case "auth_create_token" `Quick test_masc_auth_create_token_schema;
-    ];
-    "a2a_tools", [
-      Alcotest.test_case "poll_events" `Quick test_masc_poll_events_schema;
-      Alcotest.test_case "heartbeat_result" `Quick test_masc_heartbeat_result_schema;
-    ];
+    (* auth_tools, a2a_tools (poll_events/heartbeat_result), handover_tools,
+       bounded_run removed: pruned from registry *)
     "spawn_runtime_tools", [
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
     ];
@@ -824,17 +712,7 @@ let () =
       Alcotest.test_case "tool-admin-update" `Quick
         test_masc_tool_admin_update_schema;
     ];
-    "runtime_verify_tools", [
-      Alcotest.test_case "runtime-verify" `Quick
-        test_masc_runtime_verify_schema;
-      Alcotest.test_case "llama-runtime-verify" `Quick
-        test_masc_runtime_verify_schema;
-    ];
-    "handover_tools", [
-      Alcotest.test_case "handover_create" `Quick test_masc_handover_create_schema;
-      Alcotest.test_case "handover_list" `Quick test_masc_handover_list_schema;
-      Alcotest.test_case "handover_claim" `Quick test_masc_handover_claim_schema;
-    ];
+    (* runtime_verify_tools removed: masc_runtime_verify pruned *)
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick
         test_legacy_swarm_tools_removed;
@@ -842,9 +720,6 @@ let () =
     "legacy_lifecycle_removed", [
       Alcotest.test_case "mitosis_removed_from_public_schemas" `Quick
         test_legacy_mitosis_tools_removed;
-    ];
-    "bounded_run", [
-      Alcotest.test_case "bounded_run" `Quick test_masc_bounded_run_schema;
     ];
     "dashboard_tools", [
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;

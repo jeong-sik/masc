@@ -1006,8 +1006,8 @@ let test_limit_for_category_task_ops () =
    ============================================================ *)
 
 let test_category_for_tool_broadcast () =
-  check bool "masc_broadcast" true (Types.category_for_tool "masc_broadcast" = Types.BroadcastLimit);
-  check bool "masc_listen" true (Types.category_for_tool "masc_listen" = Types.BroadcastLimit)
+  check bool "masc_broadcast" true (Types.category_for_tool "masc_broadcast" = Types.BroadcastLimit)
+  (* masc_listen removed: tool pruned *)
 
 let test_category_for_tool_task_ops () =
   check bool "masc_add_task" true (Types.category_for_tool "masc_add_task" = Types.TaskOpsLimit);

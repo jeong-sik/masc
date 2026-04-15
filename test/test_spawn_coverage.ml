@@ -143,7 +143,9 @@ let test_masc_mcp_tools_has_worktree () =
   check bool "has worktree" true (List.mem "mcp__masc__masc_worktree_create" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_has_handover () =
-  check bool "has handover" true (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
+  (* masc_handover_create removed: handover tools pruned from registry *)
+  check bool "omits handover" false
+    (List.mem "mcp__masc__masc_handover_create" Spawn.masc_mcp_tools)
 
 let test_masc_mcp_tools_omits_relay_status () =
   check bool "omits relay_status" false
@@ -210,6 +212,9 @@ let test_lifecycle_suffix_has_heartbeat () =
      with Not_found -> false)
 
 let test_lifecycle_suffix_has_handover_create () =
+  (* lifecycle_suffix still mentions handover_create in its prose guidance
+     even though the tool itself was pruned. The string search stays
+     truthy until the prompt text is rewritten. *)
   check bool "has handover_create" true
     (try let _ = Str.search_forward (Str.regexp_string "handover_create") Spawn.masc_lifecycle_suffix 0 in true
      with Not_found -> false)

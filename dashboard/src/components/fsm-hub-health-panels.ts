@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 
-import { invariantRows } from './fsm-hub-diagnostics'
+import { invariantRows } from './fsm-hub-invariant-analysis'
 
 /** Human-readable descriptions for MeasurementCard auto-rule flags.
     Indexed by rule name -> { on: "this fires next turn", off: "nothing

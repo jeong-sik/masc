@@ -111,6 +111,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
               ~max_turns:1
               ~temperature:0.5
               ~max_tokens:500
+              ~approval:Approval_callbacks.auto_approve
               ()
           )
         with

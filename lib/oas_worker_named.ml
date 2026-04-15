@@ -567,6 +567,7 @@ let run_named_with_masc_tools
     ?transport
     ?(yield_on_tool = false)
     ?compact_ratio
+    ?approval
     ?sw
     ?net
     ()
@@ -582,6 +583,7 @@ let run_named_with_masc_tools
     ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy
     ?compact_ratio
+    ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume ?proof_ref
     ?contract
     ?transport ~yield_on_tool ?sw ?net ()

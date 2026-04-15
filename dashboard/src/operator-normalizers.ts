@@ -302,7 +302,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
     recommendation_summary: normalizeGuidanceSummary(root.recommendation_summary),
-    namespace: normalizeNamespace(root.namespace),
+    root: normalizeNamespace(root.root),
     swarm_status: isRecord(root.swarm_status)
       ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
       : undefined,
@@ -390,7 +390,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const root = isRecord(raw) ? raw : {}
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
   return {
-    namespace: normalizeNamespace(root.namespace),
+    root: normalizeNamespace(root.root),
     sessions: extractArray(root.sessions, ['items', 'sessions'])
       .map(normalizeSession)
       .filter((item): item is OperatorSessionSnapshot => item !== null),

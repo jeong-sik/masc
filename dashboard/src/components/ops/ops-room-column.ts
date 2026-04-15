@@ -50,7 +50,7 @@ export function OpsRoomColumn() {
   const roomControlDisclosureRef = useRef<HTMLDetailsElement | null>(null)
   const snapshot = operatorSnapshot.value
   const roomDigest = operatorRoomDigest.value
-  const room = snapshot?.namespace ?? {}
+  const room = snapshot?.root ?? {}
   const pendingState = selectPendingConfirmState(snapshot)
   const pendingConfirms = pendingState.items
   const recentMessages = snapshot?.recent_messages ?? []

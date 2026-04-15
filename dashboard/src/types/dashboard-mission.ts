@@ -568,7 +568,7 @@ export interface OperatorDigest {
   fallback_recommended_actions?: OperatorRecommendedAction[]
   recommendation_summary?: OperatorGuidanceSummary | null
   swarm_status?: CommandPlaneSwarmStatus
-  namespace?: OperatorNamespaceSnapshot
+  root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
   review_queue: OperatorReviewItem[]
@@ -593,7 +593,7 @@ export interface KeeperRecoverResult {
 }
 
 export interface OperatorSnapshot {
-  namespace: OperatorNamespaceSnapshot
+  root: OperatorNamespaceSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   operator_judge_runtime?: OperatorJudgeRuntime | null

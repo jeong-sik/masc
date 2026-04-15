@@ -352,7 +352,7 @@ let command_plane_help_http_json () =
                    [
                      ("agent", `String "codex-...");
                      ("status", `String "started");
-                     ("namespace", `String "default");
+                     ("project", `String "default");
                    ])
               ~notes:
                 [ "Response is trimmed to canonical fields."; "Use masc_status next to confirm visibility." ];

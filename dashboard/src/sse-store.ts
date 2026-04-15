@@ -167,7 +167,7 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
     namespaceTruth.value = normalized
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
-      normalized.namespace.status ?? null,
+      normalized.root.status ?? null,
     )
   } catch (err) {
     console.debug('[SSE] namespace-truth snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')

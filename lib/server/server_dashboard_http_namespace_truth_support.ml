@@ -387,7 +387,7 @@ let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell
   `Assoc
       [
         ("generated_at", `String (Types.now_iso ()));
-        ("namespace", namespace_block);
+        ("root", namespace_block);
         ( "execution",
         `Assoc
           [

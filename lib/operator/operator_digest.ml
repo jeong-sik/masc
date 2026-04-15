@@ -777,7 +777,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
-              ("namespace", room_state_json);
+              ("root", room_state_json);
               ("worker_cards", `List []);
             ]
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews

@@ -126,14 +126,14 @@ function normalizeFocus(raw: unknown): DashboardNamespaceTruthFocus | null {
 
 export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthResponse {
   const root = isRecord(raw) ? raw : {}
-  const namespaceBlock = isRecord(root.namespace) ? root.namespace : {}
+  const namespaceBlock = isRecord(root.root) ? root.root : {}
   const executionBlock = isRecord(root.execution) ? root.execution : {}
   const commandBlock = isRecord(root.command) ? root.command : {}
   const metaCognitionBlock = isRecord(root.meta_cognition) ? root.meta_cognition : {}
   const operatorBlock = isRecord(root.operator) ? root.operator : {}
   return {
     generated_at: asString(root.generated_at),
-    namespace: {
+    root: {
       status: normalizeServerStatus(namespaceBlock.status),
       counts: isRecord(namespaceBlock.counts)
         ? {

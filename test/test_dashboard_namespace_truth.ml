@@ -147,16 +147,16 @@ let test_dashboard_namespace_truth_empty_room () =
         let open Yojson.Safe.Util in
         check string "cluster default"
           "default"
-          (json |> member "namespace" |> member "status" |> member "cluster" |> to_string);
+          (json |> member "root" |> member "status" |> member "cluster" |> to_string);
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);
         check int "configured keepers default to zero"
           0
-          (json |> member "namespace" |> member "configured_keepers" |> to_int);
+          (json |> member "root" |> member "configured_keepers" |> to_int);
         check int "namespace counts expose total runtimes"
           0
-          (json |> member "namespace" |> member "counts" |> member "total_runtimes" |> to_int);
+          (json |> member "root" |> member "counts" |> member "total_runtimes" |> to_int);
         check string "focus source"
           "namespace"
           (json |> member "focus" |> member "source" |> to_string);
@@ -243,10 +243,10 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
             let focus_label = json |> member "focus" |> member "label" |> to_string in
             check int "keeper-only room counts general agents as zero"
               0
-              (json |> member "namespace" |> member "counts" |> member "agents" |> to_int);
+              (json |> member "root" |> member "counts" |> member "agents" |> to_int);
             check int "keeper-only room still counts keeper meta"
               1
-              (json |> member "namespace" |> member "counts" |> member "keepers" |> to_int);
+              (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
             check bool "keeper-only room does not report empty room focus"
               false
               (String.equal focus_label
@@ -291,10 +291,10 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
             let focus_label = json |> member "focus" |> member "label" |> to_string in
             check int "mixed room counts one general agent"
               1
-              (json |> member "namespace" |> member "counts" |> member "agents" |> to_int);
+              (json |> member "root" |> member "counts" |> member "agents" |> to_int);
             check int "mixed room counts one keeper"
               1
-              (json |> member "namespace" |> member "counts" |> member "keepers" |> to_int);
+              (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
             check bool "mixed room avoids empty runtime fallback"
               false
               (String.equal focus_label
@@ -549,7 +549,7 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
           (json |> member "status" = `Null);
         check bool "namespace block present"
           true
-          (json |> member "namespace" <> `Null);
+          (json |> member "root" <> `Null);
         check int "execution summary falls back to zero operations"
           0
           (json |> member "execution" |> member "summary" |> member "active_operations" |> to_int);
@@ -588,7 +588,7 @@ let test_last_good_shell_fallback_preserves_counts () =
         | Some json -> json
         | None -> fail "expected cached namespace-truth snapshot"
       in
-      let ns_counts = snapshot |> member "namespace" |> member "counts" in
+      let ns_counts = snapshot |> member "root" |> member "counts" in
       (* Shell was warmed once then reset; snapshot_from_caches should still
          produce a valid namespace block via the _last_good_shell fallback. *)
       check bool "namespace counts block present in fallback snapshot"

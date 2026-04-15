@@ -186,7 +186,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
 }
 
 function renderSummaryBadges(activeCount: number, deferredCount: number, recentCount: number) {
-  const roomPaused = operatorSnapshot.value?.namespace?.paused
+  const roomPaused = operatorSnapshot.value?.root?.paused
   const roomLabel =
     typeof roomPaused === 'boolean'
       ? roomPaused ? '프로젝트 일시정지' : '프로젝트 진행 중'
@@ -244,7 +244,7 @@ function renderTruth(item: OperatorReviewItem | null) {
   }
 
   if (item.target_type === 'namespace' || item.target_type === 'room') {
-    const room = detailDigest?.namespace ?? snapshot?.namespace ?? {}
+    const room = detailDigest?.root ?? snapshot?.root ?? {}
     return html`
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">

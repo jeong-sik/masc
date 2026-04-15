@@ -487,7 +487,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
-  const namespaceStatus = operatorSnapshot.value?.namespace ?? {}
+  const namespaceStatus = operatorSnapshot.value?.root ?? {}
   const missionBrief = resolveKeeperMissionBrief(keeper)
   const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
   const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)

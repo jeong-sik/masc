@@ -49,11 +49,7 @@ type config = {
   pubsub_max_messages: int;
 }
 
-(** Get pubsub max messages from env or default *)
-let pubsub_max_messages_from_env () =
-  match Sys.getenv_opt "MASC_PUBSUB_MAX_MESSAGES" with
-  | Some s -> Safe_ops.int_of_string_with_default ~default:1000 s
-  | None -> 1000
+let pubsub_max_messages_from_env () = 1000
 
 let generate_node_id () =
   let hostname = try Unix.gethostname () with Unix.Unix_error _ -> "unknown" in

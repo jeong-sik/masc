@@ -21,12 +21,7 @@ type context = {
 
 type tool_result = bool * string
 
-let default_max_write_size = 1024 * 1024  (* 1 MiB *)
-
-let max_write_size =
-  match Sys.getenv_opt "MASC_MAX_WRITE_SIZE_BYTES" with
-  | Some s -> Option.value (int_of_string_opt s) ~default:default_max_write_size
-  | None -> default_max_write_size
+let max_write_size = 1024 * 1024  (* 1 MiB *)
 
 let normalize_dir_prefix path =
   Tool_code.normalize_path path ^ "/"

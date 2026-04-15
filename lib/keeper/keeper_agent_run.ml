@@ -575,7 +575,13 @@ let run_turn
   (* OAS Utf8_sanitize.sanitize handles UTF-8 repair and control char
      stripping at serialization time (backend_openai_serialize.ml,
      backend_anthropic.ml). No pre-sanitize needed here. See OAS #916. *)
-  let history_messages = ctx_work.messages in
+  (* Repair orphaned ToolResult blocks before passing to OAS Agent.run.
+     Stale checkpoints saved before #7237 may contain tool_result blocks
+     whose matching tool_use was trimmed. Anthropic API rejects these.
+     repair_orphan_tool_result_messages downgrades orphans to plain Text. *)
+  let history_messages =
+    Keeper_context_core.repair_orphan_tool_result_messages ctx_work.messages
+  in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry
   then Keeper_exec_context.persist_message ~source:history_user_source session user_msg;

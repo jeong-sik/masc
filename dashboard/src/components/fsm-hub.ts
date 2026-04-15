@@ -43,6 +43,7 @@ export type ObservedLaneSummary = {
   label: string
   value: string
   tone: InsightTone
+  stalled: boolean
   meaning: string
   observedForSec: number
   transitionCount: number
@@ -352,14 +353,14 @@ export function deriveObservedLaneSummaries(
           : key === 'cascade'
             ? snapshot.cascade.state
             : snapshot.compaction.stage
+    const stalled = isObservedStall(key, value, observedForSec)
 
     return {
       field,
       label: LANE_LABELS[key],
       value,
-      tone: isObservedStall(key, value, observedForSec) && meaning.tone !== 'error'
-        ? 'warn'
-        : meaning.tone,
+      tone: stalled && meaning.tone !== 'error' ? 'warn' : meaning.tone,
+      stalled,
       meaning: meaning.meaning,
       observedForSec,
       transitionCount,
@@ -463,7 +464,7 @@ export function deriveOperationalInsight(
   }
 
   const lanes = deriveObservedLaneSummaries(snapshot, observations, now)
-  const stalledLane = lanes.find(lane => lane.tone === 'warn' && lane.observedForSec > 0)
+  const stalledLane = lanes.find(lane => lane.stalled)
   if (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition) {
     return {
       tone: 'error',
@@ -738,7 +739,7 @@ export function FsmHub() {
         onSelect=${setSelected}
         loading=${loading}
         transitionCount=${history.length}
-        observationCount=${phaseLog.length}
+        observationCount=${view.observations.length}
       />
 
       ${activeSelected == null ? html`

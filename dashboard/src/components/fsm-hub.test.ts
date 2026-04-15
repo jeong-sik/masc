@@ -169,7 +169,24 @@ describe('fsm-hub derived state', () => {
 
     expect(lanes.find(lane => lane.field === 'KTC')).toMatchObject({
       tone: 'warn',
+      stalled: true,
       value: 'executing',
     })
+  })
+
+  it('keeps active compaction as compaction work before the stall threshold', () => {
+    const result = deriveOperationalInsight(
+      snapshot({
+        is_live: true,
+        phase: 'Compacting',
+        turn_phase: 'compacting',
+        compaction: { stage: 'compacting' },
+      }),
+      [observation({ ts: 10, phase: 'Compacting', turn: 'compacting', compaction: 'compacting' })],
+      20,
+    )
+
+    expect(result.tone).toBe('info')
+    expect(result.headline).toContain('Compaction currently owns the turn')
   })
 })

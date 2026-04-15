@@ -75,6 +75,8 @@ export type ObservedLaneSummary = {
   transitionCount: number
 }
 
+export type InvariantViolationCounts = Record<keyof KeeperCompositeInvariants, number>
+
 export type HubState = {
   keeperName: string | null
   snapshot: KeeperCompositeSnapshot | null
@@ -82,6 +84,8 @@ export type HubState = {
   error: string | null
   lastFetchAt: number
   observations: CompositeObservation[]
+  invariantSampleCount: number
+  invariantViolations: InvariantViolationCounts
 }
 
 export type HubAction =
@@ -92,6 +96,14 @@ export type HubAction =
 export const MAX_OBSERVATIONS = 30
 export const MAX_TRANSITION_HISTORY = 20
 
+const ZERO_VIOLATIONS: InvariantViolationCounts = {
+  phase_turn_alignment: 0,
+  no_cascade_before_measurement: 0,
+  compaction_atomicity: 0,
+  event_priority_monotone: 0,
+  recovery_two_store_sync: 0,
+}
+
 export const initialHubState: HubState = {
   keeperName: null,
   snapshot: null,
@@ -99,6 +111,8 @@ export const initialHubState: HubState = {
   error: null,
   lastFetchAt: 0,
   observations: [],
+  invariantSampleCount: 0,
+  invariantViolations: { ...ZERO_VIOLATIONS },
 }
 
 export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [

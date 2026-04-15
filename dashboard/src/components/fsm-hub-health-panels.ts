@@ -1,8 +1,9 @@
 import { html } from 'htm/preact'
 
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import type { KeeperCompositeSnapshot, KeeperCompositeInvariants } from '../api/keeper'
 
 import { invariantRows } from './fsm-hub-invariant-analysis'
+import type { InvariantViolationCounts } from './fsm-hub-types'
 
 /** Human-readable descriptions for MeasurementCard auto-rule flags.
     Indexed by rule name -> { on: "this fires next turn", off: "nothing
@@ -103,7 +104,15 @@ export function invariantDescription(key: string): string {
   return INVARIANT_DESCRIPTIONS[key] ?? 'Invariant defined by the keeper composite contract.'
 }
 
-export function InvariantsPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+export function InvariantsPanel({
+  snapshot,
+  violationCounts,
+  sampleCount,
+}: {
+  snapshot: KeeperCompositeSnapshot
+  violationCounts: InvariantViolationCounts
+  sampleCount: number
+}) {
   const entries = invariantRows(snapshot)
   const okCount = entries.filter(entry => entry.ok).length
   const total = entries.length
@@ -131,13 +140,24 @@ export function InvariantsPanel({ snapshot }: { snapshot: KeeperCompositeSnapsho
       <ul class="flex flex-col gap-1">
         ${entries.map(entry => {
           const desc = invariantDescription(entry.key)
-          const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}`
+          const vCount = violationCounts[entry.key as keyof KeeperCompositeInvariants] ?? 0
+          const rate = sampleCount > 0
+            ? `${vCount}/${sampleCount} 위반`
+            : ''
+          const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
           return html`
             <li class="flex gap-2 text-[10px] cursor-help" title=${tooltip}>
               <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[#22c55e]' : 'bg-[#ef4444]'}`}></span>
-              <div class="min-w-0">
-                <div class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[#f87171] font-semibold'}>
-                  ${entry.label}
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[#f87171] font-semibold'}>
+                    ${entry.label}
+                  </span>
+                  ${vCount > 0 ? html`
+                    <span class="ml-auto text-[8px] font-mono tabular-nums text-[#f87171]">
+                      ${vCount}/${sampleCount}
+                    </span>
+                  ` : null}
                 </div>
                 <div class="text-[8px] leading-relaxed text-[var(--text-dim)]">
                   ${entry.detail}

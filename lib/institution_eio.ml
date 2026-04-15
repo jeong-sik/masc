@@ -80,7 +80,7 @@ type institution = {
   alumni: string list;
 }
 
-type config = Room_utils.config
+type config = Coord_utils.config
 
 (** {1 Default Values} *)
 
@@ -324,7 +324,7 @@ and institution_of_json json =
 (** {1 Persistence (Eio Native)} *)
 
 let institution_file (config : config) =
-  Filename.concat (Room_utils.masc_dir config) "institution.json"
+  Filename.concat (Coord_utils.masc_dir config) "institution.json"
 
 let load_institution ~fs (config : config) : institution option =
   let file = institution_file config in

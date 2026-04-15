@@ -118,6 +118,42 @@ export function deriveTopTransitions(
     .slice(0, Math.max(0, limit))
 }
 
+/** Plain-Korean inference of *why* a transition fired, attributable from
+    the transition shape alone (Watson-style retroactive reasoning,
+    arxiv 2411.03455 — applied to FSM transitions instead of LLM tool
+    calls). Returns null when the transition has no obvious cause we
+    can attribute without additional event-bus signals. */
+export function inferTransitionReason(field: string, from: string, to: string): string | null {
+  if (field === 'KTC') {
+    if (from === 'idle' && to === 'executing') return '턴이 시작되었습니다 — OAS worker 호출 진행'
+    if (from === 'executing' && to === 'idle') return '턴이 정상 종료되어 대기 상태로 복귀'
+    if (to === 'compacting') return 'KMC 가 compaction 단계를 시작 — 컨텍스트 압축 중'
+    if (to === 'finalizing') return '턴 마무리 — checkpoint/메트릭 emit'
+    if (from === 'idle' && to === 'prompting') return '프롬프트 구성 시작'
+  }
+  if (field === 'KSM') {
+    if (to === 'Compacting') return 'KSM 이 lifecycle 차원에서 compaction 진입'
+    if (to === 'HandingOff') return '키퍼 인계 시작 — 다른 keeper 로 전환 준비'
+    if (to === 'Failing') return '연속 실패 임계 도달 — 다음 fail 시 Crashed 가능'
+    if (to === 'Crashed' || to === 'Dead') return '비정상 종료 — restart 정책 확인'
+  }
+  if (field === 'KDP') {
+    if (from === 'undecided' && to === 'guard_ok') return '안전 가드 모두 통과 — 도구 실행 단계로 진행'
+    if (to === 'gate_rejected') return '게이트 차단 (cost/deny/streak/tripwire) — 도구 실행 거부됨'
+    if (to === 'tool_policy_selected') return '도구 정책이 적용되어 호출 가능한 도구 셋이 정해짐'
+  }
+  if (field === 'KCL') {
+    if (to === 'trying') return 'cascade 의 provider 호출 진행 중'
+    if (to === 'exhausted') return '모든 cascade provider 가 실패 — fallback 도 소진'
+    if (from === 'trying' && to === 'idle') return 'provider 호출 종료 (성공/실패와 무관)'
+  }
+  if (field === 'KMC') {
+    if (to === 'compacting') return '컨텍스트 압축 작업 시작 (KMC 동기화)'
+    if (from === 'compacting' && to === 'accumulating') return '압축 완료 — 다시 누적 모드로'
+  }
+  return null
+}
+
 export function derivePhaseLog(
   observations: CompositeObservation[],
   maxEntries = MAX_OBSERVATIONS,

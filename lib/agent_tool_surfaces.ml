@@ -74,9 +74,9 @@ let local_worker_compat_passthrough_tool_names =
 let local_worker_compat_passthrough_schemas : Types.tool_schema list =
   lookup_schemas_by_name_exn
     ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
-    (Tool_schemas_room_core.schemas
+    (Tool_schemas_coord_core.schemas
      @ Tool_task_schemas.schemas
-     @ Tool_schemas_inline_room.schemas)
+     @ Tool_schemas_inline_coord.schemas)
     local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Types.tool_schema list =

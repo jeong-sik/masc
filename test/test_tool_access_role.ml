@@ -204,7 +204,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_keeper_reset", Types.CanBroadcast);
       ("masc_join", Types.CanJoin);
       ("masc_broadcast", Types.CanBroadcast);
-      ("masc_verify_request", Types.CanReadState);
       ("masc_portal_send", Types.CanSendPortal);
       ("channel_gate", Types.CanBroadcast);
     ]

@@ -9,7 +9,7 @@
     @since 2.145.0 *)
 
 let sanitize_name name =
-  Room_utils_backend_setup.sanitize_namespace_segment name
+  Coord_utils_backend_setup.sanitize_namespace_segment name
 
 let chat_dir base_dir =
   Filename.concat (Filename.concat base_dir ".masc") "keeper_chat"

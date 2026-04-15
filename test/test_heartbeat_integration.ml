@@ -1,7 +1,7 @@
 (** Integration tests for Adaptive Heartbeat Phase 0/1/2.
 
     Tests cross-module scenarios that exercise the supervisor → registry
-    interaction paths. Not full E2E (no Room I/O), but verifies the
+    interaction paths. Not full E2E (no Coord I/O), but verifies the
     behavioral contracts between modules:
 
     1. Structured crash flow (3 catch branches)
@@ -420,8 +420,8 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
       let ctx : _ KT.context =

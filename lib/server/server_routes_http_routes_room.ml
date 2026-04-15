@@ -16,7 +16,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
        with_read_auth (fun state _req reqd ->
          let config = state.Mcp_server.room_config in
-         let room_state = Room.read_state config in
+         let room_state = Coord.read_state config in
          let tempo = Tempo.get_tempo config in
          let json = `Assoc [
            ("cluster", `String (Env_config_core.cluster_name ()));
@@ -34,7 +34,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
          let include_cancelled = bool_query_param req "include_cancelled" ~default:false in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-         let tasks = Room.get_tasks_raw config in
+         let tasks = Coord.get_tasks_raw config in
          let filtered =
            match status_filter with
            | None -> tasks
@@ -105,7 +105,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let agents =
-           try Room.get_agents_raw config
+           try Coord.get_agents_raw config
            with Invalid_argument _ -> []
          in
          let filtered =
@@ -148,7 +148,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
          let since_seq = int_query_param req "since_seq" ~default:0 in
          let limit = int_query_param req "limit" ~default:20 in
          let agent_filter = query_param req "agent" in
-         let msgs = Room.get_messages_raw config ~since_seq ~limit:500 in
+         let msgs = Coord.get_messages_raw config ~since_seq ~limit:500 in
          let filtered =
            match agent_filter with
            | None -> msgs

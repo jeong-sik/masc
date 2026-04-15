@@ -22,7 +22,7 @@
     ],
     "cited_paths": [
       "docs/spec/03-room-coordination.md",
-      "lib/tool_room.ml",
+      "lib/tool_coord.ml",
       "docs/SUPERVISOR-MODE.md"
     ],
     "latency_ms": 710
@@ -37,7 +37,7 @@
     "cited_paths": [
       "docs/SUPERVISOR-MODE.md",
       "docs/SUPERVISOR-MODE.md",
-      "lib/tool_room.ml"
+      "lib/tool_coord.ml"
     ],
     "latency_ms": 690
   }

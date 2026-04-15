@@ -225,11 +225,11 @@ let relay_event ?store evt =
              (Printexc.to_string exn))
 
 (** Background fiber: drain events and relay to SSE. *)
-let start ~sw ~clock ~(config : Room.config) ~bus =
+let start ~sw ~clock ~(config : Coord.config) ~bus =
   let interval_s = drain_interval_s () in
   let store =
     Dated_jsonl.create
-      ~base_dir:(Filename.concat (Room.masc_root_dir config) "oas-events")
+      ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
       ()
   in
   let sub = Agent_sdk.Event_bus.subscribe bus

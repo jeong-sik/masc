@@ -2,13 +2,13 @@
 
     Tests sandbox type construction, path extraction, and error paths.
     Full git worktree integration is tested indirectly through
-    Room_worktree tests; here we focus on Task_sandbox's own logic. *)
+    Coord_worktree tests; here we focus on Task_sandbox's own logic. *)
 
 open Alcotest
 
 module Task_sandbox = Masc_mcp.Task_sandbox
 module Worker_types = Masc_mcp.Worker_types
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 (* ============================================================
    Helpers
@@ -40,8 +40,8 @@ let with_non_git_room f =
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
   ) (fun () ->
     Unix.putenv "MASC_BASE_PATH" dir;
-    let config = Room.default_config dir in
-    let _msg = Room.init config ~agent_name:None in
+    let config = Coord.default_config dir in
+    let _msg = Coord.init config ~agent_name:None in
     f dir config
   )
 
@@ -183,7 +183,7 @@ let test_symlink_created_when_masc_exists () =
 (* ============================================================
    Integration test: full create → work → cleanup cycle
    This requires a real git repo with origin. Run under Eio context
-   since Room_worktree.worktree_create_r uses Process_eio.
+   since Coord_worktree.worktree_create_r uses Process_eio.
    ============================================================ *)
 
 (** Run a shell command, raising on failure. *)
@@ -239,16 +239,16 @@ let test_full_lifecycle () =
       git dir "commit -m 'initial commit'";
       git dir "push origin main";
 
-      (* Initialize Process_eio so Room_worktree can work *)
+      (* Initialize Process_eio so Coord_worktree can work *)
       let proc_mgr = Eio.Stdenv.process_mgr env in
       let clock = Eio.Stdenv.clock env in
       let cwd = Eio.Stdenv.cwd env in
       Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
       Unix.putenv "MASC_BASE_PATH" dir;
-      let config = Room.default_config dir in
-      let _msg = Room.init config ~agent_name:None in
-      let _join = Room.join config ~agent_name:"lifecycle-agent"
+      let config = Coord.default_config dir in
+      let _msg = Coord.init config ~agent_name:None in
+      let _join = Coord.join config ~agent_name:"lifecycle-agent"
         ~capabilities:["test"] () in
       let clone_path =
         seed_playground_clone ~base_path:dir
@@ -344,9 +344,9 @@ let test_with_sandbox_lifecycle () =
       Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
       Unix.putenv "MASC_BASE_PATH" dir;
-      let config = Room.default_config dir in
-      let _msg = Room.init config ~agent_name:None in
-      let _join = Room.join config ~agent_name:"with-agent"
+      let config = Coord.default_config dir in
+      let _msg = Coord.init config ~agent_name:None in
+      let _join = Coord.join config ~agent_name:"with-agent"
         ~capabilities:["test"] () in
       let _clone_path =
         seed_playground_clone ~base_path:dir
@@ -403,9 +403,9 @@ let test_with_sandbox_cleans_up_on_exception () =
       Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
       Unix.putenv "MASC_BASE_PATH" dir;
-      let config = Room.default_config dir in
-      let _msg = Room.init config ~agent_name:None in
-      let _join = Room.join config ~agent_name:"exc-agent"
+      let config = Coord.default_config dir in
+      let _msg = Coord.init config ~agent_name:None in
+      let _join = Coord.join config ~agent_name:"exc-agent"
         ~capabilities:["test"] () in
       let _clone_path =
         seed_playground_clone ~base_path:dir

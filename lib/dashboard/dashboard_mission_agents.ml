@@ -108,10 +108,10 @@ type archived_agent_meta = {
 }
 
 let build_task_lookup config =
-  if not (Room.is_initialized config) then
+  if not (Coord.is_initialized config) then
     []
   else
-    Room.get_tasks_raw config
+    Coord.get_tasks_raw config
     |> List.filter_map (fun (task : Types.task) ->
            if String.trim task.id = "" then None
            else Some (task.id, Printf.sprintf "%s · %s" task.id (compact_text task.title)))
@@ -150,7 +150,7 @@ let latest_message_to agent_name messages =
     None messages
 
 let read_recent_room_event_lines config ~limit =
-  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
     let month_dirs =
@@ -270,8 +270,8 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
-    if Room.is_initialized config then
-      Room.get_messages_raw config ~since_seq:0 ~limit:200
+    if Coord.is_initialized config then
+      Coord.get_messages_raw config ~since_seq:0 ~limit:200
     else
       []
   in
@@ -284,7 +284,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
         | None -> Some id)
   in
   let room_agents =
-    if Room.is_initialized config then Room.get_agents_raw config else []
+    if Coord.is_initialized config then Coord.get_agents_raw config else []
   in
   let room_agent_by_name =
     room_agents

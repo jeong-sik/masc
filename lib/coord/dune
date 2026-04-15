@@ -1,0 +1,54 @@
+(include_subdirs no)
+(library
+ (name masc_coord)
+ (public_name masc_mcp.masc_coord)
+ (wrapped false)
+ (modules
+  coord_backlog
+  coord_bootstrap
+  coord_broadcast
+  coord_hooks
+  coord_identity
+  coord_task_id
+  coord_utils_backend_setup
+  coord_utils
+  coord_utils_ops
+  coord_utils_paths_backend
+  coord_state
+  coord_eio
+  coord_agent
+  coord_gc
+  coord_init
+  coord_lifecycle
+  coord_portal
+  coord_query
+  coord_status
+  coord_task
+  coord_task_schedule
+  coord_git
+  coord_worktree
+  mention
+  resilience
+  heartbeat
+  nickname)
+ (libraries
+  masc_types
+  masc_core
+  masc_config
+  masc_log
+  masc_backend
+  masc_eio_context
+  masc_process
+  time_compat
+  fs_compat
+  yojson
+  unix
+  re
+  re.str
+  re.pcre
+  eio
+  eio.unix
+  uri
+  uuidm
+  digestif)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

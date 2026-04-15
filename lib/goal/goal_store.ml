@@ -183,17 +183,17 @@ let parse_review_outcome s =
 let clamp_priority p = max 1 (min 5 p)
 
 let goals_path config =
-  Filename.concat (Room.masc_dir config) "goals.json"
+  Filename.concat (Coord.masc_dir config) "goals.json"
 
 let snapshots_dir config =
-  Filename.concat (Room.masc_dir config) "goals_snapshots"
+  Filename.concat (Coord.masc_dir config) "goals_snapshots"
 
 let scheduler_state_path config =
-  Filename.concat (Room.masc_dir config) "goals_scheduler_state.json"
+  Filename.concat (Coord.masc_dir config) "goals_scheduler_state.json"
 
 let ensure_dirs config =
-  Room.mkdir_p (Room.masc_dir config);
-  Room.mkdir_p (snapshots_dir config);
+  Coord.mkdir_p (Coord.masc_dir config);
+  Coord.mkdir_p (snapshots_dir config);
   ()
 
 let default_state () =
@@ -202,8 +202,8 @@ let default_state () =
 let read_state config =
   ensure_dirs config;
   let path = goals_path config in
-  if Room.path_exists config path then
-    let json = Room.read_json config path in
+  if Coord.path_exists config path then
+    let json = Coord.read_json config path in
     match state_of_yojson json with
     | Ok s -> s
     | Error _ -> default_state ()
@@ -212,7 +212,7 @@ let read_state config =
 
 let write_state config st =
   ensure_dirs config;
-  Room.write_json config (goals_path config) (state_to_yojson st)
+  Coord.write_json config (goals_path config) (state_to_yojson st)
 
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
@@ -228,7 +228,7 @@ let replace_goal goals updated =
 
 let update_state config f =
   let lock_path = goals_path config in
-  Room.with_file_lock config lock_path (fun () ->
+  Coord.with_file_lock config lock_path (fun () ->
     let st = read_state config in
     let st' = f st in
     write_state config st';
@@ -377,7 +377,7 @@ let snapshot config ~mode =
   let path =
     Filename.concat (snapshots_dir config) (snapshot_id ^ ".json")
   in
-  Room.write_json config path (snapshot_to_yojson snap);
+  Coord.write_json config path (snapshot_to_yojson snap);
   snap
 
 let parse_yyyy_mm_dd s =
@@ -495,4 +495,4 @@ let active_goals config =
   list_goals config ~status:Active ()
 
 let has_scheduler_state config =
-  Room.path_exists config (scheduler_state_path config)
+  Coord.path_exists config (scheduler_state_path config)

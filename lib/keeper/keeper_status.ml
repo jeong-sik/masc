@@ -221,6 +221,10 @@ let handle_keeper_list ctx args : tool_result =
                 if String.trim m.runtime.last_speech_act = ""
                 then `Null
                 else `String m.runtime.last_speech_act);
+              ("last_social_transition_reason",
+                if String.trim m.runtime.last_social_transition_reason = ""
+                then `Null
+                else `String m.runtime.last_social_transition_reason);
               ("last_blocker",
                 if String.trim m.runtime.last_blocker = ""
                 then `Null

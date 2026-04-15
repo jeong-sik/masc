@@ -16,7 +16,7 @@ type node_status =
   | Open | Resolved
   | Approved | Denied
   | Running | Paused | Stopped | Finalized
-  | Observed | Room | Unset
+  | Observed | Coord | Unset
 
 val node_status_to_string : node_status -> string
 val node_status_of_string : string -> node_status
@@ -109,7 +109,7 @@ val client_count : unit -> int
 val format_sse_event : event -> string
 
 val emit :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?actor:entity_ref ->
   ?subject:entity_ref ->
   ?tags:string list ->
@@ -119,19 +119,19 @@ val emit :
   event
 
 val list_events :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
   unit ->
   event list
 
-val latest_seq : Room_utils.config -> int
+val latest_seq : Coord_utils.config -> int
 
 (** {1 JSON responses} *)
 
 val json_response :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -139,7 +139,7 @@ val json_response :
   Yojson.Safe.t
 
 val graph_json :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?kinds:string list ->
   ?limit:int ->
   ?timeline_limit:int ->
@@ -161,7 +161,7 @@ type agent_span = {
 val agent_span_to_yojson : agent_span -> Yojson.Safe.t
 
 val agent_spans_json :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?limit:int ->
   ?since_ms:int ->
   unit ->

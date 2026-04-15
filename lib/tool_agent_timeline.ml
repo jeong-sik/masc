@@ -4,9 +4,9 @@
     a single chronological timeline for a given agent.
 
     Data sources:
-    - Agent join status (Room.get_agents_raw)
-    - Task state transitions (Room.get_tasks_raw)
-    - Broadcast messages (Room.get_messages_raw)
+    - Agent join status (Coord.get_agents_raw)
+    - Task state transitions (Coord.get_tasks_raw)
+    - Broadcast messages (Coord.get_messages_raw)
 *)
 
 open Tool_args
@@ -14,7 +14,7 @@ open Tool_args
 type tool_result = bool * string
 
 type context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
 }
 
@@ -60,9 +60,9 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
     ]
 
 (* Collect agent join/status events *)
-let agent_events (config : Room.config) ~agent_name :
+let agent_events (config : Coord.config) ~agent_name :
     timeline_event list =
-  let agents = Room.get_active_agents config in
+  let agents = Coord.get_active_agents config in
   agents
   |> List.filter (fun (a : Types.agent) -> String.equal a.name agent_name)
   |> List.filter_map (fun (a : Types.agent) ->
@@ -88,9 +88,9 @@ let agent_events (config : Room.config) ~agent_name :
          | None -> None)
 
 (* Collect task-related events for an agent *)
-let task_events (config : Room.config) ~agent_name :
+let task_events (config : Coord.config) ~agent_name :
     timeline_event list =
-  let tasks = Room.get_tasks_safe config in
+  let tasks = Coord.get_tasks_safe config in
   tasks
   |> List.filter_map (fun (task : Types.task) ->
          match task.task_status with
@@ -176,10 +176,10 @@ let task_events (config : Room.config) ~agent_name :
          | _ -> None)
 
 (* Collect broadcast messages from agent *)
-let message_events (config : Room.config) ~agent_name ~limit :
+let message_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
   let messages =
-    Room.get_messages_raw config ~since_seq:0 ~limit
+    Coord.get_messages_raw config ~since_seq:0 ~limit
   in
   messages
   |> List.filter (fun (m : Types.message) ->
@@ -206,7 +206,7 @@ let message_events (config : Room.config) ~agent_name ~limit :
          | None -> None)
 
 (* Collect tool call events from Activity Graph *)
-let tool_call_events (config : Room.config) ~agent_name ~limit :
+let tool_call_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -268,7 +268,7 @@ let tool_call_events (config : Room.config) ~agent_name ~limit :
   |> take limit
 
 (* Collect turn-completed events from Activity Graph *)
-let turn_completed_events (config : Room.config) ~agent_name ~limit :
+let turn_completed_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -378,7 +378,7 @@ let turn_completed_events (config : Room.config) ~agent_name ~limit :
   |> take limit
 
 (* Build the full timeline *)
-let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
+let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. 3600.0) in

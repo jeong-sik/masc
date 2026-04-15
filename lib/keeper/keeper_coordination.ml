@@ -1,4 +1,4 @@
-(** Keeper_coordination — Room presence, model selection, and room cursor management.
+(** Keeper_coordination — Coord presence, model selection, and room cursor management.
 
     Checkpoint/compaction/logging functions are delegated to {!Keeper_exec_context}
     (single source of truth) and re-exported here for backward compatibility

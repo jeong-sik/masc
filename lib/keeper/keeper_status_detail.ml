@@ -1026,6 +1026,10 @@ let handle_keeper_status ctx args : tool_result =
                if String.trim m.runtime.last_speech_act = ""
                then `Null
                else `String m.runtime.last_speech_act);
+             ("last_transition_reason",
+               if String.trim m.runtime.last_social_transition_reason = ""
+               then `Null
+               else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
                if String.trim m.runtime.last_blocker = ""
                then `Null
@@ -1088,8 +1092,8 @@ let handle_keeper_status ctx args : tool_result =
              ("evidence_dir", `String
                (Filename.concat ctx.config.base_path
                  (Printf.sprintf ".masc/evidence/%s/%s"
-                   (Room_utils.safe_filename m.name)
-                   (Room_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
+                   (Coord_utils.safe_filename m.name)
+                   (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in

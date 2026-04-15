@@ -40,7 +40,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
       []
 
 let read_keeper_memory_summary
-    (config : Room.config)
+    (config : Coord.config)
     ~(name : string)
     ~(max_bytes : int)
     ~(max_lines : int)

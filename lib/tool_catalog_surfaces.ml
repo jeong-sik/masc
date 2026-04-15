@@ -111,7 +111,7 @@ type surface =
 
 let public_mcp_surface_tools =
   [
-    (* Room lifecycle *)
+    (* Coord lifecycle *)
     "masc_start"; "masc_join"; "masc_leave"; "masc_status";
     (* Messaging *)
     "masc_broadcast"; "masc_messages"; "masc_who";

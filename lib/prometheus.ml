@@ -377,7 +377,7 @@ let set_pending_tasks count =
   set_gauge "masc_pending_tasks" (float_of_int count)
 
 (** Reconcile active_agents gauge with existing agent files on disk.
-    Call after Room/server initialization to sync Prometheus state. *)
+    Call after Coord/server initialization to sync Prometheus state. *)
 let reconcile_active_agents_gauge masc_dir =
   let agents_dir = Filename.concat masc_dir "agents" in
   if Sys.file_exists agents_dir && Sys.is_directory agents_dir then

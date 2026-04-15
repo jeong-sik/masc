@@ -53,7 +53,7 @@ let write_json path json =
 
 let write_keeper_toml_exn config ~name =
   let keepers_dir =
-    Filename.concat (Room.masc_root_dir config) "config/keepers"
+    Filename.concat (Coord.masc_root_dir config) "config/keepers"
   in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
@@ -66,7 +66,8 @@ proactive_enabled = false
 |}
 
 let write_keeper_meta_exn ?(autoboot_enabled = true)
-    ?(social_model = "bdi_speech_v1") config ~name ~trace_id =
+    ?(social_model = "bdi_speech_v1")
+    ?(last_social_transition_reason = "") config ~name ~trace_id =
   let json =
     `Assoc
       [
@@ -75,6 +76,7 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
         ("trace_id", `String trace_id);
         ("goal", `String "test keeper");
         ("social_model", `String social_model);
+        ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
       ]
   in
@@ -127,11 +129,11 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_toml_exn config ~name:"dot.name";
-      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
@@ -173,10 +175,10 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
-      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn
@@ -198,8 +200,8 @@ let test_keeper_list_normalizes_unknown_social_model () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
         ~social_model:"experimental_v99";
@@ -221,6 +223,43 @@ let test_keeper_list_normalizes_unknown_social_model () =
             Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
       | None -> fail "expected sangsu row in keeper list")
 
+let test_keeper_list_exposes_last_social_transition_reason () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
+        ~last_social_transition_reason:"tool_only:visible_reply";
+      register_keeper_offline_exn config ~name:"sangsu";
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
+      in
+      check bool "tool keeper list ok" true ok;
+      let json = parse_json_exn body in
+      match keeper_json_by_name json "sangsu" with
+      | Some keeper ->
+          check string "transition reason surfaced" "tool_only:visible_reply"
+            Yojson.Safe.Util.(
+              keeper |> member "last_social_transition_reason" |> to_string)
+      | None -> fail "expected sangsu row in keeper list")
+
 let () =
   run "keeper_meta_listing"
     [
@@ -232,5 +271,7 @@ let () =
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
           test_case "tool keeper list normalizes unknown social model" `Quick
             test_keeper_list_normalizes_unknown_social_model;
+          test_case "tool keeper list exposes last social transition reason"
+            `Quick test_keeper_list_exposes_last_social_transition_reason;
         ] );
     ]

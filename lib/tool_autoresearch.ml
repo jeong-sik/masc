@@ -321,7 +321,7 @@ let handle_stop (ctx : context) args =
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-        let _config = Room.default_config ctx.base_path in
+        let _config = Coord.default_config ctx.base_path in
         broadcast_loop_lifecycle "autoresearch_stopped" state;
         (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
         | Some _link ->
@@ -453,8 +453,7 @@ let _tool_spec_system_internal = [ "masc_autoresearch_status" ]
 let tool_required_permission = function
   | "masc_autoresearch_status" ->
       Some Types.CanReadState
-  | "masc_autoresearch_start" | "masc_autoresearch_swarm_start"
-  | "masc_repo_synthesis_swarm_start" | "masc_autoresearch_cycle"
+  | "masc_autoresearch_start" | "masc_autoresearch_cycle"
   | "masc_autoresearch_inject" | "masc_autoresearch_stop" ->
       Some Types.CanAdmin
   | _ -> None

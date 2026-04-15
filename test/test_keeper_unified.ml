@@ -206,8 +206,8 @@ let test_observe_uses_precollected_board_events () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
            ~title:"Need sangsu" ~content:"@test-keeper please check this"
@@ -240,8 +240,8 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
            ~title:"General update" ~content:"No direct mention here"
@@ -271,8 +271,8 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       let post_id =
         match
           Masc_mcp.Board_dispatch.create_post ~author:"alice"
@@ -1380,7 +1380,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let validation : Agent_sdk.Raw_trace.run_validation = {
         run_ref = sample_run_ref; ok = true;
         checks = []; evidence = ["tool_paired:keeper_board_list"];
@@ -1569,7 +1569,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let validation : Agent_sdk.Raw_trace.run_validation = {
         run_ref = sample_run_ref; ok = true;
         checks = []; evidence = ["tool_paired:keeper_fs_read"];
@@ -1642,7 +1642,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       KR.clear ();
       Unix.putenv "MASC_BASE_PATH" base_dir;
       let meta = make_meta "phase-gated-keeper" in
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       ignore (KR.register ~base_path:base_dir meta.name meta);
       (match KR.dispatch_event ~base_path:base_dir meta.name KP.Operator_pause with
        | Ok _ -> ()
@@ -1677,9 +1677,9 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "keeper cycle passes trajectory_acc to agent run" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "~trajectory_acc");
-  check bool "keeper cycle resolves masc root via Room.masc_root_dir" true
+  check bool "keeper cycle resolves masc root via Coord.masc_root_dir" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "Room.masc_root_dir config");
+       "Coord.masc_root_dir config");
   check bool "keeper cycle finalizes trajectory on completion/failure" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Trajectory.finalize trajectory_acc")
@@ -1729,13 +1729,16 @@ let test_metrics_persist_social_state_fields () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let routed, social_state =
+      let routed, social_state, transition_reason =
         KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation ~previous_state:None result
       in
       let updated =
         UT.update_metrics_from_result minimal_meta ~latency_ms:100
-          ~observation:base_observation ~social_state routed
+          ~observation:base_observation ~social_state
+          ~social_transition_reason:
+            (KSM.transition_reason_to_string transition_reason)
+          routed
       in
       check string "active desire tracked" "maintain_quiet_readiness"
         updated.runtime.last_active_desire;
@@ -1743,6 +1746,8 @@ let test_metrics_persist_social_state_fields () =
         updated.runtime.last_current_intention;
       check string "speech act tracked" "stay_silent"
         updated.runtime.last_speech_act;
+      check string "transition reason tracked" "headers:explicit_social_headers"
+        updated.runtime.last_social_transition_reason;
       check string "no blocker tracked" "" updated.runtime.last_blocker;
       check string "no need tracked" "" updated.runtime.last_need)
 
@@ -1750,7 +1755,8 @@ let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
     UT.update_metrics_from_failure minimal_meta ~latency_ms:250
-      ~observation:base_observation ~reason ()
+      ~observation:base_observation ~reason
+      ~social_transition_reason:"failure:run_error" ()
   in
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
   check int "latency recorded" 250 updated.runtime.usage.last_latency_ms;
@@ -1781,7 +1787,9 @@ let test_metrics_failure_response () =
          true
        with Not_found -> false
      in
-     found)
+     found);
+  check string "failure transition reason tracked" "failure:run_error"
+    updated.runtime.last_social_transition_reason
 
 let test_prompt_includes_board_activity_section () =
   let obs =
@@ -2441,7 +2449,7 @@ let test_social_model_silences_skip_only_turn () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let routed, state =
+      let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation ~previous_state:None result
       in
@@ -2458,7 +2466,7 @@ let test_social_model_unknown_meta_falls_back_to_baseline () =
     make_run_result ~text:"I can respond normally." ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta ~observation:base_observation
       ~previous_state:None result
   in
@@ -2475,7 +2483,7 @@ let test_social_model_unknown_header_falls_back_to_baseline () =
       ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state:None result
   in
@@ -2492,7 +2500,7 @@ let test_social_model_infers_visible_reply_without_headers () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let routed, state =
+      let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation ~previous_state:None result
       in
@@ -2510,7 +2518,7 @@ let test_social_model_empty_text_without_headers_stays_silent () =
     make_run_result ~text:"" ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, transition_reason =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state:None result
   in
@@ -2520,6 +2528,9 @@ let test_social_model_empty_text_without_headers_stays_silent () =
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "blocker notes empty protocol violation"
     (Some "no tool calls and no social headers") state.blocker;
+  check string "transition reason"
+    "protocol_violation:no_tool_calls_and_no_social_headers"
+    (KSM.transition_reason_to_string transition_reason);
   check string "visible response suppressed" "" routed.response_text;
   check (list string) "no synthetic tools" [] routed.tools_used
 
@@ -2531,7 +2542,7 @@ let test_social_model_state_only_reply_stays_silent () =
       ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state:None result
   in
@@ -2549,7 +2560,7 @@ let test_social_model_strips_state_block_from_visible_reply () =
       ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state:None result
   in
@@ -2579,9 +2590,9 @@ let test_social_model_routes_blocker_to_board_post () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
-      let routed, state =
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation ~previous_state:None result
       in
@@ -2610,7 +2621,7 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
     make_run_result ~text:"" ~tools:["masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
-  let routed, state =
+  let routed, state, transition_reason =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state:None result
   in
@@ -2619,6 +2630,8 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
   check string "delivery surface" "visible_reply"
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
+  check string "transition reason" "tool_only:visible_reply"
+    (KSM.transition_reason_to_string transition_reason);
   check bool "tool-only turn synthesizes visible response" true
     (contains_substring routed.response_text "Tools used: masc_status.");
   check (list string) "tool list preserved" ["masc_status"] routed.tools_used
@@ -2631,6 +2644,7 @@ let test_social_model_previous_state_of_meta_restores_runtime_fields () =
         {
           minimal_meta.runtime with
           last_speech_act = "request_help";
+          last_social_transition_reason = "headers:explicit_social_headers";
           last_active_desire = "seek_help";
           last_current_intention = "recover_tool_route";
           last_blocker = "tool route unavailable";
@@ -2674,7 +2688,7 @@ let test_social_model_tool_only_turn_carries_previous_state () =
           delivery_surface = Board_post;
         }
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state result
   in
@@ -2697,7 +2711,7 @@ let test_social_model_infers_board_comment_from_tool_use () =
     make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
-  let routed, state =
+  let routed, state, transition_reason =
     KSM.apply_to_result ~meta:minimal_meta
       ~observation:base_observation ~previous_state:None result
   in
@@ -2706,6 +2720,8 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check string "delivery surface" "board_comment"
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
+  check string "transition reason" "tool_only:comment_board"
+    (KSM.transition_reason_to_string transition_reason);
   check bool "tool turn keeps synthesized visible response" true
     (contains_substring routed.response_text
        "Tools used: keeper_board_comment, masc_status.");

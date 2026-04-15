@@ -2,9 +2,9 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
-let room_status_json (config : Room.config) : Yojson.Safe.t =
+let room_status_json (config : Coord.config) : Yojson.Safe.t =
   let room_state_opt =
-    if Room.is_initialized config then Some (Room.read_state config) else None
+    if Coord.is_initialized config then Some (Coord.read_state config) else None
   in
   let project =
     match room_state_opt with
@@ -30,16 +30,16 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
     ]
 
 let tasks_safe config =
-  if Room.is_initialized config then Room.get_tasks_safe config
+  if Coord.is_initialized config then Coord.get_tasks_safe config
   else []
 
 let agents_safe config =
-  if Room.is_initialized config then Room.get_active_agents config
+  if Coord.is_initialized config then Coord.get_active_agents config
   else []
 
 let messages_safe config =
-  if Room.is_initialized config then
-    Room.get_messages_raw config ~since_seq:0 ~limit:50
+  if Coord.is_initialized config then
+    Coord.get_messages_raw config ~since_seq:0 ~limit:50
   else []
 
 let assoc_upsert fields key value =

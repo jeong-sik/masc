@@ -411,7 +411,7 @@ let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
-      ~(config : Room.config)
+      ~(config : Coord.config)
       (signal : Board_dispatch.keeper_board_signal)
   =
   let running_names =
@@ -1214,7 +1214,7 @@ let refresh_work_as_heartbeat
         (fun _room_id ->
            try
              ignore
-               (Room.heartbeat
+               (Coord.heartbeat
                   ctx.config
                   ~agent_name:meta_after_proactive.agent_name);
              true
@@ -1249,7 +1249,7 @@ let dispatch_recurring_keepalive
         | Keeper_recurring.Broadcast msg ->
           (try
              let _ =
-               Room.broadcast
+               Coord.broadcast
                  ctx.config
                  ~from_agent:meta_after_proactive.agent_name
                  ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
@@ -1402,7 +1402,7 @@ let run_heartbeat_loop
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Room.heartbeat success after turn. *)
+     Updated ONLY on Coord.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let max_silence () =
@@ -1537,7 +1537,7 @@ let run_heartbeat_loop
           raise Keeper_registry.Keeper_fiber_crash
         end;
         (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Room.heartbeat to prove room I/O health.
+                 After turn, call Coord.heartbeat to prove room I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
                  On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
         refresh_work_as_heartbeat
@@ -1837,9 +1837,9 @@ let start_keeper_grpc_heartbeat
 
 let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_meta =
   try
-    if not (Room_utils.is_initialized ctx.config)
+    if not (Coord_utils.is_initialized ctx.config)
     then (
-      let (_init_msg : string) = Room.init ctx.config ~agent_name:None in
+      let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
       ());
     let synced = ensure_keeper_room_presence ctx.config m in
     (match write_meta ctx.config synced with

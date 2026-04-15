@@ -355,7 +355,7 @@ let should_audit ~governance_level risk =
   | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
   | None -> false
 
-let audit_decision (config : Room.config) (decision : governance_decision) =
+let audit_decision (config : Coord.config) (decision : governance_decision) =
   let action_str =
     match decision.action with
     | `Allow -> "allow"

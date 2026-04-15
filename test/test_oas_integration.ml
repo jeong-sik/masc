@@ -78,7 +78,7 @@ let test_oas_sse_bridge_persists_native_events () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let bus = Event_bus.create () in
       Sse.set_clock (Eio.Stdenv.clock env);
       try
@@ -96,7 +96,7 @@ let test_oas_sse_bridge_persists_native_events () =
           Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
           let store =
             Dated_jsonl.create
-              ~base_dir:(Filename.concat (Room.masc_root_dir config) "oas-events")
+              ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
               ()
           in
           let events = Dated_jsonl.read_recent store 5 in

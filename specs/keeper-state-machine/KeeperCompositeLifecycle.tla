@@ -390,14 +390,16 @@ OverflowedEventuallyResolves ==
 
 \* ── Bug models (each violates a distinct invariant) ──
 
-\* NextBuggyCascade — SelectCascade without measurement
+\* NextBuggyCascade — enter cascade selection without measurement
 \* Violates: NoCascadeBeforeMeasurement
 BugCascadeBeforeMeasurement ==
-    /\ kdp_decision = "tool_policy_selected"   \* skip measurement ownership
+    /\ ktc_turn_phase = "prompting"
+    /\ shared_measurement = 0
+    /\ kdp_decision = "undecided"
     /\ kcl_cascade_state = "idle"
-    /\ kcl_cascade_state' = "trying"
-    /\ ktc_turn_phase' = "executing"
-    /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
+    /\ kdp_decision' = "tool_policy_selected"
+    /\ kcl_cascade_state' = "selecting"
+    /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kmc_compaction,
                    shared_measurement, measurement_turn, turn_tick>>
 
 NextBuggyCascade == Next \/ BugCascadeBeforeMeasurement

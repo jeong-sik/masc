@@ -4,7 +4,7 @@ module ES = Masc_mcp.Keeper_exec_status
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let keeper_health_testable : KT.keeper_health Alcotest.testable =
   Alcotest.testable
@@ -266,7 +266,7 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
         };
     }
   in
-  let config = Room.default_config "/tmp/test-keeper-exec-status-slot-timeout" in
+  let config = Coord.default_config "/tmp/test-keeper-exec-status-slot-timeout" in
   ignore (KR.register ~base_path:config.base_path meta.name meta);
   let runtime = KSB.runtime_surface_json config meta in
   let open Yojson.Safe.Util in
@@ -287,7 +287,7 @@ let test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit 
     "Mutating tools [keeper_fs_edit] committed before the turn timed out."
   in
   let config =
-    Room.default_config "/tmp/test-keeper-exec-status-manual-reconcile"
+    Coord.default_config "/tmp/test-keeper-exec-status-manual-reconcile"
   in
   ignore (KR.register ~base_path:config.base_path meta.name meta);
   KR.set_failure_reason ~base_path:config.base_path meta.name

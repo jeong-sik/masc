@@ -94,7 +94,7 @@ let prune_active_goal_ids ~(valid_goal_ids : string list)
 
 (** Run a full sweep: goals + keeper active_goal_ids.
     Writes updated state to disk. *)
-let run ?(config = default_config) (room_config : Room.config) : sweep_result =
+let run ?(config = default_config) (room_config : Coord.config) : sweep_result =
   let st = Goal_store.read_state room_config in
   let goals', partial = sweep_goals ~config st.goals in
   let valid_ids = List.map (fun (g : Goal_store.goal) -> g.id) goals' in
@@ -108,7 +108,7 @@ let run ?(config = default_config) (room_config : Room.config) : sweep_result =
   (* Prune active_goal_ids from all keeper metas *)
   let total_orphans = ref 0 in
   let keeper_dir =
-    Filename.concat (Room.masc_dir room_config) "keepers"
+    Filename.concat (Coord.masc_dir room_config) "keepers"
   in
   if Sys.file_exists keeper_dir && Sys.is_directory keeper_dir then
     Sys.readdir keeper_dir

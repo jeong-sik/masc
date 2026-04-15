@@ -123,7 +123,7 @@ let reduce_event ~nodes ~edges (value : event) =
   let sw = semantic_multiplier value.kind in
   let room_node_id = "room:" ^ value.room_id in
   ensure_node nodes ~id:room_node_id ~kind:"room" ~label:value.room_id
-    ~status:Room ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
+    ~status:Coord ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
   let actor_id =
     match value.actor with
     | Some actor ->

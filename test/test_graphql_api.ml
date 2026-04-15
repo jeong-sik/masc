@@ -1,8 +1,8 @@
 (** GraphQL API tests (read-only queries). *)
 
 module Graphql_api = Masc_mcp.Graphql_api
-module Room = Masc_mcp.Room
-module Room_utils = Room_utils
+module Coord = Masc_mcp.Coord
+module Coord_utils = Coord_utils
 
 let temp_dir () =
   let dir = Filename.temp_file "test_graphql_api_" "" in
@@ -32,8 +32,8 @@ let test_status_query () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let config = Room_utils.default_config base_path in
-  let _ = Room.init config ~agent_name:None in
+  let config = Coord_utils.default_config base_path in
+  let _ = Coord.init config ~agent_name:None in
   let json = graphql_query config "{ status { project paused } }" in
   let open Yojson.Safe.Util in
   let project = json |> member "data" |> member "status" |> member "project" |> to_string in
@@ -46,9 +46,9 @@ let test_tasks_connection () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let config = Room_utils.default_config base_path in
-  let _ = Room.init config ~agent_name:None in
-  let _ = Room.add_task config ~title:"GraphQL task" ~priority:2 ~description:"test" in
+  let config = Coord_utils.default_config base_path in
+  let _ = Coord.init config ~agent_name:None in
+  let _ = Coord.add_task config ~title:"GraphQL task" ~priority:2 ~description:"test" in
   let json =
     graphql_query config
       "{ tasks(first: 10) { totalCount edges { node { title } } } }"

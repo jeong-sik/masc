@@ -244,7 +244,7 @@
    convergence
    swarm
    swarm_goal_loop
-   room
+   coord
    run_eio
    team_context
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
@@ -281,7 +281,7 @@
    tool_task
    tool_task_schemas
    task_dispatch
-   tool_room
+   tool_coord
    workflow_guide
    tool_control
    tool_misc
@@ -314,7 +314,7 @@
    tool_usage_log
    keeper_tool_call_log
    tool_inline_dispatch_types
-   tool_inline_dispatch_room
+   tool_inline_dispatch_coord
    tool_inline_dispatch_comm
    tool_inline_dispatch
    tool_inline_dispatch_extra
@@ -647,7 +647,7 @@
   tool_local_runtime_probe
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
-  tool_inline_dispatch_room
+  tool_inline_dispatch_coord
   tool_inline_dispatch_comm
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
@@ -770,7 +770,7 @@
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
    ;; Room coordination (extracted sub-library)
-   masc_room
+   masc_coord
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    ;; Dashboard utilities (extracted sub-library)

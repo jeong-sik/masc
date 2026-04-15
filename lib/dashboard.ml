@@ -193,8 +193,8 @@ let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
   | `Null -> []
   | _ -> []
 
-let worktrees_section (config : Room_utils.config) : section =
-  let json = Room.worktree_list config in
+let worktrees_section (config : Coord_utils.config) : section =
+  let json = Coord.worktree_list config in
   let worktrees = parse_worktrees json in
   let content = List.map (fun (branch, path) ->
     Printf.sprintf "%s -> %s" branch (truncate_path path)
@@ -221,42 +221,42 @@ let rec count_lock_files path =
       0
   with Sys_error _ -> 0
 
-let count_locks_for_dir (config : Room_utils.config) locks_dir =
+let count_locks_for_dir (config : Coord_utils.config) locks_dir =
   match config.backend with
-  | Room_utils.FileSystem _ -> count_lock_files locks_dir
-  | Room_utils.Memory _ ->
-      (match Room_utils.key_of_path config locks_dir with
+  | Coord_utils.FileSystem _ -> count_lock_files locks_dir
+  | Coord_utils.Memory _ ->
+      (match Coord_utils.key_of_path config locks_dir with
        | Some key_prefix ->
-           (match Room_utils.backend_list_keys config ~prefix:(key_prefix ^ ":") with
+           (match Coord_utils.backend_list_keys config ~prefix:(key_prefix ^ ":") with
             | Ok keys -> List.length keys
             | Error _ -> 0)
        | None -> 0)
 
-let count_locks_for_room (config : Room_utils.config) room_id =
-  let locks_dir = Filename.concat (Room.room_dir_for config room_id) "locks" in
+let count_locks_for_room (config : Coord_utils.config) room_id =
+  let locks_dir = Filename.concat (Coord.room_dir_for config room_id) "locks" in
   count_locks_for_dir config locks_dir
 
-let tempo_section (config : Room_utils.config) : section =
+let tempo_section (config : Coord_utils.config) : section =
   let state = Tempo.get_tempo config in
   let content = [Tempo.format_state state] in
   { title = "Tempo"; content; empty_msg = "" }
 
-let ordered_room_ids (_config : Room_utils.config) =
+let ordered_room_ids (_config : Coord_utils.config) =
   let current_room = "default" in
   (current_room, [ current_room ])
 
-let room_snapshot (config : Room_utils.config) ~current_room room_id =
+let room_snapshot (config : Coord_utils.config) ~current_room room_id =
   {
     room_id;
     is_current = String.equal room_id current_room;
-    agents = Room.get_active_agents config;
-    tasks = Room.get_tasks_safe config;
-    messages = Room.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
+    agents = Coord.get_active_agents config;
+    tasks = Coord.get_tasks_safe config;
+    messages = Coord.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
     locks = count_locks_for_room config room_id;
   }
 
-let swarm_json (config : Room_utils.config) =
-  if Room.is_initialized config then Swarm_status.build_json config
+let swarm_json (config : Coord_utils.config) =
+  if Coord.is_initialized config then Swarm_status.build_json config
   else Swarm_status.empty_json
 
 let swarm_lane_summaries now json =
@@ -306,7 +306,7 @@ let swarm_lane_summaries now json =
   | _ -> []
 
 (** Operator-friendly swarm health section with translated labels *)
-let swarm_health_section now (_config : Room_utils.config) (json : Yojson.Safe.t) : section =
+let swarm_health_section now (_config : Coord_utils.config) (json : Yojson.Safe.t) : section =
   let open Yojson.Safe.Util in
   let lanes = swarm_lane_summaries now json in
   let next_action = json |> member "recommended_next_action" in
@@ -397,11 +397,11 @@ let locks_section locks : section =
   let content = [Printf.sprintf "%d" locks] in
   { title = "Locks"; content; empty_msg = "0" }
 
-let count_locks (config : Room_utils.config) : int =
+let count_locks (config : Coord_utils.config) : int =
   count_locks_for_room config "default"
 
 (* Agent workflow summaries: recent activity per active agent *)
-let agent_workflow_section now (_config : Room_utils.config) (agents : Types.agent list) : section =
+let agent_workflow_section now (_config : Coord_utils.config) (agents : Types.agent list) : section =
   let content =
     agents
     |> List.filter (fun (a : Types.agent) ->
@@ -524,7 +524,7 @@ let attention_section now (snapshots : room_snapshot list)
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
-let generate ?(scope = All) (config : Room_utils.config) : string =
+let generate ?(scope = All) (config : Coord_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
@@ -563,7 +563,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
     ]
   in
   let tempo = Tempo.get_tempo config in
-  let worktrees = parse_worktrees (Room.worktree_list config) in
+  let worktrees = parse_worktrees (Coord.worktree_list config) in
   let total_locks =
     List.fold_left (fun acc s -> acc + s.locks) 0 snapshots
   in
@@ -574,7 +574,7 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
   let section_strs = List.map format_section sections in
   String.concat "\n\n" ([header] @ section_strs @ [footer])
 
-let generate_compact ?(scope = All) (config : Room_utils.config) : string =
+let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let (current_room, room_ids) = ordered_room_ids config in
   let now = Time_compat.now () in
   let snapshots =

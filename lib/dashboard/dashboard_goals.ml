@@ -167,9 +167,9 @@ let rec tree_node_to_json node =
       ("updated_at", `String g.updated_at);
     ]
 
-let dashboard_goals_tree_json ~(config : Room.config) : Yojson.Safe.t =
+let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
-  let tasks = Room.get_tasks_safe config in
+  let tasks = Coord.get_tasks_safe config in
   let forest = build_forest ~goals ~tasks in
   let total_goals = List.length goals in
   let active_goals =

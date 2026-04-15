@@ -3,13 +3,13 @@
     Only filter_visible_tool_names retained for keeper agent run. *)
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
 let filter_visible_tool_names ctx tool_names =
   let portal_open =
-    Option.is_some (Room.get_portal_target ctx.config ~agent_name:ctx.agent_name)
+    Option.is_some (Coord.get_portal_target ctx.config ~agent_name:ctx.agent_name)
   in
   List.filter
     (fun name ->

@@ -3,7 +3,7 @@ open Yojson.Safe.Util
 open Result_syntax
 
 type target_type =
-  | Room
+  | Coord
 
 type record = {
   judgment_id : string;
@@ -28,10 +28,10 @@ type record = {
 }
 
 let target_type_to_string = function
-  | Room -> "root"
+  | Coord -> "root"
 
 let target_type_of_string = function
-  | "root" | "room" | "namespace" -> Some Room
+  | "root" | "room" | "namespace" -> Some Coord
   | _ -> None
 
 let option_to_yojson = Json_util.option_to_yojson
@@ -40,7 +40,7 @@ let ensure_dir path =
   Fs_compat.mkdir_p path
 
 let operator_dir config =
-  Filename.concat (Room.masc_dir config) "operator"
+  Filename.concat (Coord.masc_dir config) "operator"
 
 let judgments_path config =
   Filename.concat (operator_dir config) "judgments.jsonl"

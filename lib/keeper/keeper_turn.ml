@@ -155,7 +155,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
-      let masc_root = Room.masc_root_dir ctx.config in
+      let masc_root = Coord.masc_root_dir ctx.config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root

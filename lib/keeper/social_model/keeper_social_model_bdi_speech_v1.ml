@@ -141,27 +141,34 @@ let inferred_text_reply_state ~(meta : keeper_meta)
 
 let inferred_tool_surface tools =
   if tools = [ "keeper_stay_silent" ] then
-    Some { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
+    Some
+      ( { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
+      , Types.Tool_only_stay_silent )
   else if List.mem "keeper_board_comment" tools then
     Some
-      {
-        speech_act = Types.Comment_board;
-        delivery_surface = Types.Board_comment;
-      }
+      ( {
+          speech_act = Types.Comment_board;
+          delivery_surface = Types.Board_comment;
+        }
+      , Types.Tool_only_comment_board )
   else if List.mem "keeper_board_post" tools then
-    Some { speech_act = Types.Post_board; delivery_surface = Types.Board_post }
+    Some
+      ( { speech_act = Types.Post_board; delivery_surface = Types.Board_post }
+      , Types.Tool_only_post_board )
   else if List.mem "keeper_broadcast" tools then
     Some
-      {
-        speech_act = Types.Broadcast;
-        delivery_surface = Types.Broadcast_surface;
-      }
+      ( {
+          speech_act = Types.Broadcast;
+          delivery_surface = Types.Broadcast_surface;
+        }
+      , Types.Tool_only_broadcast )
   else if List.mem "keeper_task_claim" tools || List.mem "masc_claim_next" tools then
     Some
-      {
-        speech_act = Types.Claim_task;
-        delivery_surface = Types.Task_claim_surface;
-      }
+      ( {
+          speech_act = Types.Claim_task;
+          delivery_surface = Types.Task_claim_surface;
+        }
+      , Types.Tool_only_claim_task )
   else
     None
 
@@ -169,16 +176,17 @@ let tool_only_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : state option)
     ~(result : Keeper_agent_run.run_result) =
-  let output =
+  let output, transition_reason =
     match inferred_tool_surface result.tools_used with
     | Some routed -> routed
     | None ->
-        {
-          speech_act = Types.Inform;
-          delivery_surface = Types.Visible_reply;
-        }
+        ( {
+            speech_act = Types.Inform;
+            delivery_surface = Types.Visible_reply;
+          }
+        , Types.Tool_only_visible_reply )
   in
-  (make_state ~meta ~observation ?previous_state (), output)
+  (make_state ~meta ~observation ?previous_state (), output, transition_reason)
 
 let social_state_of_headers ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
@@ -222,13 +230,20 @@ let social_state_of_headers ~(meta : keeper_meta)
               ?blocker:(Protocol.nonempty_header_opt headers "BLOCKER")
               ?need:(Protocol.nonempty_header_opt headers "NEED")
               (),
-            { speech_act; delivery_surface } )
+            { speech_act; delivery_surface },
+            Types.Explicit_social_headers )
       | _ ->
-          protocol_violation_state ~meta ~observation
-            ~reason:"invalid social headers")
+          let state, output =
+            protocol_violation_state ~meta ~observation
+              ~reason:"invalid social headers"
+          in
+          (state, output, Types.Protocol_violation_invalid_social_headers))
   | _ ->
-      protocol_violation_state ~meta ~observation
-        ~reason:"missing social headers"
+      let state, output =
+        protocol_violation_state ~meta ~observation
+          ~reason:"missing social headers"
+      in
+      (state, output, Types.Protocol_violation_missing_social_headers)
 
 let should_dedupe_request_help ~(meta : keeper_meta) ~(blocker : string option) =
   match blocker with
@@ -300,7 +315,7 @@ let transition (previous_state : state option) (input : input) =
   if result.tools_used <> [] then
     tool_only_state ~meta ~observation ~previous_state ~result
   else if input.headers <> [] then
-    let state, output =
+    let state, output, transition_reason =
       social_state_of_headers ~meta ~observation ~previous_state input.headers
     in
     if input.has_text_reply
@@ -309,14 +324,32 @@ let transition (previous_state : state option) (input : input) =
        | Some "missing social headers" | Some "invalid social headers" -> true
        | _ -> false
     then
-      inferred_text_reply_state ~meta ~observation ?previous_state ()
+      let state, output =
+        inferred_text_reply_state ~meta ~observation ?previous_state ()
+      in
+      let fallback_reason =
+        match transition_reason with
+        | Types.Protocol_violation_missing_social_headers ->
+            Types.Missing_headers_fallback_visible_reply
+        | Types.Protocol_violation_invalid_social_headers ->
+            Types.Invalid_headers_fallback_visible_reply
+        | _ ->
+            Types.Inferred_visible_reply
+      in
+      (state, output, fallback_reason)
     else
-      (state, output)
+      (state, output, transition_reason)
   else if input.has_text_reply then
-    inferred_text_reply_state ~meta ~observation ?previous_state ()
+    let state, output =
+      inferred_text_reply_state ~meta ~observation ?previous_state ()
+    in
+    (state, output, Types.Inferred_visible_reply)
   else
-    protocol_violation_state ~meta ~observation
-      ~reason:"no tool calls and no social headers"
+    let state, output =
+      protocol_violation_state ~meta ~observation
+        ~reason:"no tool calls and no social headers"
+    in
+    (state, output, Types.Protocol_violation_no_tools_no_social_headers)
 
 let apply_output_to_result ~(meta : keeper_meta)
     ~(result : Keeper_agent_run.run_result)
@@ -372,9 +405,12 @@ let apply_to_result ~(meta : keeper_meta)
     }
   in
   let prior_state = Option.map state_of_social_state previous_state in
-  let state, output = transition prior_state input in
+  let state, output, transition_reason = transition prior_state input in
   let social_state = to_social_state state output in
-  apply_output_to_result ~meta ~result ~visible_response_body social_state
+  let result, social_state =
+    apply_output_to_result ~meta ~result ~visible_response_body social_state
+  in
+  (result, social_state, transition_reason)
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
@@ -392,4 +428,4 @@ let derive_failure_state ~(meta : keeper_meta)
   let output =
     { speech_act = Types.Defer; delivery_surface = Types.Silent }
   in
-  to_social_state state output
+  (to_social_state state output, Types.Failure_run_error)

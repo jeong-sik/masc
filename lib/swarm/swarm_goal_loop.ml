@@ -172,7 +172,7 @@ let evaluate_aggregate strategy ~aggregate_goal_expr metrics =
 (* ================================================================ *)
 
 let cancel_incomplete_tasks config ~agent_name =
-  let backlog = Room.read_backlog config in
+  let backlog = Coord.read_backlog config in
   let cancelled = ref 0 in
   let tasks =
     List.map
@@ -187,7 +187,7 @@ let cancel_incomplete_tasks config ~agent_name =
   let new_backlog : Types.backlog =
     { tasks; last_updated = Types.now_iso (); version = backlog.version + 1 }
   in
-  Room.write_backlog config new_backlog;
+  Coord.write_backlog config new_backlog;
   !cancelled
 
 let re_plan_and_dispatch config ~agent_name ~goals =

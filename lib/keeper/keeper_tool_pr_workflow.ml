@@ -6,7 +6,7 @@
 open Keeper_types
 open Keeper_exec_shared
 let handle_keeper_pr_workflow
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -79,7 +79,7 @@ let handle_keeper_pr_workflow
           [ "/bin/zsh"; "-lc"; shell ]
       in
       let repo_root =
-        match Room_git.git_root ~base_path:root with
+        match Coord_git.git_root ~base_path:root with
         | Some path -> path
         | None -> root
       in
@@ -170,7 +170,7 @@ let handle_keeper_pr_workflow
         ~finally:cleanup_worktree
         (fun () ->
       let _s1 = run_step "worktree_create" (fun () ->
-        if not (Room_git.is_git_repo ~base_path:root) then
+        if not (Coord_git.is_git_repo ~base_path:root) then
           Error "Not a git repository. MASC v2 requires .git directory for worktree isolation."
         else
           let worktrees_dir = Filename.concat repo_root ".worktrees" in
@@ -188,7 +188,7 @@ let handle_keeper_pr_workflow
           | Error _ as err -> err
           | Ok () ->
             let _ = run_sh ~cwd:repo_root ~timeout_sec:30.0 "git fetch origin" in
-            match Room_git.resolve_base_branch repo_root base_branch with
+            match Coord_git.resolve_base_branch repo_root base_branch with
             | Error e -> Error (Types.masc_error_to_string e)
             | Ok (resolved_base, fallback_from) ->
               resolved_base_branch := resolved_base;

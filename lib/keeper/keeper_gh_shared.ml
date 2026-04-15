@@ -69,7 +69,7 @@ let jq_filter = function
   | PR -> ".[] | .number"
   | Issue -> ".[] | select(.pull_request == null) | .number"
 
-let fetch_entity_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_kind)
+let fetch_entity_numbers ~(config : Coord.config) ~(repo_slug : string) ~(kind : entity_kind)
     : int list option
   =
   let endpoint =

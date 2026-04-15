@@ -1677,7 +1677,7 @@ let test_dispatch_keeper_phase_event_uses_room_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-phase-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -1698,7 +1698,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-outcome-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event

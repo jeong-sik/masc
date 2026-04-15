@@ -75,6 +75,11 @@ jobs:
       - name: Build
         run: opam exec -- dune build --release bin/main_eio.exe
 
+      - name: Release binary smoke (boot + README drift)
+        run: |
+          chmod +x scripts/release-binary-smoke.sh
+          scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
+
       - name: Package binary
         run: |
           mkdir -p dist

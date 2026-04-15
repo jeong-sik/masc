@@ -55,8 +55,8 @@ Room 내 모든 에이전트에게 전달되는 메시지. @mention으로 특정
 
 ## Architecture Terms
 
-**CPv2 (Command Plane V2)**
-MASC의 운영 관리 계층. Unit, Operation, Intent, Detachment 등의 계층적 관리 구조를 제공한다. Facade 패턴으로 여러 하위 모듈(`Cp_types`, `Cp_paths`, `Cp_serde`, `Cp_io`, `Cp_unit`, `Cp_snapshot`, `Cp_lifecycle`, `Cp_lifecycle_policy`)을 결합한다. `-> lib/command_plane_v2.ml`, `-> lib/command_plane/`
+**CPv2 (Command Plane V2)** — **scheduled for removal**
+별도 ledger 형태의 observation 레이어였다. Keeper FSM과 CP state machine 사이에 실제 결합이 없고(양방향 cross-reference 0줄), 정의된 HTTP `/api/v1/command-plane/*` 표면도 dashboard swarm view를 통해서만 간접 노출되었다. Unit(Company/Platoon/Squad/Agent_unit), Operation, Intent, Detachment는 이 purge에서 모두 함께 제거된다. `-> lib/command_plane_v2.ml`, `-> lib/command_plane/`
 
 **Chain Engine**
 노드 기반 실행 파이프라인 엔진. 23종의 노드 타입을 조합하여 LLM 호출, 도구 실행, 병렬 처리, 반복 등을 선언적으로 구성한다. JSON 또는 DSL로 체인을 정의하고 실행한다. `-> lib/chain/`
@@ -172,23 +172,8 @@ Task와 연결된 git worktree의 정보: branch, path, git_root, repo_name. Tas
 
 ## Execution
 
-**Operation**
-CPv2의 관리 단위. 목표(objective), 할당된 Unit, 자율성 수준, 정책, 예산, 의존 관계를 포함한다. 상태 머신: `Planned -> Active -> Paused | Completed | Cancelled | Failed`. `-> lib/command_plane/cp_types.ml`
-
-**Unit (CPv2 Unit)**
-CPv2의 배포 가능한 조직 단위. 4가지 규모: `Company`(최상위), `Platoon`(중간), `Squad`(소규모), `Agent_unit`(개별). 각 Unit은 leader, roster, capability_profile, policy, budget을 가진다. `-> lib/command_plane/cp_types.ml`
-
-**Intent**
-CPv2에서 작업 의도를 선언하는 레코드. 상태 머신: `Adopted -> Active_intent -> Blocked_intent | Suspended_intent | Handoff_ready | Completed_intent | Dropped_intent`. 성공 지표, 불변 조건, 아티팩트 사전 조건을 명시한다. `-> lib/command_plane/cp_types.ml`
-
-**Detachment**
-Operation의 스케줄러 실체화. Operation이 실제 실행으로 옮겨질 때 생성되는 세션 연결 단위이다. `-> lib/command_plane/cp_types.ml`
-
-**Policy Envelope**
-CPv2 Unit에 적용되는 거버넌스 정책: policy_class, approval_class, tool_allowlist, model_allowlist, requires_human_for, autonomy_level, escalation_timeout_sec, kill_switch, frozen. `-> lib/command_plane/cp_types.ml`
-
-**Budget Envelope**
-CPv2 Unit의 자원 제한: headcount_cap, active_operation_cap, max_cost_usd, max_tokens. `-> lib/command_plane/cp_types.ml`
+**Operation / Unit / Intent / Detachment / Policy Envelope / Budget Envelope** — **scheduled for removal (CP purge)**
+CPv2 항목 전체가 keeper 실행과 결합되지 않은 별도 ledger였고, 본 CP purge에서 모두 제거된다. 진짜 실행 단위는 `board_posts.jsonl` + keeper FSM(Spawned/Active/Paused/Compacting/HandingOff/…)이 관장한다.
 
 ---
 

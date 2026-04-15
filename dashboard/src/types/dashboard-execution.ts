@@ -97,7 +97,9 @@ export interface DashboardShellResponse {
     agents?: number
     tasks?: number
     keepers?: number
+    total_runtimes?: number
   }
+  configured_keepers?: number
   providers?: Record<string, unknown>
   meta_cognition?: DashboardShellMetaCognitionSummary | null
   auth?: DashboardShellAuthSummary | null
@@ -153,6 +155,7 @@ export interface DashboardNamespaceTruthResponse {
   namespace: {
     status?: ServerStatus | null
     counts?: DashboardShellResponse['counts']
+    configured_keepers?: number
     provenance?: string | null
   }
   execution?: {

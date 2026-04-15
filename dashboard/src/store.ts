@@ -64,6 +64,8 @@ export interface ShellCounts {
   agents: number
   tasks: number
   keepers: number
+  total_runtimes: number
+  configured_keepers: number
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
@@ -394,6 +396,8 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
           agents: data.counts.agents ?? 0,
           tasks: data.counts.tasks ?? 0,
           keepers: data.counts.keepers ?? 0,
+          total_runtimes: data.counts.total_runtimes ?? ((data.counts.agents ?? 0) + (data.counts.keepers ?? 0)),
+          configured_keepers: data.configured_keepers ?? 0,
         }
       }
       shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)

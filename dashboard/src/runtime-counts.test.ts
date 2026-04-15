@@ -12,12 +12,14 @@ describe('resolveRuntimeCounts', () => {
       agentsCount: 0,
       keepersCount: 0,
       namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      namespaceTruthConfiguredKeepers: 5,
       shellCounts: { agents: 1, keepers: 1, tasks: 4 },
     })).toEqual({
       agents: 2,
       keepers: 3,
       tasks: 12,
       totalRuntimes: 5,
+      configuredKeepers: 5,
       source: 'namespace-truth',
     })
   })
@@ -28,11 +30,13 @@ describe('resolveRuntimeCounts', () => {
       agentsCount: 0,
       keepersCount: 0,
       shellCounts: { agents: 4, keepers: 1, tasks: 9 },
+      shellConfiguredKeepers: 3,
     })).toEqual({
       agents: 4,
       keepers: 1,
       tasks: 9,
       totalRuntimes: 5,
+      configuredKeepers: 3,
       source: 'shell',
     })
   })
@@ -44,11 +48,13 @@ describe('resolveRuntimeCounts', () => {
       keepersCount: 3,
       tasksCount: 1,
       namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      namespaceTruthConfiguredKeepers: 5,
     })).toEqual({
       agents: 2,
       keepers: 3,
       tasks: 1,
       totalRuntimes: 5,
+      configuredKeepers: 5,
       source: 'execution',
     })
   })
@@ -59,11 +65,13 @@ describe('resolveRuntimeCounts', () => {
       agentsCount: 0,
       keepersCount: 0,
       namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      namespaceTruthConfiguredKeepers: 4,
     })).toEqual({
       agents: 2,
       keepers: 3,
       tasks: 12,
       totalRuntimes: 5,
+      configuredKeepers: 4,
       source: 'namespace-truth',
     })
   })

@@ -49,7 +49,9 @@ export function AgentsUnified() {
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.namespace.configured_keepers,
     shellCounts: shellCounts.value,
+    shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const totalCount = runtimeCounts.totalRuntimes
   const keeperCount = runtimeCounts.keepers

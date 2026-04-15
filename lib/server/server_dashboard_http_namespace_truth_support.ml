@@ -362,9 +362,14 @@ let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell
   let execution_summary = execution_summary_json execution_json in
   let command_summary = namespace_truth_command_summary_json command_summary_json in
   let shell_counts = json_assoc_field "counts" shell_json in
+  let configured_keepers =
+    Yojson.Safe.Util.member "configured_keepers" shell_json
+  in
   let runtime_count =
-    json_int_field "agents" shell_counts ~default:0
-    + json_int_field "keepers" shell_counts ~default:0
+    json_int_field "total_runtimes" shell_counts
+      ~default:
+        ( json_int_field "agents" shell_counts ~default:0
+        + json_int_field "keepers" shell_counts ~default:0 )
   in
   let focus_json =
     dashboard_namespace_truth_focus_json ~initialized ~runtime_count
@@ -375,6 +380,7 @@ let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell
       [
         ("status", json_assoc_field "status" shell_json);
         ("counts", json_assoc_field "counts" shell_json);
+        ("configured_keepers", configured_keepers);
         ("provenance", `String "truth");
       ]
   in

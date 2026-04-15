@@ -75,6 +75,15 @@ let keeper_names (config : Room.config) =
 let keeper_count (config : Room.config) : int =
   List.length (keeper_names config)
 
+let running_keeper_count (config : Room.config) : int =
+  keeper_names config
+  |> List.fold_left
+       (fun count name ->
+         match Keeper_types.read_meta config name with
+         | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
+         | _ -> count)
+       0
+
 let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
   let history_fragment_filter_enabled =

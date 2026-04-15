@@ -891,7 +891,10 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
   let general_agents = dashboard_general_agent_count agents in
   let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
-  let keepers_total, keepers_ms =
+  let active_keepers, keepers_ms =
+    measure_ms (fun () -> running_keeper_count config)
+  in
+  let configured_keepers, configured_keepers_ms =
     measure_ms (fun () -> keeper_count config)
   in
   let meta_cognition_json, meta_cognition_ms =
@@ -915,8 +918,10 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
           [
             ("agents", `Int general_agents);
             ("tasks", `Int (List.length tasks));
-            ("keepers", `Int keepers_total);
+            ("keepers", `Int active_keepers);
+            ("total_runtimes", `Int (general_agents + active_keepers));
           ] );
+      ("configured_keepers", `Int configured_keepers);
       ("providers", provider_capacity_json ());
       ("meta_cognition", meta_cognition_json);
       ("config_resolution", config_resolution_json);
@@ -928,11 +933,13 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("cluster", `String cluster);
            ("coordination_root", `String config.base_path);
            ("workspace_path", `String config.workspace_path);
-           ("keeper_count_source", `String "keeper_meta");
+           ("keeper_count_source", `String "runtime_keepalive");
+           ("configured_keeper_count_source", `String "keeper_meta");
            ("status_ms", `Int status_ms);
            ("agents_ms", `Int agents_ms);
            ("tasks_ms", `Int tasks_ms);
            ("keepers_ms", `Int keepers_ms);
+           ("configured_keepers_ms", `Int configured_keepers_ms);
            ("meta_cognition_ms", `Int meta_cognition_ms);
            ("config_resolution_ms", `Int config_resolution_ms);
            ("runtime_resolution_ms", `Int runtime_resolution_ms);

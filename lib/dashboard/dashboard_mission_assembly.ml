@@ -218,7 +218,7 @@ let action_matches_incident incident action =
       let action_type = string_field "action_type" action in
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
-let build_keeper_briefs (config : Room.config) (keepers : Yojson.Safe.t list) =
+let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
   let all_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_lookup name =
     List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries

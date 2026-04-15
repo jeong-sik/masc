@@ -320,7 +320,7 @@ let context_overflow_event_of_error
         }
 
 let pause_keeper_for_overflow
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
   let paused_meta =
@@ -573,7 +573,7 @@ let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : st
     (String.sub digest 0 8)
 
 let append_decision_record
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
@@ -1034,7 +1034,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
+let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
@@ -1308,7 +1308,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
+let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
     ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
@@ -1364,7 +1364,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
       Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-      let masc_root = Room.masc_root_dir config in
+      let masc_root = Coord.masc_root_dir config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root

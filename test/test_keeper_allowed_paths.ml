@@ -167,7 +167,7 @@ let test_ensure_playground_bundle_creates_subdirs () =
   ) (fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let config = Masc_mcp.Room.default_config dir in
+    let config = Masc_mcp.Coord.default_config dir in
     let created = KAP.ensure_playground_bundle ~config ~name:"abc" in
     check int "bundle size" 3 (List.length created);
     List.iter (fun path ->
@@ -179,7 +179,7 @@ let with_temp_config f =
   with_temp_dir "keeper_default_root_" (fun dir ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    f (Masc_mcp.Room.default_config dir))
+    f (Masc_mcp.Coord.default_config dir))
 
 let check_default_roots_use_playground (meta : KT.keeper_meta) =
   with_temp_config (fun config ->

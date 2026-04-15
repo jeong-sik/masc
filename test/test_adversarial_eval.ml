@@ -104,7 +104,7 @@ let test_validate_rejects_room_history_path () =
     ]
   in
   match Adversarial_eval.validate_inputs inputs with
-  | Error (_, Adversarial_eval.Room_history) -> ()
+  | Error (_, Adversarial_eval.Coord_history) -> ()
   | Error (_, _) -> Alcotest.fail "wrong rejection kind"
   | Ok _ -> Alcotest.fail "should reject room history"
 

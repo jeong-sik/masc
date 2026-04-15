@@ -178,7 +178,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used jso
         in
         Some
           (Operator_judgment.record config ~surface:"command.namespace"
-             ~target_type:Operator_judgment.Room ~target_id:None ~summary
+             ~target_type:Operator_judgment.Coord ~target_id:None ~summary
              ~confidence ?model_name:(Some model_used)
              ?recommended_action:
                (build_recommended_action ~actor:keeper_name ~target_type:"root"
@@ -215,7 +215,7 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
             in
             Some
               (Operator_judgment.record config ~surface:"command.swarm"
-                 ~target_type:Operator_judgment.Room
+                 ~target_type:Operator_judgment.Coord
                  ~target_id:(Some session_id) ~summary ~confidence
                  ?model_name:(Some model_used)
                  ?recommended_action:
@@ -273,7 +273,7 @@ let should_backoff ~sw ~net =
 let refresh_once ~sw ~net
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
-    ~(config : Room.config) ~build_facts =
+    ~(config : Coord.config) ~build_facts =
   let st = get_state config.base_path in
   if should_backoff ~sw ~net then
     let was_online =
@@ -326,7 +326,7 @@ let refresh_once ~sw ~net
             st.last_error <- None)
   end
 
-let start ~sw ~clock ~net ~(config : Room.config)
+let start ~sw ~clock ~net ~(config : Coord.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =

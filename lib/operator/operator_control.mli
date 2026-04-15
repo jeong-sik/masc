@@ -14,7 +14,7 @@ val snapshot_json :
   'a context ->
   Yojson.Safe.t
 
-val recent_actions_json : Room.config -> Yojson.Safe.t
+val recent_actions_json : Coord.config -> Yojson.Safe.t
 
 val action_json :
   ?actor_hint:string ->

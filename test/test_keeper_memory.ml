@@ -372,12 +372,12 @@ let test_recall_candidates_with_history_appends () =
 (* --- E2E memory write → recall integration tests (I1) --- *)
 
 module Keeper_memory_bank = Masc_mcp.Keeper_memory_bank
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
-(** Create a minimal Room.config for testing with a temp base_path.
-    Uses Room.default_config which creates FileSystem backend. *)
+(** Create a minimal Coord.config for testing with a temp base_path.
+    Uses Coord.default_config which creates FileSystem backend. *)
 let make_test_room_config dir =
-  Room.default_config dir
+  Coord.default_config dir
 
 (** E2E: write memory via append_memory_notes_from_reply, then read back via recall.
     Tests the full pipeline: reply → parse → snapshot → candidates → JSONL → recall.

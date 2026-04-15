@@ -53,7 +53,7 @@ let write_json path json =
 
 let write_keeper_toml_exn config ~name =
   let keepers_dir =
-    Filename.concat (Room.masc_root_dir config) "config/keepers"
+    Filename.concat (Coord.masc_root_dir config) "config/keepers"
   in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
@@ -129,11 +129,11 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_toml_exn config ~name:"dot.name";
-      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
@@ -175,10 +175,10 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
-      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn
@@ -200,8 +200,8 @@ let test_keeper_list_normalizes_unknown_social_model () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
         ~social_model:"experimental_v99";

@@ -14,7 +14,7 @@ type memory_match = {
 }
 
 let search_memory_bank
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(query : string)
       ~(kind_filter : string)
@@ -96,7 +96,7 @@ let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
 (* --- History search (cross-generation, retained for backward compat) --- *)
 
 let search_history
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(query : string)
@@ -141,7 +141,7 @@ let search_history
 (* --- Unified keeper_memory_search dispatch --- *)
 
 let keeper_memory_search_json
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(args : Yojson.Safe.t) =

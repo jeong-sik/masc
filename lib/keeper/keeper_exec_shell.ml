@@ -161,7 +161,7 @@ let update_playground_repo_cache
       (Printexc.to_string exn))
 
 let resolve_keeper_shell_read_cwd
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -177,7 +177,7 @@ let resolve_keeper_shell_read_cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 let resolve_keeper_shell_write_cwd
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -198,7 +198,7 @@ let resolve_keeper_shell_write_cwd
    The container-side root comes from
    [Env_config_keeper.DockerPlayground.container_playground_root] so the
    mount point is configurable (default "/home/keeper/playground"). *)
-let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
+let docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
   let playground_prefix =
     Filename.concat root Playground_paths.all_playgrounds_prefix
@@ -278,7 +278,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   | None -> None
 
 let resolve_keeper_shell_read_path
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -337,7 +337,7 @@ let resolve_keeper_shell_read_path
     resolve_with_autocorrect resolved_raw_path
 
 let handle_keeper_bash
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -533,7 +533,7 @@ let handle_keeper_bash
 ;;
 
 let handle_keeper_shell
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

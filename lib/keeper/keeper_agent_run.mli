@@ -110,7 +110,7 @@ val adaptive_thinking_budget :
 
 (** Run a single keeper turn.
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
@@ -136,7 +136,7 @@ val adaptive_thinking_budget :
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
 val run_turn :
-     config:Room.config
+     config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> base_dir:string
   -> max_context:int

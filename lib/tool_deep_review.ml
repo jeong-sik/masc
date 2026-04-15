@@ -29,7 +29,7 @@ let validate_target_files target_files =
         match kind with
         | Adversarial_eval.Readme -> "README"
         | Adversarial_eval.Design_doc -> "design_doc"
-        | Adversarial_eval.Room_history -> "room_history"
+        | Adversarial_eval.Coord_history -> "room_history"
         | Adversarial_eval.Task_history -> "task_history"
         | Adversarial_eval.Governance_history -> "governance_history"
       in
@@ -80,7 +80,7 @@ If you find concerns, list each with file:line and a brief explanation.
 If the code looks correct, respond with exactly: NO_ISSUES_FOUND|} question files_str)
 
 (** Run the adversarial review via OAS. Returns (ok, result_json). *)
-let handle_deep_review (config : Room.config) args : bool * string =
+let handle_deep_review (config : Coord.config) args : bool * string =
   let target_files =
     match Yojson.Safe.Util.(member "target_files" args) with
     | `List files ->

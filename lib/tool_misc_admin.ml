@@ -13,7 +13,7 @@ module U = Yojson.Safe.Util
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 

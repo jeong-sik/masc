@@ -15,36 +15,25 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Voice_sessions; Voice_speak; Write ]
 
 let all_masc : Tool_name.Masc.t list =
-  [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_timeline
-  ; Agent_update; Agents
+  [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_update; Agents
   ; Autoresearch_cycle; Autoresearch_inject; Autoresearch_start
   ; Autoresearch_status; Autoresearch_stop
   ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
   ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Cancel_task; Check; Claim_next
-  ; Claim_task; Cleanup_zombies; Config
-  ; Code_delete; Code_edit; Code_git; Code_read
+  ; Claim_task; Cleanup_zombies; Code_delete; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
   ; Dashboard; Deliver; Dispatch_assign; Dispatch_plan; Find_by_capability
-  ; Gc; Get_metrics
   ; Governance_feed; Governance_status
-  ; Heartbeat; Join; Keeper_msg_result; Leave
-  ; Library_add; Library_list; Library_promote; Library_read; Library_search
-  ; List_tasks; Mcp_session; Messages; Note_add
+  ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add
   ; Operation_checkpoint; Operation_finalize; Operation_pause
   ; Operation_resume; Operation_start; Operation_status; Operation_stop
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
-  ; Pause
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
-  ; Plan_update; Register_capabilities; Release_task; Reset; Resume
-  ; Room_status; Runtime_ollama_probe
-  ; Persona_list
-  ; Run_deliverable; Run_get; Run_init; Run_list; Run_log; Run_plan
-  ; Set_current_task; Spawn; Start; Status; Surface_audit; Task_history; Tasks
-  ; Tool_admin_snapshot; Tool_admin_update; Tool_grant; Tool_help
-  ; Tool_list; Tool_revoke; Tool_stats; Transition; Update_priority
-  ; Web_search; Webrtc_answer; Webrtc_offer; Who
+  ; Plan_update; Register_capabilities; Release_task; Reset; Coord_status
+  ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
+  ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
   ; Worktree_status ]
 

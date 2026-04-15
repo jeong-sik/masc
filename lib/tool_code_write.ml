@@ -15,7 +15,7 @@ open Types
 open Tool_args
 
 type context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
 }
 
@@ -86,7 +86,7 @@ let dedupe_keep_order paths =
     paths
 
 let allowed_worktree_prefixes config =
-  [ git_common_root config.Room.base_path;
+  [ git_common_root config.Coord.base_path;
     git_common_root (Sys.getcwd ()) ]
   |> List.filter_map (fun root -> root)
   |> dedupe_keep_order
@@ -111,7 +111,7 @@ let validate_writable_path ~(agent_name : string) config path =
     let worktree_prefixes = allowed_worktree_prefixes config in
     let agent_playground_prefix =
       normalize_dir_prefix
-        (Filename.concat config.Room.base_path
+        (Filename.concat config.Coord.base_path
            (Keeper_alerting_path.playground_path_of_keeper agent_name))
     in
     if List.exists
@@ -280,7 +280,7 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->
-    match Room_git.git_root ~base_path:config.Room.base_path with
+    match Coord_git.git_root ~base_path:config.Coord.base_path with
     | None -> Error (IoError "Not in a git repository")
     | Some root ->
       let worktree_prefix = Tool_code.normalize_path
@@ -546,7 +546,7 @@ let handle_code_git ctx args =
     else if cwd = "" then
       (false, "cwd parameter required for clone")
     else
-      match validate_clone_url ~base_path:ctx.config.Room.base_path url with
+      match validate_clone_url ~base_path:ctx.config.Coord.base_path url with
       | Error msg -> (false, msg)
       | Ok () ->
         match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
@@ -554,14 +554,14 @@ let handle_code_git ctx args =
         | Ok abs_cwd ->
           (* Only pass the validated URL — no extra args allowed.
              Depth and timeout are config-driven via [git_clone] in tool_policy.toml. *)
-          let depth = match get_policy_config ~base_path:ctx.config.Room.base_path with
+          let depth = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
             | None -> 0
           in
           let depth_flag =
             if depth > 0 then Printf.sprintf " --depth %d" depth else ""
           in
-          let timeout = match get_policy_config ~base_path:ctx.config.Room.base_path with
+          let timeout = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
             | None -> 120.0
           in

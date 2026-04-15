@@ -574,8 +574,8 @@ let tool_usage_of_by_name name =
 
 (* -- Config resolution --------------------------------------------- *)
 
-let resolve_config (config : Room_utils_backend_setup.config) keeper_name
-    : Room_utils_backend_setup.config =
+let resolve_config (config : Coord_utils_backend_setup.config) keeper_name
+    : Coord_utils_backend_setup.config =
   if keeper_name = "" then config
   else
     (* Keeper config resolution is scoped to the caller's current base_path.

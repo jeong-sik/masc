@@ -26,8 +26,8 @@ let teardown () =
     (try rm_rf !temp_dir with _ -> ())
   end
 
-let make_config () : Room.config =
-  Room.default_config !temp_dir
+let make_config () : Coord.config =
+  Coord.default_config !temp_dir
 
 (* ===== Type Tests ===== *)
 

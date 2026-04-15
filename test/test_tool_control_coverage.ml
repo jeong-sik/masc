@@ -55,8 +55,8 @@ let with_ctx ?(initialize = true) f =
              !test_counter)
       in
       Unix.mkdir tmp 0o755;
-      let config = Room.default_config tmp in
-      if initialize then ignore (Room.init config ~agent_name:(Some "test-agent"));
+      let config = Coord.default_config tmp in
+      if initialize then ignore (Coord.init config ~agent_name:(Some "test-agent"));
       f { Tool_control.config; agent_name = "test-agent" })
 
 let () =

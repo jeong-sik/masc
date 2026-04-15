@@ -34,9 +34,9 @@ let contains str substr =
   with Not_found -> false
 
 let write_pending_confirm config _session_id =
-  let operator_dir = Filename.concat (Room_utils.masc_dir config) "operator" in
-  Room_utils.mkdir_p operator_dir;
-  Room_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
+  let operator_dir = Filename.concat (Coord_utils.masc_dir config) "operator" in
+  Coord_utils.mkdir_p operator_dir;
+  Coord_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
     (`List
       [
         `Assoc
@@ -56,22 +56,22 @@ let write_pending_confirm config _session_id =
       ])
 
 let seed_room config session_id =
-  ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
-  ignore (Lib.Room.join config ~agent_name:"team-session-local64-smoke"
+  ignore (Lib.Coord.init config ~agent_name:(Some "fixture-root"));
+  ignore (Lib.Coord.join config ~agent_name:"team-session-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
-  ignore (Lib.Room.join config ~agent_name:"llama-local-alpha"
+  ignore (Lib.Coord.join config ~agent_name:"llama-local-alpha"
             ~capabilities:[ "worker"; "local64"; "manager" ] ());
-  ignore (Lib.Room.join config ~agent_name:"llama-local-beta"
+  ignore (Lib.Coord.join config ~agent_name:"llama-local-beta"
             ~capabilities:[ "worker"; "local64"; "metacog" ] ());
-  ignore (Lib.Room.join config ~agent_name:"llama-local-gamma"
+  ignore (Lib.Coord.join config ~agent_name:"llama-local-gamma"
             ~capabilities:[ "worker"; "local64"; "executor" ] ());
-  ignore (Lib.Room.join config ~agent_name:"llama-local-delta"
+  ignore (Lib.Coord.join config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
-    (Lib.Room.broadcast config ~from_agent:"team-session-local64-smoke"
+    (Lib.Coord.broadcast config ~from_agent:"team-session-local64-smoke"
        ~content:"@llama-local-alpha recover failed worker coverage");
   ignore
-    (Lib.Room.broadcast config ~from_agent:"llama-local-alpha"
+    (Lib.Coord.broadcast config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
   (* Team sessions are retired; mission fixtures now exercise room-level
@@ -88,7 +88,7 @@ let test_dashboard_mission_projection () =
       Eio_main.run @@ fun env ->
       Eio_guard.enable ();
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       seed_room config session_id;
       Lib.A2a_tools.emit_heartbeat_task
         ~agent:"llama-local-alpha"
@@ -127,7 +127,7 @@ let test_dashboard_mission_projection () =
       (* Simulate delta departing: remove agent file so Dashboard_mission
          sees delta as departed. *)
       let delta_path =
-        Filename.concat (Room_utils.agents_dir config) "llama-local-delta.json"
+        Filename.concat (Coord_utils.agents_dir config) "llama-local-delta.json"
       in
       if Sys.file_exists delta_path then Sys.remove delta_path;
       Eio.Switch.run (fun sw ->
@@ -203,7 +203,7 @@ let test_dashboard_mission_http_full_contract () =
       Eio_main.run @@ fun env ->
       Eio_guard.enable ();
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       seed_room config session_id;
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
          Both dashboard-level and operator snapshot caches must be invalidated. *)
@@ -234,7 +234,7 @@ let test_dashboard_mission_http_default_bootstraps_first_success () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
       seed_room config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
@@ -271,7 +271,7 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
       Eio_main.run @@ fun env ->
       Eio_guard.enable ();
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       seed_room config session_id;
       Lib.Dashboard_cache.invalidate_all ();
       Lib.Operator_control.invalidate_snapshot_cache ();
@@ -314,8 +314,8 @@ let test_dashboard_mission_http_cache_isolation () =
       Eio_main.run @@ fun env ->
       Eio_guard.enable ();
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config_a = Room_utils.default_config dir_a in
-      let config_b = Room_utils.default_config dir_b in
+      let config_a = Coord_utils.default_config dir_a in
+      let config_b = Coord_utils.default_config dir_b in
       seed_room config_a session_a;
       seed_room config_b session_b;
       let state_a =
@@ -357,7 +357,7 @@ let test_dashboard_mission_keeper_tool_audit_prefers_heartbeat_task () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Lib.A2a_tools.emit_heartbeat_task
         ~agent:keeper_name
         ~goal:"Mission keeper audit fixture"
@@ -403,8 +403,8 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      Room_utils.mkdir_p
+      let config = Coord_utils.default_config dir in
+      Coord_utils.mkdir_p
         (Filename.dirname (Lib.Keeper_types.keeper_decision_log_path config keeper_name));
       Fs_compat.append_jsonl
         (Lib.Keeper_types.keeper_decision_log_path config keeper_name)
@@ -481,8 +481,8 @@ let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
       Masc_test_deps.init_keeper_tool_registry ();
       let policy_base_path = Masc_test_deps.find_project_root () in
       ignore (Result.get_ok (Lib.Keeper_exec_tools.init_policy_config ~base_path:policy_base_path));
-      let config_a = Room_utils.default_config dir_a in
-      let config_z = Room_utils.default_config dir_z in
+      let config_a = Coord_utils.default_config dir_a in
+      let config_z = Coord_utils.default_config dir_z in
       ignore
         (Lib.Keeper_registry.register ~base_path:config_a.base_path keeper_name
            (make_meta ~also_allow:[ "keeper_board_vote" ] keeper_name));

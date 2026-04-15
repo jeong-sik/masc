@@ -14,7 +14,7 @@ module Status = Keeper_status
 module Persona = Keeper_persona
 
 type 'a context = 'a Keeper_types.context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;

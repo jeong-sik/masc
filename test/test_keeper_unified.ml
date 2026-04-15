@@ -205,8 +205,8 @@ let test_observe_uses_precollected_board_events () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
            ~title:"Need sangsu" ~content:"@test-keeper please check this"
@@ -239,8 +239,8 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
            ~title:"General update" ~content:"No direct mention here"
@@ -270,8 +270,8 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       let post_id =
         match
           Masc_mcp.Board_dispatch.create_post ~author:"alice"
@@ -1337,7 +1337,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let validation : Agent_sdk.Raw_trace.run_validation = {
         run_ref = sample_run_ref; ok = true;
         checks = []; evidence = ["tool_paired:keeper_board_list"];
@@ -1526,7 +1526,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let validation : Agent_sdk.Raw_trace.run_validation = {
         run_ref = sample_run_ref; ok = true;
         checks = []; evidence = ["tool_paired:keeper_fs_read"];
@@ -1599,7 +1599,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
       KR.clear ();
       Unix.putenv "MASC_BASE_PATH" base_dir;
       let meta = make_meta "phase-gated-keeper" in
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       ignore (KR.register ~base_path:base_dir meta.name meta);
       (match KR.dispatch_event ~base_path:base_dir meta.name KP.Operator_pause with
        | Ok _ -> ()
@@ -1634,9 +1634,9 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
   check bool "keeper cycle passes trajectory_acc to agent run" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "~trajectory_acc");
-  check bool "keeper cycle resolves masc root via Room.masc_root_dir" true
+  check bool "keeper cycle resolves masc root via Coord.masc_root_dir" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "Room.masc_root_dir config");
+       "Coord.masc_root_dir config");
   check bool "keeper cycle finalizes trajectory on completion/failure" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Trajectory.finalize trajectory_acc")
@@ -2547,8 +2547,8 @@ let test_social_model_routes_blocker_to_board_post () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
           ~observation:base_observation ~previous_state:None result

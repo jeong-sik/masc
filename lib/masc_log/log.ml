@@ -458,7 +458,7 @@ module Make (M : sig val name : string end) = struct
 end
 
 (** Pre-defined module loggers *)
-module Room = Make(struct let name = "Room" end)
+module Coord = Make(struct let name = "Coord" end)
 module Mcp = Make(struct let name = "MCP" end)
 module Auth = Make(struct let name = "Auth" end)
 module Retry = Make(struct let name = "Retry" end)

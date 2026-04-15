@@ -15,7 +15,7 @@ open Alcotest
 
 module Tool_task = Masc_mcp.Tool_task
 module A2a_tools = Masc_mcp.A2a_tools
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 (* ============================================================
    Stderr Capture Utility
@@ -90,10 +90,10 @@ let with_test_room f =
   Unix.mkdir dir 0o755;
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Room.default_config dir in
-  let _ = Room.init config ~agent_name:(Some "test-agent") in
+  let config = Coord.default_config dir in
+  let _ = Coord.init config ~agent_name:(Some "test-agent") in
   Fun.protect
-    ~finally:(fun () -> (try let _ = Room.reset config in () with _ -> ()); rm_rf dir)
+    ~finally:(fun () -> (try let _ = Coord.reset config in () with _ -> ()); rm_rf dir)
     (fun () -> f config)
 
 (* ============================================================
@@ -101,7 +101,7 @@ let with_test_room f =
    ============================================================ *)
 
 (** handle_done with a task_id that does not exist.
-    Room.complete_task_r returns Error (TaskNotFound ...) and
+    Coord.complete_task_r returns Error (TaskNotFound ...) and
     the notification path fires the [task] eprintf. *)
 let test_tool_task_done_nonexistent_logs () =
   with_test_room @@ fun config ->

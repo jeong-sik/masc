@@ -6,7 +6,7 @@ let with_temp_config f =
   let dir = Filename.temp_file "task_dispatch_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
-  let config = Room.default_config dir in
+  let config = Coord.default_config dir in
   Fun.protect ~finally:(fun () ->
       let rec rm path =
         if Sys.file_exists path then
@@ -26,7 +26,7 @@ let test_default_backend_jsonl () =
 
 let test_add_task_in_jsonl_mode () =
   with_temp_config (fun config ->
-      ignore (Room.init config ~agent_name:(Some "tester"));
+      ignore (Coord.init config ~agent_name:(Some "tester"));
       Task_dispatch.reset_for_test ();
       Task_dispatch.init_jsonl ();
       match Task_dispatch.add_task config ~title:"dispatch task" ~priority:3

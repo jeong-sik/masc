@@ -392,7 +392,7 @@ end
 
 let create_server
     ~(port : int)
-    ~(room_config : Room_utils_backend_setup.config)
+    ~(room_config : Coord_utils_backend_setup.config)
     ~(tool_dispatcher : string -> string -> (string, string) result)
   : Grpc_eio.Server.t =
   let service =
@@ -446,7 +446,7 @@ let create_server
 let start
     ~(sw : Eio.Switch.t)
     ~(env : Eio_unix.Stdenv.base)
-    ~(room_config : Room_utils_backend_setup.config)
+    ~(room_config : Coord_utils_backend_setup.config)
     ~(tool_dispatcher : string -> string -> (string, string) result)
   : unit =
   if not (is_enabled ()) then begin

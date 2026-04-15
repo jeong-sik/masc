@@ -657,7 +657,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/status" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
-          let room_state = Room.read_state config in
+          let room_state = Coord.read_state config in
           let tempo = Tempo.get_tempo config in
           let json = `Assoc [
             ("cluster", `String (Env_config_core.cluster_name ()));

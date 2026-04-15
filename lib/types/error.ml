@@ -12,11 +12,11 @@
 
 (** {1 Domain-Specific Errors} *)
 
-(** Room/Coordination errors *)
+(** Coord/Coordination errors *)
 type room_error =
-  | RoomNotFound of string         (** Room doesn't exist *)
+  | RoomNotFound of string         (** Coord doesn't exist *)
   | RoomAlreadyExists of string    (** Duplicate room creation *)
-  | RoomLocked of string           (** Room is locked by another agent *)
+  | RoomLocked of string           (** Coord is locked by another agent *)
   | RoomFull of int                (** Max agents reached *)
 
 (** Task errors *)
@@ -59,7 +59,7 @@ type mcp_error =
 
 (** Top-level error type combining all domains *)
 type t =
-  | Room of room_error
+  | Coord of room_error
   | Task of task_error
   | Agent of agent_error
   | Federation of federation_error
@@ -71,7 +71,7 @@ type t =
 
 (** Check if an error is recoverable (safe to retry) *)
 let is_recoverable = function
-  | Room (RoomLocked _) -> true
+  | Coord (RoomLocked _) -> true
   | Task (TaskAlreadyClaimed _) -> true
   | Agent (AgentTimeout _) -> true
   | Agent (AgentHeartbeatMissing _) -> true
@@ -81,12 +81,12 @@ let is_recoverable = function
 
 (** Get a human-readable error message *)
 let to_string = function
-  | Room e -> (
+  | Coord e -> (
       match e with
-      | RoomNotFound id -> Printf.sprintf "Room not found: %s" id
-      | RoomAlreadyExists id -> Printf.sprintf "Room already exists: %s" id
-      | RoomLocked id -> Printf.sprintf "Room locked: %s" id
-      | RoomFull max -> Printf.sprintf "Room full (max %d agents)" max)
+      | RoomNotFound id -> Printf.sprintf "Coord not found: %s" id
+      | RoomAlreadyExists id -> Printf.sprintf "Coord already exists: %s" id
+      | RoomLocked id -> Printf.sprintf "Coord locked: %s" id
+      | RoomFull max -> Printf.sprintf "Coord full (max %d agents)" max)
   | Task e -> (
       match e with
       | TaskNotFound id -> Printf.sprintf "Task not found: %s. Call masc_status to refresh your task list." id
@@ -146,7 +146,7 @@ let of_string msg = Internal msg
 type severity = Debug | Info | Warning | Error | Critical
 
 let severity_of_error = function
-  | Room (RoomLocked _) -> Warning
+  | Coord (RoomLocked _) -> Warning
   | Task (TaskAlreadyClaimed _) -> Warning
   | Agent (AgentTimeout _) -> Warning
   | Agent (AgentHeartbeatMissing _) -> Warning
@@ -177,10 +177,10 @@ let to_severity : severity -> Severity.t = function
     migration to the canonical error type. *)
 
 let to_masc_error : t -> Types_auth.masc_error = function
-  | Room (RoomNotFound id) -> Types_auth.IoError ("room not found: " ^ id)
-  | Room (RoomAlreadyExists id) -> Types_auth.IoError ("room exists: " ^ id)
-  | Room (RoomLocked id) -> Types_auth.IoError ("room locked: " ^ id)
-  | Room (RoomFull _) -> Types_auth.IoError "room full"
+  | Coord (RoomNotFound id) -> Types_auth.IoError ("room not found: " ^ id)
+  | Coord (RoomAlreadyExists id) -> Types_auth.IoError ("room exists: " ^ id)
+  | Coord (RoomLocked id) -> Types_auth.IoError ("room locked: " ^ id)
+  | Coord (RoomFull _) -> Types_auth.IoError "room full"
   | Task (TaskNotFound id) -> Types_auth.TaskNotFound id
   | Task (TaskAlreadyClaimed by) -> Types_auth.TaskAlreadyClaimed { task_id = ""; by }
   | Task (TaskInvalidState (current, _expected)) -> Types_auth.TaskInvalidState current

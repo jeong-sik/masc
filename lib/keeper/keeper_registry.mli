@@ -275,7 +275,7 @@ val tool_usage_of_by_name : string ->
     cross-base_path scan (O(n)) when not found in the caller's scope.
     Returns config with the keeper's actual base_path, or the original
     config unchanged if the keeper is not in the registry. *)
-val resolve_config : Room_utils_backend_setup.config -> string -> Room_utils_backend_setup.config
+val resolve_config : Coord_utils_backend_setup.config -> string -> Coord_utils_backend_setup.config
 
 (** Flush in-memory tool usage stats to disk for persistence across restarts. *)
 val flush_tool_usage : base_path:string -> string -> unit

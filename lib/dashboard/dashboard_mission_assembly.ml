@@ -501,8 +501,11 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
          ( attention_count,
            severity_rank
              (match session.top_attention with
-             | Some attention -> string_field ~default:session.health "severity" attention
-             | None -> session.health),
+             | Some attention ->
+                 string_field
+                   ~default:(Dashboard_utils.string_of_health_level session.health)
+                   "severity" attention
+             | None -> Dashboard_utils.string_of_health_level session.health),
            session.last_event_ts,
            `Assoc
              [
@@ -511,8 +514,8 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
                ("created_by", json_string_option session.created_by);
                ("origin_kind", `String session.origin_kind);
                ("namespace", json_string_option session.namespace);
-               ("status", `String session.status);
-               ("health", `String session.health);
+               ("status", `String (Dashboard_utils.string_of_session_lifecycle session.status));
+               ("health", `String (Dashboard_utils.string_of_health_level session.health));
                ("member_names", string_list_json session.member_names);
                ("started_at", json_string_option session.started_at);
                ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);

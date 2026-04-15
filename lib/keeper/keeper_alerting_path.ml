@@ -68,27 +68,30 @@ let is_within_root_norm ~(root_norm : string) (path : string) : bool =
 let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
     ?(max_dirs = 2000) ?(max_matches = 8) () : string list =
   let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
-  let visited : (string, unit) Hashtbl.t = Hashtbl.create 64 in
-  let rec walk ~dirs_seen acc dir =
-    if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+  let module StringSet = Set.Make (String) in
+  let rec walk visited ~dirs_seen acc dir =
+    if dirs_seen >= max_dirs || List.length acc >= max_matches then
+      (visited, dirs_seen, acc)
     else
       let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
       if not (is_within_root_norm ~root_norm dir)
-         || Hashtbl.mem visited dir_norm
-      then (dirs_seen, acc)
-      else begin
-        Hashtbl.replace visited dir_norm ();
+         || StringSet.mem dir_norm visited
+      then
+        (visited, dirs_seen, acc)
+      else
+        let visited = StringSet.add dir_norm visited in
         let entries =
           try Sys.readdir dir |> Array.to_list |> List.sort String.compare
           with Sys_error _ -> []
         in
         List.fold_left
-          (fun (dirs_seen, acc) entry ->
-             if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+          (fun (visited, dirs_seen, acc) entry ->
+             if dirs_seen >= max_dirs || List.length acc >= max_matches then
+               (visited, dirs_seen, acc)
              else
                let path = Filename.concat dir entry in
                match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
-               | None -> (dirs_seen, acc)
+               | None -> (visited, dirs_seen, acc)
                | Some is_dir ->
                    let acc =
                      if entry = anchor then
@@ -98,13 +101,14 @@ let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
                        then candidate :: acc else acc
                      else acc
                    in
-                   if is_dir && is_within_root_norm ~root_norm path
-                   then walk ~dirs_seen:(dirs_seen + 1) acc path
-                   else (dirs_seen, acc))
-          (dirs_seen, acc) entries
-      end
+                   if is_dir && is_within_root_norm ~root_norm path then
+                     walk visited ~dirs_seen:(dirs_seen + 1) acc path
+                   else
+                     (visited, dirs_seen, acc))
+          (visited, dirs_seen, acc) entries
   in
-  walk ~dirs_seen:0 [] root |> snd |> List.rev
+  walk StringSet.empty ~dirs_seen:0 [] root
+  |> fun (_, _, matches) -> List.rev matches
 
 let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path : string) :
     (string option, string) result =

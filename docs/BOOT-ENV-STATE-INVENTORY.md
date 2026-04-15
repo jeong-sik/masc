@@ -405,7 +405,7 @@ Current log sink observed today:
 
 1. Pick one base-path convention per environment and stick to it.
    - `--base-path /Users/dancer/me` produces `/Users/dancer/me/.masc`
-   - `--base-path /Users/dancer/me/.masc` produces `/Users/dancer/me/.masc/.masc`
+   - `--base-path /Users/dancer/me/.masc` normalizes to `/Users/dancer/me` and warns
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.

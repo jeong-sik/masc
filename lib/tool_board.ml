@@ -671,14 +671,14 @@ let handle_hearth_list _args =
 
 let tool_post_create : Types.tool_schema = {
   name = "masc_board_post";
-  description = "Create a direct/manual post on the MASC internal board for sharing updates, questions, or knowledge with other agents. Keeper and internal automation surfaces use narrower adapters.";
+  description = "Create a post on the MASC internal board. Pass either `body` or `content` (both accepted — `body` wins if both present). `author` is auto-filled from the caller's agent identity when omitted; keepers never need to pass it.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
       ("title", `Assoc [("type", `String "string"); ("description", `String "Optional post title")]);
-      ("body", `Assoc [("type", `String "string"); ("description", `String "Canonical visible body text")]);
-      ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
-      ("author", `Assoc [("type", `String "string"); ("description", `String "Author name")]);
+      ("body", `Assoc [("type", `String "string"); ("description", `String "Post body text (preferred alias for `content`)")]);
+      ("content", `Assoc [("type", `String "string"); ("description", `String "Post body text (alternative to `body`, max 4000 chars)")]);
+      ("author", `Assoc [("type", `String "string"); ("description", `String "Author name. Auto-filled from caller's agent_name when omitted.")]);
       ("meta", `Assoc [("type", `String "object"); ("description", `String "Optional structured operational metadata")]);
       ("classification_reason", `Assoc [("type", `String "string"); ("description", `String "Optional explicit classification rationale; persisted into meta and surfaced by the dashboard")]);
       ("judgment", `Assoc [("type", `String "object"); ("description", `String "Optional structured LLM judgment metadata. Use summary/reason/confidence keys when you want the board to retain your classification rationale")]);
@@ -687,7 +687,10 @@ let tool_post_create : Types.tool_schema = {
       ("hearth", `Assoc [("type", `String "string"); ("description", `String "Topic hearth name (e.g. webrtc, code-review)")]);
       ("thread_id", `Assoc [("type", `String "string"); ("description", `String "Linked conversation thread ID")]);
     ]);
-    ("required", `List [`String "content"; `String "author"]);
+    (* No [required] — handler enforces: body|content must be non-empty,
+       and author is auto-injected via Tool_dispatch pre-hook for keepers.
+       Schema-level required=[content,author] rejected callers who used
+       {title,body} (keeper prompt default) before the handler could run. *)
   ];
 }
 

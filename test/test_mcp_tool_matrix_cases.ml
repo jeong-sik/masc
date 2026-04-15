@@ -752,6 +752,11 @@ let tool_arguments fixture (schema : Types.tool_schema) =
           [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" ->
           [ "timeout_sec" ]
+      | "masc_board_post" ->
+          (* Schema no longer requires content|author (both are validated at
+             the handler layer so body/content aliases both work). Matrix
+             test still needs to supply body so board_core accepts it. *)
+          [ "body" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)

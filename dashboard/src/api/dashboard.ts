@@ -526,9 +526,12 @@ export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
 }
 
-export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {
+export function fetchDashboardMissionSession(
+  sessionId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<DashboardMissionSessionDetailResponse> {
   const query = `?session_id=${encodeURIComponent(sessionId)}`
-  return get(`/api/v1/dashboard/session${query}`)
+  return get(`/api/v1/dashboard/session${query}`, { signal: opts?.signal })
 }
 
 export interface DashboardRuntimeProviderDiscovery {

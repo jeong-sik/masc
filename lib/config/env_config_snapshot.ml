@@ -189,8 +189,8 @@ let keeper_execution_entries =
       "Max tokens before compaction (0=disabled)";
     entry ~default:"0.10" "MASC_KEEPER_COST_GATE_USD"
       "Legacy keeper cost gate (unused by unified turn cost guard)";
-    entry ~default:"0.50" "MASC_KEEPER_TOOL_COST_MAX_USD"
-      "Unified turn accumulated cost ceiling (USD)";
+    entry ~default:"0" "MASC_KEEPER_TOOL_COST_MAX_USD"
+      "Unified turn accumulated cost ceiling (USD, 0=disabled)";
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
     entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
       "Unified turn max output tokens";

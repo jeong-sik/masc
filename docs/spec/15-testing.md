@@ -152,7 +152,7 @@ Tool call -> Cost budget check
 
 | 파라미터 | 기본값 | 설명 |
 |---------|--------|------|
-| `max_cost_usd` | 0.50 | 세션 비용 한도 |
+| `max_cost_usd` | 0 | 세션 비용 한도 (`0`이면 비활성) |
 | `max_tool_calls_per_turn` | 10 | 턴당 도구 호출 상한 |
 | `entropy_threshold` | 3 | 동일 도구 연속 호출 임계값 |
 | `destructive_check_enabled` | true | 파괴적 명령 탐지 |

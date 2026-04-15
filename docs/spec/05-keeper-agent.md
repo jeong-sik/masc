@@ -391,7 +391,7 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 **Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_SIMILARITY`(0.72), `PROACTIVE_MAX_TOKENS`(1024)
 
-**Cost Gates**: `TOOL_COST_MAX_USD`(0.50, live unified-turn accumulated cost ceiling), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
+**Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
 
 **Unified Turn**: `UNIFIED_TEMP`(0.4), `UNIFIED_MAX_TOKENS`(2048), `UNIFIED_MAX_TURNS`(1000)
 

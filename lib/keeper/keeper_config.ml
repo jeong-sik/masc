@@ -590,11 +590,13 @@ let keeper_batch_limit () : int =
 let keeper_tool_cost_max_usd_rp =
   _rp_float ~key:"keeper.turn.tool_cost_max_usd"
     ~default:(fun () -> float_of_env_default "MASC_KEEPER_TOOL_COST_MAX_USD"
-                          ~default:0.50 ~min_v:0.01 ~max_v:50.0)
-    ~min_v:0.01 ~max_v:50.0
-    ~description:"Per-tool cost ceiling (USD)" ()
-let keeper_tool_cost_max_usd () : float =
-  Runtime_params.get keeper_tool_cost_max_usd_rp
+                          ~default:0.0 ~min_v:0.0 ~max_v:50.0)
+    ~min_v:0.0 ~max_v:50.0
+    ~description:"Per-tool cost ceiling (USD, 0=disabled)" ()
+let keeper_tool_cost_max_usd () : float option =
+  match Runtime_params.get keeper_tool_cost_max_usd_rp with
+  | v when Float.compare v 0.0 <= 0 -> None
+  | v -> Some v
 
 let keeper_max_tools_per_turn_rp =
   _rp_int ~key:"keeper.turn.max_tools_per_turn"

@@ -61,6 +61,7 @@ export {
   deriveTimeAxisTicks,
   deriveSwimlaneSegments,
   laneTransitionCount,
+  inferTransitionReason,
 } from './fsm-hub-derivations'
 
 export { deriveOperationalInsight } from './fsm-hub-invariant-analysis'

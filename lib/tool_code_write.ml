@@ -128,7 +128,8 @@ let allowed_git_actions = [
   "clone";
 ]
 
-let max_output_bytes = 10 * 1024 (* 10KB output limit *)
+let max_output_bytes = 10 * 1024
+let max_output_label = "10KB"
 
 let truncate_output s =
   if String.length s > max_output_bytes then
@@ -730,7 +731,7 @@ Use when removing generated, obsolete, or conflicting files during code work.";
 Allowed: dune, make, npm, npx, node, git, ls, cat, head, tail, wc, rg, find, \
 diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and testing code \
 in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
-Returns exit_code and stdout (truncated at 10KB).";
+Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

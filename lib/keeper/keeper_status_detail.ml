@@ -474,9 +474,9 @@ let handle_keeper_status ctx args : tool_result =
           | Some value -> value
           | None ->
               let resolved =
-                Oas_model_resolve.resolve_max_cascade_context models
+                Cascade_runtime.resolve_max_cascade_context models
               in
-              Oas_model_resolve.clamp_context_for_pure_local_labels
+              Cascade_runtime.clamp_context_for_pure_local_labels
                 ~labels:models ~max_context:resolved
         in
         max min_keeper_context raw
@@ -569,7 +569,7 @@ let handle_keeper_status ctx args : tool_result =
              Some (`Assoc [
                ("provider", `String provider_name);
                ("model_id", `String cfg.model_id);
-               ("max_context", `Int (Oas_model_resolve.max_context_of_label label));
+               ("max_context", `Int (Cascade_runtime.max_context_of_label label));
                ( "max_output_tokens",
                  Option.fold ~none:`Null ~some:(fun tokens -> `Int tokens)
                    cfg.max_tokens );

@@ -4,7 +4,7 @@
 
     Routes:
     - model:"keeper:<name>" -> dispatches to Keeper_turn.handle_keeper_msg
-    - model:"default" or other -> direct OAS cascade via Oas_worker.run_named
+    - model:"default" or other -> direct MASC named-cascade execution via [Oas_worker.run_named]
 
     Request/response format follows the OpenAI Chat Completions API spec. *)
 
@@ -98,7 +98,7 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
   else
     Error body
 
-(** Route to direct OAS cascade via Oas_worker.run_named. *)
+(** Route to direct MASC named-cascade execution via [Oas_worker.run_named]. *)
 let route_cascade ~message ~system_prompt ~max_tokens ~temperature
   : (string, string) result =
   match

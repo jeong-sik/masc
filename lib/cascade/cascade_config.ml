@@ -15,7 +15,7 @@ let resolve_auto_model_id = Cascade_model_resolve.resolve_auto_model_id
 let parse_custom_model = Cascade_model_resolve.parse_custom_model
 
 (* Throttle — re-exports for future migration consumers. Marked as unused
-   while scaffold lives in parallel with OAS Llm_provider.Cascade_config. *)
+   while some callers still depend on the consolidated Cascade_config surface. *)
 let[@warning "-32"] populate_throttle_table = Cascade_throttle.populate
 let[@warning "-32"] lookup_throttle = Cascade_throttle.lookup
 

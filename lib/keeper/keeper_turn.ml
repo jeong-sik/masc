@@ -166,7 +166,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn" in
       let effective_models =
         if direct_reply then
-          Oas_model_resolve.models_of_cascade_name turn_cascade_name
+          Cascade_runtime.models_of_cascade_name turn_cascade_name
               else
           effective_model_labels_for_turn meta
       in
@@ -177,7 +177,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          (false, "❌ " ^ e)
        | Ok () ->
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
-         ignore (Oas_model_resolve.refresh_local_discovery_if_possible effective_models);
+         ignore (Cascade_runtime.refresh_local_discovery_if_possible effective_models);
          let max_cascade_context =
            let min_keeper_context = Keeper_config.min_keeper_context_tokens in
            let raw =
@@ -187,9 +187,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  v
              | None ->
                  let resolved =
-                   Oas_model_resolve.resolve_max_cascade_context effective_models
+                   Cascade_runtime.resolve_max_cascade_context effective_models
                  in
-                 Oas_model_resolve.clamp_context_for_pure_local_labels
+                 Cascade_runtime.clamp_context_for_pure_local_labels
                    ~labels:effective_models ~max_context:resolved
            in
            if raw < min_keeper_context then begin

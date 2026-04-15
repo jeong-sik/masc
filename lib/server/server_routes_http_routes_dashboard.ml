@@ -13,7 +13,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
 let available_cascade_profiles () : string list =
-  let config_path = Oas_model_resolve.cascade_config_path () in
+  let config_path = Cascade_runtime.cascade_config_path () in
   match config_path with
   | None -> ["default"]
   | Some path ->

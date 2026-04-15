@@ -155,7 +155,7 @@ let keeper_context_ratio (meta : Keeper_types.keeper_meta) =
     let active_model = Keeper_exec_status.active_model_of_meta meta in
     if active_model = "" then None
     else
-      let max_ctx = Oas_model_resolve.max_context_of_label active_model in
+      let max_ctx = Cascade_runtime.max_context_of_label active_model in
       if max_ctx = 0 then None
       else Some (float_of_int input_tokens /. float_of_int max_ctx)
 

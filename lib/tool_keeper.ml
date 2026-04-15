@@ -344,7 +344,7 @@ let resolve_keeper_meta ctx args =
 let default_keeper_model_label (meta : keeper_meta) =
   match String.trim meta.runtime.usage.last_model_used with
   | "" -> (
-      match Oas_model_resolve.models_of_cascade_name meta.cascade_name with
+      match Cascade_runtime.models_of_cascade_name meta.cascade_name with
       | first :: _ when String.trim first <> "" -> first
       | _ -> Env_config.Local_runtime.default_model)
   | model -> model
@@ -611,8 +611,8 @@ let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
       | Some n when n > 0 -> n
       | _ ->
         let labels = Keeper_exec_context.effective_model_labels_for_turn meta in
-        let resolved = Oas_model_resolve.resolve_max_cascade_context labels in
-        Oas_model_resolve.clamp_context_for_pure_local_labels
+        let resolved = Cascade_runtime.resolve_max_cascade_context labels in
+        Cascade_runtime.clamp_context_for_pure_local_labels
           ~labels ~max_context:resolved
     in
     max min_ctx raw

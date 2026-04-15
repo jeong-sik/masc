@@ -320,10 +320,10 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
         match meta.max_context_override with
         | Some value -> value
         | None ->
-            let resolved =
-              Oas_model_resolve.resolve_max_cascade_context cascade_models
-            in
-            Oas_model_resolve.clamp_context_for_pure_local_labels
+              let resolved =
+                Cascade_runtime.resolve_max_cascade_context cascade_models
+              in
+            Cascade_runtime.clamp_context_for_pure_local_labels
               ~labels:cascade_models ~max_context:resolved
       in
       max min_keeper_context raw
@@ -355,10 +355,10 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
         match meta.max_context_override with
         | Some value -> value
         | None ->
-            let resolved =
-              Oas_model_resolve.resolve_max_cascade_context cascade_models
-            in
-            Oas_model_resolve.clamp_context_for_pure_local_labels
+              let resolved =
+                Cascade_runtime.resolve_max_cascade_context cascade_models
+              in
+            Cascade_runtime.clamp_context_for_pure_local_labels
               ~labels:cascade_models ~max_context:resolved
       in
       max min_keeper_context raw
@@ -679,9 +679,15 @@ let actionable_signal_present (observation : world_observation) =
   observation.pending_mentions <> []
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
+  || Option.is_some observation.worktree_change_summary
   || observation.unclaimed_task_count > 0
   || observation.failed_task_count > 0
   || observation.work_discovery_due
+
+let proactive_work_signal_present ~(meta : keeper_meta)
+    (observation : world_observation) =
+  actionable_signal_present observation
+  || Option.is_some meta.current_task_id
 
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
@@ -807,6 +813,9 @@ let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation
           has_actionable_tasks
           && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
+        let proactive_work_ready =
+          proactive_work_signal_present ~meta observation
+        in
         (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown
            has elapsed, skip the idle_gate check. task_reactive_cooldown is
            already a (shorter) subdivision of idle_gate; requiring idle_gate_elapsed
@@ -814,8 +823,9 @@ let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
         let should_run =
-          backlog_elapsed
-          || (idle_gate_elapsed && cooldown_elapsed)
+          proactive_work_ready
+          && (backlog_elapsed
+              || (idle_gate_elapsed && cooldown_elapsed))
         in
         let verdict =
           if should_run then
@@ -855,6 +865,7 @@ let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation
           else
             let skip_reasons =
               [
+                (if not proactive_work_ready then Some No_signal else None);
                 (if not idle_gate_elapsed
                  then Some (Idle_gate_pending
                               { remaining_sec =

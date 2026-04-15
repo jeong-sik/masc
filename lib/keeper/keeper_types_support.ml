@@ -23,9 +23,9 @@ let session_base_dir_ (config : Coord.config) =
   ensure_dir_ d
 
 (** Check API key availability using model label strings.
-    Delegates to Oas_model_resolve which uses OAS Provider_registry directly. *)
+    Delegates to Cascade_runtime which owns MASC cascade resolution. *)
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
-  Oas_model_resolve.ensure_api_keys_for_labels labels
+  Cascade_runtime.ensure_api_keys_for_labels labels
 
 (** Single-file metrics path kept for fallback reads. *)
 let keeper_metrics_path config name =

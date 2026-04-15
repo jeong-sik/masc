@@ -734,7 +734,7 @@ let handle_keeper_get_subroutes state req request reqd =
             Keeper_cascade_routing.select_cascade
               ~base_cascade:m.cascade_name ~phase:current
           in
-          let models = Oas_worker_named.default_model_strings
+          let models = Cascade_runtime.default_model_strings
             ~cascade_name:routing.effective_cascade
           in
           let last_model = m.runtime.usage.last_model_used in
@@ -777,7 +777,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let cascade_models =
         match meta with
         | Ok (Some m) ->
-          Oas_worker_named.default_model_strings
+          Cascade_runtime.default_model_strings
             ~cascade_name:m.cascade_name
         | _ -> ["(unknown)"]
       in

@@ -119,7 +119,7 @@ let proof_result_status_to_string status =
 (* ================================================================ *)
 
 (** Resolve a model label string to an OAS Provider.config.
-    Uses OAS Cascade_config.parse_model_string (Provider_registry SSOT).
+    Uses MASC [Cascade_config.parse_model_string] (with Provider_registry as SSOT).
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)

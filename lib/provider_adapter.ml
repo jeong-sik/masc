@@ -23,10 +23,11 @@ type adapter = {
   auth_mode : auth_mode;
   aliases : string list;
   spawn_key : string option;       (** Key into Spawn.default_configs. None = not spawnable via CLI. *)
-  cascade_prefix : string;         (** OAS cascade model prefix (e.g. "claude", "openai").
-                                       CONTRACT: Must match the prefix used by OAS Cascade_config 
-                                       and Provider_registry to identify and route model requests.
-                                       This is the primary linkage boundary between MASC and OAS. *)
+  cascade_prefix : string;         (** MASC cascade model prefix (e.g. "claude", "openai").
+                                       CONTRACT: Must match the prefix used by the local
+                                       [Cascade_config] parser and Provider_registry-compatible
+                                       model labels. This is the primary naming boundary between
+                                       MASC routing and OAS provider configs. *)
   default_voice : string option;   (** Default TTS voice name. None = no voice assignment. *)
   endpoint_url : string option;    (** Base URL for the provider API. *)
   default_model_id : string option; (** Default model ID for the provider. *)
@@ -848,7 +849,7 @@ let preferred_execution_model_labels () =
     | Ok label -> Some label
     | Error _ -> None);
     (* No hardcoded provider preference here.  Model order is determined
-       by cascade.json (OAS Cascade_config), not by MASC.  The auto_detect
+       by MASC cascade.json via [Cascade_config], not by this adapter module. The auto_detect
        list below only serves as a last-resort fallback when cascade.json
        is missing entirely. *)
   ] in
@@ -959,7 +960,7 @@ let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
-(** Best-effort mapping from OAS provider_kind to a cascade prefix via the
+(** Best-effort mapping from Provider_registry/OAS [provider_kind] to a cascade prefix via the
     adapter registry.
 
     Warning: this mapping is inherently ambiguous for provider_kind values that

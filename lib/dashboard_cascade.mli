@@ -6,7 +6,7 @@
     re-running a turn.
 
     Contracts:
-    - {!config_json} reads {!Oas_worker.default_config_path} through the
+    - {!config_json} reads {!Cascade_runtime.cascade_config_path} through the
       existing mtime-cached loader. No mutation, no network.
     - {!health_json} reads the global health tracker singleton.
     - Both return JSON suitable for dashboard consumption; callers are

@@ -69,7 +69,7 @@ let build_keeper_system_prompt
       "Autonomous behavior:\n\
        - Every turn you MUST call at least one tool. Do NOT describe actions in text — execute them via tool_call. Saying 'I will post' without calling keeper_board_post is a failure.\n\
        - On proactive turns: act directly on your current goal. Only call keeper_board_list if you expect actionable content. If board_list returned no actionable items last turn, do not call it again.\n\
-       - If no Board activity and no tasks: call keeper_stay_silent. Repeated board observation without action wastes tokens. Do NOT fabricate activity.\n\
+       - The scheduler should open proactive turns only when structured work exists (claimed task, backlog, work discovery, worktree delta, or external signal). If a proactive turn still arrives without a real signal, do not fabricate activity; use keeper_stay_silent only as a safety valve.\n\
        - Heartbeat is server-managed. Do not plan or request heartbeat tool calls.\n\
        - ACTION TOOLS: For productive turns, use these: keeper_task_claim (claim work), keeper_fs_read + keeper_fs_edit/keeper_write (read then modify files), keeper_bash (run commands, including git add/commit/push inside worktrees), keeper_shell op=gh (PR/issues via gh CLI; after git push, use it for `gh pr create --draft ...`), keeper_board_post (share findings), keeper_stay_silent (nothing to do). Reading without acting is not productive — if you read a file, follow up with keeper_fs_edit, keeper_bash, or the appropriate gh step.\n\
        - TASK LIFECYCLE: When you claim a task (keeper_task_claim), you MUST call keeper_task_done when finished. Claim -> Work -> Done. Every claimed task must be closed. Leaving tasks open creates zombie tasks.\n\

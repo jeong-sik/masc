@@ -98,9 +98,9 @@ let default_registry = Llm_provider.Provider_registry.default ()
     Resolution order:
     1. Capabilities.for_model_id — per-model override (e.g. "claude-opus-4-6" -> 1M)
     2. Provider_registry.find — provider-level default (e.g. "claude" -> 200K)
-    3. {!Oas_model_resolve.fallback_context_window} *)
+    3. {!Cascade_runtime.fallback_context_window} *)
 let resolve_max_context model =
-  let fallback = Oas_model_resolve.fallback_context_window in
+  let fallback = Cascade_runtime.fallback_context_window in
   (* Layer 1: per-model capabilities (e.g. "claude-opus-4-6" -> 1M) *)
   let from_caps =
     match Llm_provider.Capabilities.for_model_id model with

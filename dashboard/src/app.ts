@@ -5,11 +5,17 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { route, initRouter } from './router'
-import { connectSSE, disconnectSSE } from './sse'
+import {
+  connectSSE,
+  disconnectSSE,
+  pauseQueuedOasRuntimeIngress,
+  resumeQueuedOasRuntimeIngress,
+} from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForRoute } from './tab-refresh'
 import { refreshMissionSnapshot } from './mission-store'
+import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 import { refreshShell } from './store'
 import {
   BuildIdentityBadge,
@@ -32,16 +38,27 @@ export const mobileMenuOpen = signal(false)
 
 export function App() {
   useEffect(() => {
+    let cancelled = false
+
     // Initialize hash router and compatible deep links
     initRouter()
-
-    // Connect SSE and start data fetching
-    connectSSE()
 
     // Prime the lightweight shell status first so build/version metadata lands
     // while namespace-truth warms heavier execution/command projections.
     void refreshShell()
     requestNamespaceTruthNow()
+
+    // Replay durable OAS state before opening the live SSE tail.
+    pauseQueuedOasRuntimeIngress()
+    void replayOasRuntimeTelemetry()
+      .catch(err => {
+        console.warn('[app] OAS runtime replay failed', err instanceof Error ? err.message : err)
+      })
+      .finally(() => {
+        if (cancelled) return
+        connectSSE()
+        resumeQueuedOasRuntimeIngress()
+      })
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.
@@ -54,6 +71,7 @@ export function App() {
     startPeriodicRefresh()
 
     return () => {
+      cancelled = true
       disconnectSSE()
       unsubSSE()
       stopPeriodicRefresh()

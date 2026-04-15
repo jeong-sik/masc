@@ -126,7 +126,6 @@ import {
   OAS_KEEPER_SNAPSHOT_MAX,
   HEARTBEAT_STALE_MS,
   SHELL_TTL_MS,
-
 } from './config/constants'
 
 export const oasAgentEvents = signal<OasAgentEvent[]>([])
@@ -137,6 +136,17 @@ export const oasTotalLlmCalls = signal(0)
 export const oasTotalErrors = signal(0)
 export const oasLastLlmCallTs = signal<number | null>(null)
 export const oasLastErrorTs = signal<number | null>(null)
+
+export function resetOasRuntimeSignals(): void {
+  oasAgentEvents.value = []
+  oasKeeperSnapshots.value = new Map()
+  oasLastKeeperTick.value = null
+  oasTotalEvents.value = 0
+  oasTotalLlmCalls.value = 0
+  oasTotalErrors.value = 0
+  oasLastLlmCallTs.value = null
+  oasLastErrorTs.value = null
+}
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
   const head = oasAgentEvents.value[0]
@@ -160,7 +170,6 @@ export function pushOasAgentEvent(event: OasAgentEvent): void {
     return
   }
   oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
-  oasTotalEvents.value++
 }
 
 /** Record an OAS durable LLM-call event. Increments the global
@@ -168,13 +177,13 @@ export function pushOasAgentEvent(event: OasAgentEvent): void {
  *  surface recency. */
 export function recordOasLlmCall(tsMs: number): void {
   oasTotalLlmCalls.value++
-  oasLastLlmCallTs.value = tsMs
+  oasLastLlmCallTs.value = Math.max(oasLastLlmCallTs.value ?? 0, tsMs)
 }
 
 /** Record an OAS durable error event. */
 export function recordOasError(tsMs: number): void {
   oasTotalErrors.value++
-  oasLastErrorTs.value = tsMs
+  oasLastErrorTs.value = Math.max(oasLastErrorTs.value ?? 0, tsMs)
 }
 
 export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
@@ -197,7 +206,6 @@ export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
     const nextTickMs = Math.round(snapshot.timestamp * 1000)
     oasLastKeeperTick.value = Math.max(oasLastKeeperTick.value ?? 0, nextTickMs)
   }
-  oasTotalEvents.value++
 }
 
 export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() => ({

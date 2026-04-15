@@ -72,7 +72,7 @@ export function OasHealthChip() {
         <${StatCell}
           label="총 이벤트"
           value=${summary.value.totalEvents}
-          detail="live tracked"
+          detail="durable replay + live"
         />
         <${StatCell}
           label="LLM 호출"

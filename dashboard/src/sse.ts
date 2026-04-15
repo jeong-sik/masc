@@ -4,10 +4,6 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import {
-  pushOasAgentEvent,
-  updateOasKeeperSnapshot,
-  recordOasLlmCall,
-  recordOasError,
   removeBoardPost,
 } from './store'
 import {
@@ -15,11 +11,8 @@ import {
   normalizeJournalSeverity,
   normalizeJournalSource,
 } from './journal-entry'
-import type { OasKeeperSnapshot } from './types/oas'
-import {
-  appendLiveOasEvent,
-  appendLiveToolCall,
-} from './components/session-trace/session-trace-state'
+import { appendLiveToolCall } from './components/session-trace/session-trace-state'
+import { applyOasRuntimeEvent } from './oas-runtime-store'
 
 import {
   RECONNECT_BASE_MS,
@@ -160,53 +153,27 @@ function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' 
   return out
 }
 
-function eventUnixTs(event: SSEEvent): number {
-  return typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000
-}
-
-function oasEventType(event: SSEEvent): string {
-  return asString(event.event_type) ?? event.type
-}
-
-function oasEventKey(
-  event: SSEEvent,
-  actorName: string,
-  extras: Array<string | number | undefined> = [],
-): string | undefined {
-  const correlationId = asString(event.correlation_id)
-  const runId = asString(event.run_id)
-  const ts = typeof event.ts_unix === 'number' ? event.ts_unix : undefined
-  if (!correlationId && !runId && ts == null) return undefined
-  return [
-    oasEventType(event),
-    actorName,
-    correlationId ?? '',
-    runId ?? '',
-    ts != null ? String(ts) : '',
-    ...extras
-      .filter((value): value is string | number => value != null)
-      .map((value) => String(value)),
-  ].join('|')
-}
-
-function oasTraceDetail(
-  event: SSEEvent,
-  detail: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    event_type: oasEventType(event),
-    correlation_id: asString(event.correlation_id) ?? null,
-    run_id: asString(event.run_id) ?? null,
-    ts_unix: typeof event.ts_unix === 'number' ? event.ts_unix : null,
-    ...detail,
-  }
-}
-
 // --- SSE Manager ---
 
 let source: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let reconnectAttempts = 0
+let pauseOasRuntimeIngress = false
+let queuedOasEvents: SSEEvent[] = []
+
+export function pauseQueuedOasRuntimeIngress(): void {
+  pauseOasRuntimeIngress = true
+}
+
+export function resumeQueuedOasRuntimeIngress(): void {
+  pauseOasRuntimeIngress = false
+  if (queuedOasEvents.length === 0) return
+  const pending = queuedOasEvents
+  queuedOasEvents = []
+  for (const event of pending) {
+    handleEvent(event)
+  }
+}
 
 export function buildDashboardSseUrl(sessionId: string, locationSearch = window.location.search): string {
   const urlParams = new URLSearchParams(locationSearch)
@@ -257,6 +224,9 @@ export function connectSSE(): void {
   es.onopen = () => {
     if (source !== es) return
     const wasDisconnected = reconnectAttempts > 0
+    if (wasDisconnected) {
+      pauseOasRuntimeIngress = true
+    }
     reconnectAttempts = 0
     connected.value = true
     if (wasDisconnected) {
@@ -300,6 +270,10 @@ function handleEvent(event: SSEEvent): void {
   // the same switch cases.  Keep the original type for OAS/namespaced events
   // that genuinely use colons or other prefixes.
   const rawType = event.type
+  if (pauseOasRuntimeIngress && rawType.startsWith('oas:')) {
+    queuedOasEvents.push(event)
+    return
+  }
   const MASC_PREFIX = 'masc/'
   const type =
     rawType.startsWith(MASC_PREFIX)
@@ -307,6 +281,9 @@ function handleEvent(event: SSEEvent): void {
       ? rawType.slice(MASC_PREFIX.length)
       : rawType
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
+  if (rawType.startsWith('oas:')) {
+    applyOasRuntimeEvent(event, { includeLiveTrace: true })
+  }
 
   switch (type) {
     case 'agent_joined':
@@ -536,77 +513,23 @@ function handleEvent(event: SSEEvent): void {
     }
     // OAS bridge events
     case 'oas:masc:autonomy:agent_selected': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? ''
-      pushOasAgentEvent({
-        type: 'selected',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        trigger: (p.trigger as string) ?? undefined,
-        thompson_score:
-          typeof p.thompson_score === 'number' ? p.thompson_score : undefined,
-        final_score: typeof p.final_score === 'number' ? p.final_score : undefined,
-        event_type: oasEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: oasEventKey(event, agentName),
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : eventUnixTs(event),
-      })
       break
     }
     case 'oas:masc:autonomy:agent_decision': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? ''
-      pushOasAgentEvent({
-        type: 'decision',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        action: (p.action as string) ?? undefined,
-        trigger_reason: (p.trigger_reason as string) ?? undefined,
-        event_type: oasEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: oasEventKey(event, agentName),
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : eventUnixTs(event),
-      })
       break
     }
     case 'oas:masc:autonomy:agent_action_executed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? ''
-      pushOasAgentEvent({
-        type: 'action_executed',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        action: (p.action as string) ?? undefined,
-        success: typeof p.success === 'boolean' ? p.success : undefined,
-        event_type: oasEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: oasEventKey(event, agentName, [p.action as string | undefined]),
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : eventUnixTs(event),
-      })
       break
     }
     case 'oas:masc:keeper:snapshot': {
       const p = (event.payload ?? {}) as Record<string, unknown>
-      const snap: OasKeeperSnapshot = {
+      const snap = {
         keeper_name: (p.keeper_name as string) ?? '',
         generation: (p.generation as number) ?? 0,
         context_ratio: (p.context_ratio as number) ?? 0,
         message_count: (p.message_count as number) ?? 0,
         timestamp: (p.timestamp as number) ?? Date.now() / 1000,
       }
-      updateOasKeeperSnapshot(snap)
       addTypedJournalEntry(
         snap.keeper_name,
         `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`,
@@ -629,22 +552,6 @@ function handleEvent(event: SSEEvent): void {
       const actorName = keeperName || asString(p.agent_name) || ''
       const lifecycleEvent = (p.event as string) ?? undefined
       const detail = (p.detail as string) ?? undefined
-      pushOasAgentEvent({
-        type: 'keeper_lifecycle',
-        agent_name: actorName,
-        actor_kind: 'keeper',
-        keeper_name: keeperName || undefined,
-        event: lifecycleEvent,
-        detail,
-        event_type: oasEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: oasEventKey(event, actorName, [lifecycleEvent, detail]),
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : eventUnixTs(event),
-      })
       addTypedJournalEntry(
         actorName,
         `Keeper ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
@@ -668,21 +575,6 @@ function handleEvent(event: SSEEvent): void {
       const agentA = (p.agent_a as string) ?? ''
       const agentB = (p.agent_b as string) ?? ''
       const trustScore = typeof p.trust_score === 'number' ? p.trust_score : undefined
-      pushOasAgentEvent({
-        type: 'trust_updated',
-        agent_name: agentA,
-        actor_kind: 'agent',
-        secondary_agent: agentB,
-        trust_score: trustScore,
-        event_type: oasEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: oasEventKey(event, agentA, [agentB]),
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : eventUnixTs(event),
-      })
       addTypedJournalEntry(
         agentA,
         `Trust ${agentB}${trustScore != null ? ` · ${trustScore.toFixed(2)}` : ''}`,
@@ -703,22 +595,6 @@ function handleEvent(event: SSEEvent): void {
       const oldScore = typeof p.old_score === 'number' ? p.old_score : undefined
       const newScore = typeof p.new_score === 'number' ? p.new_score : undefined
       const trend = (p.trend as string) ?? undefined
-      pushOasAgentEvent({
-        type: 'reputation_changed',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        old_score: oldScore,
-        new_score: newScore,
-        trend,
-        event_type: oasEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: oasEventKey(event, agentName, [trend]),
-        timestamp:
-          typeof p.timestamp === 'number'
-            ? p.timestamp
-            : eventUnixTs(event),
-      })
       addTypedJournalEntry(
         agentName,
         `Reputation${oldScore != null && newScore != null ? ` ${oldScore.toFixed(2)} → ${newScore.toFixed(2)}` : ''}${trend ? ` · ${trend}` : ''}`,
@@ -754,26 +630,6 @@ function handleEvent(event: SSEEvent): void {
           ...envelopeFromEvent(event),
         },
       )
-      if (agentName) {
-        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-        const inputTokens = asNumber(p.input_tokens)
-        const outputTokens = asNumber(p.output_tokens)
-        const costUsd = asNumber(p.cost_usd)
-        appendLiveOasEvent(agentName, {
-          id: oasEventKey(event, agentName, [phase]) ?? `live-oas-agent-${phase}-${tsMs}-${agentName}`,
-          ts: tsMs,
-          ts_iso: new Date(tsMs).toISOString(),
-          kind: 'lifecycle',
-          summary: `agent ${phase}${inputTokens != null || outputTokens != null ? ` · ${inputTokens ?? 0}→${outputTokens ?? 0}tok` : ''}`,
-          detail: oasTraceDetail(event, {
-            task_id: taskId ?? null,
-            elapsed_s: elapsed ?? null,
-            input_tokens: inputTokens ?? null,
-            output_tokens: outputTokens ?? null,
-          }),
-          cost_usd: costUsd ?? undefined,
-        })
-      }
       break
     }
     case 'oas:tool_called':
@@ -793,18 +649,6 @@ function handleEvent(event: SSEEvent): void {
           narrativeText: `${actorLabel(agentName)} OAS 도구 ${phase}: ${toolName}`,
         },
       )
-      if (agentName) {
-        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-        appendLiveOasEvent(agentName, {
-          id: oasEventKey(event, agentName, [phase, toolName]) ?? `live-oas-tool-${phase}-${tsMs}-${toolName}`,
-          ts: tsMs,
-          ts_iso: new Date(tsMs).toISOString(),
-          kind: 'oas_tool',
-          summary: `${phase} ${toolName}`,
-          detail: oasTraceDetail(event, { phase, tool_name: toolName }),
-          toolName,
-        })
-      }
       break
     }
     case 'oas:turn_started':
@@ -824,18 +668,6 @@ function handleEvent(event: SSEEvent): void {
           narrativeText: `${actorLabel(agentName)} OAS turn ${phase}${turn != null ? ` (T${turn})` : ''}`,
         },
       )
-      if (agentName) {
-        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-        appendLiveOasEvent(agentName, {
-          id: oasEventKey(event, agentName, [phase, turn]) ?? `live-oas-turn-${phase}-${tsMs}-${turn ?? 'na'}`,
-          ts: tsMs,
-          ts_iso: new Date(tsMs).toISOString(),
-          kind: 'oas_turn',
-          summary: `${phase} turn${turn != null ? ` ${turn}` : ''}`,
-          detail: oasTraceDetail(event, { phase, turn: turn ?? null }),
-          turn,
-        })
-      }
       break
     }
     case 'oas:context_compacted': {
@@ -855,21 +687,6 @@ function handleEvent(event: SSEEvent): void {
           narrativeText: `${actorLabel(agentName)} OAS context compact${phase ? ` (${phase})` : ''}`,
         },
       )
-      if (agentName) {
-        const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-        appendLiveOasEvent(agentName, {
-          id: oasEventKey(event, agentName, [phase, before, after]) ?? `live-oas-context-${tsMs}-${phase ?? 'compact'}`,
-          ts: tsMs,
-          ts_iso: new Date(tsMs).toISOString(),
-          kind: 'oas_context',
-          summary: `compact${before != null && after != null ? ` ${before}→${after}` : ''}`,
-          detail: oasTraceDetail(event, {
-            before_tokens: before ?? null,
-            after_tokens: after ?? null,
-            phase: phase ?? null,
-          }),
-        })
-      }
       break
     }
     case 'oas:task_state_changed': {
@@ -896,21 +713,17 @@ function handleEvent(event: SSEEvent): void {
       const turn = asNumber(p.turn)
       const model = asString(p.model) ?? 'unknown'
       const inputTokens = asNumber(p.input_tokens) ?? 0
-      const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-      recordOasLlmCall(tsMs)
-      appendLiveOasEvent(agentName, {
-        id: oasEventKey(event, agentName, ['llm_request', turn]) ?? `live-oas-durable-llm-req-${tsMs}-${agentName}`,
-        ts: tsMs,
-        ts_iso: new Date(tsMs).toISOString(),
-        kind: 'lifecycle',
-        summary: `LLM 요청 · ${model} · ${inputTokens}tok${turn != null ? ` · turn ${turn}` : ''}`,
-        detail: oasTraceDetail(event, {
-          durable_kind: 'llm_request',
-          turn: turn ?? null,
-          model,
-          input_tokens: inputTokens,
-        }),
-      })
+      addTypedJournalEntry(
+        agentName,
+        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · ${model} · ${inputTokens}tok`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          ...envelopeFromEvent(event),
+        },
+      )
       break
     }
     case 'oas:durable:llm_response': {
@@ -920,22 +733,17 @@ function handleEvent(event: SSEEvent): void {
       const outputTokens = asNumber(p.output_tokens) ?? 0
       const stopReason = asString(p.stop_reason) ?? 'unknown'
       const durationMs = asNumber(p.duration_ms)
-      const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-      appendLiveOasEvent(agentName, {
-        id: oasEventKey(event, agentName, ['llm_response', turn]) ?? `live-oas-durable-llm-res-${tsMs}-${agentName}`,
-        ts: tsMs,
-        ts_iso: new Date(tsMs).toISOString(),
-        kind: 'lifecycle',
-        summary: `LLM 응답 · ${outputTokens}tok · ${stopReason}${durationMs != null ? ` · ${durationMs.toFixed(0)}ms` : ''}`,
-        detail: oasTraceDetail(event, {
-          durable_kind: 'llm_response',
-          turn: turn ?? null,
-          output_tokens: outputTokens,
-          stop_reason: stopReason,
-          duration_ms: durationMs ?? null,
-        }),
-        duration_ms: durationMs ?? undefined,
-      })
+      addTypedJournalEntry(
+        agentName,
+        `OAS durable llm_response${turn != null ? ` · T${turn}` : ''} · ${outputTokens}tok · ${stopReason}${durationMs != null ? ` · ${durationMs.toFixed(0)}ms` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          ...envelopeFromEvent(event),
+        },
+      )
       break
     }
     case 'oas:durable:error_occurred': {
@@ -944,22 +752,18 @@ function handleEvent(event: SSEEvent): void {
       const turn = asNumber(p.turn)
       const errorDomain = asString(p.error_domain) ?? 'unknown'
       const detail = asString(p.detail) ?? ''
-      const tsMs = (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000) * 1000
-      recordOasError(tsMs)
-      appendLiveOasEvent(agentName, {
-        id: oasEventKey(event, agentName, ['error_occurred', turn, errorDomain]) ?? `live-oas-durable-err-${tsMs}-${agentName}`,
-        ts: tsMs,
-        ts_iso: new Date(tsMs).toISOString(),
-        kind: 'lifecycle',
-        summary: `OAS 에러 · ${errorDomain}${turn != null ? ` · turn ${turn}` : ''}`,
-        detail: oasTraceDetail(event, {
-          durable_kind: 'error_occurred',
-          turn: turn ?? null,
-          error_domain: errorDomain,
-          detail,
-        }),
-        error: detail || errorDomain,
-      })
+      addTypedJournalEntry(
+        agentName,
+        `OAS 에러 · ${errorDomain}${turn != null ? ` · T${turn}` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          preview: detail || undefined,
+          ...envelopeFromEvent(event),
+        },
+      )
       break
     }
     case 'oas:durable:turn_started':
@@ -987,6 +791,8 @@ export function disconnectSSE(): void {
     source.close()
     source = null
   }
+  pauseOasRuntimeIngress = false
+  queuedOasEvents = []
   connected.value = false
 }
 

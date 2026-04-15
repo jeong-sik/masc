@@ -38,6 +38,7 @@
    (re_export masc_mcp.mcp_transport_protocol)
    (re_export masc_mcp.prompt_registry)
    (re_export masc_mcp.response)
+   (re_export masc_mcp.swarm_status)
    ;; masc_mcp.team_session_types removed (Epic #6107)
    (re_export masc_mcp.tool_schemas)
    (re_export masc_process)

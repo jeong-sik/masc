@@ -200,31 +200,35 @@ let test_offline_agent () =
 (* ===== Lane Status Translation ===== *)
 
 let test_lane_running () =
+  let open Swarm_status_types in
   let result =
-    Lib.Dashboard_labels.translate_lane_status ~phase:"executing"
-      ~motion_state:"moving" ~age:"5m ago"
+    Lib.Dashboard_labels.translate_lane_status ~phase:Executing
+      ~motion_state:Moving ~age:"5m ago"
   in
   Alcotest.(check string) "executing/moving" "Running (last 5m ago)" result
 
 let test_lane_stalled () =
+  let open Swarm_status_types in
   let result =
-    Lib.Dashboard_labels.translate_lane_status ~phase:"executing"
-      ~motion_state:"stalled" ~age:"10m ago"
+    Lib.Dashboard_labels.translate_lane_status ~phase:Executing
+      ~motion_state:Stalled ~age:"10m ago"
   in
   Alcotest.(check string) "executing/stalled" "STALLED - no progress" result
 
 let test_lane_blocked () =
+  let open Swarm_status_types in
   let result =
-    Lib.Dashboard_labels.translate_lane_status ~phase:"awaiting_approval"
-      ~motion_state:"waiting" ~age:"5m ago"
+    Lib.Dashboard_labels.translate_lane_status ~phase:Awaiting_approval
+      ~motion_state:Waiting ~age:"5m ago"
   in
   Alcotest.(check string) "awaiting_approval"
     "BLOCKED - needs your approval" result
 
 let test_lane_done () =
+  let open Swarm_status_types in
   let result =
-    Lib.Dashboard_labels.translate_lane_status ~phase:"completed"
-      ~motion_state:"terminal" ~age:"n/a"
+    Lib.Dashboard_labels.translate_lane_status ~phase:Lane_completed
+      ~motion_state:Terminal ~age:"n/a"
   in
   Alcotest.(check string) "completed" "Done" result
 
@@ -232,19 +236,16 @@ let test_lane_done () =
 
 let test_flag_approval () =
   let result =
-    Lib.Dashboard_labels.translate_flag_code "pending_manual_confirmation"
+    Lib.Dashboard_labels.translate_flag_code
+      Swarm_status_types.Pending_manual_confirmation
   in
   Alcotest.(check string) "approval flag" "Waiting for your approval" result
 
-let test_flag_unknown () =
-  let result = Lib.Dashboard_labels.translate_flag_code "some_new_flag" in
-  Alcotest.(check string) "unknown passthrough" "some_new_flag" result
-
-let test_flag_duration () =
+let test_flag_stale_data () =
   let result =
-    Lib.Dashboard_labels.translate_flag_code "duration_reached"
+    Lib.Dashboard_labels.translate_flag_code Swarm_status_types.Stale_data
   in
-  Alcotest.(check string) "duration flag" "Time limit reached" result
+  Alcotest.(check string) "stale_data flag" "Data may be outdated" result
 
 (* ===== Health Verdict ===== *)
 
@@ -253,14 +254,15 @@ let test_health_no_lanes () =
   Alcotest.(check string) "no lanes" "No active lanes" result
 
 let test_health_all_moving () =
+  let open Swarm_status_types in
   let lanes =
     [
       Lib.Dashboard_labels.
         {
           label = "test";
           present = true;
-          phase = "executing";
-          motion_state = "moving";
+          phase = Executing;
+          motion_state = Moving;
           age = "5m ago";
           current_step = "step";
           hard_flags = [];
@@ -276,14 +278,15 @@ let test_health_all_moving () =
      with Not_found -> false)
 
 let test_health_with_stalled () =
+  let open Swarm_status_types in
   let lanes =
     [
       Lib.Dashboard_labels.
         {
           label = "test";
           present = true;
-          phase = "executing";
-          motion_state = "stalled";
+          phase = Executing;
+          motion_state = Stalled;
           age = "10m ago";
           current_step = "step";
           hard_flags = [];
@@ -301,14 +304,15 @@ let test_health_with_stalled () =
 (** A lane that is both stalled (motion_state) and blocked (phase)
     should only be counted once in the attention count. *)
 let test_health_stalled_blocked_no_double_count () =
+  let open Swarm_status_types in
   let lanes =
     [
       Lib.Dashboard_labels.
         {
           label = "lane-1";
           present = true;
-          phase = "blocked";
-          motion_state = "stalled";
+          phase = Blocked;
+          motion_state = Stalled;
           age = "10m ago";
           current_step = "step";
           hard_flags = [];
@@ -427,8 +431,7 @@ let () =
       ( "Flag Codes",
         [
           ("approval flag", `Quick, test_flag_approval);
-          ("unknown flag", `Quick, test_flag_unknown);
-          ("duration flag", `Quick, test_flag_duration);
+          ("stale_data flag", `Quick, test_flag_stale_data);
         ] );
       ( "Health Verdict",
         [

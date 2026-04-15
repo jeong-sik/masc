@@ -2803,6 +2803,38 @@ let test_social_model_magentic_ledger_previous_state_of_meta_restores_model ()
       check string "speech act restored" "inform"
         (KSM.speech_act_to_string state.speech_act)
 
+let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let previous_state =
+    Some
+      {
+        KSM.social_model = "magentic_ledger_v1";
+        belief_summary = "ledger:phase=stalled; event=goal_idle_timeout";
+        active_desire = Some "recover_forward_motion";
+        current_intention = Some "request_replan";
+        blocker = Some "stalled_without_progress_evidence";
+        need = Some "fresh_plan_or_external_delta";
+        speech_act = KSM.Stay_silent;
+        delivery_surface = KSM.Silent;
+      }
+  in
+  let observation =
+    { base_observation with active_goals = [ "goal-1" ]; idle_seconds = 0 }
+  in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let _, state, _ =
+    KSM.apply_to_result ~meta ~observation ~previous_state result
+  in
+  check (option string) "stalled desire carried" (Some "recover_forward_motion")
+    state.active_desire;
+  check (option string) "stalled intention carried" (Some "request_replan")
+    state.current_intention;
+  check bool "belief summary remains stalled" true
+    (contains_substring state.belief_summary "ledger:phase=stalled")
+
 let test_keeper_allowed_tools_exclude_heartbeat () =
   let allowed =
     Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names minimal_policy_meta
@@ -3181,6 +3213,8 @@ let () =
             test_social_model_magentic_ledger_hides_nonvisible_tool_text;
           test_case "magentic ledger restores previous state model" `Quick
             test_social_model_magentic_ledger_previous_state_of_meta_restores_model;
+          test_case "magentic ledger stalled state carries until delta" `Quick
+            test_social_model_magentic_ledger_stalled_state_carries_until_delta;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick

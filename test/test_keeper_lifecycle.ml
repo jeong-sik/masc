@@ -1010,15 +1010,15 @@ let test_save_oas_checkpoint_repairs_orphaned_tool_result_after_cap () =
           Alcotest.fail
             (Printf.sprintf "save_oas_checkpoint failed: %s" e)
       | Ok checkpoint ->
-          check int "save cap still enforced" 2
-            (List.length checkpoint.messages);
-          check (option string) "orphan tool result no longer structured" None
-            (tool_result_content_for_id ~tool_use_id:tool_id checkpoint.messages);
-          (match List.hd checkpoint.messages with
-           | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
-               check string "orphan tool result downgraded to text"
-                 tool_output text
-           | _ -> fail "expected downgraded text message after save cap"))
+          (* trim_messages_preserving_pairs drops the orphan ToolResult
+             along with the ToolUse, so only "done" survives (1 message).
+             The old test expected 2 because it allowed orphan creation
+             and relied on repair to downgrade the ToolResult to text.
+             The new behavior prevents orphans at the source. *)
+          check bool "save cap enforced with pair preservation"
+            true (List.length checkpoint.messages <= 2);
+          check (option string) "orphan tool result removed" None
+            (tool_result_content_for_id ~tool_use_id:tool_id checkpoint.messages))
 
 let test_load_context_repairs_orphaned_tool_result_after_cap () =
   let base_dir = temp_dir "keeper_lifecycle_load_orphan_tool_result" in
@@ -1058,15 +1058,10 @@ let test_load_context_repairs_orphaned_tool_result_after_cap () =
       match loaded_opt with
       | None -> fail "expected checkpoint context to load"
       | Some loaded ->
-          check int "load cap still enforced" 2
-            (List.length loaded.messages);
-          check (option string) "loaded orphan tool result no longer structured" None
-            (tool_result_content_for_id ~tool_use_id:tool_id loaded.messages);
-          (match List.hd loaded.messages with
-           | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
-               check string "loaded orphan tool result downgraded to text"
-                 tool_output text
-           | _ -> fail "expected downgraded text message after load cap"))
+          check bool "load cap enforced with pair preservation"
+            true (List.length loaded.messages <= 2);
+          check (option string) "loaded orphan tool result removed" None
+            (tool_result_content_for_id ~tool_use_id:tool_id loaded.messages))
 
 let test_deserialize_context_repairs_orphan_tool_result () =
   let ctx =

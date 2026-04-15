@@ -10,7 +10,7 @@ open Server_utils
 (* Wire task mutation hook: invalidate execution cache on any task
    add/transition so the dashboard serves fresh backlog data. *)
 let () =
-  Room_hooks.on_task_mutation_fn := invalidate_execution_cache
+  Coord_hooks.on_task_mutation_fn := invalidate_execution_cache
 
 
 let dashboard_namespace_truth_focus_json =
@@ -80,7 +80,7 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
       ("sort_by", `String (board_sort_label sort_by));
     ]
 
-let dashboard_memory_subsystems_http_json ~(config : Room_utils.config) request
+let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
     : Yojson.Safe.t =
   let limit =
     int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:500
@@ -250,7 +250,7 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
                    ])
            | Error message -> Error message)
 
-let dashboard_planning_http_json ~(config : Room.config) : Yojson.Safe.t =
+let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in
   let task_rollup =
@@ -282,7 +282,7 @@ let dashboard_planning_http_json ~(config : Room.config) : Yojson.Safe.t =
           ] );
     ]
 
-let dashboard_goals_tree_http_json ~(config : Room.config) : Yojson.Safe.t =
+let dashboard_goals_tree_http_json ~(config : Coord.config) : Yojson.Safe.t =
   Dashboard_goals.dashboard_goals_tree_json ~config
 
 let operator_action_http_json ~state ~sw ~clock request ~args =

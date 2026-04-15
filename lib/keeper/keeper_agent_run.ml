@@ -392,7 +392,7 @@ let tool_index_entry_of_tool
     message, builds OAS tools + hooks, and delegates to
     [Oas_worker.run_named] which internally calls Agent.run().
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
@@ -411,7 +411,7 @@ let tool_index_entry_of_tool
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
@@ -631,7 +631,7 @@ let run_turn
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
   if affinity_k > 0
   then (
-    let masc_root = Room.masc_root_dir config in
+    let masc_root = Coord.masc_root_dir config in
     let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
@@ -1201,16 +1201,16 @@ let run_turn
                 let llm_selected =
                   if llm_rerank_enabled then
                     (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-	                     | Some sw, Some net ->
-	                       let rerank_cascade =
-	                         Keeper_config.keeper_llm_rerank_cascade ()
-	                       in
-	                       let defaults =
-	                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
-	                       in
-	                       let config_path = Oas_worker.default_config_path () in
-	                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
-	                          no longer owns cascade orchestration — MASC picks one
+                     | Some sw, Some net ->
+                       let rerank_cascade =
+                         Keeper_config.keeper_llm_rerank_cascade ()
+                       in
+                       let defaults =
+                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+                       in
+                       let config_path = Oas_worker.default_config_path () in
+                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
+                          no longer owns cascade orchestration — MASC picks one
                           provider from the cascade and passes it to the
                           single-provider rerank API. Graceful degradation via
                           BM25 fallback lives inside [default_rerank_fn]. *)
@@ -1222,16 +1222,16 @@ let run_turn
                        let providers =
                          Cascade_config.parse_model_strings model_strings
                        in
-	                       let healthy =
-	                         Cascade_config.filter_healthy ~sw ~net providers
-	                       in
-	                       (match healthy with
-	                        | [] ->
-	                          Log.Keeper.warn
-	                            "keeper:%s TopK_llm: no healthy provider for cascade \
-	                             '%s', falling back to core+prefilter+discovered"
-	                            meta.name
-	                            rerank_cascade;
+                       let healthy =
+                         Cascade_config.filter_healthy ~sw ~net providers
+                       in
+                       (match healthy with
+                        | [] ->
+                          Log.Keeper.warn
+                            "keeper:%s TopK_llm: no healthy provider for cascade \
+                             '%s', falling back to core+prefilter+discovered"
+                            meta.name
+                            rerank_cascade;
                           []
                         | first_provider :: _ ->
                           let rerank_fn =
@@ -1516,6 +1516,12 @@ let run_turn
            Capture now once so ts_unix and hook_ms are consistent. *)
               (let now = Time_compat.now () in
                let hook_elapsed_ms = Keeper_timing.round1 ((now -. hook_t0) *. 1000.0) in
+               Keeper_registry.set_turn_decision_stage
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Decision_tool_policy_selected;
+               Keeper_registry.set_turn_cascade_state
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Cascade_selecting;
                let disclosure_json =
                  `Assoc
                    [ "ts_unix", `Float now
@@ -1556,7 +1562,7 @@ let run_turn
     }
   in
   let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-  let base_dir = Room.masc_root_dir config in
+  let base_dir = Coord.masc_root_dir config in
   (* RFC-MASC-004 Phase 2: Hook-first is now the only path.
      Create bare memory (no imperative seeding). Memory content is
      injected via BeforeTurnParams hook; flush is incremental via
@@ -1960,8 +1966,8 @@ let run_turn
                  (* Emit activity event so episode flushes appear in
                     the activity graph / telemetry surface. *)
                  (try
-                    !Room_hooks.activity_emit_fn config
-                      ~actor:Room_hooks.{ kind = "keeper"; id = meta.name }
+                    !Coord_hooks.activity_emit_fn config
+                      ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
                       ~kind:"episode.flush"
                       ~payload:(`Assoc [
                         ("keeper", `String meta.name);

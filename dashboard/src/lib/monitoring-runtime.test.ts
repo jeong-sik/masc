@@ -122,6 +122,26 @@ describe('summarizeKeeperMonitoring', () => {
     )
   })
 
+  it('surfaces continue-gate blockers as manual reconcile guidance', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'paused',
+        phase: 'Paused',
+        pipeline_stage: 'paused',
+        paused: true,
+        runtime_blocker_class: 'ambiguous_post_commit_timeout',
+        runtime_blocker_summary:
+          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+        runtime_blocker_manual_reconcile: true,
+      }),
+    )
+
+    expect(summary.band.key).toBe('paused')
+    expect(summary.hint).toBe(
+      '계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+    )
+  })
+
   it('surfaces autonomous slot wait timeouts as attention', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({

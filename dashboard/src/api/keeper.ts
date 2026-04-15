@@ -1,6 +1,12 @@
 // MASC Dashboard — Keeper messaging (direct, operator-mediated, SSE streaming)
 
-import { isRecord } from '../components/common/normalize'
+import {
+  asBoolean,
+  asNullableString,
+  asNumber,
+  asString,
+  isRecord,
+} from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
@@ -424,17 +430,54 @@ export interface KeeperCompositeMeasurement {
 export interface KeeperLastOutcome {
   turn_id: number
   ended_at: number
+  decision_stage: KeeperCompositeDecisionStage
+  cascade_state: KeeperCompositeCascadeState
+  selected_model: string | null
 }
+
+export type KeeperCompositePhase =
+  | 'Running'
+  | 'Failing'
+  | 'Overflowed'
+  | 'Compacting'
+  | 'HandingOff'
+  | 'Draining'
+  | 'Stable'
+
+export type KeeperCompositeTurnPhase =
+  | 'idle'
+  | 'prompting'
+  | 'executing'
+  | 'compacting'
+  | 'finalizing'
+
+export type KeeperCompositeDecisionStage =
+  | 'undecided'
+  | 'guard_ok'
+  | 'gate_rejected'
+  | 'tool_policy_selected'
+
+export type KeeperCompositeCascadeState =
+  | 'idle'
+  | 'selecting'
+  | 'trying'
+  | 'done'
+  | 'exhausted'
+
+export type KeeperCompositeCompactionStage =
+  | 'accumulating'
+  | 'compacting'
+  | 'done'
 
 export interface KeeperCompositeSnapshot {
   correlation_id: string
   run_id: string
   ts: number
-  phase: string
-  turn_phase: string
-  decision: { stage: string }
-  cascade: { state: string }
-  compaction: { stage: string }
+  phase: KeeperCompositePhase
+  turn_phase: KeeperCompositeTurnPhase
+  decision: { stage: KeeperCompositeDecisionStage }
+  cascade: { state: KeeperCompositeCascadeState }
+  compaction: { stage: KeeperCompositeCompactionStage }
   measurement: KeeperCompositeMeasurement
   recovery: { data_record: boolean; fsm_condition: boolean }
   invariants: KeeperCompositeInvariants
@@ -447,6 +490,209 @@ export interface KeeperCompositeSnapshot {
   last_outcome: KeeperLastOutcome | null
 }
 
+const DEFAULT_KEEPER_COMPOSITE_RECOVERY = {
+  data_record: false,
+  fsm_condition: false,
+} as const
+
+const DEFAULT_KEEPER_COMPOSITE_INVARIANTS = {
+  phase_turn_alignment: true,
+  no_cascade_before_measurement: true,
+  compaction_atomicity: true,
+  event_priority_monotone: true,
+} as const satisfies Omit<KeeperCompositeInvariants, 'recovery_two_store_sync'>
+
+function normalizeKeeperCompositePhase(value: unknown): KeeperCompositePhase {
+  switch (asString(value, '').trim()) {
+    case 'Running':
+    case 'running':
+      return 'Running'
+    case 'Failing':
+    case 'failing':
+      return 'Failing'
+    case 'Overflowed':
+    case 'overflowed':
+      return 'Overflowed'
+    case 'Compacting':
+    case 'compacting':
+      return 'Compacting'
+    case 'HandingOff':
+    case 'handingoff':
+    case 'handing_off':
+      return 'HandingOff'
+    case 'Draining':
+    case 'draining':
+      return 'Draining'
+    case 'Stable':
+    case 'stable':
+    case 'Offline':
+    case 'offline':
+    case 'Paused':
+    case 'paused':
+    case 'Stopped':
+    case 'stopped':
+    case 'Crashed':
+    case 'crashed':
+    case 'Restarting':
+    case 'restarting':
+    case 'Dead':
+    case 'dead':
+      return 'Stable'
+    default:
+      return 'Stable'
+  }
+}
+
+function normalizeKeeperCompositeTurnPhase(value: unknown): KeeperCompositeTurnPhase {
+  switch (asString(value, '').trim()) {
+    case 'prompting':
+      return 'prompting'
+    case 'executing':
+      return 'executing'
+    case 'compacting':
+      return 'compacting'
+    case 'finalizing':
+      return 'finalizing'
+    case 'idle':
+    default:
+      return 'idle'
+  }
+}
+
+function normalizeKeeperCompositeDecisionStage(value: unknown): KeeperCompositeDecisionStage {
+  switch (asString(value, '').trim()) {
+    case 'guard_ok':
+      return 'guard_ok'
+    case 'gate_rejected':
+      return 'gate_rejected'
+    case 'tool_policy_selected':
+      return 'tool_policy_selected'
+    case 'undecided':
+    default:
+      return 'undecided'
+  }
+}
+
+function normalizeKeeperCompositeCascadeState(value: unknown): KeeperCompositeCascadeState {
+  switch (asString(value, '').trim()) {
+    case 'selecting':
+      return 'selecting'
+    case 'trying':
+      return 'trying'
+    case 'done':
+      return 'done'
+    case 'exhausted':
+      return 'exhausted'
+    case 'idle':
+    default:
+      return 'idle'
+  }
+}
+
+function normalizeKeeperCompositeCompactionStage(
+  value: unknown,
+): KeeperCompositeCompactionStage {
+  switch (asString(value, '').trim()) {
+    case 'compacting':
+      return 'compacting'
+    case 'done':
+      return 'done'
+    case 'accumulating':
+    default:
+      return 'accumulating'
+  }
+}
+
+export function normalizeKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {
+  if (!isRecord(data)) {
+    throw new Error('composite fetch failed: malformed payload')
+  }
+
+  const decision = isRecord(data.decision) ? data.decision : null
+  const cascade = isRecord(data.cascade) ? data.cascade : null
+  const compaction = isRecord(data.compaction) ? data.compaction : null
+  const measurement = isRecord(data.measurement) ? data.measurement : null
+  const autoRules = isRecord(measurement?.auto_rules) ? measurement.auto_rules : null
+  const recovery = isRecord(data.recovery) ? data.recovery : null
+  const dataRecord = asBoolean(recovery?.data_record, DEFAULT_KEEPER_COMPOSITE_RECOVERY.data_record)
+  const fsmCondition = asBoolean(recovery?.fsm_condition, DEFAULT_KEEPER_COMPOSITE_RECOVERY.fsm_condition)
+  const invariants = isRecord(data.invariants) ? data.invariants : null
+  const lastOutcome = isRecord(data.last_outcome) ? data.last_outcome : null
+
+  return {
+    correlation_id: asString(data.correlation_id, ''),
+    run_id: asString(data.run_id, ''),
+    ts: asNumber(data.ts, 0),
+    phase: normalizeKeeperCompositePhase(data.phase),
+    turn_phase: normalizeKeeperCompositeTurnPhase(data.turn_phase),
+    decision: {
+      stage: normalizeKeeperCompositeDecisionStage(decision?.stage),
+    },
+    cascade: {
+      state: normalizeKeeperCompositeCascadeState(cascade?.state),
+    },
+    compaction: {
+      stage: normalizeKeeperCompositeCompactionStage(compaction?.stage),
+    },
+    measurement: autoRules
+      ? {
+          captured: asBoolean(measurement?.captured, true),
+          auto_rules: {
+            reflect: asBoolean(autoRules.reflect, false),
+            plan: asBoolean(autoRules.plan, false),
+            compact: asBoolean(autoRules.compact, false),
+            handoff: asBoolean(autoRules.handoff, false),
+            guardrail_stop: asBoolean(autoRules.guardrail_stop, false),
+            guardrail_reason: asNullableString(autoRules.guardrail_reason),
+            goal_drift: asNumber(autoRules.goal_drift, 0),
+          },
+        }
+      : {
+          captured: asBoolean(measurement?.captured, false),
+        },
+    recovery: {
+      data_record: dataRecord,
+      fsm_condition: fsmCondition,
+    },
+    invariants: {
+      phase_turn_alignment: asBoolean(
+        invariants?.phase_turn_alignment,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.phase_turn_alignment,
+      ),
+      no_cascade_before_measurement: asBoolean(
+        invariants?.no_cascade_before_measurement,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.no_cascade_before_measurement,
+      ),
+      compaction_atomicity: asBoolean(
+        invariants?.compaction_atomicity,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.compaction_atomicity,
+      ),
+      event_priority_monotone: asBoolean(
+        invariants?.event_priority_monotone,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.event_priority_monotone,
+      ),
+      recovery_two_store_sync: asBoolean(
+        invariants?.recovery_two_store_sync,
+        dataRecord === fsmCondition,
+      ),
+    },
+    is_live: asBoolean(data.is_live, false),
+    last_outcome: lastOutcome
+      ? {
+          turn_id: asNumber(lastOutcome.turn_id, 0),
+          ended_at: asNumber(lastOutcome.ended_at, 0),
+          decision_stage: normalizeKeeperCompositeDecisionStage(
+            lastOutcome.decision_stage,
+          ),
+          cascade_state: normalizeKeeperCompositeCascadeState(
+            lastOutcome.cascade_state,
+          ),
+          selected_model: asNullableString(lastOutcome.selected_model),
+        }
+      : null,
+  }
+}
+
 export async function fetchKeeperComposite(name: string): Promise<KeeperCompositeSnapshot> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
@@ -454,7 +700,7 @@ export async function fetchKeeperComposite(name: string): Promise<KeeperComposit
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperCompositeSnapshot>
+  return normalizeKeeperCompositeSnapshot(await resp.json())
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---

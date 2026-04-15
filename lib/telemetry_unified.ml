@@ -49,6 +49,12 @@ let all_sources =
   ; Tool_metric
   ]
 
+type read_result = {
+  entries : Yojson.Safe.t list;
+  total_matching_entries : int;
+  truncated : bool;
+}
+
 (* ── Store paths ────────────────────────────────────── *)
 
 (** Fixed-path sources (single directory per source).
@@ -105,6 +111,40 @@ let extract_ts (json : Yojson.Safe.t) : float =
                 Option.value ~default:0.0 (Types.parse_iso8601_opt iso)
             | _ -> 0.0))
   | _ -> 0.0
+
+let day_string_of_unix_seconds ts =
+  let tm = Unix.gmtime ts in
+  Printf.sprintf "%04d-%02d-%02d"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+
+let effective_day_window ?since_ts ?until_ts () =
+  match since_ts, until_ts with
+  | None, None -> None
+  | _ ->
+    let lower = Option.value ~default:0.0 since_ts in
+    let upper =
+      match until_ts with
+      | Some ts -> ts
+      | None -> max lower (Unix.gettimeofday ())
+    in
+    Some (day_string_of_unix_seconds lower, day_string_of_unix_seconds upper)
+
+let within_requested_window ?since_ts ?until_ts (json : Yojson.Safe.t) : bool =
+  match since_ts, until_ts with
+  | None, None -> true
+  | _ ->
+    let ts = extract_ts json in
+    let after_lower =
+      match since_ts with
+      | None -> true
+      | Some lower -> ts >= lower
+    in
+    let before_upper =
+      match until_ts with
+      | None -> true
+      | Some upper -> ts <= upper
+    in
+    after_lower && before_upper
 
 let max_ts_opt current candidate =
   match current with
@@ -189,12 +229,20 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
 
 (* ── Read from a single fixed-path source ───────────── *)
 
-let read_fixed_source dir source ~n : Yojson.Safe.t list =
+let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
   if not (Sys.file_exists dir) then []
   else
     match Dated_jsonl.create ~base_dir:dir () with
     | store ->
-      let entries = Dated_jsonl.read_recent store n in
+      let entries =
+        match effective_day_window ?since_ts ?until_ts () with
+        | None -> Dated_jsonl.read_recent store n
+        | Some (since_day, until_day) ->
+          Dated_jsonl.read_range store ~since:since_day ~until:until_day
+      in
+      let entries =
+        List.filter (within_requested_window ?since_ts ?until_ts) entries
+      in
       List.map (tag_entry source) entries
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
@@ -204,30 +252,34 @@ let read_fixed_source dir source ~n : Yojson.Safe.t list =
 
 (* ── Read keeper metrics (per-keeper directories) ───── *)
 
-let read_keeper_metrics ~masc_root ?keeper_name ~n () : Yojson.Safe.t list =
+let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
+    Yojson.Safe.t list =
   let dirs = discover_keeper_metric_dirs masc_root in
   let dirs = match keeper_name with
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
   List.concat_map (fun (_name, dir) ->
-    read_fixed_source dir Keeper_metric ~n
+    read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ()
   ) dirs
 
 (* ── Unified read ───────────────────────────────────── *)
 
-let read_unified ~base_path ~masc_root ?(sources = all_sources) ?keeper_name
-    ?session_id ?operation_id ?worker_run_id ?(n = 100) () :
-    Yojson.Safe.t list =
-  let per_source = max n (n * 2) in
+let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
+    ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
+    ?(n = 100) () : read_result =
+  let limited = n > 0 in
+  let per_source = if limited then max n (n * 2) else 0 in
   let all_entries =
     List.concat_map (fun source ->
       match source with
       | Keeper_metric ->
-        read_keeper_metrics ~masc_root ?keeper_name ~n:per_source ()
+        read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
+          ~n:per_source ()
       | _ ->
         match fixed_store_dir ~masc_root ~base_path source with
-        | Some dir -> read_fixed_source dir source ~n:per_source
+        | Some dir ->
+          read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
         | None -> []
     ) sources
   in
@@ -253,8 +305,18 @@ let read_unified ~base_path ~masc_root ?(sources = all_sources) ?keeper_name
   let sorted = List.sort (fun a b ->
     Float.compare (extract_ts b) (extract_ts a)
   ) filtered in
-  if List.length sorted <= n then sorted
-  else List.filteri (fun i _ -> i < n) sorted
+  let total_matching_entries = List.length sorted in
+  let entries =
+    if not limited || total_matching_entries <= n then sorted
+    else List.filteri (fun i _ -> i < n) sorted
+  in
+  { entries; total_matching_entries; truncated = limited && total_matching_entries > n }
+
+let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
+    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n () :
+    Yojson.Safe.t list =
+  (read_unified_result ~base_path ~masc_root ?sources ?keeper_name ?session_id
+     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()).entries
 
 (* ── Summary ────────────────────────────────────────── *)
 

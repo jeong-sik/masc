@@ -233,6 +233,53 @@ end
 (** {1 Transport Configuration} *)
 
 module Transport = struct
+  type h2_mode =
+    | Auto
+    | H1_only
+    | H2_only
+    | Unknown_h2_mode of string
+
+  let normalize_token raw =
+    raw |> String.trim |> String.lowercase_ascii
+
+  let h2_mode_of_string raw =
+    match normalize_token raw with
+    | "1" | "true" | "h2_only" -> H2_only
+    | "0" | "false" | "h1_only" -> H1_only
+    | "auto" -> Auto
+    | other -> Unknown_h2_mode other
+
+  let h2_mode_to_string = function
+    | Auto -> "auto"
+    | H1_only -> "h1_only"
+    | H2_only -> "h2_only"
+    | Unknown_h2_mode value -> value
+
+  type agent_transport =
+    | Http
+    | Grpc
+    | Ws
+    | Webrtc
+    | Local
+    | Unknown_agent_transport of string
+
+  let agent_transport_of_string raw =
+    match normalize_token raw with
+    | "http" -> Http
+    | "grpc" -> Grpc
+    | "ws" | "websocket" -> Ws
+    | "webrtc" -> Webrtc
+    | "local" -> Local
+    | other -> Unknown_agent_transport other
+
+  let agent_transport_to_string = function
+    | Http -> "http"
+    | Grpc -> "grpc"
+    | Ws -> "ws"
+    | Webrtc -> "webrtc"
+    | Local -> "local"
+    | Unknown_agent_transport value -> value
+
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
 
@@ -255,20 +302,17 @@ module Transport = struct
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
 
-  (** HTTP mode: "auto", "h2_only", "h1_only". Default: "auto". *)
+  (** HTTP mode: typed variant for "auto", "h2_only", "h1_only". *)
   let use_h2 () =
     match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
-    | Some raw -> (
-        match String.lowercase_ascii raw with
-        | "1" | "true" -> "h2_only"
-        | "0" | "false" -> "h1_only"
-        | "auto" -> "auto"
-        | other -> other)
-    | None -> "auto"
+    | Some raw -> h2_mode_of_string raw
+    | None -> Auto
 
-  (** Agent transport type raw string (e.g. "grpc", "http", "ws"). *)
+  (** Agent transport type variant (e.g. "grpc", "http", "ws"). *)
   let agent_transport_opt () =
-    Sys.getenv_opt "MASC_AGENT_TRANSPORT" |> trim_opt
+    Sys.getenv_opt "MASC_AGENT_TRANSPORT"
+    |> trim_opt
+    |> Option.map agent_transport_of_string
 
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
   let openai_compat_enabled = Feature_flag_registry.get_bool "MASC_OPENAI_COMPAT"
@@ -326,13 +370,31 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
+  type backend =
+    | Jsonl
+    | Pg
+    | Unknown_backend of string
+
+  let backend_of_string raw =
+    match raw |> String.trim |> String.lowercase_ascii with
+    | "jsonl" -> Jsonl
+    | "pg" -> Pg
+    | other -> Unknown_backend other
+
+  let backend_to_string = function
+    | Jsonl -> "jsonl"
+    | Pg -> "pg"
+    | Unknown_backend value -> value
+
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
     get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
 
-  (** Board backend type (e.g. "jsonl", "pg"). *)
+  (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
   let backend_opt () =
-    Sys.getenv_opt "MASC_BOARD_BACKEND" |> trim_opt
+    Sys.getenv_opt "MASC_BOARD_BACKEND"
+    |> trim_opt
+    |> Option.map backend_of_string
 end
 
 (** {1 Procedural Memory Configuration} *)

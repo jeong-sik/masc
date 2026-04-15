@@ -18,6 +18,24 @@ type delivery_surface =
 
 type model_id =
   | Bdi_speech_v1
+  | Magentic_ledger_v1
+
+type transition_reason =
+  | Tool_only_stay_silent
+  | Tool_only_comment_board
+  | Tool_only_post_board
+  | Tool_only_broadcast
+  | Tool_only_claim_task
+  | Tool_only_visible_reply
+  | Tool_only_progress_ledger
+  | Explicit_social_headers
+  | Missing_headers_fallback_visible_reply
+  | Invalid_headers_fallback_visible_reply
+  | Inferred_visible_reply
+  | Protocol_violation_missing_social_headers
+  | Protocol_violation_invalid_social_headers
+  | Protocol_violation_no_tools_no_social_headers
+  | Failure_run_error
 
 type social_state = {
   social_model : string;
@@ -39,3 +57,4 @@ val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
 val default_model_id : model_id
 val normalize_social_model : string -> string
+val transition_reason_to_string : transition_reason -> string

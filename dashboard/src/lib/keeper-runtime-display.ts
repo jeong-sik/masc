@@ -54,6 +54,48 @@ function isHeartbeatAlive(heartbeat: string): boolean {
   return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
 }
 
+function manualReconcileHint(keeper: Keeper): string {
+  const detail = keeper.runtime_blocker_summary?.trim()
+  if (detail) return `계속 진행 승인 대기 · ${detail}`
+  if (keeper.runtime_blocker_class === 'ambiguous_post_commit_timeout') {
+    return '계속 진행 승인 대기 · 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
+  }
+  if (keeper.runtime_blocker_class === 'ambiguous_post_commit_failure') {
+    return '계속 진행 승인 대기 · 변경 이후 실패가 있어 상태 확인이 필요합니다.'
+  }
+  return '계속 진행 승인 대기 · 일부 변경이 반영되었을 수 있어 운영자 확인이 필요합니다.'
+}
+
+export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): string | null {
+  if (!keeper) return null
+  if (keeper.runtime_blocker_manual_reconcile) return manualReconcileHint(keeper)
+  const blockerClass = keeper.runtime_blocker_class
+  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  if (runtimeBlocker) return runtimeBlocker
+  if (blockerClass === 'ambiguous_post_commit_timeout') {
+    return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'ambiguous_post_commit_failure') {
+    return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
+  }
+  if (blockerClass === 'autonomous_slot_wait_timeout') {
+    return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
+  }
+  if (blockerClass === 'admission_queue_wait_timeout') {
+    return 'OAS admission queue 대기 시간이 초과되었습니다.'
+  }
+  if (blockerClass === 'turn_timeout_after_queue_wait') {
+    return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
+  }
+  if (blockerClass === 'turn_timeout') {
+    return '턴 실행 시간이 제한 시간을 초과했습니다.'
+  }
+  if (blockerClass === 'completion_contract_violation') {
+    return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
+  }
+  return null
+}
+
 export function keeperRecentHeartbeatLabel(keeper: Keeper | null | undefined): string {
   return keeper?.last_heartbeat
     ? `최근 하트비트 · ${relativeTime(keeper.last_heartbeat)}`
@@ -75,7 +117,7 @@ export function keeperRecentActionLabel(
 
 export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
-  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   if (runtimeBlocker) return runtimeBlocker
   const blocker = keeper.last_blocker?.trim()
   if (keeper.paused && blocker) return `일시정지 · ${blocker}`

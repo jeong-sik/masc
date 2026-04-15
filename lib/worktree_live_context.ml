@@ -23,7 +23,7 @@ let run_git_capture_lines ~workdir args =
   Eio_guard.run_in_systhread f
 
 let repo_root_for ~base_path =
-  if not (Room_git.has_git_marker base_path) then None
+  if not (Coord_git.has_git_marker base_path) then None
   else
   match run_git_capture_lines ~workdir:base_path [ "rev-parse"; "--show-toplevel" ] with
   | Some (root :: _) ->
@@ -41,7 +41,7 @@ let state_dir ~repo_root =
   Filename.concat (Filename.concat repo_root ".masc") "live-context"
 
 let state_file ~repo_root ~actor_key =
-  let safe_key = Room_utils.safe_filename actor_key in
+  let safe_key = Coord_utils.safe_filename actor_key in
   Filename.concat (state_dir ~repo_root)
     (Printf.sprintf "%s.git-status-hash" safe_key)
 

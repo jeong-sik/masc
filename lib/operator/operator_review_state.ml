@@ -53,7 +53,7 @@ let compare_review_decision (left : review_decision) (right : review_decision) =
   String.compare right.at left.at
 
 let raw_review_decisions config =
-  match Room_utils.read_json_opt config (review_state_path config) with
+  match Coord_utils.read_json_opt config (review_state_path config) with
   | None -> []
   | Some (`List rows) ->
       rows
@@ -68,7 +68,7 @@ let write_review_decisions config entries =
   entries
   |> List.sort compare_review_decision
   |> List.map review_decision_to_yojson
-  |> fun rows -> Room_utils.write_json config (review_state_path config) (`List rows)
+  |> fun rows -> Coord_utils.write_json config (review_state_path config) (`List rows)
 
 let read_review_decisions config = raw_review_decisions config
 

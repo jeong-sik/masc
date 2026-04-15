@@ -112,7 +112,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
           |> json_string_field_opt "cache_state"
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
-          ~initialized:(Room.is_initialized config) ~shell_json ~execution_json
+          ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
           ~command_summary_json
         |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
              ~extra:
@@ -148,7 +148,7 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let command_summary_json = `Assoc [] in
     Some
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config
-         ~initialized:(Room.is_initialized config) ~shell_json ~execution_json
+         ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
          ~command_summary_json)
 
 let _last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =

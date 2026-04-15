@@ -19,17 +19,55 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { KeeperCompositeSnapshot } from '../api/keeper'
+import {
+  normalizeKeeperCompositeSnapshot,
+  type KeeperCompositeSnapshot,
+} from '../api/keeper'
 import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { deriveStateEntries, deriveSwimlaneSegments } from './fsm-hub'
+import type { CompositeObservation } from './fsm-hub-types'
 
-/** Server-shaped keeper composite snapshot matching the actual
-    `/api/v1/keepers/:name/composite` response observed from a live
-    MASC v0.8.0 server on 2026-04-15. If the server changes this
-    shape, the parse should fail here, not silently produce undefined
-    in the swimlane. */
+/** Server-shaped keeper composite snapshot matching the projected
+    RFC-0003/TLA-aligned `/api/v1/keepers/:name/composite` response.
+    If the server changes this shape, the parse should fail here,
+    not silently produce undefined in the swimlane. */
 const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
+  correlation_id: '10510-64f79d602ce6c-60c',
+  run_id: 'r-1776233076-0',
+  ts: 1776235685.221697,
+  phase: 'Running',
+  turn_phase: 'idle',
+  decision: { stage: 'undecided' },
+  cascade: { state: 'idle' },
+  compaction: { stage: 'accumulating' },
+  measurement: { captured: false },
+  recovery: {
+    data_record: false,
+    fsm_condition: false,
+  },
+  invariants: {
+    phase_turn_alignment: true,
+    no_cascade_before_measurement: true,
+    compaction_atomicity: true,
+    event_priority_monotone: true,
+    recovery_two_store_sync: true,
+  },
+  is_live: false,
+  last_outcome: {
+    turn_id: 353,
+    ended_at: 1776234638.709722,
+    decision_stage: 'tool_policy_selected',
+    cascade_state: 'done',
+    selected_model: 'glm-4.5',
+  },
+}
+
+/** Legacy server-shaped keeper composite snapshot observed from a live
+    `/api/v1/keepers/:name/composite` response before recovery wiring.
+    The dashboard must normalize this shape instead of crashing at
+    `snapshot.recovery.data_record`. */
+const LEGACY_COMPOSITE_PAYLOAD = {
   correlation_id: '10510-64f79d602ce6c-60c',
   run_id: 'r-1776233076-0',
   ts: 1776235685.221697,
@@ -39,17 +77,18 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   cascade: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: false },
-  recovery: { data_record: false, fsm_condition: false },
   invariants: {
     phase_turn_alignment: true,
     no_cascade_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
-    recovery_two_store_sync: true,
   },
   is_live: false,
   last_outcome: { turn_id: 353, ended_at: 1776234638.709722 },
 }
+
+const LEGACY_NORMALIZED_COMPOSITE_SHAPE: KeeperCompositeSnapshot =
+  normalizeKeeperCompositeSnapshot(LEGACY_COMPOSITE_PAYLOAD)
 
 /** Server-shaped gate keepers response. */
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
@@ -80,6 +119,14 @@ describe('FSM Hub integration — API response shape', () => {
   })
 
   describe('composite snapshot response', () => {
+    it('normalizes legacy payloads that omit recovery wiring', () => {
+      expect(LEGACY_NORMALIZED_COMPOSITE_SHAPE.recovery).toEqual({
+        data_record: false,
+        fsm_condition: false,
+      })
+      expect(LEGACY_NORMALIZED_COMPOSITE_SHAPE.invariants.recovery_two_store_sync).toBe(true)
+    })
+
     it('carries all 5 sub-FSM fields the FsmHub renders', () => {
       expect(REAL_COMPOSITE_SHAPE.phase).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.turn_phase).toBeDefined()
@@ -94,6 +141,8 @@ describe('FSM Hub integration — API response shape', () => {
       if (REAL_COMPOSITE_SHAPE.last_outcome !== null) {
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.turn_id).toBe('number')
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.ended_at).toBe('number')
+        expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.decision_stage).toBe('string')
+        expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.cascade_state).toBe('string')
       }
     })
 
@@ -113,7 +162,7 @@ describe('FSM Hub integration — API response shape', () => {
   })
 
   describe('downstream derivers tolerate real-shape observations', () => {
-    const obsFromSnapshot = (snap: KeeperCompositeSnapshot, ts: number) => ({
+    const obsFromSnapshot = (snap: KeeperCompositeSnapshot, ts: number): CompositeObservation => ({
       ts,
       phase: snap.phase,
       turn: snap.turn_phase,
@@ -124,7 +173,7 @@ describe('FSM Hub integration — API response shape', () => {
 
     it('deriveStateEntries returns a structure when given real-shape data', () => {
       const obs1 = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obs2 = { ...obs1, ts: 110, phase: 'compacting' }
+      const obs2: CompositeObservation = { ...obs1, ts: 110, phase: 'Compacting' }
       const entries = deriveStateEntries([obs1, obs2])
       expect(entries).not.toBeNull()
       expect(entries?.phase).toBe(110) // phase transitioned at ts=110
@@ -132,7 +181,7 @@ describe('FSM Hub integration — API response shape', () => {
 
     it('deriveSwimlaneSegments handles the full is_live=true projection', () => {
       const obsIdle = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obsLive = {
+      const obsLive: CompositeObservation = {
         ...obsIdle,
         ts: 110,
         turn: 'executing' satisfies KeeperCompositeSnapshot['turn_phase'],

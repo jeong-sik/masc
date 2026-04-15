@@ -51,7 +51,7 @@ let tool_search_fn
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
 let execute_keeper_tool_call
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ?search_fn

@@ -1,6 +1,8 @@
 open Keeper_types
 open Keeper_exec_shared
 
+module StringSet = Set.Make (String)
+
 let contains_ci = String_util.contains_substring_ci
 
 type memory_match = {
@@ -14,7 +16,7 @@ type memory_match = {
 }
 
 let search_memory_bank
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(query : string)
       ~(kind_filter : string)
@@ -96,7 +98,7 @@ let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
 (* --- History search (cross-generation, retained for backward compat) --- *)
 
 let search_history
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(query : string)
@@ -116,22 +118,26 @@ let search_history
   let checkpoint_user_msgs =
     Keeper_memory_recall.recent_user_messages ctx_work.messages ~max_n:100
   in
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   let key_of s =
     let len = min 100 (String.length s) in
     String.sub s 0 len
   in
-  List.iter (fun s -> Hashtbl.replace seen (key_of s) ()) checkpoint_user_msgs;
-  let dedup lst =
-    List.filter (fun s ->
+  let seen0 =
+    List.fold_left (fun acc s -> StringSet.add (key_of s) acc)
+      StringSet.empty checkpoint_user_msgs
+  in
+  let dedup seen lst =
+    List.fold_left (fun (acc, seen) s ->
       let k = key_of s in
-      if Hashtbl.mem seen k then false
-      else (Hashtbl.replace seen k (); true)) lst
+      if StringSet.mem k seen then (acc, seen)
+      else (s :: acc, StringSet.add k seen))
+      ([], seen) lst
+    |> fun (acc, seen) -> (List.rev acc, seen)
   in
   let all_candidates =
     checkpoint_user_msgs
-    @ dedup current_history
-    @ dedup prev_history
+    @ fst (dedup seen0 current_history)
+    @ fst (dedup (snd (dedup seen0 current_history)) prev_history)
   in
   all_candidates
   |> List.filter (fun msg -> query <> "" && String_util.contains_substring_ci msg query)
@@ -141,7 +147,7 @@ let search_history
 (* --- Unified keeper_memory_search dispatch --- *)
 
 let keeper_memory_search_json
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(args : Yojson.Safe.t) =

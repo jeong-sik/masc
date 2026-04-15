@@ -60,23 +60,16 @@ type capability_class =
 
 (** Per-tool capability classification.
     A tool may belong to multiple classes (e.g. keeper_bash spans all 3). *)
-let capability_classification : (string * capability_class list) list = [
-  (* External input sources *)
-  ("masc_web_search",          [External_input]);
-  ("masc_web_fetch",           [External_input]);
-  (* Shell can curl/wget external data AND read secrets AND execute *)
-  ("keeper_bash",              [External_input; Sensitive_access; State_modification]);
-  ("keeper_shell",    [External_input; Sensitive_access]);
-  (* Sensitive data access *)
-  ("keeper_fs_read",           [Sensitive_access]);
-  ("keeper_memory_search",     [Sensitive_access]);
-  ("keeper_library_search",    [Sensitive_access]);
-  ("keeper_library_read",      [Sensitive_access]);
-  (* State modification *)
-  ("keeper_fs_edit",           [State_modification]);
-  ("keeper_pr_submit",         [State_modification]);
-  ("keeper_pr_workflow",       [State_modification]);
-]
+let capability_classification : (string * capability_class list) list =
+  [
+    ("masc_web_search", [External_input]); ("masc_web_fetch", [External_input]);
+    ("keeper_bash", [External_input; Sensitive_access; State_modification]);
+    ("keeper_shell", [External_input; Sensitive_access]);
+    ("keeper_fs_read", [Sensitive_access]); ("keeper_memory_search", [Sensitive_access]);
+    ("keeper_library_search", [Sensitive_access]); ("keeper_library_read", [Sensitive_access]);
+    ("keeper_fs_edit", [State_modification]); ("keeper_pr_submit", [State_modification]);
+    ("keeper_pr_workflow", [State_modification]);
+  ]
 
 let tool_capabilities name =
   match List.assoc_opt name capability_classification with
@@ -135,24 +128,22 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
 (** Explicit per-tool risk overrides.
     Checked BEFORE pattern matching. Use this to correct misclassifications
     caused by substring matching (e.g. "query_skill" matching "kill"). *)
-let risk_overrides : (string * risk_level) list = [
-  (* False positives from pattern matching *)
-  ("masc_a2a_query_skill", Low);       (* "skill" contains "kill" substring *)
-  (* Explicit claim surfaces. *)
-  ("masc_claim_next", Medium);
-  ("masc_claim_task", Medium);
-]
+let risk_overrides : (string * risk_level) list =
+  [
+    ("masc_a2a_query_skill", Low); (* "skill" contains "kill" substring *)
+    ("masc_claim_next", Medium); ("masc_claim_task", Medium);
+  ]
 
 let critical_patterns =
   [ "delete"; "remove"; "drop"; "force"; "reset"; "kill"; "destroy"; "purge" ]
 
 let high_patterns =
-  [ "create"; "update"; "write"; "deploy"; "push"; "merge"; "set"; "send";
-    "inject"; "spawn"; "modify"; "assign" ]
+  [ "create"; "update"; "write"; "deploy"; "push"; "merge"; "set"; "send"; "inject";
+    "spawn"; "modify"; "assign" ]
 
 let medium_patterns =
-  [ "claim"; "join"; "leave"; "start"; "stop"; "pause"; "resume";
-    "confirm"; "approve"; "reject"; "cancel" ]
+  [ "claim"; "join"; "leave"; "start"; "stop"; "pause"; "resume"; "confirm"; "approve";
+    "reject"; "cancel" ]
 
 let overwrite_sensitive_tools =
   [
@@ -364,7 +355,7 @@ let should_audit ~governance_level risk =
   | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
   | None -> false
 
-let audit_decision (config : Room.config) (decision : governance_decision) =
+let audit_decision (config : Coord.config) (decision : governance_decision) =
   let action_str =
     match decision.action with
     | `Allow -> "allow"
@@ -454,6 +445,12 @@ let install ~config ~governance_level =
     Tools below the threshold are auto-approved. *)
 let to_oas_approval_callback
       ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
+  let queue_risk_level = function
+    | Low -> Keeper_approval_queue.Low
+    | Medium -> Keeper_approval_queue.Medium
+    | High -> Keeper_approval_queue.High
+    | Critical -> Keeper_approval_queue.Critical
+  in
   (* B3: Per-decision trifecta. Evaluate on each tool call using current
      shards, not a session-scoped closure capture, so shard grants and
      revocations are reflected immediately in the trifecta state.
@@ -495,6 +492,6 @@ let to_oas_approval_callback
         ~keeper_name
         ~tool_name
         ~input
-        ~risk_level:(risk_level_to_string risk)
+        ~risk_level:(queue_risk_level risk)
     else
       Oas.Hooks.Approve

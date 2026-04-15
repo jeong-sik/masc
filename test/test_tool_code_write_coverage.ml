@@ -242,19 +242,19 @@ let error_msg result =
   | Error (Types.IoError m) -> m
   | Error _ -> "<non-IoError>"
 
-let make_config base_path : Masc_mcp.Room.config =
+let make_config base_path : Masc_mcp.Coord.config =
   (* Override MASC_BASE_PATH so default_config does not pick up the
      developer's global MASC root instead of our fresh tmp tree. The
      test runner sets this env var from the user's shell. *)
   Unix.putenv "MASC_BASE_PATH" base_path;
-  Masc_mcp.Room.default_config base_path
+  Masc_mcp.Coord.default_config base_path
 
 (* Ensure the base path exists as a real git repository so
    Tool_code.validate_path (which requires
-   Room_git.git_root ~base_path) can canonicalise against it.
+   Coord_git.git_root ~base_path) can canonicalise against it.
 
    On macOS, $TMPDIR points to /var/folders/... which is a symlink
-   target of /private/var/folders/... Room_git.git_root returns the
+   target of /private/var/folders/... Coord_git.git_root returns the
    fully realpath-resolved root, so we also realpath-resolve the
    base_path before returning it — otherwise the prefix check inside
    Tool_code.validate_path trips on the `/private/` divergence. *)
@@ -267,7 +267,7 @@ let fresh_base_path () =
   let dir = try Unix.realpath raw_dir with _ -> raw_dir in
   (* Initialise a minimal git repository so validate_path has a
      canonical root. An empty `git init` plus an initial commit
-     is sufficient; Room_git.git_root walks up from base_path. *)
+     is sufficient; Coord_git.git_root walks up from base_path. *)
   let run_git args =
     let cmd = String.concat " "
       (List.map Filename.quote ("git" :: args) @ [">"; "/dev/null"; "2>&1"]) in

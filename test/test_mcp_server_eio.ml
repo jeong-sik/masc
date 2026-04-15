@@ -839,7 +839,7 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
   (* masc_init pruned from registry — dispatch fails. Initialise the
      room state directly so downstream masc_join succeeds. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-  let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _join_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -847,7 +847,7 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   let _added =
-    Masc_mcp.Room.add_task state.room_config ~title:"managed-claim"
+    Masc_mcp.Coord.add_task state.room_config ~title:"managed-claim"
       ~priority:2 ~description:""
   in
   let request = Yojson.Safe.to_string (`Assoc [
@@ -887,7 +887,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   (* masc_init pruned from registry — dispatch fails. Initialise the
      room state directly so downstream masc_join succeeds. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-  let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -895,7 +895,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   ignore
-    (Masc_mcp.Room.add_task state.room_config ~title:"transition-claim"
+    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-claim"
        ~priority:2 ~description:"");
   let request =
     Yojson.Safe.to_string
@@ -942,7 +942,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
   (* masc_init pruned from registry — dispatch fails. Initialise the
      room state directly so downstream masc_join succeeds. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-  let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -950,7 +950,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   ignore
-    (Masc_mcp.Room.add_task state.room_config ~title:"transition-done"
+    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-done"
        ~priority:2 ~description:"");
   let (ok_claim, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1011,7 +1011,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   (* masc_init pruned from registry — dispatch fails. Initialise the
      room state directly so downstream masc_join succeeds. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-  let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -1019,7 +1019,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   ignore
-    (Masc_mcp.Room.add_task state.room_config ~title:"deprecated-claim"
+    (Masc_mcp.Coord.add_task state.room_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");
   let request =
     Yojson.Safe.to_string
@@ -1398,7 +1398,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   (* masc_init pruned from registry — dispatch fails. Initialise the
      room state directly so downstream masc_join succeeds. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-  let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
 
   let (ok_join_codex, join_codex_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1444,10 +1444,10 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
   (* masc_init pruned from registry — dispatch fails. Initialise the
      room state directly so downstream masc_join succeeds. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-  let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
 
   let _added =
-    Masc_mcp.Room.add_task state.room_config
+    Masc_mcp.Coord.add_task state.room_config
       ~title:"alias-reuse-task"
       ~priority:2
       ~description:
@@ -1542,7 +1542,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
     (* masc_init pruned from registry — dispatch fails. Initialise
        the room state directly so downstream broadcast succeeds. *)
     Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-    let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+    let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
 
     let (ok_broadcast, _broadcast_msg) =
       Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1551,7 +1551,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
     in
     Alcotest.(check bool) "broadcast success" true ok_broadcast;
 
-    let agents = Masc_mcp.Room.get_agents_raw state.room_config in
+    let agents = Masc_mcp.Coord.get_agents_raw state.room_config in
     let names = List.map (fun (a : Types.agent) -> a.name) agents in
     Alcotest.(check bool)
       "mcp session must not reuse TERM_SESSION_ID persisted nickname"
@@ -1625,7 +1625,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 117);
@@ -2131,7 +2131,7 @@ let test_handle_request_resources_read_matrix () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "fixture-root"));
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:(Some "fixture-root"));
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in
@@ -2330,7 +2330,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
               }
           else Tool_dispatch.Pass);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let _room_path = Masc_mcp.Room.masc_dir state.room_config in
+      let _room_path = Masc_mcp.Coord.masc_dir state.room_config in
       let ok, msg =
         Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
           ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
@@ -2363,7 +2363,7 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
       (* masc_init pruned from registry — dispatch fails. Initialise
          the room state directly so downstream masc_join succeeds. *)
       Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
-      let _ = Masc_mcp.Room.init state.room_config ~agent_name:None in
+      let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
       let (ok_join, _) =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
           ~name:"masc_join"

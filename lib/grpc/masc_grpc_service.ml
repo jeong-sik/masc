@@ -1,7 +1,7 @@
 (** MASC gRPC Coordination Service.
 
     Implements the MascCoordination gRPC service using grpc-direct.
-    All handlers delegate to the Room module for actual coordination logic.
+    All handlers delegate to the Coord module for actual coordination logic.
 
     Wire format: protobuf binary via ocaml-protoc-plugin.
     See proto/masc_coordination.proto for the canonical API contract. *)
@@ -49,12 +49,12 @@ let task_info_of_task (task : Types.task) : T.task_info =
 (** {1 Unary Handlers} *)
 
 (** Join handler: agent joins the coordination room. *)
-let handle_join (room_config : Room_utils_backend_setup.config) (bytes : string) : string =
+let handle_join (room_config : Coord_utils_backend_setup.config) (bytes : string) : string =
   let req = T.JoinRequest.of_bytes bytes in
   let result =
     try
       let msg =
-        Room.join room_config
+        Coord.join room_config
           ~agent_name:req.agent_name
           ~capabilities:req.capabilities
           ()
@@ -106,11 +106,11 @@ let handle_join (room_config : Room_utils_backend_setup.config) (bytes : string)
   T.JoinResponse.to_bytes result
 
 (** Leave handler: agent leaves the coordination room. *)
-let handle_leave (room_config : Room_utils_backend_setup.config) (bytes : string) : string =
+let handle_leave (room_config : Coord_utils_backend_setup.config) (bytes : string) : string =
   let req = T.LeaveRequest.of_bytes bytes in
   let result =
     try
-      let msg = Room.leave room_config ~agent_name:req.agent_name in
+      let msg = Coord.leave room_config ~agent_name:req.agent_name in
       T.LeaveResponse.{ success = true; message = msg }
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       T.LeaveResponse.{
@@ -121,7 +121,7 @@ let handle_leave (room_config : Room_utils_backend_setup.config) (bytes : string
   T.LeaveResponse.to_bytes result
 
 (** Broadcast handler: send a message to all agents. *)
-let handle_broadcast (room_config : Room_utils_backend_setup.config) (bytes : string) : string =
+let handle_broadcast (room_config : Coord_utils_backend_setup.config) (bytes : string) : string =
   let req = T.BroadcastRequest.of_bytes bytes in
   let result =
     try
@@ -135,7 +135,7 @@ let handle_broadcast (room_config : Room_utils_backend_setup.config) (bytes : st
           mention_prefix ^ " " ^ req.message
       in
       let _msg =
-        Room.broadcast room_config
+        Coord.broadcast room_config
           ~from_agent:req.agent_name ~content
       in
       T.BroadcastResponse.{ success = true; seq = now_ms () }
@@ -146,7 +146,7 @@ let handle_broadcast (room_config : Room_utils_backend_setup.config) (bytes : st
   T.BroadcastResponse.to_bytes result
 
 (** GetStatus handler: return current room state. *)
-let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : string) : string =
+let handle_get_status (room_config : Coord_utils_backend_setup.config) (_bytes : string) : string =
   let masc_dir = Filename.concat room_config.base_path ".masc" in
   let agents_dir = Filename.concat masc_dir "agents" in
   let agents =
@@ -177,7 +177,7 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
           None)
     else []
   in
-  let tasks = Room.get_tasks_safe room_config |> List.map task_info_of_task in
+  let tasks = Coord.get_tasks_safe room_config |> List.map task_info_of_task in
   T.StatusResponse.(to_bytes {
     agents;
     tasks;
@@ -221,7 +221,7 @@ let active_subscribe_streams = Atomic.make 0
     Returns a list of string directives to include in HeartbeatAck.
     Reads agent paused state and unclaimed tasks from the filesystem. *)
 let compute_directives
-    ~(room_config : Room_utils_backend_setup.config)
+    ~(room_config : Coord_utils_backend_setup.config)
     ~(agent_name : string) : string list =
   let masc_dir = Filename.concat room_config.base_path ".masc" in
   let directives = ref [] in
@@ -244,9 +244,9 @@ let compute_directives
           "compute_directives: failed to parse agent file %s: %s"
           agent_file (Printexc.to_string exn));
   (* 2. Task assignment: find first unclaimed task for idle agent *)
-  (if Room.root_is_initialized room_config then
+  (if Coord.root_is_initialized room_config then
     let unclaimed =
-      Room.get_tasks_safe room_config
+      Coord.get_tasks_safe room_config
       |> List.filter_map (fun (task : Types.task) ->
            match task.task_status with
            | Types.Todo -> Some task.id
@@ -259,7 +259,7 @@ let compute_directives
 
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
 let handle_heartbeat
-    (room_config : Room_utils_backend_setup.config)
+    (room_config : Coord_utils_backend_setup.config)
     ~(sw : Eio.Switch.t)
     (request_stream : string Grpc_eio.Stream.t)
   : string Grpc_eio.Stream.t =
@@ -373,7 +373,7 @@ let handle_heartbeat
 
 (** Subscribe server-streaming handler: push room events to the agent. *)
 let handle_subscribe
-    (room_config : Room_utils_backend_setup.config)
+    (room_config : Coord_utils_backend_setup.config)
     (bytes : string)
   : string Grpc_eio.Stream.t =
   let req = T.SubscribeRequest.of_bytes bytes in
@@ -496,7 +496,7 @@ let handle_subscribe
     @param tool_dispatcher Function that dispatches tool calls:
       [tool_name -> arguments_json -> (result_json, error_message) result]. *)
 let create_service
-    ~(room_config : Room_utils_backend_setup.config)
+    ~(room_config : Coord_utils_backend_setup.config)
     ~(tool_dispatcher : string -> string -> (string, string) result)
   : Grpc_eio.Service.t =
   Grpc_eio.Service.create service_name

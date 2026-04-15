@@ -115,6 +115,7 @@ type agent_runtime_state =
   ; noop_turn_count : int
   ; consecutive_noop_count : int
   ; last_speech_act : string
+  ; last_social_transition_reason : string
   ; last_active_desire : string
   ; last_current_intention : string
   ; last_blocker : string
@@ -495,7 +496,7 @@ let map_scheduled_autonomous_rt =
 let now_iso () = Types.now_iso ()
 let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 
-let runtime_meta_write_sync_hook : (Room.config -> keeper_meta -> unit) ref =
+let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
 ;;
 
@@ -740,6 +741,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "noop_turn_count", `Int rt.noop_turn_count
     ; "consecutive_noop_count", `Int rt.consecutive_noop_count
     ; "last_speech_act", `String rt.last_speech_act
+    ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; "last_active_desire", `String rt.last_active_desire
     ; "last_current_intention", `String rt.last_current_intention
     ; "last_blocker", `String rt.last_blocker
@@ -1122,6 +1124,9 @@ let parse_keeper_state
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
   let consecutive_noop_count = Safe_ops.json_int ~default:0 "consecutive_noop_count" json in
   let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
+  let last_social_transition_reason =
+    Safe_ops.json_string ~default:"" "last_social_transition_reason" json
+  in
   let last_active_desire =
     Safe_ops.json_string ~default:"" "last_active_desire" json
   in
@@ -1163,6 +1168,7 @@ let parse_keeper_state
       ; noop_turn_count
       ; consecutive_noop_count
       ; last_speech_act
+      ; last_social_transition_reason
       ; last_active_desire
       ; last_current_intention
       ; last_blocker
@@ -1348,6 +1354,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "noop_turn_count"
   ; "consecutive_noop_count"
   ; "last_speech_act"
+  ; "last_social_transition_reason"
   ; "last_active_desire"
   ; "last_current_intention"
   ; "last_blocker"

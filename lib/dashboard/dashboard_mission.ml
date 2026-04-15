@@ -37,9 +37,9 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let room_scope_cache_segment (_config : Room_utils.config) = "default"
+let room_scope_cache_segment (_config : Coord_utils.config) = "default"
 
-let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
+let room_scoped_cache_key (config : Coord_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) actor_name
 

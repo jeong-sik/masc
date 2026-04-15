@@ -14,7 +14,7 @@ let is_missing_read_path_error (e : string) =
   || String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
 
 let handle_keeper_fs_read
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -53,7 +53,7 @@ let handle_keeper_fs_read
 ;;
 
 let handle_keeper_fs_edit
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

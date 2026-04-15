@@ -11,8 +11,8 @@ let state_path config = Goal_store.scheduler_state_path config
 
 let read_state config =
   let path = state_path config in
-  if Room.path_exists config path then
-    let json = Room.read_json config path in
+  if Coord.path_exists config path then
+    let json = Coord.read_json config path in
     match scheduler_state_of_yojson json with
     | Ok s -> s
     | Error _ -> default_state
@@ -20,7 +20,7 @@ let read_state config =
     default_state
 
 let write_state config state =
-  Room.write_json config (state_path config) (scheduler_state_to_yojson state)
+  Coord.write_json config (state_path config) (scheduler_state_to_yojson state)
 
 let interval_sec : Goal_store.refresh_mode -> float = function
   | Daily -> 86_400.0
@@ -53,7 +53,7 @@ let due_modes config ~now =
 
 let commit_run config ~mode ~now =
   let lock_path = state_path config in
-  Room.with_file_lock config lock_path (fun () ->
+  Coord.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let updated = mark_run state ~mode ~now in
       write_state config updated)

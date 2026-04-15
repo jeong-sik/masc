@@ -9,7 +9,7 @@
 (** {1 Context} *)
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   caller_agent: string option;  (** Who is calling the tool *)
 }
 
@@ -44,22 +44,22 @@ let remove_from_blacklist ~agent_id =
   Eio.Mutex.use_rw ~protect:true blacklist_lock (fun () ->
     Hashtbl.remove blacklist agent_id)
 
-(** {1 Room Operations} *)
+(** {1 Coord Operations} *)
 
 (** Check if agent is in the current room *)
 let is_agent_in_room config ~agent_id =
-  let state = Room.read_state config in
+  let state = Coord.read_state config in
   List.mem agent_id state.Types.active_agents
 
-(** Force an agent to leave the room (uses Room.update_state for consistency) *)
+(** Force an agent to leave the room (uses Coord.update_state for consistency) *)
 let force_leave config ~agent_id ~reason =
-  (* Use update_state for atomic read-modify-write (same pattern as Room.leave) *)
-  let _ = Room.update_state config (fun s ->
+  (* Use update_state for atomic read-modify-write (same pattern as Coord.leave) *)
+  let _ = Coord.update_state config (fun s ->
     { s with Types.active_agents = List.filter ((<>) agent_id) s.active_agents }
   ) in
   (* Broadcast the forced leave *)
   let message = Printf.sprintf "[SYSTEM] Agent '%s' forcibly removed: %s" agent_id reason in
-  (try ignore (Room.broadcast config ~from_agent:"system" ~content:message)
+  (try ignore (Coord.broadcast config ~from_agent:"system" ~content:message)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.error "broadcast (force leave) failed: %s" (Printexc.to_string exn))
 
 (** masc_suspend removed: pruned from surfaces. *)

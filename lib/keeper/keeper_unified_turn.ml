@@ -231,6 +231,15 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
   | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
   | _ -> false
 
+let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Internal msg ->
+      string_contains_substring_ci
+        ~needle:"all models failed" msg
+      || string_contains_substring_ci
+           ~needle:"response rejected by accept" msg
+  | _ -> false
+
 type overflow_retry_plan = {
   retry_max_context : int;
   retry_generation : int;
@@ -320,7 +329,7 @@ let context_overflow_event_of_error
         }
 
 let pause_keeper_for_overflow
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
   let paused_meta =
@@ -345,6 +354,84 @@ let pause_keeper_for_overflow
     "%s: keeper paused after unresolved context overflow (%s)"
     meta.name reason;
   paused_meta
+
+let sync_keeper_paused_state
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(paused : bool) : keeper_meta =
+  let synced_meta =
+    {
+      meta with
+      paused;
+      updated_at = now_iso ();
+    }
+  in
+  (match write_meta config synced_meta with
+   | Ok () -> ()
+   | Error err ->
+     Log.Keeper.error
+       "%s: keeper %s write_meta failed: %s"
+       meta.name
+       (if paused then "pause" else "resume")
+       err);
+  Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
+  dispatch_keeper_phase_event
+    ~config
+    ~keeper_name:meta.name
+    (if paused
+     then Keeper_state_machine.Operator_pause
+     else Keeper_state_machine.Operator_resume);
+  (if not paused then
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | Some entry -> Atomic.set entry.fiber_wakeup true
+    | None -> ());
+  synced_meta
+
+let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) =
+  match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
+  | Some entry -> entry.meta
+  | None -> fallback_meta
+
+let enqueue_reconcile_continue_gate
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(failure_reason : Keeper_registry.failure_reason)
+    ~(committed_tools : string list)
+    ~(error_detail : string) : string =
+  let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
+  let input =
+    `Assoc [
+      ("kind", `String "reconcile_required");
+      ("keeper_name", `String meta.name);
+      ("failure_reason", `String reason_text);
+      ("error_detail", `String error_detail);
+      ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
+    ]
+  in
+  Keeper_approval_queue.submit_pending
+    ~keeper_name:meta.name
+    ~tool_name:"keeper_continue_after_reconcile"
+    ~input
+    ~risk_level:Keeper_approval_queue.Critical
+    ~on_resolution:(fun decision ->
+      let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
+      match decision with
+      | Agent_sdk.Hooks.Approve
+      | Agent_sdk.Hooks.Edit _ ->
+        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false in
+        Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
+        Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
+        Log.Keeper.info
+          "%s: reconcile continue gate approved; auto-resumed keeper"
+          meta.name
+      | Agent_sdk.Hooks.Reject reason ->
+        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true in
+        Keeper_registry.set_failure_reason
+          ~base_path:config.base_path meta.name
+          (Some failure_reason);
+        Log.Keeper.warn
+          "%s: reconcile continue gate rejected; keeper remains paused (%s)"
+          meta.name reason)
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
    per (keeper_name, model_labels) because cascade config is static at
@@ -573,7 +660,7 @@ let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : st
     (String.sub digest 0 8)
 
 let append_decision_record
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
@@ -839,6 +926,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?(is_autonomous_turn = true)
     ?(update_proactive_rt = true)
     ?social_state
+    ?social_transition_reason
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
@@ -1014,6 +1102,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
+      last_social_transition_reason =
+        (match social_transition_reason with
+         | Some reason -> String.trim reason
+         | None -> rt.last_social_transition_reason);
       last_active_desire =
         Option.value ~default:"" social_state.active_desire;
       last_current_intention =
@@ -1029,7 +1121,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
+let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
@@ -1225,7 +1317,8 @@ let broadcast_lifecycle_events ~(name : string)
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
-    ~(reason : string) ?(is_transient = false) ?social_state () : keeper_meta =
+    ~(reason : string) ?(is_transient = false) ?social_state
+    ?social_transition_reason () : keeper_meta =
   ignore is_transient; (* Param retained for caller compatibility; no longer
                           used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
@@ -1275,6 +1368,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
          | Some (state : Social.social_state) ->
              Social.speech_act_to_string state.speech_act
          | None -> meta.runtime.last_speech_act);
+      last_social_transition_reason =
+        (match social_transition_reason with
+         | Some value -> String.trim value
+         | None -> meta.runtime.last_social_transition_reason);
       last_active_desire =
         (match social_state with
          | Some (state : Social.social_state) ->
@@ -1298,7 +1395,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
+let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
     ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
@@ -1354,7 +1451,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
       Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-      let masc_root = Room.masc_root_dir config in
+      let masc_root = Coord.masc_root_dir config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root
@@ -1444,6 +1541,14 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
          block clears the field, preventing stale state on idle keepers. *)
       Keeper_registry.mark_turn_started
         ~base_path:config.base_path meta.name;
+      Keeper_registry.mark_turn_measurement
+        ~base_path:config.base_path meta.name;
+      (match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some { current_turn_observation = Some { measurement = Some _; _ }; _ } ->
+           Keeper_registry.set_turn_decision_stage
+             ~base_path:config.base_path meta.name
+             Keeper_registry.Decision_guard_ok
+       | _ -> ());
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           Keeper_exec_tools.remove_tool_call_observer side_effect_observer;
@@ -1498,6 +1603,16 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry
               ~overflow_retry_used =
+            let mark_terminal_error err =
+              if is_cascade_exhausted_error err then
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_exhausted
+              else
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Turn_finalizing
+            in
             let max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
@@ -1526,11 +1641,26 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                                 (remaining_turn_budget_s ());
                           }))
               | Some oas_timeout_s ->
+                  Keeper_registry.set_turn_cascade_state
+                    ~base_path:config.base_path meta.name
+                    Keeper_registry.Cascade_trying;
                   do_run ~run_meta ~max_context ~run_generation ~is_retry
                     ~oas_timeout_s
             in
             match attempt_result with
-            | Ok _ as ok -> ok
+            | Ok result ->
+                let selected_model =
+                  match result.cascade_observation with
+                  | Some observation -> observation.selected_model
+                  | None -> None
+                in
+                Keeper_registry.set_turn_selected_model
+                  ~base_path:config.base_path meta.name
+                  selected_model;
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_done;
+                Ok result
             | Error err ->
                 let committed_tools =
                   committed_mutating_tools !mutating_tools_committed
@@ -1559,6 +1689,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                     meta.name reason
                     (String.concat ", " committed_tools)
                     err_preview;
+                  mark_terminal_error err;
                   Error err
                 end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
@@ -1594,6 +1725,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                       meta.name
                       (String.concat ", " committed_tools)
                       err_preview;
+                  mark_terminal_error reclassified;
                   Error reclassified
                 end else if is_transient_network_error err
                               && attempt <= max_transient_retries then begin
@@ -1623,6 +1755,9 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                         ~error:err
                     with
                     | Some retry_plan ->
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_compacting;
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name
@@ -1637,6 +1772,8 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                                after_tokens =
                                  retry_plan.compaction.after_tokens;
                              });
+                        Keeper_registry.prepare_turn_retry_after_compaction
+                          ~base_path:config.base_path meta.name;
                         let retry_meta =
                           if retry_plan.retry_generation = run_meta.runtime.generation
                           then run_meta
@@ -1661,16 +1798,24 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                         mark_paused_after_overflow
                           ~run_meta
                           ~reason:"auto_compact_recovery_unavailable";
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_finalizing;
                         Error err
                   else begin
                     mark_paused_after_overflow
                       ~run_meta
                       ~reason:"overflow_persisted_after_auto_compact_retry";
+                    Keeper_registry.set_turn_phase
+                      ~base_path:config.base_path meta.name
+                      Keeper_registry.Turn_finalizing;
                     Error err
                   end
                 end
-                else
+                else begin
+                  mark_terminal_error err;
                   Error err
+                end
           in
           (* Wall-clock timeout guards against indefinite TCP-level hangs
              from upstream LLM providers. Without this, a single stalled
@@ -1707,6 +1852,9 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                 meta.name
                 (String.concat ", " committed_tools)
                 msg;
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
               Error (Oas.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
@@ -1738,9 +1886,16 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                 "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure; evidence recorded for next-turn observation"
                 meta.name
                 (String.concat ", " committed_tools);
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
               Error reclassified
-            end else
-              Error (Oas.Error.Internal msg))))
+            end else begin
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
+              Error (Oas.Error.Internal msg)
+            end)))
       in
       (* Drain correlation_id from the subscription created before the
          turn. Unsubscribe is handled by [unsubscribe_event_bus] in the
@@ -1774,7 +1929,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                " (transient, cooldown preserved)"
              else "")
             (short_preview e_str);
-          let social_state =
+          let social_state, social_transition_reason =
             Social.derive_failure_state ~meta ~observation
               ~previous_state:previous_social_state ~reason:e_str
           in
@@ -1789,16 +1944,73 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
               ~latency_ms
               ~observation
               ~reason:e_str
-              ~is_transient ~social_state ()
+              ~is_transient
+              ~social_state
+              ~social_transition_reason:
+                (Social.transition_reason_to_string social_transition_reason)
+              ()
           in
+          let updated_meta =
+            if is_ambiguous_partial then begin
+              (* Ambiguous partial commit must not auto-resume silently.
+                 The keeper is paused and an explicit continue gate is
+                 raised for the operator. Approving the gate auto-resumes
+                 the keeper; rejecting it leaves the keeper paused. *)
+              let committed_tools =
+                committed_mutating_tools !mutating_tools_committed
+              in
+              let failure_reason =
+                Option.value
+                  ~default:
+                    (Keeper_registry.Ambiguous_partial_commit {
+                      kind = Keeper_registry.Post_commit_failure;
+                      detail = e_str;
+                    })
+                  !post_commit_failure_reason
+              in
+              Keeper_registry.set_failure_reason ~base_path:config.base_path
+                meta.name
+                (Some failure_reason);
+              let paused_meta =
+                sync_keeper_paused_state
+                  ~config
+                  ~meta:updated_meta
+                  ~paused:true
+              in
+              let approval_id =
+                enqueue_reconcile_continue_gate
+                  ~config
+                  ~meta:paused_meta
+                  ~failure_reason
+                  ~committed_tools
+                  ~error_detail:e_str
+              in
+              Log.Keeper.warn
+                "%s: ambiguous partial commit (tools=[%s], reason=%s); \
+                 paused keeper and opened continue gate id=%s"
+                meta.name
+                (String.concat ", " committed_tools)
+                (Keeper_registry.failure_reason_to_string failure_reason)
+                approval_id;
+              paused_meta
+            end else
+              updated_meta
+          in
+          append_decision_record ~config ~meta:updated_meta ~observation
+            ~latency_ms ~semaphore_wait_ms
+            ~outcome:(if is_ambiguous_partial then "partial" else "error")
+            ~selected_mode:
+              (if is_ambiguous_partial
+               then "ambiguous_side_effect_error"
+               else "error")
+            ~social_state
+            ~error:e_str ();
+          (match write_meta config updated_meta with
+           | Ok () -> ()
+           | Error msg ->
+               Log.Keeper.error
+                 "write_meta failed after unified turn failure: %s" msg);
           if is_ambiguous_partial then begin
-            (* Manual reconcile blocker removed. Previously, a partial commit
-               with an unsafe tool would create a sticky blocker that required
-               operator intervention. This caused keeper death spirals (#6801).
-               Now: record the failure reason for audit, log a warning with
-               committed tools, and let the keeper continue. The next turn's
-               world_observation includes failure signals so the keeper (or
-               operator via board/keeper_chat) can decide how to recover. *)
             let failure_reason =
               Option.value
                 ~default:
@@ -1814,27 +2026,12 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
             let committed_tools =
               committed_mutating_tools !mutating_tools_committed
             in
-            Log.Keeper.warn
-              "%s: ambiguous partial commit (tools=[%s], reason=%s); \
-               evidence recorded, continuing without blocker"
+            Log.Keeper.info
+              "%s: reconcile-required failure latched as %s after committed tools [%s]"
               meta.name
-              (String.concat ", " committed_tools)
               (Keeper_registry.failure_reason_to_string failure_reason)
+              (String.concat ", " committed_tools)
           end;
-          append_decision_record ~config ~meta:updated_meta ~observation
-            ~latency_ms ~semaphore_wait_ms
-            ~outcome:(if is_ambiguous_partial then "partial" else "error")
-            ~selected_mode:
-              (if is_ambiguous_partial
-               then "ambiguous_side_effect_error"
-               else "error")
-            ~social_state
-            ~error:e_str ();
-          (match write_meta config updated_meta with
-           | Ok () -> ()
-           | Error msg ->
-               Log.Keeper.error
-                 "write_meta failed after keeper cycle failure: %s" msg);
           let base_path = config.base_path in
           (* Transient errors (429 rate limit, 503 overloaded, network
              timeout) do not count toward the consecutive failure threshold.
@@ -1868,7 +2065,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
           let explicit_accountability_claim =
             Social.extract_accountability_claim result
           in
-          let result, social_state =
+          let result, social_state, social_transition_reason =
             Social.apply_to_result ~meta ~observation
               ~previous_state:previous_social_state result
           in
@@ -1914,6 +2111,8 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
             update_metrics_from_result lifecycle.updated_meta ~latency_ms
               ~observation
               ~social_state
+              ~social_transition_reason:
+                (Social.transition_reason_to_string social_transition_reason)
               ~update_proactive_rt:true
               result
           in

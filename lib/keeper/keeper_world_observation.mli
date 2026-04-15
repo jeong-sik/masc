@@ -103,6 +103,8 @@ type turn_reason =
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =
+  | Keeper_paused
+  | Approval_pending
   | Scheduled_autonomous_disabled
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -176,11 +178,11 @@ val board_signal_match :
 
     @param pending_board_events Pre-collected board event summaries for this
       heartbeat, if already fetched during triage
-    @param config Room configuration for I/O operations
+    @param config Coord configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
   pending_board_events:pending_board_event list option ->
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   world_observation
 

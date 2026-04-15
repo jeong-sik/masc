@@ -159,10 +159,10 @@ let int_field key json =
   | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
   | _ -> 0
 
-let room_id_from_config (_config : Room.config) = "default"
+let room_id_from_config (_config : Coord.config) = "default"
 
-let cluster_summary_json (_config : Room.config) =
-  (* Transport health should stay metrics-only and avoid command-plane/Room I/O. *)
+let cluster_summary_json (_config : Coord.config) =
+  (* Transport health should stay metrics-only and avoid command-plane/Coord I/O. *)
   None
 
 let int_field_opt key = function
@@ -173,7 +173,9 @@ let int_option_json = function
   | Some value -> `Int value
   | None -> `Null
 
-let http_listener_mode () = Env_config.Transport.use_h2 ()
+let http_listener_mode () =
+  Env_config.Transport.use_h2 ()
+  |> Env_config.Transport.h2_mode_to_string
 
 let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
   if webrtc_channels > 0 then "webrtc_datachannel"
@@ -247,7 +249,7 @@ let transport_health_json ~config =
     room_id_from_config config
   in
   let cluster_name = Env_config_core.cluster_name () in
-  (* Keep transport-health free of Room/PG reads so proactive refresh does not
+  (* Keep transport-health free of Coord/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
   let recent_messages = None in
   let recent_messages_available = Option.is_some recent_messages in

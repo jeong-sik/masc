@@ -4,7 +4,7 @@
 
 (* Context required by a2a tools *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 

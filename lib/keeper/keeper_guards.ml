@@ -115,6 +115,10 @@ let emit_gate_event
     ~stage ~decision ~reason_code
     ~tool_name ~agent_name ~turn
     ~accumulated_cost_usd ~stage_latency_ms ~reason_text =
+  (match decision with
+   | "override" | "approval_required" ->
+       Keeper_registry.mark_turn_gate_rejected_by_name agent_name
+   | _ -> ());
   match Keeper_event_bus.get () with
   | None -> ()
   | Some bus ->

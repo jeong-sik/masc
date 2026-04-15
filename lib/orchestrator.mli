@@ -15,7 +15,7 @@ val default_config : config
 (** Load config from environment or use defaults *)
 val load_config : unit -> config
 val make_orchestrator_prompt : port:int -> string
-val should_orchestrate : Room.config -> bool
+val should_orchestrate : Coord.config -> bool
 
 (** Start the orchestrator background services using Pulse.
     Returns a cancel function to gracefully stop both Pulse engines. *)
@@ -24,5 +24,5 @@ val start :
   proc_mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   ?domain_mgr:_ Eio.Domain_manager.t ->
-  Room.config ->
+  Coord.config ->
   (unit -> unit)

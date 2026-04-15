@@ -10,7 +10,7 @@
 open Alcotest
 
 module Telemetry_eio = Masc_mcp.Telemetry_eio
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let temp_dir () =
   let dir = Filename.temp_file "test_telemetry_eio_" "" in
@@ -360,7 +360,7 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config base_dir in
+      let config = Coord.default_config base_dir in
       Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
         ~success:true ~duration_ms:42 ~agent_id:"codex" ();
       let summary = Telemetry_eio.summarize_tool_usage config in

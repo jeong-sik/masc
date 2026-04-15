@@ -100,7 +100,7 @@ end
 
 (** {1 Pre-defined module loggers} *)
 
-module Room : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
+module Coord : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
 module Mcp : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
 module Auth : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end
 module Retry : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end

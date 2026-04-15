@@ -1,6 +1,6 @@
 (** Task_sandbox — Worktree-based per-task filesystem isolation.
 
-    Wraps [Room_worktree] to provide a higher-level sandbox lifecycle:
+    Wraps [Coord_worktree] to provide a higher-level sandbox lifecycle:
     create sandbox, run work, collect diff, cleanup.
 
     A sandbox consists of:
@@ -18,7 +18,7 @@ type sandbox = {
 }
 
 val create :
-  config:Room_utils_backend_setup.config ->
+  config:Coord_utils_backend_setup.config ->
   task_id:string ->
   ?scope:Worker_types.execution_scope ->
   ?base_branch:string ->
@@ -29,7 +29,7 @@ val create :
     Returns [Ok sandbox] on success or [Error reason] on failure. *)
 
 val cleanup :
-  config:Room_utils_backend_setup.config ->
+  config:Coord_utils_backend_setup.config ->
   agent_name:string ->
   sandbox ->
   (string list, string) result
@@ -37,7 +37,7 @@ val cleanup :
     Returns [Ok changed_files] on success. *)
 
 val with_sandbox :
-  config:Room_utils_backend_setup.config ->
+  config:Coord_utils_backend_setup.config ->
   task_id:string ->
   ?scope:Worker_types.execution_scope ->
   ?base_branch:string ->

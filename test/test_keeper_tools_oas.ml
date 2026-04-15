@@ -42,7 +42,7 @@ let test_make_tools_returns_nonempty () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       check bool "tools nonempty" true (List.length tools > 0))
 
@@ -60,7 +60,7 @@ let test_tools_have_valid_schemas () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       List.iter (fun (tool : Agent_sdk.Tool.t) ->
         check bool (Printf.sprintf "tool %s has name" tool.schema.name)
@@ -83,7 +83,7 @@ let test_tool_count_matches_allowed () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
       let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
@@ -122,7 +122,7 @@ let test_error_json_is_returned_as_tool_error () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       match Tool.execute tool
@@ -154,7 +154,7 @@ let test_missing_file_error_includes_directory_suggestions () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let pg_dir = Filename.concat
         (Keeper_alerting_path.project_root_of_config config)
         (Keeper_alerting_path.playground_path_of_keeper meta.name) in
@@ -193,7 +193,7 @@ let test_repeated_error_results_are_blocked () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let args =
@@ -226,7 +226,7 @@ let test_failure_count_resets_after_success () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let pg_dir = Filename.concat
         (Keeper_alerting_path.project_root_of_config config)
         (Keeper_alerting_path.playground_path_of_keeper meta.name) in
@@ -274,7 +274,7 @@ let test_failure_tracking_is_independent_per_args () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room.default_config dir in
+      let config = Coord.default_config dir in
       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
       let tool = find_tool "keeper_fs_read" tools in
       let args_a = `Assoc [("path", `String "missing-a.txt")] in

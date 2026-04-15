@@ -26,8 +26,8 @@ let with_room f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
-    let config = Room.default_config dir in
-    ignore (Room.init config ~agent_name:(Some "test"));
+    let config = Coord.default_config dir in
+    ignore (Coord.init config ~agent_name:(Some "test"));
     f config)
 
 let old_iso days_ago =

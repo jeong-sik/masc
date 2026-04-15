@@ -11,14 +11,14 @@
     causes dune interface mismatch errors in the test suite). *)
 
 (** Resolve [$base_path/.masc/gh-auth/] if it exists. *)
-let config_dir (config : Room.config) : string option =
-  let dir = Filename.concat config.Room_utils.base_path ".masc/gh-auth" in
+let config_dir (config : Coord.config) : string option =
+  let dir = Filename.concat config.Coord_utils.base_path ".masc/gh-auth" in
   if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
 
 (** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
     keeper-scoped config exists. Scoped to the single subprocess
     invocation — the operator's terminal is unaffected. *)
-let with_env (config : Room.config) (gh_cmd : string) : string =
+let with_env (config : Coord.config) (gh_cmd : string) : string =
   match config_dir config with
   | None -> gh_cmd
   | Some dir ->

@@ -2,7 +2,7 @@ open Keeper_types
 open Keeper_exec_shared
 
 let handle_keeper_autoresearch_tool
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
@@ -23,7 +23,7 @@ let handle_keeper_autoresearch_tool
 ;;
 
 let keeper_masc_path_blocked
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -61,7 +61,7 @@ let keeper_masc_path_blocked
 ;;
 
 let handle_keeper_masc_tool
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)

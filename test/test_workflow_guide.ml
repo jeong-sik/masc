@@ -18,7 +18,7 @@ let check_has_tool steps tool_name =
 let check_not_empty msg steps =
   check bool msg true (List.length steps > 0)
 
-(* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
+(* ── Golden Path 1: Coord/Task Hygiene ────────────────────────────── *)
 
 let test_start_success () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:true in

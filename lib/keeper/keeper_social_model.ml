@@ -23,6 +23,24 @@ type delivery_surface = Keeper_social_model_types.delivery_surface =
 
 type model_id = Keeper_social_model_types.model_id =
   | Bdi_speech_v1
+  | Magentic_ledger_v1
+
+type transition_reason = Keeper_social_model_types.transition_reason =
+  | Tool_only_stay_silent
+  | Tool_only_comment_board
+  | Tool_only_post_board
+  | Tool_only_broadcast
+  | Tool_only_claim_task
+  | Tool_only_visible_reply
+  | Tool_only_progress_ledger
+  | Explicit_social_headers
+  | Missing_headers_fallback_visible_reply
+  | Invalid_headers_fallback_visible_reply
+  | Inferred_visible_reply
+  | Protocol_violation_missing_social_headers
+  | Protocol_violation_invalid_social_headers
+  | Protocol_violation_no_tools_no_social_headers
+  | Failure_run_error
 
 type social_state = Keeper_social_model_types.social_state = {
   social_model : string;
@@ -48,6 +66,8 @@ let delivery_surface_to_string =
 let model_id_to_string = Keeper_social_model_types.model_id_to_string
 let model_id_of_string = Keeper_social_model_types.model_id_of_string
 let normalize_social_model = Keeper_social_model_types.normalize_social_model
+let transition_reason_to_string =
+  Keeper_social_model_types.transition_reason_to_string
 
 let nonempty_opt value =
   let trimmed = String.trim value in

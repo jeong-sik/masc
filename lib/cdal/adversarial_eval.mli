@@ -20,7 +20,7 @@ type allowed_input =
 type banned_input_kind =
   | Readme
   | Design_doc
-  | Room_history
+  | Coord_history
   | Task_history
   | Governance_history
 

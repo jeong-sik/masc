@@ -254,7 +254,7 @@ let container_name (spec : Worker_execution_spec.t) =
       (Atomic.fetch_and_add container_counter 1)
   in
   Printf.sprintf "masc-worker-%s-%s"
-    (String.lowercase_ascii (Room_utils.safe_filename token))
+    (String.lowercase_ascii (Coord_utils.safe_filename token))
     unique_suffix
 
 let artifact_dir (spec : Worker_execution_spec.t) =
@@ -265,7 +265,7 @@ let stderr_artifact_path (spec : Worker_execution_spec.t) =
   let suffix =
     match spec.worker_run_id with
     | Some worker_run_id when String.trim worker_run_id <> "" ->
-        Room_utils.safe_filename worker_run_id
+        Coord_utils.safe_filename worker_run_id
     | _ -> "latest"
   in
   Filename.concat (artifact_dir spec)

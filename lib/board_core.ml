@@ -161,13 +161,16 @@ let maybe_sweep store =
 let board_base_path () =
   Env_config_core.base_path ()
 
+let board_masc_dir () =
+  Room_utils.masc_root_dir_from
+    ~base_path:(board_base_path ())
+    ~cluster_name:(Env_config_core.cluster_name ())
+
 let persist_path () =
-  let base = board_base_path () in
-  Filename.concat base ".masc/board_posts.jsonl"
+  Filename.concat (board_masc_dir ()) "board_posts.jsonl"
 
 let comments_path () =
-  let base = board_base_path () in
-  Filename.concat base ".masc/board_comments.jsonl"
+  Filename.concat (board_masc_dir ()) "board_comments.jsonl"
 
 let ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -175,7 +178,7 @@ let ensure_dir path =
 
 let ensure_masc_dir () =
   let base = board_base_path () in
-  let dir = Filename.concat base ".masc" in
+  let dir = board_masc_dir () in
   ensure_dir base;
   ensure_dir dir
 

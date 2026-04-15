@@ -7,6 +7,7 @@ import {
   deriveOperationalInsight,
   derivePhaseLog,
   deriveStateEntries,
+  deriveSwimlaneSegments,
   deriveTransitionHistory,
   type CompositeObservation,
 } from './fsm-hub'
@@ -233,5 +234,56 @@ describe('deriveStateEntries', () => {
     ]
     const entries = deriveStateEntries(observations)
     expect(entries?.turn).toBe(130)
+  })
+})
+
+describe('deriveSwimlaneSegments', () => {
+  it('returns an empty list when no observations exist', () => {
+    expect(deriveSwimlaneSegments([], 'turn', 100)).toEqual([])
+  })
+
+  it('collapses same consecutive values into a single segment', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 105, turn: 'idle' }),
+      observation({ ts: 110, turn: 'idle' }),
+    ]
+    const segments = deriveSwimlaneSegments(observations, 'turn', 120)
+    expect(segments).toEqual([{ from: 100, to: 120, value: 'idle' }])
+  })
+
+  it('closes a segment when the value changes and extends the tail to boundsEnd', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 110, turn: 'prompting' }),
+      observation({ ts: 120, turn: 'executing' }),
+    ]
+    const segments = deriveSwimlaneSegments(observations, 'turn', 200)
+    expect(segments).toEqual([
+      { from: 100, to: 110, value: 'idle' },
+      { from: 110, to: 120, value: 'prompting' },
+      { from: 120, to: 200, value: 'executing' },
+    ])
+  })
+
+  it('leaves the tail at the last observation ts when boundsEnd is earlier', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 150, turn: 'prompting' }),
+    ]
+    const segments = deriveSwimlaneSegments(observations, 'turn', 120)
+    expect(segments[segments.length - 1]).toEqual({ from: 150, to: 150, value: 'prompting' })
+  })
+
+  it('emits back-to-back segments when a value repeats after a different one', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 110, turn: 'prompting' }),
+      observation({ ts: 120, turn: 'idle' }),
+      observation({ ts: 130, turn: 'prompting' }),
+    ]
+    const segments = deriveSwimlaneSegments(observations, 'turn', 140)
+    expect(segments.map(s => s.value)).toEqual(['idle', 'prompting', 'idle', 'prompting'])
+    expect(segments[3]).toEqual({ from: 130, to: 140, value: 'prompting' })
   })
 })

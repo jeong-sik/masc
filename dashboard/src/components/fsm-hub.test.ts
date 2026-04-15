@@ -10,6 +10,7 @@ import {
   deriveSwimlaneSegments,
   deriveTimeAxisTicks,
   deriveTransitionHistory,
+  flagTooltip,
   isTransitionInSegment,
   laneTransitionCount,
   type CompositeObservation,
@@ -406,5 +407,31 @@ describe('laneTransitionCount', () => {
     expect(laneTransitionCount(observations, 'turn')).toBe(1)
     expect(laneTransitionCount(observations, 'phase')).toBe(1)
     expect(laneTransitionCount(observations, 'decision')).toBe(0)
+  })
+})
+
+describe('flagTooltip', () => {
+  it('returns the on-description when the flag is active', () => {
+    const tip = flagTooltip('reflect', true)
+    expect(tip).toContain('reflect (active)')
+    expect(tip).toMatch(/self-evaluate|Reflexion/i)
+  })
+
+  it('returns the off-description when the flag is inactive', () => {
+    const tip = flagTooltip('reflect', false)
+    expect(tip).toContain('reflect (inactive)')
+    expect(tip).toMatch(/no reflection pending/i)
+  })
+
+  it('swaps description for guardrail based on state', () => {
+    const on = flagTooltip('guardrail', true)
+    const off = flagTooltip('guardrail', false)
+    expect(on).toMatch(/tripped|halt/i)
+    expect(off).toMatch(/no guardrail active|safety envelope/i)
+  })
+
+  it('falls back to a generic tooltip for unknown labels', () => {
+    expect(flagTooltip('mystery-flag', true)).toBe('mystery-flag: active')
+    expect(flagTooltip('mystery-flag', false)).toBe('mystery-flag: inactive')
   })
 })

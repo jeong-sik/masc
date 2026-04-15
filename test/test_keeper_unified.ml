@@ -573,6 +573,12 @@ let test_paused_keeper_blocks_turns_even_with_reactive_signal () =
 
 let test_pending_approval_blocks_turns_until_resolved () =
   Eio_main.run @@ fun _env ->
+  let reactive_obs =
+    {
+      base_observation with
+      pending_mentions = [ ("alice", "@keeper continue") ];
+    }
+  in
   let id =
     AQ.submit_pending
       ~keeper_name:minimal_meta.name
@@ -581,15 +587,17 @@ let test_pending_approval_blocks_turns_until_resolved () =
       ~risk_level:AQ.Critical
       ~on_resolution:(fun _ -> ())
   in
-  let decision = WO.unified_turn_decision ~meta:minimal_meta base_observation in
+  let decision = WO.unified_turn_decision ~meta:minimal_meta reactive_obs in
   check bool "approval pending blocks turn" false decision.should_run;
   check (list string) "approval pending reason is surfaced"
     [ "approval_pending" ]
     (WO.verdict_reasons_to_strings decision.verdict);
   match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
   | Ok () ->
-    let resumed = WO.unified_turn_decision ~meta:minimal_meta base_observation in
-    check bool "approval resolve re-opens turn scheduling" true resumed.should_run
+    let resumed = WO.unified_turn_decision ~meta:minimal_meta reactive_obs in
+    check bool "approval resolve re-opens reactive scheduling" true resumed.should_run;
+    check string "resolved approval restores reactive channel" "reactive"
+      (WO.channel_to_string resumed.channel)
   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =

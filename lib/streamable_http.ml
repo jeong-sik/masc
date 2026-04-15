@@ -27,9 +27,11 @@ type response_mode =
 type request_handler =
   Yojson.Safe.t -> Yojson.Safe.t
 
+module StringMap = Map.Make (String)
+
 (** Session storage with mutex protection *)
 module Session = struct
-  let sessions : (string, session) Hashtbl.t = Hashtbl.create 64
+  let sessions : session StringMap.t ref = ref StringMap.empty
   let mutex = Eio.Mutex.create ()
 
   let generate_id () =
@@ -61,30 +63,33 @@ module Session = struct
         transport;
         subscriptions = [];
       } in
-      Hashtbl.replace sessions session.id session;
+      sessions := StringMap.add session.id session !sessions;
       session)
 
   let find id =
-    with_lock (fun () -> Hashtbl.find_opt sessions id)
+    with_lock (fun () -> StringMap.find_opt id !sessions)
 
   let touch session =
     session.last_seen <- Time_compat.now ()
 
   let remove id =
-    with_lock (fun () -> Hashtbl.remove sessions id)
+    with_lock (fun () -> sessions := StringMap.remove id !sessions)
 
   let list_all () =
     with_lock (fun () ->
-      Hashtbl.fold (fun _ v acc -> v :: acc) sessions [])
+      !sessions
+      |> StringMap.bindings
+      |> List.map (fun (_, v) -> v)
+    )
 
   let cleanup ~ttl_seconds =
     let now = Time_compat.now () in
     let cutoff = now -. ttl_seconds in
     with_lock (fun () ->
-      let to_remove = Hashtbl.fold (fun id session acc ->
+      let to_remove = StringMap.fold (fun id session acc ->
         if session.last_seen < cutoff then id :: acc else acc
-      ) sessions [] in
-      List.iter (Hashtbl.remove sessions) to_remove;
+      ) !sessions [] in
+      List.iter (fun id -> sessions := StringMap.remove id !sessions) to_remove;
       List.length to_remove)
 end
 

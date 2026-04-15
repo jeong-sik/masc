@@ -5,6 +5,7 @@
  (public_name masc_mcp.gate)
  (wrapped false)
  (modules
+   channel_gate
    channel_gate_connector
    channel_gate_discord_names
    channel_gate_discord_state
@@ -20,5 +21,6 @@
    masc_config
    masc_core
    masc_log
+   masc_pulse
    masc_types
    fs_compat))

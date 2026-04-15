@@ -428,8 +428,20 @@ let handle_keeper_bash
       match validate cmd with
       | Error reason ->
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
+        let lower_cmd = String.lowercase_ascii cmd_for_log in
+        let starts_with_gh =
+          let trimmed = String.trim lower_cmd in
+          String.length trimmed >= 2
+          && String.sub trimmed 0 2 = "gh"
+          && (String.length trimmed = 2
+              || trimmed.[2] = ' '
+              || trimmed.[2] = '\t')
+        in
         let hint =
-          if String.length reason > 0 &&
+          if starts_with_gh then
+            "`gh` is not allowed via keeper_bash. Use keeper_shell with \
+             op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
+          else if String.length reason > 0 &&
              (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
           then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
           else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)

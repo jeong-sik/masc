@@ -26,6 +26,7 @@ export interface FleetRow {
   runtime_blocker_class: Keeper['runtime_blocker_class'] | null
   runtime_blocker_summary: string | null
   tool_audit_at: string | null
+  budget_source: 'override' | 'override_invalid' | 'env' | null
 }
 
 export interface FleetTelemetryState {
@@ -310,6 +311,16 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             runtime_blocker_summary:
               firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker) ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
+            budget_source:
+              keeper.turn_budget?.reactive.source === 'override' ||
+              keeper.turn_budget?.reactive.source === 'override_invalid' ||
+              keeper.turn_budget?.scheduled_autonomous.source === 'override' ||
+              keeper.turn_budget?.scheduled_autonomous.source === 'override_invalid'
+                ? (keeper.turn_budget?.reactive.source === 'override_invalid' ||
+                   keeper.turn_budget?.scheduled_autonomous.source === 'override_invalid'
+                    ? 'override_invalid'
+                    : 'override')
+                : 'env',
           }
         })
       : toolQuality.by_keeper.map((keeper): FleetRow => ({
@@ -328,6 +339,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           runtime_blocker_class: null,
           runtime_blocker_summary: null,
           tool_audit_at: null,
+          budget_source: null,
         }))
 
   return [...rows].sort(compareFleetRows)

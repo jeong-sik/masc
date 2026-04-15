@@ -201,6 +201,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             <th class="py-1 text-right font-normal">Ctx</th>
             <th class="py-1 text-right font-normal">Latency</th>
             <th class="py-1 text-right font-normal">Model</th>
+            <th class="py-1 text-center font-normal">Budget</th>
             <th class="w-8 py-1"></th>
           </tr>
         </thead>
@@ -248,6 +249,13 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 valueClass="text-[var(--text-dim)]"
               />
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
+              <td class="py-1.5 text-center">
+                ${row.budget_source === 'override_invalid'
+                  ? html`<span class="rounded bg-red-500/15 px-1 py-0.5 text-[9px] font-semibold text-red-300" title="잘못된 TOML override">!</span>`
+                  : row.budget_source === 'override'
+                    ? html`<span class="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-semibold text-amber-300" title="TOML override 적용됨">O</span>`
+                    : html`<span class="text-[9px] text-[var(--text-dim)]">-</span>`}
+              </td>
               <td class="py-1.5 text-center">
                 <button
                   class="rounded p-0.5 text-[var(--text-dim)] hover:text-red-400 hover:bg-red-400/10 transition-colors"

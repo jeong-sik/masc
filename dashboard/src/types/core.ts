@@ -657,15 +657,17 @@ export interface Keeper {
   turn_budget?: {
     reactive: {
       value: number
-      source: 'override' | 'env'
+      source: 'override' | 'env' | 'override_invalid'
       env_default: number
       env_var: string
+      raw_override: number | null
     }
     scheduled_autonomous: {
       value: number
-      source: 'override' | 'env'
+      source: 'override' | 'env' | 'override_invalid'
       env_default: number
       env_var: string
+      raw_override: number | null
     }
     manifest_path: string | null
     clamp_min: number

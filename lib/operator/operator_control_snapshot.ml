@@ -458,10 +458,13 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                             Keeper_types_profile.effective_max_turns_per_call
                               profile
                           in
-                          let reactive_source =
-                            match profile.max_turns_per_call with
+                          let classify_source = function
                             | Some n when n >= 1 && n <= 50 -> "override"
-                            | _ -> "env"
+                            | Some _ -> "override_invalid"
+                            | None -> "env"
+                          in
+                          let reactive_source =
+                            classify_source profile.max_turns_per_call
                           in
                           let autonomous_effective =
                             Keeper_types_profile
@@ -469,11 +472,12 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                               profile
                           in
                           let autonomous_source =
-                            match
+                            classify_source
                               profile.max_turns_per_call_scheduled_autonomous
-                            with
-                            | Some n when n >= 1 && n <= 50 -> "override"
-                            | _ -> "env"
+                          in
+                          let raw_override_int = function
+                            | Some n -> `Int n
+                            | None -> `Null
                           in
                           let manifest_path_json =
                             match profile.manifest_path with
@@ -491,6 +495,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                                     ( "env_var",
                                       `String
                                         "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" );
+                                    ( "raw_override",
+                                      raw_override_int
+                                        profile.max_turns_per_call );
                                   ] );
                               ( "scheduled_autonomous",
                                 `Assoc
@@ -502,6 +509,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                                       `String
                                         "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
                                     );
+                                    ( "raw_override",
+                                      raw_override_int
+                                        profile
+                                          .max_turns_per_call_scheduled_autonomous );
                                   ] );
                               ("manifest_path", manifest_path_json);
                               ("clamp_min", `Int 1);

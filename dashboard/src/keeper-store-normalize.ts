@@ -110,10 +110,19 @@ function normalizeTurnBudget(raw: unknown): Keeper['turn_budget'] {
     if (!isRecord(v)) return null
     const value = asNumber(v.value)
     if (value == null) return null
-    const source: 'override' | 'env' = v.source === 'override' ? 'override' : 'env'
+    let source: 'override' | 'env' | 'override_invalid' = 'env'
+    if (v.source === 'override') source = 'override'
+    else if (v.source === 'override_invalid') source = 'override_invalid'
     const envDefault = asNumber(v.env_default) ?? value
     const envVar = asString(v.env_var) ?? ''
-    return { value, source, env_default: envDefault, env_var: envVar }
+    const rawOverride = asNumber(v.raw_override)
+    return {
+      value,
+      source,
+      env_default: envDefault,
+      env_var: envVar,
+      raw_override: rawOverride ?? null,
+    }
   }
   const reactive = readSlot(raw.reactive)
   const scheduled = readSlot(raw.scheduled_autonomous)

@@ -160,11 +160,23 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
 
 // ── Turn Budget ──────────────────────────────────────────
 
+export function hasTurnBudgetDivergence(keeper: Keeper): boolean {
+  const b = keeper.turn_budget
+  if (!b) return false
+  return (
+    b.reactive.source === 'override' ||
+    b.reactive.source === 'override_invalid' ||
+    b.scheduled_autonomous.source === 'override' ||
+    b.scheduled_autonomous.source === 'override_invalid'
+  )
+}
+
 interface BudgetSlot {
   value: number
-  source: 'override' | 'env'
+  source: 'override' | 'env' | 'override_invalid'
   env_default: number
   env_var: string
+  raw_override: number | null
 }
 
 function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { min: number; max: number }): string {
@@ -173,6 +185,13 @@ function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { 
     lines.push(`Source: TOML override`)
     if (manifest) lines.push(`File:   ${manifest}`)
     lines.push(`Value:  ${slot.value}  (env default was ${slot.env_default})`)
+  } else if (slot.source === 'override_invalid') {
+    lines.push(`Source: env default (override REJECTED)`)
+    if (manifest) lines.push(`File:   ${manifest}`)
+    if (slot.raw_override != null) {
+      lines.push(`Raw:    ${slot.raw_override}  — out of range [${clamp.min}, ${clamp.max}]`)
+    }
+    lines.push(`Value:  ${slot.value}  (fell back to env default)`)
   } else {
     lines.push(`Source: env default`)
     lines.push(`Env:    ${slot.env_var} = ${slot.value}`)
@@ -189,12 +208,26 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   clamp: { min: number; max: number }
 }) {
   const isOverride = slot.source === 'override'
+  const isInvalid = slot.source === 'override_invalid'
   const delta = slot.value - slot.env_default
   const deltaText = delta === 0
     ? null
     : delta > 0
       ? `+${delta} vs env`
       : `${delta} vs env`
+
+  let valueClass: string
+  let pill
+  if (isInvalid) {
+    valueClass = 'text-red-300 underline decoration-wavy decoration-red-400 underline-offset-4 cursor-help'
+    pill = html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-red-300">invalid</span>`
+  } else if (isOverride) {
+    valueClass = 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
+    pill = html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
+  } else {
+    valueClass = 'text-[var(--text-muted)] cursor-help'
+    pill = html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`
+  }
 
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
@@ -204,14 +237,10 @@ function BudgetRow({ label, slot, manifest, clamp }: {
           ? html`<span class="text-[10px] text-[var(--text-muted)] tabular-nums">${deltaText}</span>`
           : null}
         <span
-          class="text-xs font-medium tabular-nums ${isOverride
-            ? 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
-            : 'text-[var(--text-muted)] cursor-help'}"
+          class="text-xs font-medium tabular-nums ${valueClass}"
           title=${buildBudgetTooltip(slot, manifest, clamp)}
         >${slot.value}</span>
-        ${isOverride
-          ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
-          : html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`}
+        ${pill}
       </div>
     </div>
   `
@@ -230,6 +259,9 @@ export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
   const hasOverride =
     budget.reactive.source === 'override' ||
     budget.scheduled_autonomous.source === 'override'
+  const hasInvalid =
+    budget.reactive.source === 'override_invalid' ||
+    budget.scheduled_autonomous.source === 'override_invalid'
   const clamp = { min: budget.clamp_min, max: budget.clamp_max }
 
   return html`
@@ -238,9 +270,11 @@ export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
         <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
           턴 예산 (per OAS call)
         </span>
-        ${hasOverride
-          ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">drift</span>`
-          : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">inherited</span>`}
+        ${hasInvalid
+          ? html`<span class="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-red-300">invalid override</span>`
+          : hasOverride
+            ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
+            : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형 (reactive)"

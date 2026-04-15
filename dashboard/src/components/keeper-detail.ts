@@ -41,6 +41,7 @@ import {
   KeeperNeighborhood,
   RuntimeSignals,
   TurnBudgetPanel,
+  hasTurnBudgetDivergence,
 } from './keeper-detail-runtime'
 import {
   KeeperConfigPanel,
@@ -678,10 +679,13 @@ export function KeeperDetailOverlay() {
             <${RuntimeSignals} keeper=${keeper} />
           </details>
 
-          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open>
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open=${hasTurnBudgetDivergence(keeper)}>
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              <span class="w-1.5 h-1.5 rounded-full ${hasTurnBudgetDivergence(keeper) ? 'bg-amber-400' : 'bg-accent/50'}"></span>
               턴 예산
+              ${hasTurnBudgetDivergence(keeper)
+                ? html`<span class="text-[9px] text-amber-300 font-normal normal-case tracking-normal">(override)</span>`
+                : null}
             </summary>
             <div class="mt-3">
               <${TurnBudgetPanel} keeper=${keeper} />

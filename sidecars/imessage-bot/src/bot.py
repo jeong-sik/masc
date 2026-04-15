@@ -59,17 +59,37 @@ class IMessageBot:
             self._refresh_self_chat_guid(force=True)
 
     def _load_bindings(self) -> None:
-        """Load chat-to-keeper bindings from state file."""
+        """Load chat-to-keeper bindings from state file.
+
+        Read priority: new default (binding_store_path) > legacy
+        (legacy_binding_store_path) > empty. Next write always goes to the
+        new default, so a one-shot migration is transparent after the
+        .gate/runtime/ rollout (see #7468, #7471).
+        """
         path = Path(self.cfg.binding_store_path)
+        source = "default"
         if not path.exists():
-            return
+            legacy_path = Path(self.cfg.legacy_binding_store_path)
+            if legacy_path.exists():
+                path = legacy_path
+                source = "legacy"
+            else:
+                return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 self._bindings = {str(k): str(v) for k, v in data.items() if isinstance(v, str)}
-                logger.info("Loaded %d binding(s)", len(self._bindings))
+                if source == "legacy":
+                    logger.info(
+                        "Loaded %d binding(s) from legacy store %s; next write goes to %s",
+                        len(self._bindings),
+                        path,
+                        self.cfg.binding_store_path,
+                    )
+                else:
+                    logger.info("Loaded %d binding(s)", len(self._bindings))
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load bindings: %s", e)
+            logger.warning("Failed to load bindings from %s: %s", path, e)
 
     def _resolve_keeper(self, msg: InboundMessage) -> str:
         """Resolve which keeper handles a message.

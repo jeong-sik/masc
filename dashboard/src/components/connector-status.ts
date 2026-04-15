@@ -1,5 +1,5 @@
 // Connector Status — Channel Gate per-channel diagnostics panel.
-// Shows connector health, success rate, duplicates, and latest failure context.
+// Keeper-first layout: each directory keeper is a primary section; bindings nest under.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -24,13 +24,13 @@ import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
-import { Select } from './common/select'
 import { showToast } from './common/toast'
 import { createManagedAsyncResource } from '../lib/async-state'
 
 const actionLoading = signal(false)
 const channelDraft = signal('')
-const keeperDraft = signal('')
+const expandedKeeperFor = signal<string | null>(null)
+const headerExpanded = signal(false)
 
 type ConnectorStatusSnapshot = {
   gate: GateStatusData | null
@@ -52,13 +52,8 @@ const EMPTY_SNAPSHOT: ConnectorStatusSnapshot = {
 
 const connectorStatusResource = createManagedAsyncResource<ConnectorStatusSnapshot>(EMPTY_SNAPSHOT)
 
-function preferredConnector(payload: GateConnectorsData | null): GateConnectorInfo | null {
-  if (!payload || payload.connectors.length === 0) return null
-  return payload.connectors.find(connector => connector.capabilities.includes('bindings')) ?? payload.connectors[0] ?? null
-}
-
 async function refresh() {
-  const snapshot = await connectorStatusResource.load(async (signal, previous) => {
+  await connectorStatusResource.load(async (signal, previous) => {
     const next: ConnectorStatusSnapshot = {
       gate: previous?.gate ?? null,
       connectors: previous?.connectors ?? null,
@@ -95,14 +90,6 @@ async function refresh() {
 
     return next
   })
-
-  const primaryConnector = preferredConnector(snapshot?.connectors ?? null)
-  if (!channelDraft.value && (primaryConnector?.configured_bindings.length ?? 0) > 0) {
-    channelDraft.value = primaryConnector?.configured_bindings[0]?.channel_id ?? ''
-  }
-  if (!keeperDraft.value && (primaryConnector?.configured_bindings.length ?? 0) > 0) {
-    keeperDraft.value = primaryConnector?.configured_bindings[0]?.keeper_name ?? ''
-  }
 }
 
 const CHANNEL_ICONS: Record<string, string> = {
@@ -202,6 +189,19 @@ function dotClass(state: LivenessState): string {
   }
 }
 
+function dotClassForLabel(label: string): string {
+  switch (label) {
+    case 'connected':
+      return 'bg-emerald-400'
+    case 'stale':
+      return 'bg-amber-400'
+    case 'disconnected':
+      return 'bg-rose-400'
+    default:
+      return 'bg-[var(--text-dim)]'
+  }
+}
+
 function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>()
   const ordered: string[] = []
@@ -227,13 +227,6 @@ function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): strin
   return runtime
 }
 
-function keeperLabel(keeper: GateKeeperInfo): string {
-  const status = keeper.status?.trim() || 'unknown'
-  const model = modelLabelForKeeper(keeper)
-  const runtime = runtimeLabelForKeeper(keeper)
-  return [keeper.name, status, model, runtime].filter(Boolean).join(' · ')
-}
-
 function connectorStateLabel(connector: GateConnectorInfo | null): string {
   const advertised = connector?.status?.trim().toLowerCase()
   if (advertised === 'offline' || advertised === 'stale' || advertised === 'connected' || advertised === 'disconnected') {
@@ -256,19 +249,21 @@ function connectorStateTone(connector: GateConnectorInfo | null): string {
   return 'border-amber-400/30 bg-amber-500/12 text-amber-100'
 }
 
-async function bindConnector(connectorId: string) {
-  const channelId = channelDraft.value.trim()
-  const keeperName = keeperDraft.value.trim()
-  if (!channelId || !keeperName) return
+async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
+  const keeper = keeperName.trim()
+  const channel = channelId.trim()
+  if (!keeper || !channel) return
 
   actionLoading.value = true
   try {
     await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, {
-      channel_id: channelId,
-      keeper_name: keeperName,
+      channel_id: channel,
+      keeper_name: keeper,
     })
+    channelDraft.value = ''
+    expandedKeeperFor.value = null
     await refresh()
-    showToast(`Bound ${channelId} -> ${keeperName}`, 'success')
+    showToast(`Bound ${channel} -> ${keeper}`, 'success')
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'bind failed', 'error')
   } finally {
@@ -276,25 +271,29 @@ async function bindConnector(connectorId: string) {
   }
 }
 
-async function unbindConnector(connectorId: string, channelIdOverride?: string) {
-  const channelId = (channelIdOverride ?? channelDraft.value).trim()
-  if (!channelId) return
+async function unbindConnector(connectorId: string, channelId: string) {
+  const channel = channelId.trim()
+  if (!channel) return
 
   actionLoading.value = true
   try {
     await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, {
-      channel_id: channelId,
+      channel_id: channel,
     })
-    if (channelDraft.value.trim() === channelId) {
-      channelDraft.value = ''
-    }
     await refresh()
-    showToast(`Unbound ${channelId}`, 'success')
+    showToast(`Unbound ${channel}`, 'success')
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'unbind failed', 'error')
   } finally {
     actionLoading.value = false
   }
+}
+
+type KeeperGroup = {
+  name: string
+  keeper: GateKeeperInfo | null
+  bindings: Array<{ channel_id: string; keeper_name: string }>
+  unknown: boolean
 }
 
 function ConnectorLivePanel({
@@ -312,9 +311,28 @@ function ConnectorLivePanel({
   keeperDirectoryError: string | null
   loading: boolean
 }) {
-  const keeperByName = new Map(keepers.map(keeper => [keeper.name, keeper] as const))
   const configuredBindings = connector?.configured_bindings ?? []
-  const audit = connector?.recent_audit ?? []
+  const names = connector?.names
+  const connectorName = connector?.display_name || 'Connector'
+  const connectorId = connector?.connector_id ?? ''
+  const bindingActionsEnabled = connector != null && connector.capabilities.includes('bindings')
+  const directLabel = connectorStateLabel(connector)
+  const directTone = connectorStateTone(connector)
+
+  let gateHealthLabel = 'unknown'
+  if (connector?.gate_healthy === true) {
+    gateHealthLabel = 'healthy'
+  } else if (connector?.gate_healthy === false) {
+    gateHealthLabel = 'unhealthy'
+  }
+
+  const sidecarLogPath = connector?.names_path
+    ? connector.names_path.replace(
+        /\/\.masc\/connectors\/[^/]+\/names\.json$/,
+        `/.masc/logs/${connectorId}-sidecar-YYYYMMDD.log`,
+      )
+    : ''
+
   const observedRooms = uniqueStrings([
     ...(gate?.bindings ?? [])
       .filter(binding => binding.channel === (connector?.channel ?? ''))
@@ -324,37 +342,28 @@ function ConnectorLivePanel({
       .map(event => event.room_id),
     ...configuredBindings.map(binding => binding.channel_id),
   ])
-  const suggestedKeepers = uniqueStrings([
-    ...(gate?.bindings ?? [])
-      .filter(binding => binding.channel === (connector?.channel ?? ''))
-      .map(binding => binding.keeper),
-    ...(gate?.recent_events ?? [])
-      .filter(event => event.channel === (connector?.channel ?? ''))
-      .map(event => event.keeper),
-    ...configuredBindings.map(binding => binding.keeper_name),
-  ])
-  const selectedKeeper = keeperByName.get(keeperDraft.value.trim()) ?? null
-  const directLabel = connectorStateLabel(connector)
-  const directTone = connectorStateTone(connector)
-  const bindingActionsEnabled =
-    connector != null && connector.capabilities.includes('bindings')
-  const connectorName = connector?.display_name || 'Connector'
-  const connectorId = connector?.connector_id ?? ''
-  const channelInputLabel = `${connectorName} channel id`
-  let gateHealthLabel = 'unknown'
-  if (connector?.gate_healthy === true) {
-    gateHealthLabel = 'healthy'
-  } else if (connector?.gate_healthy === false) {
-    gateHealthLabel = 'unhealthy'
-  }
 
-  const names = connector?.names
-  const sidecarLogPath = connector?.names_path
-    ? connector.names_path.replace(
-        /\/\.masc\/connectors\/[^/]+\/names\.json$/,
-        `/.masc/logs/${connectorId}-sidecar-YYYYMMDD.log`,
-      )
-    : ''
+  const bindingsByKeeper = new Map<string, Array<{ channel_id: string; keeper_name: string }>>()
+  for (const binding of configuredBindings) {
+    const existing = bindingsByKeeper.get(binding.keeper_name)
+    if (existing) {
+      existing.push(binding)
+    } else {
+      bindingsByKeeper.set(binding.keeper_name, [binding])
+    }
+  }
+  const knownNames = new Set(keepers.map(keeper => keeper.name))
+  const knownGroups: KeeperGroup[] = keepers.map(keeper => ({
+    name: keeper.name,
+    keeper,
+    bindings: bindingsByKeeper.get(keeper.name) ?? [],
+    unknown: false,
+  }))
+  const unknownGroups: KeeperGroup[] = []
+  for (const [name, bindings] of bindingsByKeeper) {
+    if (knownNames.has(name)) continue
+    unknownGroups.push({ name, keeper: null, bindings, unknown: true })
+  }
 
   const browserDot: LivenessDot = {
     label: 'Browser → Server',
@@ -421,297 +430,281 @@ function ConnectorLivePanel({
   })()
   const livenessDots: LivenessDot[] = [browserDot, serverDot, sidecarDot]
 
-  const showOnboarding =
-    configuredBindings.length === 0 && !connector?.available && !connectorError
+  const showNoKeeperEmpty =
+    configuredBindings.length === 0 && !connector?.available && keepers.length === 0 && !keeperDirectoryError
+  const showSidecarOffEmpty =
+    !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
 
   return html`
     <div class="mb-4 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
-      <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2 text-[11px] text-[var(--text-body)]">
-        ${livenessDots.map(dot => html`
-          <div class="flex min-w-0 items-center gap-2" title=${dot.hint}>
-            <span class=${`inline-block h-2 w-2 rounded-full ${dotClass(dot.state)}`}></span>
-            <span class="font-medium">${dot.label}</span>
-            <span class="truncate text-[var(--text-dim)]">${dot.detail}</span>
-            ${dot.hint && (dot.state === 'down' || dot.state === 'warn')
-              ? html`<span class="text-[10px] italic text-[var(--text-dim)]">— ${dot.hint}</span>`
-              : null}
-          </div>
-        `)}
+      <div class="flex flex-wrap items-center gap-2 text-[12px]">
+        <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
+        ${connector?.bot_user_name
+          ? html`<span class="text-[var(--text-dim)]">· ${connector.bot_user_name}</span>`
+          : null}
+        <span class="text-[var(--text-dim)]">·</span>
+        <span class=${`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] ${directTone}`}>
+          <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
+          <span>${directLabel}</span>
+        </span>
+        <span class="text-[var(--text-dim)]">· hb ${timeAgo(connector?.updated_at ?? '')}</span>
+        ${connector?.reply_mode
+          ? html`<span class="text-[var(--text-dim)]">· reply ${connector.reply_mode}</span>`
+          : null}
+        ${connector?.self_chat_guid
+          ? html`<span class="text-[var(--text-dim)]">· self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>`
+          : null}
+        <span class="ml-auto flex items-center gap-2">
+          ${sidecarLogPath
+            ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>logs↗</span>`
+            : null}
+          <button
+            type="button"
+            class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            aria-label="toggle header details"
+            onClick=${() => { headerExpanded.value = !headerExpanded.value }}
+          >${headerExpanded.value ? '▴' : '▾'}</button>
+        </span>
       </div>
 
-      ${showOnboarding
+      ${headerExpanded.value
         ? html`
-            <div class="mb-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px] text-[var(--text-body)]">
-              <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">
-                Connect ${connectorName} in 3 steps
+            <div class="mt-2 rounded-md border border-[var(--white-8)] bg-[var(--white-4)] p-3 text-[11px]">
+              <div class="space-y-1.5">
+                ${livenessDots.map(dot => html`
+                  <div class="flex min-w-0 flex-wrap items-center gap-2">
+                    <span class=${`inline-block h-2 w-2 rounded-full ${dotClass(dot.state)}`}></span>
+                    <span class="font-medium">${dot.label}</span>
+                    <span class="text-[var(--text-dim)]">${dot.detail}</span>
+                    ${dot.hint && (dot.state === 'down' || dot.state === 'warn')
+                      ? html`<span class="italic text-[var(--text-dim)]">— ${dot.hint}</span>`
+                      : null}
+                  </div>
+                `)}
               </div>
-              <ol class="mb-2 list-decimal pl-5 text-[11px] leading-5 text-[var(--text-dim)]">
-                <li>Start the MASC server (the dashboard you're reading confirms it's running).</li>
-                <li>Start the sidecar: <code class="rounded bg-[var(--white-8)] px-1">cd sidecars/${connectorId}-bot && ./run.sh</code></li>
-                <li>Come back to this panel and bind a channel below.</li>
-              </ol>
-              <div class="text-[10px] text-[var(--text-dim)]">
-                Once the sidecar emits its first heartbeat this card disappears.
+              <div class="mt-3 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
+                <span>guilds ${connector?.guild_count ?? 0}</span>
+                <span>gate ${gateHealthLabel}</span>
+                <span>source ${connector?.binding_source || 'unknown'}</span>
+                <span>runtime bindings ${connector?.runtime_bindings_count ?? configuredBindings.length}</span>
+                <span>keeper dir ${keepers.length}</span>
+              </div>
+              <div class="mt-3">
+                <${ActionButton} variant="ghost" size="sm" disabled=${loading || actionLoading.value} onClick=${() => { void refresh() }}>Refresh<//>
               </div>
             </div>
           `
         : null}
-
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">Gate-Advertised Connector</div>
-          <div class="mt-1 flex flex-wrap items-center gap-2">
-            <span class=${`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${directTone}`}>
-              ${directLabel}
-            </span>
-            <span class="text-[13px] font-medium text-[var(--text-body)]">
-              ${connector?.bot_user_name
-                ? `${connectorName} · ${connector.bot_user_name} · ${truncateMiddle(connector.bot_user_id, 24)}`
-                : `${connectorName} runtime has not reported identity yet`}
-            </span>
-          </div>
-          <div class="mt-2 flex flex-wrap gap-3 text-[11px] text-[var(--text-dim)]">
-            <span>heartbeat ${timeAgo(connector?.updated_at ?? '')}</span>
-            <span>ready ${timeAgo(connector?.last_ready_at ?? '')}</span>
-            <span>guilds ${connector?.guild_count ?? 0}</span>
-            <span>runtime bindings ${connector?.runtime_bindings_count ?? configuredBindings.length}</span>
-            ${connector?.reply_mode ? html`<span>reply ${connector.reply_mode}</span>` : null}
-            ${connector?.self_chat_guid ? html`<span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>` : null}
-            <span>source ${connector?.binding_source || 'unknown'}</span>
-            <span>keeper dir ${keepers.length}</span>
-            <span>
-              gate ${gateHealthLabel}
-            </span>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <${ActionButton} variant="ghost" size="sm" disabled=${loading || actionLoading.value} onClick=${() => { void refresh() }}>Refresh<//>
-          ${bindingActionsEnabled
-            ? html`
-                <${ActionButton}
-                  variant="primary"
-                  size="sm"
-                  disabled=${actionLoading.value || channelDraft.value.trim().length === 0 || keeperDraft.value.trim().length === 0}
-                  onClick=${() => { void bindConnector(connectorId) }}
-                >
-                  ${actionLoading.value ? 'Applying...' : 'Bind'}
-                <//>
-                <${ActionButton}
-                  variant="danger"
-                  size="sm"
-                  disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
-                  onClick=${() => { void unbindConnector(connectorId) }}
-                >
-                  Unbind
-                <//>
-              `
-            : null}
-        </div>
-      </div>
 
       ${connectorError || connector?.error
         ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">${connectorError ?? connector?.error}</div>`
         : null}
 
-      ${connector
+      ${keeperDirectoryError && keepers.length === 0
+        ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">keeper directory unavailable, manual entry only</div>`
+        : null}
+
+      ${showNoKeeperEmpty
         ? html`
-            <div class="mt-3 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
-              <span>status ${connector.status_path || '-'}</span>
-              <span>bindings ${connector.binding_store_path || '-'}</span>
-              <span>audit ${connector.audit_path || '-'}</span>
-              <span>names ${connector.names_path || '-'}</span>
-              ${sidecarLogPath
-                ? html`<span>sidecar logs ${sidecarLogPath}</span>`
-                : null}
+            <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+              <div class="font-medium text-[var(--text-body)]">No keepers configured</div>
+              <div class="mt-1 text-[10px] text-[var(--text-dim)]">
+                Add keeper config files under config/keepers/ and restart the server.
+              </div>
             </div>
           `
         : null}
 
-      <div class="mt-4 grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
-        <div class="space-y-3 rounded-md border border-dashed border-[var(--white-8)] p-3">
-          <div>
-            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-body)]">Create / replace binding</div>
-            <div class="mt-1 text-[10px] text-[var(--text-dim)]">
-              Existing bindings are listed on the right. Paste a channel ID and pick a keeper here to add or replace a binding.
+      ${showSidecarOffEmpty
+        ? html`
+            <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+              <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
+              <div class="mt-1 text-[11px] text-[var(--text-dim)]">
+                Start: <code class="rounded bg-[var(--white-8)] px-1">cd sidecars/${connectorId}-bot && ./run.sh</code>
+              </div>
             </div>
-          </div>
-          <div>
-            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Channel ID (draft)</div>
-            <${TextInput}
-              value=${channelDraft.value}
-              placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
-              ariaLabel=${channelInputLabel}
-              onInput=${(e: Event) => { channelDraft.value = (e.target as HTMLInputElement).value }}
-            />
-            ${channelDraft.value.trim() && humanizeChannel(names, channelDraft.value.trim())
-              ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">resolves to ${humanizeChannel(names, channelDraft.value.trim())}</div>`
-              : null}
-          </div>
-          <div>
-            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Keeper</div>
-            ${keepers.length > 0
-              ? html`
-                  <div class="mb-2">
-                    <${Select}
-                      value=${selectedKeeper?.name ?? ''}
-                      options=${keepers.map(keeper => ({ value: keeper.name, label: keeperLabel(keeper) }))}
-                      placeholder="keeper 선택"
-                      onInput=${(value: string) => { keeperDraft.value = value }}
-                    />
-                  </div>
-                `
-              : null}
-            <${TextInput}
-              value=${keeperDraft.value}
-              placeholder="keeper name"
-              ariaLabel="Keeper name"
-              onInput=${(e: Event) => { keeperDraft.value = (e.target as HTMLInputElement).value }}
-            />
-            ${selectedKeeper
-              ? html`
-                  <div class="mt-2 flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)]">
-                    <span>status ${selectedKeeper.status || 'unknown'}</span>
-                    ${modelLabelForKeeper(selectedKeeper) ? html`<span>model ${modelLabelForKeeper(selectedKeeper)}</span>` : null}
-                    ${runtimeLabelForKeeper(selectedKeeper) ? html`<span>runtime ${runtimeLabelForKeeper(selectedKeeper)}</span>` : null}
-                    ${selectedKeeper.keepalive_running ? html`<span>keepalive</span>` : null}
-                  </div>
-                `
-              : null}
-            ${keepers.length === 0 && keeperDirectoryError
-              ? html`
-                  <div class="mt-2 text-[10px] text-[var(--text-dim)]">
-                    keeper directory unavailable, manual entry only
-                  </div>
-                `
-              : null}
-          </div>
-          ${observedRooms.length > 0
-            ? html`
-                <div>
-                  <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Observed rooms</div>
-                  <div class="flex flex-wrap gap-2">
-                    ${observedRooms.slice(0, 8).map(roomId => {
-                      const humanized = humanizeChannel(names, roomId)
-                      return html`
-                      <button
-                        type="button"
-                        class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-1 text-[10px] text-[var(--text-body)] cursor-pointer hover:bg-[var(--white-8)]"
-                        title=${roomId}
-                        onClick=${() => { channelDraft.value = roomId }}
-                      >
-                        ${humanized
-                          ? html`<span>${humanized}</span><span class="ml-1 text-[var(--text-dim)]">· ${truncateMiddle(roomId, 10)}</span>`
-                          : truncateMiddle(roomId, 22)}
-                      </button>
-                    `})}
-                  </div>
-                </div>
-              `
-            : null}
-          ${suggestedKeepers.length > 0
-            ? html`
-                <div>
-                  <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Suggested keepers</div>
-                  <div class="flex flex-wrap gap-2">
-                    ${suggestedKeepers.slice(0, 8).map(name => html`
-                      <button
-                        type="button"
-                        class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-1 text-[10px] text-[var(--text-body)] cursor-pointer hover:bg-[var(--white-8)]"
-                        onClick=${() => { keeperDraft.value = name }}
-                      >
-                        ${name}
-                      </button>
-                    `)}
-                  </div>
-                </div>
-              `
-            : null}
-        </div>
+          `
+        : null}
 
-        <div class="space-y-3">
-          <div>
-            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Configured bindings</div>
-            ${configuredBindings.length === 0
-              ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">No persisted connector bindings yet</div>`
-              : html`
-                  <div class="space-y-2">
-                    ${configuredBindings.map(binding => html`
-                      ${(() => {
-                        const keeperMeta = keeperByName.get(binding.keeper_name) ?? null
-                        const humanized = humanizeChannel(names, binding.channel_id)
-                        return html`
-                      <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
-                        <div class="flex items-start justify-between gap-3">
-                          <div class="min-w-0">
-                            <div class="text-xs font-medium text-[var(--text-body)]">
-                              <code>${truncateMiddle(binding.channel_id, 26)}</code>
-                              ${humanized
-                                ? html`<span class="ml-2 text-[var(--text-dim)]">— ${humanized}</span>`
-                                : html`<span class="ml-2 text-[var(--text-dim)]">— <span title="sidecar has not sent names yet">names pending</span></span>`}
+      ${knownGroups.length > 0
+        ? html`
+            <div class="mt-3 space-y-2">
+              ${knownGroups.map(group => {
+                const keeper = group.keeper
+                const expanded = expandedKeeperFor.value === group.name
+                const toggleExpand = () => {
+                  if (expanded) {
+                    expandedKeeperFor.value = null
+                  } else {
+                    expandedKeeperFor.value = group.name
+                    channelDraft.value = ''
+                  }
+                }
+                return html`
+                  <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2" data-keeper=${group.name}>
+                    <div class="flex flex-wrap items-baseline gap-3">
+                      <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
+                      ${keeper
+                        ? html`
+                            <div class="text-[10px] text-[var(--text-dim)]">
+                              status ${keeper.status || 'unknown'}
+                              ${modelLabelForKeeper(keeper) ? ` · model ${modelLabelForKeeper(keeper)}` : ''}
+                              ${runtimeLabelForKeeper(keeper) ? ` · runtime ${runtimeLabelForKeeper(keeper)}` : ''}
                             </div>
-                            <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">keeper ${binding.keeper_name}</div>
-                            ${keeperMeta
-                              ? html`
-                                  <div class="mt-1 text-[10px] text-[var(--text-dim)]">
-                                    ${keeperMeta.status || 'unknown'}
-                                    ${modelLabelForKeeper(keeperMeta) ? ` · ${modelLabelForKeeper(keeperMeta)}` : ''}
-                                    ${runtimeLabelForKeeper(keeperMeta) ? ` · ${runtimeLabelForKeeper(keeperMeta)}` : ''}
+                          `
+                        : null}
+                    </div>
+
+                    ${group.bindings.length === 0
+                      ? html`<div class="mt-1 text-[11px] text-[var(--text-dim)]">(no channels)</div>`
+                      : html`
+                          <div class="mt-2 space-y-1">
+                            ${group.bindings.map(binding => {
+                              const humanized = humanizeChannel(names, binding.channel_id)
+                              return html`
+                                <div class="flex items-center justify-between gap-3 text-[12px]" data-channel-id=${binding.channel_id}>
+                                  <div class="min-w-0 text-[var(--text-body)]">
+                                    <span class="mr-1 text-[var(--text-dim)]">·</span>
+                                    ${humanized
+                                      ? html`<span>${humanized}</span>`
+                                      : html`<span class="text-[var(--text-dim)]" title="sidecar has not sent names yet">names pending</span>`}
+                                    <span class="ml-2 text-[10px] text-[var(--text-dim)]">(${truncateMiddle(binding.channel_id, 14)})</span>
                                   </div>
-                                `
-                              : null}
+                                  ${bindingActionsEnabled
+                                    ? html`
+                                        <${ActionButton}
+                                          variant="ghost"
+                                          size="sm"
+                                          disabled=${actionLoading.value}
+                                          ariaLabel=${`unbind ${binding.channel_id}`}
+                                          onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}
+                                        >unbind<//>
+                                      `
+                                    : null}
+                                </div>
+                              `
+                            })}
                           </div>
-                          <div class="flex gap-2">
-                            <${ActionButton} variant="ghost" size="sm" onClick=${() => {
-                              channelDraft.value = binding.channel_id
-                              keeperDraft.value = binding.keeper_name
-                            }}>Use<//>
-                            ${bindingActionsEnabled
-                              ? html`<${ActionButton} variant="danger" size="sm" disabled=${actionLoading.value} onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}>Unbind<//>`
-                              : null}
+                        `}
+
+                    ${bindingActionsEnabled
+                      ? html`
+                          <div class="mt-2">
+                            <button
+                              type="button"
+                              class="cursor-pointer text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+                              aria-label=${`add channel to ${group.name}`}
+                              onClick=${toggleExpand}
+                            >${expanded ? '− close' : '+ add channel'}</button>
                           </div>
-                        </div>
-                      </div>
+                          ${expanded
+                            ? html`
+                                <div class="mt-2 rounded border border-dashed border-[var(--white-8)] bg-[var(--white-2)] p-2">
+                                  <${TextInput}
+                                    value=${channelDraft.value}
+                                    placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
+                                    ariaLabel=${`${connectorName} channel id`}
+                                    onInput=${(e: Event) => { channelDraft.value = (e.target as HTMLInputElement).value }}
+                                  />
+                                  ${channelDraft.value.trim() && humanizeChannel(names, channelDraft.value.trim())
+                                    ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">resolves to ${humanizeChannel(names, channelDraft.value.trim())}</div>`
+                                    : null}
+                                  ${observedRooms.length > 0
+                                    ? html`
+                                        <div class="mt-2 flex flex-wrap gap-1.5">
+                                          ${observedRooms.slice(0, 8).map(roomId => {
+                                            const humanized = humanizeChannel(names, roomId)
+                                            return html`
+                                              <button
+                                                type="button"
+                                                class="cursor-pointer rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
+                                                title=${roomId}
+                                                onClick=${() => { channelDraft.value = roomId }}
+                                              >${humanized
+                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--text-dim)]">· ${truncateMiddle(roomId, 10)}</span>`
+                                                : truncateMiddle(roomId, 22)}</button>
+                                            `
+                                          })}
+                                        </div>
+                                      `
+                                    : null}
+                                  <div class="mt-2 flex justify-end">
+                                    <${ActionButton}
+                                      variant="primary"
+                                      size="sm"
+                                      disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
+                                      onClick=${() => { void bindConnector(connectorId, group.name, channelDraft.value.trim()) }}
+                                    >${actionLoading.value ? 'Applying...' : 'bind'}<//>
+                                  </div>
+                                </div>
+                              `
+                            : null}
                         `
-                      })()}
-                    `)}
+                      : null}
                   </div>
-                `}
-          </div>
-          ${audit.length > 0
-            ? html`
-                <div>
-                  <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Recent binding audit</div>
-                  <div class="space-y-2">
-                    ${audit.slice(0, 4).map(entry => html`
-                      ${(() => {
-                        const keeperMeta = keeperByName.get(entry.keeper_name) ?? null
-                        const humanized = humanizeChannel(names, entry.channel_id)
-                        return html`
-                      <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2 text-[11px] text-[var(--text-dim)]">
-                        <div class="font-medium text-[var(--text-body)]">${entry.action} · ${truncateMiddle(entry.channel_id, 22)} · ${entry.keeper_name}</div>
-                        ${humanized
-                          ? html`<div class="mt-0.5 text-[10px] text-[var(--text-dim)]">${humanized}</div>`
-                          : null}
-                        ${keeperMeta && (keeperMeta.status || modelLabelForKeeper(keeperMeta) || runtimeLabelForKeeper(keeperMeta))
-                          ? html`
-                              <div class="mt-1 text-[10px]">
-                                ${keeperMeta.status || 'unknown'}
-                                ${modelLabelForKeeper(keeperMeta) ? ` · ${modelLabelForKeeper(keeperMeta)}` : ''}
-                                ${runtimeLabelForKeeper(keeperMeta) ? ` · ${runtimeLabelForKeeper(keeperMeta)}` : ''}
-                              </div>
-                            `
-                          : null}
-                        <div class="mt-1">${entry.actor_name || 'dashboard'} · ${timeAgo(entry.timestamp)}</div>
-                      </div>
-                        `
-                      })()}
-                    `)}
+                `
+              })}
+            </div>
+          `
+        : null}
+
+      ${unknownGroups.length > 0
+        ? html`
+            <div class="mt-3 space-y-2">
+              ${unknownGroups.map(group => html`
+                <div class="rounded-md border border-amber-400/30 bg-amber-500/8 px-3 py-2" data-keeper=${group.name}>
+                  <div class="flex items-baseline gap-2">
+                    <span class="text-amber-300">⚠</span>
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
+                      <div class="text-[10px] text-amber-200/90">binding references undefined keeper</div>
+                    </div>
+                  </div>
+                  <div class="mt-2 space-y-1">
+                    ${group.bindings.map(binding => {
+                      const humanized = humanizeChannel(names, binding.channel_id)
+                      return html`
+                        <div class="flex items-center justify-between gap-3 text-[12px]" data-channel-id=${binding.channel_id}>
+                          <div class="min-w-0 text-[var(--text-body)]">
+                            <span class="mr-1 text-[var(--text-dim)]">·</span>
+                            ${humanized
+                              ? html`<span>${humanized}</span>`
+                              : html`<span class="text-[var(--text-dim)]">names pending</span>`}
+                            <span class="ml-2 text-[10px] text-[var(--text-dim)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                          </div>
+                          ${bindingActionsEnabled
+                            ? html`
+                                <${ActionButton}
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled=${actionLoading.value}
+                                  ariaLabel=${`unbind ${binding.channel_id}`}
+                                  onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}
+                                >unbind<//>
+                              `
+                            : null}
+                        </div>
+                      `
+                    })}
                   </div>
                 </div>
-              `
-            : null}
-        </div>
-      </div>
+              `)}
+            </div>
+          `
+        : null}
+
+      ${connector
+        ? html`
+            <div class="mt-4 flex flex-wrap gap-3 text-[10px] text-[var(--text-dim)]">
+              ${connector.status_path
+                ? html`<span title=${connector.status_path}>runtime ${truncateMiddle(connector.status_path, 50)}</span>`
+                : null}
+              ${sidecarLogPath
+                ? html`<span title=${sidecarLogPath}>logs ${truncateMiddle(sidecarLogPath, 50)}</span>`
+                : null}
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -1020,5 +1013,6 @@ export function resetConnectorStatusState() {
   connectorStatusResource.reset(EMPTY_SNAPSHOT)
   actionLoading.value = false
   channelDraft.value = ''
-  keeperDraft.value = ''
+  expandedKeeperFor.value = null
+  headerExpanded.value = false
 }

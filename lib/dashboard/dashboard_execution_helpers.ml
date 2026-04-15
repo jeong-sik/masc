@@ -354,26 +354,29 @@ let load_persona_profile (persona_name : string) : agent_profile option =
 
 (** Neo4j agent identity cache. Loaded lazily on first access.
 
-    Serialised by [neo4j_cache_mu] because get_agent_profile is invoked
-    from dashboard HTTP handlers which run on multiple fibers.  Without
-    the mutex:
+    Serialised because get_agent_profile is invoked from dashboard HTTP
+    handlers running on multiple fibers (and potentially the executor
+    pool worker domain via [run_dashboard_compute]).  Without the mutex:
     - Two fibers both enter the load branch
     - First fiber starts the 10-second GraphQL request
     - Second fiber sees [neo4j_cache_loaded = true] (set too early),
       skips loading, and reads the still-empty Hashtbl
-    The flag is now set AFTER the Hashtbl is populated, and the whole
+    The flag is set AFTER the Hashtbl is populated, and the whole
     critical section runs under the mutex so only one fiber performs
-    the fetch.  [Stdlib.Mutex] because the HTTP handler may cross a
-    domain boundary. *)
+    the fetch.
+
+    [Eio.Mutex] (via [Eio_guard.with_mutex]) — Stdlib.Mutex would block
+    the entire OS thread (= the whole Eio domain) for the GraphQL
+    duration, freezing all unrelated fibers; Eio.Mutex suspends only
+    the waiting fiber.  Eio_guard.with_mutex skips locking before the
+    Eio runtime is enabled (module load, certain unit tests) so this
+    cache stays usable in both contexts. *)
 let neo4j_identity_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 32
 let neo4j_cache_loaded = ref false
-let neo4j_cache_mu = Stdlib.Mutex.create ()
+let neo4j_cache_mu = Eio.Mutex.create ()
 
 let load_neo4j_identity_cache () =
-  Stdlib.Mutex.lock neo4j_cache_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock neo4j_cache_mu)
-    (fun () ->
+  Eio_guard.with_mutex neo4j_cache_mu (fun () ->
   if !neo4j_cache_loaded then ()
   else begin
     let body =
@@ -466,10 +469,8 @@ let get_agent_profile (name : string) : agent_profile =
   let persona_name = extract_persona_name name in
   load_neo4j_identity_cache ();
   let neo4j_profile =
-    Stdlib.Mutex.lock neo4j_cache_mu;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock neo4j_cache_mu)
-      (fun () -> Hashtbl.find_opt neo4j_identity_cache persona_name)
+    Eio_guard.with_mutex neo4j_cache_mu (fun () ->
+      Hashtbl.find_opt neo4j_identity_cache persona_name)
   in
   let persona_profile = load_persona_profile persona_name in
   match (persona_profile, neo4j_profile) with

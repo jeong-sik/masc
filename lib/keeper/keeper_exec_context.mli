@@ -59,6 +59,7 @@ val checkpoint_max_tokens :
   Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint :
+  ?repair_orphans:bool ->
   max_checkpoint_messages:int ->
   Agent_sdk.Checkpoint.t -> primary_model_max_tokens:int -> working_context
 

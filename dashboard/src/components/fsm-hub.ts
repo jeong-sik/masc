@@ -216,6 +216,27 @@ export function FsmHub() {
     })()
   }, [activeSelected, shouldRefetchForTick, pollTick])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key < '1' || ev.key > '9') return
+      const idx = ev.key.charCodeAt(0) - '1'.charCodeAt(0)
+      const target_name = keeperNames[idx]
+      if (!target_name) return
+      ev.preventDefault()
+      setSelected(target_name)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [keeperNames])
+
   const view = useMemo(
     () =>
       hub.keeperName === activeSelected
@@ -412,6 +433,7 @@ function StatusBar({
                 tabindex=${active ? 0 : -1}
                 class=${`rounded-full border px-2.5 py-0.5 text-[10px] font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
                 onClick=${() => onSelect(name)}
+                title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {
                   let next = -1
                   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % keeperNames.length
@@ -428,7 +450,7 @@ function StatusBar({
                   }
                 }}
               >
-                ${name.replace(/^keeper-|-agent$/g, '')}
+                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}
               </button>
             `
           })}

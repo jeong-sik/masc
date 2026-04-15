@@ -50,21 +50,19 @@ let keeper_internal_tools =
     is O(n) but the list is <50 elements, so the overhead is negligible. *)
 let keeper_internal_set : string list = keeper_internal_tools
 
-let keeper_internal_replacement = function
-  | "keeper_board_get" -> Some "masc_board_get"
-  | "keeper_board_post" -> Some "masc_board_post"
-  | "keeper_board_list" -> Some "masc_board_list"
-  | "keeper_board_comment" -> Some "masc_board_comment"
-  | "keeper_board_vote" -> Some "masc_board_vote"
-  | "keeper_board_stats" -> Some "masc_board_stats"
-  | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_voice_speak"
-  | "keeper_voice_agent"
-  | "keeper_voice_sessions"
-  | "keeper_voice_session_start"
-  | "keeper_voice_session_end" -> None
-  | "keeper_tasks_list" -> Some "masc_tasks"
-  | "keeper_broadcast" -> Some "masc_broadcast"
+(* keeper_voice_* tools have no masc_* counterpart — default None. *)
+let keeper_internal_replacement name =
+  let open Tool_name in
+  match of_string name with
+  | Some (Keeper Board_get) -> Some (to_string (Masc Board_get))
+  | Some (Keeper Board_post) -> Some (to_string (Masc Board_post))
+  | Some (Keeper Board_list) -> Some (to_string (Masc Board_list))
+  | Some (Keeper Board_comment) -> Some (to_string (Masc Board_comment))
+  | Some (Keeper Board_vote) -> Some (to_string (Masc Board_vote))
+  | Some (Keeper Board_stats) -> Some (to_string (Masc Board_stats))
+  | Some (Keeper Board_search) -> Some (to_string (Masc Board_search))
+  | Some (Keeper Tasks_list) -> Some (to_string (Masc Tasks))
+  | Some (Keeper Broadcast) -> Some (to_string (Masc Broadcast))
   | _ -> None
 
 (* ================================================================ *)
@@ -74,8 +72,8 @@ let keeper_internal_replacement = function
 (** Tools that mutate the workspace filesystem. Canonical list shared by
     cdal_contract_bridge.ml and contract_risk.ml. *)
 let workspace_mutating_tool_names =
-  [ "keeper_fs_edit"; "keeper_write";
-    "create_text_file"; "edit_text_file"; "file_write" ]
+  List.map Tool_name.to_string Tool_name.[ Keeper Fs_edit; Keeper Write ]
+  @ [ "edit_text_file"; "file_write" ] (* external/worker tool names *)
 
 (* ================================================================ *)
 (* Surface type + canonical lists                                   *)
@@ -217,41 +215,43 @@ let system_internal_surface_tools =
 (* ================================================================ *)
 
 let coordination_role_tools : string list =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_add_task";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
-    "masc_heartbeat";
-    "masc_messages";
-    "masc_board_list";
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_get";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_spawn";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status;
+      Masc Tasks;
+      Masc Add_task;
+      Masc Broadcast;
+      Masc Join;
+      Masc Leave;
+      Masc Who;
+      Masc Heartbeat;
+      Masc Messages;
+      Masc Board_list;
+      Masc Board_post;
+      Masc Board_comment;
+      Masc Board_vote;
+      Masc Board_get;
+      Masc Claim_next;
+      Masc Transition;
+      Masc Spawn;
+    ]
 
 let execution_role_tools : string list =
-  [
-    "masc_heartbeat";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_broadcast";
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_run_init";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_tool_help";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Heartbeat;
+      Masc Claim_next;
+      Masc Transition;
+      Masc Broadcast;
+      Masc Code_search;
+      Masc Code_symbols;
+      Masc Code_read;
+      Masc Run_init;
+      Masc Run_log;
+      Masc Run_deliverable;
+      Masc Run_get;
+      Masc Tool_help;
+    ]
 
 (* ================================================================ *)
 (* Surface query functions                                          *)

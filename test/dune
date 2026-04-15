@@ -107,6 +107,7 @@
         test_tool_prefilter
         test_keeper_state_machine
         test_keeper_campaign_fsm
+        test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_telemetry_unified
         test_keeper_topk_llm
@@ -193,6 +194,7 @@
           test_tool_prefilter
           test_keeper_state_machine
           test_keeper_campaign_fsm
+          test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
             test_telemetry_unified
           test_keeper_topk_llm
@@ -377,7 +379,6 @@
         test_governance_yojson_roundtrip
         test_eval_calibration
         test_goal_janitor
-        test_keeper_pr_workflow
         test_voice_config)
  (modules
         test_runtime_params
@@ -522,9 +523,8 @@
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
-	        test_goal_janitor
-	        test_keeper_pr_workflow
-	        test_voice_config)
+        test_goal_janitor
+        test_voice_config)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
 

@@ -121,6 +121,33 @@ describe('oas-runtime-store', () => {
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
   })
 
+  it('dedupes timestamp-less events across replay/live time drift', () => {
+    vi.useFakeTimers()
+    try {
+      const driftEvent = {
+        source: 'oas_event',
+        type: 'oas:durable:llm_request',
+        correlation_id: 'corr-drift',
+        run_id: 'run-drift',
+        payload: {
+          agent_name: 'beta',
+          model: 'gpt-5',
+          input_tokens: 32,
+        },
+      } as TelemetryEntry
+
+      vi.setSystemTime(new Date('2026-04-15T00:00:00Z'))
+      hydrateOasRuntimeFromTelemetryEntries([driftEvent])
+
+      vi.setSystemTime(new Date('2026-04-15T00:10:00Z'))
+      expect(applyOasRuntimeEvent(driftEvent)).toBe(false)
+      expect(oasHealthSummary.value.totalEvents).toBe(1)
+      expect(oasHealthSummary.value.totalLlmCalls).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('replays recent OAS telemetry via the dashboard API', async () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',

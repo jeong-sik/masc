@@ -10,12 +10,7 @@ open Keeper_types
 module Types = Keeper_social_model_types
 module Protocol = Keeper_social_model_protocol
 module Bdi = Keeper_social_model_bdi_speech_v1
-
-type progress_phase =
-  | Advancing
-  | Reactive
-  | Stalled
-  | Quiet
+module Fsm = Keeper_social_model_magentic_ledger_fsm
 
 let model_name = Types.model_id_to_string Types.Magentic_ledger_v1
 
@@ -28,27 +23,14 @@ let reactive_signal_count
 let backlog_count (observation : Keeper_world_observation.world_observation) =
   observation.unclaimed_task_count + observation.failed_task_count
 
-let phase_of_turn ~(observation : Keeper_world_observation.world_observation)
-    ~(has_progress_evidence : bool) ~(has_text_reply : bool) =
-  if has_progress_evidence || has_text_reply then Advancing
-  else if reactive_signal_count observation > 0 || backlog_count observation > 0
-  then Reactive
-  else if observation.active_goals <> [] && observation.idle_seconds >= 300 then
-    Stalled
-  else Quiet
-
-let phase_to_string = function
-  | Advancing -> "advancing"
-  | Reactive -> "reactive"
-  | Stalled -> "stalled"
-  | Quiet -> "quiet"
-
-let belief_summary_of_phase ~(phase : progress_phase)
+let belief_summary_of_snapshot ~(snapshot : Fsm.snapshot)
+    ~(event : Fsm.event)
     ~(observation : Keeper_world_observation.world_observation)
     ~(tool_count : int) =
   let parts =
     [
-      "phase=" ^ phase_to_string phase;
+      "phase=" ^ Fsm.phase_to_string snapshot.phase;
+      "event=" ^ Fsm.event_to_string event;
       "reactive=" ^ string_of_int (reactive_signal_count observation);
       "backlog=" ^ string_of_int (backlog_count observation);
       "goals=" ^ string_of_int (List.length observation.active_goals);
@@ -62,12 +44,12 @@ let belief_summary_of_phase ~(phase : progress_phase)
   "ledger:" ^ String.concat "; " parts
 
 let active_desire_of_phase = function
-  | Advancing -> Some "advance_task_progress"
-  | Reactive -> Some "close_open_loop"
-  | Stalled -> Some "recover_forward_motion"
-  | Quiet -> Some "maintain_progress_ledger"
+  | Fsm.Advancing -> Some "advance_task_progress"
+  | Fsm.Reactive -> Some "close_open_loop"
+  | Fsm.Stalled -> Some "recover_forward_motion"
+  | Fsm.Quiet -> Some "maintain_progress_ledger"
 
-let current_intention_of_phase ~(phase : progress_phase) ~(tools_used : string list)
+let current_intention_of_phase ~(phase : Fsm.phase) ~(tools_used : string list)
     ~(has_text_reply : bool) =
   if List.mem "keeper_task_claim" tools_used || List.mem "masc_claim_next" tools_used
   then Some "capture_next_task"
@@ -75,12 +57,12 @@ let current_intention_of_phase ~(phase : progress_phase) ~(tools_used : string l
   else if has_text_reply then Some "publish_progress_update"
   else
     match phase with
-    | Reactive -> Some "triage_open_signal"
-    | Stalled -> Some "request_replan"
-    | Quiet -> Some "wait_for_delta"
-    | Advancing -> Some "record_progress_evidence"
+    | Fsm.Reactive -> Some "triage_open_signal"
+    | Fsm.Stalled -> Some "request_replan"
+    | Fsm.Quiet -> Some "wait_for_delta"
+    | Fsm.Advancing -> Some "record_progress_evidence"
 
-let blocker_of_phase ~(phase : progress_phase)
+let blocker_of_phase ~(phase : Fsm.phase)
     ~(base_state : Types.social_state) ~(tools_used : string list)
     ~(has_text_reply : bool) =
   match base_state.speech_act with
@@ -88,19 +70,19 @@ let blocker_of_phase ~(phase : progress_phase)
       base_state.blocker
   | _ -> (
       match phase with
-      | Stalled when tools_used = [] && not has_text_reply ->
+      | Fsm.Stalled when tools_used = [] && not has_text_reply ->
           Some "stalled_without_progress_evidence"
       | _ -> None)
 
-let need_of_phase ~(phase : progress_phase)
+let need_of_phase ~(phase : Fsm.phase)
     ~(base_state : Types.social_state) ~(tools_used : string list)
     ~(has_text_reply : bool) =
   match base_state.speech_act with
   | Types.Request_help when Option.is_some base_state.need -> base_state.need
   | _ -> (
       match phase with
-      | Stalled -> Some "fresh_plan_or_external_delta"
-      | Reactive when tools_used = [] && not has_text_reply ->
+      | Fsm.Stalled -> Some "fresh_plan_or_external_delta"
+      | Fsm.Reactive when tools_used = [] && not has_text_reply ->
           Some "next_actionable_prioritization"
       | _ -> None)
 
@@ -124,29 +106,45 @@ let should_overlay_ledger = function
       false
 
 let overlay_ledger_state ~(observation : Keeper_world_observation.world_observation)
-    ~(result : Keeper_agent_run.run_result) ~(has_text_reply : bool)
+    ~(result : Keeper_agent_run.run_result)
+    ~(previous_state : Types.social_state option)
+    ~(has_text_reply : bool)
     (base_state : Types.social_state) =
-  let has_progress_evidence =
-    result.tools_used <> [] || Option.is_some observation.worktree_change_summary
+  let previous_snapshot =
+    Option.bind previous_state Fsm.snapshot_of_social_state
   in
-  let phase =
-    phase_of_turn ~observation ~has_progress_evidence ~has_text_reply
+  let current_snapshot = Option.value ~default:Fsm.initial previous_snapshot in
+  let event =
+    Fsm.classify_event ~previous:previous_snapshot
+      {
+        Fsm.has_progress_evidence =
+          result.tools_used <> [] || has_text_reply
+          || Option.is_some observation.worktree_change_summary;
+        has_reactive_signal =
+          reactive_signal_count observation > 0 || backlog_count observation > 0;
+        has_active_goals = observation.active_goals <> [];
+        idle_seconds = observation.idle_seconds;
+      }
   in
+  let snapshot = Fsm.apply_event ~current:current_snapshot event in
   {
     base_state with
     social_model = model_name;
     belief_summary =
-      belief_summary_of_phase ~phase ~observation
+      belief_summary_of_snapshot ~snapshot ~event ~observation
         ~tool_count:(List.length result.tools_used);
-    active_desire = active_desire_of_phase phase;
+    active_desire = active_desire_of_phase snapshot.phase;
     current_intention =
-      current_intention_of_phase ~phase ~tools_used:result.tools_used
+      current_intention_of_phase ~phase:snapshot.phase
+        ~tools_used:result.tools_used
         ~has_text_reply;
     blocker =
-      blocker_of_phase ~phase ~base_state ~tools_used:result.tools_used
+      blocker_of_phase ~phase:snapshot.phase ~base_state
+        ~tools_used:result.tools_used
         ~has_text_reply;
     need =
-      need_of_phase ~phase ~base_state ~tools_used:result.tools_used
+      need_of_phase ~phase:snapshot.phase ~base_state
+        ~tools_used:result.tools_used
         ~has_text_reply;
   }
 
@@ -182,7 +180,8 @@ let apply_to_result ~(meta : keeper_meta)
   in
   let state =
     if should_overlay_ledger base_reason then
-      overlay_ledger_state ~observation ~result ~has_text_reply base_state
+      overlay_ledger_state ~observation ~result ~previous_state ~has_text_reply
+        base_state
     else { base_state with social_model = model_name }
   in
   let state, transition_reason, suppress_visible_text =
@@ -201,12 +200,19 @@ let derive_failure_state ~(meta : keeper_meta)
   let base_state, transition_reason =
     Bdi.derive_failure_state ~meta ~observation ~previous_state ~reason
   in
-  let phase =
-    phase_of_turn ~observation ~has_progress_evidence:false ~has_text_reply:false
+  let previous_snapshot =
+    Option.bind previous_state Fsm.snapshot_of_social_state
+  in
+  let snapshot =
+    Fsm.apply_event
+      ~current:(Option.value ~default:Fsm.initial previous_snapshot)
+      Fsm.Failure_observed
   in
   ( { base_state with
       social_model = model_name;
-      belief_summary = belief_summary_of_phase ~phase ~observation ~tool_count:0;
+      belief_summary =
+        belief_summary_of_snapshot ~snapshot ~event:Fsm.Failure_observed
+          ~observation ~tool_count:0;
       active_desire = Some "recover_forward_motion";
       current_intention = Some "repair_failed_turn";
       blocker =

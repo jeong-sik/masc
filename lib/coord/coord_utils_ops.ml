@@ -114,11 +114,22 @@ let mkdir_p path =
   Fs_compat.mkdir_p path
 
 let read_json_local path =
-  match Safe_ops.read_json_file_safe path with
-  | Ok json -> json
+  (* Treat blank/empty files as an empty object, consistent with
+     [read_json_root] below. A blank JSON is a legitimate state for
+     placeholders or newly-created agent metadata files, and does not
+     warrant a WARN log line. *)
+  match Safe_ops.read_file_safe path with
   | Error msg ->
     Log.Misc.warn "[read_json_local] %s" msg;
     `Assoc []
+  | Ok content ->
+    let trimmed = String.trim content in
+    if trimmed = "" then `Assoc []
+    else match Safe_ops.parse_json_safe ~context:path trimmed with
+      | Ok json -> json
+      | Error msg ->
+        Log.Misc.warn "[read_json_local] %s" msg;
+        `Assoc []
 
 let read_json_local_result path =
   Safe_ops.read_json_file_safe path

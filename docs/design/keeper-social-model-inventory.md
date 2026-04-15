@@ -35,6 +35,8 @@ See also:
 - Implementation note:
   - tool evidence is treated as progress-ledger state, so tool-only turns can
     stay silent instead of synthesizing an extra visible reply
+  - the implementation now uses a pure phase/event FSM plus a matching TLA+
+    spec for the closed state set
 
 Reference:
 - Magentic-One article

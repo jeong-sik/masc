@@ -53,9 +53,8 @@ Clone-then-worktree rule (two turns, never one):
 PR workflow (Coding/Delivery/Full preset required):
 1. `masc_worktree_create task_id=<id>` — opens isolated branch
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
-3. `masc_code_git action=add` → `action=commit` → `action=push` — all with cwd inside the worktree
-4. `keeper_pr_submit` is the canonical submit step after editing. It creates a draft PR from the worktree.
-  NOTE: Do NOT use keeper_pr_workflow — it is deprecated and will error.
+3. `keeper_bash cmd='git status'` → `git add <paths>` → `git commit -m ...` → `git push -u origin HEAD` — all with cwd inside the worktree
+4. `keeper_shell op=gh cmd='pr create --draft --title ... --body ... --base ...'` — open the draft PR after push
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

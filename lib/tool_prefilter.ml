@@ -46,6 +46,7 @@ let synonyms : (string * string list) list =
      [ "run command"; "shell read only"; "safe command"; "grep"; "rg search";
        "list files"; "directory listing"; "git status"; "find file";
        "pull request"; "issue"; "pr"; "github"; "gh cli"; "create pr";
+       "open draft pr"; "submit pr"; "push and pr";
        "open issue"; "ci status"; "repository" ]);
     ("keeper_bash",
      [ "run shell"; "execute command"; "build"; "test"; "compile"; "dune build";
@@ -113,9 +114,6 @@ let synonyms : (string * string list) list =
     ("keeper_voice_listen",
      [ "listen"; "microphone"; "speech to text"; "transcribe"; "hear";
        "voice input"; "record speech" ]);
-    ("keeper_pr_workflow",
-     [ "create pr"; "new pull request"; "open draft pr"; "one shot pr";
-       "push and pr"; "submit pr" ]);
     ("keeper_tool_search",
      [ "find tool"; "discover tool"; "search tools"; "what tool";
        "tool for"; "which tool" ]);

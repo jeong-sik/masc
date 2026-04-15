@@ -317,25 +317,6 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
           ("reply", `String "tool matrix reply");
           ("repo", `String "owner/tool-matrix");
         ]
-  | "keeper_pr_submit" ->
-      `Assoc
-        [
-          ("title", `String "tool matrix PR");
-          ("pr_title", `String "tool matrix PR");
-          ("body", `String "tool matrix body");
-          ("cwd", `String (Generic.ensure_playground_clone fixture.generic));
-          ("branch", `String "matrix/editor");
-          ("commit_message", `String "tool matrix commit");
-        ]
-  | "keeper_pr_workflow" ->
-      `Assoc
-        [
-          ("action", `String "status");
-          ("branch", `String "fix/typo");
-          ("file_path", `String "lib/foo.ml");
-          ("commit_message", `String "fix typo in foo");
-          ("pr_title", `String "Fix typo in foo");
-        ]
   | "keeper_preflight_check" -> `Assoc []
   | "keeper_stay_silent" ->
       `Assoc [ ("reason", `String "tool matrix silence") ]
@@ -359,8 +340,6 @@ let keeper_expectation_for_name name =
   | "keeper_pr_review_read"
   | "keeper_pr_review_comment"
   | "keeper_pr_review_reply"
-  | "keeper_pr_submit"
-  | "keeper_pr_workflow"
   | "keeper_preflight_check" ->
       Expect_success_or_guard github_guard_fragments
   | "keeper_fs_read" ->

@@ -597,6 +597,47 @@ tool_preset = "social"
       check string "cascade_name reset to keeper default"
         Keeper_config.default_cascade_name updated.cascade_name
 
+let test_social_model_not_resynced_from_declarative_defaults () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "social-model-owner-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+goal = "TOML goal"
+social_model = "magentic_ledger_v1"
+|};
+  let config = Coord.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-social-model-owner");
+            ("goal", `String "stale goal");
+            ("social_model", `String "bdi_speech_v1");
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check string "goal resynced from TOML" "TOML goal" updated.Keeper_types.goal;
+      check string "social_model remains keeper-owned" "bdi_speech_v1"
+        updated.social_model
+
 (** Test: room presence sync updates stale agent capabilities from live keeper meta. *)
 let test_room_presence_syncs_capabilities () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -755,6 +796,10 @@ let () =
             "declarative keepers reset stale live cascade_name to default"
             `Quick
             test_cascade_defaults_resync;
+          test_case
+            "declarative defaults do not resync social_model"
+            `Quick
+            test_social_model_not_resynced_from_declarative_defaults;
           test_case
             "room presence sync overwrites stale agent capabilities"
             `Quick

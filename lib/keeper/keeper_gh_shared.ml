@@ -198,6 +198,46 @@ let gh_issue_number_subcmds =
   [ "view"; "close"; "reopen"; "comment"; "edit"
   ; "develop"; "lock"; "unlock"; "pin"; "unpin"; "transfer" ]
 
+let gh_words (cmd : string) : string list =
+  cmd
+  |> String.map (function '\t' | '\r' | '\n' -> ' ' | c -> c)
+  |> String.trim
+  |> String.lowercase_ascii
+  |> String.split_on_char ' '
+  |> List.filter (fun s -> s <> "")
+
+let gh_global_option_takes_value = function
+  | "-r" | "--repo" | "--hostname" -> true
+  | _ -> false
+
+let gh_global_option_has_inline_value token =
+  List.exists (fun prefix -> String.starts_with ~prefix token)
+    [ "--repo="; "--hostname=" ]
+
+let rec skip_gh_leading_global_options = function
+  | [] -> []
+  | token :: rest when gh_global_option_takes_value token ->
+      (match rest with
+       | _value :: tail -> skip_gh_leading_global_options tail
+       | [] -> [])
+  | token :: rest when gh_global_option_has_inline_value token ->
+      skip_gh_leading_global_options rest
+  | token :: rest when String.starts_with ~prefix:"-" token ->
+      skip_gh_leading_global_options rest
+  | parts -> parts
+
+let rec first_gh_command_word = function
+  | [] -> None
+  | token :: rest when gh_global_option_takes_value token ->
+      (match rest with
+       | _value :: tail -> first_gh_command_word tail
+       | [] -> None)
+  | token :: rest when gh_global_option_has_inline_value token ->
+      first_gh_command_word rest
+  | token :: rest when String.starts_with ~prefix:"-" token ->
+      first_gh_command_word rest
+  | token :: _rest -> Some token
+
 (** Parse a gh command string and return [Some (kind, number)] ONLY when
     the number is the immediate positional argument after the
     subcommand:
@@ -230,10 +270,11 @@ let gh_issue_number_subcmds =
 let extract_gh_target_number (cmd : string)
     : (entity_kind * int) option
   =
-  let cmd = normalize_gh_command cmd in
   let parts =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
+    cmd
+    |> normalize_gh_command
+    |> gh_words
+    |> skip_gh_leading_global_options
   in
   let positive_int s =
     match int_of_string_opt s with
@@ -255,11 +296,11 @@ let extract_gh_target_number (cmd : string)
     [state=all] is unchanged, but we still invalidate to resync state
     filters used elsewhere), and merges. *)
 let gh_mutates_entity (cmd : string) : entity_kind option =
-  let cmd = normalize_gh_command cmd in
   let parts =
-    String.split_on_char ' ' (String.trim cmd)
-    |> List.filter (fun s -> s <> "")
-    |> List.map String.lowercase_ascii
+    cmd
+    |> normalize_gh_command
+    |> gh_words
+    |> skip_gh_leading_global_options
   in
   match parts with
   | "pr" :: sub :: _
@@ -268,6 +309,37 @@ let gh_mutates_entity (cmd : string) : entity_kind option =
   | "issue" :: sub :: _
     when List.mem sub [ "create"; "close"; "reopen"; "edit"; "transfer"; "delete" ] ->
     Some Issue
+  | _ -> None
+
+(** Deterministic blocklist for obviously destructive or credential-sensitive
+    gh commands. Unlike prefix matching on the raw string, this ignores
+    leading global options before inspecting the command group/action pair. *)
+let gh_dangerous_command (cmd : string) : string option =
+  match cmd |> normalize_gh_command |> gh_words |> skip_gh_leading_global_options with
+  | "repo" :: rest ->
+      begin match first_gh_command_word rest with
+      | Some "delete" -> Some "repo delete"
+      | Some "archive" -> Some "repo archive"
+      | Some "transfer" -> Some "repo transfer"
+      | _ -> None
+      end
+  | "auth" :: rest ->
+      begin match first_gh_command_word rest with
+      | Some "logout" -> Some "auth logout"
+      | Some "token" -> Some "auth token"
+      | _ -> None
+      end
+  | "secret" :: rest ->
+      begin match first_gh_command_word rest with
+      | Some "set" -> Some "secret set"
+      | Some "delete" -> Some "secret delete"
+      | _ -> None
+      end
+  | "ssh-key" :: rest ->
+      begin match first_gh_command_word rest with
+      | Some "delete" -> Some "ssh-key delete"
+      | _ -> None
+      end
   | _ -> None
 
 (** Truncate gh output to prevent context explosion.

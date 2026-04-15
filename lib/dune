@@ -228,7 +228,6 @@
    post_verifier
    provider_adapter
    progress
-   pulse
    relay
    goal_store
    goal_guard
@@ -355,6 +354,7 @@
    keeper_execution_scope
    keeper_social_model_types
    keeper_social_model_protocol
+   keeper_social_model_magentic_ledger_fsm
    keeper_social_model_bdi_speech_v1
    keeper_social_model_magentic_ledger_v1
    keeper_social_model_registry
@@ -405,8 +405,6 @@
    keeper_exec_shell
    keeper_gh_env
    keeper_gh_shared
-   keeper_tool_pr_workflow
-   keeper_tool_pr_submit
    keeper_tool_pr_review
    keeper_exec_preflight
    keeper_exec_task
@@ -577,8 +575,6 @@
    keeper_exec_shell
    keeper_gh_env
    keeper_gh_shared
-   keeper_tool_pr_workflow
-   keeper_tool_pr_submit
    keeper_tool_pr_review
    keeper_exec_preflight
    keeper_exec_task
@@ -754,6 +750,8 @@
    masc_core
    ;; Channel Gate (extracted sub-library) — pure protocol/state/metrics
    masc_gate
+   ;; Pulse (extracted sub-library) — beat engine for Spaces
+   masc_pulse
    ;; Shared compression codec (extracted sub-library)
    masc_compression
    ;; Eio context (extracted sub-library)

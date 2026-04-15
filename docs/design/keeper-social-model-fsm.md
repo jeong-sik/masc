@@ -24,6 +24,10 @@ Related issue:
 - the active baseline is `bdi_speech_v1`
 - a first-class `social_model -> implementation` registry dispatches between production modules
 - `magentic_ledger_v1` now exists as a second implementation path to validate the abstraction
+- `magentic_ledger_v1` now routes through an explicit phase/event FSM
+  (`lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml`)
+  with a matching TLA+ spec
+  (`specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla`)
 
 ### What is not real yet
 
@@ -170,6 +174,7 @@ Constraint:
 - unit tests for per-model transitions
 - integration tests for unified turn dispatch
 - explicit unknown-model tests
+- TLA+ state/event set alignment for any model-specific FSM with a closed phase set
 
 ## Acceptance Criteria
 

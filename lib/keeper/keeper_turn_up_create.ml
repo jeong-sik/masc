@@ -134,6 +134,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~preferred:p.tool_denylist_opt
         ~fallback:p.profile_defaults.tool_denylist
     in
+    let social_model =
+      p.profile_defaults.social_model
+      |> Option.value ~default:default_social_model
+      |> Keeper_social_model.normalize_social_model
+    in
     
     let will =
       Option.value
@@ -235,8 +240,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         short_goal;
         mid_goal;
         long_goal;
-        
-        social_model = default_social_model;
+
+        social_model;
         cascade_name = (match p.profile_defaults.cascade_name with
           | Some name -> name
           | None -> Keeper_config.default_cascade_name);

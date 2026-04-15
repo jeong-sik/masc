@@ -28,13 +28,17 @@ function eventPayload(event: OasRuntimeEnvelope): Record<string, unknown> {
   return isRecord(event.payload) ? event.payload : {}
 }
 
-function eventUnixSeconds(event: OasRuntimeEnvelope): number {
+function eventReportedUnixSeconds(event: OasRuntimeEnvelope): number | null {
   return (
     asNumber(event.ts_unix)
     ?? asNumber(event.timestamp)
     ?? asNumber(event.ts)
-    ?? Date.now() / 1000
+    ?? null
   )
+}
+
+function eventUnixSeconds(event: OasRuntimeEnvelope): number {
+  return eventReportedUnixSeconds(event) ?? Date.now() / 1000
 }
 
 function eventTimestampMs(event: OasRuntimeEnvelope): number {
@@ -50,7 +54,7 @@ function runtimeEventKey(event: OasRuntimeEnvelope): string {
   const type = runtimeEventType(event)
   const correlationId = asString(event.correlation_id)
   const runId = asString(event.run_id)
-  const tsUnix = eventUnixSeconds(event)
+  const reportedTsUnix = eventReportedUnixSeconds(event)
   const agentName =
     asString(event.agent_name)
     ?? asString(payload.agent_name)
@@ -60,13 +64,13 @@ function runtimeEventKey(event: OasRuntimeEnvelope): string {
   const taskId = asString(event.task_id) ?? asString(payload.task_id) ?? ''
   const toolName = asString(event.tool_name) ?? asString(payload.tool_name) ?? ''
   const turn = asNumber(event.turn) ?? asNumber(payload.turn)
-  if (correlationId || runId || Number.isFinite(tsUnix)) {
+  if (correlationId || runId || reportedTsUnix != null) {
     return [
       type,
       agentName,
       correlationId ?? '',
       runId ?? '',
-      Number.isFinite(tsUnix) ? String(tsUnix) : '',
+      reportedTsUnix != null ? String(reportedTsUnix) : '',
       taskId,
       toolName,
       turn != null ? String(turn) : '',
@@ -407,7 +411,7 @@ export function hydrateOasRuntimeFromTelemetryEntries(entries: TelemetryEntry[])
   const ordered = [...entries].sort((a, b) => {
     const left = coerceOasRuntimeEnvelope(a)
     const right = coerceOasRuntimeEnvelope(b)
-    return (left ? eventUnixSeconds(left) : 0) - (right ? eventUnixSeconds(right) : 0)
+    return (left ? (eventReportedUnixSeconds(left) ?? 0) : 0) - (right ? (eventReportedUnixSeconds(right) ?? 0) : 0)
   })
   for (const entry of ordered) {
     applyOasRuntimeEvent(entry)

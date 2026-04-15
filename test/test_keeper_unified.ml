@@ -681,10 +681,12 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
     (contains_substring prompt ".masc/playground/");
   check bool "playground is default coding workspace" true
     (contains_substring prompt "default coding workspace");
-  check bool "pr workflow deprecated" true
-    (contains_substring prompt "Do NOT use keeper_pr_workflow");
-  check bool "pr submit marked canonical" true
-    (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
+  check bool "git path documented via keeper_bash" true
+    (contains_substring prompt "keeper_bash cmd='git status'");
+  check bool "gh pr create path documented" true
+    (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");
+  check bool "legacy pr workflow removed from prompt" false
+    (contains_substring prompt "keeper_pr_workflow")
 
 let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
@@ -699,7 +701,7 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
     (contains_substring prompt
        ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
-let test_system_prompt_prefers_submit_over_legacy_workflow () =
+let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   let sys =
     Masc_mcp.Keeper_prompt.build_keeper_system_prompt
       ~goal:"test goal"
@@ -712,12 +714,14 @@ let test_system_prompt_prefers_submit_over_legacy_workflow () =
       ~instructions:""
       ()
   in
-  check bool "mentions pr submit" true
+  check bool "mentions git path via keeper_bash" true
     (contains_substring sys
-       "keeper_pr_submit (submit staged changes from a playground clone or repo worktree)");
-  check bool "marks pr workflow as legacy helper" true
+       "keeper_bash (run commands, including git add/commit/push inside worktrees)");
+  check bool "mentions gh create path" true
     (contains_substring sys
-       "keeper_pr_workflow (legacy one-shot worktree helper)")
+       "keeper_shell op=gh (PR/issues via gh CLI; after git push");
+  check bool "legacy pr workflow removed" false
+    (contains_substring sys "keeper_pr_workflow")
 
 let test_prompt_includes_autonomous_trigger_section () =
   let meta =
@@ -2803,6 +2807,38 @@ let test_social_model_magentic_ledger_previous_state_of_meta_restores_model ()
       check string "speech act restored" "inform"
         (KSM.speech_act_to_string state.speech_act)
 
+let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let previous_state =
+    Some
+      {
+        KSM.social_model = "magentic_ledger_v1";
+        belief_summary = "ledger:phase=stalled; event=goal_idle_timeout";
+        active_desire = Some "recover_forward_motion";
+        current_intention = Some "request_replan";
+        blocker = Some "stalled_without_progress_evidence";
+        need = Some "fresh_plan_or_external_delta";
+        speech_act = KSM.Stay_silent;
+        delivery_surface = KSM.Silent;
+      }
+  in
+  let observation =
+    { base_observation with active_goals = [ "goal-1" ]; idle_seconds = 0 }
+  in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let _, state, _ =
+    KSM.apply_to_result ~meta ~observation ~previous_state result
+  in
+  check (option string) "stalled desire carried" (Some "recover_forward_motion")
+    state.active_desire;
+  check (option string) "stalled intention carried" (Some "request_replan")
+    state.current_intention;
+  check bool "belief summary remains stalled" true
+    (contains_substring state.belief_summary "ledger:phase=stalled")
+
 let test_keeper_allowed_tools_exclude_heartbeat () =
   let allowed =
     Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names minimal_policy_meta
@@ -3037,7 +3073,7 @@ let () =
           test_case "world prompt distinguishes playground and worktree" `Quick
             test_world_prompt_distinguishes_playground_and_worktree;
           test_case "prefers submit over legacy workflow" `Quick
-            test_system_prompt_prefers_submit_over_legacy_workflow;
+            test_system_prompt_prefers_bash_and_gh_pr_lane;
           test_case "includes autonomous trigger section" `Quick
             test_prompt_includes_autonomous_trigger_section;
           test_case "omits autonomous trigger for reactive turn" `Quick
@@ -3181,6 +3217,8 @@ let () =
             test_social_model_magentic_ledger_hides_nonvisible_tool_text;
           test_case "magentic ledger restores previous state model" `Quick
             test_social_model_magentic_ledger_previous_state_of_meta_restores_model;
+          test_case "magentic ledger stalled state carries until delta" `Quick
+            test_social_model_magentic_ledger_stalled_state_carries_until_delta;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick

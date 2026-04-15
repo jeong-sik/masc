@@ -62,13 +62,15 @@ type capability_class =
     A tool may belong to multiple classes (e.g. keeper_bash spans all 3). *)
 let capability_classification : (string * capability_class list) list =
   [
-    ("masc_web_search", [External_input]); ("masc_web_fetch", [External_input]);
-    ("keeper_bash", [External_input; Sensitive_access; State_modification]);
-    ("keeper_shell", [External_input; Sensitive_access]);
-    ("keeper_fs_read", [Sensitive_access]); ("keeper_memory_search", [Sensitive_access]);
-    ("keeper_library_search", [Sensitive_access]); ("keeper_library_read", [Sensitive_access]);
-    ("keeper_fs_edit", [State_modification]); ("keeper_pr_submit", [State_modification]);
-    ("keeper_pr_workflow", [State_modification]);
+    ("masc_web_search", [ External_input ]);
+    ("masc_web_fetch", [ External_input ]);
+    ("keeper_bash", [ External_input; Sensitive_access; State_modification ]);
+    ("keeper_shell", [ External_input; Sensitive_access ]);
+    ("keeper_fs_read", [ Sensitive_access ]);
+    ("keeper_memory_search", [ Sensitive_access ]);
+    ("keeper_library_search", [ Sensitive_access ]);
+    ("keeper_library_read", [ Sensitive_access ]);
+    ("keeper_fs_edit", [ State_modification ]);
   ]
 
 let tool_capabilities name =
@@ -285,8 +287,7 @@ let baseline_risk ~tool_name ~input =
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
-  | "keeper_fs_edit" | "keeper_write"
-  | "keeper_pr_submit" | "keeper_pr_workflow" -> true
+  | "keeper_fs_edit" | "keeper_write" -> true
   | "keeper_shell" ->
     (* keeper_shell is mutating only when op=gh AND the gh command mutates *)
     Keeper_tool_registry.is_shell_gh_op input

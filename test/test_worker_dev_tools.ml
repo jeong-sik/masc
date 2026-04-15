@@ -663,4 +663,104 @@ let () =
         Alcotest.(check bool) "placeholder added" true
           (contains_substring redacted "--token [REDACTED]"));
     ];
+    "validate_gh_command", [
+      Alcotest.test_case "accepts allowed subcommand with no repo flag" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "pr list --state open" with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "expected ok, got %s" msg);
+      Alcotest.test_case "rejects shell chaining" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "pr list && echo done" with
+        | Ok () -> Alcotest.fail "expected chaining to be blocked"
+        | Error msg ->
+          Alcotest.(check bool) "chaining message" true
+            (contains_substring msg "chaining"));
+      Alcotest.test_case "rejects unknown top-level command" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "auth token" with
+        | Ok () -> Alcotest.fail "expected unknown to be blocked"
+        | Error msg ->
+          Alcotest.(check bool) "not in approved" true
+            (contains_substring msg "not in the approved"));
+      Alcotest.test_case "rejects repo delete" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "repo delete jeong-sik/foo" with
+        | Ok () -> Alcotest.fail "expected repo delete blocked"
+        | Error msg ->
+          Alcotest.(check bool) "blocked for safety" true
+            (contains_substring msg "blocked for safety"));
+      Alcotest.test_case "rejects repo archive (parity with legacy guard)" `Quick (fun () ->
+        match Worker_dev_tools.validate_gh_command "repo archive jeong-sik/foo" with
+        | Ok () -> Alcotest.fail "expected archive blocked"
+        | Error msg ->
+          Alcotest.(check bool) "archive blocked" true
+            (contains_substring msg "blocked for safety"));
+      Alcotest.test_case "skips org check when allowed_orgs empty" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:[]
+            "pr view --repo evil/repo 1"
+        with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "expected ok (empty orgs), got %s" msg);
+      Alcotest.test_case "allows repo in allowed_orgs" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
+            "pr view --repo jeong-sik/masc-mcp 123"
+        with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "expected ok, got %s" msg);
+      Alcotest.test_case "rejects repo outside allowed_orgs" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
+            "pr view --repo evil-org/payload 1"
+        with
+        | Ok () -> Alcotest.fail "expected org outside allowlist to be blocked"
+        | Error msg ->
+          Alcotest.(check bool) "mentions not in allowed_orgs" true
+            (contains_substring msg "not in allowed_orgs");
+          Alcotest.(check bool) "mentions offending owner" true
+            (contains_substring msg "evil-org"));
+      Alcotest.test_case "rejects --repo=OWNER/NAME form" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
+            "pr view --repo=evil-org/payload 1"
+        with
+        | Ok () -> Alcotest.fail "expected --repo= form to be blocked"
+        | Error msg ->
+          Alcotest.(check bool) "blocked" true
+            (contains_substring msg "not in allowed_orgs"));
+      Alcotest.test_case "rejects -R short flag outside allowlist" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
+            "issue list -R evil-org/payload"
+        with
+        | Ok () -> Alcotest.fail "expected -R form to be blocked"
+        | Error msg ->
+          Alcotest.(check bool) "blocked" true
+            (contains_substring msg "not in allowed_orgs"));
+      Alcotest.test_case "allows no --repo flag with orgs configured" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_gh_command ~allowed_orgs:["jeong-sik"]
+            "pr list --state open"
+        with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "expected ok (no --repo), got %s" msg);
+    ];
+    "extract_gh_repo_owner", [
+      Alcotest.test_case "extracts from --repo flag" `Quick (fun () ->
+        Alcotest.(check (option string)) "owner" (Some "jeong-sik")
+          (Worker_dev_tools.extract_gh_repo_owner
+             "pr view --repo jeong-sik/masc-mcp 1"));
+      Alcotest.test_case "extracts from --repo= form" `Quick (fun () ->
+        Alcotest.(check (option string)) "owner" (Some "jeong-sik")
+          (Worker_dev_tools.extract_gh_repo_owner
+             "pr view --repo=jeong-sik/masc-mcp 1"));
+      Alcotest.test_case "extracts from -R short flag" `Quick (fun () ->
+        Alcotest.(check (option string)) "owner" (Some "jeong-sik")
+          (Worker_dev_tools.extract_gh_repo_owner
+             "issue list -R jeong-sik/masc-mcp"));
+      Alcotest.test_case "returns None without --repo flag" `Quick (fun () ->
+        Alcotest.(check (option string)) "no flag" None
+          (Worker_dev_tools.extract_gh_repo_owner "pr list --state open"));
+      Alcotest.test_case "returns None for malformed slug" `Quick (fun () ->
+        Alcotest.(check (option string)) "no slash" None
+          (Worker_dev_tools.extract_gh_repo_owner "pr view --repo malformed"));
+    ];
   ]

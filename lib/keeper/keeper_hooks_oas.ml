@@ -441,7 +441,13 @@ let make_hooks
     post_tool_use_failure = Some (function
       | Agent_sdk.Hooks.PostToolUseFailure { tool_name; error; _ } ->
         let meta = !meta_ref in
-        Log.Keeper.warn "keeper:%s tool_use_failure: %s — %s"
+        (* The richer counterpart
+             "tool <name> returned error result (n/max): <detail>"
+           is already emitted at WARN by keeper_tools_oas before this hook
+           runs. Emitting a second WARN here with the same error content
+           produces paired duplicate lines per tool failure. Keep a debug
+           trace for hook-chain readers; the metric below still records. *)
+        Log.Keeper.debug "keeper:%s tool_use_failure: %s — %s"
           meta.name tool_name error;
         Heuristic_metrics.record {
           module_name = "keeper_hooks_oas";

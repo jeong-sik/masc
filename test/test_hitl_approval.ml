@@ -33,7 +33,6 @@ let test_risk_classification_high () =
     ("masc_code_write", GP.High);
     ("keeper_write", GP.High);
     ("keeper_fs_edit", GP.High);
-    ("keeper_pr_submit", GP.High);
     ("masc_create_task", GP.High);
   ] in
   List.iter (fun (tool_name, expected) ->

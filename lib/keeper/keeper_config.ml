@@ -125,6 +125,11 @@ let removed_keeper_input_key_names =
     
   ]
 
+let non_public_keeper_input_key_names =
+  [
+    "social_model";
+  ]
+
 let removed_keeper_msg_input_key_names =
   [
     "goal";
@@ -165,15 +170,24 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
   | _ -> []
 
 let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
-  let present = present_json_keys removed_keeper_input_key_names args in
-  match present with
-  | [] -> Ok ()
-  | fields ->
+  let non_public = present_json_keys non_public_keeper_input_key_names args in
+  match non_public with
+  | _ :: _ as fields ->
       Error
         (Printf.sprintf
-           "removed keeper args for %s: %s. Keepers are always-on by definition."
+           "non-public keeper args for %s: %s. These keeper runtime internals are not part of the public MCP/OAS surface."
            tool_name
            (String.concat ", " fields))
+  | [] ->
+      let present = present_json_keys removed_keeper_input_key_names args in
+      match present with
+      | [] -> Ok ()
+      | fields ->
+          Error
+            (Printf.sprintf
+               "removed keeper args for %s: %s. Keepers are always-on by definition."
+               tool_name
+               (String.concat ", " fields))
 
 let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
   let present = present_json_keys removed_keeper_msg_input_key_names args in

@@ -239,11 +239,14 @@ let base_path_raw_opt () =
 let base_path_opt () =
   base_path_raw_opt () |> Option.map normalize_masc_base_path_input
 
-(** Project base path with "." fallback when unset. *)
+(** Project base path with HOME fallback, then "." fallback when unset. *)
 let base_path () =
   match base_path_opt () with
   | Some path -> path
-  | None -> "."
+  | None ->
+      (match home_dir_opt () with
+       | Some home -> normalize_masc_base_path_input home
+       | None -> ".")
 
 let sb_path_opt () =
   match base_path_opt () with

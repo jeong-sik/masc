@@ -520,10 +520,11 @@
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
-        test_goal_janitor
-        test_keeper_pr_workflow
-        test_voice_config)
- (libraries masc_test_deps))
+	        test_goal_janitor
+	        test_keeper_pr_workflow
+	        test_voice_config)
+ (libraries masc_test_deps)
+ (deps ../bin/main_eio.exe))
 
 (test
  (name test_keeper_mutex_coverage)

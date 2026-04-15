@@ -232,7 +232,7 @@ let test_no_orphaned_tools () =
   let known_orphans =
     [ "masc_note_add"; "masc_register_capabilities";
       "masc_board_stats"; "masc_board_profile"; "masc_board_hearths";
-      "masc_board_delete"; "masc_keeper_reconcile"; "masc_keeper_compact";
+      "masc_board_delete"; "masc_keeper_compact";
       "masc_keeper_clear"; "masc_runtime_verify" ]
   in
   let is_known_orphan name = List.mem name known_orphans in

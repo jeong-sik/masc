@@ -29,6 +29,7 @@ module Dashboard_mission = Masc_mcp.Dashboard_mission
 (* module Dashboard_proof removed *)
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
+module Config_doctor = Masc_mcp.Config_doctor
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -297,6 +298,10 @@ let host =
 let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+
+let doctor_json =
+  let doc = "Emit machine-readable JSON instead of text output" in
+  Arg.(value & flag & info ["json"] ~doc)
 
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
@@ -573,9 +578,37 @@ let run_cmd host port base_path =
   try_start 0;
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let cmd =
-  let doc = "MASC MCP Server" in
-  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
-  Cmd.v info Term.(const run_cmd $ host $ port $ base_path)
+let run_cmd_exit host port base_path =
+  run_cmd host port base_path;
+  Cmd.Exit.ok
 
-let () = exit (Cmd.eval cmd)
+let doctor_cmd_exit base_path as_json =
+  let report =
+    Config_doctor.analyze
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let output =
+    if as_json then
+      Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+    else
+      Config_doctor.render_text report
+  in
+  print_endline output;
+  Config_doctor.exit_code report
+
+let doctor_cmd =
+  let doc =
+    "Diagnose config initialization, active config roots, and base-path shadowing"
+  in
+  let info = Cmd.info "doctor" ~doc in
+  Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+
+let cmd =
+  let doc = "MASC MCP Server and operator diagnostics" in
+  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
+  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
+    info [ doctor_cmd ]
+
+let () = exit (Cmd.eval' cmd)

@@ -263,9 +263,12 @@ export MASC_PERSONAS_DIR=/srv/masc/personas
 ./start-masc-mcp.sh --http --port 8935 --base-path /srv/masc/runtime
 ```
 
+active root 진단: `./_build/default/bin/main_eio.exe doctor --base-path /srv/masc/runtime`
+
 상세: `docs/KEEPER-USER-MANUAL.md`
 
 Boot/path/state inventory: `docs/BOOT-ENV-STATE-INVENTORY.md`
+Config/init diagnosis: `docs/CONFIG-DOCTOR.md`
 
 호환성 참고:
 - 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_join(agent_name="codex")`

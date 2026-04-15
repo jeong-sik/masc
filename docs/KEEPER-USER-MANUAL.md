@@ -607,11 +607,12 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 | 소스 | 경로 | 역할 |
 |------|------|------|
 | TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | Persona 없이 선언적 정의 |
+| Persona profile fallback | `<PERSONAS_ROOT>/<name>/profile.json` | TOML이 없거나 깨졌을 때 keeper 기본값 fallback |
 | Persistent meta | `.masc/keepers/<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
 
 별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
 
-resolved config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리를 우선 사용하고, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 다음 `~/.masc/config`, 마지막으로 repo `config/` fallback chain을 사용한다. repo `config/`는 체크인된 default/example source이며, 웹/대시보드는 파일을 직접 읽지 않고 서버가 해석한 config root와 persona root를 사용한다.
+운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. 헷갈리면 `main_eio.exe doctor --base-path ...`를 먼저 사용한다. low-level resolver에는 추가 fallback이 있지만, 운영 진단 기준은 `docs/CONFIG-DOCTOR.md`를 따른다.
 
 ### 8.2 Template 변경 반영
 
@@ -652,6 +653,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 | 문서 | 용도 |
 |------|------|
+| [CONFIG-DOCTOR.md](./CONFIG-DOCTOR.md) | active config/init 진단 |
 | [GLOSSARY.md](./GLOSSARY.md) | 용어 정의 |
 | [QUICK-START.md](./QUICK-START.md) | repo coordination 시작 경로 |
 | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | historical compatibility lane |

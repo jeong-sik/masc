@@ -1300,6 +1300,7 @@ function PipelineStep({
   isLast,
   sinceTs,
   now,
+  limited,
 }: {
   label: string
   shortLabel: string
@@ -1307,6 +1308,9 @@ function PipelineStep({
   isLast?: boolean
   sinceTs: number | null
   now: number
+  /** When true, this lane has limited observability — only a subset of
+      states are derivable from the registry. Shown as a subtle indicator. */
+  limited?: boolean
 }) {
   const prevRef = useRef(value)
   const [flash, setFlash] = useState(false)
@@ -1351,14 +1355,15 @@ function PipelineStep({
   })()
 
   return html`
-    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${heldFor ? `, ${heldFor}` : ''}`}
-      title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
+    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
+      title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n⚠ 관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
-      <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls}`}>
+      <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
             <span class="text-[9px] font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
+            ${limited ? html`<span class="text-[7px] font-mono text-[var(--text-dim)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`
             <span class=${`text-[9px] font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
@@ -1390,8 +1395,8 @@ function TurnPipelineStrip({
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">
         <${PipelineStep} shortLabel="KTC" label="턴 주기" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} now=${now} />
-        <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} now=${now} />
-        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} now=${now} limited />
+        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} now=${now} limited />
         <${PipelineStep} shortLabel="KMC" label="컨텍스트 압축" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} now=${now} isLast />
       </div>
     </div>

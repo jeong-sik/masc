@@ -572,7 +572,10 @@ let run_turn
   (* Capture history BEFORE appending the current user_msg.
      OAS Agent.run appends user_msg from ~goal internally, so passing it
      in initial_messages would cause duplication. *)
-  let history_messages = Inference_utils.sanitize_messages_utf8 ctx_work.messages in
+  (* OAS Utf8_sanitize.sanitize handles UTF-8 repair and control char
+     stripping at serialization time (backend_openai_serialize.ml,
+     backend_anthropic.ml). No pre-sanitize needed here. See OAS #916. *)
+  let history_messages = ctx_work.messages in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry
   then Keeper_exec_context.persist_message ~source:history_user_source session user_msg;

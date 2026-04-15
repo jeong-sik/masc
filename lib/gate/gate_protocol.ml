@@ -138,14 +138,14 @@ let outbound_to_json out =
           ("tokens_used", `Int s.tokens_used);
         ]
   in
-  (* B2 Phase 2: emit both [keeper_name] and [destination_id]. Consumers
-     migrating to the new vocabulary can begin reading [destination_id];
-     legacy consumers keep reading [keeper_name]. Phase 3 will drop
-     [keeper_name] from emit (inbound parse will still accept it for one
-     more release cycle). *)
+  (* B2 Phase 3: [destination_id] is the sole outbound routing key. The
+     legacy [keeper_name] output was dropped now that all known consumers
+     (sidecars via gate_shared.GateResponse.from_json, #7485) prefer
+     [destination_id] and only fall back to [keeper_name] when the new key
+     is absent. Inbound parse still accepts either key — Phase 4 can
+     retire the [keeper_name] wire form entirely in a future major bump. *)
   let base = [
     ("ok", `Bool true);
-    ("keeper_name", `String out.keeper_name);
     ("destination_id", `String out.keeper_name);
     ("reply", `String out.content);
     ("turn_stats", stats_json);

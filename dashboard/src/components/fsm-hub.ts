@@ -92,11 +92,11 @@ const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
 }
 
 const LANE_LABELS: Record<keyof Omit<CompositeObservation, 'ts'>, string> = {
-  phase: 'keeper lifecycle',
-  turn: 'turn cycle',
-  decision: 'decision',
-  cascade: 'cascade',
-  compaction: 'compaction',
+  phase: 'Keeper 생명주기',
+  turn: '턴 주기',
+  decision: '의사결정',
+  cascade: '캐스케이드',
+  compaction: '컨텍스트 압축',
 }
 
 function observeSnapshot(
@@ -898,7 +898,7 @@ export function FsmHub() {
         <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
         ${/* ── Zone 2b: Transition History Trail (collapsible) ── */ ''}
-        <${CollapsibleZone} id="transition-trail" title="Transition History" defaultOpen=${true}>
+        <${CollapsibleZone} id="transition-trail" title="전환 이력" defaultOpen=${true}>
           <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
         <//>
 
@@ -906,7 +906,7 @@ export function FsmHub() {
         <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
 
         ${/* ── Zone 3b: Swimlane Timeline (collapsible) ── */ ''}
-        <${CollapsibleZone} id="swimlane" title="Swimlane Timeline" defaultOpen=${true}>
+        <${CollapsibleZone} id="swimlane" title="상태 타임라인" defaultOpen=${true}>
           <${SwimlaneTimeline}
             observations=${view.observations}
             now=${now}
@@ -916,7 +916,7 @@ export function FsmHub() {
         <//>
 
         ${/* ── Zone 4: Health Grid (collapsible) ── */ ''}
-        <${CollapsibleZone} id="health-grid" title="Health Grid" defaultOpen=${true}>
+        <${CollapsibleZone} id="health-grid" title="상태 격자" defaultOpen=${true}>
           <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             <${MeasurementCard} snapshot=${snapshot} />
             <${InvariantsPanel} snapshot=${snapshot} />
@@ -1193,22 +1193,23 @@ function HeroPhase({
 
   return html`
     <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
-      role="status" aria-live="polite" aria-label=${`Keeper phase: ${snapshot.phase}${heldFor ? `, held for ${heldFor}` : ''}`}
+      role="status" aria-live="polite" aria-label=${`Keeper 상태: ${displayState(snapshot.phase)}${heldFor ? `, ${heldFor}` : ''}`}
       title=${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}
     >
       <div class="flex items-baseline justify-between">
         <div>
-          <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]" id="ksm-label">KSM · Keeper Lifecycle</div>
+          <div class="text-[10px] font-semibold tracking-[0.06em] text-[var(--text-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-[8px] text-[var(--text-dim)]">KSM</span></div>
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
-            ${snapshot.phase}
+            ${displayState(snapshot.phase)}
           </div>
+          <div class="mt-0.5 text-[9px] font-mono text-[var(--text-dim)]">${snapshot.phase}</div>
           ${heldFor ? html`
             <div class="mt-1 text-[10px] font-mono text-[var(--text-dim)]" aria-hidden="true">
-              held for <span class="text-[var(--text-body)]">${heldFor}</span>
+              유지 <span class="text-[var(--text-body)]">${heldFor}</span>
             </div>
           ` : null}
         </div>
-        ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">phase changed</span>` : null}
+        ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">상태 변경</span>` : null}
       </div>
       <${PhaseSparkline} log=${phaseLog} />
     </div>
@@ -1250,6 +1251,46 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   Draining: 'Finishing current work before shutdown',
   Restarting: 'Shutting down and restarting',
   Dead: 'Permanently terminated',
+}
+
+/** Korean display names for raw FSM state values.
+    Replaces English internals in PipelineStep and Swimlane. */
+const STATE_DISPLAY_NAMES: Record<string, string> = {
+  // KTC
+  idle: '대기',
+  prompting: '프롬프트 구성',
+  executing: '실행 중',
+  compacting: '압축 중',
+  finalizing: '마무리',
+  // KDP
+  undecided: '대기',
+  guard_ok: '가드 통과',
+  gate_rejected: '게이트 거부',
+  tool_policy_selected: '도구 정책 적용',
+  // KCL
+  selecting: '선택 중',
+  trying: '시도 중',
+  done: '완료',
+  exhausted: '소진',
+  // KMC
+  accumulating: '수집 중',
+  // KSM
+  Running: '가동 중',
+  Compacting: '압축 중',
+  HandingOff: '인수인계',
+  Failing: '오류 발생',
+  Crashed: '비정상 종료',
+  Offline: '오프라인',
+  Paused: '일시 중지',
+  Stopped: '정지',
+  Draining: '종료 준비',
+  Restarting: '재시작',
+  Dead: '종료됨',
+}
+
+/** Resolve display name: Korean label for UI, raw value preserved in tooltips. */
+function displayState(value: string): string {
+  return STATE_DISPLAY_NAMES[value] ?? value
 }
 
 function PipelineStep({
@@ -1306,23 +1347,23 @@ function PipelineStep({
   })()
 
   return html`
-    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${shortLabel}: ${value}${heldFor ? `, held for ${heldFor}` : ''}`}
-      title=${`${label} (${shortLabel}): ${value}${heldFor ? ` · held ${heldFor}` : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
+    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${heldFor ? `, ${heldFor}` : ''}`}
+      title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
       <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
-            <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</span>
+            <span class="text-[9px] font-semibold tracking-[0.04em] text-[var(--text-muted)]">${label}</span>
           </div>
           ${heldFor ? html`
             <span class=${`text-[9px] font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
           ` : null}
         </div>
         <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'} ${flash ? 'animate-pulse' : ''}`}>
-          ${value}
+          ${displayState(value)}
         </div>
-        <div class="text-[8px] text-[var(--text-dim)] mt-0.5">${label}</div>
+        <div class="text-[8px] font-mono text-[var(--text-dim)] mt-0.5">${shortLabel} · ${value}</div>
       </div>
       ${!isLast ? html`<div class=${`hidden md:block w-5 shrink-0 ${connectorCls}`}></div>` : null}
     </div>
@@ -1341,13 +1382,13 @@ function TurnPipelineStrip({
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-        Turn Pipeline
+        턴 파이프라인
       </div>
-      <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="Turn pipeline stages">
-        <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} now=${now} />
-        <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} now=${now} />
-        <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} now=${now} />
-        <${PipelineStep} shortLabel="KMC" label="Compaction" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} now=${now} isLast />
+      <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">
+        <${PipelineStep} shortLabel="KTC" label="턴 주기" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KMC" label="컨텍스트 압축" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} now=${now} isLast />
       </div>
     </div>
   `
@@ -1609,11 +1650,11 @@ const SWIMLANE_LANES: Array<{
   label: string
   short: string
 }> = [
-  { key: 'phase', label: 'Keeper Lifecycle', short: 'KSM' },
-  { key: 'turn', label: 'Turn Cycle', short: 'KTC' },
-  { key: 'decision', label: 'Decision', short: 'KDP' },
-  { key: 'cascade', label: 'Cascade', short: 'KCL' },
-  { key: 'compaction', label: 'Compaction', short: 'KMC' },
+  { key: 'phase', label: 'Keeper 생명주기', short: 'KSM' },
+  { key: 'turn', label: '턴 주기', short: 'KTC' },
+  { key: 'decision', label: '의사결정', short: 'KDP' },
+  { key: 'cascade', label: '캐스케이드', short: 'KCL' },
+  { key: 'compaction', label: '컨텍스트 압축', short: 'KMC' },
 ]
 
 const IDLE_LIKE_VALUES = new Set([
@@ -1743,7 +1784,7 @@ function SwimlaneTimeline({
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          Swimlane Timeline
+          상태 타임라인
         </div>
         <div class="flex items-center gap-1 flex-wrap">
           ${SWIMLANE_LANES.map(lane => {
@@ -1789,7 +1830,7 @@ function SwimlaneTimeline({
                     hoveredSegment.from === seg.from &&
                     hoveredSegment.to === seg.to
                   const dimmed = hoveredSegment != null && !isHovered
-                  const ariaLabel = `${lane.label}, ${seg.value}, ${fmtAbs(seg.from)} to ${fmtAbs(seg.to)}, held ${holdFor}`
+                  const ariaLabel = `${lane.label}, ${displayState(seg.value)}, ${fmtAbs(seg.from)} ~ ${fmtAbs(seg.to)}, ${holdFor}`
                   return html`
                     <button
                       type="button"
@@ -1799,7 +1840,7 @@ function SwimlaneTimeline({
                       data-seg-index=${segIndex}
                       class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-200 border-r border-[rgba(0,0,0,0.25)] last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-inset ${isHovered ? 'ring-1 ring-[var(--accent)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
-                      title=${`${lane.short} · ${seg.value}\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · held ${holdFor}`}
+                      title=${`${lane.label} (${lane.short}) · ${displayState(seg.value)} (${seg.value})\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · ${holdFor}`}
                       aria-label=${ariaLabel}
                       onmouseenter=${() => onHoverSegment({ field: lane.short, laneKey: lane.key, from: seg.from, to: seg.to, value: seg.value })}
                       onmouseleave=${() => onHoverSegment(null)}

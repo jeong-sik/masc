@@ -46,7 +46,7 @@ mention_targets = ["masc-improver", "improver", "refactorer"]
 
 proactive_enabled = true
 execution_scope = "workspace"
-allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
+allowed_paths = []
 
 tool_preset = "delivery"
 

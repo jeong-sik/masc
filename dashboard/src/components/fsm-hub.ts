@@ -1340,7 +1340,11 @@ function PipelineStep({
   const stalenessCls = (() => {
     if (!heldFor || sinceTs == null) return 'text-[var(--text-dim)]'
     const ageSec = now - sinceTs
-    if (!isActive) return 'text-[var(--text-dim)]'
+    if (!isActive) {
+      // idle 상태에서도 장기 대기를 시각적으로 구분
+      if (ageSec > 600) return 'text-[var(--text-muted)]'   // 10분+ → muted (보임)
+      return 'text-[var(--text-dim)]'                        // 기본 dim
+    }
     if (ageSec > 60) return 'text-[#f59e0b]'
     if (ageSec > 20) return 'text-[#facc15]'
     return 'text-[#818cf8]'
@@ -1676,7 +1680,7 @@ const ALARM_VALUES = new Set([
 
 function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[rgba(239,68,68,0.5)]'
-  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[rgba(255,255,255,0.04)]'
+  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[rgba(255,255,255,0.07)]'
   if (value === 'Compacting' || value === 'compacting') return 'bg-[rgba(245,158,11,0.45)]'
   if (value === 'HandingOff') return 'bg-[rgba(167,139,250,0.5)]'
   return 'bg-[rgba(129,140,248,0.45)]'

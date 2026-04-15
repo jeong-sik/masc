@@ -25,17 +25,4 @@ let schemas : tool_schema list = [
       ("properties", `Assoc []);
     ];
   };
-  {
-    name = "masc_pause_status";
-    description = "Check if the default project namespace is currently paused and get pause details for the flattened default namespace.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("namespace_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional namespace hint. Current builds always report the default flattened namespace.");
-        ]);
-      ]);
-    ];
-  };
 ]

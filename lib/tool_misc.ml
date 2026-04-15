@@ -141,7 +141,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
-  | "masc_feature_flags" -> Some (Tool_misc_admin.handle_feature_flags args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
@@ -161,7 +160,7 @@ let _tool_spec_read_only =
 let tool_required_permission = function
   | "masc_config" | "masc_dashboard" | "masc_verify_handoff"
   | "masc_tool_stats" | "masc_tool_help" | "masc_web_search"
-  | "masc_tool_admin_snapshot" | "masc_feature_flags" ->
+  | "masc_tool_admin_snapshot" ->
       Some Types.CanReadState
   | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
       Some Types.CanBroadcast

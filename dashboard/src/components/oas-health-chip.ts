@@ -72,7 +72,7 @@ export function OasHealthChip() {
         <${StatCell}
           label="총 이벤트"
           value=${summary.value.totalEvents}
-          detail="SSE relay"
+          detail="live tracked"
         />
         <${StatCell}
           label="LLM 호출"

@@ -35,7 +35,6 @@ export type SSEEventType =
   | 'oas:masc:autonomy:agent_decision'
   | 'oas:masc:autonomy:agent_action_executed'
   | 'oas:masc:keeper:snapshot'
-  | 'oas:masc:keeper:tick'
   | 'oas:masc:keeper:lifecycle'
   | 'oas:masc:trust_updated'
   | 'oas:masc:reputation_changed'
@@ -75,6 +74,9 @@ export interface SSEEvent {
   status?: string
   post_id?: string
   author?: string
+  agent_name?: string
+  keeper_name?: string
+  event_type?: string
   // Keeper event fields
   name?: string
   generation?: number

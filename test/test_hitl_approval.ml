@@ -254,6 +254,34 @@ let test_approval_queue_cancel_cleans_up () =
   let final_count = AQ.pending_count () in
   Alcotest.(check int) "no orphan entries" initial_count final_count
 
+let test_background_pending_callback_and_keeper_lookup () =
+  Eio_main.run @@ fun _env ->
+  let initial_count = AQ.pending_count () in
+  let callback_result = ref None in
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input:(`Assoc [("kind", `String "reconcile_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> callback_result := Some decision)
+  in
+  Alcotest.(check bool) "keeper has pending approval" true
+    (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
+  Alcotest.(check int) "background entry added"
+    (initial_count + 1) (AQ.pending_count ());
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+  Alcotest.(check bool) "keeper pending cleared" false
+    (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
+  Alcotest.(check int) "background entry removed"
+    initial_count (AQ.pending_count ());
+  match !callback_result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some _ -> Alcotest.fail "expected approve callback"
+  | None -> Alcotest.fail "expected callback to fire"
+
 (* ── 4. Approval callback integration ────────────────────── *)
 
 let test_callback_approves_low_risk () =
@@ -346,6 +374,8 @@ let () =
       Alcotest.test_case "expire stale" `Quick test_approval_queue_expire_stale;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
+      Alcotest.test_case "background pending callback" `Quick
+        test_background_pending_callback_and_keeper_lookup;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

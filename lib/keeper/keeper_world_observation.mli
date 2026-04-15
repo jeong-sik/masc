@@ -103,6 +103,8 @@ type turn_reason =
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =
+  | Keeper_paused
+  | Approval_pending
   | Scheduled_autonomous_disabled
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }

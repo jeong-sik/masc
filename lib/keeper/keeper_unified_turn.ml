@@ -355,6 +355,84 @@ let pause_keeper_for_overflow
     meta.name reason;
   paused_meta
 
+let sync_keeper_paused_state
+    ~(config : Room.config)
+    ~(meta : keeper_meta)
+    ~(paused : bool) : keeper_meta =
+  let synced_meta =
+    {
+      meta with
+      paused;
+      updated_at = now_iso ();
+    }
+  in
+  (match write_meta config synced_meta with
+   | Ok () -> ()
+   | Error err ->
+     Log.Keeper.error
+       "%s: keeper %s write_meta failed: %s"
+       meta.name
+       (if paused then "pause" else "resume")
+       err);
+  Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
+  dispatch_keeper_phase_event
+    ~config
+    ~keeper_name:meta.name
+    (if paused
+     then Keeper_state_machine.Operator_pause
+     else Keeper_state_machine.Operator_resume);
+  (if not paused then
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | Some entry -> Atomic.set entry.fiber_wakeup true
+    | None -> ());
+  synced_meta
+
+let current_keeper_meta ~(config : Room.config) ~(fallback_meta : keeper_meta) =
+  match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
+  | Some entry -> entry.meta
+  | None -> fallback_meta
+
+let enqueue_reconcile_continue_gate
+    ~(config : Room.config)
+    ~(meta : keeper_meta)
+    ~(failure_reason : Keeper_registry.failure_reason)
+    ~(committed_tools : string list)
+    ~(error_detail : string) : string =
+  let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
+  let input =
+    `Assoc [
+      ("kind", `String "reconcile_required");
+      ("keeper_name", `String meta.name);
+      ("failure_reason", `String reason_text);
+      ("error_detail", `String error_detail);
+      ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
+    ]
+  in
+  Keeper_approval_queue.submit_pending
+    ~keeper_name:meta.name
+    ~tool_name:"keeper_continue_after_reconcile"
+    ~input
+    ~risk_level:Keeper_approval_queue.Critical
+    ~on_resolution:(fun decision ->
+      let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
+      match decision with
+      | Agent_sdk.Hooks.Approve
+      | Agent_sdk.Hooks.Edit _ ->
+        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false in
+        Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
+        Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
+        Log.Keeper.info
+          "%s: reconcile continue gate approved; auto-resumed keeper"
+          meta.name
+      | Agent_sdk.Hooks.Reject reason ->
+        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true in
+        Keeper_registry.set_failure_reason
+          ~base_path:config.base_path meta.name
+          (Some failure_reason);
+        Log.Keeper.warn
+          "%s: reconcile continue gate rejected; keeper remains paused (%s)"
+          meta.name reason)
+
 (* Dedupe "mixed cascade context budget" log: the values are constant
    per (keeper_name, model_labels) because cascade config is static at
    startup.  Logging per turn produces 15-20 duplicates per keeper per
@@ -1846,14 +1924,67 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
               ~reason:e_str
               ~is_transient ~social_state ()
           in
+          let updated_meta =
+            if is_ambiguous_partial then begin
+              (* Ambiguous partial commit must not auto-resume silently.
+                 The keeper is paused and an explicit continue gate is
+                 raised for the operator. Approving the gate auto-resumes
+                 the keeper; rejecting it leaves the keeper paused. *)
+              let committed_tools =
+                committed_mutating_tools !mutating_tools_committed
+              in
+              let failure_reason =
+                Option.value
+                  ~default:
+                    (Keeper_registry.Ambiguous_partial_commit {
+                      kind = Keeper_registry.Post_commit_failure;
+                      detail = e_str;
+                    })
+                  !post_commit_failure_reason
+              in
+              Keeper_registry.set_failure_reason ~base_path:config.base_path
+                meta.name
+                (Some failure_reason);
+              let paused_meta =
+                sync_keeper_paused_state
+                  ~config
+                  ~meta:updated_meta
+                  ~paused:true
+              in
+              let approval_id =
+                enqueue_reconcile_continue_gate
+                  ~config
+                  ~meta:paused_meta
+                  ~failure_reason
+                  ~committed_tools
+                  ~error_detail:e_str
+              in
+              Log.Keeper.warn
+                "%s: ambiguous partial commit (tools=[%s], reason=%s); \
+                 paused keeper and opened continue gate id=%s"
+                meta.name
+                (String.concat ", " committed_tools)
+                (Keeper_registry.failure_reason_to_string failure_reason)
+                approval_id;
+              paused_meta
+            end else
+              updated_meta
+          in
+          append_decision_record ~config ~meta:updated_meta ~observation
+            ~latency_ms ~semaphore_wait_ms
+            ~outcome:(if is_ambiguous_partial then "partial" else "error")
+            ~selected_mode:
+              (if is_ambiguous_partial
+               then "ambiguous_side_effect_error"
+               else "error")
+            ~social_state
+            ~error:e_str ();
+          (match write_meta config updated_meta with
+           | Ok () -> ()
+           | Error msg ->
+               Log.Keeper.error
+                 "write_meta failed after unified turn failure: %s" msg);
           if is_ambiguous_partial then begin
-            (* Manual reconcile blocker removed. Previously, a partial commit
-               with an unsafe tool would create a sticky blocker that required
-               operator intervention. This caused keeper death spirals (#6801).
-               Now: record the failure reason for audit, log a warning with
-               committed tools, and let the keeper continue. The next turn's
-               world_observation includes failure signals so the keeper (or
-               operator via board/keeper_chat) can decide how to recover. *)
             let failure_reason =
               Option.value
                 ~default:
@@ -1869,27 +2000,12 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
             let committed_tools =
               committed_mutating_tools !mutating_tools_committed
             in
-            Log.Keeper.warn
-              "%s: ambiguous partial commit (tools=[%s], reason=%s); \
-               evidence recorded, continuing without blocker"
+            Log.Keeper.info
+              "%s: reconcile-required failure latched as %s after committed tools [%s]"
               meta.name
-              (String.concat ", " committed_tools)
               (Keeper_registry.failure_reason_to_string failure_reason)
+              (String.concat ", " committed_tools)
           end;
-          append_decision_record ~config ~meta:updated_meta ~observation
-            ~latency_ms ~semaphore_wait_ms
-            ~outcome:(if is_ambiguous_partial then "partial" else "error")
-            ~selected_mode:
-              (if is_ambiguous_partial
-               then "ambiguous_side_effect_error"
-               else "error")
-            ~social_state
-            ~error:e_str ();
-          (match write_meta config updated_meta with
-           | Ok () -> ()
-           | Error msg ->
-               Log.Keeper.error
-                 "write_meta failed after keeper cycle failure: %s" msg);
           let base_path = config.base_path in
           (* Transient errors (429 rate limit, 503 overloaded, network
              timeout) do not count toward the consecutive failure threshold.

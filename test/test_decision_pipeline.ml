@@ -151,6 +151,8 @@ let test_turn_reason_to_string_coverage () =
 
 let test_skip_reason_to_string_coverage () =
   let variants = [
+    WO.Keeper_paused;
+    WO.Approval_pending;
     WO.Scheduled_autonomous_disabled;
     WO.Idle_gate_pending { remaining_sec = 30 };
     WO.Cooldown_pending { remaining_sec = 15 };

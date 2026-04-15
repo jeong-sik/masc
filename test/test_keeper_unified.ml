@@ -15,6 +15,7 @@ module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Oas_model_resolve
+module AQ = Masc_mcp.Keeper_approval_queue
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -556,6 +557,40 @@ let test_verdict_reasons_to_strings_uses_structured_skip_tags () =
   check (list string) "structured cooldown skip tags"
     [ "cooldown_pending" ]
     (WO.verdict_reasons_to_strings cooldown_verdict)
+
+let test_paused_keeper_blocks_turns_even_with_reactive_signal () =
+  let meta = { minimal_meta with paused = true } in
+  let obs =
+    { base_observation with pending_mentions = [ ("alice", "@keeper wake up") ] }
+  in
+  let decision = WO.unified_turn_decision ~meta obs in
+  check bool "paused keeper does not run" false decision.should_run;
+  check string "channel stays reactive" "reactive"
+    (WO.channel_to_string decision.channel);
+  check (list string) "paused reason is surfaced"
+    [ "keeper_paused" ]
+    (WO.verdict_reasons_to_strings decision.verdict)
+
+let test_pending_approval_blocks_turns_until_resolved () =
+  Eio_main.run @@ fun _env ->
+  let id =
+    AQ.submit_pending
+      ~keeper_name:minimal_meta.name
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input:(`Assoc [ ("kind", `String "reconcile_required") ])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun _ -> ())
+  in
+  let decision = WO.unified_turn_decision ~meta:minimal_meta base_observation in
+  check bool "approval pending blocks turn" false decision.should_run;
+  check (list string) "approval pending reason is surfaced"
+    [ "approval_pending" ]
+    (WO.verdict_reasons_to_strings decision.verdict);
+  match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+  | Ok () ->
+    let resumed = WO.unified_turn_decision ~meta:minimal_meta base_observation in
+    check bool "approval resolve re-opens turn scheduling" true resumed.should_run
+  | Error msg -> Alcotest.fail ("resolve failed: " ^ msg)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =
   with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->
@@ -2767,6 +2802,10 @@ let () =
             test_verdict_reasons_to_strings_uses_structured_run_tags;
           test_case "verdict reasons use structured skip tags" `Quick
             test_verdict_reasons_to_strings_uses_structured_skip_tags;
+          test_case "paused keeper blocks turns" `Quick
+            test_paused_keeper_blocks_turns_even_with_reactive_signal;
+          test_case "pending approval blocks turns" `Quick
+            test_pending_approval_blocks_turns_until_resolved;
           test_case "task reactive cooldown floor never hits zero" `Quick
             test_task_reactive_cooldown_floor_never_hits_zero;
           test_case "with goals" `Quick test_observation_with_goals;

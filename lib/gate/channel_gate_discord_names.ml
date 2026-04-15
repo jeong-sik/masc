@@ -16,8 +16,12 @@ type name_map = {
   updated_at : string;
 }
 
-let default_names_path = ".masc/connectors/discord/names.json"
-let legacy_names_path = "sidecars/discord-bot/.gate/discord_names.json"
+let default_names_path = ".gate/runtime/discord/names.json"
+(* Legacy path from the pre-v0.9.0 layout. Read-fallback still honours it so
+   that operators who have data there see a transparent migration on the next
+   write. `sidecars/discord-bot/.gate/discord_names.json` (even older layout)
+   is no longer auto-discovered; set MASC_DISCORD_NAMES_PATH if still in use. *)
+let legacy_names_path = ".masc/connectors/discord/names.json"
 
 let resolve_path raw_path =
   if Filename.is_relative raw_path then

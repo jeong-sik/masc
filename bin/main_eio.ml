@@ -605,10 +605,66 @@ let doctor_cmd =
   let info = Cmd.info "doctor" ~doc in
   Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
 
+(* --- init subcommand: seed default config from binary-embedded assets ----- *)
+
+let init_force =
+  let doc = "Overwrite existing config files instead of skipping them" in
+  Arg.(value & flag & info ["force"] ~doc)
+
+let rec mkdir_p dir =
+  if Sys.file_exists dir then ()
+  else begin
+    let parent = Filename.dirname dir in
+    if parent <> dir then mkdir_p parent;
+    try Unix.mkdir dir 0o755
+    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc content)
+
+let init_cmd_exit base_path force =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let target_root = Filename.concat base_path ".masc/config" in
+  mkdir_p target_root;
+  let written = ref 0 and skipped = ref 0 and failed = ref 0 in
+  List.iter
+    (fun rel ->
+      match Embedded_config.read rel with
+      | None ->
+        Printf.eprintf "init: missing embedded asset: %s\n" rel;
+        incr failed
+      | Some content ->
+        let dest = Filename.concat target_root rel in
+        mkdir_p (Filename.dirname dest);
+        if Sys.file_exists dest && not force then begin
+          Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
+          incr skipped
+        end else begin
+          (try
+             write_file dest content;
+             Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content);
+             incr written
+           with Sys_error msg ->
+             Printf.eprintf "init: %s: %s\n" dest msg;
+             incr failed)
+        end)
+    Embedded_config.file_list;
+  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
+    !written !skipped !failed target_root;
+  if !failed > 0 then 1 else 0
+
+let init_cmd =
+  let doc = "Seed default .masc/config/ from binary-embedded assets" in
+  let info = Cmd.info "init" ~doc in
+  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ doctor_cmd ]
+    info [ doctor_cmd; init_cmd ]
 
 let () = exit (Cmd.eval' cmd)

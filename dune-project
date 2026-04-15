@@ -78,6 +78,8 @@
   (neo4j_bolt_eio (>= 0.4))
   ; OpenTelemetry observability + OTLP exporter
   (opentelemetry (>= 0.13))
-  (ambient-context-eio (>= 0.2))))
+  (ambient-context-eio (>= 0.2))
+  ; Build-time embedder for default config seeds (init subcommand)
+  (crunch (and :build (>= 4.0)))))
  
 ; Formatting

@@ -5,7 +5,7 @@
  (modules main_eio)
  (public_name masc-mcp)
  (package masc_mcp)
- (libraries masc_mcp masc_mcp.config masc_mcp.mcp_session masc_mcp.mcp_transport_protocol masc_eio_context cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio gluten httpun dune-build-info masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process unix fmt yojson str mirage-crypto-rng.unix cohttp cohttp-eio masc_mcp.prompt_registry agent_sdk agent_sdk.llm_provider ))
+ (libraries masc_mcp masc_mcp.config masc_mcp.embedded_config masc_mcp.mcp_session masc_mcp.mcp_transport_protocol masc_eio_context cmdliner eio eio_main h2 h2-eio httpun-eio gluten-eio gluten httpun dune-build-info masc_core masc_types fs_compat time_compat masc_log masc_room masc_backend masc_process unix fmt yojson str mirage-crypto-rng.unix cohttp cohttp-eio masc_mcp.prompt_registry agent_sdk agent_sdk.llm_provider ))
 
 (executable
  (name main_stdio_eio)

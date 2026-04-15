@@ -260,6 +260,42 @@ let test_keeper_list_exposes_last_social_transition_reason () =
               keeper |> member "last_social_transition_reason" |> to_string)
       | None -> fail "expected sangsu row in keeper list")
 
+let test_keeper_list_preserves_known_social_model () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
+        ~social_model:"magentic_ledger_v1";
+      register_keeper_offline_exn config ~name:"sangsu";
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
+      in
+      check bool "tool keeper list ok" true ok;
+      let json = parse_json_exn body in
+      match keeper_json_by_name json "sangsu" with
+      | Some keeper ->
+          check string "known model preserved" "magentic_ledger_v1"
+            Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
+      | None -> fail "expected sangsu row in keeper list")
+
 let () =
   run "keeper_meta_listing"
     [
@@ -271,6 +307,8 @@ let () =
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
           test_case "tool keeper list normalizes unknown social model" `Quick
             test_keeper_list_normalizes_unknown_social_model;
+          test_case "tool keeper list preserves known social model" `Quick
+            test_keeper_list_preserves_known_social_model;
           test_case "tool keeper list exposes last social transition reason"
             `Quick test_keeper_list_exposes_last_social_transition_reason;
         ] );

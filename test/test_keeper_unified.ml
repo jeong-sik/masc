@@ -901,6 +901,10 @@ let test_social_model_registry_round_trip () =
     (Some "bdi_speech_v1")
     (KSM.model_id_of_string "bdi_speech_v1"
     |> Option.map KSM.model_id_to_string);
+  check (option string) "second model id resolves"
+    (Some "magentic_ledger_v1")
+    (KSM.model_id_of_string "magentic_ledger_v1"
+    |> Option.map KSM.model_id_to_string);
   check bool "unknown model id rejected" true
     (Option.is_none (KSM.model_id_of_string "experimental_v99"));
   check string "unknown model normalized to baseline" "bdi_speech_v1"
@@ -2685,6 +2689,77 @@ let test_social_model_infers_board_comment_from_tool_use () =
   check (list string) "tool list preserved"
     ["keeper_board_comment"; "masc_status"] routed.tools_used
 
+let test_social_model_magentic_ledger_silences_tool_only_turn () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let result =
+    make_run_result ~text:"" ~tools:["masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
+  in
+  check string "social model" "magentic_ledger_v1" state.social_model;
+  check string "speech act" "stay_silent"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "active desire reflects progress ledger"
+    (Some "advance_task_progress") state.active_desire;
+  check (option string) "current intention tracks evidence"
+    (Some "record_progress_evidence") state.current_intention;
+  check string "transition reason" "tool_only:progress_ledger"
+    (KSM.transition_reason_to_string transition_reason);
+  check bool "belief summary is ledger shaped" true
+    (contains_substring state.belief_summary "ledger:phase=advancing");
+  check string "visible response suppressed" "" routed.response_text;
+  check (list string) "tool list preserved" ["masc_status"] routed.tools_used
+
+let test_social_model_magentic_ledger_hides_nonvisible_tool_text () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let result =
+    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
+  in
+  check string "social model" "magentic_ledger_v1" state.social_model;
+  check string "speech act" "comment_board"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "board_comment"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check string "transition reason preserved" "tool_only:comment_board"
+    (KSM.transition_reason_to_string transition_reason);
+  check string "non-visible tool turn does not synthesize text" ""
+    routed.response_text;
+  check (list string) "tool list preserved"
+    ["keeper_board_comment"; "masc_status"] routed.tools_used
+
+let test_social_model_magentic_ledger_previous_state_of_meta_restores_model ()
+    =
+  let meta =
+    {
+      minimal_meta with
+      social_model = "magentic_ledger_v1";
+      runtime =
+        {
+          minimal_meta.runtime with
+          last_speech_act = "inform";
+          last_active_desire = "advance_task_progress";
+          last_current_intention = "record_progress_evidence";
+        };
+    }
+  in
+  match KSM.previous_state_of_meta meta with
+  | None -> fail "expected previous social state"
+  | Some state ->
+      check string "social model restored" "magentic_ledger_v1"
+        state.social_model;
+      check string "speech act restored" "inform"
+        (KSM.speech_act_to_string state.speech_act)
+
 let test_keeper_allowed_tools_exclude_heartbeat () =
   let allowed =
     Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names minimal_policy_meta
@@ -3053,6 +3128,12 @@ let () =
             test_social_model_tool_only_turn_carries_previous_state;
           test_case "social model infers board comment from tool use" `Quick
             test_social_model_infers_board_comment_from_tool_use;
+          test_case "magentic ledger silences tool-only turn" `Quick
+            test_social_model_magentic_ledger_silences_tool_only_turn;
+          test_case "magentic ledger hides non-visible tool text" `Quick
+            test_social_model_magentic_ledger_hides_nonvisible_tool_text;
+          test_case "magentic ledger restores previous state model" `Quick
+            test_social_model_magentic_ledger_previous_state_of_meta_restores_model;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick

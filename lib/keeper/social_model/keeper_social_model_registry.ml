@@ -15,6 +15,9 @@ let apply_to_result ~(meta : keeper_meta)
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.apply_to_result ~meta ~observation
         ~previous_state result
+  | Types.Magentic_ledger_v1 ->
+      Keeper_social_model_magentic_ledger_v1.apply_to_result ~meta
+        ~observation ~previous_state result
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
@@ -23,4 +26,7 @@ let derive_failure_state ~(meta : keeper_meta)
   match active_model_of_meta meta with
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.derive_failure_state ~meta
+        ~observation ~previous_state ~reason
+  | Types.Magentic_ledger_v1 ->
+      Keeper_social_model_magentic_ledger_v1.derive_failure_state ~meta
         ~observation ~previous_state ~reason

@@ -319,13 +319,13 @@ let test_orchestra_room_core_shape () =
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
       let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
       let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
-      Alcotest.(check bool) "namespace node exists" true
+      Alcotest.(check bool) "root node exists" true
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "namespace")
+             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "root")
            nodes);
-      Alcotest.(check bool) "namespace block present" true
-        (Yojson.Safe.Util.member "namespace" json <> `Null);
+      Alcotest.(check bool) "root block present" true
+        (Yojson.Safe.Util.member "root" json <> `Null);
       Alcotest.(check int) "session count" 0
         Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
       Alcotest.(check string) "focus kind" "node"

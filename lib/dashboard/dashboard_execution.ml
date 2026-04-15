@@ -256,15 +256,20 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           | _ -> false)
         |> take 20
       in
+      (* Cap removed (2026-04-16): active_tasks is already bounded by
+         how many tasks exist in state, and recent_done is capped at 20
+         above. The previous [take 50] silently truncated the backlog in
+         the dashboard planning view at exactly 50 entries, which surfaced
+         as a "total tasks = 50" bug once the real backlog exceeded that
+         number. The raw list is surfaced instead; frontend paginates. *)
       let all_visible = active_tasks @ recent_done in
-      let limited_tasks = take 50 all_visible in
       let task_fields = [
-        ("tasks", `List (List.map task_json limited_tasks));
+        ("tasks", `List (List.map task_json all_visible));
         ("task_counts", `Assoc [
           ("active", `Int (List.length active_tasks));
           ("done_recent", `Int (List.length recent_done));
           ("total", `Int (List.length tasks));
-          ("shown", `Int (List.length limited_tasks));
+          ("shown", `Int (List.length all_visible));
         ]);
       ] in
       let t_end = Time_compat.now () in

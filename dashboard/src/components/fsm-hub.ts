@@ -895,29 +895,35 @@ export function FsmHub() {
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
         <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
-        ${/* ── Zone 2b: Transition History Trail ── */ ''}
-        <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
+        ${/* ── Zone 2b: Transition History Trail (collapsible) ── */ ''}
+        <${CollapsibleZone} id="transition-trail" title="Transition History" defaultOpen=${true}>
+          <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
+        <//>
 
         ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
         <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
 
-        ${/* ── Zone 3b: Swimlane Timeline ── */ ''}
-        <${SwimlaneTimeline}
-          observations=${view.observations}
-          now=${now}
-          hoveredSegment=${hoveredSegment}
-          onHoverSegment=${setHoveredSegment}
-        />
-
-        ${/* ── Zone 4: Health Grid ── */ ''}
-        <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          <${MeasurementCard} snapshot=${snapshot} />
-          <${InvariantsPanel} snapshot=${snapshot} />
-          <${RecoveryStatePanel}
-            dataRecord=${snapshot.recovery.data_record}
-            fsmCondition=${snapshot.recovery.fsm_condition}
+        ${/* ── Zone 3b: Swimlane Timeline (collapsible) ── */ ''}
+        <${CollapsibleZone} id="swimlane" title="Swimlane Timeline" defaultOpen=${true}>
+          <${SwimlaneTimeline}
+            observations=${view.observations}
+            now=${now}
+            hoveredSegment=${hoveredSegment}
+            onHoverSegment=${setHoveredSegment}
           />
-        </div>
+        <//>
+
+        ${/* ── Zone 4: Health Grid (collapsible) ── */ ''}
+        <${CollapsibleZone} id="health-grid" title="Health Grid" defaultOpen=${true}>
+          <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <${MeasurementCard} snapshot=${snapshot} />
+            <${InvariantsPanel} snapshot=${snapshot} />
+            <${RecoveryStatePanel}
+              dataRecord=${snapshot.recovery.data_record}
+              fsmCondition=${snapshot.recovery.fsm_condition}
+            />
+          </div>
+        <//>
 
         ${/* ── Zone 5: Collapsible Graph ── */ ''}
         <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]"
@@ -1905,6 +1911,68 @@ function TransitionTrail({
           `
         })}
       </div>
+    </div>
+  `
+}
+
+// ── Collapsible Zone ────────────────────────────────────
+
+const COLLAPSED_ZONES_KEY = 'fsm-hub:collapsed-zones'
+
+function loadCollapsedZones(): Set<string> {
+  try {
+    const stored = localStorage.getItem(COLLAPSED_ZONES_KEY)
+    if (stored) return new Set(JSON.parse(stored) as string[])
+  } catch { /* ignore corrupt localStorage */ }
+  return new Set<string>()
+}
+
+function saveCollapsedZones(collapsed: Set<string>): void {
+  try {
+    localStorage.setItem(COLLAPSED_ZONES_KEY, JSON.stringify([...collapsed]))
+  } catch { /* quota exceeded — non-critical */ }
+}
+
+function CollapsibleZone({
+  id,
+  title: zoneTitle,
+  defaultOpen = true,
+  children,
+}: {
+  id: string
+  title: string
+  defaultOpen?: boolean
+  children: unknown
+}) {
+  const [collapsed, setCollapsed] = useState(() => {
+    const stored = loadCollapsedZones()
+    return stored.has(id) ? true : !defaultOpen
+  })
+
+  const toggle = () => {
+    setCollapsed(prev => {
+      const next = !prev
+      const stored = loadCollapsedZones()
+      if (next) stored.add(id)
+      else stored.delete(id)
+      saveCollapsedZones(stored)
+      return next
+    })
+  }
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] overflow-hidden">
+      <button
+        type="button"
+        class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--white-3)] transition-colors cursor-pointer select-none"
+        onClick=${toggle}
+        aria-expanded=${!collapsed}
+        aria-controls=${`zone-${id}`}
+      >
+        <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${zoneTitle}</span>
+        <span class=${`text-[10px] text-[var(--text-dim)] transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}>▾</span>
+      </button>
+      ${!collapsed ? html`<div id=${`zone-${id}`} class="px-4 pb-3">${children}</div>` : null}
     </div>
   `
 }

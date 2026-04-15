@@ -240,6 +240,80 @@ module Masc = struct
     | Worktree_list
     | Worktree_remove
     | Worktree_status
+    (* Expanded coverage for tool_permission_map.ml *)
+    | Autoresearch_swarm_start
+    | Collaboration_graph
+    | Config
+    | Dispatch_escalate
+    | Dispatch_rebalance
+    | Dispatch_recall
+    | Done
+    | Get_metrics
+    | Keeper_msg_result
+    | Observe_alerts
+    | Observe_capacity
+    | Observe_operations
+    | Observe_swarm
+    | Observe_topology
+    | Observe_traces
+    | Policy_approve
+    | Policy_deny
+    | Policy_status
+    | Policy_update
+    | Portal_close
+    | Portal_open
+    | Portal_send
+    | Release
+    | Runtime_ollama_probe
+    | Runtime_verify
+    | Surface_audit
+    | Tool_admin_snapshot
+    | Tool_admin_update
+    | Tool_stats
+    | Unit_define
+    | Unit_list
+    | Unit_reassign
+    | Unit_reparent
+    | Webrtc_answer
+    | Webrtc_offer
+    (* Admin / lifecycle tools *)
+    | Admin_cleanup
+    | Admin_reset
+    | Agent_timeline
+    | Execute
+    | Execute_dry_run
+    | Force_leave
+    | Gc
+    | Gc_force
+    | Library_add
+    | Library_list
+    | Library_promote
+    | Library_read
+    | Library_search
+    | Listen
+    | Mcp_session
+    | Operator_judgment_write
+    | Pause
+    | Persona_list
+    | Recall_search
+    | Resume
+    | Room_delete
+    | Run_deliverable
+    | Run_get
+    | Run_init
+    | Run_list
+    | Run_log
+    | Run_plan
+    | Set_param
+    | Set_room
+    | Spawn
+    | Start
+    | Verify_auto
+    | Verify_pending
+    | Verify_request
+    | Verify_status
+    | Verify_submit
+    | Voice_ping_pong
 
   let to_string = function
     | A2a_delegate -> "masc_a2a_delegate"
@@ -330,6 +404,78 @@ module Masc = struct
     | Worktree_list -> "masc_worktree_list"
     | Worktree_remove -> "masc_worktree_remove"
     | Worktree_status -> "masc_worktree_status"
+    | Autoresearch_swarm_start -> "masc_autoresearch_swarm_start"
+    | Collaboration_graph -> "masc_collaboration_graph"
+    | Config -> "masc_config"
+    | Dispatch_escalate -> "masc_dispatch_escalate"
+    | Dispatch_rebalance -> "masc_dispatch_rebalance"
+    | Dispatch_recall -> "masc_dispatch_recall"
+    | Done -> "masc_done"
+    | Get_metrics -> "masc_get_metrics"
+    | Keeper_msg_result -> "masc_keeper_msg_result"
+    | Observe_alerts -> "masc_observe_alerts"
+    | Observe_capacity -> "masc_observe_capacity"
+    | Observe_operations -> "masc_observe_operations"
+    | Observe_swarm -> "masc_observe_swarm"
+    | Observe_topology -> "masc_observe_topology"
+    | Observe_traces -> "masc_observe_traces"
+    | Policy_approve -> "masc_policy_approve"
+    | Policy_deny -> "masc_policy_deny"
+    | Policy_status -> "masc_policy_status"
+    | Policy_update -> "masc_policy_update"
+    | Portal_close -> "masc_portal_close"
+    | Portal_open -> "masc_portal_open"
+    | Portal_send -> "masc_portal_send"
+    | Release -> "masc_release"
+    | Runtime_ollama_probe -> "masc_runtime_ollama_probe"
+    | Runtime_verify -> "masc_runtime_verify"
+    | Surface_audit -> "masc_surface_audit"
+    | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
+    | Tool_admin_update -> "masc_tool_admin_update"
+    | Tool_stats -> "masc_tool_stats"
+    | Unit_define -> "masc_unit_define"
+    | Unit_list -> "masc_unit_list"
+    | Unit_reassign -> "masc_unit_reassign"
+    | Unit_reparent -> "masc_unit_reparent"
+    | Webrtc_answer -> "masc_webrtc_answer"
+    | Webrtc_offer -> "masc_webrtc_offer"
+    | Admin_cleanup -> "masc_admin_cleanup"
+    | Admin_reset -> "masc_admin_reset"
+    | Agent_timeline -> "masc_agent_timeline"
+    | Execute -> "masc_execute"
+    | Execute_dry_run -> "masc_execute_dry_run"
+    | Force_leave -> "masc_force_leave"
+    | Gc -> "masc_gc"
+    | Gc_force -> "masc_gc_force"
+    | Library_add -> "masc_library_add"
+    | Library_list -> "masc_library_list"
+    | Library_promote -> "masc_library_promote"
+    | Library_read -> "masc_library_read"
+    | Library_search -> "masc_library_search"
+    | Listen -> "masc_listen"
+    | Mcp_session -> "masc_mcp_session"
+    | Operator_judgment_write -> "masc_operator_judgment_write"
+    | Pause -> "masc_pause"
+    | Persona_list -> "masc_persona_list"
+    | Recall_search -> "masc_recall_search"
+    | Resume -> "masc_resume"
+    | Room_delete -> "masc_room_delete"
+    | Run_deliverable -> "masc_run_deliverable"
+    | Run_get -> "masc_run_get"
+    | Run_init -> "masc_run_init"
+    | Run_list -> "masc_run_list"
+    | Run_log -> "masc_run_log"
+    | Run_plan -> "masc_run_plan"
+    | Set_param -> "masc_set_param"
+    | Set_room -> "masc_set_room"
+    | Spawn -> "masc_spawn"
+    | Start -> "masc_start"
+    | Verify_auto -> "masc_verify_auto"
+    | Verify_pending -> "masc_verify_pending"
+    | Verify_request -> "masc_verify_request"
+    | Verify_status -> "masc_verify_status"
+    | Verify_submit -> "masc_verify_submit"
+    | Voice_ping_pong -> "masc_voice_ping_pong"
 
   let of_string = function
     | "masc_a2a_delegate" -> Some A2a_delegate
@@ -420,6 +566,78 @@ module Masc = struct
     | "masc_worktree_list" -> Some Worktree_list
     | "masc_worktree_remove" -> Some Worktree_remove
     | "masc_worktree_status" -> Some Worktree_status
+    | "masc_autoresearch_swarm_start" -> Some Autoresearch_swarm_start
+    | "masc_collaboration_graph" -> Some Collaboration_graph
+    | "masc_config" -> Some Config
+    | "masc_dispatch_escalate" -> Some Dispatch_escalate
+    | "masc_dispatch_rebalance" -> Some Dispatch_rebalance
+    | "masc_dispatch_recall" -> Some Dispatch_recall
+    | "masc_done" -> Some Done
+    | "masc_get_metrics" -> Some Get_metrics
+    | "masc_keeper_msg_result" -> Some Keeper_msg_result
+    | "masc_observe_alerts" -> Some Observe_alerts
+    | "masc_observe_capacity" -> Some Observe_capacity
+    | "masc_observe_operations" -> Some Observe_operations
+    | "masc_observe_swarm" -> Some Observe_swarm
+    | "masc_observe_topology" -> Some Observe_topology
+    | "masc_observe_traces" -> Some Observe_traces
+    | "masc_policy_approve" -> Some Policy_approve
+    | "masc_policy_deny" -> Some Policy_deny
+    | "masc_policy_status" -> Some Policy_status
+    | "masc_policy_update" -> Some Policy_update
+    | "masc_portal_close" -> Some Portal_close
+    | "masc_portal_open" -> Some Portal_open
+    | "masc_portal_send" -> Some Portal_send
+    | "masc_release" -> Some Release
+    | "masc_runtime_ollama_probe" -> Some Runtime_ollama_probe
+    | "masc_runtime_verify" -> Some Runtime_verify
+    | "masc_surface_audit" -> Some Surface_audit
+    | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
+    | "masc_tool_admin_update" -> Some Tool_admin_update
+    | "masc_tool_stats" -> Some Tool_stats
+    | "masc_unit_define" -> Some Unit_define
+    | "masc_unit_list" -> Some Unit_list
+    | "masc_unit_reassign" -> Some Unit_reassign
+    | "masc_unit_reparent" -> Some Unit_reparent
+    | "masc_webrtc_answer" -> Some Webrtc_answer
+    | "masc_webrtc_offer" -> Some Webrtc_offer
+    | "masc_admin_cleanup" -> Some Admin_cleanup
+    | "masc_admin_reset" -> Some Admin_reset
+    | "masc_agent_timeline" -> Some Agent_timeline
+    | "masc_execute" -> Some Execute
+    | "masc_execute_dry_run" -> Some Execute_dry_run
+    | "masc_force_leave" -> Some Force_leave
+    | "masc_gc" -> Some Gc
+    | "masc_gc_force" -> Some Gc_force
+    | "masc_library_add" -> Some Library_add
+    | "masc_library_list" -> Some Library_list
+    | "masc_library_promote" -> Some Library_promote
+    | "masc_library_read" -> Some Library_read
+    | "masc_library_search" -> Some Library_search
+    | "masc_listen" -> Some Listen
+    | "masc_mcp_session" -> Some Mcp_session
+    | "masc_operator_judgment_write" -> Some Operator_judgment_write
+    | "masc_pause" -> Some Pause
+    | "masc_persona_list" -> Some Persona_list
+    | "masc_recall_search" -> Some Recall_search
+    | "masc_resume" -> Some Resume
+    | "masc_room_delete" -> Some Room_delete
+    | "masc_run_deliverable" -> Some Run_deliverable
+    | "masc_run_get" -> Some Run_get
+    | "masc_run_init" -> Some Run_init
+    | "masc_run_list" -> Some Run_list
+    | "masc_run_log" -> Some Run_log
+    | "masc_run_plan" -> Some Run_plan
+    | "masc_set_param" -> Some Set_param
+    | "masc_set_room" -> Some Set_room
+    | "masc_spawn" -> Some Spawn
+    | "masc_start" -> Some Start
+    | "masc_verify_auto" -> Some Verify_auto
+    | "masc_verify_pending" -> Some Verify_pending
+    | "masc_verify_request" -> Some Verify_request
+    | "masc_verify_status" -> Some Verify_status
+    | "masc_verify_submit" -> Some Verify_submit
+    | "masc_voice_ping_pong" -> Some Voice_ping_pong
     | _ -> None
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
@@ -466,15 +684,30 @@ module Masc_keeper = struct
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
+(** Top-level tool identifier.
+    [Infra] covers prefix-less infrastructure tools (channel_gate etc.)
+    that do not belong to the Keeper/Masc/Masc_keeper surfaces. *)
+type infra =
+  | Channel_gate
+
+let infra_to_string = function
+  | Channel_gate -> "channel_gate"
+
+let infra_of_string = function
+  | "channel_gate" -> Some Channel_gate
+  | _ -> None
+
 type t =
   | Keeper of Keeper.t
   | Masc of Masc.t
   | Masc_keeper of Masc_keeper.t
+  | Infra of infra
 
 let to_string = function
   | Keeper k -> Keeper.to_string k
   | Masc m -> Masc.to_string m
   | Masc_keeper mk -> Masc_keeper.to_string mk
+  | Infra i -> infra_to_string i
 
 let of_string s =
   match Keeper.of_string s with
@@ -485,7 +718,10 @@ let of_string s =
     | None ->
       match Masc.of_string s with
       | Some m -> Some (Masc m)
-      | None -> None
+      | None ->
+        match infra_of_string s with
+        | Some i -> Some (Infra i)
+        | None -> None
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 

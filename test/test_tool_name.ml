@@ -34,7 +34,28 @@ let all_masc : Tool_name.Masc.t list =
   ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
-  ; Worktree_status ]
+  ; Worktree_status
+  ; Autoresearch_swarm_start; Collaboration_graph; Config
+  ; Dispatch_escalate; Dispatch_rebalance; Dispatch_recall; Done
+  ; Get_metrics; Keeper_msg_result
+  ; Observe_alerts; Observe_capacity; Observe_operations
+  ; Observe_swarm; Observe_topology; Observe_traces
+  ; Policy_approve; Policy_deny; Policy_status; Policy_update
+  ; Portal_close; Portal_open; Portal_send; Release
+  ; Runtime_ollama_probe; Runtime_verify; Surface_audit
+  ; Tool_admin_snapshot; Tool_admin_update; Tool_stats
+  ; Unit_define; Unit_list; Unit_reassign; Unit_reparent
+  ; Webrtc_answer; Webrtc_offer
+  ; Admin_cleanup; Admin_reset; Agent_timeline
+  ; Execute; Execute_dry_run; Force_leave
+  ; Gc; Gc_force
+  ; Library_add; Library_list; Library_promote; Library_read; Library_search
+  ; Listen; Mcp_session; Operator_judgment_write; Pause; Persona_list
+  ; Recall_search; Resume; Room_delete
+  ; Run_deliverable; Run_get; Run_init; Run_list; Run_log; Run_plan
+  ; Set_param; Set_room; Spawn; Start
+  ; Verify_auto; Verify_pending; Verify_request; Verify_status; Verify_submit
+  ; Voice_ping_pong ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =
   [ Clear; Compact; Create_from_persona; Down; List; Msg; Repair; Reset
@@ -165,6 +186,15 @@ let test_shard_tools_parse () =
       (Printf.sprintf "Tool_shard names not in Tool_name: [%s]"
          (String.concat "; " unparsed))
 
+let test_permission_map_parse () =
+  let unparsed = List.filter (fun name ->
+    Tool_name.of_string name = None
+  ) Tool_permission_map.known_tool_names in
+  if unparsed <> [] then
+    Alcotest.fail
+      (Printf.sprintf "Tool_permission_map names not in Tool_name: [%s]"
+         (String.concat "; " unparsed))
+
 let () =
   Alcotest.run "Tool_name" [
     "roundtrip", [
@@ -183,5 +213,6 @@ let () =
     ];
     "coverage", [
       Alcotest.test_case "shard tools parse" `Quick test_shard_tools_parse;
+      Alcotest.test_case "permission_map parse" `Quick test_permission_map_parse;
     ];
   ]

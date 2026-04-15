@@ -146,6 +146,78 @@ module Masc : sig
     | Worktree_list
     | Worktree_remove
     | Worktree_status
+    | Autoresearch_swarm_start
+    | Collaboration_graph
+    | Config
+    | Dispatch_escalate
+    | Dispatch_rebalance
+    | Dispatch_recall
+    | Done
+    | Get_metrics
+    | Keeper_msg_result
+    | Observe_alerts
+    | Observe_capacity
+    | Observe_operations
+    | Observe_swarm
+    | Observe_topology
+    | Observe_traces
+    | Policy_approve
+    | Policy_deny
+    | Policy_status
+    | Policy_update
+    | Portal_close
+    | Portal_open
+    | Portal_send
+    | Release
+    | Runtime_ollama_probe
+    | Runtime_verify
+    | Surface_audit
+    | Tool_admin_snapshot
+    | Tool_admin_update
+    | Tool_stats
+    | Unit_define
+    | Unit_list
+    | Unit_reassign
+    | Unit_reparent
+    | Webrtc_answer
+    | Webrtc_offer
+    | Admin_cleanup
+    | Admin_reset
+    | Agent_timeline
+    | Execute
+    | Execute_dry_run
+    | Force_leave
+    | Gc
+    | Gc_force
+    | Library_add
+    | Library_list
+    | Library_promote
+    | Library_read
+    | Library_search
+    | Listen
+    | Mcp_session
+    | Operator_judgment_write
+    | Pause
+    | Persona_list
+    | Recall_search
+    | Resume
+    | Room_delete
+    | Run_deliverable
+    | Run_get
+    | Run_init
+    | Run_list
+    | Run_log
+    | Run_plan
+    | Set_param
+    | Set_room
+    | Spawn
+    | Start
+    | Verify_auto
+    | Verify_pending
+    | Verify_request
+    | Verify_status
+    | Verify_submit
+    | Voice_ping_pong
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -170,10 +242,18 @@ module Masc_keeper : sig
   val pp : Format.formatter -> t -> unit
 end
 
+(** Infrastructure-level tools with no keeper_*/masc_* prefix. *)
+type infra =
+  | Channel_gate
+
+val infra_to_string : infra -> string
+val infra_of_string : string -> infra option
+
 type t =
   | Keeper of Keeper.t
   | Masc of Masc.t
   | Masc_keeper of Masc_keeper.t
+  | Infra of infra
 
 val to_string : t -> string
 val of_string : string -> t option

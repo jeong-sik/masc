@@ -5,7 +5,7 @@
        commands that should/shouldn't trigger pre-validation.
     2. [gh_mutates_entity]: pure classifier covering the cache
        invalidation triggers.
-    3. [Keeper_gh_cache.validate_number]: fast-path returns ([`Unknown]
+    3. [Keeper_exec_github.validate_number]: fast-path returns ([`Unknown]
        on empty repo_slug, zero number) that don't require subprocess. *)
 
 open Alcotest
@@ -19,8 +19,8 @@ let mutates = Masc_mcp.Keeper_exec_github.gh_mutates_entity
    Pretty-print and equality are trivial. *)
 let entity_kind_testable =
   let pp fmt = function
-    | Masc_mcp.Keeper_gh_cache.PR -> Format.fprintf fmt "PR"
-    | Masc_mcp.Keeper_gh_cache.Issue -> Format.fprintf fmt "Issue"
+    | Masc_mcp.Keeper_exec_github.PR -> Format.fprintf fmt "PR"
+    | Masc_mcp.Keeper_exec_github.Issue -> Format.fprintf fmt "Issue"
   in
   testable pp ( = )
 
@@ -32,32 +32,32 @@ let target_testable = option (pair entity_kind_testable int)
 
 let test_extract_pr_view_number () =
   check target_testable "pr view 123"
-    (Some (Masc_mcp.Keeper_gh_cache.PR, 123))
+    (Some (Masc_mcp.Keeper_exec_github.PR, 123))
     (extract "pr view 123")
 
 let test_extract_pr_view_with_flags () =
   check target_testable "pr view 456 --json title,body"
-    (Some (Masc_mcp.Keeper_gh_cache.PR, 456))
+    (Some (Masc_mcp.Keeper_exec_github.PR, 456))
     (extract "pr view 456 --json title,body")
 
 let test_extract_pr_merge_number () =
   check target_testable "pr merge 789 --squash"
-    (Some (Masc_mcp.Keeper_gh_cache.PR, 789))
+    (Some (Masc_mcp.Keeper_exec_github.PR, 789))
     (extract "pr merge 789 --squash")
 
 let test_extract_pr_comment_number () =
   check target_testable "pr comment 42 --body 'hi'"
-    (Some (Masc_mcp.Keeper_gh_cache.PR, 42))
+    (Some (Masc_mcp.Keeper_exec_github.PR, 42))
     (extract "pr comment 42 --body hi")
 
 let test_extract_issue_view_number () =
   check target_testable "issue view 100"
-    (Some (Masc_mcp.Keeper_gh_cache.Issue, 100))
+    (Some (Masc_mcp.Keeper_exec_github.Issue, 100))
     (extract "issue view 100")
 
 let test_extract_issue_close_number () =
   check target_testable "issue close 17 --reason completed"
-    (Some (Masc_mcp.Keeper_gh_cache.Issue, 17))
+    (Some (Masc_mcp.Keeper_exec_github.Issue, 17))
     (extract "issue close 17 --reason completed")
 
 let test_extract_pr_list_returns_none () =
@@ -91,7 +91,7 @@ let test_extract_unknown_command_returns_none () =
 
 let test_extract_extra_whitespace () =
   check target_testable "multiple spaces around 'pr view 55'"
-    (Some (Masc_mcp.Keeper_gh_cache.PR, 55))
+    (Some (Masc_mcp.Keeper_exec_github.PR, 55))
     (extract "   pr   view    55   ")
 
 let test_extract_zero_is_none () =
@@ -121,27 +121,27 @@ let test_extract_flag_before_number_is_none () =
 
 let test_mutates_pr_create () =
   check (option entity_kind_testable) "pr create"
-    (Some Masc_mcp.Keeper_gh_cache.PR)
+    (Some Masc_mcp.Keeper_exec_github.PR)
     (mutates "pr create --title foo")
 
 let test_mutates_pr_close () =
   check (option entity_kind_testable) "pr close"
-    (Some Masc_mcp.Keeper_gh_cache.PR)
+    (Some Masc_mcp.Keeper_exec_github.PR)
     (mutates "pr close 123")
 
 let test_mutates_pr_merge () =
   check (option entity_kind_testable) "pr merge"
-    (Some Masc_mcp.Keeper_gh_cache.PR)
+    (Some Masc_mcp.Keeper_exec_github.PR)
     (mutates "pr merge 456 --squash")
 
 let test_mutates_issue_create () =
   check (option entity_kind_testable) "issue create"
-    (Some Masc_mcp.Keeper_gh_cache.Issue)
+    (Some Masc_mcp.Keeper_exec_github.Issue)
     (mutates "issue create --title bug")
 
 let test_mutates_issue_close () =
   check (option entity_kind_testable) "issue close"
-    (Some Masc_mcp.Keeper_gh_cache.Issue)
+    (Some Masc_mcp.Keeper_exec_github.Issue)
     (mutates "issue close 17")
 
 let test_mutates_pr_list_returns_none () =
@@ -161,7 +161,7 @@ let test_mutates_unknown_command_returns_none () =
   check (option entity_kind_testable) "workflow list" None (mutates "workflow list")
 
 (* ====================================================================== *)
-(* Keeper_gh_cache.validate_number fast-path                                *)
+(* Keeper_exec_github.validate_number fast-path                                *)
 (* ====================================================================== *)
 
 (* These tests only exercise the guard clauses that short-circuit before
@@ -178,8 +178,8 @@ let dummy_config () : Room.config =
 let test_validate_empty_slug_returns_unknown () =
   let config = dummy_config () in
   let result =
-    Masc_mcp.Keeper_gh_cache.validate_number
-      ~config ~repo_slug:"" ~kind:Masc_mcp.Keeper_gh_cache.PR ~number:42
+    Masc_mcp.Keeper_exec_github.validate_number
+      ~config ~repo_slug:"" ~kind:Masc_mcp.Keeper_exec_github.PR ~number:42
   in
   check bool "empty slug -> Unknown" true
     (match result with `Unknown -> true | _ -> false)
@@ -187,8 +187,8 @@ let test_validate_empty_slug_returns_unknown () =
 let test_validate_zero_number_returns_unknown () =
   let config = dummy_config () in
   let result =
-    Masc_mcp.Keeper_gh_cache.validate_number
-      ~config ~repo_slug:"owner/repo" ~kind:Masc_mcp.Keeper_gh_cache.PR ~number:0
+    Masc_mcp.Keeper_exec_github.validate_number
+      ~config ~repo_slug:"owner/repo" ~kind:Masc_mcp.Keeper_exec_github.PR ~number:0
   in
   check bool "zero number -> Unknown" true
     (match result with `Unknown -> true | _ -> false)
@@ -196,14 +196,14 @@ let test_validate_zero_number_returns_unknown () =
 let test_validate_negative_number_returns_unknown () =
   let config = dummy_config () in
   let result =
-    Masc_mcp.Keeper_gh_cache.validate_number
-      ~config ~repo_slug:"owner/repo" ~kind:Masc_mcp.Keeper_gh_cache.Issue ~number:(-1)
+    Masc_mcp.Keeper_exec_github.validate_number
+      ~config ~repo_slug:"owner/repo" ~kind:Masc_mcp.Keeper_exec_github.Issue ~number:(-1)
   in
   check bool "negative number -> Unknown" true
     (match result with `Unknown -> true | _ -> false)
 
 let test_metrics_initial () =
-  let m = Masc_mcp.Keeper_gh_cache.metrics () in
+  let m = Masc_mcp.Keeper_exec_github.cache_metrics () in
   (* Keys must exist even before any call. *)
   check bool "has hits" true (List.mem_assoc "hits" m);
   check bool "has misses" true (List.mem_assoc "misses" m);

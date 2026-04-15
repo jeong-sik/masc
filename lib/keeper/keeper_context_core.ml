@@ -230,6 +230,13 @@ let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
       | _ -> None)
     msg.content
 
+let tool_result_ids_of_message (msg : Agent_sdk.Types.message) : string list =
+  List.filter_map
+    (function
+      | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+      | _ -> None)
+    msg.content
+
 let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
   List.exists
     (function
@@ -276,6 +283,61 @@ let tool_result_text_of_block
     | Some value -> Yojson.Safe.to_string value
     | None -> Printf.sprintf "[tool result %s]" tool_use_id
 
+let tool_use_text_of_block
+    ~(tool_use_id : string)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t) : string =
+  let tool_name = Inference_utils.sanitize_text_utf8 (String.trim tool_name) in
+  let tool_use_id = Inference_utils.sanitize_text_utf8 (String.trim tool_use_id) in
+  let tool_name =
+    if tool_name = "" then "unknown_tool" else tool_name
+  in
+  let input_json = Yojson.Safe.to_string input |> Inference_utils.sanitize_text_utf8 in
+  Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
+
+let repair_dangling_tool_use_messages
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let repair_with_next
+      (current : Agent_sdk.Types.message)
+      (next_opt : Agent_sdk.Types.message option) =
+    let next_tool_result_ids =
+      match next_opt with
+      | Some next -> tool_result_ids_of_message next
+      | None -> []
+    in
+    let has_dangling =
+      List.exists
+        (function
+          | Agent_sdk.Types.ToolUse { id; _ } ->
+              not (List.mem id next_tool_result_ids)
+          | _ -> false)
+        current.content
+    in
+    if not has_dangling then current
+    else
+      let content =
+        List.map
+          (function
+            | Agent_sdk.Types.ToolUse { id; name; input }
+              when not (List.mem id next_tool_result_ids) ->
+                Agent_sdk.Types.Text
+                  (tool_use_text_of_block
+                     ~tool_use_id:id ~tool_name:name ~input)
+            | other -> other)
+          current.content
+      in
+      { current with content }
+  in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | [ current ] ->
+        List.rev (repair_with_next current None :: acc)
+    | current :: ((next :: _) as rest) ->
+        let repaired = repair_with_next current (Some next) in
+        loop (repaired :: acc) rest
+  in
+  loop [] messages
+
 let repair_orphan_tool_result_messages
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   let rec loop prev acc = function
@@ -320,6 +382,12 @@ let repair_orphan_tool_result_messages
   in
   loop None [] messages
 
+let repair_broken_tool_call_pairs
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  messages
+  |> repair_dangling_tool_use_messages
+  |> repair_orphan_tool_result_messages
+
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
     ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
@@ -335,7 +403,7 @@ let deserialize_context (s : string) ~max_tokens : working_context =
   let system_prompt = json |> member "system_prompt" |> to_string in
   let messages =
     json |> member "messages" |> to_list |> List.map message_of_json
-    |> repair_orphan_tool_result_messages
+    |> repair_broken_tool_call_pairs
   in
   let _legacy_token_count = json |> member "token_count" |> to_int_option in
   sync_oas_context
@@ -918,7 +986,7 @@ let sanitize_oas_checkpoint
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
   let messages =
-    if repair_orphans then repair_orphan_tool_result_messages messages
+    if repair_orphans then repair_broken_tool_call_pairs messages
     else messages
   in
   ({ cp with messages }, stats)
@@ -949,7 +1017,7 @@ let context_of_oas_checkpoint
       trim_messages_preserving_pairs cp.messages
         ~max_count:max_checkpoint_messages
     in
-    if repair_orphans then repair_orphan_tool_result_messages messages
+    if repair_orphans then repair_broken_tool_call_pairs messages
     else messages
   in
   sync_oas_context
@@ -1006,7 +1074,7 @@ let save_oas_checkpoint
   let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
   let capped_messages =
     if capped_messages_were_truncated
-    then repair_orphan_tool_result_messages capped_messages
+    then repair_broken_tool_call_pairs capped_messages
     else capped_messages
   in
   let state =

@@ -94,6 +94,17 @@ let tool_result_content_for_id ~tool_use_id msgs =
         msg.content)
     msgs
 
+let has_tool_use_id ~tool_use_id msgs =
+  List.exists
+    (fun (msg : Agent_sdk.Types.message) ->
+      List.exists
+        (function
+          | Agent_sdk.Types.ToolUse { id; _ } ->
+              String.equal id tool_use_id
+          | _ -> false)
+        msg.content)
+    msgs
+
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   match
@@ -1115,6 +1126,78 @@ let test_deserialize_context_preserves_valid_tool_pair () =
     (Some "paired output")
     (tool_result_content_for_id ~tool_use_id:tool_id roundtrip.messages)
 
+let test_deserialize_context_repairs_dangling_tool_use () =
+  let tool_id = "call-dangling-use-json" in
+  let ctx =
+    KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+    |> fun ctx ->
+    KEC.append_many ctx
+      [
+        Agent_sdk.Types.user_msg "read the file";
+        tool_use_message ~tool_use_id:tool_id ~name:"keeper_board_comment" ();
+        Agent_sdk.Types.assistant_msg "done";
+      ]
+  in
+  let roundtrip =
+    KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
+  in
+  check bool "dangling tool use removed on deserialize" false
+    (has_tool_use_id ~tool_use_id:tool_id roundtrip.messages);
+  match List.nth_opt roundtrip.messages 1 with
+  | Some { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+      check bool "dangling tool use downgraded to text on deserialize" true
+        (contains_substring text "tool use keeper_board_comment");
+      check bool "dangling tool use id retained on deserialize" true
+        (contains_substring text tool_id)
+  | _ -> fail "expected dangling tool use to downgrade to text on deserialize"
+
+let test_load_context_repairs_dangling_tool_use_after_cap () =
+  let base_dir = temp_dir "keeper_lifecycle_load_dangling_tool_use" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-dangling-tool-use" in
+      let session =
+        KEC.create_session ~session_id:trace_id ~base_dir
+      in
+      let tool_id = "tool-dangling-load" in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [
+            Agent_sdk.Types.user_msg "inspect file";
+            tool_use_message ~tool_use_id:tool_id ~name:"keeper_board_comment" ();
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "save_oas failed: %s" e));
+      let (_session, loaded_opt) =
+        KEC.load_context_from_checkpoint
+          ~max_checkpoint_messages:8
+          ~trace_id
+          ~primary_model_max_tokens:64_000
+          ~base_dir
+      in
+      match loaded_opt with
+      | None -> fail "expected checkpoint context to load"
+      | Some loaded ->
+          check bool "dangling tool use removed on load" false
+            (has_tool_use_id ~tool_use_id:tool_id loaded.messages);
+          match List.nth_opt loaded.messages 1 with
+          | Some { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+              check bool "dangling tool use downgraded to text on load" true
+                (contains_substring text "tool use keeper_board_comment");
+              check bool "dangling tool use id retained on load" true
+                (contains_substring text tool_id)
+          | _ ->
+              fail "expected dangling tool use to downgrade to text on load")
+
 let test_save_oas_checkpoint_strips_summarized_world_state () =
   let base_dir = temp_dir "keeper_lifecycle_save_summary_strip" in
   Fun.protect
@@ -1571,6 +1654,10 @@ let () =
             test_deserialize_context_repairs_orphan_tool_result;
           test_case "deserialize preserves valid tool pair" `Quick
             test_deserialize_context_preserves_valid_tool_pair;
+          test_case "deserialize repairs dangling tool use" `Quick
+            test_deserialize_context_repairs_dangling_tool_use;
+          test_case "load repairs dangling tool use after cap" `Quick
+            test_load_context_repairs_dangling_tool_use_after_cap;
         ] );
       ( "compact_policy",
         [

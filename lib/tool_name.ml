@@ -51,6 +51,7 @@ module Keeper = struct
     | Voice_session_start
     | Voice_sessions
     | Voice_speak
+    | Write
 
   let to_string = function
     | Bash -> "keeper_bash"
@@ -98,6 +99,7 @@ module Keeper = struct
     | Voice_session_start -> "keeper_voice_session_start"
     | Voice_sessions -> "keeper_voice_sessions"
     | Voice_speak -> "keeper_voice_speak"
+    | Write -> "keeper_write"
 
   let of_string = function
     | "keeper_bash" -> Some Bash
@@ -145,6 +147,7 @@ module Keeper = struct
     | "keeper_voice_session_start" -> Some Voice_session_start
     | "keeper_voice_sessions" -> Some Voice_sessions
     | "keeper_voice_speak" -> Some Voice_speak
+    | "keeper_write" -> Some Write
     | _ -> None
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
@@ -196,6 +199,8 @@ module Masc = struct
     | Dispatch_assign
     | Dispatch_plan
     | Find_by_capability
+    | Governance_feed
+    | Governance_status
     | Heartbeat
     | Join
     | Leave
@@ -286,6 +291,8 @@ module Masc = struct
     | Dispatch_assign -> "masc_dispatch_assign"
     | Dispatch_plan -> "masc_dispatch_plan"
     | Find_by_capability -> "masc_find_by_capability"
+    | Governance_feed -> "masc_governance_feed"
+    | Governance_status -> "masc_governance_status"
     | Heartbeat -> "masc_heartbeat"
     | Join -> "masc_join"
     | Leave -> "masc_leave"
@@ -376,6 +383,8 @@ module Masc = struct
     | "masc_dispatch_assign" -> Some Dispatch_assign
     | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_find_by_capability" -> Some Find_by_capability
+    | "masc_governance_feed" -> Some Governance_feed
+    | "masc_governance_status" -> Some Governance_status
     | "masc_heartbeat" -> Some Heartbeat
     | "masc_join" -> Some Join
     | "masc_leave" -> Some Leave

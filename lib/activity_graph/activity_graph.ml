@@ -393,15 +393,15 @@ let span_end_kind = function
   | _ -> None
 
 let span_end_status = function
-  | "task.done" -> "completed"
-  | "task.released" -> "released"
-  | "task.cancelled" -> "cancelled"
-  | "agent.left" -> "left"
-  | "agent.retired" -> "retired"
-  | "operation.finalized" -> "finalized"
-  | "operation.stopped" -> "stopped"
-  | "keeper.autonomy_completed" -> "completed"
-  | _ -> "ended"
+  | "task.done" -> Span_completed
+  | "task.released" -> Span_released
+  | "task.cancelled" -> Span_cancelled
+  | "agent.left" -> Span_left
+  | "agent.retired" -> Span_retired
+  | "operation.finalized" -> Span_finalized
+  | "operation.stopped" -> Span_stopped
+  | "keeper.autonomy_completed" -> Span_completed
+  | _ -> Span_ended
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
   let events = list_events config ~kinds:[] ~after_seq:0 ~limit () in
@@ -460,7 +460,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
       end_ms = now_ms;
       span_kind = sk;
       label;
-      span_status = "open";
+      span_status = Span_open;
     } :: !closed_spans
   ) open_spans;
   let all_spans = List.rev !closed_spans in

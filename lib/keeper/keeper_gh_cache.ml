@@ -18,28 +18,10 @@ type cache_entry = {
 }
 
 (* ------------------------------------------------------------------ *)
-(* Tuning constants — SSOT for keeper_gh_cache behavior.               *)
-(* If these need to vary at runtime, migrate to                        *)
-(* Keeper_tool_policy_config.t ([gh_cache] section in tool_policy.toml)*)
-(* following the pr_create_timeout_sec pattern.                        *)
+(* Tuning constants — read from [gh_cache] section in                  *)
+(* config/tool_policy.toml via Keeper_tool_policy accessors.           *)
+(* Fallback defaults are in the accessor functions (policy not loaded). *)
 (* ------------------------------------------------------------------ *)
-
-(** Time-to-live for cached PR/issue number lists.
-    120 s keeps entries fresh enough that newly-created PRs appear within
-    ~2 minutes, while avoiding a subprocess per validation call. *)
-let cache_ttl_sec = 120.0
-
-(** Page size for the [gh api repos/.../pulls|issues?per_page=N] REST
-    call. Repos with >100 open PRs will miss older numbers — those
-    fall to [`Unknown] (fail-open), which is safer than a hard rejection. *)
-let fetch_page_size = 100
-
-(** Subprocess timeout for the [gh api] fetch call.
-    Must be long enough for a cold gh-cli invocation behind a network
-    proxy, short enough that a stalled gh process doesn't block keeper
-    turns. 10 s matches the preflight-check timeout in
-    Keeper_exec_preflight. *)
-let fetch_timeout_sec = 10.0
 
 let kind_path = function PR -> "pulls" | Issue -> "issues"
 
@@ -87,7 +69,7 @@ let fetch_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_
   =
   let endpoint =
     Printf.sprintf "repos/%s/%s?state=all&per_page=%d"
-      repo_slug (kind_path kind) fetch_page_size
+      repo_slug (kind_path kind) (Keeper_tool_policy.gh_cache_fetch_page_size ())
   in
   let raw =
     Printf.sprintf "gh api %s --jq %s"
@@ -98,7 +80,7 @@ let fetch_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_
   let shell = Printf.sprintf "%s 2>/dev/null" scoped in
   match
     Process_eio.run_argv_with_status
-      ~timeout_sec:fetch_timeout_sec
+      ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
       [ "/bin/zsh"; "-lc"; shell ]
   with
   | Unix.WEXITED 0, out -> Some (parse_numbers_from_jq_output out)
@@ -113,7 +95,7 @@ let fetch_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_
 let now () = Unix.gettimeofday ()
 
 let entry_is_fresh entry =
-  entry.populated && now () -. entry.fetched_at < cache_ttl_sec
+  entry.populated && now () -. entry.fetched_at < Keeper_tool_policy.gh_cache_ttl_sec ()
 
 (** Read or populate the entry for [(repo_slug, kind)].
     Returns the entry; [populated=false] means fetch failed. *)

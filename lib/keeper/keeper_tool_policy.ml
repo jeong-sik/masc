@@ -122,6 +122,33 @@ let pr_create_timeout_sec () : float =
   | None -> 30.0
   | Some cfg -> Keeper_tool_policy_config.pr_create_timeout_sec cfg
 
+(* ── GH cache config accessors (config-driven) ─────────────── *)
+
+let gh_cache_ttl_sec () : float =
+  match !policy_config with
+  | None -> 120.0
+  | Some cfg -> Keeper_tool_policy_config.gh_cache_ttl_sec cfg
+
+let gh_cache_fetch_page_size () : int =
+  match !policy_config with
+  | None -> 100
+  | Some cfg -> Keeper_tool_policy_config.gh_cache_fetch_page_size cfg
+
+let gh_cache_fetch_timeout_sec () : float =
+  match !policy_config with
+  | None -> 10.0
+  | Some cfg -> Keeper_tool_policy_config.gh_cache_fetch_timeout_sec cfg
+
+let gh_cache_max_alternatives () : int =
+  match !policy_config with
+  | None -> 20
+  | Some cfg -> Keeper_tool_policy_config.gh_cache_max_alternatives cfg
+
+let gh_cache_max_output_bytes () : int =
+  match !policy_config with
+  | None -> 8192
+  | Some cfg -> Keeper_tool_policy_config.gh_cache_max_output_bytes cfg
+
 (* ── Preset subsumption (config-driven) ──────────────────────── *)
 
 let preset_can_satisfy ~(agent_preset : string) ~(required_preset : string) : bool =

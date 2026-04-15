@@ -75,16 +75,16 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
     setLoading(true)
     setError(null)
 
     Promise.allSettled([
-      fetchKeeperStateDiagram(keeperName),
-      fetchKeeperTransitions(keeperName, 5),
+      fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
+      fetchKeeperTransitions(keeperName, 5, { signal: controller.signal }),
     ])
       .then(([diagramResult, transitionsResult]) => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         if (diagramResult.status === 'fulfilled') {
           setDiagramData(diagramResult.value)
         } else {
@@ -101,12 +101,12 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         setLoading(false)
       })
       .catch(err => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'state diagram fetch failed')
         setLoading(false)
       })
 
-    return () => { cancelled = true }
+    return () => { controller.abort() }
   }, [keeperName])
 
   const livePhase = normalizePhase(currentPhase) ?? normalizePhase(diagramData?.current_phase)

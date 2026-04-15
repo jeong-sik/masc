@@ -373,20 +373,27 @@ export interface KeeperStateDiagramResponse {
   memory_kind_usage?: MemoryKindUsageEntry[]
 }
 
-export async function fetchKeeperTransitions(name: string, limit = 20): Promise<KeeperTransitionsResponse> {
+export async function fetchKeeperTransitions(
+  name: string,
+  limit = 20,
+  opts?: { signal?: AbortSignal },
+): Promise<KeeperTransitionsResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/transitions?limit=${limit}`,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
   return resp.json() as Promise<KeeperTransitionsResponse>
 }
 
-export async function fetchKeeperStateDiagram(name: string): Promise<KeeperStateDiagramResponse> {
+export async function fetchKeeperStateDiagram(
+  name: string,
+  opts?: { signal?: AbortSignal },
+): Promise<KeeperStateDiagramResponse> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/state-diagram`,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`)

@@ -183,6 +183,7 @@ val run_named_with_masc_tools :
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
+  ?approval:Oas.Hooks.approval_callback ->
   ?sw:Eio.Switch.t ->
   ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   unit ->

@@ -311,6 +311,7 @@ let compute_judgments
     Masc_oas_bridge.run_safe ~timeout_s (fun () ->
       Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+        ~approval:Approval_callbacks.auto_approve
         ()
     )
   with

@@ -121,3 +121,4 @@ val to_oas_approval_callback :
     Tools below the threshold are auto-approved.
 
     @since 2.262.0 (#5902, #5907) *)
+

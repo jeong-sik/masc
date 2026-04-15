@@ -110,6 +110,7 @@ let route_cascade ~message ~system_prompt ~max_tokens ~temperature
         ~max_turns:1
         ~temperature
         ~max_tokens
+        ~approval:Approval_callbacks.auto_approve
         ()
     )
   with

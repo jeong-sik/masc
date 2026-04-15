@@ -23,14 +23,20 @@ let display_name = "Discord"
 let channel = "discord"
 
 
-let default_status_path = ".masc/connectors/discord/status.json"
-let default_binding_store_path = ".masc/connectors/discord/bindings.json"
-let default_binding_audit_path = ".masc/connectors/discord/binding_audit.jsonl"
+let default_status_path = ".gate/runtime/discord/status.json"
+let default_binding_store_path = ".gate/runtime/discord/bindings.json"
+let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
 
-let legacy_status_path = "sidecars/discord-bot/.gate/discord_status.json"
-let legacy_binding_store_path = "sidecars/discord-bot/.gate/discord_bindings.json"
-let legacy_binding_audit_path =
-  "sidecars/discord-bot/.gate/discord_binding_audit.jsonl"
+(* Legacy paths take the shape used before the gate-runtime migration
+   (masc-mcp #7462 / v0.9.0). On first read after upgrade, data still
+   living at the legacy location is picked up and the next write lands
+   at the new default, so operators see a transparent migration. Older
+   `sidecars/discord-bot/.gate/*` layouts from the 2026-Q1 era are no
+   longer auto-discovered; operators using them must set the explicit
+   MASC_DISCORD_*_PATH env vars. *)
+let legacy_status_path = ".masc/connectors/discord/status.json"
+let legacy_binding_store_path = ".masc/connectors/discord/bindings.json"
+let legacy_binding_audit_path = ".masc/connectors/discord/binding_audit.jsonl"
 
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"

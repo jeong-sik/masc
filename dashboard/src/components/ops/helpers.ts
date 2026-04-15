@@ -209,9 +209,10 @@ export function targetTypeLabel(value?: string | null): string {
   }
 }
 
-function isNamespaceTarget(value?: string | null): boolean {
+export function isRootTarget(value?: string | null): boolean {
   return value === 'root' || value === 'namespace' || value === 'room'
 }
+const isNamespaceTarget = isRootTarget
 
 export function deliveryModeLabel(confirmRequired?: boolean): string {
   return confirmRequired ? '확인 후 실행' : '즉시 실행'

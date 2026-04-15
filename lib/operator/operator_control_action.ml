@@ -15,9 +15,9 @@ let normalize_judgment_surface value =
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
-  match normalized with
-  | "root" | "namespace" | "room" -> Ok ("root", Operator_judgment.Room)
-  | _ -> Error "target_type must be root"
+  if Operator_digest_types.is_root_alias normalized then
+    Ok ("root", Operator_judgment.Room)
+  else Error "target_type must be root"
 
 let default_fresh_ttl_sec surface =
   match surface with
@@ -126,8 +126,9 @@ let canonical_action_type action_type =
   | other -> other
 
 let normalize_action_target_type target_type =
-  match String.trim target_type |> String.lowercase_ascii with
-  | "root" | "namespace" | "room" -> Ok "root"
+  let normalized = String.trim target_type |> String.lowercase_ascii in
+  if Operator_digest_types.is_root_alias normalized then Ok "root"
+  else match normalized with
   | "keeper" | "review_item" as value -> Ok value
   | "" -> Ok ""
   | _ -> Error "target_type must be root, keeper, or review_item"

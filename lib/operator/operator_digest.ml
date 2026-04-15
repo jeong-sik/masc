@@ -368,8 +368,9 @@ let urgency_rank = function
   | "now" -> 1
   | _ -> 0
 
-let target_rank = function
-  | "root" | "namespace" | "room" -> 3
+let target_rank value =
+  if Operator_digest_types.is_root_alias value then 3
+  else match value with
   | "keeper" -> 1
   | _ -> 0
 

@@ -99,11 +99,15 @@ export async function refreshMissionSessionDetail(
   }
 }
 
-export async function refreshMissionBriefing(force = false): Promise<void> {
+export async function refreshMissionBriefing(
+  force = false,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
   missionBriefingLoading.value = true
   missionBriefingError.value = null
   try {
-    const raw = await fetchDashboardMissionBriefing(force)
+    const raw = await fetchDashboardMissionBriefing(force, { signal: opts?.signal })
+    if (opts?.signal?.aborted) return
     const normalized = normalizeMissionBriefing(raw)
     missionBriefing.value = normalized
     if (normalized.refreshing || normalized.status === 'pending') {
@@ -112,9 +116,12 @@ export async function refreshMissionBriefing(force = false): Promise<void> {
       clearMissionBriefingPoll()
     }
   } catch (err) {
+    if (isAbortError(err)) return
     missionBriefingError.value = err instanceof Error ? err.message : 'Failed to load mission briefing'
     clearMissionBriefingPoll()
   } finally {
-    missionBriefingLoading.value = false
+    if (!opts?.signal?.aborted) {
+      missionBriefingLoading.value = false
+    }
   }
 }

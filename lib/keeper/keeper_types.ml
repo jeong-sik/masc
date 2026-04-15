@@ -115,6 +115,8 @@ type agent_runtime_state =
   ; noop_turn_count : int
   ; consecutive_noop_count : int
   ; last_speech_act : string
+  ; last_active_desire : string
+  ; last_current_intention : string
   ; last_blocker : string
   ; last_need : string
   }
@@ -738,6 +740,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "noop_turn_count", `Int rt.noop_turn_count
     ; "consecutive_noop_count", `Int rt.consecutive_noop_count
     ; "last_speech_act", `String rt.last_speech_act
+    ; "last_active_desire", `String rt.last_active_desire
+    ; "last_current_intention", `String rt.last_current_intention
     ; "last_blocker", `String rt.last_blocker
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
@@ -1118,6 +1122,12 @@ let parse_keeper_state
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
   let consecutive_noop_count = Safe_ops.json_int ~default:0 "consecutive_noop_count" json in
   let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
+  let last_active_desire =
+    Safe_ops.json_string ~default:"" "last_active_desire" json
+  in
+  let last_current_intention =
+    Safe_ops.json_string ~default:"" "last_current_intention" json
+  in
   let last_blocker = Safe_ops.json_string ~default:"" "last_blocker" json in
   let last_need = Safe_ops.json_string ~default:"" "last_need" json in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
@@ -1153,6 +1163,8 @@ let parse_keeper_state
       ; noop_turn_count
       ; consecutive_noop_count
       ; last_speech_act
+      ; last_active_desire
+      ; last_current_intention
       ; last_blocker
       ; last_need
       }
@@ -1336,6 +1348,8 @@ let fallback_canonical_keeper_meta_key_names =
   ; "noop_turn_count"
   ; "consecutive_noop_count"
   ; "last_speech_act"
+  ; "last_active_desire"
+  ; "last_current_intention"
   ; "last_blocker"
   ; "last_need"
   ; "paused"

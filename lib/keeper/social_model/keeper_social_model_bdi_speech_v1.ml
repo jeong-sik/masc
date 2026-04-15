@@ -35,6 +35,16 @@ type request_help_delivery =
   | Request_help_deduped
   | Request_help_failed
 
+let state_of_social_state (state : Types.social_state) : state =
+  {
+    social_model = state.social_model;
+    belief_summary = state.belief_summary;
+    active_desire = state.active_desire;
+    current_intention = state.current_intention;
+    blocker = state.blocker;
+    need = state.need;
+  }
+
 let to_social_state (state : state) (output : output) : Types.social_state =
   {
     social_model = state.social_model;
@@ -93,8 +103,14 @@ let belief_summary_of_observation
 
 let make_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ?previous_state
     ?active_desire ?current_intention ?blocker ?need ?social_model
     ?belief_summary () =
+  let carry explicit selector =
+    match explicit with
+    | Some _ -> explicit
+    | None -> Option.bind previous_state selector
+  in
   {
     social_model =
       Option.value
@@ -103,21 +119,24 @@ let make_state ~(meta : keeper_meta)
     belief_summary =
       Option.value ~default:(belief_summary_of_observation observation)
         belief_summary;
-    active_desire;
-    current_intention;
+    active_desire = carry active_desire (fun state -> state.active_desire);
+    current_intention =
+      carry current_intention (fun state -> state.current_intention);
     blocker;
-    need;
+    need = carry need (fun state -> state.need);
   }
 
 let protocol_violation_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation) ~(reason : string)
-    =
-  ( make_state ~meta ~observation ?blocker:(Some reason) (),
+=
+  ( make_state ~meta ~observation ?previous_state:None ?blocker:(Some reason)
+      (),
     { speech_act = Types.Defer; delivery_surface = Types.Silent } )
 
 let inferred_text_reply_state ~(meta : keeper_meta)
-    ~(observation : Keeper_world_observation.world_observation) =
-  ( make_state ~meta ~observation (),
+    ~(observation : Keeper_world_observation.world_observation)
+    ?previous_state () =
+  ( make_state ~meta ~observation ?previous_state (),
     { speech_act = Types.Inform; delivery_surface = Types.Visible_reply } )
 
 let inferred_tool_surface tools =
@@ -148,6 +167,7 @@ let inferred_tool_surface tools =
 
 let tool_only_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(previous_state : state option)
     ~(result : Keeper_agent_run.run_result) =
   let output =
     match inferred_tool_surface result.tools_used with
@@ -158,10 +178,11 @@ let tool_only_state ~(meta : keeper_meta)
           delivery_surface = Types.Visible_reply;
         }
   in
-  (make_state ~meta ~observation (), output)
+  (make_state ~meta ~observation ?previous_state (), output)
 
 let social_state_of_headers ~(meta : keeper_meta)
-    ~(observation : Keeper_world_observation.world_observation) headers =
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(previous_state : state option) headers =
   match
     Protocol.nonempty_header_opt headers "SPEECH_ACT",
     Protocol.header_assoc_opt headers "DELIVERY_SURFACE"
@@ -187,6 +208,7 @@ let social_state_of_headers ~(meta : keeper_meta)
               | _ -> truncated
           in
           ( make_state ~meta ~observation
+              ?previous_state
               ~social_model:
                 (Types.normalize_social_model
                    (Option.value
@@ -271,15 +293,15 @@ let deliver_request_help_post ~(meta : keeper_meta)
       | Ok _ -> Request_help_posted
       | Error _ -> Request_help_failed
 
-let transition (_previous_state : state option) (input : input) =
+let transition (previous_state : state option) (input : input) =
   let meta = input.meta in
   let observation = input.observation in
   let result = input.result in
   if result.tools_used <> [] then
-    tool_only_state ~meta ~observation ~result
+    tool_only_state ~meta ~observation ~previous_state ~result
   else if input.headers <> [] then
     let state, output =
-      social_state_of_headers ~meta ~observation input.headers
+      social_state_of_headers ~meta ~observation ~previous_state input.headers
     in
     if input.has_text_reply
        &&
@@ -287,11 +309,11 @@ let transition (_previous_state : state option) (input : input) =
        | Some "missing social headers" | Some "invalid social headers" -> true
        | _ -> false
     then
-      inferred_text_reply_state ~meta ~observation
+      inferred_text_reply_state ~meta ~observation ?previous_state ()
     else
       (state, output)
   else if input.has_text_reply then
-    inferred_text_reply_state ~meta ~observation
+    inferred_text_reply_state ~meta ~observation ?previous_state ()
   else
     protocol_violation_state ~meta ~observation
       ~reason:"no tool calls and no social headers"
@@ -332,6 +354,7 @@ let apply_output_to_result ~(meta : keeper_meta)
 
 let apply_to_result ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(previous_state : Types.social_state option)
     (result : Keeper_agent_run.run_result) =
   let headers, response_body =
     Protocol.parse_header_block result.response_text
@@ -348,15 +371,18 @@ let apply_to_result ~(meta : keeper_meta)
       has_text_reply = String.trim visible_response_body <> "";
     }
   in
-  let state, output = transition None input in
+  let prior_state = Option.map state_of_social_state previous_state in
+  let state, output = transition prior_state input in
   let social_state = to_social_state state output in
   apply_output_to_result ~meta ~result ~visible_response_body social_state
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(previous_state : Types.social_state option)
     ~(reason : string) =
   let state =
     make_state ~meta ~observation
+      ?previous_state:(Option.map state_of_social_state previous_state)
       ?blocker:
         (match String.trim reason with
         | "" -> None

@@ -9,15 +9,41 @@ let lane_phase_to_string = function
   | Awaiting_approval -> "awaiting_approval"
   | Lane_completed -> "completed"
 
+let lane_phase_of_string = function
+  | "forming" -> Forming
+  | "dispatching" -> Dispatching
+  | "executing" -> Executing
+  | "blocked" -> Blocked
+  | "awaiting_approval" -> Awaiting_approval
+  | "completed" -> Lane_completed
+  | _ -> Forming
+
 let lane_motion_to_string = function
   | Waiting -> "waiting"
   | Moving -> "moving"
   | Stalled -> "stalled"
   | Terminal -> "terminal"
 
+let lane_motion_of_string = function
+  | "waiting" -> Waiting
+  | "moving" -> Moving
+  | "stalled" -> Stalled
+  | "terminal" -> Terminal
+  | _ -> Waiting
+
 let flag_severity_to_string = function
   | Flag_bad -> "bad"
   | Flag_warn -> "warn"
+
+let flag_code_of_string = function
+  | "projected_only" -> Some Projected_only
+  | "missing_trace_events" -> Some Missing_trace_events
+  | "pending_manual_confirmation" -> Some Pending_manual_confirmation
+  | "missing_worker_binding" -> Some Missing_worker_binding
+  | "missing_runtime_progress" -> Some Missing_runtime_progress
+  | "stale_data" -> Some Stale_data
+  | "dashboard_source_split" -> Some Dashboard_source_split
+  | _ -> None
 
 let swarm_operation_status_to_string = function
   | SOp_active -> "active" | SOp_planned -> "planned" | SOp_paused -> "paused"

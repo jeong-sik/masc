@@ -58,11 +58,11 @@ type room_snapshot = Dashboard_labels.room_snapshot = {
 type swarm_lane_summary = Dashboard_labels.swarm_lane_summary = {
   label: string;
   present: bool;
-  phase: string;
-  motion_state: string;
+  phase: Swarm_status_types.lane_phase;
+  motion_state: Swarm_status_types.lane_motion;
   age: string;
   current_step: string;
-  hard_flags: string list;
+  hard_flags: Swarm_status_types.flag_code list;
 }
 
 (** Format a section *)
@@ -275,10 +275,12 @@ let swarm_lane_summaries now json =
                  let phase =
                    lane |> member "phase" |> to_string_option
                    |> Option.value ~default:"forming"
+                   |> Swarm_status_json.lane_phase_of_string
                  in
                  let motion_state =
                    lane |> member "motion_state" |> to_string_option
                    |> Option.value ~default:"waiting"
+                   |> Swarm_status_json.lane_motion_of_string
                  in
                  let current_step =
                    lane |> member "current_step" |> to_string_option
@@ -294,7 +296,8 @@ let swarm_lane_summaries now json =
                    | `List flags ->
                        flags
                        |> List.filter_map (fun flag ->
-                              flag |> member "code" |> to_string_option)
+                              flag |> member "code" |> to_string_option
+                              |> (fun opt -> Option.bind opt Swarm_status_json.flag_code_of_string))
                    | _ -> []
                  in
                  Some { label; present; phase; motion_state; age; current_step; hard_flags }

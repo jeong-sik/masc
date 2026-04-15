@@ -385,6 +385,7 @@ let check_route path expected =
        | Keeper_api.Keeper_post_config -> "config"
        | Keeper_api.Keeper_post_boot -> "boot"
        | Keeper_api.Keeper_post_shutdown -> "shutdown"
+       | Keeper_api.Keeper_post_reset -> "reset"
        | Keeper_api.Keeper_post_unknown -> "unknown")
       path
 ;;
@@ -394,6 +395,7 @@ let test_keeper_post_route_classification () =
   check_route "/api/v1/keepers/sangsu/config" Keeper_api.Keeper_post_config;
   check_route "/api/v1/keepers/sangsu/boot" Keeper_api.Keeper_post_boot;
   check_route "/api/v1/keepers/sangsu/shutdown" Keeper_api.Keeper_post_shutdown;
+  check_route "/api/v1/keepers/sangsu/reset" Keeper_api.Keeper_post_reset;
   check_route "/api/v1/keepers/sangsu" Keeper_api.Keeper_post_unknown;
   check_route "/api/v1/keepers//boot" Keeper_api.Keeper_post_unknown
 ;;

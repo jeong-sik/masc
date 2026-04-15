@@ -371,7 +371,15 @@ function StatusBar({
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
-          ${staleSec > 60 ? html`<span class="text-[9px] font-mono text-amber-400">${fmtDuration(staleSec)} 전 갱신</span>` : null}
+          ${staleSec > 120 ? html`
+            <span class="text-[9px] font-mono text-red-400 animate-pulse" title="마지막 관측이 2분 이상 경과 — 대시보드 데이터가 현재 상태를 반영하지 않을 수 있습니다">
+              ${fmtDuration(staleSec)} 전 갱신
+            </span>
+          ` : staleSec > 60 ? html`
+            <span class="text-[9px] font-mono text-amber-400" title="마지막 관측이 1분 이상 경과">
+              ${fmtDuration(staleSec)} 전 갱신
+            </span>
+          ` : null}
         </div>
         <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
           ${keeperNames.map((name, i) => {

@@ -58,10 +58,7 @@ let tool_command_plane_http_json ~deps ~state request ~name ~args =
 let _cp_summary_ref : Yojson.Safe.t ref =
   ref (`Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")])
 
-let _cp_summary_refresh_interval_s =
-  Dashboard_http_helpers.float_of_env_default
-    "MASC_CP_SUMMARY_REFRESH_INTERVAL_S"
-    ~default:120.0 ~min_v:30.0 ~max_v:600.0
+let _cp_summary_refresh_interval_s = 120.0
 
 type cp_snapshot_cache = {
   snapshot : Yojson.Safe.t;
@@ -111,15 +108,9 @@ let start_cp_summary_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"cp-summary"
                  ~interval_s:_cp_summary_refresh_interval_s)
-              with timeout_s =
-                     Dashboard_http_helpers.float_of_env_default
-                       "MASC_CP_SUMMARY_TIMEOUT_S"
-                       ~default:90.0 ~min_v:10.0 ~max_v:180.0;
+              with timeout_s = 90.0;
                    max_backoff_s = 300.0;
-                   warm_delay_s =
-                     Dashboard_http_helpers.float_of_env_default
-                       "MASC_WARM_DELAY_CP_SUMMARY_S"
-                       ~default:30.0 ~min_v:0.0 ~max_v:300.0 }
+                   warm_delay_s = 30.0 }
     ~compute:(fun () -> compute_cp_summary ~state)
     ~on_result:(fun json -> _cp_summary_ref := json)
 
@@ -137,14 +128,8 @@ let command_plane_summary_http_json ~state:_ =
    churn while still keeping a warm cached snapshot available. *)
 
 let _cp_snapshot_compute_mu = Eio.Mutex.create ()
-let _cp_snapshot_refresh_interval_s =
-  Dashboard_http_helpers.float_of_env_default
-    "MASC_CP_SNAPSHOT_REFRESH_INTERVAL_S"
-    ~default:120.0 ~min_v:30.0 ~max_v:600.0
-let _cp_snapshot_timeout_s =
-  Dashboard_http_helpers.float_of_env_default
-    "MASC_CP_SNAPSHOT_TIMEOUT_S"
-    ~default:60.0 ~min_v:10.0 ~max_v:120.0
+let _cp_snapshot_refresh_interval_s = 120.0
+let _cp_snapshot_timeout_s = 60.0
 
 let compute_cp_snapshot ~state =
   let config = state.Mcp_server.room_config in
@@ -185,10 +170,7 @@ let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
                    ~label:"cp-snapshot"
                    ~interval_s:_cp_snapshot_refresh_interval_s)
                 with timeout_s = _cp_snapshot_timeout_s;
-                     warm_delay_s =
-                       Dashboard_http_helpers.float_of_env_default
-                         "MASC_WARM_DELAY_CP_SNAPSHOT_S"
-                         ~default:90.0 ~min_v:0.0 ~max_v:300.0 }
+                     warm_delay_s = 90.0 }
       ~compute:(fun () -> compute_cp_snapshot ~state)
       ~on_result:store_cp_snapshot
 

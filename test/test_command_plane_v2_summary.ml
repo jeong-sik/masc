@@ -34,7 +34,7 @@ let test_swarm_proof_fallback_reads_slot_samples_from_bounded_tail () =
       let run_dir = Filename.concat (swarm_live_dir config) "run-001" in
       let slot_samples_path = Filename.concat run_dir "slot-samples.jsonl" in
       let noise_rows =
-        List.init 70 (fun idx ->
+        List.init 2200 (fun idx ->
             make_slot_sample
               ~timestamp:(Printf.sprintf "2026-03-23T00:%02d:00Z" idx)
               ~active_slots:1 ~ctx_per_slot:(2048 + idx))
@@ -53,15 +53,14 @@ let test_swarm_proof_fallback_reads_slot_samples_from_bounded_tail () =
           ]
       in
       write_jsonl_rows slot_samples_path rows;
-      with_env "MASC_CP_SWARM_SLOT_SAMPLE_TAIL_LINES" "64" (fun () ->
-        let json = Command_plane_v2.summary_json config in
-        let swarm_proof = Yojson.Safe.Util.member "swarm_proof" json in
-        Alcotest.(check string) "fallback source" "slot_samples"
-          (swarm_proof |> Yojson.Safe.Util.member "source"
-         |> Yojson.Safe.Util.to_string);
-        Alcotest.(check int) "peak_hot_slots uses recent tail only" 9
-          (swarm_proof |> Yojson.Safe.Util.member "peak_hot_slots"
-         |> Yojson.Safe.Util.to_int);
-        Alcotest.(check int) "ctx_per_slot follows latest tail sample" 32768
-          (swarm_proof |> Yojson.Safe.Util.member "ctx_per_slot"
-         |> Yojson.Safe.Util.to_int)))
+      let json = Command_plane_v2.summary_json config in
+      let swarm_proof = Yojson.Safe.Util.member "swarm_proof" json in
+      Alcotest.(check string) "fallback source" "slot_samples"
+        (swarm_proof |> Yojson.Safe.Util.member "source"
+       |> Yojson.Safe.Util.to_string);
+      Alcotest.(check int) "peak_hot_slots uses recent tail only" 9
+        (swarm_proof |> Yojson.Safe.Util.member "peak_hot_slots"
+       |> Yojson.Safe.Util.to_int);
+      Alcotest.(check int) "ctx_per_slot follows latest tail sample" 32768
+        (swarm_proof |> Yojson.Safe.Util.member "ctx_per_slot"
+       |> Yojson.Safe.Util.to_int))

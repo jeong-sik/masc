@@ -214,9 +214,10 @@ let git_action_of_input (input : Yojson.Safe.t) : string =
   | _ -> ""
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
-  if is_effectively_read_only_tool tool_name then true
-  else match tool_name with
-  | "keeper_shell" when is_shell_gh_op input ->
+  (* keeper_shell with op=gh is input-aware: gh commands can mutate state
+     even though the tool itself is marked read-only by default. Check gh
+     op BEFORE the blanket read-only short-circuit. *)
+  if tool_name = "keeper_shell" && is_shell_gh_op input then
     let cmd = gh_effective_cmd input in
     let cmd_lower = String.lowercase_ascii cmd in
     if cmd_lower = "" then false
@@ -228,6 +229,8 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
         String.length cmd_lower >= String.length prefix
         && String.sub cmd_lower 0 (String.length prefix) = prefix
       ) gh_read_only_prefixes
+  else if is_effectively_read_only_tool tool_name then true
+  else match tool_name with
   | "masc_code_git" -> List.mem (git_action_of_input input) git_read_only_actions
   | "masc_worktree_list" -> true
   | _ -> false

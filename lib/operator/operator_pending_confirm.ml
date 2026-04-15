@@ -255,19 +255,19 @@ let pending_confirms_json ?actor config =
 let available_actions : available_action list =
   [
     make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
-      ~target_type:"namespace"
+      ~target_type:"root"
       ~description:"Namespace-wide operator broadcast.";
     make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
-      ~target_type:"namespace"
+      ~target_type:"root"
       ~description:"Pause namespace automation and spawning.";
     make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
-      ~target_type:"namespace"
+      ~target_type:"root"
       ~description:"Resume a paused namespace.";
     make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
-      ~target_type:"namespace"
+      ~target_type:"root"
       ~description:"Run one immediate social sweep across keepers.";
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
-      ~target_type:"namespace"
+      ~target_type:"root"
       ~description:"Inject a backlog task into the namespace.";
     make_available_action ~action_type:"team_note" ~tool_name:"masc_operator_action"
       ~target_type:"team_session"

@@ -243,7 +243,7 @@ function renderTruth(item: OperatorReviewItem | null) {
     return html`<div class="text-[12px] text-[var(--text-muted)]">큐에서 항목을 고르면 truth를 보여줍니다.</div>`
   }
 
-  if (item.target_type === 'namespace' || item.target_type === 'room') {
+  if (item.target_type === 'root' || item.target_type === 'namespace' || item.target_type === 'room') {
     const room = detailDigest?.root ?? snapshot?.root ?? {}
     return html`
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">

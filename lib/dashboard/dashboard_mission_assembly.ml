@@ -166,11 +166,15 @@ let identity_digest prefix identity =
 
 let is_internal_attention incident =
   let target_type = string_field "target_type" incident in
-  String.equal target_type "namespace" || String.equal target_type "room"
+  String.equal target_type "root"
+  || String.equal target_type "namespace"
+  || String.equal target_type "room"
 
 let is_internal_action action =
   let target_type = string_field "target_type" action in
-  String.equal target_type "namespace" || String.equal target_type "room"
+  String.equal target_type "root"
+  || String.equal target_type "namespace"
+  || String.equal target_type "room"
 
 let incident_action_types kind =
   match kind with

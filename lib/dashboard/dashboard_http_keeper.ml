@@ -322,11 +322,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
             | None -> None
           in
-          let reconcile_status =
-            if Keeper_manual_reconcile.is_pending config m.name then
-              Some "manual_reconcile_required"
-            else None
-          in
+          (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
           in
@@ -551,10 +547,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("phase",
                 match phase with
                 | Some p -> `String p
-                | None -> `Null);
-              ("reconcile_status",
-                match reconcile_status with
-                | Some status -> `String status
                 | None -> `Null);
             ] @ runtime_blocker_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);

@@ -142,42 +142,30 @@ let runtime_blocker_surface_of_reason (reason : string) =
     None
 
 let runtime_blocker_fields_json
-    (config : Room_utils.config)
+    (_config : Room_utils.config)
     (meta : keeper_meta) =
-  match Keeper_manual_reconcile.read config meta.name with
-  | Some { status = Keeper_manual_reconcile.Pending; blocker_class; summary; _ } ->
+  (* Manual_reconcile reading removed — runtime blockers now derive
+     solely from transient failure reasons, not sticky reconcile state. *)
+  let derived =
+    match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
+    | Some blocker -> Some blocker
+    | None ->
+        runtime_blocker_surface_of_reason
+          meta.runtime.proactive_rt.last_reason
+  in
+  match derived with
+  | Some (blocker_class, summary, manual_reconcile) ->
       [
         ("runtime_blocker_class", `String blocker_class);
         ("runtime_blocker_summary", `String summary);
-        ("runtime_blocker_manual_reconcile", `Bool true);
+        ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
       ]
-  | Some { status = Keeper_manual_reconcile.Cleared; _ } ->
+  | None ->
       [
         ("runtime_blocker_class", `Null);
         ("runtime_blocker_summary", `Null);
         ("runtime_blocker_manual_reconcile", `Null);
       ]
-  | None ->
-      let derived =
-        match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
-        | Some blocker -> Some blocker
-        | None ->
-            runtime_blocker_surface_of_reason
-              meta.runtime.proactive_rt.last_reason
-      in
-      match derived with
-      | Some (blocker_class, summary, manual_reconcile) ->
-          [
-            ("runtime_blocker_class", `String blocker_class);
-            ("runtime_blocker_summary", `String summary);
-            ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
-          ]
-      | None ->
-          [
-            ("runtime_blocker_class", `Null);
-            ("runtime_blocker_summary", `Null);
-            ("runtime_blocker_manual_reconcile", `Null);
-          ]
 
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in

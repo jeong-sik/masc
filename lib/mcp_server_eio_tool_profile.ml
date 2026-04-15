@@ -218,7 +218,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_up", "Start Keeper");
   ("masc_keeper_msg", "Send Keeper Message");
   ("masc_keeper_repair", "Keeper Repair");
-  ("masc_keeper_reconcile", "Keeper Reconcile");
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_compact", "Compact Keeper Context");

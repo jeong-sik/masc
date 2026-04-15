@@ -139,8 +139,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'fleet-health',
-      label: 'Fleet 건강',
-      description: '텔레메트리 이벤트, Fleet 비교, 도구 품질, 거버넌스 지표를 통합 뷰로.',
+      label: 'Keeper 현황',
+      description: '텔레메트리 이벤트, Keeper 비교, 도구 품질, 거버넌스 지표를 통합 뷰로.',
       params: { section: 'fleet-health' },
     },
     {

@@ -159,7 +159,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('Fleet Coverage')
+    expect(container.textContent).toContain('Keeper 가동률')
     expect(container.textContent).toContain('1/2 keepers surfaced recent tool activity.')
     expect(container.textContent).toContain('keeper-alpha')
     expect(container.textContent).toContain('keeper-beta')

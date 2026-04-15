@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { RotateCcw } from 'lucide-preact'
 import { LoadingState } from './common/feedback-state'
 import {
   fetchDashboardExecution,
@@ -9,11 +10,15 @@ import {
   type TelemetrySourceSummary,
   type ToolQualityResponse,
 } from '../api/dashboard'
+import { resetKeeper } from '../api/keeper'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
+import { requestConfirm } from './common/confirm-dialog'
+import { Sparkline } from './common/sparkline'
+import { pushSnapshot, getTrend, type MetricKey, type TrendDirection } from './fleet-trend-store'
 import {
   EMPTY_TOOL_QUALITY,
   PRESSURE_WARN_RATIO,
@@ -41,6 +46,37 @@ import {
 } from './fleet-telemetry-utils'
 
 export { buildFleetRows }
+
+// Whether "up" is bad for a given metric. context_ratio and latency going up = bad.
+function isUpBad(metric: MetricKey): boolean {
+  return metric === 'context_ratio' || metric === 'last_latency_ms'
+}
+
+function trendArrow(direction: TrendDirection): string {
+  if (direction === 'up') return '\u2191'
+  if (direction === 'down') return '\u2193'
+  return ''
+}
+
+function trendColorClass(direction: TrendDirection, metric: MetricKey): string {
+  if (direction === 'flat') return 'text-[var(--text-dim)]'
+  const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
+  return bad ? 'text-red-400' : 'text-emerald-400'
+}
+
+function sparklineColor(metric: MetricKey, direction: TrendDirection): string {
+  if (direction === 'flat') return '#64748b'
+  const bad = (direction === 'up' && isUpBad(metric)) || (direction === 'down' && !isUpBad(metric))
+  return bad ? '#f87171' : '#34d399'
+}
+
+function auditFreshnessClass(isoTimestamp: string | null): string {
+  if (!isoTimestamp) return 'text-[var(--text-dim)]'
+  const ageMs = Date.now() - new Date(isoTimestamp).getTime()
+  if (ageMs < 5 * 60 * 1000) return 'text-[var(--text)]'
+  if (ageMs < 15 * 60 * 1000) return 'text-[var(--text-dim)]'
+  return 'text-amber-300'
+}
 
 function SummaryCard({
   title,
@@ -122,9 +158,33 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
   `
 }
 
-function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
+function TrendCell({ name, metric, value, valueClass }: {
+  name: string
+  metric: MetricKey
+  value: string
+  valueClass: string
+}) {
+  const trend = getTrend(name, metric)
+  const arrow = trend ? trendArrow(trend.direction) : ''
+  const colorClass = trend ? trendColorClass(trend.direction, metric) : ''
+  const sColor = trend ? sparklineColor(metric, trend.direction) : '#64748b'
+
+  return html`
+    <td class="py-1.5 text-right">
+      <div class="flex items-center justify-end gap-1">
+        <span class="font-mono ${valueClass}">${value}</span>
+        ${arrow ? html`<span class="text-[9px] ${colorClass}">${arrow}</span>` : null}
+      </div>
+      ${trend && trend.values.length >= 2
+        ? html`<div class="mt-0.5 flex justify-end"><${Sparkline} values=${trend.values} width=${48} height=${14} color=${sColor} /></div>`
+        : null}
+    </td>
+  `
+}
+
+function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (name: string) => void }) {
   if (rows.length === 0) {
-    return html`<div class="text-[11px] text-[var(--text-dim)]">키퍼 fleet 데이터 없음.</div>`
+    return html`<div class="text-[11px] text-[var(--text-dim)]">Keeper 데이터 없음.</div>`
   }
 
   return html`
@@ -135,11 +195,13 @@ function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
             <th class="py-1 text-left font-normal">Keeper</th>
             <th class="py-1 text-right font-normal">Status</th>
             <th class="py-1 text-right font-normal">Activity</th>
+            <th class="py-1 text-right font-normal">측정</th>
             <th class="py-1 text-right font-normal">Tools</th>
             <th class="py-1 text-right font-normal">Success</th>
             <th class="py-1 text-right font-normal">Ctx</th>
             <th class="py-1 text-right font-normal">Latency</th>
             <th class="py-1 text-right font-normal">Model</th>
+            <th class="w-8 py-1"></th>
           </tr>
         </thead>
         <tbody>
@@ -162,13 +224,40 @@ function FleetComparisonTable({ rows }: { rows: FleetRow[] }) {
               </td>
               <td class="py-1.5 text-right font-mono ${statusClass(row)}">${row.status}</td>
               <td class="py-1.5 text-right text-[var(--text-dim)]">${formatActivity(row.last_activity_ago_s)}</td>
-              <td class="py-1.5 text-right font-mono text-[var(--text)]">${row.tool_calls.toLocaleString()}</td>
-              <td class="py-1.5 text-right font-mono ${successClass(row.tool_success_pct)}">
-                ${formatPercent(row.tool_success_pct, 1)}
+              <td class="py-1.5 text-right text-[10px] ${auditFreshnessClass(row.tool_audit_at)}" title=${row.tool_audit_at ?? ''}>
+                ${row.tool_audit_at ? formatTimeAgo(row.tool_audit_at) : '-'}
               </td>
-              <td class="py-1.5 text-right font-mono ${pressureClass(row.context_ratio)}">${formatPercent(row.context_ratio * 100, 1)}</td>
-              <td class="py-1.5 text-right text-[var(--text-dim)]">${formatLatency(row.last_latency_ms)}</td>
+              <${TrendCell}
+                name=${row.name} metric="tool_calls"
+                value=${row.tool_calls.toLocaleString()}
+                valueClass="text-[var(--text)]"
+              />
+              <${TrendCell}
+                name=${row.name} metric="tool_success_pct"
+                value=${formatPercent(row.tool_success_pct, 1)}
+                valueClass=${successClass(row.tool_success_pct)}
+              />
+              <${TrendCell}
+                name=${row.name} metric="context_ratio"
+                value=${formatPercent(row.context_ratio * 100, 1)}
+                valueClass=${pressureClass(row.context_ratio)}
+              />
+              <${TrendCell}
+                name=${row.name} metric="last_latency_ms"
+                value=${formatLatency(row.last_latency_ms)}
+                valueClass="text-[var(--text-dim)]"
+              />
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
+              <td class="py-1.5 text-center">
+                <button
+                  class="rounded p-0.5 text-[var(--text-dim)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                  onClick=${() => onReset(row.name)}
+                  title="초기화"
+                  aria-label=${`${row.name} 초기화`}
+                >
+                  <${RotateCcw} size=${12} />
+                </button>
+              </td>
             </tr>
           `})}
         </tbody>
@@ -291,6 +380,8 @@ export function FleetTelemetryPanel() {
         || toolQuality.total > 0
         || telemetrySummary.total_entries > 0
 
+      pushSnapshot(rows)
+
       state.value = {
         loading: false,
         error: hasAnyData ? null : 'No fleet telemetry data available.',
@@ -329,27 +420,56 @@ export function FleetTelemetryPanel() {
   const sourcesWithData = value.telemetry_sources.filter(source => source.entry_count > 0).length
 
   if (value.loading && value.rows.length === 0) {
-    return html`<${LoadingState}>Fleet 텔레메트리 불러오는 중...<//>`
+    return html`<${LoadingState}>Keeper 텔레메트리 불러오는 중...<//>`
   }
 
   if (value.error) {
     return html`<div class="p-4 text-[11px] text-red-400">${value.error}</div>`
   }
 
+  const handleReset = async (name: string) => {
+    const confirmed = await requestConfirm({
+      title: `${name} 초기화`,
+      message: `이 키퍼의 사용량 지표(턴 수, 토큰 수, 비용, 지연시간)가 0으로 초기화됩니다.\n되돌릴 수 없습니다.`,
+      confirmText: '초기화',
+      cancelText: '취소',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    const result = await resetKeeper(name)
+    if (result.ok) {
+      void loadFleetTelemetry()
+    }
+  }
+
+  const activeCount = counts.live
+  const attentionCount = value.rows.filter(row => row.keepalive_running && (
+    row.runtime_blocker_class != null
+    || row.context_ratio >= PRESSURE_WARN_RATIO
+    || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
+    || (row.tool_success_pct != null && row.tool_success_pct < 90)
+  )).length
+  const offlineCount = value.rows.length - activeCount
+
   return html`
     <div class="flex flex-col gap-4 p-4">
       <div class="flex items-start justify-between gap-3">
-        <div>
-          <h2 class="text-sm font-medium">Fleet Telemetry</h2>
-          <div class="text-[10px] text-[var(--text-dim)]">
-            ${value.updated_at ? `Updated ${formatTimeAgo(value.updated_at)}` : 'Runtime + telemetry store view'}
+        <div class="flex items-center gap-3">
+          <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>
+          <div class="flex items-center gap-2 text-[10px]">
+            ${activeCount > 0 ? html`<span class="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-400">${activeCount} 가동</span>` : null}
+            ${attentionCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-amber-400">${attentionCount} 주의</span>` : null}
+            ${offlineCount > 0 ? html`<span class="rounded-full bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">
+          <span class="text-[10px] text-[var(--text-dim)]">
+            ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
+          </span>
           <button
             class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-dim)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
-            aria-label="Fleet 텔레메트리 새로고침"
+            aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>
           <span class="text-[10px] text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         </div>
@@ -359,7 +479,7 @@ export function FleetTelemetryPanel() {
 
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <${SummaryCard}
-          title="Fleet Coverage"
+          title="Keeper 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
           detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers surfaced recent tool activity.`}
           tone=${liveTone}
@@ -394,8 +514,8 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Keeper Comparison</div>
-        <${FleetComparisonTable} rows=${value.rows} />
+        <div class="mb-1 text-[10px] uppercase tracking-wider text-[var(--text-dim)]">Keeper 비교</div>
+        <${FleetComparisonTable} rows=${value.rows} onReset=${handleReset} />
       </div>
 
       <div>

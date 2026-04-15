@@ -92,7 +92,7 @@ describe('FleetHealthPanel', () => {
 
     expect(screen.getByText('개요')).toBeTruthy()
     expect(screen.getByText('이벤트 로그')).toBeTruthy()
-    expect(screen.getByText('Fleet 비교')).toBeTruthy()
+    expect(screen.getByText('Keeper 비교')).toBeTruthy()
     expect(screen.getByText('도구 품질')).toBeTruthy()
     expect(screen.getByText('거버넌스')).toBeTruthy()
   })

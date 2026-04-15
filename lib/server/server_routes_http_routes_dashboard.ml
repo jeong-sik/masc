@@ -526,6 +526,12 @@ let rec add_routes ~sw ~clock router =
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_down"
                  ~action:"shutdown" state agent_name req reqd
              ) request reqd
+       | Keeper_api.Keeper_post_reset ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state agent_name req reqd ->
+               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_reset"
+                 ~action:"reset" state agent_name req reqd
+             ) request reqd
        | Keeper_api.Keeper_post_unknown ->
            Http.Response.json ~status:`Not_found
              {|{"error":"not found"}|} reqd)

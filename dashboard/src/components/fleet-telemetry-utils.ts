@@ -25,6 +25,7 @@ export interface FleetRow {
   recent_tools: string[]
   runtime_blocker_class: Keeper['runtime_blocker_class'] | null
   runtime_blocker_summary: string | null
+  tool_audit_at: string | null
 }
 
 export interface FleetTelemetryState {
@@ -308,6 +309,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             runtime_blocker_class: keeper.runtime_blocker_class ?? null,
             runtime_blocker_summary:
               firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker) ?? null,
+            tool_audit_at: keeper.tool_audit_at ?? null,
           }
         })
       : toolQuality.by_keeper.map((keeper): FleetRow => ({
@@ -325,6 +327,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           recent_tools: [],
           runtime_blocker_class: null,
           runtime_blocker_summary: null,
+          tool_audit_at: null,
         }))
 
   return [...rows].sort(compareFleetRows)

@@ -48,6 +48,26 @@ let sse_connect_window_s =
 let sse_connect_max_in_window =
   env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:10 |> max 0
 
+let guard_deadline state =
+  let session_deadline =
+    if sse_reconnect_min_interval_s <= 0.0 || state.last_connect_at < 0.0 then
+      neg_infinity
+    else
+      state.last_connect_at +. sse_reconnect_min_interval_s
+  in
+  let window_deadline =
+    if sse_connect_window_s <= 0.0 then
+      neg_infinity
+    else
+      match state.connect_times with
+      | latest :: _ -> latest +. sse_connect_window_s
+      | [] -> neg_infinity
+  in
+  Float.max session_deadline window_deadline
+
+let guard_expired ~now ~session_id state =
+  not (Hashtbl.mem sse_conn_by_session session_id) && now >= guard_deadline state
+
 (** Register an SSE connection under [sse_registry_mutex].
     All call sites must use this instead of direct [Hashtbl.replace]. *)
 let register_sse_conn ~session_id ~info =
@@ -72,7 +92,6 @@ let stop_sse_session session_id =
     | None -> None
     | Some info ->
         Hashtbl.remove sse_conn_by_session session_id;
-        Hashtbl.remove sse_connect_guard_by_session session_id;
         Some info) in
   match info_opt with
   | None -> ()
@@ -89,9 +108,10 @@ let active_session_count () =
 
 let reap_stale_guards () =
   Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
+    let now = Time_compat.now () in
     let stale =
-      Hashtbl.fold (fun sid _ acc ->
-        if not (Hashtbl.mem sse_conn_by_session sid) then sid :: acc
+      Hashtbl.fold (fun sid state acc ->
+        if guard_expired ~now ~session_id:sid state then sid :: acc
         else acc
       ) sse_connect_guard_by_session []
     in
@@ -144,11 +164,16 @@ let check_sse_connect_guard session_id =
     let now = Time_compat.now () in
     let state =
       match Hashtbl.find_opt sse_connect_guard_by_session session_id with
-      | Some v -> v
+      | Some v ->
+          v.connect_times <- prune_connect_times ~now v.connect_times;
+          if guard_expired ~now ~session_id v then (
+            Hashtbl.remove sse_connect_guard_by_session session_id;
+            { last_connect_at = -.1.0; connect_times = [] })
+          else
+            v
       | None -> { last_connect_at = -.1.0; connect_times = [] }
     in
-    let recent = prune_connect_times ~now state.connect_times in
-    state.connect_times <- recent;
+    let recent = state.connect_times in
     let session_wait_s =
       if sse_reconnect_min_interval_s <= 0.0 then
         0.0

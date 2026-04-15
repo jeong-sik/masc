@@ -198,6 +198,48 @@ let extract_command_name cmd =
     let token = String.sub trimmed 0 (find_sep 0) in
     Some (Filename.basename token)
 
+(** Error hint for a blocked command.
+
+    A terse "'foo' is not allowed, allowed: dune, git..." drives the LLM
+    to retry variants of foo, including OCaml/Python syntax fragments
+    ('let', 'sort', 'Keeper_agent_run.build_ctx_composition', etc.) —
+    live log 2026-04-16 shows 12+ retries per ~3MB.
+
+    Give the LLM an actionable nudge based on what it probably tried:
+      - OCaml/Python identifier → redirect to code tools
+      - common shell command we don't allow (sort, awk) → name the
+        supported alternative (rg/jq)
+      - everything else → plain allowlist
+
+    The helper is a pure function of the tried command name. *)
+let command_blocked_hint name =
+  let looks_like_source_code s =
+    (* Contains '.' at a non-boundary position (A.B), or starts with a
+       reserved OCaml keyword that no shell command uses. *)
+    (String.contains s '.'
+     && (String.index s '.' > 0)
+     && (String.index s '.' < String.length s - 1))
+    || List.mem s
+         [ "let"; "match"; "if"; "then"; "else"; "fun"; "rec"; "in";
+           "module"; "open"; "type"; "def"; "class"; "import"; "from" ]
+  in
+  let alt =
+    match name with
+    | "sort" | "uniq" -> " Use rg or jq for filtering."
+    | "sed" | "awk" -> " Use keeper_fs_edit for in-place edits."
+    | "find" -> " Use rg --files or masc_code_search."
+    | "curl" | "wget" -> " Use masc_web_search for content fetching."
+    | _ when looks_like_source_code name ->
+      " This looks like source code, not a shell command — use \
+       masc_code_edit / masc_code_write / masc_code_read instead."
+    | _ -> ""
+  in
+  Printf.sprintf
+    "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, \
+     make, node, npm, etc.%s For file operations use keeper_fs_read or \
+     keeper_fs_edit."
+    name alt
+
 let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "command must not be empty"
@@ -212,11 +254,7 @@ let validate_command_with_allowlist ~allowed_commands cmd =
     | None -> Error "command must not be empty"
     | Some name when List.mem name allowed_commands -> Ok ()
     | Some name ->
-      Error
-        (Printf.sprintf
-           "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc. \
-            For file operations use keeper_fs_read or keeper_fs_edit."
-           name)
+      Error (command_blocked_hint name)
 
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
@@ -247,11 +285,7 @@ let validate_command_coding_with_allowlist
             | None -> Error "command must not be empty"
             | Some name when List.mem name allowed_commands ->
               validate_segments rest
-            | Some name ->
-              Error
-                (Printf.sprintf
-                   "Command blocked: '%s' is not allowed. Allowed: dune, git, rg, ls, cat, make, node, npm, etc."
-                   name))
+            | Some name -> Error (command_blocked_hint name))
       in
       validate_segments segments
 

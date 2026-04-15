@@ -967,10 +967,15 @@ function StatusBar({
   transitionCount: number
   observationCount: number
 }) {
+  const idleDuration = snapshot && !snapshot.is_live
+    ? fmtDuration(Math.max(0, now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)))
+    : null
+  const idleIsLong = snapshot && !snapshot.is_live && idleDuration != null
+    && (now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)) > 300
   const liveBadge = snapshot
     ? snapshot.is_live
-      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-emerald-400 border-emerald-500/40 bg-emerald-500/10 animate-pulse">● LIVE</span>`
-      : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-[var(--text-dim)] border-white/10">○ idle ${fmtDuration(Math.max(0, now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)))}</span>`
+      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-emerald-400 border-emerald-500/40 bg-emerald-500/10 animate-pulse">● 실행 중</span>`
+      : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono ${idleIsLong ? 'text-[var(--text-muted)] border-amber-500/30' : 'text-[var(--text-dim)] border-white/10'}">○ 대기 ${idleDuration}${snapshot.last_outcome ? html` <span class="text-[8px] opacity-70">· 턴 #${snapshot.last_outcome.turn_id}</span>` : ''}</span>`
     : null
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
@@ -982,9 +987,9 @@ function StatusBar({
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
-          ${staleSec > 60 ? html`<span class="text-[9px] font-mono text-amber-400">${fmtDuration(staleSec)} ago</span>` : null}
+          ${staleSec > 60 ? html`<span class="text-[9px] font-mono text-amber-400">${fmtDuration(staleSec)} 전 갱신</span>` : null}
         </div>
-        <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper selection">
+        <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
           ${keeperNames.map((name, i) => {
             const active = name === selected
             const cls = active
@@ -1023,13 +1028,13 @@ function StatusBar({
         <div class="mt-1.5 flex items-center gap-2 text-[9px] font-mono flex-wrap">
           ${/* KPI micro-metrics */ ''}
           <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-body)]">
-            turn ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
+            턴 ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
           </span>
           <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[#818cf8]' : 'border-[var(--white-8)] text-[var(--text-dim)]'}`}>
-            ${transitionCount} transitions
+            ${transitionCount} 전환
           </span>
           <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-dim)]">
-            ${observationCount} obs
+            ${observationCount} 관측
           </span>
           ${/* Meta IDs */ ''}
           <span class="text-[var(--text-dim)] opacity-60">corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>

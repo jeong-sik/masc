@@ -179,11 +179,40 @@ export function FsmHub() {
   )
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const shortcutsOpenRef = useRef(false)
+  const [density, setDensity] = useState<'comfortable' | 'compact'>(() => {
+    if (typeof window === 'undefined') return 'comfortable'
+    const stored = window.localStorage.getItem('fsm-hub:density')
+    return stored === 'compact' ? 'compact' : 'comfortable'
+  })
   const requestIdRef = useRef(0)
 
   useEffect(() => {
     shortcutsOpenRef.current = shortcutsOpen
   }, [shortcutsOpen])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('fsm-hub:density', density)
+  }, [density])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === 'd') {
+        ev.preventDefault()
+        setDensity(d => d === 'comfortable' ? 'compact' : 'comfortable')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
@@ -344,13 +373,16 @@ export function FsmHub() {
   )
   const { snapshot, loading, error, lastFetchAt } = view
 
+  const rootGap = density === 'compact' ? 'gap-1.5' : 'gap-3'
   return html`
-    <div class="flex flex-col gap-3">
+    <div class=${`flex flex-col ${rootGap}`} data-density=${density}>
       ${/* ── Zone 1: Status Bar ── */ ''}
       <${StatusBar}
         snapshot=${snapshot}
         now=${now}
         lastFetchAt=${lastFetchAt}
+        density=${density}
+        onDensityToggle=${() => setDensity(d => d === 'comfortable' ? 'compact' : 'comfortable')}
         keeperNames=${keeperNames}
         selected=${activeSelected}
         onSelect=${setSelected}
@@ -458,6 +490,7 @@ function ShortcutsOverlay({
     { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
     { keys: 'r', desc: '강제 새로고침' },
     { keys: 'g', desc: 'Compound Graph 토글' },
+    { keys: 'd', desc: '밀도 토글 (여유 / 조밀)' },
     { keys: '? ', desc: '단축키 목록 토글' },
     { keys: 'Esc', desc: '오버레이 닫기' },
     { keys: '← →', desc: '키퍼 탭 이동 (탭 포커스 시)' },
@@ -506,6 +539,8 @@ function StatusBar({
   snapshot,
   now,
   lastFetchAt,
+  density,
+  onDensityToggle,
   keeperNames,
   selected,
   onSelect,
@@ -519,6 +554,8 @@ function StatusBar({
   snapshot: KeeperCompositeSnapshot | null
   now: number
   lastFetchAt: number
+  density: 'comfortable' | 'compact'
+  onDensityToggle: () => void
   keeperNames: string[]
   selected: string | null
   onSelect: (n: string) => void
@@ -557,8 +594,9 @@ function StatusBar({
       ].filter(Boolean).join(' · ')
     : ''
 
+  const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class="sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md px-4 py-2.5 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
+    <div class=${`sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
@@ -577,6 +615,14 @@ function StatusBar({
             aria-keyshortcuts="r"
           >
             ${refreshFlash ? '✓' : '↻'}
+          </button>
+          <button
+            class="text-[9px] font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
+            onClick=${onDensityToggle}
+            title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
+            aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
+          >
+            ${density === 'compact' ? '▣ 조밀' : '▢ 여유'}
           </button>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}

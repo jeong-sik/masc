@@ -834,27 +834,39 @@ let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
               (Printexc.to_string exn);
             `Null)
   in
+  (* Cold workspaces lazily materialize room/keeper state on first access.
+     Keep those stateful reads sequential so one failing init path does not
+     cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
+     only for projection-style reads that are safe to drop to `Null`. *)
   let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
   let general_agents = dashboard_general_agent_count agents in
   let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
-  let active_keepers, keepers_ms =
-    measure_ms (fun () -> running_keeper_count config)
-  in
+  let active_keepers, keepers_ms = measure_ms (fun () -> running_keeper_count config) in
   let configured_keepers, configured_keepers_ms =
     measure_ms (fun () -> keeper_count config)
   in
-  let meta_cognition_json, meta_cognition_ms =
-    measure_ms (fun () -> meta_cognition_summary_cached config)
-  in
-  let config_resolution_json, config_resolution_ms =
-    measure_json_projection "config_resolution" (fun () ->
-        Config_dir_resolver.(resolve () |> to_json))
-  in
-  let runtime_resolution_json, runtime_resolution_ms =
-    measure_json_projection "runtime_resolution"
-      (fun () -> Server_dashboard_http_runtime_info.runtime_resolution_json config)
-  in
+  let meta_cognition_r = ref (`Null, 0) in
+  let config_resolution_r = ref (`Null, 0) in
+  let runtime_resolution_r = ref (`Null, 0) in
+  Eio.Fiber.all
+    [
+      (fun () ->
+        meta_cognition_r :=
+          measure_json_projection "meta_cognition" (fun () ->
+              meta_cognition_summary_cached config));
+      (fun () ->
+        config_resolution_r :=
+          measure_json_projection "config_resolution" (fun () ->
+              Config_dir_resolver.(resolve () |> to_json)));
+      (fun () ->
+        runtime_resolution_r :=
+          measure_json_projection "runtime_resolution" (fun () ->
+              Server_dashboard_http_runtime_info.runtime_resolution_json config));
+    ];
+  let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
+  let config_resolution_json, config_resolution_ms = !config_resolution_r in
+  let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
   `Assoc
     [
       ("generated_at", `String (Types.now_iso ()));

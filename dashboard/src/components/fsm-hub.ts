@@ -1428,37 +1428,71 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
   `
 }
 
+/** Plain-english safety-property descriptions per invariant key.
+    Each entry names *what* the invariant guards and *what breaks* if
+    it's violated, so an operator reading a red row in the panel
+    understands the blast radius without cross-referencing the keeper
+    RFC. Based on RFC-0003 composite keeper lifecycle contracts. */
+const INVARIANT_DESCRIPTIONS: Record<string, string> = {
+  phase_turn_alignment:
+    'The KSM phase (Running / Compacting / HandingOff / …) must match what the KTC turn lane is doing. A drift means the two state machines disagree on which mode the keeper is in.',
+  no_cascade_before_measurement:
+    'Cascade selection must not begin before the measurement phase captures auto-rules. A violation usually means a provider call fired without the guardrail/drift checks that gate it.',
+  compaction_atomicity:
+    'Compaction must be atomic — a turn either sees the old context or the new one, never a half-compacted state. A break corrupts message ordering or duplicates content.',
+  event_priority_monotone:
+    'Event_bus priorities must be monotone (higher priority delivered first). A break means a critical event was delivered after a lower-priority one, which can skew keeper decisions.',
+  recovery_two_store_sync:
+    'Data-record and FSM-condition stores must agree on the same recovery point. A drift here means a restart would replay from an inconsistent checkpoint.',
+}
+
+export function invariantDescription(key: string): string {
+  return INVARIANT_DESCRIPTIONS[key] ?? 'Invariant defined by the keeper composite contract.'
+}
+
 function InvariantsPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const entries = invariantRows(snapshot)
-  const allOk = entries.every(entry => entry.ok)
+  const okCount = entries.filter(entry => entry.ok).length
+  const total = entries.length
+  const allOk = okCount === total
+  const badgeText = allOk ? `${total}/${total}` : `${okCount}/${total}`
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="flex items-center justify-between mb-2">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Safety
         </div>
-        <span class=${`rounded-full border px-2 py-0.5 text-[9px] font-mono ${
-          allOk
-            ? 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]'
-            : 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
-        }`}>
-          ${allOk ? '5/5' : 'violation'}
+        <span
+          class=${`rounded-full border px-2 py-0.5 text-[9px] font-mono tabular-nums ${
+            allOk
+              ? 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]'
+              : 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
+          }`}
+          title=${allOk
+            ? `All ${total} keeper composite invariants hold.`
+            : `${total - okCount} of ${total} invariants are currently violated.`}
+        >
+          ${badgeText}
         </span>
       </div>
       <ul class="flex flex-col gap-1">
-        ${entries.map(entry => html`
-          <li class="flex gap-2 text-[10px]">
-            <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[#22c55e]' : 'bg-[#ef4444]'}`}></span>
-            <div class="min-w-0">
-              <div class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[#f87171] font-semibold'}>
-                ${entry.label}
+        ${entries.map(entry => {
+          const desc = invariantDescription(entry.key)
+          const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}`
+          return html`
+            <li class="flex gap-2 text-[10px] cursor-help" title=${tooltip}>
+              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[#22c55e]' : 'bg-[#ef4444]'}`}></span>
+              <div class="min-w-0">
+                <div class=${entry.ok ? 'text-[var(--text-body)]' : 'text-[#f87171] font-semibold'}>
+                  ${entry.label}
+                </div>
+                <div class="text-[8px] leading-relaxed text-[var(--text-dim)]">
+                  ${entry.detail}
+                </div>
               </div>
-              <div class="text-[8px] leading-relaxed text-[var(--text-dim)]">
-                ${entry.detail}
-              </div>
-            </div>
-          </li>
-        `)}
+            </li>
+          `
+        })}
       </ul>
     </div>
   `

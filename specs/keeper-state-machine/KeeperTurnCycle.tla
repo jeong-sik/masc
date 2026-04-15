@@ -1,345 +1,272 @@
 ---- MODULE KeeperTurnCycle ----
 (***************************************************************************)
-(* KeeperTurnCycle — TLA+ spec for the keeper turn execution lifecycle.    *)
+(* KeeperTurnCycle — runtime-aligned turn observation contract.            *)
 (*                                                                         *)
-(* Models a single keeper's turn phases:                                   *)
-(*   Idle → Planning → Executing → ToolCall → SideEffect →                *)
-(*   Compacting → Done → Idle                                              *)
+(* This spec models the live per-turn observation that the OCaml runtime   *)
+(* stores in [Keeper_registry.current_turn_observation]. It is not the old *)
+(* "tool_call/side_effect/done" linear storyboard; the current runtime is  *)
+(* a 3-axis machine:                                                        *)
+(*   - turn_phase      : prompting | executing | compacting | finalizing   *)
+(*   - decision_stage  : undecided | guard_ok | gate_rejected |            *)
+(*                       tool_policy_selected                              *)
+(*   - cascade_state   : idle | selecting | trying | done | exhausted      *)
 (*                                                                         *)
-(* Complementary to KeeperStateMachine.tla which models the 11-phase       *)
-(* lifecycle. This spec zooms into what happens during a single turn       *)
-(* while the keeper is in the Running phase.                               *)
-(*                                                                         *)
-(* Derived from OCaml implementation: keeper_unified_turn.ml,              *)
-(* keeper_agent_run.ml, keeper_post_turn.ml, keeper_compact_policy.ml.     *)
+(* Turn idle is represented by [turn_live = FALSE] plus cleared substate.  *)
+(* The authoritative write points live in:                                  *)
+(*   - keeper_registry.ml                                                  *)
+(*   - keeper_agent_run.ml                                                 *)
+(*   - keeper_unified_turn.ml                                              *)
+(*   - keeper_guards.ml                                                    *)
 (***************************************************************************)
 
-EXTENDS Naturals, FiniteSets
-
-CONSTANTS
-    MaxRetries,         \* Maximum transient retries (default 2)
-    MaxToolCalls,       \* Maximum tool calls per turn
-    CompactionThreshold \* Trigger compaction when ratio exceeds this
+EXTENDS TLC
 
 VARIABLES
-    turn_phase,         \* Current phase of the turn cycle
-    retry_count,        \* Number of retries attempted in current turn
-    tool_calls,         \* Number of tool calls made so far
-    has_side_effect,    \* Whether a side-effecting tool was called
-    compaction_needed,  \* Whether compaction should be applied
-    turn_outcome,       \* "none" | "success" | "error" | "timeout" | "partial"
-    reconcile_required  \* Sticky until a later successful turn verifies clean recovery
+    turn_live,            \* current_turn_observation = Some _
+    turn_phase,           \* Keeper_registry.turn_phase
+    decision_stage,       \* Keeper_registry.decision_stage
+    cascade_state,        \* Keeper_registry.cascade_state
+    measurement_bound,    \* mark_turn_measurement already consumed
+    selected_model_bound  \* selected_model = Some _
 
-vars == <<turn_phase, retry_count, tool_calls,
-          has_side_effect, compaction_needed, turn_outcome, reconcile_required>>
+vars ==
+    << turn_live, turn_phase, decision_stage, cascade_state,
+       measurement_bound, selected_model_bound >>
 
-TurnPhases == {"idle", "planning", "executing", "tool_call",
-               "side_effect", "compacting", "done"}
-
-Outcomes == {"none", "success", "error", "timeout", "partial"}
-
-(***************************************************************************)
-(* Type invariant                                                          *)
-(***************************************************************************)
+TurnPhaseSet == {"idle", "prompting", "executing", "compacting", "finalizing"}
+DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
+CascadeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
+ActionSet    == {
+    "StartTurn",
+    "BindMeasurement",
+    "GuardOk",
+    "SelectToolPolicy",
+    "GateRejected",
+    "CascadeTrying",
+    "CascadeDone",
+    "CascadeExhausted",
+    "EnterCompacting",
+    "RetryAfterCompaction",
+    "FinishTurn"
+}
+InvariantSet == {
+    "NoLiveTurnClearsState",
+    "IdleRequiresNotLive",
+    "GateRejectedRequiresFinalizing",
+    "SelectingRequiresToolPolicy",
+    "ExecutingRequiresTrying",
+    "CompactingRequiresTrying",
+    "TerminalCascadeRequiresFinalizing"
+}
 
 TypeOK ==
-    /\ turn_phase \in TurnPhases
-    /\ retry_count \in 0..MaxRetries
-    /\ tool_calls \in 0..MaxToolCalls
-    /\ has_side_effect \in BOOLEAN
-    /\ compaction_needed \in BOOLEAN
-    /\ turn_outcome \in Outcomes
-    /\ reconcile_required \in BOOLEAN
-
-(***************************************************************************)
-(* Initial state                                                           *)
-(***************************************************************************)
+    /\ turn_live \in BOOLEAN
+    /\ turn_phase \in TurnPhaseSet
+    /\ decision_stage \in DecisionSet
+    /\ cascade_state \in CascadeSet
+    /\ measurement_bound \in BOOLEAN
+    /\ selected_model_bound \in BOOLEAN
 
 Init ==
+    /\ turn_live = FALSE
     /\ turn_phase = "idle"
-    /\ retry_count = 0
-    /\ tool_calls = 0
-    /\ has_side_effect = FALSE
-    /\ compaction_needed = FALSE
-    /\ turn_outcome = "none"
-    /\ reconcile_required = FALSE
+    /\ decision_stage = "undecided"
+    /\ cascade_state = "idle"
+    /\ measurement_bound = FALSE
+    /\ selected_model_bound = FALSE
 
-(***************************************************************************)
-(* Turn trigger: Idle → Planning                                           *)
-(* Keeper receives heartbeat clock tick or reactive board event.           *)
-(***************************************************************************)
+\* ──────────────────────────────────────────────────────────────────────
+\* Live turn installation
+\* keeper_unified_turn.ml: mark_turn_started
+\* ──────────────────────────────────────────────────────────────────────
+StartTurn ==
+    /\ ~turn_live
+    /\ turn_live' = TRUE
+    /\ turn_phase' = "prompting"
+    /\ decision_stage' = "undecided"
+    /\ cascade_state' = "idle"
+    /\ measurement_bound' = FALSE
+    /\ selected_model_bound' = FALSE
 
-TurnTrigger ==
-    /\ turn_phase = "idle"
-    /\ turn_phase' = "planning"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
+\* mark_turn_measurement
+BindMeasurement ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ ~measurement_bound
+    /\ measurement_bound' = TRUE
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
+                    cascade_state, selected_model_bound>>
 
-(***************************************************************************)
-(* Planning phase: verify keys, build prompt, resolve params.              *)
-(* Can succeed (→ Executing) or fail (→ Done with error).                  *)
-(***************************************************************************)
+\* keeper_unified_turn.ml elevates guard_ok when a measurement is present.
+GuardOk ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ measurement_bound
+    /\ decision_stage = "undecided"
+    /\ decision_stage' = "guard_ok"
+    /\ UNCHANGED <<turn_live, turn_phase, cascade_state,
+                    measurement_bound, selected_model_bound>>
 
-PlanningSucceeds ==
-    /\ turn_phase = "planning"
+\* keeper_agent_run.ml: tool disclosure completes, selected policy becomes active.
+\* Runtime allows this from undecided as well as guard_ok.
+SelectToolPolicy ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ cascade_state = "idle"
+    /\ decision_stage \in {"undecided", "guard_ok"}
+    /\ decision_stage' = "tool_policy_selected"
+    /\ cascade_state' = "selecting"
+    /\ UNCHANGED <<turn_live, turn_phase, measurement_bound,
+                    selected_model_bound>>
+
+\* keeper_guards.ml: override/approval_required short-circuits the turn.
+\* The runtime leaves cascade_state as-is (usually idle or selecting).
+GateRejected ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ decision_stage \in {"undecided", "guard_ok", "tool_policy_selected"}
+    /\ cascade_state \in {"idle", "selecting"}
+    /\ turn_phase' = "finalizing"
+    /\ decision_stage' = "gate_rejected"
+    /\ UNCHANGED <<turn_live, cascade_state, measurement_bound,
+                    selected_model_bound>>
+
+\* keeper_unified_turn.ml: retry_loop sets Cascade_trying before OAS run.
+CascadeTrying ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ decision_stage = "tool_policy_selected"
+    /\ cascade_state = "selecting"
     /\ turn_phase' = "executing"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
+    /\ cascade_state' = "trying"
+    /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
+                    selected_model_bound>>
 
-PlanningFails ==
-    /\ turn_phase = "planning"
-    /\ turn_phase' = "done"
-    /\ turn_outcome' = "error"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, reconcile_required>>
-
-(***************************************************************************)
-(* Executing → ToolCall: model produces a tool call.                       *)
-(***************************************************************************)
-
-MakeToolCall ==
+\* Successful cascade attempt chooses a model and enters finalizing.
+CascadeDone ==
+    /\ turn_live
     /\ turn_phase = "executing"
-    /\ tool_calls < MaxToolCalls
-    /\ turn_phase' = "tool_call"
-    /\ tool_calls' = tool_calls + 1
-    /\ UNCHANGED <<retry_count, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
+    /\ cascade_state = "trying"
+    /\ turn_phase' = "finalizing"
+    /\ cascade_state' = "done"
+    /\ selected_model_bound' = TRUE
+    /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
-(***************************************************************************)
-(* ToolCall → SideEffect: tool call is a side-effecting operation.         *)
-(* board_post, bash, fs_edit, github, pr_workflow.                         *)
-(***************************************************************************)
-
-ToolCallWithSideEffect ==
-    /\ turn_phase = "tool_call"
-    /\ turn_phase' = "side_effect"
-    /\ has_side_effect' = TRUE
-    /\ UNCHANGED <<retry_count, tool_calls,
-                    compaction_needed, turn_outcome, reconcile_required>>
-
-(***************************************************************************)
-(* ToolCall → Executing: tool call completes (no side effect or            *)
-(* side effect already recorded). Return to execution loop.                *)
-(***************************************************************************)
-
-ToolCallCompletes ==
-    /\ turn_phase = "tool_call"
-    /\ turn_phase' = "executing"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
-
-(***************************************************************************)
-(* SideEffect → Executing: side-effecting tool completes.                  *)
-(***************************************************************************)
-
-SideEffectCompletes ==
-    /\ turn_phase = "side_effect"
-    /\ turn_phase' = "executing"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
-
-(***************************************************************************)
-(* Executing → Compacting: agent run completes successfully.               *)
-(* Compaction decision is always evaluated (even if skipped).              *)
-(***************************************************************************)
-
-ExecutionSucceeds ==
+\* Exhausted cascade also terminates the turn, without binding a model.
+CascadeExhausted ==
+    /\ turn_live
     /\ turn_phase = "executing"
-    /\ turn_phase' = "compacting"
-    /\ turn_outcome' = "success"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, reconcile_required>>
+    /\ cascade_state = "trying"
+    /\ turn_phase' = "finalizing"
+    /\ cascade_state' = "exhausted"
+    /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
+                    selected_model_bound>>
 
-(***************************************************************************)
-(* Executing → Compacting: any error after a committed mutating tool call. *)
-(* Cannot retry — the turn outcome is partial and needs explicit reconcile.*)
-(***************************************************************************)
-
-ErrorAfterSideEffect ==
+\* Overflow recovery enters explicit compaction while preserving the trying edge.
+EnterCompacting ==
+    /\ turn_live
     /\ turn_phase = "executing"
-    /\ has_side_effect = TRUE
+    /\ cascade_state = "trying"
     /\ turn_phase' = "compacting"
-    /\ turn_outcome' = "partial"
-    /\ reconcile_required' = TRUE
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed>>
+    /\ UNCHANGED <<turn_live, decision_stage, cascade_state,
+                    measurement_bound, selected_model_bound>>
 
-(***************************************************************************)
-(* Executing → Executing: transient error, no side-effect, retry.          *)
-(* OCaml: exponential backoff 1s, 2s.                                      *)
-(***************************************************************************)
-
-TransientErrorRetry ==
-    /\ turn_phase = "executing"
-    /\ has_side_effect = FALSE
-    /\ retry_count < MaxRetries
-    /\ retry_count' = retry_count + 1
-    /\ UNCHANGED <<turn_phase, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
-
-(***************************************************************************)
-(* Executing → Compacting: persistent error or retries exhausted.          *)
-(***************************************************************************)
-
-PersistentError ==
-    /\ turn_phase = "executing"
-    /\ has_side_effect = FALSE
-    /\ \/ retry_count >= MaxRetries
-       \/ turn_outcome = "error"  \* already marked as error
-    /\ turn_phase' = "compacting"
-    /\ turn_outcome' = "error"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, reconcile_required>>
-
-(***************************************************************************)
-(* Timeout before any committed mutation stays a plain timeout.            *)
-(***************************************************************************)
-
-TimeoutBeforeSideEffect ==
-    /\ turn_phase \in {"executing", "tool_call", "side_effect"}
-    /\ has_side_effect = FALSE
-    /\ turn_phase' = "compacting"
-    /\ turn_outcome' = "timeout"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, reconcile_required>>
-
-(***************************************************************************)
-(* Timeout after a committed mutation is also a partial outcome.           *)
-(***************************************************************************)
-
-TimeoutAfterSideEffect ==
-    /\ turn_phase \in {"executing", "tool_call", "side_effect"}
-    /\ has_side_effect = TRUE
-    /\ turn_phase' = "compacting"
-    /\ turn_outcome' = "partial"
-    /\ reconcile_required' = TRUE
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed>>
-
-(***************************************************************************)
-(* Compacting → Done: compaction decision evaluated and applied/skipped.   *)
-(***************************************************************************)
-
-CompactionDecision ==
+\* keeper_unified_turn.ml: prepare_turn_retry_after_compaction
+\* Re-enters prompting with the measurement still bound, but clears the old
+\* cascade attempt and selected model before the next retry.
+RetryAfterCompaction ==
+    /\ turn_live
     /\ turn_phase = "compacting"
-    /\ turn_phase' = "done"
-    /\ UNCHANGED <<retry_count, tool_calls, has_side_effect,
-                    compaction_needed, turn_outcome, reconcile_required>>
+    /\ cascade_state = "trying"
+    /\ turn_phase' = "prompting"
+    /\ decision_stage' = "guard_ok"
+    /\ cascade_state' = "idle"
+    /\ selected_model_bound' = FALSE
+    /\ UNCHANGED <<turn_live, measurement_bound>>
 
-(***************************************************************************)
-(* Done → Idle: turn cycle completes, keeper returns to idle.              *)
-(* Metrics persisted, evidence captured, metadata updated.                 *)
-(***************************************************************************)
-
-TurnCompletes ==
-    /\ turn_phase = "done"
+\* keeper_unified_turn.ml finally block: mark_turn_finished clears live state.
+FinishTurn ==
+    /\ turn_live
+    /\ turn_phase \in (TurnPhaseSet \ {"idle"})
+    /\ turn_live' = FALSE
     /\ turn_phase' = "idle"
-    /\ retry_count' = 0
-    /\ tool_calls' = 0
-    /\ has_side_effect' = FALSE
-    /\ compaction_needed' = FALSE
-    /\ turn_outcome' = "none"
-    /\ reconcile_required' =
-         IF turn_outcome = "success" THEN FALSE ELSE reconcile_required
-
-(***************************************************************************)
-(* Next-state relation                                                     *)
-(***************************************************************************)
+    /\ decision_stage' = "undecided"
+    /\ cascade_state' = "idle"
+    /\ measurement_bound' = FALSE
+    /\ selected_model_bound' = FALSE
 
 Next ==
-    \/ TurnTrigger
-    \/ PlanningSucceeds
-    \/ PlanningFails
-    \/ MakeToolCall
-    \/ ToolCallWithSideEffect
-    \/ ToolCallCompletes
-    \/ SideEffectCompletes
-    \/ ExecutionSucceeds
-    \/ ErrorAfterSideEffect
-    \/ TransientErrorRetry
-    \/ PersistentError
-    \/ TimeoutBeforeSideEffect
-    \/ TimeoutAfterSideEffect
-    \/ CompactionDecision
-    \/ TurnCompletes
+    \/ StartTurn
+    \/ BindMeasurement
+    \/ GuardOk
+    \/ SelectToolPolicy
+    \/ GateRejected
+    \/ CascadeTrying
+    \/ CascadeDone
+    \/ CascadeExhausted
+    \/ EnterCompacting
+    \/ RetryAfterCompaction
+    \/ FinishTurn
 
-Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
+Spec ==
+    Init /\ [][Next]_vars /\ WF_vars(FinishTurn)
 
-(***************************************************************************)
-(* Safety invariants                                                       *)
-(***************************************************************************)
+\* ──────────────────────────────────────────────────────────────────────
+\* Invariants
+\* ──────────────────────────────────────────────────────────────────────
 
-(* S1: Turn cycle always goes through Compacting before returning to Idle. *)
-(*     No shortcut from Executing/ToolCall/SideEffect to Idle.             *)
-NoDirectExecutingToIdle ==
-    turn_phase = "idle" =>
-        (turn_outcome = "none" /\ retry_count = 0)
+NoLiveTurnClearsState ==
+    ~turn_live =>
+        /\ turn_phase = "idle"
+        /\ decision_stage = "undecided"
+        /\ cascade_state = "idle"
+        /\ ~measurement_bound
+        /\ ~selected_model_bound
 
-(* S2: SideEffect is only reachable from ToolCall.                         *)
-(*     (Enforced by transition structure, verifiable by model checking.)   *)
+IdleRequiresNotLive ==
+    turn_phase = "idle" => ~turn_live
 
-(* S3: Partial outcome is sticky evidence that explicit reconcile is still
-       required until a later successful turn clears it.                   *)
-PartialOutcomeRequiresReconcile ==
-    (turn_outcome = "partial") => reconcile_required
+GateRejectedRequiresFinalizing ==
+    decision_stage = "gate_rejected" => turn_phase = "finalizing"
 
-(* S3b: Once a side effect has committed, later executing steps may fail   *)
-(*      or compact, but they may not increase retry_count.                 *)
-SideEffectRetryAction ==
-    (has_side_effect = TRUE /\ turn_phase = "executing") =>
-        retry_count' <= retry_count
+SelectingRequiresToolPolicy ==
+    cascade_state = "selecting" =>
+        /\ turn_live
+        /\ turn_phase = "prompting"
+        /\ decision_stage = "tool_policy_selected"
 
-NoRetryAfterSideEffectStep ==
-    [][SideEffectRetryAction]_vars
+ExecutingRequiresTrying ==
+    turn_phase = "executing" =>
+        /\ turn_live
+        /\ cascade_state = "trying"
+        /\ decision_stage = "tool_policy_selected"
 
-(* S4: Tool calls are bounded.                                             *)
-ToolCallsBounded ==
-    tool_calls <= MaxToolCalls
+CompactingRequiresTrying ==
+    turn_phase = "compacting" =>
+        /\ turn_live
+        /\ cascade_state = "trying"
+        /\ decision_stage = "tool_policy_selected"
 
-(* S5: Retry count never exceeds maximum.                                  *)
-RetryBounded ==
-    retry_count <= MaxRetries
+TerminalCascadeRequiresFinalizing ==
+    cascade_state \in {"done", "exhausted"} =>
+        /\ turn_live
+        /\ turn_phase = "finalizing"
+        /\ decision_stage = "tool_policy_selected"
 
-(* S6: Done state always has an outcome set.                               *)
-DoneHasOutcome ==
-    turn_phase = "done" => turn_outcome /= "none"
-
-(* S7: Idle state always has outcome cleared.                              *)
-IdleIsClear ==
-    turn_phase = "idle" =>
-        /\ turn_outcome = "none"
-        /\ retry_count = 0
-        /\ tool_calls = 0
-        /\ has_side_effect = FALSE
-
-(* Combined safety *)
 Safety ==
     /\ TypeOK
-    /\ ToolCallsBounded
-    /\ RetryBounded
-    /\ DoneHasOutcome
-    /\ IdleIsClear
-    /\ PartialOutcomeRequiresReconcile
+    /\ NoLiveTurnClearsState
+    /\ IdleRequiresNotLive
+    /\ GateRejectedRequiresFinalizing
+    /\ SelectingRequiresToolPolicy
+    /\ ExecutingRequiresTrying
+    /\ CompactingRequiresTrying
+    /\ TerminalCascadeRequiresFinalizing
 
-(***************************************************************************)
-(* Liveness properties                                                     *)
-(***************************************************************************)
-
-(* L1: Every turn eventually completes (reaches Done).                     *)
-TurnEventuallyDone ==
-    (turn_phase /= "idle") ~> (turn_phase = "done")
-
-(* L2: Every Done state eventually returns to Idle.                        *)
-DoneEventuallyIdle ==
-    (turn_phase = "done") ~> (turn_phase = "idle")
-
-(* L3: Turn cycle is live — can always make progress.                      *)
-TurnCycleLive ==
-    (turn_phase = "idle") ~> (turn_phase = "done")
+LiveTurnEventuallyClears ==
+    turn_live ~> ~turn_live
 
 Liveness ==
-    /\ TurnEventuallyDone
-    /\ DoneEventuallyIdle
-    /\ TurnCycleLive
+    LiveTurnEventuallyClears
 
 ====

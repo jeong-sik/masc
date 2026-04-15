@@ -435,6 +435,17 @@ let set_turn_selected_model ~base_path name selected_model =
   update_entry ~base_path name (fun e ->
     update_current_turn e (fun obs -> { obs with selected_model }))
 
+let prepare_turn_retry_after_compaction ~base_path name =
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      {
+        obs with
+        turn_phase = Turn_prompting;
+        decision_stage = Decision_guard_ok;
+        cascade_state = Cascade_idle;
+        selected_model = None;
+      }))
+
 let mark_turn_gate_rejected_by_name name =
   let target =
     StringMap.fold

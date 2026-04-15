@@ -233,6 +233,13 @@ val set_turn_phase :
 val set_turn_selected_model :
   base_path:string -> string -> string option -> unit
 
+(** Reset a live turn into the post-compaction retry posture used by
+    overflow recovery. Preserves the bound measurement, but clears the
+    previous cascade attempt and selected model so the next retry starts
+    from [Prompting + Guard_ok + Cascade_idle]. *)
+val prepare_turn_retry_after_compaction :
+  base_path:string -> string -> unit
+
 (** Cross-registry convenience for hooks that only know the keeper name. *)
 val mark_turn_gate_rejected_by_name : string -> unit
 

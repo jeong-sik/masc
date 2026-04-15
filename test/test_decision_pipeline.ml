@@ -20,6 +20,7 @@ module TS = Masc_mcp.Tool_shard
 module KTP = Masc_mcp.Keeper_tool_policy
 module Reg = Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
+module KTC = Masc_mcp.Keeper_turn_cycle_contract
 module KTypes = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
 
@@ -102,6 +103,11 @@ let keeper_composite_lifecycle_tla () =
   Filename.concat
     (project_root ())
     "specs/keeper-state-machine/KeeperCompositeLifecycle.tla"
+
+let keeper_turn_cycle_tla () =
+  Filename.concat
+    (project_root ())
+    "specs/keeper-state-machine/KeeperTurnCycle.tla"
 
 (* ── E1: NEL Invariant ──────────────────────────────── *)
 
@@ -501,6 +507,35 @@ let test_observer_event_priority_detects_competing_measurement () =
     check bool "second measurement for same live turn breaks monotonicity"
       false snap.invariants.event_priority_monotone
 
+let test_turn_retry_after_compaction_resets_cascade_attempt () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-compaction-retry" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  dispatch_obs_measurement name;
+  Reg.mark_turn_measurement ~base_path:test_obs_bp name;
+  Reg.set_turn_decision_stage ~base_path:test_obs_bp name
+    Reg.Decision_tool_policy_selected;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_trying;
+  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
+  Reg.set_turn_phase ~base_path:test_obs_bp name Reg.Turn_compacting;
+  Reg.prepare_turn_retry_after_compaction ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "retry returns to prompting"
+      "prompting" (Obs.turn_phase_to_string snap.ktc_turn_phase);
+    check string "retry preserves guard_ok posture"
+      "guard_ok" (Obs.decision_stage_to_string snap.kdp_decision);
+    check string "retry clears prior cascade attempt"
+      "idle" (Obs.cascade_state_to_string snap.kcl_cascade_state);
+    (match entry.current_turn_observation with
+     | None -> Alcotest.fail "live turn missing after retry reset"
+     | Some obs ->
+       check (option string) "retry clears selected model"
+         None obs.selected_model)
+
 let test_composite_observer_variants_match_tla_sets () =
   let tla = read_file (keeper_composite_lifecycle_tla ()) in
   let check_set label expected actual =
@@ -540,6 +575,32 @@ let test_composite_observer_named_sets_match_tla_sets () =
     "InvariantSet matches observer invariant_key variants"
     (extract_tla_set ~marker:"InvariantSet" tla)
     (List.map Obs.invariant_key_to_string Obs.all_invariant_keys)
+
+let test_keeper_turn_cycle_named_sets_match_tla_sets () =
+  let tla = read_file (keeper_turn_cycle_tla ()) in
+  let check_set label expected actual =
+    check (list string) label expected actual
+  in
+  check_set
+    "TurnPhaseSet matches KTC turn_phase variants"
+    (extract_tla_set ~marker:"TurnPhaseSet" tla)
+    (List.map Obs.turn_phase_to_string Obs.all_turn_phases);
+  check_set
+    "DecisionSet matches KTC decision variants"
+    (extract_tla_set ~marker:"DecisionSet" tla)
+    (List.map Obs.decision_stage_to_string Obs.all_decision_stages);
+  check_set
+    "CascadeSet matches KTC cascade variants"
+    (extract_tla_set ~marker:"CascadeSet" tla)
+    (List.map Obs.cascade_state_to_string Obs.all_cascade_states);
+  check_set
+    "ActionSet matches KTC action variants"
+    (extract_tla_set ~marker:"ActionSet" tla)
+    (List.map KTC.tla_action_to_string KTC.all_tla_actions);
+  check_set
+    "InvariantSet matches KTC invariant variants"
+    (extract_tla_set ~marker:"InvariantSet" tla)
+    (List.map KTC.invariant_key_to_string KTC.all_invariant_keys)
 
 (* ── Test Suite ──────────────────────────────────────── *)
 
@@ -592,9 +653,13 @@ let () =
         test_observer_json_includes_terminal_fields;
       test_case "event priority detects competing measurement" `Quick
         test_observer_event_priority_detects_competing_measurement;
+      test_case "compaction retry resets prior cascade attempt" `Quick
+        test_turn_retry_after_compaction_resets_cascade_attempt;
       test_case "variant sets match KeeperCompositeLifecycle.tla" `Quick
         test_composite_observer_variants_match_tla_sets;
       test_case "named sets match KeeperCompositeLifecycle.tla" `Quick
         test_composite_observer_named_sets_match_tla_sets;
+      test_case "named sets match KeeperTurnCycle.tla" `Quick
+        test_keeper_turn_cycle_named_sets_match_tla_sets;
     ];
   ]

@@ -1747,12 +1747,8 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                                after_tokens =
                                  retry_plan.compaction.after_tokens;
                              });
-                        Keeper_registry.set_turn_phase
-                          ~base_path:config.base_path meta.name
-                          Keeper_registry.Turn_prompting;
-                        Keeper_registry.set_turn_decision_stage
-                          ~base_path:config.base_path meta.name
-                          Keeper_registry.Decision_guard_ok;
+                        Keeper_registry.prepare_turn_retry_after_compaction
+                          ~base_path:config.base_path meta.name;
                         let retry_meta =
                           if retry_plan.retry_generation = run_meta.runtime.generation
                           then run_meta

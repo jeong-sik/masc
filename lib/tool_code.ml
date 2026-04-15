@@ -76,11 +76,28 @@ let validate_path config path =
     in
     let canonical = normalize_path absolute_path in
     let canonical_root = normalize_path git_root in
-    if String.starts_with ~prefix:(canonical_root ^ "/") canonical
-       || String.equal canonical canonical_root then
-      Ok canonical
-    else
-      Error (IoError "Path traversal detected: access outside git root")
+    let resolved_root =
+      try Some (Unix.realpath canonical_root) with
+      | Unix.Unix_error _ -> None
+    in
+    let resolved_path =
+      if Sys.file_exists canonical then
+        try Some (Unix.realpath canonical) with
+        | Unix.Unix_error _ -> None
+      else
+        None
+    in
+    let within root candidate =
+      String.starts_with ~prefix:(root ^ "/") candidate
+      || String.equal candidate root
+    in
+    let allowed =
+      match resolved_root, resolved_path with
+      | Some root, Some candidate -> within root candidate
+      | _ -> within canonical_root canonical
+    in
+    if allowed then Ok canonical
+    else Error (IoError "Path traversal detected: access outside git root")
   with
   | Invalid_argument msg -> Error (IoError msg)
   | exn -> Error (IoError (Printexc.to_string exn))
@@ -139,28 +156,39 @@ let validate_read_path ~agent_name config path =
       let playground_tree_abs_raw =
         Filename.concat base_path playground_tree_rel
       in
-      (* #6637 iter11 GLM review: fail closed on realpath failure.
-         [normalize_path] only resolves string-level [.] / [..]
-         segments; it does NOT follow symlinks. If the playground
-         tree doesn't realpath, a symlink in the filesystem could
-         flip the prefix comparison below. Return an explicit error
-         that points the LLM at the recovery action (provision the
-         playground bundle) instead of silently weakening the gate.
-         Mirrors iter10 #6651 fail-closed pattern. *)
-      match
-        try Ok (Unix.realpath playground_tree_abs_raw) with
-        | Unix.Unix_error _ ->
-            Error
-              (IoError
-                 (Printf.sprintf
-                    "keeper playground tree %S does not exist; cannot \
-                     validate cross-keeper containment. Clone via \
-                     keeper_shell op=git_clone to provision your \
-                     playground first. See #6527/#6637."
-                    playground_tree_rel))
-      with
-      | Error e -> Error e
-      | Ok playground_tree_canonical ->
+      let playground_tree_abs = normalize_path playground_tree_abs_raw in
+      let target_mentions_playground_tree =
+        String.starts_with ~prefix:(playground_tree_abs ^ "/") canonical_string
+        || String.equal canonical_string playground_tree_abs
+      in
+      if not target_mentions_playground_tree then
+        (* Shared codebase paths outside [.masc/playground] remain
+           readable even when the playground tree has never been
+           provisioned in this repo. *)
+        Ok canonical
+      else
+        (* #6637 iter11 GLM review: fail closed on realpath failure.
+           [normalize_path] only resolves string-level [.] / [..]
+           segments; it does NOT follow symlinks. If the playground
+           tree doesn't realpath, a symlink in the filesystem could
+           flip the prefix comparison below. Return an explicit error
+           that points the LLM at the recovery action (provision the
+           playground bundle) instead of silently weakening the gate.
+           Mirrors iter10 #6651 fail-closed pattern. *)
+        match
+          try Ok (Unix.realpath playground_tree_abs_raw) with
+          | Unix.Unix_error _ ->
+              Error
+                (IoError
+                   (Printf.sprintf
+                      "keeper playground tree %S does not exist; cannot \
+                       validate cross-keeper containment. Clone via \
+                       keeper_shell op=git_clone to provision your \
+                       playground first. See #6527/#6637."
+                      playground_tree_rel))
+        with
+        | Error e -> Error e
+        | Ok playground_tree_canonical ->
           let is_under_any_playground =
             String.starts_with
               ~prefix:(playground_tree_canonical ^ "/") canonical

@@ -1,14 +1,16 @@
 {
   "default_models": [
-    "glm-coding:glm-5.1",
-    "ollama:qwen3.5:35b-a3b-nvfp4"
+    {"model": "glm-coding:glm-5.1", "weight": 50},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
+    {"model": "ollama:gemma4:26b", "weight": 20}
   ],
   "local_only_models": [
     "ollama:qwen3.5:35b-a3b-nvfp4"
   ],
   "keeper_unified_models": [
-    "glm-coding:glm-5.1",
-    "ollama:qwen3.5:35b-a3b-nvfp4"
+    {"model": "glm-coding:glm-5.1", "weight": 50},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 30},
+    {"model": "ollama:gemma4:26b", "weight": 20}
   ],
   "nick0cave_models": [
     "glm-coding:glm-5-turbo",

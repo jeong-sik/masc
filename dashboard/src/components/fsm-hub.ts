@@ -881,10 +881,7 @@ export function FsmHub() {
           ? `위 탭에서 키퍼를 선택하면 composite FSM 스냅샷을 표시합니다 (${keeperNames.length}개 사용 가능)`
           : '등록된 키퍼가 없습니다 — MASC에 키퍼를 기동하면 자동으로 표시됩니다'} />
       ` : loading && !snapshot ? html`
-        <div class="flex items-center justify-center gap-2 py-10 text-[11px] text-[var(--text-dim)]">
-          <span class="inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>
-          composite 스냅샷 로딩중
-        </div>
+        <${SkeletonLayout} />
       ` : error ? html`
         <${EmptyState} message=${error} compact />
       ` : snapshot ? html`
@@ -1912,6 +1909,83 @@ function TransitionTrail({
             </div>
           `
         })}
+      </div>
+    </div>
+  `
+}
+
+// ── Skeleton Loading (Linear/Stripe pattern) ────────────
+
+const shimmerCls = 'animate-pulse rounded bg-[var(--white-5)]'
+
+function SkeletonBar({ w, h = 'h-3' }: { w: string; h?: string }) {
+  return html`<div class=${`${shimmerCls} ${w} ${h}`}></div>`
+}
+
+function SkeletonLayout() {
+  return html`
+    <div class="flex flex-col gap-3" aria-hidden="true" aria-label="Loading composite snapshot">
+      ${/* Operator Meaning skeleton */ ''}
+      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
+        <${SkeletonBar} w="w-24" h="h-2" />
+        <div class="mt-3"><${SkeletonBar} w="w-3/4" h="h-5" /></div>
+        <div class="mt-2"><${SkeletonBar} w="w-full" h="h-3" /></div>
+        <div class="mt-3 flex gap-2">
+          <${SkeletonBar} w="w-16" h="h-4" />
+          <${SkeletonBar} w="w-20" h="h-4" />
+          <${SkeletonBar} w="w-14" h="h-4" />
+        </div>
+      </div>
+
+      ${/* Hero Phase skeleton */ ''}
+      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-5">
+        <${SkeletonBar} w="w-32" h="h-2" />
+        <div class="mt-2"><${SkeletonBar} w="w-40" h="h-8" /></div>
+        <div class="mt-2"><${SkeletonBar} w="w-20" h="h-2" /></div>
+        <div class="mt-2 flex gap-1">
+          ${[1,2,3,4,5,6,7,8].map(() => html`<${SkeletonBar} w="w-2" h="h-2" />`)}
+        </div>
+      </div>
+
+      ${/* Pipeline Strip skeleton */ ''}
+      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+        <${SkeletonBar} w="w-24" h="h-2" />
+        <div class="mt-2 flex gap-2">
+          ${[1,2,3,4].map(() => html`
+            <div class="flex-1 rounded-lg border border-[var(--white-8)] p-2">
+              <${SkeletonBar} w="w-10" h="h-2" />
+              <div class="mt-1"><${SkeletonBar} w="w-16" h="h-4" /></div>
+              <div class="mt-1"><${SkeletonBar} w="w-14" h="h-2" /></div>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      ${/* Swimlane skeleton */ ''}
+      <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+        <${SkeletonBar} w="w-28" h="h-2" />
+        <div class="mt-2 flex flex-col gap-1.5">
+          ${[1,2,3,4,5].map(() => html`
+            <div class="flex items-center gap-2">
+              <${SkeletonBar} w="w-10" h="h-2" />
+              <div class=${`${shimmerCls} flex-1 h-4`}></div>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      ${/* Health Grid skeleton */ ''}
+      <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        ${[1,2,3].map(() => html`
+          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+            <${SkeletonBar} w="w-20" h="h-2" />
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <${SkeletonBar} w="w-14" h="h-5" />
+              <${SkeletonBar} w="w-12" h="h-5" />
+              <${SkeletonBar} w="w-16" h="h-5" />
+            </div>
+          </div>
+        `)}
       </div>
     </div>
   `

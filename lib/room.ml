@@ -283,10 +283,5 @@ let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->
 (* Agent status, capability registration, discovery *)
 include Room_agent
 
-(* Consensus / Voting *)
-include Room_vote
-
-(* Tempo Control (Cluster Pace Management) *)
-include Room_tempo
-
 (* Room_multi removed — operational namespace is always "default" *)
+(* Room_vote, Room_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)

@@ -891,136 +891,7 @@ let test_register_capabilities_nonexistent_agent () =
     Alcotest.(check bool) "register for nonexistent" true (contains_warning result)
   )
 
-(* ============================================================ *)
-(* Voting / Consensus Tests                                     *)
-(* ============================================================ *)
-
-let contains_ballot result = String.sub result 0 4 = "\xF0\x9F\x97\xB3"  (* 🗳️ *)
-
-(* Helper to extract vote_id from vote_create result *)
-let extract_vote_id result =
-  (* Format: "🗳️ Vote created: vote-XXXX-XXXX\n..." *)
-  let re = Str.regexp "vote-[0-9a-zA-Z-]+" in
-  try
-    let _ = Str.search_forward re result 0 in
-    Str.matched_string result
-  with Not_found -> "vote-unknown"
-
-let test_vote_create () =
-  with_test_env (fun config ->
-    let result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Should we use OCaml?"
-      ~options:["yes"; "no"; "maybe"]
-      ~required_votes:2 in
-    Alcotest.(check bool) "vote created" true (contains_ballot result);
-    Alcotest.(check bool) "has vote id" true (str_contains result "vote-")
-  )
-
-let test_vote_cast () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Test vote"
-      ~options:["yes"; "no"]
-      ~required_votes:2 in
-    let vote_id = extract_vote_id create_result in
-
-    (* Cast vote *)
-    let result = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"yes" in
-    Alcotest.(check bool) "vote cast" true (contains_check result)
-  )
-
-let test_vote_double_vote () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Test"
-      ~options:["yes"; "no"]
-      ~required_votes:2 in
-    let vote_id = extract_vote_id create_result in
-
-    let _ = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"yes" in
-
-    (* Vote again - should be rejected (duplicate vote blocked) *)
-    let result = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"no" in
-    Alcotest.(check bool) "double vote rejected" true (contains_warning result)
-  )
-
-let test_vote_invalid_choice () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Test"
-      ~options:["yes"; "no"]
-      ~required_votes:2 in
-    let vote_id = extract_vote_id create_result in
-
-    (* Invalid choice - returns ❌ *)
-    let result = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"maybe" in
-    Alcotest.(check bool) "invalid choice rejected" true (contains_error result)
-  )
-
-let test_vote_status () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Test"
-      ~options:["yes"; "no"]
-      ~required_votes:2 in
-    let vote_id = extract_vote_id create_result in
-
-    let status = Room.vote_status config ~vote_id in
-    let has_topic = match status with
-      | `Assoc fields -> List.mem_assoc "topic" fields
-      | _ -> false
-    in
-    Alcotest.(check bool) "status has topic" true has_topic
-  )
-
-let test_vote_nonexistent () =
-  with_test_env (fun config ->
-    let status = Room.vote_status config ~vote_id:"vote-999" in
-    let has_error = match status with
-      | `Assoc fields -> List.mem_assoc "error" fields
-      | _ -> false
-    in
-    Alcotest.(check bool) "nonexistent vote error" true has_error
-  )
-
-let test_vote_resolution_approved () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Approve this?"
-      ~options:["yes"; "no"]
-      ~required_votes:2 in
-    let vote_id = extract_vote_id create_result in
-
-    (* Two agents vote yes *)
-    let _ = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"yes" in
-    let result = Room.vote_cast config ~agent_name:"codex" ~vote_id ~choice:"yes" in
-
-    (* Should show resolved with winner *)
-    Alcotest.(check bool) "vote resolved" true (str_contains result "resolved" || str_contains result "Winner")
-  )
-
-let test_list_votes () =
-  with_test_env (fun config ->
-    let _ = Room.vote_create config ~proposer:"claude" ~topic:"Vote 1" ~options:["a";"b"] ~required_votes:2 in
-    let _ = Room.vote_create config ~proposer:"gemini" ~topic:"Vote 2" ~options:["x";"y"] ~required_votes:2 in
-
-    let result = Room.list_votes config in
-    let count = match result with
-      | `Assoc fields -> (
-          match List.assoc_opt "votes" fields with
-          | Some (`List l) -> List.length l
-          | _ -> 0
-        )
-      | _ -> 0
-    in
-    Alcotest.(check bool) "has 2 votes" true (count = 2)
-  )
+(* Room_vote / Room_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
 
 (* ============================================================ *)
 (* Input Validation Tests                                       *)
@@ -1114,58 +985,6 @@ let test_reinit_after_reset () =
 
   let _ = Room.reset config in
   Unix.rmdir tmp_dir
-
-(* ============================================================ *)
-(* Vote Edge Cases                                              *)
-(* ============================================================ *)
-
-let test_vote_single_option () =
-  with_test_env (fun config ->
-    (* Single option vote should work *)
-    let result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Approve?"
-      ~options:["yes"]
-      ~required_votes:1 in
-    Alcotest.(check bool) "single option" true (contains_ballot result)
-  )
-
-let test_vote_many_voters () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Many voters"
-      ~options:["a"; "b"; "c"]
-      ~required_votes:5 in
-    let vote_id = extract_vote_id create_result in
-
-    (* Multiple agents vote *)
-    let _ = Room.vote_cast config ~agent_name:"agent1" ~vote_id ~choice:"a" in
-    let _ = Room.vote_cast config ~agent_name:"agent2" ~vote_id ~choice:"a" in
-    let _ = Room.vote_cast config ~agent_name:"agent3" ~vote_id ~choice:"b" in
-    let _ = Room.vote_cast config ~agent_name:"agent4" ~vote_id ~choice:"a" in
-    let result = Room.vote_cast config ~agent_name:"agent5" ~vote_id ~choice:"a" in
-
-    (* Should be resolved with 5 votes *)
-    Alcotest.(check bool) "resolved with 5" true
-      (str_contains result "resolved" || str_contains result "Winner")
-  )
-
-let test_vote_tie () =
-  with_test_env (fun config ->
-    let create_result = Room.vote_create config
-      ~proposer:"claude"
-      ~topic:"Tie vote"
-      ~options:["a"; "b"]
-      ~required_votes:2 in
-    let vote_id = extract_vote_id create_result in
-
-    let _ = Room.vote_cast config ~agent_name:"agent1" ~vote_id ~choice:"a" in
-    let result = Room.vote_cast config ~agent_name:"agent2" ~vote_id ~choice:"b" in
-
-    (* Should be tied *)
-    Alcotest.(check bool) "vote tied" true (str_contains result "Tied" || str_contains result "resolved")
-  )
 
 (* ============================================================ *)
 (* Message Edge Cases                                           *)
@@ -1796,21 +1615,6 @@ let () =
       Alcotest.test_case "find by capability" `Quick test_find_by_capability;
       Alcotest.test_case "find no match" `Quick test_find_by_capability_no_match;
       Alcotest.test_case "register nonexistent agent" `Quick test_register_capabilities_nonexistent_agent;
-    ];
-
-    (* === Voting / Consensus Tests === *)
-    "voting", [
-      Alcotest.test_case "create vote" `Quick test_vote_create;
-      Alcotest.test_case "cast vote" `Quick test_vote_cast;
-      Alcotest.test_case "double vote blocked" `Quick test_vote_double_vote;
-      Alcotest.test_case "invalid choice" `Quick test_vote_invalid_choice;
-      Alcotest.test_case "vote status" `Quick test_vote_status;
-      Alcotest.test_case "nonexistent vote" `Quick test_vote_nonexistent;
-      Alcotest.test_case "vote resolution" `Quick test_vote_resolution_approved;
-      Alcotest.test_case "list votes" `Quick test_list_votes;
-      Alcotest.test_case "single option" `Quick test_vote_single_option;
-      Alcotest.test_case "many voters" `Quick test_vote_many_voters;
-      Alcotest.test_case "vote tie" `Quick test_vote_tie;
     ];
 
     (* === Input Validation Tests === *)

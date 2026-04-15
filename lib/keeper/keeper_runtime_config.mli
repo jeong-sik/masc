@@ -53,6 +53,11 @@ val resolve_overrides :
 
       [reactive]
       max_turns_per_call          = 15
+
+      [turn]
+      tool_cost_max_usd           = 1.25
+      max_tools_per_turn          = 64
+      llm_rerank                  = true
     ]}
 
     Unknown keys are ignored (forward compatibility). *)

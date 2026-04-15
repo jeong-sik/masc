@@ -94,6 +94,39 @@ let test_applies_multiple_overrides () =
     (Some "20")
     (List.assoc_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" overrides)
 
+let test_applies_turn_execution_overrides () =
+  let doc = parse_or_fail
+    "[turn]\n\
+     tool_cost_max_usd = 1.25\n\
+     max_tools_per_turn = 64\n\
+     llm_rerank = true\n\
+     llm_rerank_cascade = \"tool_rerank_fast\"\n\
+     temperature = 0.65\n\
+     max_output_tokens = 8192\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 6" 6 count;
+  check (option string) "tool cost ceiling"
+    (Some "1.25")
+    (List.assoc_opt "MASC_KEEPER_TOOL_COST_MAX_USD" overrides);
+  check (option string) "max tools per turn"
+    (Some "64")
+    (List.assoc_opt "MASC_KEEPER_MAX_TOOLS_PER_TURN" overrides);
+  check (option string) "llm rerank"
+    (Some "true")
+    (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
+  check (option string) "llm rerank cascade"
+    (Some "tool_rerank_fast")
+    (List.assoc_opt "MASC_KEEPER_LLM_RERANK_CASCADE" overrides);
+  check (option string) "temperature"
+    (Some "0.65")
+    (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
+  check (option string) "max output tokens"
+    (Some "8192")
+    (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides)
+
 let test_caller_env_wins_over_toml () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
   let fake_env =
@@ -144,6 +177,18 @@ let test_load_and_apply_records_boot_override () =
         0.42
         (Env_config_keeper.KeeperRuntime.deliberation_daily_budget_usd ())
 
+let test_load_and_apply_records_turn_cost_override () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\ntool_cost_max_usd = 1.25\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" msg
+  | Ok n ->
+    check int "applied count" 1 n;
+    check (option string) "boot override stored"
+      (Some "1.25")
+      (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD")
+
 let test_float_value_round_trip () =
   let doc = parse_or_fail
     "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
@@ -161,10 +206,12 @@ let () =
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
+        ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
+        ; test_case "load_and_apply records turn cost override" `Quick test_load_and_apply_records_turn_cost_override
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ] )
     ]

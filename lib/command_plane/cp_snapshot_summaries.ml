@@ -75,10 +75,7 @@ let traces_json_of_events events =
       ("events", `List events);
     ]
 
-let swarm_slot_samples_tail_lines () =
-  Dashboard_http_helpers.int_of_env_default
-    "MASC_CP_SWARM_SLOT_SAMPLE_TAIL_LINES"
-    ~default:2048 ~min_v:64 ~max_v:20000
+let swarm_slot_samples_tail_lines () = 2048
 
 let read_jsonl_tail_json path ~max_lines =
   read_jsonl_tail_lines path ~max_lines

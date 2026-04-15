@@ -514,7 +514,13 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
           let h_norm = String.lowercase_ascii (String.trim h) in
           List.filter (fun (p : post) -> p.hearth = Some h_norm) filtered
     in
-    take (min limit 100) filtered  (* Hard cap at 100 *)
+    (* Cap at Limits.max_posts (default 10_000) as an OOM guard. The
+       previous inner cap of 100 was a duplicate of Board_dispatch.list_posts's
+       fetch_limit guard (`max limit 200`) and broke offset-based pagination:
+       when the dashboard requested offset=100 limit=100, Board_dispatch
+       passed probe_fetch=201 here but we returned only 100, so fetched_len
+       never exceeded window_end and has_more went stale at ~100-200 posts. *)
+    take (min limit Limits.max_posts) filtered
   )
 
 (** Full-scan search over all posts (no limit on scan, only on results).

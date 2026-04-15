@@ -159,26 +159,12 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with required_permission = Some Types.CanLeave } );
     ( "masc_broadcast",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
-    ( "masc_listen",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_messages",
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "masc_who",
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "channel_gate",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
-    ( "masc_verify_auto",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_pending",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_request",
-      { default_metadata with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_status",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_submit",
-      { default_metadata with required_permission = Some Types.CanReadState } );
-    ( "masc_recall_search",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "masc_portal_open",
       { default_metadata with required_permission = Some Types.CanOpenPortal } );
     ( "masc_portal_close",
@@ -257,9 +243,6 @@ let explicit_metadata : (string * metadata) list =
        signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
-    (* Voice MCP tool: deprecated after voice group removal from tool_policy.toml.
-       Schema still registered in keeper_schema.ml for backward compat dispatch. *)
-    ("masc_voice_ping_pong", deprecated "Voice group removed from tool_policy.toml");
   ]
 
 (* ================================================================ *)

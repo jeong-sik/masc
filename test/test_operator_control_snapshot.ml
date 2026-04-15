@@ -464,10 +464,10 @@ let test_digest_room_includes_tool_host_failure_attention () =
 
 let test_operator_digest_severity_rank_supports_critical () =
   Alcotest.(check int) "critical rank" 3
-    (Operator_digest.severity_rank "critical");
+    (Operator_digest.severity_rank Operator_digest.Sev_critical);
   Alcotest.(check bool) "critical outranks bad" true
-    (Operator_digest.severity_rank "critical"
-    > Operator_digest.severity_rank "bad")
+    (Operator_digest.severity_rank Sev_critical
+    > Operator_digest.severity_rank Sev_bad)
 
 (* test_snapshot_and_digest_expose_role_runtime_census removed:
    depended on team session start/update which is no longer available. *)

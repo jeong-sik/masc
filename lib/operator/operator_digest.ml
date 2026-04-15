@@ -9,7 +9,7 @@ open Operator_digest_guidance
 let health_from_attention_items (items : attention_item list) =
   if
     List.exists
-      (fun (item : attention_item) -> String.equal item.severity "bad")
+      (fun (item : attention_item) -> item.severity = Sev_bad)
       items
   then "bad"
   else if items <> [] then "warn"
@@ -53,7 +53,7 @@ let recent_tool_host_failures ~now () =
                   {
                     kind = envelope.cause_code;
                     severity =
-                      Failure_envelope.severity_to_string envelope.severity;
+                      operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
                     target_type = "namespace";
                     target_id = None;
@@ -122,22 +122,11 @@ let build_room_attention_items ?command_plane_summary config =
     ]
     |> List.filter_map (fun (kind, summary, signal_json) ->
            match signal_json |> U.member "tone" with
-           | `String "warn" ->
+           | `String ("warn" | "bad" as tone) ->
                Some
                  {
                    kind;
-                   severity = "warn";
-                   summary;
-                   target_type = "namespace";
-                   target_id = None;
-                   actor = None;
-                   evidence = signal_json;
-                 }
-           | `String "bad" ->
-               Some
-                 {
-                   kind;
-                   severity = "bad";
+                   severity = operator_severity_of_string tone;
                    summary;
                    target_type = "namespace";
                    target_id = None;
@@ -163,7 +152,7 @@ let build_room_attention_items ?command_plane_summary config =
                Some
                  {
                    kind;
-                   severity = if count >= 3 then "bad" else "warn";
+                   severity = if count >= 3 then Sev_bad else Sev_warn;
                    summary;
                    target_type = "namespace";
                    target_id = None;
@@ -183,7 +172,7 @@ let build_room_attention_items ?command_plane_summary config =
       [
         {
           kind = "pending_confirm_waiting";
-          severity = "warn";
+          severity = Sev_warn;
           summary =
             Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
               (List.length pending_confirms);
@@ -263,13 +252,13 @@ let room_recommendations ?command_plane_summary config =
            match signal_json with
            | `Assoc _ -> (
                match signal_json |> U.member "tone" with
-               | `String ("warn" | "bad" as severity) ->
+               | `String ("warn" | "bad" as tone) ->
                    Some
                      {
                        action_type;
                        target_type = "namespace";
                        target_id = None;
-                       severity;
+                       severity = operator_severity_of_string tone;
                        reason;
                        suggested_payload = `Assoc [ ("message", `String message) ];
                      }
@@ -280,7 +269,7 @@ let room_recommendations ?command_plane_summary config =
                    action_type;
                    target_type = "namespace";
                    target_id = None;
-                   severity = if count >= 3 then "bad" else "warn";
+                   severity = if count >= 3 then Sev_bad else Sev_warn;
                    reason;
                    suggested_payload = `Assoc [ ("message", `String message) ];
                  }
@@ -295,7 +284,7 @@ type review_item = Operator_digest_review_types.review_item = {
   kind : string;
   target_type : string;
   target_id : string option;
-  severity : string;
+  severity : operator_severity;
   urgency : string;
   summary : string;
   why_now : string;
@@ -430,7 +419,7 @@ let review_item_to_yojson ~actor (item : review_item) =
       ("kind", `String item.kind);
       ("target_type", `String item.target_type);
       ("target_id", string_option_to_json item.target_id);
-      ("severity", `String item.severity);
+      ("severity", `String (operator_severity_to_string item.severity));
       ("urgency", `String item.urgency);
       ("summary", `String item.summary);
       ("why_now", `String item.why_now);
@@ -476,7 +465,7 @@ let pending_confirm_review_item ~now (entry : pending_confirm) =
         action_type = entry.action_type;
         target_type = entry.target_type;
         target_id = entry.target_id;
-        severity = if Operator_approval.confirm_required entry.action_type then "bad" else "warn";
+        severity = if Operator_approval.confirm_required entry.action_type then Sev_bad else Sev_warn;
         reason = why_now;
         suggested_payload = entry.payload;
       }
@@ -487,7 +476,7 @@ let pending_confirm_review_item ~now (entry : pending_confirm) =
     target_type = entry.target_type;
     target_id = entry.target_id;
     severity =
-      if Operator_approval.confirm_required entry.action_type then "bad" else "warn";
+      if Operator_approval.confirm_required entry.action_type then Sev_bad else Sev_warn;
     urgency = "now";
     summary;
     why_now;
@@ -529,7 +518,7 @@ let namespace_gate_review_item ~room_json =
           action_type = "namespace_resume";
           target_type = "namespace";
           target_id = None;
-          severity = "warn";
+          severity = Sev_warn;
           reason = pause_reason;
           suggested_payload = `Assoc [];
         }
@@ -540,7 +529,7 @@ let namespace_gate_review_item ~room_json =
         kind = "namespace_gate";
         target_type = "namespace";
         target_id = None;
-        severity = "warn";
+        severity = Sev_warn;
         urgency = "soon";
         summary;
         why_now = pause_reason;
@@ -591,22 +580,22 @@ let keeper_review_item ~now keeper_json =
       if reasons = [] then None
       else
         let severity =
-          if List.mem "오프라인" reasons then "bad" else "warn"
+          if List.mem "오프라인" reasons then Sev_bad else Sev_warn
         in
         let recommended_action =
           Some
             {
               action_type =
-                if String.equal severity "bad" then "keeper_recover"
-                else "keeper_probe";
+                (match severity with Sev_bad | Sev_critical -> "keeper_recover"
+                | Sev_warn -> "keeper_probe");
               target_type = "keeper";
               target_id = Some keeper_name;
               severity;
               reason = String.concat " · " reasons;
               suggested_payload =
-                if String.equal severity "bad"
-                then `Assoc [ ("reason", `String "operator review queue") ]
-                else `Assoc [];
+                (match severity with Sev_bad | Sev_critical ->
+                  `Assoc [ ("reason", `String "operator review queue") ]
+                | Sev_warn -> `Assoc []);
             }
         in
         Some
@@ -616,7 +605,8 @@ let keeper_review_item ~now keeper_json =
             target_type = "keeper";
             target_id = Some keeper_name;
             severity;
-            urgency = if String.equal severity "bad" then "now" else "soon";
+            urgency = (match severity with Sev_bad | Sev_critical -> "now"
+              | Sev_warn -> "soon");
             summary = Printf.sprintf "키퍼 %s 점검이 필요합니다." keeper_name;
             why_now = String.concat " · " reasons;
             source = "deterministic";

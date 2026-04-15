@@ -1,6 +1,13 @@
+type operator_severity = Sev_critical | Sev_bad | Sev_warn
+
+val operator_severity_to_string : operator_severity -> string
+val operator_severity_of_string : string -> operator_severity
+val operator_severity_of_failure_envelope :
+  Failure_envelope.severity -> operator_severity
+
 type attention_item = {
   kind : string;
-  severity : string;
+  severity : operator_severity;
   summary : string;
   target_type : string;
   target_id : string option;
@@ -12,7 +19,7 @@ type recommended_action = {
   action_type : string;
   target_type : string;
   target_id : string option;
-  severity : string;
+  severity : operator_severity;
   reason : string;
   suggested_payload : Yojson.Safe.t;
 }
@@ -46,7 +53,7 @@ type worker_card = {
 
 (* session_digest type removed — team session cleanup *)
 
-val severity_rank : string -> int
+val severity_rank : operator_severity -> int
 val compare_attention : attention_item -> attention_item -> int
 val compare_recommendation : recommended_action -> recommended_action -> int
 val compare_worker_card : worker_card -> worker_card -> int

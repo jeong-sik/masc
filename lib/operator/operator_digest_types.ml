@@ -1,9 +1,31 @@
 module U = Yojson.Safe.Util
 open Operator_pending_confirm
 
+(** Severity levels for operator attention items and recommendations.
+    Closed set — exhaustive matching catches new levels at compile time. *)
+type operator_severity = Sev_critical | Sev_bad | Sev_warn
+
+let operator_severity_to_string = function
+  | Sev_critical -> "critical"
+  | Sev_bad -> "bad"
+  | Sev_warn -> "warn"
+
+let operator_severity_of_string = function
+  | "critical" -> Sev_critical
+  | "bad" -> Sev_bad
+  | "warn" -> Sev_warn
+  | other -> failwith ("unknown operator severity: " ^ other)
+
+let operator_severity_of_failure_envelope
+    (sev : Failure_envelope.severity) : operator_severity =
+  match sev with
+  | Failure_envelope.Critical -> Sev_critical
+  | Failure_envelope.Bad -> Sev_bad
+  | Failure_envelope.Warn -> Sev_warn
+
 type attention_item = {
   kind : string;
-  severity : string;
+  severity : operator_severity;
   summary : string;
   target_type : string;
   target_id : string option;
@@ -15,7 +37,7 @@ type recommended_action = {
   action_type : string;
   target_type : string;
   target_id : string option;
-  severity : string;
+  severity : operator_severity;
   reason : string;
   suggested_payload : Yojson.Safe.t;
 }
@@ -81,10 +103,9 @@ let planned_worker_turn_grace_sec = 180.0
 let room_digest_session_limit = 10
 
 let severity_rank = function
-  | "critical" -> 3
-  | "bad" -> 2
-  | "warn" -> 1
-  | _ -> 0
+  | Sev_critical -> 3
+  | Sev_bad -> 2
+  | Sev_warn -> 1
 
 let compare_attention (a : attention_item) (b : attention_item) =
   let by_severity = Int.compare (severity_rank b.severity) (severity_rank a.severity) in
@@ -127,7 +148,7 @@ let attention_item_to_yojson (item : attention_item) =
   `Assoc
     [
       ("kind", `String item.kind);
-      ("severity", `String item.severity);
+      ("severity", `String (operator_severity_to_string item.severity));
       ("summary", `String item.summary);
       ("target_type", `String item.target_type);
       ("target_id", string_option_to_json item.target_id);
@@ -156,7 +177,7 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
       ("action_type", `String item.action_type);
       ("target_type", `String item.target_type);
       ("target_id", string_option_to_json item.target_id);
-      ("severity", `String item.severity);
+      ("severity", `String (operator_severity_to_string item.severity));
       ("reason", `String item.reason);
       ("confirm_required", `Bool (recommended_confirm_required item.action_type));
       ("suggested_payload", item.suggested_payload);
@@ -301,13 +322,13 @@ let summary_of_attention_items (items : attention_item list) =
   let bad_count =
     List.fold_left
       (fun acc (item : attention_item) ->
-        if String.equal item.severity "bad" then acc + 1 else acc)
+        match item.severity with Sev_bad -> acc + 1 | Sev_critical | Sev_warn -> acc)
       0 sorted
   in
   let warn_count =
     List.fold_left
       (fun acc (item : attention_item) ->
-        if String.equal item.severity "warn" then acc + 1 else acc)
+        match item.severity with Sev_warn -> acc + 1 | Sev_critical | Sev_bad -> acc)
       0 sorted
   in
   `Assoc

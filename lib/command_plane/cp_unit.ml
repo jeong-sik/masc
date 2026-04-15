@@ -1,5 +1,22 @@
 include Cp_unit_projection
 
+(** Leader presence: composite of agent_status + existence.
+    Replaces stringly-typed leader_status ("offline"/"missing"/status).
+    @since 7239 *)
+type leader_presence =
+  | Leader_present of Types.agent_status
+  | Leader_offline   (** agent not in live list *)
+  | Leader_missing   (** no leader_id set *)
+
+let leader_presence_to_string = function
+  | Leader_present status -> Types.string_of_agent_status status
+  | Leader_offline -> "offline"
+  | Leader_missing -> "missing"
+
+let leader_is_unavailable = function
+  | Leader_offline | Leader_missing -> true
+  | Leader_present _ -> false
+
 let safe_live_agents config =
   Room.get_active_agents config
   |> List.filter (fun (agent : Types.agent) ->
@@ -333,17 +350,21 @@ let roster_name_is_live live_agents roster_name =
 let agent_status_map agents =
   List.map (fun (agent : Types.agent) -> (agent.name, Types.string_of_agent_status agent.status)) agents
 
-let agent_status_for agents agent_name =
-  match List.assoc_opt agent_name agents with
-  | Some status -> status
-  | None ->
-      agents
-      |> List.find_map (fun (live_name, status) ->
-             if live_agent_name_matches agent_name live_name then
-               Some status
-             else
-               None)
-      |> Option.value ~default:"offline"
+let agent_status_for agents agent_name : leader_presence =
+  let find_status () =
+    match List.assoc_opt agent_name agents with
+    | Some status -> Some status
+    | None ->
+        agents
+        |> List.find_map (fun (live_name, status) ->
+               if live_agent_name_matches agent_name live_name then
+                 Some status
+               else
+                 None)
+  in
+  match find_status () with
+  | Some status -> Leader_present (Types.agent_status_of_string status)
+  | None -> Leader_offline
 
 let active_operation_status = function
   | Active | Planned -> true
@@ -413,14 +434,17 @@ let rec build_tree_json ?(depth = 0) ?(visited = [])
         |> List.filter (roster_name_is_live live_agents)
         |> List.length
       in
-      let leader_status =
+      let leader_presence =
         match unit.leader_id with
         | Some leader -> agent_status_for agent_statuses leader
-        | None -> "missing"
+        | None -> Leader_missing
       in
+      let leader_status = leader_presence_to_string leader_presence in
       let reasons = ref [] in
-      if unit.leader_id = None then reasons := "leader_missing" :: !reasons;
-      if unit.leader_id <> None && leader_status = "offline" then reasons := "leader_offline" :: !reasons;
+      (match leader_presence with
+       | Leader_missing -> reasons := "leader_missing" :: !reasons
+       | Leader_offline -> reasons := "leader_offline" :: !reasons
+       | Leader_present _ -> ());
       if List.length unit.roster > unit.budget.headcount_cap then reasons := "headcount_cap_exceeded" :: !reasons;
       if descendant_op_count > unit.budget.active_operation_cap then
         reasons := "active_operation_cap_exceeded" :: !reasons;
@@ -488,15 +512,20 @@ let rec build_tree_json_indexed ?(depth = 0) ?(visited = [])
         Hashtbl.find_opt tree_idx.live_roster_count unit_id
         |> Option.value ~default:0
       in
-      let leader_status =
+      let leader_presence =
         match unit.leader_id with
-        | Some leader -> Cp_tree_index.agent_status_for_tbl tree_idx leader
-        | None -> "missing"
+        | Some leader ->
+          let s = Cp_tree_index.agent_status_for_tbl tree_idx leader in
+          if s = "offline" then Leader_offline
+          else Leader_present (Types.agent_status_of_string s)
+        | None -> Leader_missing
       in
+      let leader_status = leader_presence_to_string leader_presence in
       let reasons = ref [] in
-      if unit.leader_id = None then reasons := "leader_missing" :: !reasons;
-      if unit.leader_id <> None && leader_status = "offline" then
-        reasons := "leader_offline" :: !reasons;
+      (match leader_presence with
+       | Leader_missing -> reasons := "leader_missing" :: !reasons
+       | Leader_offline -> reasons := "leader_offline" :: !reasons
+       | Leader_present _ -> ());
       if List.length unit.roster > unit.budget.headcount_cap then
         reasons := "headcount_cap_exceeded" :: !reasons;
       if descendant_op_count > unit.budget.active_operation_cap then

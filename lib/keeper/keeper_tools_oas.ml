@@ -70,7 +70,7 @@ let keeper_tool_result_is_failure (result : string) : bool =
     (* Policy gate rejections are not tool failures — the tool works correctly,
        but the keeper's preset denies execution.  Counting these as failures
        inflates metrics for social-preset keepers that discover tools like
-       keeper_fs_edit or keeper_pr_workflow via core_discovery_tools but
+       keeper_fs_edit or keeper_bash via core_discovery_tools but
        cannot execute them.  The LLM still sees the error message and can
        adapt; only the metric classification changes. *)
     let is_policy_gate =

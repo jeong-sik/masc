@@ -43,7 +43,6 @@ let raw_schema_by_name name =
   let all =
     Config.raw_all_tool_schemas
     @ Tool_shard.coding_tools
-    @ Tool_shard.keeper_pr_submit_tools
   in
   all
   |> List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name)
@@ -192,24 +191,11 @@ let test_coding_preset_has_keeper_bash () =
   check bool "has keeper_shell" true
     (has_tool "keeper_shell" tools)
 
-let test_pr_schema_descriptions_distinguish_workflow_lanes () =
-  let workflow_desc =
-    match raw_schema_by_name "keeper_pr_workflow" with
-    | Some schema -> schema.description
-    | None -> fail "keeper_pr_workflow schema missing"
-  in
-  let submit_desc =
-    match raw_schema_by_name "keeper_pr_submit" with
-    | Some schema -> schema.description
-    | None -> fail "keeper_pr_submit schema missing"
-  in
-  check bool "workflow is legacy" true
-    (String_util.contains_substring workflow_desc "Legacy one-shot worktree PR helper");
-  check bool "workflow is not playground path" true
-    (String_util.contains_substring workflow_desc "It is not the playground-clone path");
-  check bool "submit covers playground and worktree" true
-    (String_util.contains_substring submit_desc
-       "Canonical submit step for a playground clone or repo worktree")
+let test_legacy_pr_schemas_removed () =
+  check bool "workflow schema removed" true
+    (raw_schema_by_name "keeper_pr_workflow" = None);
+  check bool "submit schema removed" true
+    (raw_schema_by_name "keeper_pr_submit" = None)
 
 (* ============================================================
    6. All keepers get autoresearch tools (mode removed)
@@ -944,6 +930,6 @@ let () =
     ]);
     ("pr_lane_wording", [
       test_case "schema descriptions distinguish workflow lanes" `Quick
-        test_pr_schema_descriptions_distinguish_workflow_lanes;
+        test_legacy_pr_schemas_removed;
     ]);
   ]

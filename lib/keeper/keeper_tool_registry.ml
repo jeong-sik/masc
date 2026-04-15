@@ -45,9 +45,10 @@ let core_always_tools =
     selection accuracy for small models):
     - Removed from core: keeper_time_now (trivial, shell fallback),
       keeper_tasks_audit (admin), keeper_board_delete (admin #4309),
-      keeper_board_cleanup (admin), keeper_bash (redundant with
-      keeper_shell op=bash).
+      keeper_board_cleanup (admin).
     - keeper_tools_list moved from core_always to discoverable.
+    - keeper_bash stays visible because it is the write-side git path
+      after removing legacy PR wrappers.
     - 26 → 20 tools.  9B tool selection accuracy improves with fewer
       choices (vLLM Semantic Router research: k=3-5 optimal for 7-9B).
 
@@ -70,7 +71,7 @@ let core_discovery_tools =
       Keeper Board_comment; Keeper Board_vote; Keeper Board_list;
       (* Shell + VCS *)
       Keeper Shell;
-      Keeper Pr_workflow; Keeper Pr_submit;
+      Keeper Bash;
       Keeper Preflight_check;
       (* Review *)
       Keeper Pr_review_read; Keeper Pr_review_comment; Keeper Pr_review_reply;
@@ -302,7 +303,7 @@ let is_main_worktree_boundary_exempt_with_input
     | Some (Masc Code_edit) | Some (Masc Code_write)
     | Some (Masc Code_delete) | Some (Masc Code_shell)
     | Some (Masc Code_git) | Some (Masc Worktree_create)
-    | Some (Keeper Pr_submit) | Some (Keeper Fs_edit) -> true
+    | Some (Keeper Fs_edit) -> true
     | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

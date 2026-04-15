@@ -1,4 +1,4 @@
-(** MCP tool schemas for namespace management operations (extra). *)
+(** MCP tool schemas for project management operations (extra). *)
 
 open Types
 

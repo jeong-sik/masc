@@ -51,7 +51,7 @@ let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
 
 let default_instructions =
   "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-NAMESPACE: Agents sharing the same base path (.masc/ folder) coordinate together. \
+PROJECT: Agents sharing the same base path (.masc/ folder) coordinate together. \
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
@@ -161,10 +161,10 @@ let label_words_from_identifier ident =
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
   (* Room lifecycle *)
-  ("masc_join", "Join Namespace");
-  ("masc_leave", "Leave Namespace");
-  ("masc_status", "Namespace Status");
-  ("masc_reset", "Reset Namespace");
+  ("masc_join", "Join Project");
+  ("masc_leave", "Leave Project");
+  ("masc_status", "Project Status");
+  ("masc_reset", "Reset Project");
   ("masc_who", "List Online Agents");
   ("masc_check", "Check Preconditions");
   ("masc_workflow_guide", "Workflow Guide");
@@ -226,7 +226,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
-  ("masc_room_status", "Namespace Status");
+  ("masc_room_status", "Project Status");
   ("masc_claim_task", "Claim Task");
   ("masc_set_current_task", "Bind Current Task");
   ("masc_complete_task", "Complete Task");

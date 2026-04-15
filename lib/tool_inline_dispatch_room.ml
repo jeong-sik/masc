@@ -23,14 +23,13 @@ let handle_start (ctx : context) : tool_result option =
     if p = "" then arg_get_string ctx "room" "" else p
   in
   let task_title = arg_get_string ctx "task_title" "" in
-  (* Step 1: set project root / coordination namespace *)
+  (* Step 1: set project root *)
   let room_result =
     if path = "" then begin
-      (* Use current project namespace if already set *)
       if Room.is_initialized state.Mcp_server.room_config then
         Ok config
       else
-        Error "path is required when no project namespace is set. Provide the project directory path."
+        Error "path is required when no project scope is set. Provide the project directory path."
     end else begin
       let expanded =
         if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
@@ -116,7 +115,7 @@ let handle_start (ctx : context) : tool_result option =
         end
       end
 
-(** masc_join — join the active MASC project namespace *)
+(** masc_join — join the active MASC project *)
 let handle_join (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in

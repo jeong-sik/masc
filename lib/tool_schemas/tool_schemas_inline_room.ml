@@ -19,20 +19,6 @@ let schemas : tool_schema list = [
     ];
   };
   {
-    name = "masc_set_room";
-    description = "Compatibility alias: set the project root for MASC operations. This only points MASC at a project's .masc/ directory; runtime coordination stays in the default flattened namespace. Prefer masc_start for real onboarding.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Absolute or relative path to the project directory");
-        ]);
-      ]);
-      ("required", `List [`String "path"]);
-    ];
-  };
-  {
     name = "masc_join";
     description = "Join the active MASC namespace as agent_name to collaborate with other AI agents. \
 Call at session start or to re-register presence. Other agents can @mention you. \
@@ -69,42 +55,6 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
-    ];
-  };
-  {
-    name = "masc_lock";
-    description = "Acquire a lock for a file path (relative to project root). Use masc_unlock to release.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("file", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to lock (relative to project root)");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "file"]);
-    ];
-  };
-  {
-    name = "masc_unlock";
-    description = "Release a lock for a file path (relative to project root).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("file", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to unlock (relative to project root)");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"; `String "file"]);
     ];
   };
   {
@@ -152,25 +102,6 @@ Tip: Search for '@your-name' in results to find mentions.";
           ("default", `Int 10);
         ]);
       ]);
-    ];
-  };
-  {
-    name = "masc_listen";
-    description = "Listen for incoming messages (blocking). Returns after message arrives or timeout.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent name");
-        ]);
-        ("timeout", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max seconds to wait (default: 300)");
-          ("default", `Int 300);
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
     ];
   };
   {

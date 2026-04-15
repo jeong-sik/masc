@@ -354,7 +354,7 @@ let annotate_keeper_repair_json ~(keeper_name : string) body =
         (`Assoc
           ( ("runtime_class", `String "keeper")
           :: ("keeper_name", `String keeper_name)
-          :: ("delegated_tool", `String "masc_repair_loop")
+          :: ("delegated_tool", `String "masc_keeper_repair")
           :: fields ))
   | _ -> body
 

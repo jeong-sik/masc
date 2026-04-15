@@ -42,21 +42,6 @@ let handle_dashboard ctx args =
       in
       (true, output)
 
-let handle_verify_handoff _ctx args =
-  let original = get_string args "original" "" in
-  let received = get_string args "received" "" in
-  if original = "" || received = "" then
-    (false, "❌ original and received are required")
-  else
-    let threshold =
-      get_float args "threshold" (Level2_config.Drift_guard.default_threshold ())
-    in
-    let result =
-      Drift_guard.verify_handoff ~original ~received ~threshold ()
-      |> Drift_guard.result_to_json
-    in
-    (true, Yojson.Safe.to_string result)
-
 let handle_gc ctx args =
   let days_raw = get_int args "days" 7 in
   let days = max 1 days_raw in
@@ -132,7 +117,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer args)
   | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer args)
   | "masc_dashboard" -> Some (handle_dashboard ctx args)
-  | "masc_verify_handoff" -> Some (handle_verify_handoff ctx args)
   | "masc_gc" -> Some (handle_gc ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
@@ -151,14 +135,13 @@ let schemas = Tool_schemas_misc.schemas
 
 let _tool_spec_read_only =
   [
-    "masc_verify_handoff";
     "masc_tool_help";
     "masc_web_search";
     "masc_dashboard";
   ]
 
 let tool_required_permission = function
-  | "masc_config" | "masc_dashboard" | "masc_verify_handoff"
+  | "masc_config" | "masc_dashboard"
   | "masc_tool_stats" | "masc_tool_help" | "masc_web_search"
   | "masc_tool_admin_snapshot" ->
       Some Types.CanReadState

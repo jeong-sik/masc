@@ -739,7 +739,6 @@ let run_turn
     ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
     ; "masc_governance_status", "거버넌스 상태 규칙 정책"
     ; "masc_governance_feed", "거버넌스 피드 이벤트 로그"
-    ; "masc_governance_set", "거버넌스 설정 규칙 변경"
     ; "masc_autoresearch_start", "자동연구 리서치 시작"
     ; "masc_autoresearch_status", "자동연구 리서치 상태"
     ; "masc_autoresearch_stop", "자동연구 리서치 중지"
@@ -768,15 +767,11 @@ let run_turn
     ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
     ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
     ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
-    ; "masc_auth_status", "인증 상태 토큰 자격"
-    ; "masc_auth_refresh", "인증 갱신 토큰 리프레시"
     ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
     ; "masc_broadcast", "브로드캐스트 방송 알림 공지"
     ; "masc_claim_next", "다음태스크 가져오기 할당"
     ; "masc_messages", "메시지 대화 채팅 로그"
     ; "masc_leave", "퇴장 나가기 오프라인 종료"
-    ; "masc_heartbeat_start", "하트비트 시작 자동 핑"
-    ; "masc_heartbeat_stop", "하트비트 중지 핑 종료"
       (* masc_broadcast, masc_who, masc_messages require MCP session context
        and fail in keeper. Use keeper_broadcast instead. (#4694) *)
     ]

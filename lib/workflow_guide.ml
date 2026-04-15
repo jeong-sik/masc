@@ -48,25 +48,7 @@ let after_start ~success =
         [ "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
-        [ s "masc_start" "Retry masc_start with the correct path if the path was wrong";
-          s "masc_init" "Initialize MASC if not yet set up" ];
-      preconditions = [];
-      common_mistakes = [] }
-
-let after_set_room ~success =
-  if success then
-    { next_steps =
-        [ s "masc_join" "Compatibility path: register your agent identity in the project namespace";
-          s "masc_status" "Verify namespace state before proceeding";
-          s "masc_start" "Prefer masc_start for future one-step namespace onboarding" ];
-      preconditions = [];
-      common_mistakes =
-        [ "Treating masc_set_room like full onboarding — it only selects the project coordination root";
-          "Starting work without masc_join — other agents cannot see you" ] }
-  else
-    { next_steps =
-        [ s "masc_start" "Retry with the repo root path if you want the truthful one-shot onboarding flow";
-          s "masc_init" "Initialize MASC if not yet set up" ];
+        [ s "masc_start" "Retry masc_start with the correct path if the path was wrong" ];
       preconditions = [];
       common_mistakes = [] }
 
@@ -81,8 +63,7 @@ let after_join ~success =
         [ "Skipping masc_status — you may duplicate work another agent claimed" ] }
   else
     { next_steps =
-        [ s "masc_start" "Set the namespace first";
-          s "masc_init" "Initialize MASC if not set up" ];
+        [ s "masc_start" "Set the namespace first" ];
       preconditions = [];
       common_mistakes = [] }
 
@@ -261,18 +242,6 @@ let after_worktree_create ~success =
       preconditions = [ "room_set"; "joined"; "task_claimed" ];
       common_mistakes = [] }
 
-let after_init ~success =
-  if success then
-    { next_steps =
-        [ s "masc_start" "Set the namespace to your project root and join it" ];
-      preconditions = [];
-      common_mistakes = [] }
-  else
-    { next_steps =
-        [ s "masc_status" "Check if MASC is already initialized" ];
-      preconditions = [];
-      common_mistakes = [] }
-
 (* ── Main dispatch ───────────────────────────────────────────────── *)
 
 let next_steps ~tool_name ~success =
@@ -280,7 +249,6 @@ let next_steps ~tool_name ~success =
   match tool_name with
   (* Front Door: Namespace/Task Hygiene *)
   | "masc_start" -> after_start ~success
-  | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
   | "masc_claim_next" -> after_claim_auto_bound ~success
@@ -292,7 +260,6 @@ let next_steps ~tool_name ~success =
   (* Common *)
   | "masc_broadcast" -> after_broadcast ~success
   | "masc_worktree_create" -> after_worktree_create ~success
-  | "masc_init" -> after_init ~success
   (* No guidance registered *)
   | _ -> empty
 
@@ -367,8 +334,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     ~current_task_set ~worktree_active ~session_active =
   if not room_set then
     { next_steps =
-        [ s "masc_start" "Set the project coordination root and join the default namespace";
-          s "masc_init" "Initialize MASC if this is a fresh setup" ];
+        [ s "masc_start" "Set the project coordination root and join the default namespace" ];
       preconditions = [];
       common_mistakes =
         [ "Calling coordination tools before project scope is initialized" ] }

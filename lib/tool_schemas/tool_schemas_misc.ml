@@ -89,29 +89,6 @@ Use from the answering side after a prior masc_webrtc_offer call.";
     ];
   };
   {
-    name = "masc_verify_handoff";
-    description = "Compare original and received context to detect semantic drift after handoff (default threshold: 0.85).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("original", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Original context before handoff");
-        ]);
-        ("received", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Received context after handoff");
-        ]);
-        ("threshold", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Similarity threshold (default: 0.85)");
-          ("default", `Float 0.85);
-        ]);
-      ]);
-      ("required", `List [`String "original"; `String "received"]);
-    ];
-  };
-  {
     name = "masc_gc";
     description = "Run garbage collection: remove zombie agents, archive stale tasks, delete old messages (default: 7-day threshold).";
     input_schema = `Assoc [

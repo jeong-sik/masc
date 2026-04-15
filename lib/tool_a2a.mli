@@ -1,5 +1,6 @@
 (** A2A tools - Agent-to-Agent protocol.
-    Only poll_events and heartbeat_result remain active. *)
+    All tool handlers removed (poll_events, heartbeat_result pruned).
+    Module retained for dispatch interface compatibility. *)
 
 type context = {
   config: Room.config;
@@ -7,9 +8,6 @@ type context = {
 }
 
 type tool_result = bool * string
-
-val handle_poll_events : context -> Yojson.Safe.t -> tool_result
-val handle_heartbeat_result : context -> Yojson.Safe.t -> tool_result
 
 (** Tool schemas for MCP tools/list *)
 val schemas : Types.tool_schema list

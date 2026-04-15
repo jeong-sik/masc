@@ -68,19 +68,4 @@ Pair with masc_workflow_guide for next-step recommendations.";
       ("required", `List [`String "assertions"]);
     ];
   };
-  {
-    name = "masc_init";
-    description = "Create the .masc/ folder to bootstrap a new MASC project namespace in this project. \
-Call once per project when no .masc/ exists yet; if it already exists you auto-join. \
-After init, call masc_join to register your presence, then masc_add_task or masc_claim_next.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent identity: 'claude' (Claude Code), 'gemini' (Gemini CLI), or 'codex' (Codex CLI)");
-        ]);
-      ]);
-    ];
-  };
 ]

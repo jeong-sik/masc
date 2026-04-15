@@ -96,6 +96,16 @@ let inbound_of_json json =
       let raw = str "channel" in
       String.lowercase_ascii (String.trim raw)
     in
+    (* Read priority for the keeper-routing field: accept the new
+       [destination_id] key first and fall back to the legacy [keeper_name]
+       key. Both map onto the same record field for now; emit-side is still
+       [keeper_name] only (B2 Phase 1 — parse-both / emit-legacy). The
+       emit-side rotation happens in Phase 2. *)
+    let keeper_name =
+      let destination = str "destination_id" in
+      if destination <> "" then destination
+      else str "keeper_name"
+    in
     let metadata =
       match json |> member "metadata" with
       | `Assoc pairs ->
@@ -109,7 +119,7 @@ let inbound_of_json json =
       channel_user_id = str "channel_user_id";
       channel_user_name = str "channel_user_name";
       channel_room_id = str "channel_room_id";
-      keeper_name = str "keeper_name";
+      keeper_name;
       content = str "content";
       idempotency_key = str "idempotency_key";
       metadata;

@@ -68,16 +68,16 @@ let is_within_root_norm ~(root_norm : string) (path : string) : bool =
 let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
     ?(max_dirs = 2000) ?(max_matches = 8) () : string list =
   let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
-  let visited : (string, unit) Hashtbl.t = Hashtbl.create 64 in
-  let rec walk ~dirs_seen acc dir =
+  let module SS = Set.Make (String) in
+  let rec walk ~dirs_seen acc dir visited =
     if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
     else
       let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
       if not (is_within_root_norm ~root_norm dir)
-         || Hashtbl.mem visited dir_norm
+         || SS.mem dir_norm visited
       then (dirs_seen, acc)
       else begin
-        Hashtbl.replace visited dir_norm ();
+        let visited = SS.add dir_norm visited in
         let entries =
           try Sys.readdir dir |> Array.to_list |> List.sort String.compare
           with Sys_error _ -> []
@@ -99,12 +99,12 @@ let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
                      else acc
                    in
                    if is_dir && is_within_root_norm ~root_norm path
-                   then walk ~dirs_seen:(dirs_seen + 1) acc path
+                   then walk ~dirs_seen:(dirs_seen + 1) acc path visited
                    else (dirs_seen, acc))
           (dirs_seen, acc) entries
       end
   in
-  walk ~dirs_seen:0 [] root |> snd |> List.rev
+  walk ~dirs_seen:0 [] root SS.empty |> snd |> List.rev
 
 let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path : string) :
     (string option, string) result =

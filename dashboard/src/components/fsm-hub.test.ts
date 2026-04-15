@@ -8,6 +8,7 @@ import {
   derivePhaseLog,
   deriveStateEntries,
   deriveSwimlaneSegments,
+  deriveTimeAxisTicks,
   deriveTransitionHistory,
   type CompositeObservation,
 } from './fsm-hub'
@@ -285,5 +286,44 @@ describe('deriveSwimlaneSegments', () => {
     const segments = deriveSwimlaneSegments(observations, 'turn', 140)
     expect(segments.map(s => s.value)).toEqual(['idle', 'prompting', 'idle', 'prompting'])
     expect(segments[3]).toEqual({ from: 130, to: 140, value: 'prompting' })
+  })
+})
+
+describe('deriveTimeAxisTicks', () => {
+  it('returns no ticks for a zero-width span', () => {
+    expect(deriveTimeAxisTicks(100, 100)).toEqual([])
+  })
+
+  it('returns ticks aligned to round clock moments', () => {
+    // 30s window, step should round up to 10s, firstTick = 110
+    const ticks = deriveTimeAxisTicks(103, 133)
+    expect(ticks.map(t => t.ts)).toEqual([110, 120, 130])
+    for (const tick of ticks) {
+      expect(tick.label).toMatch(/\d{2}:\d{2}:\d{2}/)
+    }
+  })
+
+  it('chooses a minute-scale step for long windows', () => {
+    // 15 min window, step should be 300s (5 min)
+    const ticks = deriveTimeAxisTicks(1_700_000_000, 1_700_000_900)
+    expect(ticks.length).toBeGreaterThanOrEqual(2)
+    expect(ticks.length).toBeLessThanOrEqual(6)
+    const gaps = ticks.slice(1).map((t, i) => t.ts - (ticks[i]?.ts ?? 0))
+    for (const gap of gaps) {
+      expect(gap).toBeGreaterThanOrEqual(60)
+    }
+  })
+
+  it('respects the maxTicks cap', () => {
+    const ticks = deriveTimeAxisTicks(0, 3600, 3)
+    expect(ticks.length).toBeLessThanOrEqual(3)
+  })
+
+  it('emits no ticks strictly-less-than spanStart', () => {
+    const ticks = deriveTimeAxisTicks(100, 200)
+    for (const tick of ticks) {
+      expect(tick.ts).toBeGreaterThan(100)
+      expect(tick.ts).toBeLessThanOrEqual(200)
+    }
   })
 })

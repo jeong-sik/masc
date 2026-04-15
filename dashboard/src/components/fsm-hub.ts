@@ -232,6 +232,43 @@ export function deriveStateEntries(
   return result
 }
 
+export type TimeAxisTick = { ts: number; label: string }
+
+const TIME_AXIS_STEPS_SEC = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600, 7200]
+
+/** Compute up to `maxTicks` evenly-spaced absolute-time tick marks that
+    lie strictly inside `[spanStart, spanEnd]`. The step is rounded up
+    to the nearest human-friendly value (1s..2h) so labels align on
+    round clock moments, not arbitrary offsets. Returns empty when the
+    span is too narrow to fit more than a single tick. */
+export function deriveTimeAxisTicks(
+  spanStart: number,
+  spanEnd: number,
+  maxTicks = 6,
+): TimeAxisTick[] {
+  const span = spanEnd - spanStart
+  if (span <= 0 || maxTicks < 2) return []
+  const desiredStep = span / Math.max(1, maxTicks - 1)
+  const step =
+    TIME_AXIS_STEPS_SEC.find(s => s >= desiredStep) ??
+    TIME_AXIS_STEPS_SEC[TIME_AXIS_STEPS_SEC.length - 1] ??
+    desiredStep
+  const showSeconds = step < 60
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(showSeconds ? { second: '2-digit' } : {}),
+    hour12: false,
+  })
+  const firstTick = Math.ceil(spanStart / step) * step
+  const ticks: TimeAxisTick[] = []
+  for (let ts = firstTick; ts <= spanEnd && ticks.length < maxTicks; ts += step) {
+    if (ts <= spanStart) continue
+    ticks.push({ ts, label: formatter.format(new Date(ts * 1000)) })
+  }
+  return ticks
+}
+
 export type SwimlaneSegment = {
   from: number
   to: number
@@ -1480,6 +1517,15 @@ function SwimlaneTimeline({
   const spanEnd = Math.max(now, observations[observations.length - 1]?.ts ?? now)
   const spanWidth = Math.max(1, spanEnd - spanStart)
   const windowDuration = fmtDuration(Math.max(0, spanEnd - spanStart))
+  const ticks = deriveTimeAxisTicks(spanStart, spanEnd)
+  const showSeconds = spanWidth < 600
+  const absFormatter = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(showSeconds ? { second: '2-digit' } : {}),
+    hour12: false,
+  })
+  const fmtAbs = (ts: number) => absFormatter.format(new Date(ts * 1000))
 
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
@@ -1488,7 +1534,10 @@ function SwimlaneTimeline({
           Swimlane Timeline
         </div>
         <div class="text-[9px] font-mono text-[var(--text-dim)]">
-          window <span class="text-[var(--text-body)]">${windowDuration}</span>
+          <span>${fmtAbs(spanStart)}</span>
+          <span class="mx-1 text-[var(--text-muted)]">→</span>
+          <span>${fmtAbs(spanEnd)}</span>
+          · window <span class="text-[var(--text-body)]">${windowDuration}</span>
           · <span class="text-[var(--text-body)]">${observations.length}</span> obs
         </div>
       </div>
@@ -1508,7 +1557,7 @@ function SwimlaneTimeline({
                     <div
                       class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-300 border-r border-[rgba(0,0,0,0.25)] last:border-r-0`}
                       style=${`width: ${pct.toFixed(2)}%`}
-                      title=${`${lane.short} · ${seg.value} · ${holdFor}`}
+                      title=${`${lane.short} · ${seg.value}\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · held ${holdFor}`}
                     ></div>
                   `
                 })}
@@ -1517,6 +1566,25 @@ function SwimlaneTimeline({
           `
         })}
       </div>
+      ${ticks.length > 0 ? html`
+        <div class="mt-1 flex items-center gap-2" aria-hidden="true">
+          <div class="w-[44px] shrink-0"></div>
+          <div class="relative flex-1 h-3">
+            ${ticks.map(tick => {
+              const leftPct = ((tick.ts - spanStart) / spanWidth) * 100
+              return html`
+                <div
+                  class="absolute top-0 flex flex-col items-center text-[var(--text-dim)]"
+                  style=${`left: ${leftPct.toFixed(2)}%; transform: translateX(-50%)`}
+                >
+                  <div class="h-1 w-px bg-[var(--white-10)]"></div>
+                  <div class="text-[8px] font-mono leading-none mt-0.5">${tick.label}</div>
+                </div>
+              `
+            })}
+          </div>
+        </div>
+      ` : null}
       <div class="mt-2 flex flex-wrap items-center gap-2 text-[9px] text-[var(--text-dim)]">
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(129,140,248,0.45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>

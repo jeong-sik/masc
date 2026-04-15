@@ -419,3 +419,5 @@ let filter ~(tools : Types.tool_schema list) ~(query : string) ~(k : int)
     : Types.tool_schema list =
   filter_with_scores ~tools ~query ~k
   |> List.map fst
+
+let synonym_keys = List.map fst synonyms

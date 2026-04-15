@@ -18,6 +18,10 @@ val filter :
 (** Return top-[k] tools from [tools] most relevant to [query].
     Returns [[]] on zero overlap. *)
 
+val synonym_keys : string list
+(** All tool names registered in the synonym dictionary.
+    Test helper: verify every key maps to a known [Tool_name.t]. *)
+
 val filter_with_scores :
   tools:Types.tool_schema list ->
   query:string ->

@@ -50,6 +50,7 @@ module Keeper : sig
     | Voice_session_start
     | Voice_sessions
     | Voice_speak
+    | Write
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -102,6 +103,8 @@ module Masc : sig
     | Dispatch_assign
     | Dispatch_plan
     | Find_by_capability
+    | Governance_feed
+    | Governance_status
     | Heartbeat
     | Join
     | Leave

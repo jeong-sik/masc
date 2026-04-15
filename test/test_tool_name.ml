@@ -12,7 +12,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Task_claim; Task_create; Task_done; Task_force_done; Task_force_release
   ; Tasks_audit; Tasks_list; Time_now; Tool_search; Tools_list
   ; Voice_agent; Voice_listen; Voice_session_end; Voice_session_start
-  ; Voice_sessions; Voice_speak ]
+  ; Voice_sessions; Voice_speak; Write ]
 
 let all_masc : Tool_name.Masc.t list =
   [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_update; Agents
@@ -25,6 +25,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Claim_task; Cleanup_zombies; Code_delete; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
   ; Dashboard; Deliver; Dispatch_assign; Dispatch_plan; Find_by_capability
+  ; Governance_feed; Governance_status
   ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add
   ; Operation_checkpoint; Operation_finalize; Operation_pause
   ; Operation_resume; Operation_start; Operation_status; Operation_stop
@@ -165,6 +166,15 @@ let test_shard_tools_parse () =
       (Printf.sprintf "Tool_shard names not in Tool_name: [%s]"
          (String.concat "; " unparsed))
 
+let test_prefilter_synonyms_parse () =
+  let unparsed = List.filter (fun name ->
+    Tool_name.of_string name = None
+  ) Tool_prefilter.synonym_keys in
+  if unparsed <> [] then
+    Alcotest.fail
+      (Printf.sprintf "Tool_prefilter synonyms not in Tool_name: [%s]"
+         (String.concat "; " unparsed))
+
 let () =
   Alcotest.run "Tool_name" [
     "roundtrip", [
@@ -183,5 +193,6 @@ let () =
     ];
     "coverage", [
       Alcotest.test_case "shard tools parse" `Quick test_shard_tools_parse;
+      Alcotest.test_case "prefilter synonyms parse" `Quick test_prefilter_synonyms_parse;
     ];
   ]

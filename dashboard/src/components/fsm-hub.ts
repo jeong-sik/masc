@@ -272,7 +272,7 @@ export function FsmHub() {
         />
 
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
-        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
+        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} observations=${view.observations} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
         ${/* ── Zone 2b: Transition History Trail + Top Transitions (collapsible) ── */ ''}
         <${CollapsibleZone} id="transition-trail" title="전환 이력" defaultOpen=${true}>

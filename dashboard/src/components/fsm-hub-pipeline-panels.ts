@@ -12,6 +12,7 @@ import {
 } from './fsm-hub-types'
 import { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
 import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
+import { deriveSwimlaneSegments } from './fsm-hub-derivations'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 
@@ -97,31 +98,71 @@ export function OperationalMeaningPanel({
   `
 }
 
-const PHASE_DOT_COLOR: Record<string, string> = {
-  Running: 'bg-emerald-400',
-  Compacting: 'bg-amber-400',
-  HandingOff: 'bg-violet-400',
-  Failing: 'bg-red-400',
-  Crashed: 'bg-red-500',
-  Draining: 'bg-amber-300',
-  Restarting: 'bg-blue-400',
-  Offline: 'bg-zinc-600',
-  Paused: 'bg-zinc-600',
-  Stopped: 'bg-zinc-600',
-  Dead: 'bg-zinc-800',
+const PHASE_BAR_FILL: Record<string, string> = {
+  Running: '#22c55e',
+  Compacting: '#f59e0b',
+  HandingOff: '#a78bfa',
+  Failing: '#ef4444',
+  Crashed: '#ef4444',
+  Draining: '#fbbf24',
+  Restarting: '#60a5fa',
+  Offline: '#52525b',
+  Paused: '#52525b',
+  Stopped: '#52525b',
+  Dead: '#27272a',
 }
 
-function PhaseSparkline({ log }: { log: string[] }) {
-  if (log.length < 2) return null
+function PhaseSparkline({
+  observations,
+  now,
+}: {
+  observations: CompositeObservation[]
+  now: number
+}) {
+  const segments = useMemo(
+    () => deriveSwimlaneSegments(observations, 'phase', now),
+    [observations, now],
+  )
+  if (segments.length < 2) return null
+
+  const W = 120
+  const H = 16
+  const gap = 1
+  const totalDuration = segments.reduce((s, seg) => s + Math.max(0, seg.to - seg.from), 0)
+  if (totalDuration <= 0) return null
+
+  let x = 0
+  const bars = segments.map((seg, i) => {
+    const dur = Math.max(0, seg.to - seg.from)
+    const w = Math.max(1, (dur / totalDuration) * (W - (segments.length - 1) * gap))
+    const fill = PHASE_BAR_FILL[seg.value] ?? '#47b8ff'
+    const barX = x
+    x += w + gap
+    const isLast = i === segments.length - 1
+    return { x: barX, w, fill, phase: seg.value, dur, isLast }
+  })
+
   return html`
-    <div class="flex items-center gap-[3px] mt-2" title="Phase history (oldest → newest)">
-      <span class="text-[8px] text-[var(--text-dim)] mr-1">history</span>
-      ${log.map((phase, i) => {
-        const isLast = i === log.length - 1
-        const dotColor = PHASE_DOT_COLOR[phase] ?? 'bg-[var(--accent)]'
-        const size = isLast ? 'w-2.5 h-2.5 ring-1 ring-white/20' : 'w-1.5 h-1.5'
-        return html`<span class=${`rounded-full ${dotColor} ${size} shrink-0`} title=${phase}></span>`
-      })}
+    <div class="mt-2 flex items-center gap-2">
+      <span class="text-[8px] text-[var(--text-dim)]">phase</span>
+      <svg
+        width=${W} height=${H}
+        viewBox=${`0 0 ${W} ${H}`}
+        class="shrink-0"
+        role="img"
+        aria-label="Phase duration sparkline"
+      >
+        ${bars.map((b) => html`
+          <rect
+            x=${b.x} y=${0} width=${b.w} height=${H}
+            fill=${b.fill}
+            opacity=${b.isLast ? 1 : 0.7}
+            rx=${1}
+          >
+            <title>${displayState(b.phase)} ${fmtDuration(b.dur)}</title>
+          </rect>
+        `)}
+      </svg>
     </div>
   `
 }
@@ -163,12 +204,13 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
 
 export function HeroPhase({
   snapshot,
-  phaseLog,
+  observations,
   phaseSince,
   now,
 }: {
   snapshot: KeeperCompositeSnapshot
-  phaseLog: string[]
+  phaseLog?: string[]
+  observations: CompositeObservation[]
   phaseSince: number | null
   now: number
 }) {
@@ -217,7 +259,7 @@ export function HeroPhase({
         </div>
         ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">상태 변경</span>` : null}
       </div>
-      <${PhaseSparkline} log=${phaseLog} />
+      <${PhaseSparkline} observations=${observations} now=${now} />
     </div>
   `
 }

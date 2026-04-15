@@ -989,13 +989,13 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                   Some
                     (Types.TaskInvalidState
                        (Printf.sprintf
-                          "task %s is already done by %s; inspect task history instead of calling masc_done again"
+                          "task %s is already done by %s; inspect task history instead of calling masc_transition(action=done) again"
                           task_id assignee))
               | Cancelled { cancelled_by; _ } ->
                   Some
                     (Types.TaskInvalidState
                        (Printf.sprintf
-                          "task %s was cancelled by %s; reopen or create a new task instead of calling masc_done"
+                          "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
                           task_id cancelled_by))
             in
             match completion_error with

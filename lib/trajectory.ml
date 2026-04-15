@@ -272,7 +272,7 @@ let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulat
 let set_task_id (acc : accumulator) (id : string) : unit =
   acc.task_id <- Some id
 
-(** Clear task binding (e.g., after masc_done). *)
+(** Clear task binding (e.g., after masc_transition action=done). *)
 let clear_task_id (acc : accumulator) : unit =
   acc.task_id <- None
 

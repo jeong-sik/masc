@@ -165,7 +165,7 @@ type keeper_meta =
   ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
-      Set when keeper claims a task; cleared on masc_done.
+      Set when keeper claims a task; cleared on masc_transition action=done.
       Propagated to trajectory accumulator for per-task cost tracking. *)
   ; work_discovery_enabled : bool option
   ; work_discovery_sources : string list option

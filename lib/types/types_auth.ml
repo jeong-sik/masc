@@ -72,7 +72,6 @@ let limit_for_category config = function
 let category_for_tool = function
   | "masc_broadcast" -> BroadcastLimit
   | "masc_add_task"
-  | "masc_done"
   | "masc_claim_next"
   | "masc_claim_task"
   | "masc_set_current_task"

@@ -47,7 +47,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_config", CanReadState);
     ("masc_add_task", CanAddTask);
     ("masc_claim_next", CanClaimTask);
-    ("masc_done", CanCompleteTask);
     ("masc_update_priority", CanCompleteTask);
     ("masc_transition", CanCompleteTask);
     ("masc_broadcast", CanBroadcast);

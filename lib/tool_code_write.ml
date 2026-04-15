@@ -388,7 +388,39 @@ let handle_code_edit ctx args =
           done;
 
           if !count = 0 then
-            (false, "old_string not found in file")
+            (* Exact match failed. Look for the first line of old_string
+               (trimmed) inside the file and surface up to 3 matching
+               lines — the LLM almost always got whitespace / indent /
+               trailing newline wrong, and showing the real line(s) it
+               meant to target lets the next attempt succeed without
+               re-reading the whole file.
+
+               Evidence: 2026-04-16 /loop iter 3 — 17/19 masc_code_edit
+               failures are "old_string not found", single root cause. *)
+            let first_line =
+              match String.index_opt old_string '\n' with
+              | Some i -> String.sub old_string 0 i
+              | None -> old_string
+            in
+            let needle = String.trim first_line in
+            if String.length needle < 8 then
+              (false, "old_string not found in file")
+            else
+              let matches =
+                String.split_on_char '\n' content
+                |> List.filter (fun line ->
+                     String_util.contains_substring line needle)
+                |> List.filteri (fun i _ -> i < 3)
+              in
+              let hint =
+                match matches with
+                | [] -> ""
+                | samples ->
+                  "\nLines in file matching the first trimmed line of \
+                   old_string (check whitespace/indent):\n  "
+                  ^ String.concat "\n  " samples
+              in
+              (false, "old_string not found in file." ^ hint)
           else if !count > 1 && not replace_all then
             (false, Printf.sprintf
                "old_string found %d times. Use replace_all=true or provide more context"

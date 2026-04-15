@@ -243,6 +243,23 @@ let correct_repo_flag ~(correct_slug : string) (cmd : string) : string * bool =
     (corrected, corrected <> cmd)
   else (cmd, false)
 
+(** Rejection counter: tracks how many times a (repo, kind, number)
+    triple has been rejected in this process lifetime. Used to escalate
+    gate responses when the LLM repeatedly tries the same hallucinated
+    number. Module-level so counts persist across keeper turns.
+    @since 7199 *)
+let rejection_counts : (string * Keeper_gh_cache.entity_kind * int, int) Hashtbl.t =
+  Hashtbl.create 16
+
+let record_and_get_rejection_count ~repo_slug ~kind ~number =
+  let key = (repo_slug, kind, number) in
+  let count = match Hashtbl.find_opt rejection_counts key with
+    | Some n -> n + 1
+    | None -> 1
+  in
+  Hashtbl.replace rejection_counts key count;
+  count
+
 let handle_keeper_github
       ~(config : Room.config)
       ~(meta : keeper_meta)
@@ -332,10 +349,12 @@ let handle_keeper_github
              Keeper_gh_cache.validate_number ~config ~repo_slug:slug ~kind ~number
            with
            | `Valid | `Unknown -> None
-           | `Invalid valids -> Some (kind, number, valids, slug))
+           | `Invalid valids ->
+             let rej_count = record_and_get_rejection_count ~repo_slug:slug ~kind ~number in
+             Some (kind, number, valids, slug, rej_count))
       in
       (match invalid_number with
-       | Some (kind, number, valids, slug) ->
+       | Some (kind, number, valids, slug, rejection_count) ->
          let kind_label =
            match kind with Keeper_gh_cache.PR -> "PR" | Issue -> "issue"
          in
@@ -372,20 +391,31 @@ let handle_keeper_github
              Printf.sprintf "gh %s view %d" sub_label recent
            | [] -> Printf.sprintf "gh %s list --state open" sub_label
          in
+         let reason =
+           if rejection_count >= 2 then
+             Printf.sprintf
+               "ALREADY REJECTED %d TIMES. STOP retrying %s #%d. \
+                This number DOES NOT EXIST in %s. \
+                You tried this exact number before and it failed. \
+                Use EXACTLY this command instead: %s. \
+                Do NOT retry #%d under any circumstances."
+               rejection_count kind_label number slug suggested number
+           else
+             Printf.sprintf
+               "WRONG NUMBER (not a repo problem). \
+                %s #%d does not exist. \
+                The repo %s is correct. \
+                Pick from these valid %s numbers: [%s]."
+               kind_label number slug kind_label valid_str
+         in
          Yojson.Safe.to_string
            (`Assoc
                [ "ok", `Bool false
-               ; "error", `String "number_not_found"
-               ; ( "reason"
-                 , `String
-                     (Printf.sprintf
-                        "WRONG NUMBER (not a repo problem). \
-                         %s #%d does not exist. \
-                         The repo %s is correct. \
-                         Pick from these valid %s numbers: [%s]."
-                        kind_label number slug kind_label valid_str) )
+               ; "error", `String (if rejection_count >= 2 then "repeated_hallucination" else "number_not_found")
+               ; "reason", `String reason
                ; "valid_numbers", `List (List.map (fun n -> `Int n) shown)
                ; "suggested_command", `String suggested
+               ; "rejection_count", `Int rejection_count
                ; ( "hint"
                  , `String
                      (Printf.sprintf

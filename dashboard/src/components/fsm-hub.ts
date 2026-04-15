@@ -1908,6 +1908,42 @@ function SwimlaneTimeline({
           </div>
         </div>
       ` : null}
+      ${observations.length > 1 ? html`
+        <div class="mt-0.5 flex items-center gap-2" aria-hidden="true">
+          <div class="w-[44px] shrink-0 text-[8px] text-[var(--text-dim)] text-right">obs</div>
+          <div class="relative flex-1 h-2.5">
+            ${observations.map((obs, obsIndex) => {
+              const leftPct = ((obs.ts - spanStart) / spanWidth) * 100
+              const prev = obsIndex > 0 ? observations[obsIndex - 1] : null
+              const hasTransition = prev != null && (
+                prev.phase !== obs.phase ||
+                prev.turn !== obs.turn ||
+                prev.decision !== obs.decision ||
+                prev.cascade !== obs.cascade ||
+                prev.compaction !== obs.compaction
+              )
+              const dotCls = hasTransition
+                ? 'bg-[#818cf8] ring-1 ring-[rgba(129,140,248,0.4)]'
+                : 'bg-[var(--white-10)]'
+              const changedLanes = prev == null ? [] : [
+                ...(prev.phase !== obs.phase ? ['KSM'] : []),
+                ...(prev.turn !== obs.turn ? ['KTC'] : []),
+                ...(prev.decision !== obs.decision ? ['KDP'] : []),
+                ...(prev.cascade !== obs.cascade ? ['KCL'] : []),
+                ...(prev.compaction !== obs.compaction ? ['KMC'] : []),
+              ]
+              const tip = `${fmtAbs(obs.ts)}${changedLanes.length > 0 ? ` · ${changedLanes.join(', ')} changed` : ' · no change'}`
+              return html`
+                <div
+                  class=${`absolute top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full ${dotCls} transition-all duration-200`}
+                  style=${`left: ${leftPct.toFixed(2)}%`}
+                  title=${tip}
+                ></div>
+              `
+            })}
+          </div>
+        </div>
+      ` : null}
       <div class="mt-2 flex flex-wrap items-center gap-2 text-[9px] text-[var(--text-dim)]">
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(129,140,248,0.45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>

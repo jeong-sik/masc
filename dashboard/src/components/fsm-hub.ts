@@ -275,6 +275,18 @@ export type SwimlaneSegment = {
   value: string
 }
 
+/** Cross-panel hover coordination payload. When a swimlane segment is
+    under the cursor, the SwimlaneTimeline publishes which lane, value,
+    and time window it covers, and downstream panels (TransitionTrail,
+    PipelineStep) highlight rows that overlap. */
+export type HoveredSegment = {
+  field: string  // KSM / KTC / KDP / KCL / KMC
+  laneKey: keyof Omit<CompositeObservation, 'ts'>
+  from: number
+  to: number
+  value: string
+}
+
 /** Collapse consecutive observations of a single lane into run-length
     segments. The final segment is extended to `boundsEnd` so the lane
     visually reaches the right edge of the timeline instead of stopping
@@ -772,6 +784,7 @@ export function FsmHub() {
   const [pollTick, setPollTick] = useState(0)
   const [now, setNow] = useState(() => Date.now() / 1000)
   const [graphOpen, setGraphOpen] = useState(false)
+  const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const requestIdRef = useRef(0)
 
   const keeperList = keepers.value
@@ -883,13 +896,18 @@ export function FsmHub() {
         <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
         ${/* ── Zone 2b: Transition History Trail ── */ ''}
-        <${TransitionTrail} history=${history} now=${now} />
+        <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
 
         ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
         <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
 
         ${/* ── Zone 3b: Swimlane Timeline ── */ ''}
-        <${SwimlaneTimeline} observations=${view.observations} now=${now} />
+        <${SwimlaneTimeline}
+          observations=${view.observations}
+          now=${now}
+          hoveredSegment=${hoveredSegment}
+          onHoverSegment=${setHoveredSegment}
+        />
 
         ${/* ── Zone 4: Health Grid ── */ ''}
         <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -1500,9 +1518,13 @@ function swimlaneSegmentColor(value: string): string {
 function SwimlaneTimeline({
   observations,
   now,
+  hoveredSegment,
+  onHoverSegment,
 }: {
   observations: CompositeObservation[]
   now: number
+  hoveredSegment: HoveredSegment | null
+  onHoverSegment: (seg: HoveredSegment | null) => void
 }) {
   if (observations.length === 0) {
     return html`
@@ -1553,11 +1575,19 @@ function SwimlaneTimeline({
                 ${segments.map(seg => {
                   const pct = ((seg.to - seg.from) / spanWidth) * 100
                   const holdFor = fmtDuration(Math.max(0, seg.to - seg.from))
+                  const isHovered =
+                    hoveredSegment != null &&
+                    hoveredSegment.laneKey === lane.key &&
+                    hoveredSegment.from === seg.from &&
+                    hoveredSegment.to === seg.to
+                  const dimmed = hoveredSegment != null && !isHovered
                   return html`
                     <div
-                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-300 border-r border-[rgba(0,0,0,0.25)] last:border-r-0`}
+                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-200 border-r border-[rgba(0,0,0,0.25)] last:border-r-0 cursor-pointer ${isHovered ? 'ring-1 ring-[var(--accent)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
                       title=${`${lane.short} · ${seg.value}\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · held ${holdFor}`}
+                      onmouseenter=${() => onHoverSegment({ field: lane.short, laneKey: lane.key, from: seg.from, to: seg.to, value: seg.value })}
+                      onmouseleave=${() => onHoverSegment(null)}
                     ></div>
                   `
                 })}
@@ -1596,12 +1626,23 @@ function SwimlaneTimeline({
   `
 }
 
+export function isTransitionInSegment(
+  entry: { ts: number; field: string },
+  segment: HoveredSegment | null,
+): boolean {
+  if (!segment) return false
+  if (entry.field !== segment.field) return false
+  return entry.ts >= segment.from && entry.ts <= segment.to
+}
+
 function TransitionTrail({
   history,
   now,
+  hoveredSegment,
 }: {
   history: { ts: number; from: string; to: string; field: string }[]
   now: number
+  hoveredSegment: HoveredSegment | null
 }) {
   if (history.length === 0) {
     return html`
@@ -1620,8 +1661,13 @@ function TransitionTrail({
         ${history.map(entry => {
           const ago = fmtDuration(Math.max(0, now - entry.ts))
           const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
+          const inSegment = isTransitionInSegment(entry, hoveredSegment)
+          const dimmed = hoveredSegment != null && !inSegment
+          const rowCls = inSegment
+            ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
+            : ''
           return html`
-            <div class="flex items-center gap-2 text-[10px] font-mono leading-tight">
+            <div class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}>
               <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
               <span class="text-[var(--text-dim)]">${entry.from}</span>

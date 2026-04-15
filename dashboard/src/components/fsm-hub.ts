@@ -15,26 +15,20 @@ import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 /**
  * FSM Hub — architecture audit surface for the composite keeper lifecycle.
  *
- * Data source: `/api/v1/keepers/:name/composite` (RFC-0003 §7).
- * Rendered as four sub-FSM badges (KSM / KTC / KDP / KCL / KMC) plus the
- * five safety invariants from KeeperCompositeLifecycle.tla.
+ * Layout redesign: Hero (KSM) + Pipeline strip (KTC→KDP→KCL→KMC) +
+ * Health grid (measurement/invariants/recovery) + collapsible graph.
  *
- * This MVP shows the composite snapshot as structured rows rather than a
- * Cytoscape compound graph; the compound view is tracked as a follow-up
- * (docs/design/dashboard-fsm-redesign.md Phase 3 §2).
+ * Data source: `/api/v1/keepers/:name/composite` (RFC-0003 §7).
  */
 export function FsmHub() {
   const [selected, setSelected] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // 30-second polling fallback so the dashboard stays alive when
-  // no SSE keeper_composite_changed events arrive (idle keepers).
   const [pollTick, setPollTick] = useState(0)
-  // Wall-clock of last successful fetch — drives stale indicator.
   const [lastFetchAt, setLastFetchAt] = useState(0)
-  // Current clock for relative time display (updates every second).
   const [now, setNow] = useState(() => Date.now() / 1000)
+  const [graphOpen, setGraphOpen] = useState(false)
 
   const keeperList = keepers.value
   const keeperNames = useMemo(
@@ -42,7 +36,6 @@ export function FsmHub() {
     [keeperList],
   )
 
-  // Pick the first keeper by default once the list is loaded.
   useEffect(() => {
     if (selected == null && keeperNames.length > 0) {
       const first = keeperNames[0]
@@ -50,23 +43,16 @@ export function FsmHub() {
     }
   }, [keeperNames, selected])
 
-  // 30-second polling interval — ensures the dashboard updates even
-  // when SSE events are absent (idle keeper). Restores the behavior
-  // from 28349f986 that was accidentally removed in 9275013f1.
   useEffect(() => {
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
   }, [])
 
-  // 1-second clock tick for relative time display (idle duration,
-  // last refreshed). Lightweight: only updates a number, no fetch.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now() / 1000), 1_000)
     return () => clearInterval(id)
   }, [])
 
-  // Re-fetch composite snapshot whenever the selected keeper changes OR the
-  // SSE envelope signals a registry mutation on it OR the poll timer fires.
   const tick = compositeTick.value
   const shouldRefetchForTick =
     selected != null && tick.name === selected ? tick.ts_unix : 0
@@ -91,12 +77,16 @@ export function FsmHub() {
   }, [selected, shouldRefetchForTick, pollTick, doFetch])
 
   return html`
-    <div class="flex flex-col gap-5">
-      <${HubHeader} />
-      <${KeeperPicker}
-        names=${keeperNames}
+    <div class="flex flex-col gap-3">
+      ${/* ── Zone 1: Status Bar ── */ ''}
+      <${StatusBar}
+        snapshot=${snapshot}
+        now=${now}
+        lastFetchAt=${lastFetchAt}
+        keeperNames=${keeperNames}
         selected=${selected}
         onSelect=${setSelected}
+        loading=${loading}
       />
 
       ${selected == null ? html`
@@ -109,123 +99,160 @@ export function FsmHub() {
       ` : error ? html`
         <${EmptyState} message=${error} compact />
       ` : snapshot ? html`
-        <${CompositeGraphPanel} snapshot=${snapshot} />
-        <div class="grid gap-4 lg:grid-cols-2">
-          <${SubFsmCard} label="KSM · Keeper lifecycle" value=${snapshot.phase} tone="accent" />
-          <${SubFsmCard} label="KTC · Turn cycle" value=${snapshot.turn_phase} tone="indigo" />
-          <${SubFsmCard} label="KDP · Decision pipeline" value=${snapshot.decision.stage} tone="indigo" />
-          <${SubFsmCard} label="KCL · Cascade state" value=${snapshot.cascade.state} tone="indigo" />
-          <${SubFsmCard} label="KMC · Memory compaction" value=${snapshot.compaction.stage} tone="amber" />
+        ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
+        <${HeroPhase} snapshot=${snapshot} />
+
+        ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
+        <${TurnPipelineStrip} snapshot=${snapshot} />
+
+        ${/* ── Zone 4: Health Grid ── */ ''}
+        <div class="grid gap-3 lg:grid-cols-3">
           <${MeasurementCard} snapshot=${snapshot} />
+          <${InvariantsPanel} invariants=${snapshot.invariants} />
+          <${RecoveryStatePanel}
+            dataRecord=${snapshot.recovery.data_record}
+            fsmCondition=${snapshot.recovery.fsm_condition}
+          />
         </div>
-        <${InvariantsPanel} invariants=${snapshot.invariants} />
-        <${RecoveryStatePanel}
-          dataRecord=${snapshot.recovery.data_record}
-          fsmCondition=${snapshot.recovery.fsm_condition}
-        />
-        <${SnapshotMeta} snapshot=${snapshot} now=${now} lastFetchAt=${lastFetchAt} />
+
+        ${/* ── Zone 5: Collapsible Graph ── */ ''}
+        <details class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)]"
+          open=${graphOpen}
+          onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary class="cursor-pointer select-none px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] hover:text-[var(--text-body)]">
+            Compound Graph — 5 sub-FSMs (Cytoscape)
+          </summary>
+          <div class="px-3 pb-3">
+            <${CompositeGraphPanel} snapshot=${snapshot} />
+          </div>
+        </details>
       ` : null}
     </div>
   `
 }
 
-function CompositeGraphPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
-  const spec = useMemo(() => buildCompositeFsmSpec({
-    phase: snapshot.phase,
-    turnPhase: snapshot.turn_phase,
-    decisionStage: snapshot.decision.stage,
-    cascadeState: snapshot.cascade.state,
-    compactionStage: snapshot.compaction.stage,
-  }), [
-    snapshot.phase,
-    snapshot.turn_phase,
-    snapshot.decision.stage,
-    snapshot.cascade.state,
-    snapshot.compaction.stage,
-  ])
+// ── Zone 1: Status Bar ──────────────────────────────────
 
-  return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-      <div class="mb-2 flex items-center justify-between">
-        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          Composite compound view — 5 sub-FSMs
-        </div>
-        <span class="text-[10px] text-[var(--text-dim)]">
-          KeeperCompositeLifecycle.tla
-        </span>
-      </div>
-      <${CytoscapeFsm} spec=${spec} height="360px" />
-    </div>
-  `
-}
-
-function HubHeader() {
-  return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
-      <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
-        FSM Hub — RFC-0003 Composite Lifecycle
-      </div>
-      <div class="mt-1 text-[11px] leading-[1.55] text-[var(--text-body)]">
-        Decision · Cascade · Memory · Compaction 네 서브 FSM을 교차로 관찰합니다.
-        Observer는 <code class="px-1 font-mono text-[var(--accent)]">Keeper_composite_observer.observe</code>
-        를 통해 순수 투영만 수행합니다 — 상태 변경/라우팅은 이 페이지에서 일어나지 않습니다.
-      </div>
-    </div>
-  `
-}
-
-function KeeperPicker({
-  names,
+function StatusBar({
+  snapshot,
+  now,
+  lastFetchAt,
+  keeperNames,
   selected,
   onSelect,
+  loading,
 }: {
-  names: string[]
+  snapshot: KeeperCompositeSnapshot | null
+  now: number
+  lastFetchAt: number
+  keeperNames: string[]
   selected: string | null
   onSelect: (n: string) => void
+  loading: boolean
 }) {
-  if (names.length === 0) {
-    return html`<${EmptyState} message="등록된 키퍼가 없습니다" compact />`
-  }
+  const liveBadge = snapshot
+    ? snapshot.is_live
+      ? html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-emerald-400 border-emerald-500/40 bg-emerald-500/10 animate-pulse">● LIVE</span>`
+      : html`<span class="px-2 py-0.5 rounded-full border text-[10px] font-mono text-[var(--text-dim)] border-white/10">○ idle ${fmtDuration(Math.max(0, now - (snapshot.last_outcome?.ended_at ?? snapshot.ts)))}</span>`
+    : null
+
+  const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
   return html`
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="text-[10px] uppercase tracking-[0.1em] text-[var(--text-muted)]">관찰 대상</span>
-      ${names.map(name => {
-        const active = name === selected
-        const cls = active
-          ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--accent)]'
-          : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--text-body)] hover:border-[var(--accent-30)]'
-        return html`
-          <button
-            class=${`rounded-full border px-3 py-1 text-[11px] font-mono transition-colors ${cls}`}
-            onClick=${() => onSelect(name)}
-          >
-            ${name}
-          </button>
-        `
-      })}
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-4 py-2.5">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-3">
+          <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
+          ${liveBadge}
+          ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
+          ${staleSec > 60 ? html`<span class="text-[9px] font-mono text-amber-400">${fmtDuration(staleSec)} ago</span>` : null}
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          ${keeperNames.map(name => {
+            const active = name === selected
+            const cls = active
+              ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--accent)]'
+              : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
+            return html`
+              <button
+                class=${`rounded-full border px-2.5 py-0.5 text-[10px] font-mono transition-colors cursor-pointer ${cls}`}
+                onClick=${() => onSelect(name)}
+              >
+                ${name.replace(/^keeper-|-agent$/g, '')}
+              </button>
+            `
+          })}
+        </div>
+      </div>
+      ${snapshot ? html`
+        <div class="mt-1.5 flex gap-3 text-[9px] font-mono text-[var(--text-dim)] opacity-70">
+          <span>${snapshot.last_outcome ? `turn #${snapshot.last_outcome.turn_id} @ ${new Date(snapshot.last_outcome.ended_at * 1000).toLocaleTimeString()}` : 'no turn yet'}</span>
+          <span>corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>
+          <span>run ${snapshot.run_id?.slice(-8) ?? '?'}</span>
+        </div>
+      ` : null}
     </div>
   `
 }
 
-function SubFsmCard({
+// ── Zone 2: Hero Phase ──────────────────────────────────
+
+function HeroPhase({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+  const prevRef = useRef(snapshot.phase)
+  const [flash, setFlash] = useState(false)
+  useEffect(() => {
+    if (prevRef.current !== snapshot.phase) {
+      prevRef.current = snapshot.phase
+      setFlash(true)
+      const id = setTimeout(() => setFlash(false), 2000)
+      return () => clearTimeout(id)
+    }
+    return undefined
+  }, [snapshot.phase])
+
+  const phaseColor: Record<string, string> = {
+    Running: 'text-emerald-400',
+    Compacting: 'text-amber-400',
+    HandingOff: 'text-violet-400',
+    Failing: 'text-red-400',
+    Crashed: 'text-red-500',
+    Offline: 'text-[var(--text-dim)]',
+    Paused: 'text-[var(--text-dim)]',
+    Stopped: 'text-[var(--text-dim)]',
+  }
+  const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'
+
+  return html`
+    <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
+      <div class="flex items-baseline justify-between">
+        <div>
+          <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">KSM · Keeper Lifecycle</div>
+          <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`}>
+            ${snapshot.phase}
+          </div>
+        </div>
+        ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono">phase changed</span>` : null}
+      </div>
+    </div>
+  `
+}
+
+// ── Zone 3: Turn Pipeline Strip ─────────────────────────
+
+function PipelineStep({
   label,
+  shortLabel,
   value,
   tone,
+  isLast,
 }: {
   label: string
+  shortLabel: string
   value: string
-  tone: 'accent' | 'indigo' | 'amber'
+  tone: string
+  isLast?: boolean
 }) {
-  const toneCls =
-    tone === 'accent'
-      ? 'text-[var(--accent)]'
-      : tone === 'indigo'
-        ? 'text-[#818cf8]'
-        : 'text-[#f59e0b]'
-
-  // Flash on state transition: track previous value and trigger a
-  // brief highlight animation when it changes.
   const prevRef = useRef(value)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -238,46 +265,70 @@ function SubFsmCard({
     return undefined
   }, [value])
 
-  const flashBorder = flash
-    ? 'border-[var(--accent)] shadow-[0_0_8px_rgba(var(--accent-rgb),0.35)]'
-    : 'border-[var(--white-8)]'
+  const isActive = value !== 'idle' && value !== 'undecided' && value !== 'accumulating'
+  const borderCls = flash
+    ? 'border-[var(--accent)] shadow-[0_0_6px_rgba(71,184,255,0.3)]'
+    : isActive
+      ? `border-[${tone}]`
+      : 'border-[var(--white-8)]'
 
   return html`
-    <div class=${`rounded-xl border bg-[var(--white-2)] p-4 transition-all duration-500 ${flashBorder}`}>
-      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
-      <div class=${`mt-1.5 font-mono text-[18px] font-semibold ${toneCls} ${flash ? 'animate-pulse' : ''}`}>${value}</div>
-      ${flash ? html`<div class="mt-1 text-[9px] text-[var(--accent)] animate-pulse">state changed</div>` : null}
+    <div class="flex items-center gap-0 flex-1 min-w-0">
+      <div class=${`flex-1 rounded-lg border bg-[var(--white-2)] px-3 py-2 transition-all duration-500 ${borderCls}`}>
+        <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</div>
+        <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-dim)]'} ${flash ? 'animate-pulse' : ''}`}>
+          ${value}
+        </div>
+        <div class="text-[8px] text-[var(--text-dim)] mt-0.5">${label}</div>
+      </div>
+      ${!isLast ? html`<div class="w-4 h-[1px] bg-[var(--white-10)] shrink-0"></div>` : null}
     </div>
   `
 }
 
+function TurnPipelineStrip({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        Turn Pipeline
+      </div>
+      <div class="flex gap-0 items-stretch">
+        <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} tone="rgba(129,140,248,0.4)" />
+        <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} tone="rgba(129,140,248,0.4)" />
+        <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} tone="rgba(129,140,248,0.4)" />
+        <${PipelineStep} shortLabel="KMC" label="Compaction" value=${snapshot.compaction.stage} tone="rgba(245,158,11,0.4)" isLast />
+      </div>
+    </div>
+  `
+}
+
+// ── Zone 4: Health Grid ─────────────────────────────────
+
 function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const m = snapshot.measurement
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
-      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-        Shared measurement
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+        Measurement
       </div>
       ${m.captured && m.auto_rules ? html`
-        <div class="mt-1.5 flex flex-col gap-1 text-[11px] text-[var(--text-body)]">
-          <div class="flex gap-2 font-mono">
+        <div class="flex flex-col gap-1.5 text-[11px] text-[var(--text-body)]">
+          <div class="flex flex-wrap gap-1.5 font-mono">
             <${Flag} label="reflect" on=${m.auto_rules.reflect} />
             <${Flag} label="plan" on=${m.auto_rules.plan} />
             <${Flag} label="compact" on=${m.auto_rules.compact} />
             <${Flag} label="handoff" on=${m.auto_rules.handoff} />
           </div>
-          <div class="flex gap-2 font-mono">
+          <div class="flex items-center gap-2 font-mono">
             <${Flag} label="guardrail" on=${m.auto_rules.guardrail_stop} tone="warn" />
-            <span class="text-[var(--text-dim)]">drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
+            <span class="text-[10px] text-[var(--text-dim)]">drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
           ${m.auto_rules.guardrail_reason ? html`
-            <div class="text-[10px] text-[#f59e0b]">사유: ${m.auto_rules.guardrail_reason}</div>
+            <div class="text-[9px] text-[#f59e0b] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
           ` : null}
         </div>
       ` : html`
-        <div class="mt-1.5 text-[11px] text-[var(--text-dim)]">
-          아직 관측된 Context_measured 이벤트가 없습니다.
-        </div>
+        <div class="text-[10px] text-[var(--text-dim)]">관측 대기</div>
       `}
     </div>
   `
@@ -297,35 +348,35 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
 }
 
 const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
-  phase_turn_alignment: 'PhaseTurnAlignment — phase=Compacting ⇔ turn=compacting',
-  no_cascade_before_measurement: 'NoCascadeBeforeMeasurement — measurement 선행',
-  compaction_atomicity: 'CompactionAtomicity — phase=Compacting ⇔ compaction_active',
-  event_priority_monotone: 'EventPriorityMonotone — Compaction < Handoff < Context_measured',
-  recovery_two_store_sync: 'RecoveryTwoStoreSync — data/fsm 저장소 동기',
+  phase_turn_alignment: 'Phase ⇔ Turn',
+  no_cascade_before_measurement: 'Cascade ordering',
+  compaction_atomicity: 'Compaction atomic',
+  event_priority_monotone: 'Event priority',
+  recovery_two_store_sync: 'Two-store sync',
 }
 
 function InvariantsPanel({ invariants }: { invariants: KeeperCompositeInvariants }) {
   const entries = Object.entries(invariants) as [keyof KeeperCompositeInvariants, boolean][]
   const allOk = entries.every(([, ok]) => ok)
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
-      <div class="flex items-center justify-between">
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="flex items-center justify-between mb-2">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          Safety invariants (KeeperCompositeLifecycle.tla)
+          Safety
         </div>
-        <span class=${`rounded-full border px-2 py-0.5 text-[10px] font-mono ${
+        <span class=${`rounded-full border px-2 py-0.5 text-[9px] font-mono ${
           allOk
             ? 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]'
             : 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]'
         }`}>
-          ${allOk ? 'all green' : 'violation'}
+          ${allOk ? '5/5' : 'violation'}
         </span>
       </div>
-      <ul class="mt-2 flex flex-col gap-1 text-[11px]">
+      <ul class="flex flex-col gap-1">
         ${entries.map(([key, ok]) => html`
-          <li class="flex items-center gap-2">
-            <span class=${`h-2 w-2 rounded-full ${ok ? 'bg-[#22c55e]' : 'bg-[#ef4444]'}`}></span>
-            <span class=${ok ? 'text-[var(--text-body)]' : 'text-[#f87171]'}>
+          <li class="flex items-center gap-1.5 text-[10px]">
+            <span class=${`h-1.5 w-1.5 rounded-full shrink-0 ${ok ? 'bg-[#22c55e]' : 'bg-[#ef4444]'}`}></span>
+            <span class=${ok ? 'text-[var(--text-body)]' : 'text-[#f87171] font-semibold'}>
               ${INVARIANT_LABELS[key]}
             </span>
           </li>
@@ -344,30 +395,50 @@ function RecoveryStatePanel({
 }) {
   const state =
     !dataRecord && !fsmCondition ? 'clean' :
-    dataRecord && fsmCondition ? 'manual_reconcile_pending' :
-    dataRecord && !fsmCondition ? 'drift: data set, fsm cleared' :
-    'drift: fsm set, data cleared'
-  const toneCls =
-    state === 'clean'
-      ? 'text-[#22c55e]'
-      : state.startsWith('drift')
-        ? 'text-[#ef4444]'
-        : 'text-[#f59e0b]'
+    dataRecord && fsmCondition ? 'reconcile_pending' :
+    dataRecord && !fsmCondition ? 'drift: data↑ fsm↓' :
+    'drift: fsm↑ data↓'
+  const isClean = state === 'clean'
+  const isDrift = state.startsWith('drift')
+  const toneCls = isClean ? 'text-[#22c55e]' : isDrift ? 'text-[#ef4444]' : 'text-[#f59e0b]'
+  const borderCls = isClean ? 'border-[var(--white-8)]' : isDrift ? 'border-[rgba(239,68,68,0.3)]' : 'border-[rgba(245,158,11,0.3)]'
+
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
-      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-        Recovery two-store (RFC-0003 §8)
+    <div class=${`rounded-xl border bg-[var(--white-2)] p-3 ${borderCls}`}>
+      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+        Recovery
       </div>
-      <div class="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]">
-        <span class=${`font-mono ${toneCls}`}>${state}</span>
-        <span class="text-[var(--text-dim)]">data_record <span class="font-mono text-[var(--text-body)]">${String(dataRecord)}</span></span>
-        <span class="text-[var(--text-dim)]">fsm_condition <span class="font-mono text-[var(--text-body)]">${String(fsmCondition)}</span></span>
+      <div class=${`font-mono text-[13px] font-semibold ${toneCls}`}>${state}</div>
+      <div class="mt-1.5 flex gap-3 text-[9px] text-[var(--text-dim)]">
+        <span>data <span class="font-mono">${String(dataRecord)}</span></span>
+        <span>fsm <span class="font-mono">${String(fsmCondition)}</span></span>
       </div>
     </div>
   `
 }
 
-/** Format seconds into a compact human-readable duration. */
+// ── Compound Graph (collapsed by default) ───────────────
+
+function CompositeGraphPanel({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+  const spec = useMemo(() => buildCompositeFsmSpec({
+    phase: snapshot.phase,
+    turnPhase: snapshot.turn_phase,
+    decisionStage: snapshot.decision.stage,
+    cascadeState: snapshot.cascade.state,
+    compactionStage: snapshot.compaction.stage,
+  }), [
+    snapshot.phase,
+    snapshot.turn_phase,
+    snapshot.decision.stage,
+    snapshot.cascade.state,
+    snapshot.compaction.stage,
+  ])
+
+  return html`<${CytoscapeFsm} spec=${spec} height="320px" />`
+}
+
+// ── Utilities ───────────────────────────────────────────
+
 function fmtDuration(seconds: number): string {
   if (seconds < 0) return '0s'
   const s = Math.floor(seconds)
@@ -377,55 +448,4 @@ function fmtDuration(seconds: number): string {
   if (m < 60) return `${m}m ${rem}s`
   const h = Math.floor(m / 60)
   return `${h}h ${m % 60}m`
-}
-
-function SnapshotMeta({
-  snapshot,
-  now,
-  lastFetchAt,
-}: {
-  snapshot: KeeperCompositeSnapshot
-  now: number
-  lastFetchAt: number
-}) {
-  const date = new Date(snapshot.ts * 1000)
-
-  // Idle duration: time since last_outcome.ended_at or snapshot.ts
-  const idleRef = snapshot.last_outcome
-    ? snapshot.last_outcome.ended_at
-    : snapshot.ts
-  const idleSec = snapshot.is_live ? 0 : Math.max(0, now - idleRef)
-  const idleStr = snapshot.is_live ? '' : ` ${fmtDuration(idleSec)}`
-  const idleWarn = idleSec > 300 // 5 minutes
-
-  const liveClass = snapshot.is_live
-    ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10'
-    : idleWarn
-      ? 'text-amber-400 border-amber-500/40 bg-amber-500/8'
-      : 'text-[var(--text-dim)] border-white/10'
-
-  const lastOutcomeText = snapshot.last_outcome
-    ? `last turn #${snapshot.last_outcome.turn_id} ended ${new Date(snapshot.last_outcome.ended_at * 1000).toLocaleTimeString()}`
-    : 'no completed turn'
-
-  // Stale indicator: how long since the last successful fetch
-  const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
-  const staleWarn = staleSec > 60
-
-  return html`
-    <div class="flex flex-wrap gap-2 text-[10px] text-[var(--text-dim)] font-mono items-center">
-      <span class=${`px-1.5 py-0.5 border rounded ${liveClass}`}>
-        ${snapshot.is_live ? '● LIVE' : `○ idle${idleStr}`}
-      </span>
-      ${staleWarn ? html`
-        <span class="px-1.5 py-0.5 border rounded text-amber-400 border-amber-500/40">
-          refreshed ${fmtDuration(staleSec)} ago
-        </span>
-      ` : null}
-      <span>correlation ${snapshot.correlation_id}</span>
-      <span>run ${snapshot.run_id}</span>
-      <span>ts ${date.toISOString()}</span>
-      <span class="opacity-70">${lastOutcomeText}</span>
-    </div>
-  `
 }

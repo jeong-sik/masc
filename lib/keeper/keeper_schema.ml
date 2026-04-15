@@ -236,12 +236,12 @@ let keeper_schemas : tool_schema list = [
         ("execution_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
-          ("description", `String "Execution scope: observe_only (read-only), workspace (write to allowed paths), local (full access). Default: workspace.");
+          ("description", `String "Execution scope. 'observe_only' blocks all writes. 'workspace'/'local' enable writes within playground (.masc/playground/<name>/). Extra paths must be listed explicitly in allowed_paths. Default: workspace.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Restrict file writes to these path prefixes. Empty list uses computed defaults based on execution_scope. Use [\"*\"] for explicit full access.");
+          ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/). Use [\"*\"] for explicit full access.");
         ]);
         ("tool_access",
           tool_access_schema

@@ -1015,6 +1015,7 @@ function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; 
   return html`
     <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
       role="status" aria-live="polite" aria-label=${`Keeper phase: ${snapshot.phase}`}
+      title=${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}
     >
       <div class="flex items-baseline justify-between">
         <div>
@@ -1031,6 +1032,41 @@ function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; 
 }
 
 // ── Zone 3: Turn Pipeline Strip ─────────────────────────
+
+/** Human-readable descriptions for sub-FSM states.
+    Shown as native title tooltips on hover. */
+const STATE_DESCRIPTIONS: Record<string, string> = {
+  // KTC (Turn Cycle)
+  idle: 'Waiting for the next heartbeat cycle to start a turn',
+  prompting: 'Building the LLM prompt with context and tools',
+  executing: 'LLM is generating a response or calling tools',
+  compacting: 'Compressing context to fit within the window',
+  finalizing: 'Post-turn cleanup: checkpoint save, metrics emit',
+  // KDP (Decision Pipeline)
+  undecided: 'No decision made yet — waiting for the turn to start',
+  guard_ok: 'All safety guards passed, proceeding to tool execution',
+  gate_rejected: 'A safety gate blocked the action (cost, deny list, etc.)',
+  tool_policy_selected: 'Tool policy has been applied, tools filtered',
+  // KCL (Cascade)
+  selecting: 'Choosing the best provider from the cascade list',
+  trying: 'Attempting inference with the selected provider',
+  done: 'Provider responded successfully',
+  exhausted: 'All providers in the cascade failed',
+  // KMC (Compaction)
+  accumulating: 'Collecting messages; context not yet full',
+  // KSM (Phase) — used in Hero
+  Running: 'Keeper is actively running turns',
+  Compacting: 'Compacting context to reclaim token budget',
+  HandingOff: 'Transferring state to the next generation',
+  Failing: 'Experiencing errors, will retry or recover',
+  Crashed: 'Unrecoverable error — needs operator intervention',
+  Offline: 'Not started or explicitly shut down',
+  Paused: 'Temporarily paused by operator',
+  Stopped: 'Gracefully stopped',
+  Draining: 'Finishing current work before shutdown',
+  Restarting: 'Shutting down and restarting',
+  Dead: 'Permanently terminated',
+}
 
 function PipelineStep({
   label,
@@ -1072,7 +1108,9 @@ function PipelineStep({
     : 'border-t border-[var(--white-10)]'
 
   return html`
-    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${shortLabel}: ${value}`}>
+    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${shortLabel}: ${value}`}
+      title=${`${label} (${shortLabel}): ${value}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
+    >
       <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls}`}>
         <div class="flex items-center gap-1.5">
           ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}

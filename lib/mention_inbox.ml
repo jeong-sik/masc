@@ -70,17 +70,17 @@ let mention_record_of_json (json : Yojson.Safe.t) : mention_record option =
 
 (** {1 Path Resolution} *)
 
-let inbox_path (config : Room.config) : string =
-  Filename.concat (Room.masc_dir config) "mention_inbox.jsonl"
+let inbox_path (config : Coord.config) : string =
+  Filename.concat (Coord.masc_dir config) "mention_inbox.jsonl"
 
 (** {1 JSONL I/O} *)
 
-let append_mention (config : Room.config) (record : mention_record) : unit =
+let append_mention (config : Coord.config) (record : mention_record) : unit =
   let path = inbox_path config in
   let json = mention_record_to_json record in
   Fs_compat.append_jsonl path json
 
-let load_all_mentions (config : Room.config) : mention_record list =
+let load_all_mentions (config : Coord.config) : mention_record list =
   let path = inbox_path config in
   if not (Sys.file_exists path) then []
   else
@@ -95,7 +95,7 @@ let load_all_mentions (config : Room.config) : mention_record list =
             mention_record_of_json json
           with Yojson.Json_error _ -> None)
 
-let read_mentions (config : Room.config) ~(target_agent : string) ~(limit : int)
+let read_mentions (config : Coord.config) ~(target_agent : string) ~(limit : int)
     : mention_record list =
   load_all_mentions config
   |> List.filter (fun r -> r.target_agent = target_agent)
@@ -108,12 +108,12 @@ let read_mentions (config : Room.config) ~(target_agent : string) ~(limit : int)
     in
     take limit [] xs)
 
-let unread_count (config : Room.config) ~(target_agent : string) : int =
+let unread_count (config : Coord.config) ~(target_agent : string) : int =
   load_all_mentions config
   |> List.filter (fun r -> r.target_agent = target_agent && r.read_at = 0.0)
   |> List.length
 
-let mark_read (config : Room.config) ~(mention_id : string) : unit =
+let mark_read (config : Coord.config) ~(mention_id : string) : unit =
   let path = inbox_path config in
   let all = load_all_mentions config in
   let now = Time_compat.now () in

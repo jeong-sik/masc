@@ -9,13 +9,30 @@
 
 (** {1 Types} *)
 
+type record_type =
+  | Verdict_record
+  | Label_record
+
+val record_type_to_string : record_type -> string
+val record_type_of_string : string -> record_type option
+
+type label_verdict =
+  | Approve_label
+  | Reject_label
+
+val label_verdict_to_string : label_verdict -> string
+val label_verdict_of_string : string -> label_verdict option
+
+val verdict_to_string : Anti_rationalization.verdict -> string
+val verdict_of_string : string -> Anti_rationalization.verdict option
+
 type verdict_record = {
-  record_type : string;
+  record_type : record_type;
   notes_hash : string;
   task_id : string;
   task_title : string;
   agent_name : string;
-  verdict : string;
+  verdict : Anti_rationalization.verdict;
   gate : Anti_rationalization.gate;
   evaluator_cascade : string;
   generator_cascade : string option;
@@ -24,9 +41,9 @@ type verdict_record = {
 }
 
 type label_record = {
-  record_type : string;
+  record_type : record_type;
   notes_hash : string;
-  human_verdict : string;
+  human_verdict : label_verdict;
   labeler : string;
   reason : string;
   timestamp : float;
@@ -34,8 +51,8 @@ type label_record = {
 
 type divergence = {
   notes_hash : string;
-  evaluator_verdict : string;
-  human_verdict : string;
+  evaluator_verdict : Anti_rationalization.verdict;
+  human_verdict : label_verdict;
   gate : string;
   task_title : string;
 }
@@ -79,7 +96,7 @@ val record_verdict :
 
 val record_human_label :
   notes_hash:string ->
-  human_verdict:string ->
+  human_verdict:label_verdict ->
   labeler:string ->
   reason:string ->
   unit
@@ -104,8 +121,8 @@ val format_few_shot_block : calibration_example list -> string
 
 val to_harness_verdict : verdict_record -> Agent_sdk.Harness.verdict
 (** Convert a MASC verdict record to an OAS [Harness.verdict].
-    "approve" maps to [passed=true, score=1.0];
-    "reject:*" maps to [passed=false, score=0.0] with gate detail. *)
+    [Approve] maps to [passed=true, score=1.0];
+    [Reject _] maps to [passed=false, score=0.0] with gate detail. *)
 
 (** {1 Statistics} *)
 

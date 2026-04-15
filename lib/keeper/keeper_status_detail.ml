@@ -64,6 +64,26 @@ let effective_status_name (ctx : _ context) args =
   | "" -> normalize_status_name ctx.agent_name
   | value -> value
 
+type tail_order =
+  | Oldest_first
+  | Newest_first
+
+let tail_order_of_args args =
+  match String.lowercase_ascii (String.trim (get_string args "tail_order" "")) with
+  | "newest_first" | "newest" | "latest_first" | "desc" ->
+      Newest_first
+  | _ ->
+      Oldest_first
+
+let tail_order_to_string = function
+  | Oldest_first -> "oldest_first"
+  | Newest_first -> "newest_first"
+
+let apply_tail_order order items =
+  match order with
+  | Oldest_first -> items
+  | Newest_first -> List.rev items
+
 let resolve_status_target (ctx : _ context) args =
   let requested_name = effective_status_name ctx args in
   if not (validate_name requested_name) then
@@ -95,6 +115,7 @@ let hash_status_args _config resolved_name args =
     string_of_bool (get_bool args "include_compaction_history" false);
     string_of_int (get_int args "tail_turns" 3);
     string_of_int (get_int args "tail_messages" 5);
+    tail_order_to_string (tail_order_of_args args);
   ] in
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
@@ -435,6 +456,7 @@ let handle_keeper_status ctx args : tool_result =
       let tail_compactions = max 0 (get_int args "tail_compactions" 10) in
       let tail_bytes = max 1_000 (get_int args "tail_bytes" 60_000) in
       let fast = get_bool args "fast" (keeper_status_fast_default ()) in
+      let tail_order = tail_order_of_args args in
       let include_context = get_bool args "include_context" (not fast) in
       let include_metrics_overview =
         get_bool args "include_metrics_overview" (not fast)
@@ -578,7 +600,7 @@ let handle_keeper_status ctx args : tool_result =
            let (parsed, _) =
              Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
            in
-           `List parsed
+           `List (apply_tail_order tail_order parsed)
          in
          let metrics_window_lines =
            if include_metrics_overview then
@@ -637,12 +659,18 @@ let handle_keeper_status ctx args : tool_result =
          in
          let memory_bank_summary =
            if include_memory_bank then
-             read_keeper_memory_summary
-               ctx.config
-               ~name:m.name
-               ~max_bytes:tail_bytes
-               ~max_lines:(max (tail_turns * 10) 400)
-               ~recent_limit:8
+             let summary =
+               read_keeper_memory_summary
+                 ctx.config
+                 ~name:m.name
+                 ~max_bytes:tail_bytes
+                 ~max_lines:(max (tail_turns * 10) 400)
+                 ~recent_limit:8
+             in
+             {
+               summary with
+               recent_notes = apply_tail_order tail_order summary.recent_notes;
+             }
            else
              {
                total_notes = 0;
@@ -735,7 +763,10 @@ let handle_keeper_status ctx args : tool_result =
                    with Yojson.Json_error _ -> (acc, raw_count, fragment_count, filtered_count))
                  ([], 0, 0, 0) lines
              in
-             (`List (List.rev items_rev), raw_count, fragment_count, filtered_count)
+            ( `List (apply_tail_order tail_order (List.rev items_rev)),
+              raw_count,
+              fragment_count,
+              filtered_count )
          in
          let compaction_history_tail =
            if not include_compaction_history then
@@ -818,7 +849,7 @@ let handle_keeper_status ctx args : tool_result =
              let total = List.length events in
              let start = max 0 (total - tail_compactions) in
              let tail = List.filteri (fun i _ -> i >= start) events in
-             (`List tail, total)
+             (`List (apply_tail_order tail_order tail), total)
         in
         let all_internal_tools =
           keeper_model_tools |> List.map (fun tool -> tool.Types.name)
@@ -989,11 +1020,16 @@ let handle_keeper_status ctx args : tool_result =
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
            ("social", `Assoc [
-             ("model", `String m.social_model);
+             ("model",
+               `String (Keeper_social_model.normalize_social_model m.social_model));
              ("last_speech_act",
                if String.trim m.runtime.last_speech_act = ""
                then `Null
                else `String m.runtime.last_speech_act);
+             ("last_transition_reason",
+               if String.trim m.runtime.last_social_transition_reason = ""
+               then `Null
+               else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
                if String.trim m.runtime.last_blocker = ""
                then `Null
@@ -1018,6 +1054,7 @@ let handle_keeper_status ctx args : tool_result =
              ("include_memory_bank", `Bool include_memory_bank);
              ("include_history_tail", `Bool include_history_tail);
              ("include_compaction_history", `Bool include_compaction_history);
+             ("tail_order", `String (tail_order_to_string tail_order));
            ]);
            ("models_resolved", models_resolved);
            ("model_observability", model_observability);
@@ -1055,8 +1092,8 @@ let handle_keeper_status ctx args : tool_result =
              ("evidence_dir", `String
                (Filename.concat ctx.config.base_path
                  (Printf.sprintf ".masc/evidence/%s/%s"
-                   (Room_utils.safe_filename m.name)
-                   (Room_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
+                   (Coord_utils.safe_filename m.name)
+                   (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let playground_rel = Keeper_alerting_path.playground_path_of_keeper m.name in
            let playground_abs = Filename.concat ctx.config.base_path playground_rel in

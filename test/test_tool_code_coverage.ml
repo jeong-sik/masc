@@ -5,7 +5,7 @@
 *)
 
 module Tool_code = Masc_mcp.Tool_code
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 (* msg_contains: case-insensitive substring check *)
 let msg_contains ~needle haystack =
@@ -38,8 +38,8 @@ let make_ctx () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
-  let config = Room.default_config base_dir in
-  ignore (Room.init config ~agent_name:(Some "test-agent"));
+  let config = Coord.default_config base_dir in
+  ignore (Coord.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_code.context = { config; agent_name = "test-agent" } in
   (ctx, base_dir)
 

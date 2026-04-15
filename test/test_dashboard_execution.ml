@@ -114,7 +114,7 @@ let test_dashboard_execution_fixture () =
        | Some v -> Unix.putenv "MASC_STORAGE_TYPE" v
        | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED" "true";
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
@@ -176,7 +176,7 @@ let test_dashboard_execution_live_empty_room () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
@@ -210,12 +210,12 @@ let test_dashboard_execution_namespace_status () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio_main.run @@ fun env ->
-      ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.ensure_room_bootstrap config;
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Lib.Coord.ensure_room_bootstrap config;
       check (option string) "room state current_room flattened" (Some "default")
-        (Lib.Room.read_current_room config);
+        (Lib.Coord.read_current_room config);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -259,9 +259,9 @@ let test_dashboard_shell_namespace_status () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.ensure_room_bootstrap config;
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Lib.Coord.ensure_room_bootstrap config;
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let key_absent key json =
@@ -301,9 +301,9 @@ let test_dashboard_shell_surfaces_workspace_when_different () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config =
-        { (Room_utils.default_config dir) with workspace_path = workspace }
+        { (Coord_utils.default_config dir) with workspace_path = workspace }
       in
-      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Coord.init config ~agent_name:None);
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let status = json |> member "status" in
@@ -327,9 +327,9 @@ let test_dashboard_shell_includes_meta_cognition_summary () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -398,8 +398,8 @@ let test_dashboard_shell_splits_active_and_configured_keepers () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
       Eio.Switch.run (fun sw ->
         Fun.protect
           ~finally:(fun () ->
@@ -425,10 +425,10 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -455,10 +455,10 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio_main.run @@ fun env ->
-      ignore (Lib.Room.init config ~agent_name:None);
-      ignore (Lib.Room.join config ~agent_name:"test-agent-fox" ~capabilities:["housekeeping"] ());
+      ignore (Lib.Coord.init config ~agent_name:None);
+      ignore (Lib.Coord.join config ~agent_name:"test-agent-fox" ~capabilities:["housekeeping"] ());
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -521,10 +521,10 @@ let test_patch_surface_json_for_running_keepers_tolerates_null_agent () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]

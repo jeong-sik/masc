@@ -117,8 +117,8 @@ let test_implicit_dual_roots_are_strict_violation () =
     diag.strict_mode_requested;
   Alcotest.(check bool) "startup_rejected derived from implicit dual roots" true
     diag.startup_rejected;
-  Alcotest.(check bool) "fail_fast derived from implicit dual roots" true
-    diag.fail_fast_enabled;
+  Alcotest.(check bool) "startup_abort_eligible derived from implicit dual roots" true
+    diag.startup_abort_eligible;
   Alcotest.(check bool) "implicit dual roots violate" true
     (Server_base_path_diagnostics.strict_violation diag)
 
@@ -161,8 +161,8 @@ let test_explicit_resolution_source_escapes_strict_violation () =
     diag.strict_mode_requested;
   Alcotest.(check bool) "startup_rejected false for explicit env source" false
     diag.startup_rejected;
-  Alcotest.(check bool) "fail_fast_enabled remains true under strict mode" true
-    diag.fail_fast_enabled;
+  Alcotest.(check bool) "startup_abort_eligible remains true under strict mode" true
+    diag.startup_abort_eligible;
   Alcotest.(check bool) "explicit env source escapes violation" false
     (Server_base_path_diagnostics.strict_violation diag)
 
@@ -194,8 +194,8 @@ let test_explicit_cli_resolution_source_also_escapes () =
     diag.strict_mode_requested;
   Alcotest.(check bool) "startup_rejected false for explicit cli source" false
     diag.startup_rejected;
-  Alcotest.(check bool) "fail_fast_enabled false without user STRICT" false
-    diag.fail_fast_enabled;
+  Alcotest.(check bool) "startup_abort_eligible false without user STRICT" false
+    diag.startup_abort_eligible;
   Alcotest.(check bool) "explicit cli source escapes violation" false
     (Server_base_path_diagnostics.strict_violation diag)
 
@@ -249,8 +249,8 @@ let test_to_yojson_exposes_gate_fields () =
     (json |> member "strict_mode_requested" |> to_bool);
   Alcotest.(check bool) "startup_rejected field" false
     (json |> member "startup_rejected" |> to_bool);
-  Alcotest.(check bool) "fail_fast_enabled field" false
-    (json |> member "fail_fast_enabled" |> to_bool)
+  Alcotest.(check bool) "startup_abort_eligible field" false
+    (json |> member "startup_abort_eligible" |> to_bool)
 
 let test_default_base_path_ignores_inherited_parent_root_in_tests () =
   with_temp_dir "base-path-default" @@ fun root ->

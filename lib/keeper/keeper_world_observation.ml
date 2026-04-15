@@ -64,6 +64,8 @@ type turn_reason =
   | Never_started
 
 type skip_reason =
+  | Keeper_paused
+  | Approval_pending
   | Scheduled_autonomous_disabled
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -85,6 +87,8 @@ let turn_reason_to_string = function
   | Never_started -> "never_started"
 
 let skip_reason_to_string = function
+  | Keeper_paused -> "keeper_paused"
+  | Approval_pending -> "approval_pending"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
   | Idle_gate_pending _ -> "idle_gate_pending"
   | Cooldown_pending _ -> "cooldown_pending"
@@ -124,7 +128,7 @@ let scope_message_feed_enabled (meta : keeper_meta) : bool =
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
 
-let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
+let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
     ((string * string) list * (string * string) list * (string * int) list) =
   let targets = message_feed_targets meta in
   let broad_scope = scope_message_feed_enabled meta in
@@ -172,7 +176,7 @@ let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
         let since_seq = room_cursor_for meta room_id in
         let messages =
           try
-            Room.get_all_messages_raw config ~since_seq
+            Coord.get_all_messages_raw config ~since_seq
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | _ -> []
@@ -199,9 +203,9 @@ let apply_message_cursor_updates (meta : keeper_meta)
     meta updates
 
 (** Read room backlog counts. *)
-let read_backlog_counts ~(config : Room.config) : int * int =
+let read_backlog_counts ~(config : Coord.config) : int * int =
   try
-    let backlog = Room.read_backlog config in
+    let backlog = Coord.read_backlog config in
     let unclaimed =
       List.length
         (List.filter
@@ -221,8 +225,8 @@ let read_backlog_counts ~(config : Room.config) : int * int =
   | _ -> (0, 0)
 
 (** Count active agents in room. *)
-let count_active_agents ~(config : Room.config) : int =
-  try List.length (Room.get_agents_raw config)
+let count_active_agents ~(config : Coord.config) : int =
+  try List.length (Coord.get_agents_raw config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> 0
@@ -305,7 +309,7 @@ let board_signal_match
     else { explicit_mention = false; matched_targets = []; score = 0 }
 
 (** Read context ratio from checkpoint if available. *)
-let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
+let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
   try
     let cascade_models =
       Keeper_model_labels.configured_model_labels_of_meta meta
@@ -339,7 +343,7 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   | _ -> 0.0
 
 (** Read continuity summary from checkpoint messages or meta fallback. *)
-let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
+let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
     : string =
   try
     let cascade_models =
@@ -372,17 +376,19 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
         (match snapshot with
          | Some s -> keeper_state_snapshot_to_summary_text s
          | None ->
-             let trimmed = String.trim meta.continuity_summary in
-             if trimmed = "" then "No continuity snapshot available."
-             else trimmed)
+             continuity_fallback_summary_text
+               ~continuity_summary:meta.continuity_summary
+               ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts)
     | None ->
-        let trimmed = String.trim meta.continuity_summary in
-        if trimmed = "" then "No continuity snapshot available." else trimmed
+        continuity_fallback_summary_text
+          ~continuity_summary:meta.continuity_summary
+          ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ ->
-      let trimmed = String.trim meta.continuity_summary in
-      if trimmed = "" then "No continuity snapshot available." else trimmed
+      continuity_fallback_summary_text
+        ~continuity_summary:meta.continuity_summary
+        ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
 
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
@@ -607,7 +613,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     ([], 0, 0)
 
 let observe ~(pending_board_events : pending_board_event list option)
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta) :
     world_observation =
   let pending_mentions, pending_scope_messages, message_cursor_updates =
@@ -716,6 +722,27 @@ let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation
     ]
     |> List.filter_map Fun.id
   in
+  let blocked_channel =
+    match reactive_triggers with
+    | _ :: _ -> Reactive
+    | [] -> Scheduled_autonomous
+  in
+  let blocked reason =
+    {
+      should_run = false;
+      channel = blocked_channel;
+      verdict = Skip { reasons = (reason, []) };
+      since_last_scheduled_autonomous = None;
+      effective_cooldown = None;
+      task_reactive_cooldown = None;
+      idle_gate_sec = None;
+    }
+  in
+  if meta.paused then
+    blocked Keeper_paused
+  else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name then
+    blocked Approval_pending
+  else
   match reactive_triggers with
   | first :: rest ->
       {

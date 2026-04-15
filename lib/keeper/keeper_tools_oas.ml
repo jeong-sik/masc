@@ -54,7 +54,7 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
     [ctx_snapshot] value. Tools that raise exceptions return error results
     instead of crashing the agent loop.
 
-    @param config Room configuration for tool dispatch
+    @param config Coord configuration for tool dispatch
     @param meta Keeper metadata (determines which tools are allowed)
     @param ctx_snapshot Immutable snapshot of current working context *)
 (** Repeated-failure guardrail: blocks a tool after [max_consecutive]
@@ -166,7 +166,7 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
 let sse_error_preview_max_chars = 300
 
 let make_tools
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_snapshot : Keeper_types.working_context)
     ?search_fn

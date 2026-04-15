@@ -1,234 +1,197 @@
 ---- MODULE KeeperDecisionPipeline ----
-\* Keeper Decision Pipeline — TLA+ Formal Specification
-\*
-\* Models the feedback loop between Guard evaluation, Thompson Sampling,
-\* and Tool Policy restriction.  Verifies that proposed damping mechanisms
-\* (penalty cap per cycle + recovery floor shards) prevent death spirals.
-\*
-\* Key properties verified:
-\*   - ToolSetNeverEmpty:          recovery floor guarantees minimum tools
-\*   - RecoveryFloorMaintained:    tool_count >= RecoveryFloorSize (stronger)
-\*   - PenaltyCapEnforced:         at most PenaltyCapPerCycle penalties per cycle
-\*   - FailingEventuallyRecovers:  Failing always reaches Running (liveness)
-\*
-\* Bug model: BugRemoveRecoveryFloor demonstrates that removing the recovery
-\* floor allows ToolSetNeverEmpty violation and breaks FailingEventuallyRecovers.
-\*
-\* Mirrors: Phase B of Keeper Decision Layer v2 plan (Rev.5)
-\* OCaml mapping (E7 table, plan Part 2.5):
-\*   fsm_phase                  ↔ Keeper_state_machine.DerivePhase
-\*   tool_count                 ↔ |keeper_tool_policy.resolve_tools| (cardinality)
-\*   thompson_alpha             ↔ Thompson_sampling.agent_stats.alpha (discretized)
-\*   thompson_beta              ↔ Thompson_sampling.agent_stats.beta  (discretized)
-\*   guard_penalties_this_cycle ↔ per-cycle counter (B1: guard→thompson bridge)
-
-EXTENDS Naturals
-
-CONSTANTS
-    MaxAlpha,              \* Upper bound for Thompson alpha (state space limit)
-    MaxBeta,               \* Upper bound for Thompson beta  (state space limit)
-    PenaltyCapPerCycle,    \* Max guard→thompson penalties per heartbeat cycle (design: 1)
-    TotalRemovableShards,  \* Removable shards (board, filesystem, shell, ...)
-    RecoveryFloorSize      \* Non-removable shards (base; shard.removable = false)
-
-ASSUME RecoveryFloorSize >= 1  \* At least one non-removable shard must exist
+(***************************************************************************)
+(* KeeperDecisionPipeline — runtime-aligned decision stage contract.       *)
+(*                                                                         *)
+(* This spec models the decision-stage projection stored in                *)
+(* [Keeper_registry.current_turn_observation.decision_stage]. The current  *)
+(* runtime no longer uses the old Thompson/tool_count feedback loop that   *)
+(* an earlier TLA draft described. Instead, the live decision pipeline is  *)
+(* a narrow per-turn contract driven by four write points:                 *)
+(*   - mark_turn_started                    → undecided                    *)
+(*   - mark_turn_measurement + guard pass   → guard_ok                     *)
+(*   - keeper_agent_run tool disclosure     → tool_policy_selected         *)
+(*   - keeper_guards override/approval gate → gate_rejected               *)
+(* plus retry/finalize resets.                                              *)
+(***************************************************************************)
 
 VARIABLES
-    fsm_phase,                  \* "Running" | "Failing"
-    tool_count,                 \* Total available tools (floor..max)
-    thompson_alpha,             \* Beta prior: successes (discretized, min 1)
-    thompson_beta,              \* Beta prior: failures  (discretized, min 1)
-    guard_penalties_this_cycle, \* Per-cycle penalty counter
-    turn_outcome                \* "None" | "Success" | "Failure"
+    turn_live,          \* current_turn_observation = Some _
+    turn_phase,         \* Keeper_registry.turn_phase
+    decision_stage,     \* Keeper_registry.decision_stage
+    cascade_state,      \* Keeper_registry.cascade_state
+    measurement_bound   \* mark_turn_measurement already consumed
 
-vars == <<fsm_phase, tool_count, thompson_alpha, thompson_beta,
-          guard_penalties_this_cycle, turn_outcome>>
+vars == <<turn_live, turn_phase, decision_stage, cascade_state, measurement_bound>>
 
-MaxToolCount == TotalRemovableShards + RecoveryFloorSize
-
-\* ── Initial State ─────────────────────────────────────────
-
-Init ==
-    /\ fsm_phase = "Running"
-    /\ tool_count = MaxToolCount          \* All shards granted at start
-    /\ thompson_alpha = 2                 \* Slightly positive prior
-    /\ thompson_beta = 1                  \* (alpha > beta → healthy)
-    /\ guard_penalties_this_cycle = 0
-    /\ turn_outcome = "None"
-
-\* ── Actions ───────────────────────────────────────────────
-
-\* Guard fires: measurement thresholds exceeded (repetition, alignment, context).
-\* Transitions to Failing; applies Thompson penalty capped per cycle.
-\* Mirrors: keeper_guard.ml evaluate → Guardrail_stop event.
-\*          B1: guard→thompson bridge with penalty cap.
-GuardFires ==
-    /\ fsm_phase \in {"Running", "Failing"}
-    /\ guard_penalties_this_cycle < PenaltyCapPerCycle
-    /\ thompson_beta' = IF thompson_beta < MaxBeta
-                         THEN thompson_beta + 1
-                         ELSE thompson_beta
-    /\ guard_penalties_this_cycle' = guard_penalties_this_cycle + 1
-    /\ fsm_phase' = "Failing"
-    /\ turn_outcome' = "None"             \* Stale success invalidated on guard event
-    /\ UNCHANGED <<tool_count, thompson_alpha>>
-
-\* Tool restriction: Failing phase removes removable shards.
-\* Recovery floor (non-removable shards) enforces a hard lower bound.
-\* Mirrors: B2 — keeper_tool_policy.ml Failing → recovery_minimum_shards.
-\*          tool_shard.ml: shard.removable = false → cannot be revoked.
-ToolRestriction ==
-    /\ fsm_phase = "Failing"
-    /\ tool_count > RecoveryFloorSize     \* Floor enforced
-    /\ tool_count' = tool_count - 1
-    /\ UNCHANGED <<fsm_phase, thompson_alpha, thompson_beta,
-                   guard_penalties_this_cycle, turn_outcome>>
-
-\* Turn succeeds: keeper completes a task with available tools.
-\* Positive Thompson signal (alpha increases).
-\* Mirrors: keeper_state_machine.ml TurnSucceeded event.
-TurnSucceeds ==
-    /\ fsm_phase \in {"Running", "Failing"}
-    /\ tool_count > 0
-    /\ turn_outcome' = "Success"
-    /\ thompson_alpha' = IF thompson_alpha < MaxAlpha
-                          THEN thompson_alpha + 1
-                          ELSE thompson_alpha
-    /\ UNCHANGED <<fsm_phase, tool_count, thompson_beta,
-                   guard_penalties_this_cycle>>
-
-\* Turn fails: task not completed (insufficient tools, complexity, etc.).
-\* Does NOT directly update Thompson — guard evaluation handles negatives.
-\* Mirrors: keeper_state_machine.ml TurnFailed event.
-TurnFails ==
-    /\ fsm_phase \in {"Running", "Failing"}
-    /\ tool_count > 0
-    /\ turn_outcome' = "Failure"
-    /\ UNCHANGED <<fsm_phase, tool_count, thompson_alpha, thompson_beta,
-                   guard_penalties_this_cycle>>
-
-\* Recovery heartbeat: successful turn clears Failing condition.
-\* Resets turn_outcome so subsequent cycles start from a clean state;
-\* without this, a stale "Success" would let recovery re-fire immediately
-\* after the next GuardFires→Failing transition.
-\* Mirrors: keeper_state_machine.ml HeartbeatOk clearing guardrail_triggered.
-RecoveryHeartbeat ==
-    /\ fsm_phase = "Failing"
-    /\ turn_outcome = "Success"
-    /\ fsm_phase' = "Running"
-    /\ turn_outcome' = "None"            \* Reset: require fresh TurnSucceeds for next recovery
-    /\ UNCHANGED <<tool_count, thompson_alpha, thompson_beta,
-                   guard_penalties_this_cycle>>
-
-\* Shard restoration: Running keeper with positive score regains shards.
-\* Mirrors: B2 — tool_shard.grant_shard on improved performance.
-ShardRestoration ==
-    /\ fsm_phase = "Running"
-    /\ tool_count < MaxToolCount
-    /\ thompson_alpha > thompson_beta     \* Positive Thompson score
-    /\ tool_count' = tool_count + 1
-    /\ UNCHANGED <<fsm_phase, thompson_alpha, thompson_beta,
-                   guard_penalties_this_cycle, turn_outcome>>
-
-\* Cycle boundary: heartbeat cycle advances, per-cycle penalty counter resets.
-\* This is the sole reset point for guard_penalties_this_cycle ("per-cycle"
-\* semantics).  RecoveryHeartbeat intentionally does NOT reset it — recovery
-\* is a phase transition within a cycle, not a cycle boundary.
-\* Also resets turn_outcome so stale results do not leak across cycles.
-NewCycle ==
-    /\ guard_penalties_this_cycle > 0
-    /\ guard_penalties_this_cycle' = 0
-    /\ turn_outcome' = "None"            \* Fresh cycle, fresh outcome
-    /\ UNCHANGED <<fsm_phase, tool_count, thompson_alpha, thompson_beta>>
-
-\* ── Next State ────────────────────────────────────────────
-
-Next ==
-    \/ GuardFires
-    \/ ToolRestriction
-    \/ TurnSucceeds
-    \/ TurnFails
-    \/ RecoveryHeartbeat
-    \/ ShardRestoration
-    \/ NewCycle
-
-\* ── Bug Model ─────────────────────────────────────────────
-
-\* BUG: Recovery floor removed — tool_count can drop below RecoveryFloorSize.
-\* Models: revoke_shard ignoring removable=false, or recovery_minimum_shards
-\* not enforced in Failing phase.
-\* Consequence: tool_count reaches 0 → TurnSucceeds permanently disabled
-\*              → RecoveryHeartbeat never fires → Failing forever (death spiral).
-BugRemoveRecoveryFloor ==
-    /\ fsm_phase = "Failing"
-    /\ tool_count > 0
-    \* BUG: ignores RecoveryFloorSize, removes shard below floor
-    /\ tool_count' = tool_count - 1
-    /\ UNCHANGED <<fsm_phase, thompson_alpha, thompson_beta,
-                   guard_penalties_this_cycle, turn_outcome>>
-
-NextBuggy ==
-    \/ Next
-    \/ BugRemoveRecoveryFloor
-
-\* ── Fairness ──────────────────────────────────────────────
-
-Fairness ==
-    /\ WF_vars(TurnSucceeds)           \* Turns eventually succeed if tools available
-    /\ SF_vars(RecoveryHeartbeat)      \* Strong fairness required: RecoveryHeartbeat is
-                                        \* repeatedly enabled (TurnSucceeds sets turn_outcome
-                                        \* = "Success") but GuardFires can preempt, resetting
-                                        \* turn_outcome to "None" before recovery executes.
-                                        \* WF would require continuous enablement; SF fires
-                                        \* if the action is infinitely often enabled, which
-                                        \* holds because TurnSucceeds is WF-fair.
-    /\ WF_vars(NewCycle)               \* Heartbeat cycles advance
-    /\ WF_vars(ShardRestoration)       \* Shards restored when score positive
-
-Spec == Init /\ [][Next]_vars /\ Fairness
-
-SpecBuggy == Init /\ [][NextBuggy]_vars /\ Fairness
-
-\* ── Safety Properties ─────────────────────────────────────
-
-\* S1: Tool set never completely empty.
-\* Recovery floor (non-removable shards) always provides minimum tools.
-\* Clean: satisfied — ToolRestriction stops at RecoveryFloorSize.
-\* Buggy: violated — BugRemoveRecoveryFloor bypasses floor → tool_count = 0.
-ToolSetNeverEmpty == tool_count > 0
-
-\* S2: Recovery floor maintained — stronger than S1.
-\* tool_count never drops below non-removable shard count.
-RecoveryFloorMaintained == tool_count >= RecoveryFloorSize
-
-\* S3: Guard penalty bounded per heartbeat cycle.
-\* Prevents rapid Thompson degradation from consecutive guard firings.
-PenaltyCapEnforced == guard_penalties_this_cycle <= PenaltyCapPerCycle
-
-\* ── Type Invariant ────────────────────────────────────────
+TurnPhaseSet == {"idle", "prompting", "executing", "compacting", "finalizing"}
+DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
+CascadeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
+ActionSet    == {
+    "StartTurn",
+    "BindMeasurement",
+    "GuardOk",
+    "SelectToolPolicy",
+    "CascadeTrying",
+    "GateRejected",
+    "RetryAfterCompaction",
+    "FinishTurn"
+}
+InvariantSet == {
+    "NoLiveTurnClearsDecision",
+    "IdleRequiresUndecided",
+    "GuardOkRequiresMeasurement",
+    "GateRejectedRequiresFinalizing",
+    "NonIdleCascadeRequiresDecisionBoundary",
+    "SelectingRequiresPrompting"
+}
 
 TypeOK ==
-    /\ fsm_phase \in {"Running", "Failing"}
-    /\ tool_count \in 0..MaxToolCount
-    /\ thompson_alpha \in 1..MaxAlpha
-    /\ thompson_beta \in 1..MaxBeta
-    /\ guard_penalties_this_cycle \in 0..PenaltyCapPerCycle
-    /\ turn_outcome \in {"None", "Success", "Failure"}
+    /\ turn_live \in BOOLEAN
+    /\ turn_phase \in TurnPhaseSet
+    /\ decision_stage \in DecisionSet
+    /\ cascade_state \in CascadeSet
+    /\ measurement_bound \in BOOLEAN
 
-\* ── Liveness Properties ───────────────────────────────────
+Init ==
+    /\ turn_live = FALSE
+    /\ turn_phase = "idle"
+    /\ decision_stage = "undecided"
+    /\ cascade_state = "idle"
+    /\ measurement_bound = FALSE
 
-\* L1: Failing eventually recovers to Running.
-\* Proof sketch (clean model):
-\*   1. tool_count >= RecoveryFloorSize > 0 always         (S1, ASSUME)
-\*   2. TurnSucceeds enabled (tool_count > 0) and fair     (WF)
-\*   3. turn_outcome = "Success" eventually                 (WF step 2)
-\*   4. GuardFires may reset turn_outcome to "None"         (preemption)
-\*   5. But TurnSucceeds re-enables recovery (WF, step 2)   (infinitely often)
-\*   6. RecoveryHeartbeat infinitely often enabled           (SF applies)
-\*   7. fsm_phase = "Running"                               (SF fires)
-\*
-\* Buggy model: at tool_count = 0, TurnSucceeds is permanently disabled,
-\* breaking step 2. Failing persists forever → liveness violation.
-FailingEventuallyRecovers == (fsm_phase = "Failing") ~> (fsm_phase = "Running")
+StartTurn ==
+    /\ ~turn_live
+    /\ turn_live' = TRUE
+    /\ turn_phase' = "prompting"
+    /\ decision_stage' = "undecided"
+    /\ cascade_state' = "idle"
+    /\ measurement_bound' = FALSE
+
+BindMeasurement ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ decision_stage = "undecided"
+    /\ cascade_state = "idle"
+    /\ ~measurement_bound
+    /\ measurement_bound' = TRUE
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, cascade_state>>
+
+GuardOk ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ measurement_bound
+    /\ decision_stage = "undecided"
+    /\ decision_stage' = "guard_ok"
+    /\ UNCHANGED <<turn_live, turn_phase, cascade_state, measurement_bound>>
+
+\* Runtime allows policy selection directly from undecided or from guard_ok.
+SelectToolPolicy ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ cascade_state = "idle"
+    /\ decision_stage \in {"undecided", "guard_ok"}
+    /\ decision_stage' = "tool_policy_selected"
+    /\ cascade_state' = "selecting"
+    /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
+
+\* Entering the provider attempt preserves the decision stage but advances the
+\* cascade lane into the live trying state.
+CascadeTrying ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ decision_stage = "tool_policy_selected"
+    /\ cascade_state = "selecting"
+    /\ turn_phase' = "executing"
+    /\ cascade_state' = "trying"
+    /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
+
+\* Guards short-circuit during pre_tool_use while the live attempt is trying.
+GateRejected ==
+    /\ turn_live
+    /\ turn_phase = "executing"
+    /\ decision_stage = "tool_policy_selected"
+    /\ cascade_state = "trying"
+    /\ turn_phase' = "finalizing"
+    /\ decision_stage' = "gate_rejected"
+    /\ UNCHANGED <<turn_live, cascade_state, measurement_bound>>
+
+\* Overflow retry resets the decision lane to a fresh post-guard posture.
+RetryAfterCompaction ==
+    /\ turn_live
+    /\ turn_phase = "compacting"
+    /\ decision_stage = "tool_policy_selected"
+    /\ decision_stage' = "guard_ok"
+    /\ cascade_state' = "idle"
+    /\ turn_phase' = "prompting"
+    /\ UNCHANGED <<turn_live, measurement_bound>>
+
+FinishTurn ==
+    /\ turn_live
+    /\ turn_phase \in (TurnPhaseSet \ {"idle"})
+    /\ turn_live' = FALSE
+    /\ turn_phase' = "idle"
+    /\ decision_stage' = "undecided"
+    /\ cascade_state' = "idle"
+    /\ measurement_bound' = FALSE
+
+Next ==
+    \/ StartTurn
+    \/ BindMeasurement
+    \/ GuardOk
+    \/ SelectToolPolicy
+    \/ CascadeTrying
+    \/ GateRejected
+    \/ RetryAfterCompaction
+    \/ FinishTurn
+
+Spec ==
+    Init /\ [][Next]_vars /\ WF_vars(FinishTurn)
+
+NoLiveTurnClearsDecision ==
+    ~turn_live =>
+        /\ turn_phase = "idle"
+        /\ decision_stage = "undecided"
+        /\ cascade_state = "idle"
+        /\ ~measurement_bound
+
+IdleRequiresUndecided ==
+    turn_phase = "idle" => decision_stage = "undecided"
+
+GuardOkRequiresMeasurement ==
+    decision_stage = "guard_ok" =>
+        /\ turn_live
+        /\ turn_phase = "prompting"
+        /\ measurement_bound
+        /\ cascade_state = "idle"
+
+GateRejectedRequiresFinalizing ==
+    decision_stage = "gate_rejected" =>
+        /\ turn_live
+        /\ turn_phase = "finalizing"
+
+NonIdleCascadeRequiresDecisionBoundary ==
+    cascade_state \in {"selecting", "trying", "done", "exhausted"} =>
+        /\ turn_live
+        /\ decision_stage \in {"tool_policy_selected", "gate_rejected"}
+
+SelectingRequiresPrompting ==
+    cascade_state = "selecting" =>
+        /\ turn_live
+        /\ turn_phase = "prompting"
+
+Safety ==
+    /\ TypeOK
+    /\ NoLiveTurnClearsDecision
+    /\ IdleRequiresUndecided
+    /\ GuardOkRequiresMeasurement
+    /\ GateRejectedRequiresFinalizing
+    /\ NonIdleCascadeRequiresDecisionBoundary
+    /\ SelectingRequiresPrompting
+
+DecisionEventuallyClears ==
+    decision_stage /= "undecided" ~> decision_stage = "undecided"
+
+Liveness ==
+    DecisionEventuallyClears
 
 ====

@@ -17,7 +17,7 @@ let runtime_support = Server_dashboard_http_runtime_support.default ()
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
 let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
-let dashboard_runtime ?net ?mono_clock (config : Room.config) :
+let dashboard_runtime ?net ?mono_clock (config : Coord.config) :
     Server_dashboard_http_runtime_support.runtime option =
   let _ = config in
   match net, mono_clock with
@@ -25,7 +25,7 @@ let dashboard_runtime ?net ?mono_clock (config : Room.config) :
   | _ -> None
 
 let run_dashboard_compute ?(mode = Offloaded_readonly) ?net ?mono_clock ~sw ~clock
-    ~(config : Room.config) compute =
+    ~(config : Coord.config) compute =
   let runtime = dashboard_runtime ?net ?mono_clock config in
   Server_dashboard_http_runtime_support.run_dashboard_compute runtime_support
     ~mode ?runtime ~sw ~clock ~config compute
@@ -56,9 +56,9 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
-let room_scope_cache_segment (_config : Room.config) = "default"
+let room_scope_cache_segment (_config : Coord.config) = "default"
 
-let room_scoped_cache_key (config : Room.config) prefix suffix =
+let room_scoped_cache_key (config : Coord.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) suffix
 
@@ -95,27 +95,16 @@ let initialized_json_opt ?(allow_initializing = false) = function
       | _ -> Some json)
   | _ -> None
 
-let command_plane_summary_cache_parts ~allow_initializing ~state =
-  match
-    Server_command_plane_http_support.command_plane_summary_http_json ~state
-    |> initialized_json_opt ~allow_initializing
-  with
-  | Some (`Assoc fields) ->
-      let swarm_status =
-        match List.assoc_opt "swarm_status" fields with
-        | Some (`Assoc _ as json) -> Some json
-        | _ -> None
-      in
-      (Some (`Assoc (List.remove_assoc "swarm_status" fields)), swarm_status)
-  | _ -> (None, None)
+let command_plane_summary_cache_parts ~allow_initializing:_ ~state:_ =
+  (None, None)
 
-let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
-  let room_state = Room.read_state config in
+let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
+  let room_state = Coord.read_state config in
   let tempo = Tempo.get_tempo config in
   (* M-17 fix: single-namespace, queries scoped by basepath *)
-  let tasks = Room.get_tasks_safe config in
-  let agents = Room.get_active_agents config in
-  let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+  let tasks = Coord.get_tasks_safe config in
+  let agents = Coord.get_active_agents config in
+  let msgs = Coord.get_messages_raw config ~since_seq:0 ~limit:20 in
   let now_ts = Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
   let (governance_monitor_json, governance_feed_ok) =
@@ -150,7 +139,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
       ("monitoring", `Assoc [
         ("board", board_monitor_json);
         ("governance", governance_monitor_json);
-        ("room_state", Room_eio.state_health_counters ());
+        ("room_state", Coord_eio.state_health_counters ());
         ("executor", executor_outcomes_json config);
         ("slots", slot_monitoring_json ());
       ]);
@@ -256,7 +245,6 @@ let operator_actor_hint request =
    Default (no-param) requests are served from a background-refreshed ref.
    Parameterized requests fall back to on-demand compute with SWR cache.
 
-   The snapshot compute can take 1-28s (command_plane_json is the bottleneck).
    Using Proactive_refresh gives circuit breaker + exponential backoff on
    repeated failures, matching the pattern used by execution and mission loops.
 
@@ -288,7 +276,7 @@ let _operator_refresh_interval_s =
 
 let operator_snapshot_extra () =
   [
-    ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+    ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
   ]
 
 let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
@@ -458,7 +446,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
         with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
           ~extra:
             [
-              ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+              ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
             ]
           json
     | Error `Timeout ->
@@ -541,7 +529,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
           (with_projection_diagnostics ~surface:"operator_digest" ~started_at
              ~extra:
                [
-                 ("readonly_pool", Room_utils.domain_local_pg_backend_diagnostics_json ());
+                 ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
                ]
              json)
     | Error `Timeout ->
@@ -707,8 +695,8 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
       ~clock ~timeout_sec:_dashboard_mission_timeout_s compute
 
-let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
-  let room_state = Room.read_state config in
+let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
+  let room_state = Coord.read_state config in
   let cluster = Env_config_core.cluster_name () in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
@@ -784,13 +772,13 @@ let dashboard_message_json (message : Types.message) =
 (* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
 
 let dashboard_tasks_safe config =
-  Room.get_tasks_safe config
+  Coord.get_tasks_safe config
 
 let dashboard_agents_safe config =
-  Room.get_active_agents config
+  Coord.get_active_agents config
 
 let dashboard_messages_safe config ~since_seq ~limit =
-  Room.get_messages_raw config ~since_seq ~limit
+  Coord.get_messages_raw config ~since_seq ~limit
 
 let is_keeper_agent (agent : Types.agent) =
   String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"
@@ -804,18 +792,31 @@ let dashboard_general_agent_count agents =
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
-let dashboard_shell_timeout_s = 8.0
+let dashboard_shell_timeout_s = 16.0
 
-let dashboard_shell_paths_json (config : Room.config) : Yojson.Safe.t =
+(* Meta_cognition.summary_json does a full board_posts.jsonl scan +
+   belief/tension/desire rule evaluation. On a room with 450+ posts this
+   regularly exceeds 8s, which was the previous shell timeout and caused
+   repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
+   noise in the log. Give it its own cache with a longer TTL so the shell
+   path does not block on it every refresh cycle. *)
+let meta_cognition_summary_ttl = 120.0
+
+let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
+  let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
+  Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl (fun () ->
+    Meta_cognition.summary_json config)
+
+let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
     ?input_base_path:(Env_config_core.base_path_raw_opt ())
     ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
     ~effective_base_path:config.base_path
-    ~effective_masc_root:(Room.masc_root_dir config)
+    ~effective_masc_root:(Coord.masc_root_dir config)
     ()
   |> Server_base_path_diagnostics.to_yojson
 
-let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
+let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
   let cluster = Env_config_core.cluster_name () in
   let started_at = Unix.gettimeofday () in
   let measure_ms f =
@@ -844,7 +845,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     measure_ms (fun () -> keeper_count config)
   in
   let meta_cognition_json, meta_cognition_ms =
-    measure_ms (fun () -> Meta_cognition.summary_json config)
+    measure_ms (fun () -> meta_cognition_summary_cached config)
   in
   let config_resolution_json, config_resolution_ms =
     measure_json_projection "config_resolution" (fun () ->
@@ -891,7 +892,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
            ("runtime_resolution_ms", `Int runtime_resolution_ms);
          ]
 
-let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.config) :
+let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config) :
     Yojson.Safe.t =
   let auth_cfg = Auth.load_auth_config config.base_path in
   let token = auth_token_from_request request in
@@ -978,7 +979,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Room.confi
       ("keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error);
     ]
 
-let dashboard_shell_http_json ?clock ?request (config : Room.config) : Yojson.Safe.t =
+let dashboard_shell_http_json ?clock ?request (config : Coord.config) : Yojson.Safe.t =
   let cache_key =
     Printf.sprintf "shell:coord=%s:workspace=%s"
       config.base_path config.workspace_path

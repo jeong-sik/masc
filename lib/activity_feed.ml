@@ -103,8 +103,8 @@ let parse_created_at_or_fallback ~kind ~path raw =
 (** {1 Source Readers} *)
 
 (** Read task activity from `.masc/tasks/` directory. *)
-let task_activities (config : Room.config) : activity_item list =
-  let tasks_dir = Filename.concat (Room.masc_dir config) "tasks" in
+let task_activities (config : Coord.config) : activity_item list =
+  let tasks_dir = Filename.concat (Coord.masc_dir config) "tasks" in
   if not (Fs_compat.file_exists tasks_dir) || not (Sys.is_directory tasks_dir) then []
   else
     let files =
@@ -142,8 +142,8 @@ let task_activities (config : Room.config) : activity_item list =
           })
 
 (** Read board post activity from `.masc/board_posts.jsonl`. *)
-let board_post_activities (config : Room.config) : activity_item list =
-  let path = Filename.concat (Room.masc_dir config) "board_posts.jsonl" in
+let board_post_activities (config : Coord.config) : activity_item list =
+  let path = Filename.concat (Coord.masc_dir config) "board_posts.jsonl" in
   load_jsonl_safe ~kind:"board post" path
   |> List.filter_map (fun json ->
       let id = Safe_ops.json_string ~default:"" "id" json in
@@ -173,8 +173,8 @@ let board_post_activities (config : Room.config) : activity_item list =
         })
 
 (** Read board comment activity from `.masc/board_comments.jsonl`. *)
-let board_comment_activities (config : Room.config) : activity_item list =
-  let path = Filename.concat (Room.masc_dir config) "board_comments.jsonl" in
+let board_comment_activities (config : Coord.config) : activity_item list =
+  let path = Filename.concat (Coord.masc_dir config) "board_comments.jsonl" in
   load_jsonl_safe ~kind:"board comment" path
   |> List.filter_map (fun json ->
       let id = Safe_ops.json_string ~default:"" "id" json in
@@ -203,7 +203,7 @@ let board_comment_activities (config : Room.config) : activity_item list =
         })
 
 (** Read mention activity from `.masc/mention_inbox.jsonl`. *)
-let mention_activities (config : Room.config) : activity_item list =
+let mention_activities (config : Coord.config) : activity_item list =
   let path = Mention_inbox.inbox_path config in
   load_jsonl_safe ~kind:"mention inbox" path
   |> List.filter_map (fun json ->
@@ -234,7 +234,7 @@ let mention_activities (config : Room.config) : activity_item list =
 
 (** {1 Unified Timeline} *)
 
-let recent_activity (config : Room.config) ?agent_name ~(limit : int) ()
+let recent_activity (config : Coord.config) ?agent_name ~(limit : int) ()
     : activity_item list =
   let all_items =
     List.concat [

@@ -56,7 +56,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   (* Fix 3: Cache room_initialized to avoid repeated stat syscalls.
      Updated after auto-init succeeds. *)
-  let room_init_cached = ref (Room.is_initialized config) in
+  let room_init_cached = ref (Coord.is_initialized config) in
 
   (* Fix 4: Check resolved-name cache for fast identity resolution.
      On 2nd+ call in the same MCP session, the cached name lets us skip
@@ -208,12 +208,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
 
   let agent_name =
     if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name) then
-      let resolved = Room.resolve_agent_name config agent_name in
+      let resolved = Coord.resolve_agent_name config agent_name in
       if resolved <> agent_name then
         try
           if !room_init_cached then
             (try
-              if Room.is_agent_joined config ~agent_name:resolved then
+              if Coord.is_agent_joined config ~agent_name:resolved then
                 resolved
               else
                 agent_name
@@ -331,7 +331,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let init_error =
     if (not auth_enabled) && join_required && not !room_init_cached then
       (try
-         let (_init_msg : string) = Room.init config ~agent_name:None in
+         let (_init_msg : string) = Coord.init config ~agent_name:None in
          room_init_cached := true;  (* Fix 3: update cache after successful init *)
          None
        with Invalid_argument msg -> Some msg
@@ -362,7 +362,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       true
     else
       (* If per-agent tokens are required, only auto-join when agent_name already
-         looks like a stable nickname. Otherwise Room.join would generate a new
+         looks like a stable nickname. Otherwise Coord.join would generate a new
          nickname, breaking token verification for subsequent calls. *)
       let auth_cfg = Auth.load_auth_config config.base_path in
       if auth_cfg.require_token && not (Nickname.is_generated_nickname agent_name) then
@@ -378,7 +378,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (* Fix 3: use cached room_initialized *)
       let is_joined =
         if !room_init_cached then
-          try Room.is_agent_joined config ~agent_name
+          try Coord.is_agent_joined config ~agent_name
           with Sys_error _ | Yojson.Json_error _ | Invalid_argument _ -> false
         else
           false
@@ -386,7 +386,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       if is_joined then
         agent_name
       else begin
-        let join_result = Room.join config ~agent_name ~capabilities:[] () in
+        let join_result = Coord.join config ~agent_name ~capabilities:[] () in
         let nickname = extract_nickname_from_join_result ~fallback:agent_name join_result in
         Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
         (* Persist nickname so subsequent calls can use it. *)
@@ -426,7 +426,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     in
     if (not skip_heartbeat) && !room_init_cached then
       try
-        ignore (Room.heartbeat config ~agent_name)
+        ignore (Coord.heartbeat config ~agent_name)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -441,7 +441,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       ~room_initialized
       ~join_required
       ~agent_name
-      ~check_join:(fun () -> Room.is_agent_joined config ~agent_name)
+      ~check_join:(fun () -> Coord.is_agent_joined config ~agent_name)
   in
 
   (* Debug: log join check *)
@@ -483,12 +483,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                     proc_mgr = state.Mcp_server.proc_mgr;
                     net = state.Mcp_server.net; mcp_session_id } in
         Tool_operator.dispatch ctx ~name ~args:coerced_args
-    | Mod_command_plane ->
-        let ctx : (_, _) Tool_command_plane.context =
-          { config; agent_name; sw = Some sw; clock = Some clock;
-            net = state.Mcp_server.net; mcp_state = Some state;
-            mcp_session_id; auth_token } in
-        Tool_command_plane.dispatch ctx ~name ~args:coerced_args
     | Mod_local_runtime ->
         Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:coerced_args
     | Mod_worktree ->
@@ -510,7 +504,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_task.dispatch { Tool_task.config; agent_name; sw = Some sw }
           ~name ~args:coerced_args
     | Mod_room ->
-        Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:coerced_args
+        Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args:coerced_args
     | Mod_control ->
         Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:coerced_args
     | Mod_agent_timeline ->

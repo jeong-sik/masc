@@ -214,7 +214,7 @@ val keeper_adaptive_thinking_enabled : unit -> bool
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)
 
-(** Room signal prompt enabled override from env var. *)
+(** Coord signal prompt enabled override from env var. *)
 val keeper_room_signal_prompt_enabled_override : unit -> bool option
 
 (** Force module initialization to guarantee all runtime params are registered

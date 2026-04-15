@@ -1011,7 +1011,6 @@ let test_category_for_tool_broadcast () =
 
 let test_category_for_tool_task_ops () =
   check bool "masc_add_task" true (Types.category_for_tool "masc_add_task" = Types.TaskOpsLimit);
-  check bool "masc_done" true (Types.category_for_tool "masc_done" = Types.TaskOpsLimit);
   check bool "masc_transition" true (Types.category_for_tool "masc_transition" = Types.TaskOpsLimit)
 
 let test_category_for_tool_general () =

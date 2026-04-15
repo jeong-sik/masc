@@ -61,6 +61,25 @@ let test_read_only_case_insensitive () =
   Alcotest.(check bool) "Pr View mixed"
     true (is_ro ~tool_name:"keeper_shell" ~input:(mk_cmd "Pr View 123"))
 
+let test_prefixed_gh_command_normalization () =
+  Alcotest.(check (option int)) "prefixed gh parser still finds PR number"
+    (Some 123)
+    (match Keeper_gh_shared.extract_gh_target_number "gh pr view 123" with
+     | Some (Keeper_gh_shared.PR, n) -> Some n
+     | _ -> None);
+  Alcotest.(check (option string)) "prefixed gh parser still finds mutation"
+    (Some "pr")
+    (match Keeper_gh_shared.gh_mutates_entity "gh pr merge 123" with
+     | Some Keeper_gh_shared.PR -> Some "pr"
+     | Some Keeper_gh_shared.Issue -> Some "issue"
+     | None -> None);
+  Alcotest.(check bool) "prefixed gh command stays read-only"
+    true
+    (is_ro ~tool_name:"keeper_shell" ~input:(mk_cmd "gh pr list --state open"));
+  Alcotest.(check bool) "prefixed gh merge stays mutating"
+    true
+    (has_side_effect ~tool_name:"keeper_shell" ~input:(mk_cmd "gh pr merge 123"))
+
 (* ================================================================ *)
 (* Read-only subcommands via args                                    *)
 (* ================================================================ *)
@@ -368,6 +387,8 @@ let () =
             test_read_only_cmd_prefixes;
           Alcotest.test_case "case insensitive" `Quick
             test_read_only_case_insensitive;
+          Alcotest.test_case "prefixed gh command normalization" `Quick
+            test_prefixed_gh_command_normalization;
         ] );
       ( "read_only_args",
         [

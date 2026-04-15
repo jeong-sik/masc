@@ -14,7 +14,7 @@ module Status = Keeper_status
 module Persona = Keeper_persona
 
 type 'a context = 'a Keeper_types.context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -188,11 +188,16 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("social_model", `String meta.social_model);
+            ("social_model",
+              `String (Keeper_social_model.normalize_social_model meta.social_model));
             ( "last_speech_act",
               if String.trim meta.runtime.last_speech_act = ""
               then `Null
               else `String meta.runtime.last_speech_act );
+            ( "last_social_transition_reason",
+              if String.trim meta.runtime.last_social_transition_reason = ""
+              then `Null
+              else `String meta.runtime.last_social_transition_reason );
             ("skill_route", keeper_list_skill_route_json config meta);
             ("cascade_name", `String meta.cascade_name);
             ("created_at", `String meta.created_at);

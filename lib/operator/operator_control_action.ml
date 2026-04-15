@@ -16,7 +16,7 @@ let normalize_judgment_surface value =
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
   if Operator_digest_types.is_root_alias normalized then
-    Ok ("root", Operator_judgment.Room)
+    Ok ("root", Operator_judgment.Coord)
   else Error "target_type must be root"
 
 let default_fresh_ttl_sec surface =

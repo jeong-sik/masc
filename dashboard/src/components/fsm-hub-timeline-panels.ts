@@ -13,6 +13,7 @@ import {
 import {
   deriveSwimlaneSegments,
   deriveTimeAxisTicks,
+  inferTransitionReason,
   laneTransitionCount,
 } from './fsm-hub-derivations'
 
@@ -40,15 +41,12 @@ const IDLE_LIKE_VALUES = new Set([
   'idle',
   'undecided',
   'accumulating',
-  'Offline',
-  'Paused',
-  'Stopped',
+  'Stable',
 ])
 
 const ALARM_VALUES = new Set([
-  'Crashed',
   'Failing',
-  'Dead',
+  'Overflowed',
   'gate_rejected',
   'exhausted',
 ])
@@ -355,16 +353,22 @@ export function TransitionTrail({
           const rowCls = inSegment
             ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
             : ''
+          const reason = inferTransitionReason(entry.field, entry.from, entry.to)
+          const tooltip = reason
+            ? `${entry.field}: ${entry.from} → ${entry.to}\n${reason}`
+            : `${entry.field}: ${entry.from} → ${entry.to}`
           return html`
             <div
               data-trail-index=${trailIndex}
-              class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              title=${tooltip}
+              class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
             >
               <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
               <span class="text-[var(--text-dim)]">${entry.from}</span>
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${entry.to}</span>
+              ${reason ? html`<span class="ml-1 text-[8px] text-[var(--text-dim)] opacity-50">ⓘ</span>` : null}
             </div>
           `
         })}

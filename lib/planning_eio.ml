@@ -59,7 +59,7 @@ let create_context ~task_id =
 
 (* ===== File System Helpers ===== *)
 
-let planning_dir (config : Room.config) task_id =
+let planning_dir (config : Coord.config) task_id =
   Filename.concat config.base_path (Printf.sprintf "planning/%s" task_id)
 
 let ensure_dir path =
@@ -79,7 +79,7 @@ let write_file_content path content =
 (* ===== Core Operations (Pure Sync) ===== *)
 
 (** Initialize planning context for a task *)
-let init (config : Room.config) ~task_id : (planning_context, string) result =
+let init (config : Coord.config) ~task_id : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     ensure_dir dir;
@@ -98,7 +98,7 @@ let init (config : Room.config) ~task_id : (planning_context, string) result =
   | e -> Error (Printexc.to_string e)
 
 (** Load planning context *)
-let load (config : Room.config) ~task_id : (planning_context, string) result =
+let load (config : Coord.config) ~task_id : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     let ctx_path = Filename.concat dir "context.json" in
@@ -114,7 +114,7 @@ let load (config : Room.config) ~task_id : (planning_context, string) result =
   | e -> Error (Printexc.to_string e)
 
 (** Update task plan *)
-let update_plan (config : Room.config) ~task_id ~content : (planning_context, string) result =
+let update_plan (config : Coord.config) ~task_id ~content : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     match load config ~task_id with
@@ -130,7 +130,7 @@ let update_plan (config : Room.config) ~task_id ~content : (planning_context, st
   | e -> Error (Printexc.to_string e)
 
 (** Add note *)
-let add_note (config : Room.config) ~task_id ~note : (planning_context, string) result =
+let add_note (config : Coord.config) ~task_id ~note : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     match load config ~task_id with
@@ -154,7 +154,7 @@ let add_note (config : Room.config) ~task_id ~note : (planning_context, string) 
   | e -> Error (Printexc.to_string e)
 
 (** Add error - PDCA Check phase. Auto-creates planning context if none exists. *)
-let add_error (config : Room.config) ~task_id ~error_type ~message ?context () : (planning_context, string) result =
+let add_error (config : Coord.config) ~task_id ~error_type ~message ?context () : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     let ctx = match load config ~task_id with
@@ -191,7 +191,7 @@ let add_error (config : Room.config) ~task_id ~error_type ~message ?context () :
   | e -> Error (Printexc.to_string e)
 
 (** Mark error as resolved *)
-let resolve_error (config : Room.config) ~task_id ~index : (planning_context, string) result =
+let resolve_error (config : Coord.config) ~task_id ~index : (planning_context, string) result =
   try
     match load config ~task_id with
     | Error e -> Error e
@@ -213,7 +213,7 @@ let resolve_error (config : Room.config) ~task_id ~index : (planning_context, st
   | e -> Error (Printexc.to_string e)
 
 (** Set deliverable. Auto-creates planning context if none exists. *)
-let set_deliverable (config : Room.config) ~task_id ~content : (planning_context, string) result =
+let set_deliverable (config : Coord.config) ~task_id ~content : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     let ctx = match load config ~task_id with
@@ -236,11 +236,11 @@ let set_deliverable (config : Room.config) ~task_id ~content : (planning_context
 
 (* ===== Session-level Context ===== *)
 
-let current_task_file (config : Room.config) =
-  Filename.concat config.base_path ".masc/current_task"
+let current_task_file (config : Coord.config) =
+  Filename.concat (Coord_utils.masc_dir config) "current_task"
 
 (** Get current task_id for session *)
-let get_current_task (config : Room.config) : string option =
+let get_current_task (config : Coord.config) : string option =
   let path = current_task_file config in
   if Sys.file_exists path then
     Some (String.trim (read_file_content path))
@@ -248,19 +248,19 @@ let get_current_task (config : Room.config) : string option =
     None
 
 (** Set current task_id for session *)
-let set_current_task (config : Room.config) ~task_id : unit =
+let set_current_task (config : Coord.config) ~task_id : unit =
   let path = current_task_file config in
   ensure_dir (Filename.dirname path);
   write_file_content path task_id
 
 (** Clear current task *)
-let clear_current_task (config : Room.config) : unit =
+let clear_current_task (config : Coord.config) : unit =
   let path = current_task_file config in
   if Sys.file_exists path then
     Sys.remove path
 
 (** Resolve task_id - use provided or fall back to current *)
-let resolve_task_id (config : Room.config) ~task_id : (string, string) result =
+let resolve_task_id (config : Coord.config) ~task_id : (string, string) result =
   match task_id with
   | "" ->
       (match get_current_task config with

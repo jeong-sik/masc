@@ -26,21 +26,21 @@ let load_jsonl_safe path =
         []
 
 let load_board_posts config =
-  let path = Filename.concat (Room.masc_dir config) "board_posts.jsonl" in
+  let path = Filename.concat (Coord.masc_dir config) "board_posts.jsonl" in
   load_jsonl_safe path
   |> List.filter_map Board.post_of_yojson
 
 let load_board_comments config =
-  let path = Filename.concat (Room.masc_dir config) "board_comments.jsonl" in
+  let path = Filename.concat (Coord.masc_dir config) "board_comments.jsonl" in
   load_jsonl_safe path
   |> List.filter_map Board.comment_of_yojson
 
 let load_board_vote_count config =
-  let path = Filename.concat (Room.masc_dir config) "board_votes.jsonl" in
+  let path = Filename.concat (Coord.masc_dir config) "board_votes.jsonl" in
   List.length (load_jsonl_safe path)
 
 let load_governance_cases config =
-  let dir = Filename.concat (Room.masc_dir config) "governance_v2/cases" in
+  let dir = Filename.concat (Coord.masc_dir config) "governance_v2/cases" in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
   | Ok names ->
@@ -451,8 +451,8 @@ let snapshot_json ?hearth ~limit config =
     |> take limit
   in
   let social_edges = social_edges_json ~limit sources in
-  let tasks = Room.get_tasks_raw config in
-  let agents = Room.get_agents_raw config in
+  let tasks = Coord.get_tasks_raw config in
+  let agents = Coord.get_agents_raw config in
   let idle_signal_count =
     sources
     |> List.filter (fun source ->

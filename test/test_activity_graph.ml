@@ -24,7 +24,7 @@ let with_config f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Room.default_config dir in
+      let config = Lib.Coord.default_config dir in
       f config)
 
 let test_emit_and_list_events () =

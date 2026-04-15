@@ -39,6 +39,21 @@ let counter_misses = Atomic.make 0
 let counter_bypasses = Atomic.make 0
 let counter_fetch_errors = Atomic.make 0
 
+let normalize_gh_command (cmd : string) : string =
+  let tokens =
+    cmd
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun token -> token <> "")
+  in
+  let rec drop_leading_gh = function
+    | token :: rest when String.lowercase_ascii token = "gh" ->
+        drop_leading_gh rest
+    | remaining -> remaining
+  in
+  String.concat " " (drop_leading_gh tokens)
+
 let parse_numbers_from_jq_output (out : string) : int list =
   out
   |> String.split_on_char '\n'
@@ -54,7 +69,7 @@ let jq_filter = function
   | PR -> ".[] | .number"
   | Issue -> ".[] | select(.pull_request == null) | .number"
 
-let fetch_entity_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_kind)
+let fetch_entity_numbers ~(config : Coord.config) ~(repo_slug : string) ~(kind : entity_kind)
     : int list option
   =
   let endpoint =
@@ -255,7 +270,12 @@ let rec first_gh_command_word = function
 let extract_gh_target_number (cmd : string)
     : (entity_kind * int) option
   =
-  let parts = skip_gh_leading_global_options (gh_words cmd) in
+  let parts =
+    cmd
+    |> normalize_gh_command
+    |> gh_words
+    |> skip_gh_leading_global_options
+  in
   let positive_int s =
     match int_of_string_opt s with
     | Some n when n > 0 -> Some n
@@ -276,7 +296,12 @@ let extract_gh_target_number (cmd : string)
     [state=all] is unchanged, but we still invalidate to resync state
     filters used elsewhere), and merges. *)
 let gh_mutates_entity (cmd : string) : entity_kind option =
-  let parts = skip_gh_leading_global_options (gh_words cmd) in
+  let parts =
+    cmd
+    |> normalize_gh_command
+    |> gh_words
+    |> skip_gh_leading_global_options
+  in
   match parts with
   | "pr" :: sub :: _
     when List.mem sub [ "create"; "close"; "reopen"; "merge"; "ready"; "edit" ] ->
@@ -290,7 +315,7 @@ let gh_mutates_entity (cmd : string) : entity_kind option =
     gh commands. Unlike prefix matching on the raw string, this ignores
     leading global options before inspecting the command group/action pair. *)
 let gh_dangerous_command (cmd : string) : string option =
-  match skip_gh_leading_global_options (gh_words cmd) with
+  match cmd |> normalize_gh_command |> gh_words |> skip_gh_leading_global_options with
   | "repo" :: rest ->
       begin match first_gh_command_word rest with
       | Some "delete" -> Some "repo delete"

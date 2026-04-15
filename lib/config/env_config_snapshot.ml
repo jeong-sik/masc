@@ -688,7 +688,7 @@ let operator_entries =
     entry ~default:"60" "MASC_OPERATOR_JUDGE_INTERVAL_SEC"
       "Operator judge interval (clamped >=15 seconds)";
     entry ~default:"60" "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC"
-      "Room TTL for operator judge cleanup (clamped >=15 seconds)";
+      "Coord TTL for operator judge cleanup (clamped >=15 seconds)";
     entry ~default:"300" "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
       "Session TTL for operator judge cleanup (clamped >=30 seconds)";
     entry ~default:"(none)" "MASC_OPERATOR_JUDGE_TIMEOUT_SEC"

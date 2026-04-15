@@ -8,7 +8,7 @@ import type { TelemetryEntry } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
 import { selectEntity, detailSelection } from './detail-selection-store'
-import { entryTimestampMs, isToolCall } from './observatory-utils'
+import { entryTimestampMs, isToolCall, useTrackBucketCount } from './observatory-utils'
 
 function toolCallOutcome(entry: TelemetryEntry): 'success' | 'failure' | 'unknown' {
   if (entry.success === true) return 'success'
@@ -40,18 +40,54 @@ interface Props {
 
 export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null)
+  const bucketCount = useTrackBucketCount(trackRef)
   const span = windowEnd - windowStart
   if (span <= 0) return null
 
-  const markers = events
+  const toolEvents = events
     .filter(isToolCall)
     .map(entry => ({ entry, ts: entryTimestampMs(entry) }))
     .filter((m): m is { entry: TelemetryEntry; ts: number } =>
       m.ts !== null && m.ts >= windowStart && m.ts <= windowEnd,
     )
 
-  const successCount = markers.filter(m => toolCallOutcome(m.entry) === 'success').length
-  const failureCount = markers.filter(m => toolCallOutcome(m.entry) === 'failure').length
+  const markers = (() => {
+    const buckets = new Map<number, {
+      entry: TelemetryEntry
+      ts: number
+      count: number
+      failureCount: number
+    }>()
+
+    for (const { entry, ts } of toolEvents) {
+      const pct = (ts - windowStart) / span
+      const index = Math.min(bucketCount - 1, Math.max(0, Math.floor(pct * bucketCount)))
+      const failure = toolCallOutcome(entry) === 'failure'
+      const existing = buckets.get(index)
+      if (existing) {
+        existing.count += 1
+        if (failure) existing.failureCount += 1
+        if (ts >= existing.ts) {
+          existing.entry = entry
+          existing.ts = ts
+        }
+      } else {
+        buckets.set(index, {
+          entry,
+          ts,
+          count: 1,
+          failureCount: failure ? 1 : 0,
+        })
+      }
+    }
+
+    return [...buckets.entries()]
+      .sort((left, right) => left[0] - right[0])
+      .map(([, bucket]) => bucket)
+  })()
+
+  const successCount = toolEvents.filter(m => toolCallOutcome(m.entry) === 'success').length
+  const failureCount = toolEvents.filter(m => toolCallOutcome(m.entry) === 'failure').length
 
   return html`
     <div class="flex items-center gap-3">
@@ -73,9 +109,9 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
       >
         ${markers.length === 0
           ? html`<div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">이 시간 범위에 도구 호출 없음</div>`
-          : markers.map(({ entry, ts }) => {
+          : markers.map(({ entry, ts, count, failureCount: bucketFailures }) => {
               const pct = ((ts - windowStart) / span) * 100
-              const outcome = toolCallOutcome(entry)
+              const outcome = bucketFailures > 0 ? 'failure' : toolCallOutcome(entry)
               const color = outcomeColor(outcome)
               const name = toolName(entry)
               const selected = detailSelection.value
@@ -87,12 +123,16 @@ export function ToolCallTrack({ events, windowStart, windowEnd }: Props) {
                 <span
                   class="absolute top-1 bottom-1 w-[3px] ${color} rounded-[1px] hover:w-1.5 transition-all cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
-                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${outcome}`}
+                  title=${`${new Date(ts).toLocaleTimeString()} · ${name} · ${outcome}${count > 1 ? ` · ${count} calls` : ''}`}
                   onClick=${(e: MouseEvent) => {
                     e.stopPropagation()
-                    selectEntity({ kind: 'tool_call', entry, ts })
+                    selectEntity({ kind: 'tool_call', entry, ts, bucketCount: count })
                   }}
-                ></span>
+                >${count > 1 ? html`
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-[8px] font-mono text-text-dim">
+                    ${count}
+                  </span>
+                ` : null}</span>
               `
             })
         }

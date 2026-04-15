@@ -133,7 +133,7 @@ let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
-let dispatch_keeper_phase_event ~(config : Room.config) ~keeper_name event =
+let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
   match
     Keeper_registry.dispatch_event
       ~base_path:config.base_path
@@ -149,7 +149,7 @@ let dispatch_keeper_phase_event ~(config : Room.config) ~keeper_name event =
         (Keeper_state_machine.transition_error_to_string err)
 
 let dispatch_post_turn_lifecycle_events
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
@@ -254,12 +254,12 @@ let keeper_room_capabilities (meta : keeper_meta) =
 
 let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities =
   let agent_file =
-    Filename.concat (Room.agents_dir config)
-      (Room.safe_filename meta.agent_name ^ ".json")
+    Filename.concat (Coord.agents_dir config)
+      (Coord.safe_filename meta.agent_name ^ ".json")
   in
   (* Use backend-aware read_json_opt instead of Sys.file_exists which
      returns false for non-filesystem backends (PG, Memory). *)
-  match Room.read_json_opt config agent_file with
+  match Coord.read_json_opt config agent_file with
   | None -> true
   | Some json -> (
       match Types.agent_of_yojson json with
@@ -274,22 +274,22 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
       (fun acc room_id ->
         try
           let joined =
-            Room.is_agent_joined config ~agent_name:meta.agent_name
+            Coord.is_agent_joined config ~agent_name:meta.agent_name
           in
           if not joined
           then begin
-            Room.ensure_room_bootstrap config;
+            Coord.ensure_room_bootstrap config;
             ignore
-              (Room.join config ~agent_name:meta.agent_name
+              (Coord.join config ~agent_name:meta.agent_name
                  ~capabilities ())
           end;
           if joined && keeper_room_capabilities_need_sync config meta capabilities
           then
             ignore
-              (Room.update_agent_r config ~agent_name:meta.agent_name
+              (Coord.update_agent_r config ~agent_name:meta.agent_name
                  ~capabilities ());
           ignore
-            (Room.heartbeat config ~agent_name:meta.agent_name);
+            (Coord.heartbeat config ~agent_name:meta.agent_name);
           room_id :: acc
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Keeper_context_core.log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;

@@ -3,7 +3,7 @@
 open Tool_args
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -15,7 +15,7 @@ let result_to_response = function
 (** Handle masc_agents *)
 let handle_agents ctx args =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
-  let json = Room.get_agents_status ctx.config in
+  let json = Coord.get_agents_status ctx.config in
   let json = match json with
     | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
     | other -> other
@@ -25,7 +25,7 @@ let handle_agents ctx args =
 (** Handle masc_register_capabilities *)
 let handle_register_capabilities ctx args =
   let capabilities = get_string_list args "capabilities" in
-  (true, Room.register_capabilities ctx.config ~agent_name:ctx.agent_name ~capabilities)
+  (true, Coord.register_capabilities ctx.config ~agent_name:ctx.agent_name ~capabilities)
 
 (** Handle masc_agent_update *)
 let handle_agent_update ctx args =
@@ -36,7 +36,7 @@ let handle_agent_update ctx args =
     | `List _ -> Some (get_string_list args "capabilities")
     | _ -> None
   in
-  result_to_response (Room.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
+  result_to_response (Coord.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ctx args =
@@ -163,7 +163,7 @@ let handle_agent_fitness ctx args =
       let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in
       let room_agents =
         try
-          Room.get_agents_raw ctx.config
+          Coord.get_agents_raw ctx.config
           |> List.map (fun (a : Types.agent) -> a.name)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e

@@ -20,7 +20,7 @@ type validation_result =
     [gh api repos/{slug}/pulls|issues?state=all] (REST). Subsequent calls
     within the TTL (from [gh_cache.cache_ttl_sec]) are served from memory. *)
 val validate_number :
-  config:Room.config ->
+  config:Coord.config ->
   repo_slug:string ->
   kind:entity_kind ->
   number:int ->
@@ -74,7 +74,7 @@ val gh_dangerous_command :
 
 (* ---- Repo slug + flag utilities ------------------------------- *)
 
-val with_keeper_gh_env : Room.config -> string -> string
+val with_keeper_gh_env : Coord.config -> string -> string
 
 val has_repo_flag : string -> bool
 

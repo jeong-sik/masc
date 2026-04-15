@@ -129,7 +129,7 @@ module Masc : sig
     | Register_capabilities
     | Release_task
     | Reset
-    | Room_status
+    | Coord_status
     | Set_current_task
     | Status
     | Task_history

@@ -221,10 +221,10 @@ let validate_command_with_allowlist ~allowed_commands cmd =
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 
-(** Relaxed command validation for Coding/Full preset keepers.
-    Allows pipes and redirects; validates every command in the pipeline
-    against [dev_allowed_commands]. *)
-let validate_command_coding cmd =
+let validate_command_coding_with_allowlist
+    ?(allow_pipes = true)
+    ~(allowed_commands : string list)
+    cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars_coding trimmed then
@@ -237,12 +237,15 @@ let validate_command_coding cmd =
     match split_pipeline_segments trimmed with
     | Error _ as err -> err
     | Ok segments ->
+      if (not allow_pipes) && List.length segments > 1 then
+        Error "Pipes are not allowed. Run one command per call."
+      else
       let rec validate_segments = function
         | [] -> Ok ()
         | segment :: rest -> (
             match extract_command_name segment with
             | None -> Error "command must not be empty"
-            | Some name when List.mem name dev_allowed_commands ->
+            | Some name when List.mem name allowed_commands ->
               validate_segments rest
             | Some name ->
               Error
@@ -251,6 +254,15 @@ let validate_command_coding cmd =
                    name))
       in
       validate_segments segments
+
+(** Relaxed command validation for Coding/Full preset keepers.
+    Allows pipes and redirects; validates every command in the pipeline
+    against [dev_allowed_commands]. *)
+let validate_command_coding cmd =
+  validate_command_coding_with_allowlist
+    ~allow_pipes:true
+    ~allowed_commands:dev_allowed_commands
+    cmd
 
 let strip_wrapping_quotes token =
   let len = String.length token in
@@ -585,13 +597,47 @@ let gh_allowed_commands =
   ]
 
 (** Specific (command, subcommand) pairs that are always blocked
-    regardless of allowlist. These are irreversible or catastrophic. *)
+    regardless of allowlist. These are irreversible or catastrophic.
+    Parity with the legacy [gh_dangerous_prefixes] check in
+    [keeper_exec_shell.ml] op=gh, which is being retired in favor of
+    calling [validate_gh_command] as the single source of truth. *)
 let gh_blocked_operations =
   [
     ("repo", "delete");
+    ("repo", "archive");
+    ("repo", "transfer");
     ("gist", "delete");
     ("workflow", "disable");
   ]
+
+(** Extract owner from a [--repo OWNER/NAME], [--repo=OWNER/NAME], or
+    [-R OWNER/NAME] flag in a gh command string. Returns [None] if no
+    such flag is present — in that case gh defaults to the cwd's git
+    origin, which is already org-gated at clone time.
+
+    Only the owner segment is returned; repo/branch names are outside
+    the allowlist scope. *)
+let extract_gh_repo_owner cmd =
+  let tokens =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  let owner_of_slug s =
+    match String.split_on_char '/' s with
+    | owner :: _ :: _ when owner <> "" -> Some owner
+    | _ -> None
+  in
+  let rec find = function
+    | [] -> None
+    | "--repo" :: slug :: _ | "-R" :: slug :: _ -> owner_of_slug slug
+    | tok :: rest when String.length tok > 7 && String.sub tok 0 7 = "--repo=" ->
+      let slug = String.sub tok 7 (String.length tok - 7) in
+      (match owner_of_slug slug with
+       | Some _ as o -> o
+       | None -> find rest)
+    | _ :: rest -> find rest
+  in
+  find tokens
 
 (** Extract the top-level command and its first subcommand from a gh
     command string (the portion after "gh ").
@@ -619,10 +665,18 @@ let extract_gh_command_pair cmd =
     (Some x, find_subcmd rest)
 
 (** Validate a gh CLI command string for safety.
-    Checks: (1) shell metacharacters, (2) top-level command allowlist,
-    (3) blocked operation pairs.
+    Checks in order:
+      (1) shell metacharacters,
+      (2) top-level command allowlist,
+      (3) blocked (command, subcommand) operation pairs,
+      (4) [--repo OWNER/NAME] owner against [allowed_orgs] (if non-empty).
+
+    Check 4 is skipped when [allowed_orgs] is [] (policy not configured)
+    or when the command carries no [--repo] flag (gh falls back to
+    cwd's origin, which is already gated at clone time).
+
     [cmd] is the portion after "gh ", e.g. "pr view 123". *)
-let validate_gh_command cmd =
+let validate_gh_command ?(allowed_orgs = []) cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "gh command must not be empty"
   else if contains_forbidden_shell_chars trimmed then
@@ -648,7 +702,17 @@ let validate_gh_command cmd =
         then
           Error
             (Printf.sprintf "gh %s %s is blocked for safety" command sub)
-        else Ok ()
+        else
+          match allowed_orgs, extract_gh_repo_owner trimmed with
+          | [], _ | _, None -> Ok ()
+          | orgs, Some owner when List.mem owner orgs -> Ok ()
+          | orgs, Some owner ->
+            Error
+              (Printf.sprintf
+                 "gh --repo owner '%s' not in allowed_orgs [%s]. \
+                  Drop --repo to use the current repo, or use an allowed org."
+                 owner
+                 (String.concat ", " orgs))
 
 (** Known destructive API endpoint patterns.
     Each pattern is checked as a substring of the full command.

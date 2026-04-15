@@ -53,14 +53,14 @@ let keeper_continuity_to_string = function
   | Continuity_recovering -> "recovering"
   | Continuity_not_running -> "not_running"
 
-let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Safe.t =
+let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
-    Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
+    Filename.concat (Coord.agents_dir config) (Coord.safe_filename agent_name ^ ".json")
   in
-  if not (Room.path_exists config agent_file) then
+  if not (Coord.path_exists config agent_file) then
     `Assoc [ ("exists", `Bool false) ]
   else (
-    match Room.read_json_opt config agent_file with
+    match Coord.read_json_opt config agent_file with
     | None ->
         `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
     | Some json -> (
@@ -94,7 +94,7 @@ let parse_agent_status (config : Room.config) ~(agent_name : string) : Yojson.Sa
                 ("last_seen", `String agent.last_seen);
                 ("age_s", `Float age_s);
                 ("last_seen_ago_s", `Float last_seen_ago_s);
-                ("is_zombie", `Bool (Room.is_zombie_agent ~agent_name:agent.name agent.last_seen));
+                ("is_zombie", `Bool (Coord.is_zombie_agent ~agent_name:agent.name agent.last_seen));
               ]))
 
 let json_string_opt key json =

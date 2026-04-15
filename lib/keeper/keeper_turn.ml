@@ -155,7 +155,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
-      let masc_root = Room.masc_root_dir ctx.config in
+      let masc_root = Coord.masc_root_dir ctx.config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root
@@ -228,8 +228,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   match continuity_snapshot with
                   | Some s -> keeper_state_snapshot_to_summary_text s
                   | None ->
-                    let trimmed = String.trim meta.continuity_summary in
-                    if trimmed = "" then "" else trimmed
+                    continuity_fallback_summary_text
+                      ~continuity_summary:meta.continuity_summary
+                      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
                 in
                 if summary = "" || summary = "No continuity snapshot available."
                 then ""

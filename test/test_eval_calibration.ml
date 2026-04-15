@@ -121,7 +121,7 @@ let test_record_human_label () =
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   Cal.record_human_label
-    ~notes_hash:"abc123" ~human_verdict:"reject"
+    ~notes_hash:"abc123" ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"work was incomplete";
   let store = Cal.get_store () in
   let records = Dated_jsonl.read_recent store 10 in
@@ -146,13 +146,15 @@ let test_find_divergences_false_positive () =
   Cal.record_verdict ~task_id:"t1" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FP task" ~notes:"looks ok but not" in
   Cal.record_human_label
-    ~notes_hash:hash ~human_verdict:"reject"
+    ~notes_hash:hash ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"did not address the task";
   let divs = Cal.find_divergences () in
   check int "1 divergence found" 1 (List.length divs);
   let d = List.hd divs in
-  check string "evaluator approved" "approve" d.evaluator_verdict;
-  check string "human rejected" "reject" d.human_verdict;
+  check string "evaluator approved" "approve"
+    (Cal.verdict_to_string d.evaluator_verdict);
+  check string "human rejected" "reject"
+    (Cal.label_verdict_to_string d.human_verdict);
   Cal.reset_store_for_testing ()
 
 let test_find_divergences_false_negative () =
@@ -165,12 +167,13 @@ let test_find_divergences_false_negative () =
   Cal.record_verdict ~task_id:"t2" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"FN task" ~notes:"actually good work" in
   Cal.record_human_label
-    ~notes_hash:hash ~human_verdict:"approve"
+    ~notes_hash:hash ~human_verdict:Cal.Approve_label
     ~labeler:"vincent" ~reason:"";
   let divs = Cal.find_divergences () in
   check int "1 divergence found" 1 (List.length divs);
   let d = List.hd divs in
-  check string "human approved" "approve" d.human_verdict;
+  check string "human approved" "approve"
+    (Cal.label_verdict_to_string d.human_verdict);
   Cal.reset_store_for_testing ()
 
 let test_find_divergences_agreement () =
@@ -183,7 +186,7 @@ let test_find_divergences_agreement () =
   Cal.record_verdict ~task_id:"t3" ~req ~result ();
   let hash = Cal.notes_hash ~task_title:"OK task" ~notes:"done correctly" in
   Cal.record_human_label
-    ~notes_hash:hash ~human_verdict:"approve"
+    ~notes_hash:hash ~human_verdict:Cal.Approve_label
     ~labeler:"vincent" ~reason:"";
   let divs = Cal.find_divergences () in
   check int "no divergences when agreement" 0 (List.length divs);
@@ -219,7 +222,7 @@ let test_select_examples_max () =
     Cal.record_verdict ~task_id:(Printf.sprintf "t%d" i) ~req ~result ();
     let hash = Cal.notes_hash ~task_title:title ~notes in
     Cal.record_human_label
-      ~notes_hash:hash ~human_verdict:"reject"
+      ~notes_hash:hash ~human_verdict:Cal.Reject_label
       ~labeler:"vincent" ~reason:"bad";
   done;
   let examples = Cal.select_examples ~max_examples:2 in
@@ -334,9 +337,9 @@ let test_calibration_stats_cross_model_mix () =
 
 let test_to_harness_verdict_approve () =
   let record : Cal.verdict_record = {
-    record_type = "verdict"; notes_hash = "abc";
+    record_type = Cal.Verdict_record; notes_hash = "abc";
     task_id = "t1"; task_title = "Fix login";
-    agent_name = "dreamer"; verdict = "approve";
+    agent_name = "dreamer"; verdict = AR.Approve;
     gate = AR.Structured_tool; evaluator_cascade = "glm5";
     generator_cascade = Some "claude"; fallback_reason = None;
     timestamp = 0.0;
@@ -350,9 +353,9 @@ let test_to_harness_verdict_approve () =
 
 let test_to_harness_verdict_reject () =
   let record : Cal.verdict_record = {
-    record_type = "verdict"; notes_hash = "def";
+    record_type = Cal.Verdict_record; notes_hash = "def";
     task_id = "t2"; task_title = "Deploy fix";
-    agent_name = "coder"; verdict = "reject:too short";
+    agent_name = "coder"; verdict = AR.Reject "too short";
     gate = AR.Length; evaluator_cascade = "local";
     generator_cascade = None; fallback_reason = None;
     timestamp = 0.0;

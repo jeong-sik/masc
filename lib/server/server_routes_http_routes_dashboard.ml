@@ -41,7 +41,7 @@ let available_cascade_profiles () : string list =
        ["default"])
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
-    relay via Room.broadcast.  Error responses are encoded through Yojson so
+    relay via Coord.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
 let handle_broadcast state agent_name reqd body_str =
   let reply ok error_opt =
@@ -57,7 +57,7 @@ let handle_broadcast state agent_name reqd body_str =
     match Yojson.Safe.Util.member "message" json with
     | `String message ->
         let config = state.Mcp_server.room_config in
-        let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
+        let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
         reply true None
     | `Null -> reply false (Some "missing required field: message")
     | _ -> reply false (Some "field 'message' must be a string")
@@ -436,15 +436,31 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let base_path = config.base_path in
-         let masc_root = Room.masc_root_dir config in
-         let n =
-           Server_utils.int_query_param req "n" ~default:100
-           |> max 1 |> min 500
+         let masc_root = Coord.masc_root_dir config in
+         let float_query_param req key =
+           match Server_utils.query_param req key with
+           | None -> None
+           | Some raw -> float_of_string_opt raw
          in
          let keeper_name = Server_utils.query_param req "keeper" in
          let session_id = Server_utils.query_param req "session_id" in
          let operation_id = Server_utils.query_param req "operation_id" in
          let worker_run_id = Server_utils.query_param req "worker_run_id" in
+         let since_ts = Option.map (fun ms -> ms /. 1000.0)
+             (float_query_param req "since_ms")
+         in
+         let until_ts = Option.map (fun ms -> ms /. 1000.0)
+             (float_query_param req "until_ms")
+         in
+         let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
+         let n =
+           match Server_utils.query_param req "n" with
+           | Some raw ->
+             Option.value ~default:(if has_time_window then 0 else 100)
+               (int_of_string_opt raw)
+             |> max 0
+           | None -> if has_time_window then 0 else 100
+         in
          let sources =
            match Server_utils.query_param req "source" with
            | None -> Telemetry_unified.all_sources
@@ -453,14 +469,17 @@ let rec add_routes ~sw ~clock router =
               | Some src -> [src]
               | None -> Telemetry_unified.all_sources)
          in
-         let entries =
-           Telemetry_unified.read_unified ~base_path ~masc_root ~sources
-             ?keeper_name ?session_id ?operation_id ?worker_run_id ~n ()
+         let result =
+           Telemetry_unified.read_unified_result ~base_path ~masc_root ~sources
+             ?keeper_name ?session_id ?operation_id ?worker_run_id
+             ?since_ts ?until_ts ~n ()
          in
          let json = `Assoc [
            ("generated_at", `String (Types.now_iso ()));
-           ("count", `Int (List.length entries));
-           ("entries", `List entries);
+           ("count", `Int (List.length result.entries));
+           ("total_matching_entries", `Int result.total_matching_entries);
+           ("truncated", `Bool result.truncated);
+           ("entries", `List result.entries);
          ] in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
@@ -469,7 +488,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let base_path = config.base_path in
-         let masc_root = Room.masc_root_dir config in
+         let masc_root = Coord.masc_root_dir config in
          let json = Telemetry_unified.summary_json ~base_path ~masc_root () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd

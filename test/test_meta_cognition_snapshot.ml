@@ -1,5 +1,5 @@
 module Tool_agent = Masc_mcp.Tool_agent
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 module Meta_cognition = Masc_mcp.Meta_cognition
 
 let counter = ref 0
@@ -28,8 +28,8 @@ let with_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
-  let config = Room.default_config base_dir in
-  ignore (Room.init config ~agent_name:(Some "tester"));
+  let config = Coord.default_config base_dir in
+  ignore (Coord.init config ~agent_name:(Some "tester"));
   let ctx : Tool_agent.context = { config; agent_name = "tester" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () -> f ctx)
 
@@ -95,9 +95,9 @@ let json_list_ids key json =
 
 let test_snapshot_detects_signals () =
   with_ctx @@ fun ctx ->
-  ignore (Room.join ctx.config ~agent_name:"peer" ~capabilities:[] ());
-  ignore (Room.join ctx.config ~agent_name:"observer" ~capabilities:[] ());
-  let masc_dir = Room.masc_dir ctx.config in
+  ignore (Coord.join ctx.config ~agent_name:"peer" ~capabilities:[] ());
+  ignore (Coord.join ctx.config ~agent_name:"observer" ~capabilities:[] ());
+  let masc_dir = Coord.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [
@@ -161,7 +161,7 @@ let test_snapshot_detects_signals () =
 
 let test_snapshot_marks_contested_belief () =
   with_ctx @@ fun ctx ->
-  let masc_dir = Room.masc_dir ctx.config in
+  let masc_dir = Coord.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [

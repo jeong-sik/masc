@@ -100,7 +100,7 @@ let parse_args () =
 
   let specs = [
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
-    ("--room", Arg.Set_string room, "Room name (default: from base path)");
+    ("--room", Arg.Set_string room, "Coord name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or HOME)");
   ] in

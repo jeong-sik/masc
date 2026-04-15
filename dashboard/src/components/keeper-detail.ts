@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
-import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
+import { keeperDisplayStatus, keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
 import { useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
@@ -101,7 +101,7 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 }
 
 function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
-  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -111,7 +111,8 @@ function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
-  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
+  const manualReconcile = keeper.runtime_blocker_manual_reconcile === true
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -140,14 +141,22 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>`
           : null}
-        ${keeper.paused && keeper.keepalive_running
-          ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
+        ${keeper.paused && keeper.keepalive_running && manualReconcile
+          ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
+          : keeper.paused && keeper.keepalive_running
+            ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
-        ${runtimeBlockerClass
+        ${manualReconcile
+          ? html`
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+                계속 진행 승인 대기
+              </span>
+            `
+          : runtimeBlockerClass
           ? html`
               <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}

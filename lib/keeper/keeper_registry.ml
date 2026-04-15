@@ -60,6 +60,36 @@ let failure_reason_to_string = function
     [set_failure_reason] before raising. *)
 exception Keeper_fiber_crash
 
+type turn_phase =
+  | Turn_idle
+  | Turn_prompting
+  | Turn_executing
+  | Turn_compacting
+  | Turn_finalizing
+
+type decision_stage =
+  | Decision_undecided
+  | Decision_guard_ok
+  | Decision_gate_rejected
+  | Decision_tool_policy_selected
+
+type cascade_state =
+  | Cascade_idle
+  | Cascade_selecting
+  | Cascade_trying
+  | Cascade_done
+  | Cascade_exhausted
+
+type compaction_stage =
+  | Compaction_accumulating
+  | Compaction_compacting
+  | Compaction_done
+
+type turn_measurement = {
+  tm_captured_at : float;
+  tm_auto_rules : Keeper_state_machine.auto_rule_summary;
+}
+
 type registry_entry = {
   base_path : string;
   name : string;
@@ -94,19 +124,30 @@ type registry_entry = {
   last_auto_rules :
     (float * Keeper_state_machine.auto_rule_summary) option;
   last_event_bus_correlation : string option;
+  pending_turn_measurement : turn_measurement option;
   current_turn_observation : turn_observation option;
   last_completed_turn : completed_turn_observation option;
+  compaction_stage : compaction_stage;
 }
 
 and turn_observation = {
   turn_id : int;
   started_at : float;
+  turn_phase : turn_phase;
+  decision_stage : decision_stage;
+  cascade_state : cascade_state;
+  measurement : turn_measurement option;
+  measurement_bind_count : int;
+  selected_model : string option;
 }
 
 and completed_turn_observation = {
   ct_turn_id : int;
   ct_started_at : float;
   ct_ended_at : float;
+  ct_decision_stage : decision_stage;
+  ct_cascade_state : cascade_state;
+  ct_selected_model : string option;
 }
 
 
@@ -208,8 +249,10 @@ let register_with_state ~base_path name meta
     waiting_for_inference = Atomic.make false;
     last_auto_rules = None;
     last_event_bus_correlation = None;
+    pending_turn_measurement = None;
     current_turn_observation = None;
     last_completed_turn = None;
+    compaction_stage = Compaction_accumulating;
   } in
   put_entry key entry;
   if phase = Running then
@@ -324,11 +367,104 @@ let set_last_correlation_id ~base_path name cid =
   update_entry ~base_path name (fun e ->
     { e with last_event_bus_correlation = Some cid })
 
+let turn_phase_of_cascade_state = function
+  | Cascade_idle | Cascade_selecting -> Turn_prompting
+  | Cascade_trying -> Turn_executing
+  | Cascade_done | Cascade_exhausted -> Turn_finalizing
+
+let update_current_turn e f =
+  let current_turn_observation =
+    match e.current_turn_observation with
+    | None -> None
+    | Some obs -> Some (f obs)
+  in
+  { e with current_turn_observation }
+
 let mark_turn_started ~base_path name =
   update_entry ~base_path name (fun e ->
     let turn_id = e.meta.runtime.usage.total_turns + 1 in
-    let obs = { turn_id; started_at = Time_compat.now () } in
-    { e with current_turn_observation = Some obs })
+    let obs = {
+      turn_id;
+      started_at = Time_compat.now ();
+      turn_phase = Turn_prompting;
+      decision_stage = Decision_undecided;
+      cascade_state = Cascade_idle;
+      measurement = None;
+      measurement_bind_count = 0;
+      selected_model = None;
+    } in
+    { e with
+      current_turn_observation = Some obs;
+      compaction_stage = Compaction_accumulating;
+    })
+
+let mark_turn_measurement ~base_path name =
+  update_entry ~base_path name (fun e ->
+    match e.current_turn_observation, e.pending_turn_measurement with
+    | Some obs, Some measurement ->
+      {
+        e with
+        current_turn_observation =
+          Some {
+            obs with
+            measurement = Some measurement;
+            measurement_bind_count = obs.measurement_bind_count + 1;
+          };
+        pending_turn_measurement = None;
+      }
+    | _ -> e)
+
+let set_turn_decision_stage ~base_path name decision_stage =
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs -> { obs with decision_stage }))
+
+let set_turn_cascade_state ~base_path name cascade_state =
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      {
+        obs with
+        cascade_state;
+        turn_phase = turn_phase_of_cascade_state cascade_state;
+      }))
+
+let set_turn_phase ~base_path name turn_phase =
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs -> { obs with turn_phase }))
+
+let set_turn_selected_model ~base_path name selected_model =
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs -> { obs with selected_model }))
+
+let prepare_turn_retry_after_compaction ~base_path name =
+  update_entry ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      {
+        obs with
+        turn_phase = Turn_prompting;
+        decision_stage = Decision_guard_ok;
+        cascade_state = Cascade_idle;
+        selected_model = None;
+      }))
+
+let mark_turn_gate_rejected_by_name name =
+  let target =
+    StringMap.fold
+      (fun _k v acc ->
+        match acc with
+        | Some _ -> acc
+        | None -> if String.equal v.name name then Some v else None)
+      (Atomic.get registry) None
+  in
+  match target with
+  | None -> ()
+  | Some entry ->
+      update_entry ~base_path:entry.base_path name (fun e ->
+        update_current_turn e (fun obs ->
+          {
+            obs with
+            decision_stage = Decision_gate_rejected;
+            turn_phase = Turn_finalizing;
+          }))
 
 let mark_turn_finished ~base_path name =
   update_entry ~base_path name (fun e ->
@@ -339,6 +475,9 @@ let mark_turn_finished ~base_path name =
           ct_turn_id = obs.turn_id;
           ct_started_at = obs.started_at;
           ct_ended_at = Time_compat.now ();
+          ct_decision_stage = obs.decision_stage;
+          ct_cascade_state = obs.cascade_state;
+          ct_selected_model = obs.selected_model;
         }
       | None -> e.last_completed_turn  (* no live turn → preserve previous *)
     in
@@ -574,8 +713,8 @@ let tool_usage_of_by_name name =
 
 (* -- Config resolution --------------------------------------------- *)
 
-let resolve_config (config : Room_utils_backend_setup.config) keeper_name
-    : Room_utils_backend_setup.config =
+let resolve_config (config : Coord_utils_backend_setup.config) keeper_name
+    : Coord_utils_backend_setup.config =
   if keeper_name = "" then config
   else
     (* Keeper config resolution is scoped to the caller's current base_path.
@@ -694,6 +833,25 @@ let execute_entry_action_observability
   | Cleanup_and_unregister ->
       ()
 
+let pending_measurement_after_event now entry event =
+  match event with
+  | Keeper_state_machine.Context_measured { auto_rules; _ } ->
+    Some {
+      tm_captured_at = now;
+      tm_auto_rules = auto_rules;
+    }
+  | _ -> entry.pending_turn_measurement
+
+let compaction_stage_after_event entry event =
+  match event with
+  | Keeper_state_machine.Compaction_started
+  | Keeper_state_machine.Auto_compact_triggered
+  | Keeper_state_machine.Operator_compact_requested ->
+    Compaction_compacting
+  | Keeper_state_machine.Compaction_completed _ -> Compaction_done
+  | Keeper_state_machine.Compaction_failed _ -> Compaction_accumulating
+  | _ -> entry.compaction_stage
+
 (** Registry mutation is still non-yielding (StringMap lookup + put,
     Atomic.set). Observability-only entry actions run after [put_entry], so
     any SSE/log side effects happen after the registry state is consistent. *)
@@ -724,6 +882,12 @@ let dispatch_event_with_audit
       | Keeper_state_machine.Context_measured { auto_rules; _ } ->
         Some (now, auto_rules)
       | _ -> entry.last_auto_rules
+    in
+    let pending_turn_measurement =
+      pending_measurement_after_event now entry event
+    in
+    let compaction_stage =
+      compaction_stage_after_event entry event
     in
     let result =
       Keeper_state_machine.apply_event
@@ -791,6 +955,8 @@ let dispatch_event_with_audit
          dead_since_ts;
          transition_seq = new_seq;
          last_auto_rules;
+         pending_turn_measurement;
+         compaction_stage;
        };
        List.iter
          (execute_entry_action_observability
@@ -829,6 +995,8 @@ let dispatch_event_with_audit
          conditions = tr.updated_conditions;
          transition_seq = new_seq;
          last_auto_rules;
+         pending_turn_measurement;
+         compaction_stage;
        };
        (try
           Sse.broadcast

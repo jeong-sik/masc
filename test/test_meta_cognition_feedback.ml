@@ -1,7 +1,7 @@
 module Feedback = Masc_mcp.Server_meta_cognition_feedback
 module Board = Masc_mcp.Board
 module Board_dispatch = Masc_mcp.Board_dispatch
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
@@ -48,8 +48,8 @@ let with_ctx f =
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Board_dispatch.init_jsonl ();
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "tester"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "tester"));
       f config)
 
 let assoc_opt key = function

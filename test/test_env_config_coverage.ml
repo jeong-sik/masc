@@ -76,6 +76,45 @@ let test_get_bool_default_false () =
   let result = Env_config.get_bool ~default:false "NONEXISTENT_VAR_XYZ_12345" in
   check bool "default false" false result
 
+(* ============================================================
+   Transport / Board Variant Parsing Tests
+   ============================================================ *)
+
+let test_transport_use_h2_parses_h2_only_variant () =
+  with_env "MASC_USE_H2" " TRUE " (fun () ->
+    check string "normalized h2 mode" "h2_only"
+      (Env_config.Transport.use_h2 ()
+       |> Env_config.Transport.h2_mode_to_string))
+
+let test_transport_use_h2_preserves_unknown_variant_tag () =
+  with_env "MASC_USE_H2" "experimental" (fun () ->
+    match Env_config.Transport.use_h2 () with
+    | Env_config.Transport.Unknown_h2_mode "experimental" -> ()
+    | other ->
+        fail
+          (Printf.sprintf "expected unknown h2 mode, got %s"
+             (Env_config.Transport.h2_mode_to_string other)))
+
+let test_agent_transport_opt_parses_alias_variant () =
+  with_env "MASC_AGENT_TRANSPORT" " WebSocket " (fun () ->
+    match Env_config.Transport.agent_transport_opt () with
+    | Some Env_config.Transport.Ws -> ()
+    | Some other ->
+        fail
+          (Printf.sprintf "expected ws transport, got %s"
+             (Env_config.Transport.agent_transport_to_string other))
+    | None -> fail "expected Some transport")
+
+let test_board_backend_opt_parses_variant () =
+  with_env "MASC_BOARD_BACKEND" " PG " (fun () ->
+    match Env_config.Board.backend_opt () with
+    | Some Env_config.Board.Pg -> ()
+    | Some other ->
+        fail
+          (Printf.sprintf "expected pg backend, got %s"
+             (Env_config.Board.backend_to_string other))
+    | None -> fail "expected Some backend")
+
 let test_base_path_prefers_env () =
   with_env "MASC_BASE_PATH" "/tmp/masc-custom-root" (fun () ->
     check (option string) "base_path_opt" (Some "/tmp/masc-custom-root")
@@ -455,6 +494,16 @@ let () =
     "get_bool", [
       test_case "default true" `Quick test_get_bool_default_true;
       test_case "default false" `Quick test_get_bool_default_false;
+    ];
+    "transport_variants", [
+      test_case "use_h2 parses h2_only" `Quick
+        test_transport_use_h2_parses_h2_only_variant;
+      test_case "use_h2 preserves unknown" `Quick
+        test_transport_use_h2_preserves_unknown_variant_tag;
+      test_case "agent transport parses alias" `Quick
+        test_agent_transport_opt_parses_alias_variant;
+      test_case "board backend parses variant" `Quick
+        test_board_backend_opt_parses_variant;
     ];
     "path_helpers", [
       test_case "base_path prefers env" `Quick test_base_path_prefers_env;

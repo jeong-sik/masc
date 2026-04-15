@@ -88,6 +88,9 @@ export function DetailPane() {
       </div>
       <div class="grid grid-cols-1 gap-1.5 px-3 py-2 md:grid-cols-2">
         <${MetaRow} label="시각" value=${new Date(selection.ts).toLocaleString()} />
+        ${selection.bucketCount > 1 ? html`
+          <${MetaRow} label="bucket" value=${`${selection.bucketCount} events`} />
+        ` : null}
         ${source ? html`<${MetaRow} label="source" value=${source} />` : null}
         ${keeper ? html`<${MetaRow} label="keeper" value=${keeper} />` : null}
         ${typeof selection.entry.session_id === 'string' ? html`

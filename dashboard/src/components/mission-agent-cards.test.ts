@@ -72,4 +72,21 @@ describe('mission keeper runtime helpers', () => {
       'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
     )
   })
+
+  it('renders continue-gate hints when manual reconcile is required', () => {
+    const keeper = {
+      name: 'uranium666',
+      status: 'idle',
+      paused: true,
+      keepalive_running: true,
+      runtime_blocker_class: 'ambiguous_post_commit_timeout',
+      runtime_blocker_summary:
+        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      runtime_blocker_manual_reconcile: true,
+    } as Keeper
+
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+    )
+  })
 })

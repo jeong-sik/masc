@@ -1,7 +1,7 @@
 (** Tool_relay — retired hidden relay surface. *)
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
   sw: Eio.Switch.t;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;

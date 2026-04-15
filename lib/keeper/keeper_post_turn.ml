@@ -127,7 +127,6 @@ let apply_post_turn_lifecycle
   | Some cp ->
       let ctx =
         context_of_oas_checkpoint
-          ~repair_orphans:false
           ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           cp
           ~primary_model_max_tokens
@@ -157,6 +156,13 @@ let apply_post_turn_lifecycle
           let () = on_compaction_started () in
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
+          in
+          let compacted_ctx =
+            {
+              compacted_ctx with
+              messages =
+                repair_orphan_tool_result_messages compacted_ctx.messages;
+            }
           in
           (match save_oas_checkpoint
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
@@ -401,6 +407,13 @@ let recover_latest_checkpoint_for_overflow_retry
             before_tokens;
             after_tokens;
             saved_tokens = max 0 (before_tokens - after_tokens);
+          }
+        in
+        let compacted_ctx =
+          {
+            compacted_ctx with
+            messages =
+              repair_orphan_tool_result_messages compacted_ctx.messages;
           }
         in
         try

@@ -8,7 +8,7 @@ include Keeper_config
 let keeper_debug = Env_config.KeeperRuntime.debug
 
 type 'a context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
   sw: Eio.Switch.t;
   clock: 'a Eio.Time.clock;
@@ -720,27 +720,28 @@ let list_persona_summaries () : persona_summary list =
     with Sys_error _ -> []
   in
   (* Collect all persona (name, path) from all dirs; later dirs override *)
-  let seen = Hashtbl.create 32 in
+  let module SS = Set.Make (String) in
+  let raw = dirs |> List.concat_map entries_from_dir in
   let all_entries =
-    dirs
-    |> List.concat_map entries_from_dir
-    |> List.filter (fun (name, _) ->
-           if Hashtbl.mem seen name then false
-           else (Hashtbl.add seen name (); true))
+    List.fold_left (fun (acc, seen) (name, path) ->
+      if SS.mem name seen then (acc, seen)
+      else ((name, path) :: acc, SS.add name seen))
+      ([], SS.empty) raw
+    |> fun (acc, _) -> List.rev acc
   in
   all_entries
   |> List.filter_map (fun (name, path) -> load_persona_summary_from_path name path)
   |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
 
-let keeper_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
+let keeper_dir (config : Coord.config) =
+  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
   ensure_dir d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
-let session_base_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "traces" in
+let session_base_dir (config : Coord.config) =
+  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
   ensure_dir d
 
 (** Strip "keeper-" prefix if already present to prevent double-prefixing.

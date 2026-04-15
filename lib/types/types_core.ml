@@ -201,10 +201,10 @@ let agent_of_yojson json =
       | _ -> Error original_error)
 
 (* ============================================ *)
-(* Multi-Room Types                             *)
+(* Multi-Coord Types                             *)
 (* ============================================ *)
 
-(** Room metadata - information about a coordination room *)
+(** Coord metadata - information about a coordination room *)
 type room_info = {
   id: string;                                 (* unique ID: slugified name *)
   name: string;                               (* display name *)
@@ -215,7 +215,7 @@ type room_info = {
   task_count: int; [@default 0]               (* active task count *)
 } [@@deriving yojson { strict = false }, show]
 
-(** Room registry - tracks all available rooms *)
+(** Coord registry - tracks all available rooms *)
 type room_registry = {
   rooms: room_info list; [@default []]        (* list of rooms *)
   default_room: string; [@default "default"]  (* default room ID *)
@@ -638,7 +638,7 @@ type message = {
   trace_context: string option; [@default None]
 } [@@deriving yojson { strict = false }, show]
 
-(** Room state *)
+(** Coord state *)
 type room_state = {
   protocol_version: string;
   project: string;
@@ -909,7 +909,7 @@ type tool_schema = {
 }
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).
-    Defined here so that both Room_task_schedule (producer) and consumers
+    Defined here so that both Coord_task_schedule (producer) and consumers
     (tool_task, orchestrator) can reference the type without
     triggering warning 34 from [include] re-export. *)
 type claim_next_result =

@@ -20,10 +20,12 @@ CONSTANTS
     MaxRestarts       \* Maximum restart attempts before Dead
 
 VARIABLES
+    launch_pending,
     fiber_alive,
     heartbeat_healthy,
     turn_healthy,
-    manual_reconcile_required,
+    context_within_budget,
+    context_handoff_needed,
     compaction_active,
     handoff_active,
     operator_paused,
@@ -36,8 +38,8 @@ VARIABLES
     compact_retry_exhausted,
     restart_count
 
-vars == <<fiber_alive, heartbeat_healthy, turn_healthy,
-          manual_reconcile_required,
+vars == <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+          context_within_budget, context_handoff_needed,
           compaction_active, handoff_active, operator_paused,
           stop_requested, restart_budget_remaining, backoff_elapsed,
           guardrail_triggered, drain_complete,
@@ -50,6 +52,7 @@ DerivePhase ==
     \* Stopped requires no buffer ops in flight (TLC deadlock fix)
     IF stop_requested /\ drain_complete
        /\ ~compaction_active /\ ~handoff_active THEN "Stopped"
+    ELSE IF launch_pending /\ ~fiber_alive THEN "Offline"
     ELSE IF ~fiber_alive /\ ~restart_budget_remaining THEN "Dead"
     ELSE IF ~fiber_alive /\ restart_budget_remaining /\ backoff_elapsed THEN "Restarting"
     ELSE IF ~fiber_alive /\ restart_budget_remaining THEN "Crashed"
@@ -63,7 +66,7 @@ DerivePhase ==
     ELSE IF handoff_active THEN "HandingOff"
     ELSE IF compaction_active THEN "Compacting"
     ELSE IF context_overflow THEN "Overflowed"
-    ELSE IF ~heartbeat_healthy \/ ~turn_healthy \/ manual_reconcile_required THEN "Failing"
+    ELSE IF ~heartbeat_healthy \/ ~turn_healthy THEN "Failing"
     ELSE IF fiber_alive THEN "Running"
     ELSE "Offline"
 
@@ -75,10 +78,12 @@ NotTerminal == Phase \notin TerminalPhases
 \* ── Initial State ─────────────────────────────────────────
 
 Init ==
+    /\ launch_pending = FALSE
     /\ fiber_alive = TRUE
     /\ heartbeat_healthy = TRUE
     /\ turn_healthy = TRUE
-    /\ manual_reconcile_required = FALSE
+    /\ context_within_budget = TRUE
+    /\ context_handoff_needed = FALSE
     /\ compaction_active = FALSE
     /\ handoff_active = FALSE
     /\ operator_paused = FALSE
@@ -96,7 +101,8 @@ Init ==
 HeartbeatOk ==
     /\ NotTerminal /\ fiber_alive
     /\ heartbeat_healthy' = TRUE
-    /\ UNCHANGED <<fiber_alive, turn_healthy, manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
@@ -107,7 +113,8 @@ HeartbeatOk ==
 HeartbeatFailed ==
     /\ NotTerminal /\ fiber_alive
     /\ heartbeat_healthy' = FALSE
-    /\ UNCHANGED <<fiber_alive, turn_healthy, manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
@@ -115,19 +122,12 @@ HeartbeatFailed ==
                    context_overflow, compact_retry_exhausted,
                    restart_count>>
 
-\* NOTE: This action clears manual_reconcile_required, which DIFFERS from
-\* the OCaml code (Turn_succeeded only sets turn_healthy=true, not
-\* manual_reconcile_required=false).  Only Manual_reconcile_cleared and
-\* Fiber_started clear it in OCaml.  The accurate model is in
-\* KeeperReconcileLiveness.tla.  This spec retains the clearing behavior
-\* to preserve backwards compatibility with existing property proofs
-\* (RunningClearsManualReconcile + FailingResolves).
 TurnSucceeded ==
     /\ NotTerminal /\ fiber_alive
     /\ turn_healthy' = TRUE
-    /\ manual_reconcile_required' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, compaction_active,
-                   handoff_active, operator_paused, stop_requested,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy,
+                   context_within_budget, context_handoff_needed,
+                   compaction_active, handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
                    context_overflow, compact_retry_exhausted,
@@ -136,21 +136,22 @@ TurnSucceeded ==
 TurnFailed ==
     /\ NotTerminal /\ fiber_alive
     /\ turn_healthy' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, manual_reconcile_required,
-                   compaction_active,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy,
+                   context_within_budget, context_handoff_needed, compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
                    context_overflow, compact_retry_exhausted,
                    restart_count>>
 
-ManualReconcileRequired ==
+ContextMeasured ==
     /\ NotTerminal /\ fiber_alive
-    /\ manual_reconcile_required' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   compaction_active, handoff_active, operator_paused,
-                   stop_requested, restart_budget_remaining, backoff_elapsed,
-                   guardrail_triggered, drain_complete,
+    /\ context_handoff_needed' \in BOOLEAN
+    /\ guardrail_triggered' \in BOOLEAN
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, compaction_active, handoff_active,
+                   operator_paused, stop_requested, restart_budget_remaining,
+                   backoff_elapsed, drain_complete,
                    context_overflow, compact_retry_exhausted,
                    restart_count>>
 
@@ -158,8 +159,8 @@ CompactionStarted ==
     /\ NotTerminal /\ fiber_alive
     /\ ~compaction_active /\ ~handoff_active
     /\ compaction_active' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -173,8 +174,8 @@ CompactionCompleted ==
     /\ compaction_active' = FALSE
     /\ context_overflow' = FALSE
     /\ compact_retry_exhausted' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete, restart_count>>
@@ -183,8 +184,8 @@ HandoffStarted ==
     /\ NotTerminal /\ fiber_alive
     /\ ~handoff_active /\ ~compaction_active
     /\ handoff_active' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -194,8 +195,8 @@ HandoffStarted ==
 HandoffCompleted ==
     /\ NotTerminal /\ handoff_active
     /\ handoff_active' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -205,8 +206,8 @@ HandoffCompleted ==
 OperatorPause ==
     /\ NotTerminal /\ fiber_alive
     /\ operator_paused' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -216,8 +217,8 @@ OperatorPause ==
 OperatorResume ==
     /\ NotTerminal /\ operator_paused
     /\ operator_paused' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -227,8 +228,8 @@ OperatorResume ==
 StopRequested ==
     /\ NotTerminal /\ ~stop_requested
     /\ stop_requested' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -239,8 +240,8 @@ DrainCompleteEv ==
     /\ NotTerminal /\ stop_requested /\ ~drain_complete
     /\ ~compaction_active /\ ~handoff_active  \* buffer ops must finish first
     /\ drain_complete' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered,
@@ -250,8 +251,8 @@ DrainCompleteEv ==
 FiberTerminated ==
     /\ NotTerminal /\ fiber_alive
     /\ fiber_alive' = FALSE
-    /\ UNCHANGED <<heartbeat_healthy, turn_healthy, manual_reconcile_required,
-                   compaction_active,
+    /\ UNCHANGED <<launch_pending, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed, compaction_active,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -260,10 +261,10 @@ FiberTerminated ==
 
 FiberStarted ==
     /\ NotTerminal /\ ~fiber_alive /\ restart_budget_remaining
+    /\ launch_pending' = FALSE
     /\ fiber_alive' = TRUE
     /\ heartbeat_healthy' = TRUE
     /\ turn_healthy' = TRUE
-    /\ manual_reconcile_required' = FALSE
     /\ compaction_active' = FALSE
     /\ handoff_active' = FALSE
     /\ backoff_elapsed' = FALSE
@@ -272,7 +273,7 @@ FiberStarted ==
     /\ stop_requested' = FALSE  \* TLA+ liveness fix: restart contradicts stop
     /\ context_overflow' = FALSE
     /\ compact_retry_exhausted' = FALSE
-    /\ UNCHANGED <<operator_paused,
+    /\ UNCHANGED <<context_within_budget, context_handoff_needed, operator_paused,
                    restart_budget_remaining, restart_count>>
 
 SupervisorRestartAttempt ==
@@ -281,8 +282,8 @@ SupervisorRestartAttempt ==
     /\ restart_count < MaxRestarts
     /\ backoff_elapsed' = TRUE
     /\ restart_count' = restart_count + 1
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining,
                    guardrail_triggered, drain_complete,
@@ -291,8 +292,8 @@ SupervisorRestartAttempt ==
 RestartBudgetExhausted ==
     /\ NotTerminal /\ restart_budget_remaining
     /\ restart_budget_remaining' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -302,8 +303,8 @@ RestartBudgetExhausted ==
 GuardrailStop ==
     /\ NotTerminal /\ fiber_alive
     /\ guardrail_triggered' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    drain_complete,
@@ -321,8 +322,8 @@ ContextOverflowDetected ==
     /\ NotTerminal /\ fiber_alive
     /\ ~compaction_active
     /\ context_overflow' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -336,8 +337,8 @@ AutoCompactTriggered ==
     /\ context_overflow /\ ~compaction_active /\ ~handoff_active
     /\ ~compact_retry_exhausted
     /\ compaction_active' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -352,8 +353,8 @@ CompactRetryExhausted ==
     /\ context_overflow /\ ~compaction_active
     /\ ~compact_retry_exhausted
     /\ compact_retry_exhausted' = TRUE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -366,8 +367,8 @@ OperatorCompactRequested ==
     /\ ~compaction_active /\ ~handoff_active
     /\ compaction_active' = TRUE
     /\ compact_retry_exhausted' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -380,8 +381,8 @@ OperatorClearRequested ==
     /\ NotTerminal
     /\ context_overflow' = FALSE
     /\ compact_retry_exhausted' = FALSE
-    /\ manual_reconcile_required' = FALSE
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete, restart_count>>
@@ -391,7 +392,7 @@ OperatorClearRequested ==
 Next ==
     \/ HeartbeatOk      \/ HeartbeatFailed
     \/ TurnSucceeded    \/ TurnFailed
-    \/ ManualReconcileRequired
+    \/ ContextMeasured
     \/ CompactionStarted \/ CompactionCompleted
     \/ HandoffStarted   \/ HandoffCompleted
     \/ OperatorPause    \/ OperatorResume
@@ -410,7 +411,7 @@ Next ==
 
 Fairness ==
     /\ WF_vars(HeartbeatOk)
-    /\ WF_vars(ManualReconcileRequired)
+    /\ WF_vars(ContextMeasured)
     /\ WF_vars(CompactionCompleted)
     /\ WF_vars(HandoffCompleted)
     /\ SF_vars(DrainCompleteEv)     \* Strong fairness: drain fires even if intermittently enabled
@@ -448,8 +449,9 @@ StoppedRequiresDrain == [](Phase = "Stopped" => (stop_requested /\ drain_complet
 \* S8: Dead requires no budget
 DeadRequiresNoBudget == [](Phase = "Dead" => ~restart_budget_remaining)
 
-\* S9: Running cannot retain a pending manual reconcile requirement.
-RunningClearsManualReconcile == [](Phase = "Running" => ~manual_reconcile_required)
+\* S9: Offline requires an explicit pre-start launch marker.
+OfflineRequiresLaunchPending ==
+    [](Phase = "Offline" => (launch_pending /\ ~fiber_alive))
 
 \* S10 (removed): "Compacting never re-enters Overflowed" was over-
 \*      restrictive — a failed compaction legitimately leaves
@@ -503,10 +505,12 @@ NoDeadlockExceptTerminal ==
 \* ── Type Invariant ────────────────────────────────────────
 
 TypeOK ==
+    /\ launch_pending \in BOOLEAN
     /\ fiber_alive \in BOOLEAN
     /\ heartbeat_healthy \in BOOLEAN
     /\ turn_healthy \in BOOLEAN
-    /\ manual_reconcile_required \in BOOLEAN
+    /\ context_within_budget \in BOOLEAN
+    /\ context_handoff_needed \in BOOLEAN
     /\ compaction_active \in BOOLEAN
     /\ handoff_active \in BOOLEAN
     /\ operator_paused \in BOOLEAN
@@ -540,8 +544,8 @@ BuggyCompactionCompleted ==
     \* BUG: the primed values of context_overflow and compact_retry_exhausted
     \* are omitted, so those flags stay set after the compaction claims to
     \* have resolved the overflow.
-    /\ UNCHANGED <<fiber_alive, heartbeat_healthy, turn_healthy,
-                   manual_reconcile_required,
+    /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
+                   context_within_budget, context_handoff_needed,
                    handoff_active, operator_paused, stop_requested,
                    restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
@@ -551,7 +555,7 @@ BuggyCompactionCompleted ==
 NextBuggy ==
     \/ HeartbeatOk      \/ HeartbeatFailed
     \/ TurnSucceeded    \/ TurnFailed
-    \/ ManualReconcileRequired
+    \/ ContextMeasured
     \/ CompactionStarted \/ BuggyCompactionCompleted  \* ← swapped in
     \/ HandoffStarted   \/ HandoffCompleted
     \/ OperatorPause    \/ OperatorResume

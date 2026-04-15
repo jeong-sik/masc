@@ -27,7 +27,7 @@ let state_path base_dir =
   Filename.concat (Filename.concat base_dir ".masc") "state.json"
 
 let agent_path config agent_name =
-  Filename.concat (Room.agents_dir config) (Room.safe_filename agent_name ^ ".json")
+  Filename.concat (Coord.agents_dir config) (Coord.safe_filename agent_name ^ ".json")
 
 let test_read_state_repairs_empty_object () =
   Eio_main.run @@ fun env ->
@@ -36,16 +36,16 @@ let test_read_state_repairs_empty_object () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:None);
       write_text_file (state_path base_dir) "{}";
 
-      let state = Room.read_state config in
+      let state = Coord.read_state config in
       check string "protocol default" "0.1.0" state.protocol_version;
       check int "message_seq default" 0 state.message_seq;
       check (list string) "active_agents default" [] state.active_agents;
 
-      let repaired_json = Room.read_json config (state_path base_dir) in
+      let repaired_json = Coord.read_json config (state_path base_dir) in
       check string "repaired protocol" "0.1.0"
         (Safe_ops.json_string ~default:"" "protocol_version" repaired_json);
       check int "repaired message_seq" 0
@@ -58,8 +58,8 @@ let test_read_state_recovers_legacy_active_agent_entries () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:None);
       let legacy_json =
         `Assoc
           [
@@ -79,14 +79,14 @@ let test_read_state_recovers_legacy_active_agent_entries () =
       in
       write_text_file (state_path base_dir) (Yojson.Safe.to_string legacy_json);
 
-      let state = Room.read_state config in
+      let state = Coord.read_state config in
       check int "message_seq preserved" 7 state.message_seq;
       check (list string) "legacy active_agents recovered"
         [ "codex-swift-fox"; "gemini-brave-bear"; "keeper-sangsu-agent" ]
         state.active_agents;
 
       let open Yojson.Safe.Util in
-      let repaired_json = Room.read_json config (state_path base_dir) in
+      let repaired_json = Coord.read_json config (state_path base_dir) in
       let repaired_agents =
         repaired_json |> member "active_agents" |> to_list |> List.map to_string
       in
@@ -100,8 +100,8 @@ let test_read_state_filters_invalid_active_agent_entries () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:None);
       let corrupted_json =
         `Assoc
           [
@@ -121,7 +121,7 @@ let test_read_state_filters_invalid_active_agent_entries () =
       in
       write_text_file (state_path base_dir) (Yojson.Safe.to_string corrupted_json);
 
-      let state = Room.read_state config in
+      let state = Coord.read_state config in
       check (list string) "invalid entries filtered"
         [ "codex-swift-fox"; "gemini-brave-bear" ]
         state.active_agents)
@@ -153,8 +153,8 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:None);
       let legacy_agent_json =
         `Assoc
           [
@@ -170,7 +170,7 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
       write_text_file (agent_path config "keeper-sangsu-agent")
         (Yojson.Safe.to_string legacy_agent_json);
 
-      ignore (Room.heartbeat config ~agent_name:"keeper-sangsu-agent");
+      ignore (Coord.heartbeat config ~agent_name:"keeper-sangsu-agent");
 
       let repaired_json =
         match Safe_ops.read_file_safe (agent_path config "keeper-sangsu-agent") with
@@ -186,7 +186,7 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
          | _ -> false))
 
 let () =
-  run "Room_state_recovery"
+  run "Coord_state_recovery"
     [
       ( "room_state",
         [

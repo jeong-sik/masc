@@ -1,15 +1,13 @@
 
-open Server_utils
 open Server_auth
-open Server_dashboard_http
 
 module Http = Http_server_eio
 module Http_h2 = Http_server_h2
 module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
-module Room = Room
-module Room_utils = Room_utils
+module Coord = Coord
+module Coord_utils = Coord_utils
 module Tool_keeper = Tool_keeper
 module Keeper_types = Keeper_types
 module Keeper_alerting = Keeper_alerting
@@ -19,7 +17,6 @@ module Keeper_runtime = Keeper_runtime
 module Ag_ui = Ag_ui
 module Tool_operator = Tool_operator
 module Operator_control = Operator_control
-module Command_plane_v2 = Command_plane_v2
 module Dashboard_execution = Dashboard_execution
 module Dashboard_mission = Dashboard_mission
 module Dashboard_mission_briefing = Dashboard_mission_briefing
@@ -36,7 +33,6 @@ module Sse = Sse
 module Safe_ops = Safe_ops
 module Tool_board = Tool_board
 module Process_eio = Process_eio
-module Server_command_plane_http = Server_command_plane_http
 module Server_mcp_transport_http = Server_mcp_transport_http
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
@@ -109,163 +105,6 @@ let state_net_opt = function
 let require_runtime label = function
   | Some value -> value
   | None -> invalid_arg (label ^ " not available")
-
-let command_plane_http_deps ?state () : Server_command_plane_http.deps =
-  let state_opt =
-    match state with
-    | Some state -> Some state
-    | None -> current_server_state_opt ()
-  in
-  {
-    query_param;
-    int_query_param;
-    operator_actor_hint;
-    get_session_id_any;
-    auth_token_from_request;
-    get_switch = (fun () ->
-      require_runtime "command-plane switch" (state_switch_opt state_opt));
-    get_clock = (fun () ->
-      require_runtime "command-plane clock" (state_clock_opt state_opt));
-    get_net = (fun () ->
-      require_runtime "command-plane net" (state_net_opt state_opt));
-    get_origin;
-    cors_headers;
-  }
-
-let command_plane_summary_http_json ~state =
-  Server_command_plane_http.command_plane_summary_http_json ~state
-
-let command_plane_snapshot_http_json ~state =
-  Server_command_plane_http.command_plane_snapshot_http_json ~state
-
-let command_plane_topology_http_json ~state =
-  Server_command_plane_http.command_plane_topology_http_json ~state
-
-let command_plane_units_http_json ~state =
-  Server_command_plane_http.command_plane_units_http_json ~state
-
-let command_plane_operations_http_json ~state request =
-  Server_command_plane_http.command_plane_operations_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_detachments_http_json ~state request =
-  Server_command_plane_http.command_plane_detachments_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_detachment_status_http_json ~state request =
-  Server_command_plane_http.command_plane_detachment_status_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_decisions_http_json ~state request =
-  Server_command_plane_http.command_plane_decisions_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_capacity_http_json ~state =
-  Server_command_plane_http.command_plane_capacity_http_json ~state
-
-let command_plane_alerts_http_json ~state =
-  Server_command_plane_http.command_plane_alerts_http_json ~state
-
-let command_plane_traces_http_json ~state request =
-  Server_command_plane_http.command_plane_traces_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_swarm_http_json ~state request =
-  Server_command_plane_http.command_plane_swarm_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_orchestra_http_json ~state request =
-  Server_command_plane_http.command_plane_orchestra_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request
-
-let command_plane_unit_define_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_unit_define_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_operation_start_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_operation_start_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_operation_checkpoint_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_operation_checkpoint_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_unit_reparent_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_unit_reparent_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_unit_reassign_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_unit_reassign_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_operation_pause_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_operation_pause_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_operation_resume_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_operation_resume_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_operation_stop_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_operation_stop_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_operation_finalize_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_operation_finalize_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_dispatch_plan_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_dispatch_plan_http_json ~state request
-    ~args
-
-let command_plane_dispatch_assign_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_dispatch_assign_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_dispatch_rebalance_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_dispatch_rebalance_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_dispatch_escalate_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_dispatch_escalate_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_dispatch_recall_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_dispatch_recall_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_dispatch_tick_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_dispatch_tick_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_policy_status_http_json ~state =
-  Server_command_plane_http.command_plane_policy_status_http_json ~state
-
-let command_plane_policy_approve_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_policy_approve_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_policy_deny_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_policy_deny_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_policy_update_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_policy_update_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_policy_freeze_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_policy_freeze_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_policy_kill_switch_http_json ~state request ~args =
-  Server_command_plane_http.command_plane_policy_kill_switch_http_json
-    ~deps:(command_plane_http_deps ~state ()) ~state request ~args
-
-let command_plane_help_http_json () =
-  Server_command_plane_http.command_plane_help_http_json ()
-
-let command_plane_error_json message =
-  Server_command_plane_http.command_plane_error_json message
 
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in

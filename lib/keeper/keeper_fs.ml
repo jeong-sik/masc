@@ -65,13 +65,13 @@ let save_json_atomic (path : string) (json : Yojson.Safe.t) : unit =
 (* Standard Keeper Paths                                            *)
 (* ================================================================ *)
 
-let keeper_dir (config : Room.config) : string =
-  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
+let keeper_dir (config : Coord.config) : string =
+  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
   ensure_dir d
 
-let session_base_dir (config : Room.config) : string =
-  let d = Filename.concat (Room.masc_root_dir config) "traces" in
+let session_base_dir (config : Coord.config) : string =
+  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
   ensure_dir d
 
-let keeper_session_dir (config : Room.config) (trace_id : string) : string =
+let keeper_session_dir (config : Coord.config) (trace_id : string) : string =
   Filename.concat (session_base_dir config) trace_id

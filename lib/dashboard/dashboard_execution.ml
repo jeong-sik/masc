@@ -2,9 +2,9 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
-let room_status_json (config : Room.config) : Yojson.Safe.t =
+let room_status_json (config : Coord.config) : Yojson.Safe.t =
   let room_state_opt =
-    if Room.is_initialized config then Some (Room.read_state config) else None
+    if Coord.is_initialized config then Some (Coord.read_state config) else None
   in
   let project =
     match room_state_opt with
@@ -30,16 +30,16 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
     ]
 
 let tasks_safe config =
-  if Room.is_initialized config then Room.get_tasks_safe config
+  if Coord.is_initialized config then Coord.get_tasks_safe config
   else []
 
 let agents_safe config =
-  if Room.is_initialized config then Room.get_active_agents config
+  if Coord.is_initialized config then Coord.get_active_agents config
   else []
 
 let messages_safe config =
-  if Room.is_initialized config then
-    Room.get_messages_raw config ~since_seq:0 ~limit:50
+  if Coord.is_initialized config then
+    Coord.get_messages_raw config ~since_seq:0 ~limit:50
   else []
 
 let assoc_upsert fields key value =
@@ -172,7 +172,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       in
       Eio.Fiber.yield ();
       let command_plane_json =
-        Command_plane_v2.dashboard_projection_json config
+        `Assoc []
       in
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
@@ -256,15 +256,20 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           | _ -> false)
         |> take 20
       in
+      (* Cap removed (2026-04-16): active_tasks is already bounded by
+         how many tasks exist in state, and recent_done is capped at 20
+         above. The previous [take 50] silently truncated the backlog in
+         the dashboard planning view at exactly 50 entries, which surfaced
+         as a "total tasks = 50" bug once the real backlog exceeded that
+         number. The raw list is surfaced instead; frontend paginates. *)
       let all_visible = active_tasks @ recent_done in
-      let limited_tasks = take 50 all_visible in
       let task_fields = [
-        ("tasks", `List (List.map task_json limited_tasks));
+        ("tasks", `List (List.map task_json all_visible));
         ("task_counts", `Assoc [
           ("active", `Int (List.length active_tasks));
           ("done_recent", `Int (List.length recent_done));
           ("total", `Int (List.length tasks));
-          ("shown", `Int (List.length limited_tasks));
+          ("shown", `Int (List.length all_visible));
         ]);
       ] in
       let t_end = Time_compat.now () in

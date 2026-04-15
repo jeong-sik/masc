@@ -14,7 +14,7 @@ open Tool_args
 
 (* Context required by code tools *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -65,12 +65,12 @@ let validate_path config path =
     if String.contains path '\x00' then
       Error (IoError "Path contains null byte")
     else
-    match Room_git.git_root ~base_path:config.Room.base_path with
+    match Coord_git.git_root ~base_path:config.Coord.base_path with
     | None -> Error (IoError "Not in a git repository")
     | Some git_root ->
     let absolute_path =
       if Filename.is_relative path then
-        Filename.concat config.Room.base_path path
+        Filename.concat config.Coord.base_path path
       else
         path
     in
@@ -104,7 +104,7 @@ let validate_path config path =
 
    Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
 let validate_read_path ~agent_name config path =
-  let base_path = config.Room.base_path in
+  let base_path = config.Coord.base_path in
   match validate_path config path with
   | Error e -> Error e
   | Ok canonical_string ->
@@ -307,18 +307,39 @@ let handle_code_search ctx args =
         ] in
         (true, Yojson.Safe.to_string response)
     | Unix.WEXITED 2, output ->
-        (* rg error: invalid regex, missing file, etc. Provide actionable help. *)
+        (* rg error: invalid regex, missing file, etc. Pick the right hint
+           by scanning the rg output, since exit-2 is overloaded. *)
+        let trimmed_out = String.trim output in
+        let mentions_no_file =
+          let lower = String.lowercase_ascii trimmed_out in
+          let contains s sub =
+            let ls = String.length s and lsub = String.length sub in
+            let rec scan i =
+              if i + lsub > ls then false
+              else if String.sub s i lsub = sub then true
+              else scan (i + 1)
+            in
+            scan 0
+          in
+          contains lower "no such file" || contains lower "is a directory"
+        in
         let hint =
-          if is_regex then
+          if mentions_no_file then
+            Printf.sprintf
+              "Search target not found. The 'path' argument resolved to %S — check that it \
+               exists and is reachable from the keeper's allowed roots. (Empty/missing 'path' \
+               defaults to '.')"
+              search_path
+          else if is_regex then
             "Regex error: check your pattern syntax, or set is_regex=false for literal search."
           else
             "Literal search failed. If your query contains regex chars (*+?[](){}^$|.\\), \
              try simplifying the query or set is_regex=true with a valid regex."
         in
         (false, Printf.sprintf "❌ %s\nrg output: %s" hint
-           (if output = "" then "(empty)" else
-             let s = String.trim output in
-             if String.length s > 300 then String.sub s 0 300 ^ "..." else s))
+           (if trimmed_out = "" then "(empty)"
+            else if String.length trimmed_out > 300 then String.sub trimmed_out 0 300 ^ "..."
+            else trimmed_out))
     | status, output ->
         let code = match status with
           | Unix.WEXITED n -> Printf.sprintf "exit %d" n

@@ -165,7 +165,7 @@ let test_generate_id_unique () =
    Eio Helpers
    ============================================================ *)
 
-module Room_utils = Room_utils
+module Coord_utils = Coord_utils
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -183,7 +183,7 @@ let make_test_dir () =
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir
 
-let make_test_config ~base_path : Room_utils.config =
+let make_test_config ~base_path : Coord_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
@@ -197,7 +197,7 @@ let make_test_config ~base_path : Room_utils.config =
     workspace_path = base_path;
     lock_expiry_minutes = 5;
     backend_config;
-    backend = Room_utils.Memory memory_backend;
+    backend = Coord_utils.Memory memory_backend;
   }
 
 let with_eio_env f =

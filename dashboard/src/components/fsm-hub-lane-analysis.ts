@@ -18,8 +18,9 @@ export function isObservedStall(
 ): boolean {
   if (key === 'phase') {
     if (value === 'Failing') return observedForSec >= 90
+    if (value === 'Overflowed') return observedForSec >= 60
     if (value === 'Compacting') return observedForSec >= 90
-    if (value === 'HandingOff' || value === 'Draining' || value === 'Restarting') return observedForSec >= 60
+    if (value === 'HandingOff' || value === 'Draining') return observedForSec >= 60
     return false
   }
   if (key === 'turn') {
@@ -55,23 +56,17 @@ function laneMeaning(
             ? { tone: 'info', meaning: 'parent lifecycle is healthy while the live turn advances' }
             : { tone: 'ok', meaning: 'no live turn; waiting for the next observation cycle' }
         case 'Failing':
-          return { tone: 'error', meaning: 'recovery owns the keeper lifecycle until reconcile clears' }
+          return { tone: 'error', meaning: 'the parent lifecycle is degraded and must clear before healthy turns resume' }
+        case 'Overflowed':
+          return { tone: 'warn', meaning: 'context overflow has been latched and must resolve before healthy turns resume' }
         case 'Compacting':
           return { tone: 'warn', meaning: 'post-turn compaction currently owns the lifecycle' }
         case 'HandingOff':
           return { tone: 'warn', meaning: 'handoff is draining this keeper toward stop' }
         case 'Draining':
           return { tone: 'warn', meaning: 'the keeper is draining in-flight work before stop' }
-        case 'Restarting':
-          return { tone: 'warn', meaning: 'boot path is re-entering Running after restart' }
-        case 'Paused':
-          return { tone: 'info', meaning: 'operator pause keeps the lifecycle intentionally frozen' }
-        case 'Stopped':
-        case 'Offline':
+        case 'Stable':
           return { tone: 'info', meaning: 'no lifecycle activity is currently expected' }
-        case 'Crashed':
-        case 'Dead':
-          return { tone: 'error', meaning: 'the lifecycle is terminal until an external recovery path runs' }
         default:
           return { tone: 'info', meaning: 'lifecycle state observed' }
       }

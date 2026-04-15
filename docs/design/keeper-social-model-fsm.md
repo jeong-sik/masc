@@ -21,13 +21,18 @@ Related issue:
 
 - keeper creation persists `social_model` into keeper runtime state
 - unified turn paths propagate `SOCIAL_MODEL`, `BELIEF_SUMMARY`, `ACTIVE_DESIRE`, `CURRENT_INTENTION`, `BLOCKER`, `NEED`, `SPEECH_ACT`, and `DELIVERY_SURFACE`
-- the active baseline is effectively `bdi_speech_v1`
+- the active baseline is `bdi_speech_v1`
+- a first-class `social_model -> implementation` registry dispatches between production modules
+- `magentic_ledger_v1` now exists as a second implementation path to validate the abstraction
+- `magentic_ledger_v1` now routes through an explicit phase/event FSM
+  (`lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml`)
+  with a matching TLA+ spec
+  (`specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla`)
 
 ### What is not real yet
 
-- no first-class `social_model -> implementation` registry
-- no per-model `state / input / transition / output` contract
-- no second production social-model implementation to prove the abstraction
+- `social_model` ownership is still runtime-centric rather than persona-default + override + snapshot
+- richer per-model state typing is still hidden behind the shared adapter surface
 
 ## Terminology
 
@@ -169,6 +174,7 @@ Constraint:
 - unit tests for per-model transitions
 - integration tests for unified turn dispatch
 - explicit unknown-model tests
+- TLA+ state/event set alignment for any model-specific FSM with a closed phase set
 
 ## Acceptance Criteria
 

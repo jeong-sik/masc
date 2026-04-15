@@ -314,7 +314,7 @@ export function deriveSwimlaneSegments(
   return segments
 }
 
-function laneTransitionCount(
+export function laneTransitionCount(
   observations: CompositeObservation[],
   key: keyof Omit<CompositeObservation, 'ts'>,
 ): number {
@@ -1601,12 +1601,41 @@ function SwimlaneTimeline({
     hour12: false,
   })
   const fmtAbs = (ts: number) => absFormatter.format(new Date(ts * 1000))
+  const laneDensity: Record<string, number> = {}
+  let busiestLane = ''
+  let busiestCount = 0
+  for (const lane of SWIMLANE_LANES) {
+    const count = laneTransitionCount(observations, lane.key)
+    laneDensity[lane.short] = count
+    if (count > busiestCount) {
+      busiestLane = lane.short
+      busiestCount = count
+    }
+  }
 
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3" data-fsm-swimlane-root="true">
-      <div class="mb-2 flex items-baseline justify-between">
+      <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
         <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
           Swimlane Timeline
+        </div>
+        <div class="flex items-center gap-1 flex-wrap">
+          ${SWIMLANE_LANES.map(lane => {
+            const count = laneDensity[lane.short] ?? 0
+            const isBusiest = busiestLane === lane.short && count > 0
+            return html`
+              <span
+                class=${`rounded-full border px-1.5 py-0.5 text-[9px] font-mono tabular-nums ${
+                  count === 0
+                    ? 'text-[var(--text-dim)] border-[var(--white-8)]'
+                    : isBusiest
+                      ? 'text-[#818cf8] border-[rgba(129,140,248,0.4)] bg-[rgba(129,140,248,0.08)]'
+                      : 'text-[var(--text-body)] border-[var(--white-10)]'
+                }`}
+                title=${`${lane.label} · ${count} transition${count === 1 ? '' : 's'} in this window`}
+              >${lane.short} ${count}</span>
+            `
+          })}
         </div>
         <div class="text-[9px] font-mono text-[var(--text-dim)]">
           <span>${fmtAbs(spanStart)}</span>

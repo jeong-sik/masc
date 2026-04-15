@@ -11,6 +11,7 @@ import {
   deriveTimeAxisTicks,
   deriveTransitionHistory,
   isTransitionInSegment,
+  laneTransitionCount,
   type CompositeObservation,
   type HoveredSegment,
 } from './fsm-hub'
@@ -372,5 +373,38 @@ describe('isTransitionInSegment', () => {
     ]
     const index = history.findIndex(e => isTransitionInSegment(e, segKSM))
     expect(index).toBe(-1)
+  })
+})
+
+describe('laneTransitionCount', () => {
+  it('returns zero when the lane never changed', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 110, turn: 'idle' }),
+      observation({ ts: 120, turn: 'idle' }),
+    ]
+    expect(laneTransitionCount(observations, 'turn')).toBe(0)
+  })
+
+  it('counts each value change between adjacent observations', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 110, turn: 'prompting' }),
+      observation({ ts: 120, turn: 'executing' }),
+      observation({ ts: 130, turn: 'executing' }),
+      observation({ ts: 140, turn: 'idle' }),
+    ]
+    expect(laneTransitionCount(observations, 'turn')).toBe(3)
+  })
+
+  it('is lane-independent — different lanes count independently', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle', phase: 'Running' }),
+      observation({ ts: 110, turn: 'prompting', phase: 'Running' }),
+      observation({ ts: 120, turn: 'prompting', phase: 'Compacting' }),
+    ]
+    expect(laneTransitionCount(observations, 'turn')).toBe(1)
+    expect(laneTransitionCount(observations, 'phase')).toBe(1)
+    expect(laneTransitionCount(observations, 'decision')).toBe(0)
   })
 })

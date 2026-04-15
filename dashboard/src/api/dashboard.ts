@@ -770,9 +770,12 @@ export interface DashboardVerificationRef {
   value: string
 }
 
-export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {
+export function fetchDashboardMissionBriefing(
+  force = false,
+  opts?: { signal?: AbortSignal },
+): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/mission/briefing${query}`)
+  return get(`/api/v1/dashboard/mission/briefing${query}`, { signal: opts?.signal })
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {

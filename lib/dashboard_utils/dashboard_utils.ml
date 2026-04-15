@@ -138,6 +138,48 @@ let string_of_health_level = function
   | HL_ok -> "ok"
   | HL_unknown -> "unknown"
 
+(** Session lifecycle — parsed from session JSON at call sites.
+    The variant makes the different terminal sets visible:
+    - [is_session_terminal]: Completed | Cancelled | Failed | Stopped
+    - [is_session_blocked]: Failed | Cancelled | Interrupted
+    - dashboard_mission terminal: Completed | Interrupted | Cancelled | Expired *)
+type session_lifecycle =
+  | SL_active
+  | SL_running
+  | SL_paused
+  | SL_completed
+  | SL_cancelled
+  | SL_failed
+  | SL_stopped
+  | SL_interrupted
+  | SL_expired
+  | SL_unknown
+
+let session_lifecycle_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "active" -> SL_active
+  | "running" -> SL_running
+  | "paused" -> SL_paused
+  | "completed" -> SL_completed
+  | "cancelled" -> SL_cancelled
+  | "failed" -> SL_failed
+  | "stopped" -> SL_stopped
+  | "interrupted" -> SL_interrupted
+  | "expired" -> SL_expired
+  | _ -> SL_unknown
+
+let string_of_session_lifecycle = function
+  | SL_active -> "active"
+  | SL_running -> "running"
+  | SL_paused -> "paused"
+  | SL_completed -> "completed"
+  | SL_cancelled -> "cancelled"
+  | SL_failed -> "failed"
+  | SL_stopped -> "stopped"
+  | SL_interrupted -> "interrupted"
+  | SL_expired -> "expired"
+  | SL_unknown -> "unknown"
+
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, operator, command_plane modules. *)
 
@@ -156,11 +198,13 @@ let is_health_at_risk = function
   | HL_bad | HL_risk | HL_critical -> true
   | HL_warn | HL_degraded | HL_ok | HL_unknown -> false
 
-let is_session_terminal status =
-  List.mem status [ "completed"; "cancelled"; "failed"; "stopped" ]
+let is_session_terminal = function
+  | SL_completed | SL_cancelled | SL_failed | SL_stopped -> true
+  | SL_active | SL_running | SL_paused | SL_interrupted | SL_expired | SL_unknown -> false
 
-let is_session_blocked status =
-  List.mem status [ "failed"; "cancelled"; "interrupted" ]
+let is_session_blocked = function
+  | SL_failed | SL_cancelled | SL_interrupted -> true
+  | SL_active | SL_running | SL_paused | SL_completed | SL_stopped | SL_expired | SL_unknown -> false
 
 (** Dashboard tone — severity indicator for UI rendering.
     ADT eliminates catch-all patterns and enforces exhaustive matching.

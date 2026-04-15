@@ -666,6 +666,68 @@ cascade_name = "local_only"
        check (option string) "cascade preserved"
          (Some "local_only") d.cascade_name)
 
+let test_profile_max_turns_overrides () =
+  let input = {|
+[keeper]
+goal = "test"
+max_turns_per_call = 25
+max_turns_per_call_scheduled_autonomous = 3
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option int) "max_turns_per_call" (Some 25) d.max_turns_per_call;
+       check (option int) "max_turns_per_call_scheduled_autonomous"
+         (Some 3) d.max_turns_per_call_scheduled_autonomous;
+       check int "effective reactive uses override" 25
+         (KTP.effective_max_turns_per_call d);
+       (* autonomous is capped by reactive global cap, but 3 < env default 15 *)
+       check int "effective autonomous uses override" 3
+         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
+
+let test_profile_max_turns_defaults_when_absent () =
+  let input = {|
+[keeper]
+goal = "test"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option int) "max_turns_per_call absent" None d.max_turns_per_call;
+       check (option int) "max_turns_per_call_scheduled_autonomous absent"
+         None d.max_turns_per_call_scheduled_autonomous;
+       (* helpers fall back to env defaults (15 and min(global, 2)=2) *)
+       check int "effective reactive default" 15
+         (KTP.effective_max_turns_per_call d);
+       check int "effective autonomous default" 2
+         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
+
+let test_profile_max_turns_rejects_out_of_range () =
+  let input = {|
+[keeper]
+goal = "test"
+max_turns_per_call = 99
+max_turns_per_call_scheduled_autonomous = 0
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       (* Values are parsed as-is but clamp_max_turns_override rejects them,
+          so helpers fall back to env defaults. *)
+       check int "out-of-range reactive falls back" 15
+         (KTP.effective_max_turns_per_call d);
+       check int "zero autonomous falls back" 2
+         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
+
 let test_profile_normalizes_legacy_keeper_cascade_alias () =
   let input = {|
 [keeper]
@@ -780,6 +842,12 @@ let () =
             test_profile_ignores_legacy_allowed_providers;
           test_case "legacy keeper cascade alias normalized" `Quick
             test_profile_normalizes_legacy_keeper_cascade_alias;
+          test_case "max_turns overrides parsed and applied" `Quick
+            test_profile_max_turns_overrides;
+          test_case "max_turns defaults when absent" `Quick
+            test_profile_max_turns_defaults_when_absent;
+          test_case "max_turns rejects out-of-range values" `Quick
+            test_profile_max_turns_rejects_out_of_range;
         ] );
       ( "file_loading",
         [

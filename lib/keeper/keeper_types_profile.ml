@@ -152,6 +152,10 @@ type keeper_profile_defaults = {
   telemetry_feedback_window_hours : int option;
   cascade_name : string option;
   models : string list option;
+  (* Turn budget overrides. None = inherit env default
+     (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
+  max_turns_per_call : int option;
+  max_turns_per_call_scheduled_autonomous : int option;
 }
 
 type persona_summary = {
@@ -191,6 +195,8 @@ let empty_keeper_profile_defaults = {
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
+  max_turns_per_call = None;
+  max_turns_per_call_scheduled_autonomous = None;
   cascade_name = None;
   models = None;
 }
@@ -315,6 +321,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+        max_turns_per_call = int_ "max_turns_per_call";
+        max_turns_per_call_scheduled_autonomous =
+          int_ "max_turns_per_call_scheduled_autonomous";
         cascade_name = normalize_cascade_name_opt (str "cascade_name");
         models =
           (match strs "models" with
@@ -443,6 +452,11 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
+                max_turns_per_call =
+                  Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
+                max_turns_per_call_scheduled_autonomous =
+                  Safe_ops.json_int_opt
+                    "max_turns_per_call_scheduled_autonomous" keeper_json;
                 cascade_name =
                   normalize_cascade_name_opt
                     (Safe_ops.json_string_opt "cascade_name" keeper_json);
@@ -464,6 +478,27 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
        load_keeper_profile_defaults_from_persona name)
   | None ->
     load_keeper_profile_defaults_from_persona name
+
+(** Clamp a profile-provided max-turns override to [1, 50] — the same range
+    enforced by [Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call].
+    Values outside the range are rejected so a typo in TOML cannot silently
+    bypass the budget envelope. *)
+let clamp_max_turns_override : int option -> int option = function
+  | Some n when n >= 1 && n <= 50 -> Some n
+  | _ -> None
+
+let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =
+  match clamp_max_turns_override profile.max_turns_per_call with
+  | Some n -> n
+  | None -> Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+
+let effective_max_turns_per_call_scheduled_autonomous
+    (profile : keeper_profile_defaults) : int =
+  let global_cap = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call in
+  match clamp_max_turns_override profile.max_turns_per_call_scheduled_autonomous with
+  | Some n -> min n global_cap
+  | None ->
+    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
 
 type keeper_default_source_snapshot = {
   source_kind : string option;

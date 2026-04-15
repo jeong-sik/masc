@@ -1437,16 +1437,22 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let remaining_turn_budget_s () =
             Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
           in
+          let keeper_profile =
+            Keeper_types_profile.load_keeper_profile_defaults meta.name
+          in
           let do_run ~run_meta ~max_context ~run_generation ~is_retry
               ~oas_timeout_s =
             let max_idle_turns, max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
                   ( Env_config_keeper.KeeperKeepalive.max_idle_turns_reactive,
-                    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call )
+                    Keeper_types_profile.effective_max_turns_per_call
+                      keeper_profile )
               | Keeper_world_observation.Scheduled_autonomous ->
                   ( Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous,
-                    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous )
+                    Keeper_types_profile
+                    .effective_max_turns_per_call_scheduled_autonomous
+                      keeper_profile )
             in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
@@ -1471,9 +1477,12 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             let max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
-                  Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+                  Keeper_types_profile.effective_max_turns_per_call
+                    keeper_profile
               | Keeper_world_observation.Scheduled_autonomous ->
-                  Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+                  Keeper_types_profile
+                  .effective_max_turns_per_call_scheduled_autonomous
+                    keeper_profile
             in
             let attempt_result =
               match

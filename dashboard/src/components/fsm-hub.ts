@@ -232,6 +232,39 @@ export function deriveStateEntries(
   return result
 }
 
+export type SwimlaneSegment = {
+  from: number
+  to: number
+  value: string
+}
+
+/** Collapse consecutive observations of a single lane into run-length
+    segments. The final segment is extended to `boundsEnd` so the lane
+    visually reaches the right edge of the timeline instead of stopping
+    at the last observation ts. */
+export function deriveSwimlaneSegments(
+  observations: CompositeObservation[],
+  key: keyof Omit<CompositeObservation, 'ts'>,
+  boundsEnd: number,
+): SwimlaneSegment[] {
+  if (observations.length === 0) return []
+  const segments: SwimlaneSegment[] = []
+  for (let index = 0; index < observations.length; index += 1) {
+    const current = observations[index]
+    if (!current) continue
+    const last = segments[segments.length - 1]
+    if (last && last.value === current[key]) {
+      last.to = current.ts
+    } else {
+      if (last) last.to = current.ts
+      segments.push({ from: current.ts, to: current.ts, value: current[key] })
+    }
+  }
+  const tail = segments[segments.length - 1]
+  if (tail && boundsEnd > tail.to) tail.to = boundsEnd
+  return segments
+}
+
 function laneTransitionCount(
   observations: CompositeObservation[],
   key: keyof Omit<CompositeObservation, 'ts'>,
@@ -818,6 +851,9 @@ export function FsmHub() {
         ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
         <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
 
+        ${/* ── Zone 3b: Swimlane Timeline ── */ ''}
+        <${SwimlaneTimeline} observations=${view.observations} now=${now} />
+
         ${/* ── Zone 4: Health Grid ── */ ''}
         <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <${MeasurementCard} snapshot=${snapshot} />
@@ -1376,6 +1412,120 @@ const FIELD_COLOR: Record<string, string> = {
   KDP: 'text-[#818cf8]',
   KCL: 'text-[#818cf8]',
   KMC: 'text-[#f59e0b]',
+}
+
+// ── Zone 3b: Swimlane Timeline ──────────────────────────
+
+/** Run-length-encoded swimlane rendering. Each of the 5 sub-FSM lanes
+    is a horizontal strip segmented proportionally by the time each
+    value was held. Colors encode activity class rather than specific
+    state name: idle-like states fade into the background, active
+    states use indigo, and alarm-like states (crashed/failing/rejected/
+    exhausted) turn red so operators can scan across lanes for
+    correlated trouble at a glance. */
+const SWIMLANE_LANES: Array<{
+  key: keyof Omit<CompositeObservation, 'ts'>
+  label: string
+  short: string
+}> = [
+  { key: 'phase', label: 'Keeper Lifecycle', short: 'KSM' },
+  { key: 'turn', label: 'Turn Cycle', short: 'KTC' },
+  { key: 'decision', label: 'Decision', short: 'KDP' },
+  { key: 'cascade', label: 'Cascade', short: 'KCL' },
+  { key: 'compaction', label: 'Compaction', short: 'KMC' },
+]
+
+const IDLE_LIKE_VALUES = new Set([
+  'idle',
+  'undecided',
+  'accumulating',
+  'Offline',
+  'Paused',
+  'Stopped',
+])
+
+const ALARM_VALUES = new Set([
+  'Crashed',
+  'Failing',
+  'Dead',
+  'gate_rejected',
+  'exhausted',
+])
+
+function swimlaneSegmentColor(value: string): string {
+  if (ALARM_VALUES.has(value)) return 'bg-[rgba(239,68,68,0.5)]'
+  if (IDLE_LIKE_VALUES.has(value)) return 'bg-[rgba(255,255,255,0.04)]'
+  if (value === 'Compacting' || value === 'compacting') return 'bg-[rgba(245,158,11,0.45)]'
+  if (value === 'HandingOff') return 'bg-[rgba(167,139,250,0.5)]'
+  return 'bg-[rgba(129,140,248,0.45)]'
+}
+
+function SwimlaneTimeline({
+  observations,
+  now,
+}: {
+  observations: CompositeObservation[]
+  now: number
+}) {
+  if (observations.length === 0) {
+    return html`
+      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+        관측 타임라인 대기 — 관측이 쌓이면 레인별 세그먼트로 표시됩니다
+      </div>
+    `
+  }
+  const first = observations[0]
+  if (!first) return null
+  const spanStart = first.ts
+  const spanEnd = Math.max(now, observations[observations.length - 1]?.ts ?? now)
+  const spanWidth = Math.max(1, spanEnd - spanStart)
+  const windowDuration = fmtDuration(Math.max(0, spanEnd - spanStart))
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
+      <div class="mb-2 flex items-baseline justify-between">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          Swimlane Timeline
+        </div>
+        <div class="text-[9px] font-mono text-[var(--text-dim)]">
+          window <span class="text-[var(--text-body)]">${windowDuration}</span>
+          · <span class="text-[var(--text-body)]">${observations.length}</span> obs
+        </div>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        ${SWIMLANE_LANES.map(lane => {
+          const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
+          return html`
+            <div class="flex items-center gap-2">
+              <div class="w-[44px] shrink-0 text-[9px] font-mono font-semibold text-[var(--text-muted)]">
+                ${lane.short}
+              </div>
+              <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="img" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
+                ${segments.map(seg => {
+                  const pct = ((seg.to - seg.from) / spanWidth) * 100
+                  const holdFor = fmtDuration(Math.max(0, seg.to - seg.from))
+                  return html`
+                    <div
+                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-all duration-300 border-r border-[rgba(0,0,0,0.25)] last:border-r-0`}
+                      style=${`width: ${pct.toFixed(2)}%`}
+                      title=${`${lane.short} · ${seg.value} · ${holdFor}`}
+                    ></div>
+                  `
+                })}
+              </div>
+            </div>
+          `
+        })}
+      </div>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-[9px] text-[var(--text-dim)]">
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(129,140,248,0.45)]"></span>active</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(245,158,11,0.45)]"></span>compact</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(167,139,250,0.5)]"></span>handoff</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]"></span>alarm</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[rgba(255,255,255,0.04)]"></span>idle</span>
+      </div>
+    </div>
+  `
 }
 
 function TransitionTrail({

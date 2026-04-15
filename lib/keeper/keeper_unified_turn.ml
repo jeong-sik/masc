@@ -66,7 +66,7 @@ let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
 
     These errors may recur with the same payload, so they are NOT
     eligible for same-turn retry.  They ARE eligible for auto-recovery
-    (skip manual reconcile) when all committed tools are reconcile-safe:
+    when all committed tools are reconcile-safe (idempotent/board-like):
     the keeper's next heartbeat cycle will build a fresh prompt. *)
 let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -1521,7 +1521,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                     else "transient error"
                   in
                   Log.Keeper.warn
-                    "%s: %s after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (error: %s)"
+                    "%s: %s after committed reconcile-safe tool(s) [%s] — auto-recovering (error: %s)"
                     meta.name reason
                     (String.concat ", " committed_tools)
                     err_preview;
@@ -1663,12 +1663,13 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             then begin
               (* Timeouts are inherently transient — the provider was
                  reachable (tools executed) but took too long.  Board-only
-                 committed tools are duplicate-tolerant, so we skip
-                 manual_reconcile.  Unlike the retry_loop path, no
-                 is_transient check is needed: a wall-clock timeout after
-                 successful tool execution is always transient by nature. *)
+                 committed tools are duplicate-tolerant, so we auto-recover
+                 instead of recording an integrity failure.  Unlike the
+                 retry_loop path, no is_transient check is needed: a
+                 wall-clock timeout after successful tool execution is
+                 always transient by nature. *)
               Log.Keeper.warn
-                "%s: turn wall-clock timeout after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (timeout: %s)"
+                "%s: turn wall-clock timeout after committed reconcile-safe tool(s) [%s] — auto-recovering (timeout: %s)"
                 meta.name
                 (String.concat ", " committed_tools)
                 msg;
@@ -1700,7 +1701,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               in
               post_commit_failure_reason := Some failure_reason;
               Log.Keeper.error
-                "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure, manual reconcile required"
+                "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure; evidence recorded for next-turn observation"
                 meta.name
                 (String.concat ", " committed_tools);
               Error reclassified

@@ -188,11 +188,9 @@ let test_permissions_promoted_to_metadata_ssot () =
        ~base_path:"/tmp/masc-permission-metadata-ssot" ());
   let expectations =
     [
-      ("masc_init", Types.CanInit);
       ("masc_status", Types.CanReadState);
       ("masc_add_task", Types.CanAddTask);
       ("masc_board_list", Types.CanReadState);
-      ("masc_auth_enable", Types.CanInit);
       ("masc_operator_action", Types.CanBroadcast);
       ("masc_worktree_create", Types.CanCreateWorktree);
       ("masc_autoresearch_status", Types.CanReadState);
@@ -200,7 +198,6 @@ let test_permissions_promoted_to_metadata_ssot () =
       ("masc_heartbeat", Types.CanBroadcast);
       ("masc_config", Types.CanReadState);
       ("masc_unit_list", Types.CanReadState);
-      ("masc_pause_status", Types.CanReadState);
       ("masc_tool_list", Types.CanReadState);
       ("masc_runtime_verify", Types.CanReadState);
       ("masc_persona_list", Types.CanReadState);

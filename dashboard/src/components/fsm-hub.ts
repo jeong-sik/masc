@@ -135,20 +135,25 @@ export function FsmHub() {
     [storeKeeperList],
   )
   useEffect(() => {
-    if (storeNames.length > 0) return
+    if (storeNames.length > 0 || gateKeeperNames.length > 0) return
     let cancelled = false
     void (async () => {
       try {
         const data = await fetchGateKeepers()
-        if (!cancelled) {
-          setGateKeeperNames(data.keepers.map(k => k.name).sort())
-        }
+        if (cancelled) return
+        const next = data.keepers.map(k => k.name).sort()
+        setGateKeeperNames(prev =>
+          prev.length === next.length && prev.every((v, i) => v === next[i])
+            ? prev
+            : next,
+        )
       } catch {
-        // gate endpoint may require auth — silent fallback
+        // Gate endpoint auth failure or network error — leave names empty
+        // so the primary store path can populate once shell refresh lands.
       }
     })()
     return () => { cancelled = true }
-  }, [storeNames.length, pollTick])
+  }, [storeNames.length, gateKeeperNames.length, pollTick])
 
   const keeperNames = storeNames.length > 0 ? storeNames : gateKeeperNames
   const activeSelected = useMemo(() => {

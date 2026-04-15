@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import type { GateKeepersData } from '../api/gate'
+import { normalizeKeepers } from '../keeper-store-normalize'
 import { deriveStateEntries, deriveSwimlaneSegments } from './fsm-hub'
 
 /** Server-shaped keeper composite snapshot matching the actual
@@ -112,8 +113,8 @@ describe('FSM Hub integration — API response shape', () => {
   })
 
   describe('downstream derivers tolerate real-shape observations', () => {
-    const obsFromSnapshot = (snap: KeeperCompositeSnapshot, tsOverride?: number) => ({
-      ts: tsOverride ?? snap.ts,
+    const obsFromSnapshot = (snap: KeeperCompositeSnapshot, ts: number) => ({
+      ts,
       phase: snap.phase,
       turn: snap.turn_phase,
       decision: snap.decision.stage,
@@ -130,9 +131,14 @@ describe('FSM Hub integration — API response shape', () => {
     })
 
     it('deriveSwimlaneSegments handles the full is_live=true projection', () => {
-      // After #7319, is_live with no guardrail yields decision='guard_ok', cascade='trying'
       const obsIdle = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obsLive = { ...obsIdle, ts: 110, turn: 'executing', decision: 'guard_ok', cascade: 'trying' }
+      const obsLive = {
+        ...obsIdle,
+        ts: 110,
+        turn: 'executing' satisfies KeeperCompositeSnapshot['turn_phase'],
+        decision: 'guard_ok' satisfies KeeperCompositeSnapshot['decision']['stage'],
+        cascade: 'trying' satisfies KeeperCompositeSnapshot['cascade']['state'],
+      }
       const segments = deriveSwimlaneSegments([obsIdle, obsLive], 'decision', 200)
       expect(segments).toHaveLength(2)
       expect(segments[0]?.value).toBe('undecided')
@@ -140,15 +146,15 @@ describe('FSM Hub integration — API response shape', () => {
     })
   })
 
-  describe('known-broken shapes that must still fail loudly', () => {
-    it('a shell response missing the keepers field is the original bug — document the expected shape', () => {
-      const shellWithNullKeepers = { keepers: null as null, configured_keepers: 12 }
-      // Demonstrate: the store reads data.keepers, not data.configured_keepers.
-      // If shell ever returns keepers: null again, the frontend silently renders empty.
-      // FsmHub fix (#7315) works around this via gate fallback — but the test below
-      // pins the failure mode so future refactors don't accidentally regress.
-      expect(shellWithNullKeepers.keepers).toBeNull()
-      expect(shellWithNullKeepers.configured_keepers).toBe(12)
+  describe('store normalizer against the regression shape', () => {
+    it('normalizeKeepers(null) and normalizeKeepers(undefined) yield an empty array — the failure mode that triggered the v8-v22 blind spot', () => {
+      expect(normalizeKeepers(null)).toEqual([])
+      expect(normalizeKeepers(undefined)).toEqual([])
+    })
+
+    it('normalizeKeepers ignores the count-only "configured_keepers" field the shell actually sends', () => {
+      const shellShape: Record<string, unknown> = { configured_keepers: 12 }
+      expect(normalizeKeepers(shellShape.keepers)).toEqual([])
     })
   })
 })

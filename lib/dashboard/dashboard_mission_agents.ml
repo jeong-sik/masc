@@ -51,8 +51,8 @@ type session_context = {
   created_by : string option;
   origin_kind : string;
   namespace : string option;
-  status : string;
-  health : string;
+  status : Dashboard_utils.session_lifecycle;
+  health : Dashboard_utils.health_level;
   member_names : string list;
   started_at : string option;
   elapsed_sec : int option;
@@ -195,8 +195,8 @@ let read_recent_room_event_lines config ~limit =
       month_dirs;
     List.rev !collected
 
-let is_session_concluded (status : string) =
-  match Dashboard_utils.session_lifecycle_of_string status with
+let is_session_concluded (status : Dashboard_utils.session_lifecycle) =
+  match status with
   | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled -> true
   | SL_active | SL_running | SL_paused | SL_failed | SL_stopped | SL_expired | SL_unknown -> false
 

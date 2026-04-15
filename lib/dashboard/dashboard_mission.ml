@@ -8,8 +8,8 @@ type session_context = Dashboard_mission_assembly.session_context = {
   created_by : string option;
   origin_kind : string;
   namespace : string option;
-  status : string;
-  health : string;
+  status : Dashboard_utils.session_lifecycle;
+  health : Dashboard_utils.health_level;
   member_names : string list;
   started_at : string option;
   elapsed_sec : int option;
@@ -212,9 +212,11 @@ let _build_session_context session_json _cards =
       else
         "live=recent_turns · planned=known_members"
     in
-    let status = session_status_string session_json in
-    let status_lc = Dashboard_utils.session_lifecycle_of_string status in
-    let is_terminal = match status_lc with
+    let status =
+      Dashboard_utils.session_lifecycle_of_string
+        (session_status_string session_json)
+    in
+    let is_terminal = match status with
       | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled | SL_expired -> true
       | SL_active | SL_running | SL_paused | SL_failed | SL_stopped | SL_unknown -> false
     in
@@ -253,15 +255,18 @@ let _build_session_context session_json _cards =
         health =
           (if is_terminal then
              (* Terminal sessions get neutral health — no false alarms *)
-             "ok"
+             Dashboard_utils.HL_ok
            else
-             match session_card with
-             | Some card ->
-                 trim_to_option (string_field "health" card)
-                 |> Option.value ~default:"ok"
-             | None ->
-                 trim_to_option (string_field "status" team_health)
-                 |> Option.value ~default:"ok");
+             let raw =
+               match session_card with
+               | Some card ->
+                   trim_to_option (string_field "health" card)
+                   |> Option.value ~default:"ok"
+               | None ->
+                   trim_to_option (string_field "status" team_health)
+                   |> Option.value ~default:"ok"
+             in
+             Dashboard_utils.health_level_of_string raw);
         member_names;
         started_at = trim_to_option (string_field "created_at_iso" meta);
         elapsed_sec =
@@ -508,8 +513,11 @@ let _build_briefs_from_sessions sessions attention_queue actions =
          in
          let health_tone =
            match top_attention_json with
-           | Some attention -> string_field ~default:session.health "severity" attention
-           | None -> session.health
+           | Some attention ->
+               string_field
+                 ~default:(Dashboard_utils.string_of_health_level session.health)
+                 "severity" attention
+           | None -> Dashboard_utils.string_of_health_level session.health
          in
          let related_attention_count = List.length related_attentions in
          let sort_severity = severity_rank health_tone in
@@ -522,8 +530,8 @@ let _build_briefs_from_sessions sessions attention_queue actions =
                ("goal", `String session.goal);
                ("created_by", json_string_option session.created_by);
                ("namespace", json_string_option session.namespace);
-               ("status", `String session.status);
-               ("health", `String session.health);
+               ("status", `String (Dashboard_utils.string_of_session_lifecycle session.status));
+               ("health", `String (Dashboard_utils.string_of_health_level session.health));
                ("member_names", `List (List.map (fun value -> `String value) session.member_names));
                ("started_at", json_string_option session.started_at);
                ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);

@@ -1518,6 +1518,12 @@ let run_turn
            Capture now once so ts_unix and hook_ms are consistent. *)
               (let now = Time_compat.now () in
                let hook_elapsed_ms = Keeper_timing.round1 ((now -. hook_t0) *. 1000.0) in
+               Keeper_registry.set_turn_decision_stage
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Decision_tool_policy_selected;
+               Keeper_registry.set_turn_cascade_state
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Cascade_selecting;
                let disclosure_json =
                  `Assoc
                    [ "ts_unix", `Float now

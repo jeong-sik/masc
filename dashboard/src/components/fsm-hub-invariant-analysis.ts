@@ -42,10 +42,6 @@ function invariantDetail(
       return ok
         ? 'This turn has not emitted competing measurement snapshots.'
         : 'More than one measurement event appears to own the same turn.'
-    case 'recovery_two_store_sync':
-      return ok
-        ? 'Recovery data and FSM condition are synchronized.'
-        : `recovery.data_record=${String(snapshot.recovery.data_record)}, recovery.fsm_condition=${String(snapshot.recovery.fsm_condition)}.`
   }
 }
 
@@ -116,30 +112,6 @@ export function deriveOperationalInsight(
 
   const lanes = precomputedLanes ?? deriveObservedLaneSummaries(snapshot, observations, now)
   const stalledLane = lanes.find(lane => lane.stalled)
-  if (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition) {
-    return {
-      tone: 'error',
-      headline: 'Recovery stores diverged',
-      detail: 'The manual-reconcile data record and FSM condition disagree, which should be unreachable under RFC-0003.',
-      nextStep: 'Reconcile the recovery stores before treating the lifecycle as healthy again.',
-      evidence: [
-        `data ${String(snapshot.recovery.data_record)}`,
-        `fsm ${String(snapshot.recovery.fsm_condition)}`,
-      ],
-    }
-  }
-  if (snapshot.recovery.data_record && snapshot.recovery.fsm_condition) {
-    return {
-      tone: 'warn',
-      headline: 'Manual reconcile is pending',
-      detail: 'Both recovery stores agree the keeper is waiting for manual reconcile to clear.',
-      nextStep: 'Resolve the reconcile path before expecting Failing to return to Running.',
-      evidence: [
-        `KSM ${snapshot.phase}`,
-        'manual reconcile required',
-      ],
-    }
-  }
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
     return {
       tone: 'error',
@@ -234,7 +206,7 @@ export function deriveOperationalInsight(
   return {
     tone: 'info',
     headline: 'Live turn is progressing normally',
-    detail: 'No invariant drift or recovery issue is visible; the sub-FSMs look aligned for the current live turn.',
+    detail: 'No invariant drift is visible; the sub-FSMs look aligned for the current live turn.',
     nextStep: nextExpectedStep(snapshot),
     evidence: [
       `KSM ${snapshot.phase}`,

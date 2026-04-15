@@ -21,7 +21,7 @@ module KTP = Masc_mcp.Keeper_tool_policy
 module Reg = Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
 module KTypes = Masc_mcp.Keeper_types
-module Kfs = Masc_mcp.Keeper_fs
+module KSM = Masc_mcp.Keeper_state_machine
 
 let read_file path =
   let ic = open_in path in
@@ -94,7 +94,9 @@ let rec find_repo_root dir =
       find_repo_root parent
 
 let project_root () =
-  find_repo_root (Sys.getcwd ())
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> find_repo_root (Filename.dirname Sys.executable_name)
 
 let keeper_composite_lifecycle_tla () =
   Filename.concat
@@ -279,12 +281,6 @@ let test_cascade_mermaid_healthy_no_reason_note () =
 (* ── Composite Observer: turn-scoped state (issue #7122) ─ *)
 
 let test_obs_bp = "/tmp/test-composite-obs"
-let test_obs_masc_root = Filename.concat test_obs_bp ".masc"
-
-let legacy_manual_reconcile_path name =
-  Filename.concat
-    (Filename.concat test_obs_masc_root "keepers")
-    (name ^ ".manual_reconcile.json")
 
 let make_obs_meta name =
   let json = `Assoc [
@@ -296,6 +292,28 @@ let make_obs_meta name =
   match KTypes.meta_of_json json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_obs_meta failed: " ^ err)
+
+let dispatch_obs_measurement name =
+  ignore
+    (Reg.dispatch_event
+       ~base_path:test_obs_bp
+       name
+       (KSM.Context_measured
+          {
+            context_ratio = 0.42;
+            message_count = 12;
+            token_count = 3456;
+            auto_rules =
+              {
+                KSM.reflect = false;
+                plan = true;
+                compact = false;
+                handoff = false;
+                guardrail_stop = false;
+                guardrail_reason = None;
+                goal_drift = 0.18;
+              };
+          }))
 
 let test_observer_idle_when_no_turn () =
   Eio_main.run @@ fun _env ->
@@ -313,12 +331,29 @@ let test_observer_executing_during_turn () =
   let name = "obs-active" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_trying;
   (match Reg.get ~base_path:test_obs_bp name with
    | None -> Alcotest.fail "entry missing after mark_turn_started"
    | Some entry ->
      let snap = Obs.observe entry in
      check string "in-turn keeper has Executing turn phase"
        "executing" (Obs.turn_phase_to_string snap.ktc_turn_phase))
+
+let test_observer_prompting_at_turn_start () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-prompting" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing after mark_turn_started"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "fresh turn starts in Prompting"
+      "prompting" (Obs.turn_phase_to_string snap.ktc_turn_phase);
+    check string "fresh turn starts undecided"
+      "undecided" (Obs.decision_stage_to_string snap.kdp_decision);
+    check string "fresh turn starts with idle cascade"
+      "idle" (Obs.cascade_state_to_string snap.kcl_cascade_state)
 
 let test_observer_no_stale_after_turn_end () =
   Eio_main.run @@ fun _env ->
@@ -377,6 +412,11 @@ let test_observer_last_outcome_populated_after_turn () =
   let name = "obs-last-outcome" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
+  dispatch_obs_measurement name;
+  Reg.mark_turn_measurement ~base_path:test_obs_bp name;
+  Reg.set_turn_decision_stage ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_done;
+  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
   Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing"
@@ -387,7 +427,13 @@ let test_observer_last_outcome_populated_after_turn () =
      | None -> Alcotest.fail "last_outcome should be Some after a finished turn"
      | Some lo ->
        check bool "last_outcome.turn_id positive" true (lo.turn_id > 0);
-       check bool "last_outcome.ended_at non-zero" true (lo.ended_at > 0.0))
+       check bool "last_outcome.ended_at non-zero" true (lo.ended_at > 0.0);
+       check string "last_outcome decision persisted"
+         "tool_policy_selected" (Obs.decision_stage_to_string lo.decision_stage);
+       check string "last_outcome cascade persisted"
+         "done" (Obs.cascade_state_to_string lo.cascade_state);
+       check (option string) "last_outcome selected_model persisted"
+         (Some "glm-4.5") lo.selected_model)
 
 let test_observer_last_outcome_preserved_across_finish_idempotent () =
   Eio_main.run @@ fun _env ->
@@ -411,37 +457,32 @@ let test_observer_last_outcome_preserved_across_finish_idempotent () =
   check bool "last_outcome preserved across redundant mark_turn_finished"
     true (lo_first = lo_second)
 
-let test_observer_json_includes_recovery_fields () =
+let test_observer_json_includes_terminal_fields () =
   Eio_main.run @@ fun _env ->
-  let name = "obs-recovery-json" in
+  let name = "obs-terminal-json" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  dispatch_obs_measurement name;
+  Reg.mark_turn_measurement ~base_path:test_obs_bp name;
+  Reg.set_turn_decision_stage ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_done;
+  Reg.set_turn_selected_model ~base_path:test_obs_bp name (Some "glm-4.5");
+  Reg.mark_turn_finished ~base_path:test_obs_bp name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing"
   | Some entry ->
-    let snap = Obs.observe ~masc_root_dir:test_obs_masc_root entry in
+    let snap = Obs.observe entry in
     let json = Obs.snapshot_to_json snap in
     let open Yojson.Safe.Util in
-    check bool "recovery.data_record default false"
-      false (json |> member "recovery" |> member "data_record" |> to_bool);
-    check bool "recovery.fsm_condition default false"
-      false (json |> member "recovery" |> member "fsm_condition" |> to_bool);
-    check bool "recovery_two_store_sync default true"
-      true (json |> member "invariants" |> member "recovery_two_store_sync" |> to_bool)
-
-let test_observer_legacy_recovery_sidecar_surfaces_drift () =
-  Eio_main.run @@ fun _env ->
-  let name = "obs-recovery-sidecar" in
-  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
-  let sidecar = legacy_manual_reconcile_path name in
-  ignore (Kfs.ensure_dir (Filename.dirname sidecar));
-  Kfs.save_json_atomic sidecar (`Assoc [ "legacy", `Bool true ]);
-  match Reg.get ~base_path:test_obs_bp name with
-  | None -> Alcotest.fail "entry missing"
-  | Some entry ->
-    let snap = Obs.observe ~masc_root_dir:test_obs_masc_root entry in
-    check bool "legacy sidecar sets data_record" true snap.recovery.data_record;
-    check bool "fsm condition remains false without live SSOT" false snap.recovery.fsm_condition;
-    check bool "legacy sidecar creates recovery drift" false snap.invariants.recovery_two_store_sync
+    check string "decision stage rendered"
+      "tool_policy_selected"
+      (json |> member "last_outcome" |> member "decision_stage" |> to_string);
+    check string "cascade state rendered"
+      "done"
+      (json |> member "last_outcome" |> member "cascade_state" |> to_string);
+    check string "selected model rendered"
+      "glm-4.5"
+      (json |> member "last_outcome" |> member "selected_model" |> to_string)
 
 let test_composite_observer_variants_match_tla_sets () =
   let tla = read_file (keeper_composite_lifecycle_tla ()) in
@@ -506,6 +547,7 @@ let () =
     ];
     "composite_observer_turn_scope", [
       test_case "idle when no turn" `Quick test_observer_idle_when_no_turn;
+      test_case "Prompting at turn start" `Quick test_observer_prompting_at_turn_start;
       test_case "Executing during turn" `Quick test_observer_executing_during_turn;
       test_case "no stale Executing after turn end" `Quick test_observer_no_stale_after_turn_end;
       test_case "mark_turn_finished is idempotent" `Quick test_observer_finished_idempotent;
@@ -515,10 +557,8 @@ let () =
       test_case "is_live = false on idle keeper" `Quick test_observer_is_live_false_when_idle;
       test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
       test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
-      test_case "snapshot json includes recovery fields" `Quick
-        test_observer_json_includes_recovery_fields;
-      test_case "legacy recovery sidecar surfaces drift" `Quick
-        test_observer_legacy_recovery_sidecar_surfaces_drift;
+      test_case "snapshot json includes terminal fields" `Quick
+        test_observer_json_includes_terminal_fields;
       test_case "variant sets match KeeperCompositeLifecycle.tla" `Quick
         test_composite_observer_variants_match_tla_sets;
     ];

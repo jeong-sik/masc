@@ -405,7 +405,6 @@ export interface KeeperCompositeInvariants {
   no_cascade_before_measurement: boolean
   compaction_atomicity: boolean
   event_priority_monotone: boolean
-  recovery_two_store_sync: boolean
 }
 
 export interface KeeperCompositeMeasurement {
@@ -424,6 +423,9 @@ export interface KeeperCompositeMeasurement {
 export interface KeeperLastOutcome {
   turn_id: number
   ended_at: number
+  decision_stage: KeeperCompositeDecisionStage
+  cascade_state: KeeperCompositeCascadeState
+  selected_model: string | null
 }
 
 export type KeeperCompositePhase =
@@ -470,7 +472,6 @@ export interface KeeperCompositeSnapshot {
   cascade: { state: KeeperCompositeCascadeState }
   compaction: { stage: KeeperCompositeCompactionStage }
   measurement: KeeperCompositeMeasurement
-  recovery: { data_record: boolean; fsm_condition: boolean }
   invariants: KeeperCompositeInvariants
   /** RFC-0003 Phase 2 (#7122): true when a turn is actively
       executing. Sub-FSM fields reflect live in-turn state only

@@ -39,16 +39,20 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   cascade: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: false },
-  recovery: { data_record: false, fsm_condition: false },
   invariants: {
     phase_turn_alignment: true,
     no_cascade_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
-    recovery_two_store_sync: true,
   },
   is_live: false,
-  last_outcome: { turn_id: 353, ended_at: 1776234638.709722 },
+  last_outcome: {
+    turn_id: 353,
+    ended_at: 1776234638.709722,
+    decision_stage: 'tool_policy_selected',
+    cascade_state: 'done',
+    selected_model: 'glm-4.5',
+  },
 }
 
 /** Server-shaped gate keepers response. */
@@ -94,21 +98,17 @@ describe('FSM Hub integration — API response shape', () => {
       if (REAL_COMPOSITE_SHAPE.last_outcome !== null) {
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.turn_id).toBe('number')
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.ended_at).toBe('number')
+        expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.decision_stage).toBe('string')
+        expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.cascade_state).toBe('string')
       }
     })
 
-    it('all 5 invariants are boolean — InvariantsPanel renders 5/5 or partial', () => {
+    it('all 4 invariants are boolean — InvariantsPanel renders 4/4 or partial', () => {
       const inv = REAL_COMPOSITE_SHAPE.invariants
       expect(typeof inv.phase_turn_alignment).toBe('boolean')
       expect(typeof inv.no_cascade_before_measurement).toBe('boolean')
       expect(typeof inv.compaction_atomicity).toBe('boolean')
       expect(typeof inv.event_priority_monotone).toBe('boolean')
-      expect(typeof inv.recovery_two_store_sync).toBe('boolean')
-    })
-
-    it('recovery.data_record and fsm_condition are boolean — RecoveryStatePanel classifies drift on these', () => {
-      expect(typeof REAL_COMPOSITE_SHAPE.recovery.data_record).toBe('boolean')
-      expect(typeof REAL_COMPOSITE_SHAPE.recovery.fsm_condition).toBe('boolean')
     })
   })
 

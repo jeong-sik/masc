@@ -13,12 +13,9 @@
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
 
-    Current scope: [ksm_phase], [ktc_turn_phase], [kmc_compaction], and
-    conservative live projections for [kdp_decision] / [kcl_cascade_state]
-    are derived from the registry entry. Finer-grained live substates such
-    as [Decision_tool_policy_selected], [Cascade_selecting], [Cascade_done],
-    and [Cascade_exhausted] still require additional runtime observation
-    points.
+    Current scope: all projected sub-FSM live states are written directly
+    into [Keeper_registry.registry_entry]. The observer no longer infers
+    decision/cascade/compaction state from coarse parent conditions.
 
     @since RFC-0003 — Composite observer v0. *)
 
@@ -39,7 +36,7 @@ type ksm_phase =
 
 val all_ksm_phases : ksm_phase list
 
-type turn_phase =
+type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
   | Turn_prompting
   | Turn_executing
@@ -48,7 +45,7 @@ type turn_phase =
 
 val all_turn_phases : turn_phase list
 
-type decision_stage =
+type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
   | Decision_gate_rejected
@@ -56,7 +53,7 @@ type decision_stage =
 
 val all_decision_stages : decision_stage list
 
-type cascade_state =
+type cascade_state = Keeper_registry.cascade_state =
   | Cascade_idle
   | Cascade_selecting
   | Cascade_trying
@@ -65,7 +62,7 @@ type cascade_state =
 
 val all_cascade_states : cascade_state list
 
-type compaction_stage =
+type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
@@ -81,18 +78,6 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
-  recovery_two_store_sync : bool;
-}
-
-type recovery_projection = {
-  data_record : bool;
-      (** Legacy [.manual_reconcile.json] sidecar exists under
-          [.masc/keepers/]. This is the persisted-store half of the old
-          two-store recovery protocol. *)
-  fsm_condition : bool;
-      (** Recovery condition latched in the live FSM store. The current
-          runtime no longer carries this signal, so the observer projects
-          [false] until a new SSOT field is introduced. *)
 }
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -102,6 +87,9 @@ type recovery_projection = {
 type last_outcome = {
   turn_id : int;
   ended_at : float;
+  decision_stage : decision_stage;
+  cascade_state : cascade_state;
+  selected_model : string option;
 }
 
 type snapshot = {
@@ -114,7 +102,6 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  recovery : recovery_projection;
   invariants : invariants_check;
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is
@@ -133,16 +120,12 @@ type snapshot = {
     observer is driven from a known event envelope (OAS event_bus
     envelope, PR OAS#845). When absent, the snapshot uses
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
-    reads within the same keeper transition return the same id.
+    reads within the same keeper transition return the same id. *)
 
-    [masc_root_dir] is optional because most projected state comes from the
-    live registry entry itself. Pass it when callers want the observer to
-    check legacy sidecars such as [.manual_reconcile.json]. *)
 val observe :
   ?correlation_id:string ->
   ?run_id:string ->
   ?now:float ->
-  ?masc_root_dir:string ->
   Keeper_registry.registry_entry ->
   snapshot
 

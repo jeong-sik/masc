@@ -8,8 +8,8 @@
 \*     - KeeperContextLifecycle.tla   Context + Compaction + Checkpoint + Recovery
 \*   None of them check joint invariants that span all four domain FSMs
 \*   (Decision, Cascade, MemoryCompaction, Compaction-phase) together, nor
-\*   does any spec model the keepalive recovery two-store orchestration that
-\*   Bug #1 (keeper_keepalive.ml:774-836, PR #6834) exposed.
+\*   does any spec model the exact projected turn/decision/cascade state
+\*   sequence now surfaced by the runtime observer.
 \*
 \*   This spec is an OBSERVER, not a new controller. It declares a minimum
 \*   set of projected variables — each traceable to an OCaml module — and
@@ -26,8 +26,9 @@
 \*   2. The 11-state parent phase from RFC-0002 is projected to
 \*      {Running, Failing, Compacting, HandingOff, Draining, Stable}
 \*      — exactly the phases that matter for cross-spec ordering.
-\*   3. Recovery orchestration is encoded as a two-store consistency
-\*      invariant between reconcile_data_record and fsm_condition.
+\*   3. Parent-lifecycle recovery is modeled directly as Running/Failing
+\*      phase transitions; legacy two-store manual_reconcile state is
+\*      intentionally excluded from this observer.
 \*   4. Model size kept small on purpose; TLC over this spec should
 \*      complete in seconds, not hours.
 \*
@@ -73,17 +74,10 @@ VARIABLES
     measurement_turn,   \* Turn tick at which current shared_measurement
                         \* was captured. Guards "measurement before cascade".
 
-    reconcile_data,     \* Two-store model (P4 absorption)
-                        \* TRUE iff filesystem reconcile record is set.
-
-    reconcile_fsm,      \* Two-store model. TRUE iff FSM condition
-                        \* manual_reconcile_required is set.
-
     turn_tick           \* Monotone counter used for ordering checks.
 
 vars == <<ksm_phase, ktc_turn_phase, kdp_decision, kcl_cascade_state,
-          kmc_compaction, shared_measurement, measurement_turn,
-          reconcile_data, reconcile_fsm, turn_tick>>
+          kmc_compaction, shared_measurement, measurement_turn, turn_tick>>
 
 \* ── Enumerated value sets ───────────────────────────────
 
@@ -117,8 +111,6 @@ TypeOK ==
     /\ kmc_compaction \in CompactionSet
     /\ shared_measurement \in Nat
     /\ measurement_turn \in Nat
-    /\ reconcile_data \in BOOLEAN
-    /\ reconcile_fsm \in BOOLEAN
     /\ turn_tick \in 0..MaxTurnTicks
 
 \* ── Initial state ────────────────────────────────────────
@@ -131,8 +123,6 @@ Init ==
     /\ kmc_compaction = "accumulating"
     /\ shared_measurement = 0
     /\ measurement_turn = 0
-    /\ reconcile_data = FALSE
-    /\ reconcile_fsm = FALSE
     /\ turn_tick = 0
 
 \* ── Domain actions (abstract) ────────────────────────────
@@ -148,8 +138,11 @@ StartTurn ==
     /\ turn_tick' = turn_tick + 1
     /\ shared_measurement' = 0           \* reset hub at turn start
     /\ measurement_turn' = 0
-    /\ UNCHANGED <<ksm_phase, kdp_decision, kcl_cascade_state,
-                   kmc_compaction, reconcile_data, reconcile_fsm>>
+    /\ kdp_decision' = "undecided"
+    /\ kcl_cascade_state' = "idle"
+    /\ kmc_compaction' =
+         IF kmc_compaction = "done" THEN "accumulating" ELSE kmc_compaction
+    /\ UNCHANGED <<ksm_phase>>
 
 MeasurementBroadcast ==                  \* Context_measured (priority 5)
     /\ ktc_turn_phase = "prompting"
@@ -157,8 +150,7 @@ MeasurementBroadcast ==                  \* Context_measured (priority 5)
     /\ shared_measurement' = turn_tick    \* any unique, nonzero value
     /\ measurement_turn' = turn_tick
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
-                   kcl_cascade_state, kmc_compaction, reconcile_data,
-                   reconcile_fsm, turn_tick>>
+                   kcl_cascade_state, kmc_compaction, turn_tick>>
 
 DecideGuard ==
     /\ ktc_turn_phase = "prompting"
@@ -167,25 +159,56 @@ DecideGuard ==
     /\ kdp_decision' = "guard_ok"
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   reconcile_data, reconcile_fsm, turn_tick>>
+                   turn_tick>>
 
-SelectCascade ==                         \* CascadeAfterDecision (abstract)
+SelectToolPolicy ==
+    /\ ktc_turn_phase = "prompting"
     /\ kdp_decision = "guard_ok"
-    /\ shared_measurement /= 0            \* measurement must precede
-    /\ kcl_cascade_state \in {"idle", "selecting"}
+    /\ kdp_decision' = "tool_policy_selected"
+    /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick>>
+
+StartCascadeSelection ==
+    /\ ktc_turn_phase = "prompting"
+    /\ kdp_decision = "tool_policy_selected"
+    /\ shared_measurement /= 0
+    /\ kcl_cascade_state = "idle"
+    /\ kcl_cascade_state' = "selecting"
+    /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick>>
+
+SelectCascade ==
+    /\ kcl_cascade_state = "selecting"
+    /\ shared_measurement /= 0
     /\ kcl_cascade_state' = "trying"
     /\ ktc_turn_phase' = "executing"
     /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
-                   shared_measurement, measurement_turn, reconcile_data,
-                   reconcile_fsm, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick>>
+
+GateRejected ==
+    /\ ktc_turn_phase \in {"prompting", "executing"}
+    /\ kdp_decision \in {"guard_ok", "tool_policy_selected"}
+    /\ kdp_decision' = "gate_rejected"
+    /\ ktc_turn_phase' = "finalizing"
+    /\ kcl_cascade_state' = "idle"
+    /\ UNCHANGED <<ksm_phase, kmc_compaction, shared_measurement,
+                   measurement_turn, turn_tick>>
 
 CascadeDone ==
     /\ kcl_cascade_state = "trying"
     /\ kcl_cascade_state' = "done"
     /\ ktc_turn_phase' = "finalizing"
     /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
-                   shared_measurement, measurement_turn, reconcile_data,
-                   reconcile_fsm, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick>>
+
+CascadeExhausted ==
+    /\ kcl_cascade_state = "trying"
+    /\ kcl_cascade_state' = "exhausted"
+    /\ ktc_turn_phase' = "finalizing"
+    /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
+                   shared_measurement, measurement_turn, turn_tick>>
 
 \* FinishTurn — closes the current turn and resets per-turn sub-FSM state.
 \* Without this, the next StartTurn would keep kcl_cascade_state stale
@@ -197,8 +220,7 @@ FinishTurn ==
     /\ kdp_decision' = "undecided"
     /\ shared_measurement' = 0
     /\ measurement_turn' = 0
-    /\ UNCHANGED <<ksm_phase, kmc_compaction, reconcile_data,
-                   reconcile_fsm, turn_tick>>
+    /\ UNCHANGED <<ksm_phase, kmc_compaction, turn_tick>>
 
 \* Compaction is coupled: parent phase + turn phase + memory phase
 \* must co-advance (CompactionAtomicity).
@@ -211,8 +233,7 @@ StartCompaction ==
     /\ kmc_compaction' = "compacting"
     /\ kcl_cascade_state' = "idle"
     /\ kdp_decision' = "undecided"
-    /\ UNCHANGED <<shared_measurement, measurement_turn, reconcile_data,
-                   reconcile_fsm, turn_tick>>
+    /\ UNCHANGED <<shared_measurement, measurement_turn, turn_tick>>
 
 FinishCompaction ==
     /\ ksm_phase = "Compacting"
@@ -221,43 +242,21 @@ FinishCompaction ==
     /\ ktc_turn_phase' = "idle"
     /\ kmc_compaction' = "done"
     /\ UNCHANGED <<kdp_decision, kcl_cascade_state, shared_measurement,
-                   measurement_turn, reconcile_data, reconcile_fsm,
-                   turn_tick>>
-
-\* Recovery two-store orchestration (P4 absorption).
-\* Two atomic halves of what keepalive's maybe_recover_from_failing performs.
+                   measurement_turn, turn_tick>>
 
 EnterFailing ==
     /\ ksm_phase = "Running"
-    /\ reconcile_data' = TRUE
-    /\ reconcile_fsm' = TRUE
     /\ ksm_phase' = "Failing"
-    /\ ktc_turn_phase' = "idle"
-    \* Abort the in-flight turn: reset sub-FSMs so the next StartTurn
-    \* begins from a clean per-turn state.
-    /\ kdp_decision' = "undecided"
-    /\ kcl_cascade_state' = "idle"
-    /\ shared_measurement' = 0
-    /\ measurement_turn' = 0
-    /\ UNCHANGED <<kmc_compaction, turn_tick>>
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick>>
 
-ClearDataRecord ==
+ClearFailing ==
     /\ ksm_phase = "Failing"
-    /\ reconcile_data = TRUE
-    /\ reconcile_data' = FALSE
-    /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
-                   kcl_cascade_state, kmc_compaction, shared_measurement,
-                   measurement_turn, reconcile_fsm, turn_tick>>
-
-ClearFsmCondition ==
-    /\ ksm_phase = "Failing"
-    /\ reconcile_data = FALSE             \* data must be cleared first
-    /\ reconcile_fsm = TRUE
-    /\ reconcile_fsm' = FALSE
     /\ ksm_phase' = "Running"
     /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
                    kmc_compaction, shared_measurement, measurement_turn,
-                   reconcile_data, turn_tick>>
+                   turn_tick>>
 
 \* Overflowed orchestration (Context overflow detected).
 \* Entry aborts the in-flight turn so the auto-compaction that follows
@@ -270,7 +269,7 @@ EnterOverflowed ==
     /\ kcl_cascade_state' = "idle"
     /\ shared_measurement' = 0
     /\ measurement_turn' = 0
-    /\ UNCHANGED <<kmc_compaction, reconcile_data, reconcile_fsm, turn_tick>>
+    /\ UNCHANGED <<kmc_compaction, turn_tick>>
 
 \* Overflowed -> Compacting (Start_compaction entry action).
 \* Atomically moves KSM, KTC, KMC so CompactionAtomicity is preserved:
@@ -282,8 +281,7 @@ OverflowedAutoCompact ==
     /\ ktc_turn_phase' = "compacting"
     /\ kmc_compaction' = "compacting"
     /\ UNCHANGED <<kdp_decision, kcl_cascade_state, shared_measurement,
-                   measurement_turn, reconcile_data, reconcile_fsm,
-                   turn_tick>>
+                   measurement_turn, turn_tick>>
 
 \* ── Next-state relation ──────────────────────────────────
 
@@ -291,26 +289,31 @@ Next ==
     \/ StartTurn
     \/ MeasurementBroadcast
     \/ DecideGuard
+    \/ SelectToolPolicy
+    \/ StartCascadeSelection
     \/ SelectCascade
+    \/ GateRejected
     \/ CascadeDone
+    \/ CascadeExhausted
     \/ FinishTurn
     \/ StartCompaction
     \/ FinishCompaction
     \/ EnterFailing
-    \/ ClearDataRecord
-    \/ ClearFsmCondition
+    \/ ClearFailing
     \/ EnterOverflowed
     \/ OverflowedAutoCompact
 
 Fairness ==
     /\ WF_vars(MeasurementBroadcast)
     /\ WF_vars(DecideGuard)
+    /\ WF_vars(SelectToolPolicy)
+    /\ WF_vars(StartCascadeSelection)
     /\ WF_vars(SelectCascade)
     /\ WF_vars(CascadeDone)
+    /\ WF_vars(CascadeExhausted)
     /\ WF_vars(FinishTurn)
     /\ WF_vars(FinishCompaction)
-    /\ WF_vars(ClearDataRecord)
-    /\ WF_vars(ClearFsmCondition)
+    /\ WF_vars(ClearFailing)
     /\ WF_vars(OverflowedAutoCompact)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
@@ -329,7 +332,7 @@ PhaseTurnAlignment ==
 \* Cascade selection cannot advance past idle/selecting without a
 \* measurement having been taken in the current turn.
 NoCascadeBeforeMeasurement ==
-    (kcl_cascade_state \in {"trying", "done"}) =>
+    (kcl_cascade_state \in {"selecting", "trying", "done", "exhausted"}) =>
         (shared_measurement /= 0 /\ measurement_turn = turn_tick)
 
 \* I3 — CompactionAtomicity
@@ -346,30 +349,12 @@ CompactionAtomicity ==
 EventPriorityMonotone ==
     (shared_measurement /= 0) => (measurement_turn <= turn_tick)
 
-\* I5 — RecoveryTwoStoreSync  (absorbs state-fsm-gap-2026-04-13.md P4)
-\* The FSM condition must not be cleared while the filesystem reconcile
-\* record is still set. This is the reverse-order failure: OCaml code
-\* dispatches Manual_reconcile_cleared before Keeper_manual_reconcile.clear.
-\* BugFsmClearsWithoutData reconstructs this pattern.
-\*
-\* Note: the stuck-at (reconcile_data=FALSE, reconcile_fsm=TRUE) pattern
-\* from Bug #1 (PR #6834) is a liveness violation, not a safety one. It is
-\* caught by RecoveryEventuallyCompletes with WF on ClearFsmCondition.
-\* Normal ordering (T,T)->(F,T)->(F,F) does NOT violate this invariant
-\* because reconcile_data=TRUE always implies reconcile_fsm=TRUE here.
-RecoveryTwoStoreSync ==
-    ~(reconcile_data /\ ~reconcile_fsm)
-
 SafetyInvariant ==
     /\ TypeOK
     /\ PhaseTurnAlignment
     /\ NoCascadeBeforeMeasurement
     /\ CompactionAtomicity
     /\ EventPriorityMonotone
-
-\* I5 is intentionally NOT bundled into SafetyInvariant because its
-\* shape ("state never reached") is clearer when listed in the cfg as
-\* a separate INVARIANT; see KeeperCompositeLifecycle.cfg.
 
 \* ── Liveness ─────────────────────────────────────────────
 
@@ -379,10 +364,8 @@ EventualMeasurementResolves ==
     (ktc_turn_phase = "prompting") ~>
         (shared_measurement /= 0 \/ ktc_turn_phase /= "prompting")
 
-\* L2 — RecoveryEventuallyCompletes  (absorbs P4 liveness obligation)
-\* A Failing episode must eventually clear both stores and return to
-\* Running. Without WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)
-\* this fails, which is the lesson from Bug #1.
+\* L2 — FailingEventuallyClears
+\* A Failing episode must eventually return to Running.
 RecoveryEventuallyCompletes ==
     (ksm_phase = "Failing") ~> (ksm_phase = "Running")
 
@@ -393,18 +376,17 @@ RecoveryEventuallyCompletes ==
 OverflowedEventuallyResolves ==
     (ksm_phase = "Overflowed") ~> (ksm_phase /= "Overflowed")
 
-\* ── Bug models (three, each violates a distinct invariant) ──
+\* ── Bug models (each violates a distinct invariant) ──
 
 \* NextBuggyCascade — SelectCascade without measurement
 \* Violates: NoCascadeBeforeMeasurement
 BugCascadeBeforeMeasurement ==
-    /\ kdp_decision = "undecided"         \* skip DecideGuard
+    /\ kdp_decision = "tool_policy_selected"   \* skip measurement ownership
     /\ kcl_cascade_state = "idle"
     /\ kcl_cascade_state' = "trying"
     /\ ktc_turn_phase' = "executing"
     /\ UNCHANGED <<ksm_phase, kdp_decision, kmc_compaction,
-                   shared_measurement, measurement_turn, reconcile_data,
-                   reconcile_fsm, turn_tick>>
+                   shared_measurement, measurement_turn, turn_tick>>
 
 NextBuggyCascade == Next \/ BugCascadeBeforeMeasurement
 
@@ -416,27 +398,12 @@ BugCompactionDesync ==
     /\ kmc_compaction' = "compacting"     \* BUG: KSM and KTC stay put
     /\ UNCHANGED <<ksm_phase, ktc_turn_phase, kdp_decision,
                    kcl_cascade_state, shared_measurement, measurement_turn,
-                   reconcile_data, reconcile_fsm, turn_tick>>
+                   turn_tick>>
 
 NextBuggyCompaction == Next \/ BugCompactionDesync
 
-\* NextBuggyRecovery — FSM condition cleared without clearing data record
-\* Violates: RecoveryTwoStoreSync (reconstructs Bug #1)
-BugFsmClearsWithoutData ==
-    /\ ksm_phase = "Failing"
-    /\ reconcile_data = TRUE
-    /\ reconcile_fsm = TRUE
-    /\ reconcile_fsm' = FALSE             \* BUG: clears FSM first
-    /\ ksm_phase' = "Running"
-    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
-                   kmc_compaction, shared_measurement, measurement_turn,
-                   reconcile_data, turn_tick>>
-
-NextBuggyRecovery == Next \/ BugFsmClearsWithoutData
-
 SpecBuggyCascade    == Init /\ [][NextBuggyCascade]_vars /\ Fairness
 SpecBuggyCompaction == Init /\ [][NextBuggyCompaction]_vars /\ Fairness
-SpecBuggyRecovery   == Init /\ [][NextBuggyRecovery]_vars /\ Fairness
 
 \* ── Boundary comments (reviewer gate) ────────────────────
 \* This spec must NOT introduce any of the following, per:

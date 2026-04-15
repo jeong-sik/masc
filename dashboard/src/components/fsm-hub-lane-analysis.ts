@@ -56,7 +56,7 @@ function laneMeaning(
             ? { tone: 'info', meaning: 'parent lifecycle is healthy while the live turn advances' }
             : { tone: 'ok', meaning: 'no live turn; waiting for the next observation cycle' }
         case 'Failing':
-          return { tone: 'error', meaning: 'recovery owns the keeper lifecycle until reconcile clears' }
+          return { tone: 'error', meaning: 'the parent lifecycle is degraded and must clear before healthy turns resume' }
         case 'Overflowed':
           return { tone: 'warn', meaning: 'context overflow has been latched and must resolve before healthy turns resume' }
         case 'Compacting':

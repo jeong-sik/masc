@@ -59,7 +59,7 @@
 RFC-0002는 11-state parent phase FSM을 pure function `derive_phase` + `apply_event`로 1급 구성했다. RFC-0003은 그 위에 **transition을 하나도 추가하지 않는다**. 관계는 다음과 같다:
 
 - RFC-0002: 개별 keeper의 lifecycle ownership (측정 → 이벤트 → 조건 → phase).
-- RFC-0003: 한 turn 안에서 여러 도메인 FSM 간 ordering/atomicity/two-store consistency를 관찰.
+- RFC-0003: 한 turn 안에서 여러 도메인 FSM 간 ordering/atomicity를 관찰.
 - RFC-0002의 11-state → 6-state projection 규칙은 RFC-0003 spec 서두 `Comment A`에 명시한다. `{Offline, Paused, Stopped, Crashed, Restarting, Dead}`는 모두 `Stable`로 접어 turn cycle 밖에 둔다.
 
 이 RFC의 invariants가 위반된다 해도 RFC-0002의 단일 FSM 동작은 여전히 올바르다. 단, joint property가 깨지면 운영자는 "FSM은 정상이지만 전체 시스템이 turn cycle을 잘못 진행 중"임을 관찰할 수 있어야 한다.
@@ -93,8 +93,6 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | `kmc_compaction` | `MemoryCompaction.tla` | `{accumulating, compacting, done}` | |
 | `shared_measurement` | `Context_measured` | `Nat` (0 = none, else snapshot id) | **hub** |
 | `measurement_turn` | `turn_tick` at capture | `Nat` | ordering |
-| `reconcile_data` | `Keeper_manual_reconcile` (FS record) | `BOOLEAN` | two-store A |
-| `reconcile_fsm` | live recovery-condition SSOT (legacy placeholder in current runtime) | `BOOLEAN` | two-store B |
 | `turn_tick` | monotone counter | `0..MaxTurnTicks` | model bound |
 
 ### Projected state contracts
@@ -106,7 +104,7 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | State | 의미 | 들어올 때 | 나갈 때 |
 |------|------|-----------|---------|
 | `Running` | healthy parent lifecycle | normal init / recovery / compaction done / handoff done | failing, overflowed, compacting, handoff, draining |
-| `Failing` | recovery ownership active | heartbeat/turn/guard path가 healthy를 잃음 | running, overflowed, draining |
+| `Failing` | degraded parent lifecycle | heartbeat/turn/guard path가 healthy를 잃음 | running, overflowed, draining |
 | `Overflowed` | provider-level hard context overflow latched | prompt가 max context를 초과함 | compacting(auto-compact), running(operator clear), draining |
 | `Compacting` | post-turn compaction owns parent lifecycle | compaction entry action fired | running(compaction done), overflowed(compaction failed), failing, draining |
 | `HandingOff` | generation rollover in progress | handoff entry action fired | running(handoff done), failing, draining |
@@ -140,7 +138,7 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | `selecting` | provider path is being chosen | decision advanced past guard_ok | trying, exhausted |
 | `trying` | provider attempt in flight | cascade slot/provider selected | done, exhausted |
 | `done` | provider returned usable output | cascade/provider success accepted | idle/finalizing reset |
-| `exhausted` | every cascade path failed | last provider failed without usable result | idle/failing recovery path |
+| `exhausted` | every cascade path failed | last provider failed without usable result | idle/failing path |
 
 #### KMC
 
@@ -152,7 +150,7 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 
 ### Actions (narrow abstractions)
 
-`StartTurn`, `MeasurementBroadcast`, `DecideGuard`, `SelectCascade`, `CascadeDone`, `FinishTurn`, `StartCompaction`, `FinishCompaction`, `EnterFailing`, `ClearDataRecord`, `ClearFsmCondition`, `EnterOverflowed`, `OverflowedAutoCompact`. 총 13개. 각 action은 sub-FSM transition의 minimum projection이며, 자세한 guard는 원 spec에 위임한다.
+`StartTurn`, `MeasurementBroadcast`, `DecideGuard`, `SelectToolPolicy`, `StartCascadeSelection`, `SelectCascade`, `GateRejected`, `CascadeDone`, `CascadeExhausted`, `FinishTurn`, `StartCompaction`, `FinishCompaction`, `EnterFailing`, `ClearFailing`, `EnterOverflowed`, `OverflowedAutoCompact`. 총 16개. 각 action은 sub-FSM transition의 minimum projection이며, 자세한 guard는 원 spec에 위임한다.
 
 ### Safety invariants (clean cfg)
 
@@ -162,14 +160,12 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | I2 | `NoCascadeBeforeMeasurement` | cascade가 idle/selecting을 떠나려면 현재 turn의 measurement가 있어야 함 |
 | I3 | `CompactionAtomicity` | `kmc_compaction = compacting ⇒ ksm_phase = Compacting` |
 | I4 | `EventPriorityMonotone` | 한 turn에 measurement는 최대 1회 |
-| I5 | `RecoveryTwoStoreSync` | `Failing` 중 `reconcile_data=FALSE ∧ reconcile_fsm=TRUE`인 상태는 unreachable (Bug #1 재구성) |
-
 ### Liveness (fairness 필요)
 
 - L1 `EventualMeasurementResolves`: `prompting ~> (shared_measurement ≠ 0 ∨ turn 이동)`
 - L2 `RecoveryEventuallyCompletes`: `Failing ~> Running`
 
-L2는 `WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)`이 fairness에 포함되어야만 성립한다. Bug #1의 교훈은 여기에 있다. fairness 하나가 빠지면 liveness가 즉시 무너진다.
+L2는 `WF_vars(ClearFailing)`이 fairness에 포함되어야만 성립한다. fairness 하나가 빠지면 liveness가 즉시 무너진다.
 
 ### Bug models
 
@@ -177,8 +173,6 @@ L2는 `WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)`이 fairness에 포
 |-----|------|-------------------|
 | `BugCascadeBeforeMeasurement` | measurement 없이 SelectCascade | I2 |
 | `BugCompactionDesync` | KMC만 compacting으로 진행 | I1, I3 |
-| `BugFsmClearsWithoutData` | data record가 set인데 FSM condition 먼저 clear | I5 |
-
 세 bug는 **서로 다른 invariant를 때린다**. 모두 같은 곳을 치면 invariant 해상도가 낮다는 신호 (`feedback_tla-spec-audit-outcome-trichotomy.md`).
 
 ## 6. Observer Contract (OCaml)
@@ -197,7 +191,6 @@ L2는 `WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)`이 fairness에 포
     kcl_cascade_state : cascade_state;
     kmc_compaction : compaction_stage;
     shared_measurement : Keeper_state_machine.auto_rules_summary option;
-    recovery : recovery_projection;
     invariants : invariants_check;
   }
 
@@ -206,18 +199,14 @@ L2는 `WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)`이 fairness에 포
     no_cascade_before_measurement : bool;
     compaction_atomicity : bool;
     event_priority_monotone : bool;
-    recovery_two_store_sync : bool;
   }
 
-  val observe :
-    ?masc_root_dir:string ->
-    Keeper_registry.registry_entry ->
-    snapshot
+  val observe : Keeper_registry.registry_entry -> snapshot
   (** Pure projection. Reads the registry entry plus the most recent
       Context_measured event. No mutation, no I/O. *)
   ```
 
-- `Keeper_registry.registry_entry`에 `composite_view : Keeper_composite_observer.snapshot Lazy.t` 파생 필드 (`:43-75` 확장). **저장되지 않는다**; read 시점에 계산한다. 기존 ref가 stale하지 않도록 lazy + 매 read마다 재평가 옵션을 제공한다.
+- `Keeper_registry.registry_entry`가 projected sub-FSM state를 직접 저장한다. observer는 이 필드를 읽기만 하며, lifecycle/turn code가 single writer가 된다.
 
 ### 관찰 hook 위치
 
@@ -243,39 +232,43 @@ GET /api/keepers/:name/composite
   "ts": 1712834000.5,
   "phase": "Running",
   "turn_phase": "executing",
-  "decision": { "stage": "tool_policy_selected", "cycle_penalty": 0 },
-  "cascade": { "profile": "keeper_unified", "state": "trying" },
-  "compaction": { "stage": "accumulating", "last_saved_tokens": 0 },
+  "decision": { "stage": "tool_policy_selected" },
+  "cascade": { "state": "trying" },
+  "compaction": { "stage": "accumulating" },
   "measurement": {
-    "captured_this_turn": true,
-    "context_ratio": 0.62,
-    "message_count": 48
+    "captured": true,
+    "auto_rules": {
+      "reflect": false,
+      "plan": true,
+      "compact": false,
+      "handoff": false,
+      "guardrail_stop": false,
+      "guardrail_reason": null,
+      "goal_drift": 0.18
+    }
   },
-  "recovery": { "data_record": false, "fsm_condition": false },
+  "is_live": true,
+  "last_outcome": {
+    "turn_id": 41,
+    "ended_at": 1712833970.2,
+    "decision_stage": "tool_policy_selected",
+    "cascade_state": "done",
+    "selected_model": "glm-4.5"
+  },
   "invariants": {
     "phase_turn_alignment": true,
     "no_cascade_before_measurement": true,
     "compaction_atomicity": true,
-    "event_priority_monotone": true,
-    "recovery_two_store_sync": true
+    "event_priority_monotone": true
   }
 }
 ```
 
 Dashboard `/fsm` hub 페이지는 이 payload를 composite Cytoscape + invariants panel + event log로 렌더링한다. 렌더링 설계의 상세는 `docs/design/dashboard-fsm-redesign.md`를 따른다. `/fsm` hub를 선택한 이유는 운영자 콘솔(`/keepers/:name`)과 아키텍처 감사 뷰를 섞지 않기 위함.
 
-## 8. P4 Absorption
+## 8. Legacy Purge
 
-`state-fsm-gap-2026-04-13.md` §5 P4는 새 파일 `KeeperRecoveryOrchestration.tla`를 제안했다. 본 RFC는 이를 **별도 spec 파일로 만들지 않는다**. 대신 `KeeperCompositeLifecycle.tla`의 다음 요소가 P4의 의무를 수용한다:
-
-| P4 제안 | 이 RFC의 대응 |
-|---------|---------------|
-| `ClearDataRecord`, `DispatchManualReconcileCleared` 액션 | `ClearDataRecord`, `ClearFsmCondition` actions |
-| `DataRecordCleared ⇒ FSMConditionCleared` safety | `RecoveryTwoStoreSync` invariant |
-| `BugRecoverySequence` (omit dispatch) | `BugFsmClearsWithoutData` bug model + `KeeperCompositeLifecycle-buggy-recovery.cfg` |
-| WF on clearing path | `WF_vars(ClearDataRecord)`, `WF_vars(ClearFsmCondition)` in `Fairness` |
-
-사유: P4의 핵심 요구는 "data record와 FSM condition 두 store가 영구 불일치하지 않는다"이다. 이 요구는 composite spec의 `Failing ~> Running` liveness와 `RecoveryTwoStoreSync` safety에 자연스럽게 들어온다. 별도 파일은 spec fragmentation만 늘린다.
+`manual_reconcile` two-store는 현재 composite observer의 SSOT가 아니다. 따라서 RFC-0003 contract에서도 제외한다. parent recovery는 `Running ↔ Failing` phase transition으로만 관찰하고, composite snapshot/TLA/dashboard 어디에도 legacy sidecar나 placeholder bool을 남기지 않는다.
 
 P1(`TurnSucceeded` spec-code divergence)은 여기서 다루지 않는다. P1은 `KeeperStateMachine.tla`의 국소 수정이며, 본 RFC와 직교한다.
 

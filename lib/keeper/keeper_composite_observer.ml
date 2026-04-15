@@ -20,7 +20,7 @@ let all_ksm_phases =
     Ksm_stable;
   ]
 
-type turn_phase =
+type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
   | Turn_prompting
   | Turn_executing
@@ -30,7 +30,7 @@ type turn_phase =
 let all_turn_phases =
   [ Turn_idle; Turn_prompting; Turn_executing; Turn_compacting; Turn_finalizing ]
 
-type decision_stage =
+type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
   | Decision_gate_rejected
@@ -44,7 +44,7 @@ let all_decision_stages =
     Decision_tool_policy_selected;
   ]
 
-type cascade_state =
+type cascade_state = Keeper_registry.cascade_state =
   | Cascade_idle
   | Cascade_selecting
   | Cascade_trying
@@ -60,7 +60,7 @@ let all_cascade_states =
     Cascade_exhausted;
   ]
 
-type compaction_stage =
+type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
   | Compaction_compacting
   | Compaction_done
@@ -73,17 +73,14 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
-  recovery_two_store_sync : bool;
-}
-
-type recovery_projection = {
-  data_record : bool;
-  fsm_condition : bool;
 }
 
 type last_outcome = {
   turn_id : int;
   ended_at : float;
+  decision_stage : decision_stage;
+  cascade_state : cascade_state;
+  selected_model : string option;
 }
 
 type snapshot = {
@@ -96,7 +93,6 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  recovery : recovery_projection;
   invariants : invariants_check;
   is_live : bool;
   last_outcome : last_outcome option;
@@ -179,28 +175,6 @@ let compaction_stage_of_string = function
 (* Derivation from registry entry                                   *)
 (* ================================================================ *)
 
-(* The turn-cycle phase is derived from the keeper lifecycle phase.
-   Per-turn-internal sub-phases (Prompting, Executing) are not visible
-   to the observer — those live inside a single [run_unified_turn] call.
-   Post-turn hooks (PR follow-up) will update shared state so the
-   observer can distinguish them. *)
-(* Turn-cycle phase derivation (issue #7122).
-
-   The Compacting/Finalizing branches reflect KSM lifecycle phases that
-   the keeper enters between turns. Within a normal turn the phase
-   defaults to [Idle] unless [current_turn_observation] is [Some _],
-   in which case the keeper is actively in [`Executing`] — the OAS
-   call is in flight, between [mark_turn_started] and
-   [mark_turn_finished]. Finer-grained breakdown
-   ([Prompting]/[ToolCall]) requires Event_bus subscription and is
-   tracked as Phase 2 of #7122. *)
-(* KSM projection rule from KeeperCompositeLifecycle.tla Comment A.
-
-   The observer cares only about parent phases that materially affect
-   cross-FSM ordering. Turn-external or terminal phases collapse to
-   [Ksm_stable]; [Overflowed] remains explicit because it is a distinct
-   pre-compaction lifecycle edge in both the OCaml FSM and the TLA+
-   projection. *)
 let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
   match phase with
   | Keeper_state_machine.Running -> Ksm_running
@@ -216,65 +190,30 @@ let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
   | Keeper_state_machine.Restarting
   | Keeper_state_machine.Dead -> Ksm_stable
 
-let derive_turn_phase
-    ~(ksm_phase : ksm_phase)
-    ~(is_live : bool)
-    : turn_phase =
-  match ksm_phase with
-  | Ksm_compacting -> Turn_compacting
-  | Ksm_handing_off
-  | Ksm_draining -> Turn_finalizing
-  | _ -> if is_live then Turn_executing else Turn_idle
+let live_turn_phase (entry : Keeper_registry.registry_entry) =
+  match entry.current_turn_observation with
+  | Some obs -> obs.turn_phase
+  | None ->
+      (match derive_ksm_phase entry.phase with
+       | Ksm_compacting -> Turn_compacting
+       | Ksm_handing_off
+       | Ksm_draining -> Turn_finalizing
+       | _ -> Turn_idle)
 
-(* Compaction sub-FSM: compaction_active is the authoritative condition.
-   Phase [Compacting] MUST coincide with this condition under the
-   [PhaseTurnAlignment] invariant; any drift is a safety signal. *)
-let derive_compaction_stage (conds : Keeper_state_machine.conditions)
-    : compaction_stage =
-  if conds.compaction_active then Compaction_compacting
-  else Compaction_accumulating
+let live_decision_stage (entry : Keeper_registry.registry_entry) =
+  match entry.current_turn_observation with
+  | Some obs -> obs.decision_stage
+  | None -> Decision_undecided
 
-(* Decision pipeline stage.
+let live_cascade_state (entry : Keeper_registry.registry_entry) =
+  match entry.current_turn_observation with
+  | Some obs -> obs.cascade_state
+  | None -> Cascade_idle
 
-   Three inputs determine the decision projection:
-   1. [guardrail_triggered] (sticky condition) → [Gate_rejected].
-   2. [current_turn_observation <> None] (is_live) → the turn started,
-      so guards MUST have passed. This is a logical implication, not a
-      guess: the turn loop calls guard evaluation before
-      [mark_turn_started], and a guard rejection prevents the turn from
-      starting at all. Projecting [Guard_ok] when a turn is running is
-      provably correct.
-   3. Otherwise → [Undecided]. No turn is running, no guardrail tripped.
-
-   [Tool_policy_selected] remains a Phase 2 follow-up (#7122) since it
-   requires knowing whether tool selection has occurred within the
-   current turn, which is per-call-internal state. *)
-let derive_decision_stage
-    (conds : Keeper_state_machine.conditions)
-    ~(is_live : bool)
-    : decision_stage =
-  if conds.guardrail_triggered then Decision_gate_rejected
-  else if is_live then Decision_guard_ok
-  else Decision_undecided
-
-(* Cascade state.
-
-   [is_live] means the OAS worker call is in flight. During that window
-   the cascade is either selecting a provider or executing inference —
-   both map to [`Trying`] at the dashboard granularity. When the turn
-   finishes ([is_live = false]), the cascade is no longer active, so
-   [`Idle`] is correct.
-
-   This avoids the "stale state on idle keepers" problem that ruled out
-   the post-hoc-persist approach (see #7122), because the projection
-   derives from [current_turn_observation] which is atomically cleared
-   by [mark_turn_finished].
-
-   Finer-grained live cascade state ([`Selecting`] vs [`Trying`] vs
-   [`Done`]) remains a Phase 2 follow-up (#7122) requiring Event_bus
-   subscription. *)
-let derive_cascade_state ~(is_live : bool) : cascade_state =
-  if is_live then Cascade_trying else Cascade_idle
+let live_measurement (entry : Keeper_registry.registry_entry) =
+  match entry.current_turn_observation with
+  | Some { measurement = Some measurement; _ } -> Some measurement.tm_auto_rules
+  | _ -> None
 
 (* ================================================================ *)
 (* Invariants                                                       *)
@@ -292,20 +231,10 @@ let check_phase_turn_alignment
 
 let check_compaction_atomicity
     (phase : ksm_phase)
-    (conds : Keeper_state_machine.conditions)
+    (compaction_stage : compaction_stage)
     : bool =
-  let phase_is_compacting = phase = Ksm_compacting in
-  phase_is_compacting = conds.compaction_active
+  (compaction_stage = Compaction_compacting) = (phase = Ksm_compacting)
 
-(* NoCascadeBeforeMeasurement from KeeperCompositeLifecycle.tla:
-   when the cascade sub-FSM is active, a measurement snapshot must
-   already have been captured. Cascade work pulled through a provider
-   without a preceding measurement indicates the auto-rule gate was
-   bypassed.
-
-   With [derive_cascade_state] projecting [`Trying`] when is_live (#7319),
-   this invariant is now observable from a single snapshot: cascade
-   non-idle AND measurement absent is the violation. *)
 let check_no_cascade_before_measurement
     ~(cascade_state : cascade_state)
     ~(measurement_captured : bool)
@@ -315,34 +244,12 @@ let check_no_cascade_before_measurement
   | Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted ->
       measurement_captured
 
-let check_recovery_two_store_sync ~(recovery : recovery_projection) : bool =
-  not (recovery.data_record && not recovery.fsm_condition)
-
-let legacy_manual_reconcile_path ~masc_root_dir name =
-  Filename.concat
-    (Filename.concat masc_root_dir "keepers")
-    (name ^ ".manual_reconcile.json")
-
-let derive_recovery ?masc_root_dir (entry : Keeper_registry.registry_entry)
-    : recovery_projection =
-  let data_record =
-    match masc_root_dir with
-    | None -> false
-    | Some root ->
-      Fs_compat.file_exists (legacy_manual_reconcile_path ~masc_root_dir:root entry.name)
-  in
-  {
-    data_record;
-    fsm_condition = false;
-  }
-
 let compute_invariants
     ~(phase : ksm_phase)
-    ~(conds : Keeper_state_machine.conditions)
     ~(turn_phase : turn_phase)
     ~(cascade_state : cascade_state)
+    ~(compaction_stage : compaction_stage)
     ~(measurement_captured : bool)
-    ~(recovery : recovery_projection)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
@@ -350,9 +257,8 @@ let compute_invariants
       check_no_cascade_before_measurement
         ~cascade_state
         ~measurement_captured;
-    compaction_atomicity = check_compaction_atomicity phase conds;
+    compaction_atomicity = check_compaction_atomicity phase compaction_stage;
     event_priority_monotone = true;
-    recovery_two_store_sync = check_recovery_two_store_sync ~recovery;
     (* per-snapshot view cannot witness event ordering; this invariant
        becomes checkable when the event-bus broadcast carries priority
        annotations (follow-up to #7122). *)
@@ -372,7 +278,6 @@ let observe
     ?correlation_id
     ?run_id
     ?now
-    ?masc_root_dir
     (entry : Keeper_registry.registry_entry)
     : snapshot =
   let ts = match now with Some t -> t | None -> Time_compat.now () in
@@ -389,23 +294,21 @@ let observe
     | Some s when String.length s > 0 -> s
     | _ -> stable_run_id entry
   in
-  let conds = entry.conditions in
   let is_live = entry.current_turn_observation <> None in
   let ksm_phase = derive_ksm_phase entry.phase in
-  let turn_phase = derive_turn_phase ~ksm_phase ~is_live in
-  let compaction_stage = derive_compaction_stage conds in
-  let decision_stage = derive_decision_stage conds ~is_live in
-  let cascade_state = derive_cascade_state ~is_live in
-  let measurement_captured = entry.last_auto_rules <> None in
-  let recovery = derive_recovery ?masc_root_dir entry in
+  let turn_phase = live_turn_phase entry in
+  let compaction_stage = entry.compaction_stage in
+  let decision_stage = live_decision_stage entry in
+  let cascade_state = live_cascade_state entry in
+  let measurement = live_measurement entry in
+  let measurement_captured = Option.is_some measurement in
   let invariants =
     compute_invariants
       ~phase:ksm_phase
-      ~conds
       ~turn_phase
       ~cascade_state
+      ~compaction_stage
       ~measurement_captured
-      ~recovery
   in
   {
     correlation_id;
@@ -416,16 +319,7 @@ let observe
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
     kmc_compaction = compaction_stage;
-    shared_measurement =
-      (match entry.last_auto_rules with
-       | Some (_ts, summary) -> Some summary
-       | None -> None);
-    recovery;
-    (* Registry retains the last [Context_measured] auto-rule summary in
-       [last_auto_rules]. The wall-clock timestamp is discarded here
-       because the snapshot's [ts] field already carries it; if callers
-       ever need the original measurement timestamp, extend the snapshot
-       type rather than widening [shared_measurement]. *)
+    shared_measurement = measurement;
     invariants;
     is_live;
     last_outcome =
@@ -434,6 +328,9 @@ let observe
          Some {
            turn_id = lc.ct_turn_id;
            ended_at = lc.ct_ended_at;
+           decision_stage = lc.ct_decision_stage;
+           cascade_state = lc.ct_cascade_state;
+           selected_model = lc.ct_selected_model;
          }
        | None -> None);
   }
@@ -448,7 +345,6 @@ let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
     "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
     "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
-    "recovery_two_store_sync", `Bool inv.recovery_two_store_sync;
   ]
 
 let measurement_to_json (m : Keeper_state_machine.auto_rule_summary)
@@ -489,16 +385,20 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       | None -> `Assoc [
           "captured", `Bool false;
         ]);
-    "recovery", `Assoc [
-      "data_record", `Bool s.recovery.data_record;
-      "fsm_condition", `Bool s.recovery.fsm_condition;
-    ];
     "invariants", invariants_to_json s.invariants;
     "is_live", `Bool s.is_live;
     "last_outcome", (match s.last_outcome with
       | Some lo -> `Assoc [
           "turn_id", `Int lo.turn_id;
           "ended_at", `Float lo.ended_at;
+          "decision_stage",
+            `String (decision_stage_to_string lo.decision_stage);
+          "cascade_state",
+            `String (cascade_state_to_string lo.cascade_state);
+          "selected_model",
+            (match lo.selected_model with
+             | Some model -> `String model
+             | None -> `Null);
         ]
       | None -> `Null);
   ]

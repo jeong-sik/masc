@@ -29,7 +29,7 @@ import {
 } from './fsm-hub-derivations'
 import { OperationalMeaningPanel, HeroPhase, TurnPipelineStrip, CompositeGraphPanel } from './fsm-hub-pipeline-panels'
 import { DwellHistogramPanel, SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
-import { MeasurementCard, InvariantsPanel, RecoveryStatePanel } from './fsm-hub-health-panels'
+import { MeasurementCard, InvariantsPanel } from './fsm-hub-health-panels'
 
 // ── Backward-compatible re-exports ─────────────────────
 // External consumers (agents-unified.ts, fsm-hub.test.ts)
@@ -68,7 +68,6 @@ export { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 export {
   flagTooltip,
   invariantDescription,
-  recoveryStateDescription,
 } from './fsm-hub-health-panels'
 
 export {
@@ -126,7 +125,7 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
  * FSM Hub — architecture audit surface for the composite keeper lifecycle.
  *
  * Layout redesign: Hero (KSM) + Pipeline strip (KTC->KDP->KCL->KMC) +
- * Health grid (measurement/invariants/recovery) + collapsible graph.
+ * Health grid (measurement/invariants) + collapsible graph.
  *
  * Data source: `/api/v1/keepers/:name/composite` (RFC-0003 S7).
  */
@@ -388,10 +387,6 @@ export function FsmHub() {
               snapshot=${snapshot}
               violationCounts=${view.invariantViolations}
               sampleCount=${view.invariantSampleCount}
-            />
-            <${RecoveryStatePanel}
-              dataRecord=${snapshot.recovery.data_record}
-              fsmCondition=${snapshot.recovery.fsm_condition}
             />
           </div>
         <//>

@@ -231,6 +231,15 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
   | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
   | _ -> false
 
+let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Internal msg ->
+      string_contains_substring_ci
+        ~needle:"all models failed" msg
+      || string_contains_substring_ci
+           ~needle:"response rejected by accept" msg
+  | _ -> false
+
 type overflow_retry_plan = {
   retry_max_context : int;
   retry_generation : int;
@@ -1429,6 +1438,14 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
          block clears the field, preventing stale state on idle keepers. *)
       Keeper_registry.mark_turn_started
         ~base_path:config.base_path meta.name;
+      Keeper_registry.mark_turn_measurement
+        ~base_path:config.base_path meta.name;
+      (match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some { current_turn_observation = Some { measurement = Some _; _ }; _ } ->
+           Keeper_registry.set_turn_decision_stage
+             ~base_path:config.base_path meta.name
+             Keeper_registry.Decision_guard_ok
+       | _ -> ());
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           Keeper_exec_tools.remove_tool_call_observer side_effect_observer;
@@ -1483,6 +1500,16 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry
               ~overflow_retry_used =
+            let mark_terminal_error err =
+              if is_cascade_exhausted_error err then
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_exhausted
+              else
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Turn_finalizing
+            in
             let max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
@@ -1511,11 +1538,26 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                                 (remaining_turn_budget_s ());
                           }))
               | Some oas_timeout_s ->
+                  Keeper_registry.set_turn_cascade_state
+                    ~base_path:config.base_path meta.name
+                    Keeper_registry.Cascade_trying;
                   do_run ~run_meta ~max_context ~run_generation ~is_retry
                     ~oas_timeout_s
             in
             match attempt_result with
-            | Ok _ as ok -> ok
+            | Ok result ->
+                let selected_model =
+                  match result.cascade_observation with
+                  | Some observation -> observation.selected_model
+                  | None -> None
+                in
+                Keeper_registry.set_turn_selected_model
+                  ~base_path:config.base_path meta.name
+                  selected_model;
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_done;
+                Ok result
             | Error err ->
                 let committed_tools =
                   committed_mutating_tools !mutating_tools_committed
@@ -1544,6 +1586,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                     meta.name reason
                     (String.concat ", " committed_tools)
                     err_preview;
+                  mark_terminal_error err;
                   Error err
                 end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
@@ -1579,6 +1622,7 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                       meta.name
                       (String.concat ", " committed_tools)
                       err_preview;
+                  mark_terminal_error reclassified;
                   Error reclassified
                 end else if is_transient_network_error err
                               && attempt <= max_transient_retries then begin
@@ -1608,6 +1652,9 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                         ~error:err
                     with
                     | Some retry_plan ->
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_compacting;
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name
@@ -1622,6 +1669,12 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                                after_tokens =
                                  retry_plan.compaction.after_tokens;
                              });
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_prompting;
+                        Keeper_registry.set_turn_decision_stage
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Decision_guard_ok;
                         let retry_meta =
                           if retry_plan.retry_generation = run_meta.runtime.generation
                           then run_meta
@@ -1646,16 +1699,24 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                         mark_paused_after_overflow
                           ~run_meta
                           ~reason:"auto_compact_recovery_unavailable";
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_finalizing;
                         Error err
                   else begin
                     mark_paused_after_overflow
                       ~run_meta
                       ~reason:"overflow_persisted_after_auto_compact_retry";
+                    Keeper_registry.set_turn_phase
+                      ~base_path:config.base_path meta.name
+                      Keeper_registry.Turn_finalizing;
                     Error err
                   end
                 end
-                else
+                else begin
+                  mark_terminal_error err;
                   Error err
+                end
           in
           (* Wall-clock timeout guards against indefinite TCP-level hangs
              from upstream LLM providers. Without this, a single stalled
@@ -1692,6 +1753,9 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                 meta.name
                 (String.concat ", " committed_tools)
                 msg;
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
               Error (Oas.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
@@ -1723,9 +1787,16 @@ let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
                 "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure; evidence recorded for next-turn observation"
                 meta.name
                 (String.concat ", " committed_tools);
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
               Error reclassified
-            end else
-              Error (Oas.Error.Internal msg))))
+            end else begin
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
+              Error (Oas.Error.Internal msg)
+            end)))
       in
       (* Drain correlation_id from the subscription created before the
          turn. Unsubscribe is handled by [unsubscribe_event_bus] in the

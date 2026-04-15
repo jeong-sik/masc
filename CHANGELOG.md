@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-04-16
+
+### Changed
+
+- **Gate wire vocabulary migrated** from `keeper_name` to `destination_id`
+  across a 4-phase rolling deprecation. The Gate library is en route to a
+  standalone `gate-mcp` repo (Track B4); `keeper_name` carried
+  MASC-specific language that didn't belong in a generic gate contract.
+  Phases:
+  - Phase 1 (#7482): `inbound_of_json` accepts either key (prefers
+    `destination_id`).
+  - Phase 2 (#7484): `outbound_to_json` emits both keys.
+  - Phase 2b (#7485): sidecar `GateResponse.from_json` parses either
+    key on the consumer side (single shared helper covers all four
+    Python sidecars).
+  - Phase 3 (#7487): `outbound_to_json` drops `keeper_name`; only
+    `destination_id` emitted now.
+  - Phase 4 (future major release): rename internal OCaml record field
+    and inbound-only `keeper_name` parse as well.
+
+### Migration note
+
+Out-of-tree consumers that still read only the `keeper_name` key from
+gate reply JSON now see `null`. Upgrade to read `destination_id`. The
+transition window was Phase 2 → Phase 3 (both keys emitted); consumers
+had the full Phase 2 release to migrate.
+
 ## [0.9.2] - 2026-04-16
 
 ### Changed

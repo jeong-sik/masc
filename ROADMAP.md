@@ -1,7 +1,7 @@
 # masc-mcp Roadmap
 
-> Current package version: v0.9.2
-> Latest release: v0.9.2 (2026-04-16)
+> Current package version: v0.9.3
+> Latest release: v0.9.3 (2026-04-16)
 > Updated: 2026-04-16
 
 This roadmap is the 6-8 week operating view for `masc-mcp`.

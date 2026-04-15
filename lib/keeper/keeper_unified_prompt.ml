@@ -235,10 +235,19 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     || observation.active_agent_count > 0
   then (
     Buffer.add_string ubuf "### Namespace State\n";
-    if observation.unclaimed_task_count > 0 then
+    if observation.unclaimed_task_count > 0 then begin
       Buffer.add_string ubuf
         (Printf.sprintf "- Unclaimed tasks: %d\n"
            observation.unclaimed_task_count);
+      (* Claim-first bias: when unclaimed work exists and the keeper
+         has no active task, emit a strong directive to claim before
+         browsing. Without this, keepers waste turns on board_list
+         and tasks_list instead of productive work. Ref: #7226 *)
+      if meta.current_task_id = None then
+        Buffer.add_string ubuf
+          "- ACTION REQUIRED: You have NO active task. Call keeper_task_claim {} \
+           as your FIRST action this turn. Do NOT browse board or list tasks first.\n"
+    end;
     if observation.failed_task_count > 0 then
       Buffer.add_string ubuf
         (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);

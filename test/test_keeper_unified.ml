@@ -1688,12 +1688,16 @@ let test_metrics_persist_social_state_fields () =
     (fun () ->
       let routed, social_state =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       let updated =
         UT.update_metrics_from_result minimal_meta ~latency_ms:100
           ~observation:base_observation ~social_state routed
       in
+      check string "active desire tracked" "maintain_quiet_readiness"
+        updated.runtime.last_active_desire;
+      check string "current intention tracked" "stay_available_without_noise"
+        updated.runtime.last_current_intention;
       check string "speech act tracked" "stay_silent"
         updated.runtime.last_speech_act;
       check string "no blocker tracked" "" updated.runtime.last_blocker;
@@ -2396,7 +2400,7 @@ let test_social_model_silences_skip_only_turn () =
     (fun () ->
       let routed, state =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       check string "speech act" "stay_silent"
         (KSM.speech_act_to_string state.speech_act);
@@ -2412,7 +2416,8 @@ let test_social_model_unknown_meta_falls_back_to_baseline () =
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
   let routed, state =
-    KSM.apply_to_result ~meta ~observation:base_observation result
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
   in
   check string "unknown meta model falls back to baseline"
     "bdi_speech_v1" state.social_model;
@@ -2429,7 +2434,7 @@ let test_social_model_unknown_header_falls_back_to_baseline () =
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "unknown header model falls back to baseline"
     "bdi_speech_v1" state.social_model;
@@ -2446,7 +2451,7 @@ let test_social_model_infers_visible_reply_without_headers () =
     (fun () ->
       let routed, state =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       check string "speech act" "inform"
         (KSM.speech_act_to_string state.speech_act);
@@ -2464,7 +2469,7 @@ let test_social_model_empty_text_without_headers_stays_silent () =
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "defer"
     (KSM.speech_act_to_string state.speech_act);
@@ -2485,7 +2490,7 @@ let test_social_model_state_only_reply_stays_silent () =
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "defer"
     (KSM.speech_act_to_string state.speech_act);
@@ -2503,7 +2508,7 @@ let test_social_model_strips_state_block_from_visible_reply () =
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "inform"
     (KSM.speech_act_to_string state.speech_act);
@@ -2535,7 +2540,7 @@ let test_social_model_routes_blocker_to_board_post () =
       ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
       let routed, state =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       let posts =
         Masc_mcp.Board_dispatch.list_posts
@@ -2564,7 +2569,7 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "inform"
     (KSM.speech_act_to_string state.speech_act);
@@ -2575,6 +2580,75 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
     (contains_substring routed.response_text "Tools used: masc_status.");
   check (list string) "tool list preserved" ["masc_status"] routed.tools_used
 
+let test_social_model_previous_state_of_meta_restores_runtime_fields () =
+  let meta =
+    {
+      minimal_meta with
+      runtime =
+        {
+          minimal_meta.runtime with
+          last_speech_act = "request_help";
+          last_active_desire = "seek_help";
+          last_current_intention = "recover_tool_route";
+          last_blocker = "tool route unavailable";
+          last_need = "operator guidance";
+        };
+    }
+  in
+  match KSM.previous_state_of_meta meta with
+  | None -> fail "expected previous social state"
+  | Some state ->
+      check string "social model restored" "bdi_speech_v1" state.social_model;
+      check (option string) "active desire restored"
+        (Some "seek_help") state.active_desire;
+      check (option string) "current intention restored"
+        (Some "recover_tool_route") state.current_intention;
+      check (option string) "blocker restored"
+        (Some "tool route unavailable") state.blocker;
+      check (option string) "need restored"
+        (Some "operator guidance") state.need;
+      check string "speech act restored" "request_help"
+        (KSM.speech_act_to_string state.speech_act);
+      check string "delivery surface inferred from speech act" "board_post"
+        (KSM.delivery_surface_to_string state.delivery_surface)
+
+let test_social_model_tool_only_turn_carries_previous_state () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let previous_state =
+    Some
+      KSM.
+        {
+          social_model = "bdi_speech_v1";
+          belief_summary = "mentions=1";
+          active_desire = Some "seek_help";
+          current_intention = Some "recover_tool_route";
+          blocker = Some "tool route unavailable";
+          need = Some "operator guidance";
+          speech_act = Request_help;
+          delivery_surface = Board_post;
+        }
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation ~previous_state result
+  in
+  check string "speech act becomes inform for tool-only turn" "inform"
+    (KSM.speech_act_to_string state.speech_act);
+  check (option string) "active desire carried"
+    (Some "seek_help") state.active_desire;
+  check (option string) "current intention carried"
+    (Some "recover_tool_route") state.current_intention;
+  check (option string) "need carried"
+    (Some "operator guidance") state.need;
+  check (option string) "blocker not carried into tool-only turn" None
+    state.blocker;
+  check bool "tool-only response still synthesized" true
+    (contains_substring routed.response_text "Tools used: masc_status.");
+  check (list string) "tool list preserved" ["masc_status"] routed.tools_used
+
 let test_social_model_infers_board_comment_from_tool_use () =
   let result =
     make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
@@ -2582,7 +2656,7 @@ let test_social_model_infers_board_comment_from_tool_use () =
   in
   let routed, state =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "comment_board"
     (KSM.speech_act_to_string state.speech_act);
@@ -2957,6 +3031,10 @@ let () =
             test_social_model_routes_blocker_to_board_post;
           test_case "social model tool-only turn skips protocol violation" `Quick
             test_social_model_tool_only_turn_skips_protocol_violation;
+          test_case "social model restores previous state from runtime" `Quick
+            test_social_model_previous_state_of_meta_restores_runtime_fields;
+          test_case "social model tool-only turn carries previous state" `Quick
+            test_social_model_tool_only_turn_carries_previous_state;
           test_case "social model infers board comment from tool use" `Quick
             test_social_model_infers_board_comment_from_tool_use;
           test_case "render_inline deny" `Quick

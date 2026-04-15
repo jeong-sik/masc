@@ -60,6 +60,14 @@ let delivery_surface_to_string = function
   | Task_claim_surface -> "task_claim"
   | Broadcast_surface -> "broadcast"
 
+let default_delivery_surface_of_speech_act = function
+  | Stay_silent | Defer -> Silent
+  | Inform -> Visible_reply
+  | Request_help | Post_board -> Board_post
+  | Comment_board -> Board_comment
+  | Claim_task -> Task_claim_surface
+  | Broadcast -> Broadcast_surface
+
 let delivery_surface_of_string value =
   match String.lowercase_ascii (String.trim value) with
   | "silent" -> Some Silent

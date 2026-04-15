@@ -49,6 +49,42 @@ let model_id_to_string = Keeper_social_model_types.model_id_to_string
 let model_id_of_string = Keeper_social_model_types.model_id_of_string
 let normalize_social_model = Keeper_social_model_types.normalize_social_model
 
+let nonempty_opt value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+
+let previous_state_of_meta (meta : Keeper_types.keeper_meta) =
+  let runtime = meta.runtime in
+  let speech_act =
+    match model_id_of_string meta.social_model with
+    | None -> None
+    | Some _ -> (
+        match Keeper_social_model_types.speech_act_of_string runtime.last_speech_act with
+        | Some speech_act -> Some speech_act
+        | None -> None)
+  in
+  let active_desire = nonempty_opt runtime.last_active_desire in
+  let current_intention = nonempty_opt runtime.last_current_intention in
+  let blocker = nonempty_opt runtime.last_blocker in
+  let need = nonempty_opt runtime.last_need in
+  match speech_act, active_desire, current_intention, blocker, need with
+  | None, None, None, None, None -> None
+  | _ ->
+      let speech_act = Option.value ~default:Inform speech_act in
+      Some
+        {
+          social_model = normalize_social_model meta.social_model;
+          belief_summary = "runtime_carry";
+          active_desire;
+          current_intention;
+          blocker;
+          need;
+          speech_act;
+          delivery_surface =
+            Keeper_social_model_types.default_delivery_surface_of_speech_act
+              speech_act;
+        }
+
 let extract_accountability_claim (result : Keeper_agent_run.run_result) =
   let headers, _ =
     Keeper_social_model_protocol.parse_header_block result.response_text

@@ -47,17 +47,20 @@ val delivery_surface_to_string : delivery_surface -> string
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
 val normalize_social_model : string -> string
+val previous_state_of_meta : Keeper_types.keeper_meta -> social_state option
 val extract_accountability_claim :
   Keeper_agent_run.run_result -> accountability_claim option
 
 val derive_failure_state :
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
+  previous_state:social_state option ->
   reason:string ->
   social_state
 
 val apply_to_result :
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
+  previous_state:social_state option ->
   Keeper_agent_run.run_result ->
   Keeper_agent_run.run_result * social_state

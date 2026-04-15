@@ -9,16 +9,18 @@ let active_model_of_meta (meta : keeper_meta) =
 
 let apply_to_result ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(previous_state : Types.social_state option)
     (result : Keeper_agent_run.run_result) =
   match active_model_of_meta meta with
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.apply_to_result ~meta ~observation
-        result
+        ~previous_state result
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
+    ~(previous_state : Types.social_state option)
     ~(reason : string) =
   match active_model_of_meta meta with
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.derive_failure_state ~meta
-        ~observation ~reason
+        ~observation ~previous_state ~reason

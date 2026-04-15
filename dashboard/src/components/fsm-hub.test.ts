@@ -16,7 +16,6 @@ import {
   inferTransitionReason,
   invariantDescription,
   isTransitionInSegment,
-  recoveryStateDescription,
   laneTransitionCount,
   type CompositeObservation,
   type HoveredSegment,
@@ -31,7 +30,7 @@ function observation(
     turn: 'idle',
     decision: 'undecided',
     cascade: 'idle',
-    compaction: 'idle',
+    compaction: 'accumulating',
     ...overrides,
   }
 }
@@ -49,7 +48,10 @@ function snapshot(
     cascade: { state: 'idle' },
     compaction: { stage: 'accumulating' },
     measurement: { captured: false },
-    recovery: { data_record: false, fsm_condition: false },
+    recovery: {
+      data_record: false,
+      fsm_condition: false,
+    },
     invariants: {
       phase_turn_alignment: true,
       no_cascade_before_measurement: true,
@@ -103,13 +105,13 @@ describe('fsm-hub derived state', () => {
   it('derives newest-first transition entries from observation changes', () => {
     const observations = [
       observation({ ts: 1 }),
-      observation({ ts: 2, phase: 'Compacting', turn: 'running' }),
-      observation({ ts: 3, phase: 'Compacting', turn: 'running', cascade: 'retrying' }),
+      observation({ ts: 2, phase: 'Compacting', turn: 'executing' }),
+      observation({ ts: 3, phase: 'Compacting', turn: 'executing', cascade: 'trying' }),
     ]
 
     expect(deriveTransitionHistory(observations)).toEqual([
-      { ts: 3, from: 'idle', to: 'retrying', field: 'KCL' },
-      { ts: 2, from: 'idle', to: 'running', field: 'KTC' },
+      { ts: 3, from: 'idle', to: 'trying', field: 'KCL' },
+      { ts: 2, from: 'idle', to: 'executing', field: 'KTC' },
       { ts: 2, from: 'Running', to: 'Compacting', field: 'KSM' },
     ])
   })
@@ -156,9 +158,9 @@ describe('fsm-hub derived state', () => {
   it('keeps only distinct consecutive phases in the phase log', () => {
     const observations = [
       observation({ ts: 1, phase: 'Running' }),
-      observation({ ts: 2, phase: 'Running', turn: 'running' }),
+      observation({ ts: 2, phase: 'Running', turn: 'executing' }),
       observation({ ts: 3, phase: 'Failing' }),
-      observation({ ts: 4, phase: 'Failing', cascade: 'retrying' }),
+      observation({ ts: 4, phase: 'Failing', cascade: 'trying' }),
     ]
 
     expect(derivePhaseLog(observations)).toEqual([
@@ -197,6 +199,9 @@ describe('fsm-hub derived state', () => {
         last_outcome: {
           turn_id: 42,
           ended_at: 75,
+          decision_stage: 'guard_ok',
+          cascade_state: 'done',
+          selected_model: null,
         },
       }),
       [observation({ ts: 75 })],
@@ -563,7 +568,6 @@ describe('invariantDescription', () => {
       'no_cascade_before_measurement',
       'compaction_atomicity',
       'event_priority_monotone',
-      'recovery_two_store_sync',
     ]
     for (const key of keys) {
       const desc = invariantDescription(key)
@@ -577,30 +581,9 @@ describe('invariantDescription', () => {
     expect(invariantDescription('no_cascade_before_measurement')).toMatch(/cascade|measurement/i)
     expect(invariantDescription('compaction_atomicity')).toMatch(/atomic|half-compacted/i)
     expect(invariantDescription('event_priority_monotone')).toMatch(/priority|priorit/i)
-    expect(invariantDescription('recovery_two_store_sync')).toMatch(/recovery|checkpoint|store/i)
   })
 
   it('falls back to generic text for unknown keys', () => {
     expect(invariantDescription('mystery_invariant')).toMatch(/^Invariant defined by/)
-  })
-})
-
-describe('recoveryStateDescription', () => {
-  it('returns prose for all four recovery states', () => {
-    const states = ['clean', 'reconcile_pending', 'drift: data↑ fsm↓', 'drift: fsm↑ data↓']
-    for (const state of states) {
-      const desc = recoveryStateDescription(state)
-      expect(desc.length).toBeGreaterThan(30)
-      expect(desc).not.toMatch(/^Recovery state defined by/)
-    }
-  })
-
-  it('mentions restart consequence for drift states', () => {
-    expect(recoveryStateDescription('drift: data↑ fsm↓')).toMatch(/restart|replay|duplicate/i)
-    expect(recoveryStateDescription('drift: fsm↑ data↓')).toMatch(/restart|lose|re-derive/i)
-  })
-
-  it('falls back for unknown states', () => {
-    expect(recoveryStateDescription('unknown')).toMatch(/^Recovery state defined by/)
   })
 })

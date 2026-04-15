@@ -665,9 +665,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =
     match Env_config.Transport.use_h2 () with
-    | "h2_only" -> `H2_only
-    | "h1_only" -> `H1_only
-    | _ -> `Auto
+    | Env_config.Transport.H2_only -> `H2_only
+    | Env_config.Transport.H1_only -> `H1_only
+    | Env_config.Transport.Auto
+    | Env_config.Transport.Unknown_h2_mode _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   let initial_backend_mode = requested_backend_mode () in

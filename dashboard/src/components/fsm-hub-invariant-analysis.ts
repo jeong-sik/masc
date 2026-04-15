@@ -44,8 +44,8 @@ function invariantDetail(
         : 'More than one measurement event appears to own the same turn.'
     case 'recovery_two_store_sync':
       return ok
-        ? 'Recovery data and FSM condition are synchronized.'
-        : `recovery.data_record=${String(snapshot.recovery.data_record)}, recovery.fsm_condition=${String(snapshot.recovery.fsm_condition)}.`
+        ? 'Recovery data record and FSM condition agree on whether manual reconcile is required.'
+        : `recovery.data_record=${String(snapshot.recovery.data_record)} while recovery.fsm_condition=${String(snapshot.recovery.fsm_condition)}.`
   }
 }
 
@@ -58,6 +58,9 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
     return 'A healthy provider path or manual reconcile must clear Failing before Running can resume.'
   }
+  if (snapshot.phase === 'Overflowed') {
+    return 'Context overflow must resolve through compaction or explicit operator clearance before the lifecycle can settle.'
+  }
   if (snapshot.phase === 'Compacting' || snapshot.compaction.stage === 'compacting') {
     return 'KMC should reach done and then KSM should hand control back to Running.'
   }
@@ -66,6 +69,9 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   }
   if (snapshot.phase === 'Draining') {
     return 'Draining should complete before the lifecycle settles into Stopped.'
+  }
+  if (snapshot.phase === 'Stable') {
+    return 'The lifecycle is outside the active turn cycle; the next meaningful edge should come from a new live turn or operator action.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
     return 'The blocked turn should finalize back to idle without entering cascade/tool execution.'
@@ -110,30 +116,6 @@ export function deriveOperationalInsight(
 
   const lanes = precomputedLanes ?? deriveObservedLaneSummaries(snapshot, observations, now)
   const stalledLane = lanes.find(lane => lane.stalled)
-  if (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition) {
-    return {
-      tone: 'error',
-      headline: 'Recovery stores diverged',
-      detail: 'The manual-reconcile data record and FSM condition disagree, which should be unreachable under RFC-0003.',
-      nextStep: 'Reconcile the recovery stores before treating the lifecycle as healthy again.',
-      evidence: [
-        `data ${String(snapshot.recovery.data_record)}`,
-        `fsm ${String(snapshot.recovery.fsm_condition)}`,
-      ],
-    }
-  }
-  if (snapshot.recovery.data_record && snapshot.recovery.fsm_condition) {
-    return {
-      tone: 'warn',
-      headline: 'Manual reconcile is pending',
-      detail: 'Both recovery stores agree the keeper is waiting for manual reconcile to clear.',
-      nextStep: 'Resolve the reconcile path before expecting Failing to return to Running.',
-      evidence: [
-        `KSM ${snapshot.phase}`,
-        'manual reconcile required',
-      ],
-    }
-  }
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
     return {
       tone: 'error',
@@ -184,7 +166,7 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Restarting') {
+  if (snapshot.phase === 'Overflowed' || snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Stable') {
     return {
       tone: 'warn',
       headline: `${snapshot.phase} is the active lifecycle edge`,
@@ -228,7 +210,7 @@ export function deriveOperationalInsight(
   return {
     tone: 'info',
     headline: 'Live turn is progressing normally',
-    detail: 'No invariant drift or recovery issue is visible; the sub-FSMs look aligned for the current live turn.',
+    detail: 'No invariant drift is visible; the sub-FSMs look aligned for the current live turn.',
     nextStep: nextExpectedStep(snapshot),
     evidence: [
       `KSM ${snapshot.phase}`,

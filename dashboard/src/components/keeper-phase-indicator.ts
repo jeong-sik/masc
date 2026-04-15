@@ -18,6 +18,7 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Offline:    { label: '오프라인',   color: '#6b7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.18)', glow: 'none',                             icon: '○' },
   Running:    { label: '실행중',     color: '#34d399', bg: 'rgba(52,211,153,0.08)',  border: 'rgba(52,211,153,0.22)',  glow: '0 0 8px rgba(52,211,153,0.25)',    icon: '●' },
   Failing:    { label: '오류중',     color: '#f97316', bg: 'rgba(249,115,22,0.08)',  border: 'rgba(249,115,22,0.22)',  glow: '0 0 8px rgba(249,115,22,0.25)',    icon: '▲' },
+  Overflowed: { label: '오버플로우', color: '#fb923c', bg: 'rgba(251,146,60,0.08)',  border: 'rgba(251,146,60,0.22)',  glow: '0 0 8px rgba(251,146,60,0.20)',    icon: '⬢' },
   Compacting: { label: '압축중',     color: '#a855f7', bg: 'rgba(168,85,247,0.08)',  border: 'rgba(168,85,247,0.22)',  glow: '0 0 8px rgba(168,85,247,0.20)',    icon: '◆' },
   HandingOff: { label: '승계중',     color: '#f472b6', bg: 'rgba(244,114,182,0.08)', border: 'rgba(244,114,182,0.22)', glow: '0 0 8px rgba(244,114,182,0.20)',   icon: '⟳' },
   Draining:   { label: '종료중',     color: '#fb923c', bg: 'rgba(251,146,60,0.08)',  border: 'rgba(251,146,60,0.22)',  glow: '0 0 8px rgba(251,146,60,0.20)',    icon: '▽' },
@@ -28,7 +29,7 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Dead:       { label: '종료',       color: '#4b5563', bg: 'rgba(75,85,99,0.06)',    border: 'rgba(75,85,99,0.18)',    glow: 'none',                             icon: '✦' },
 }
 
-const BUFFER_PHASES = new Set<string>(['Failing', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
+const BUFFER_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
 
 function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
   if (!phase) return PHASE_STYLES.Offline

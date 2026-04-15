@@ -5,20 +5,26 @@
 EXTENDS Naturals
 
 PhaseNames ==
-    {"Offline", "Running", "Failing", "Compacting", "HandingOff",
+    {"Offline", "Running", "Failing", "Overflowed", "Compacting", "HandingOff",
      "Draining", "Paused", "Stopped", "Crashed", "Restarting", "Dead"}
 
 CanTransition(from, to) ==
     CASE from = "Stopped" -> FALSE
       [] from = "Dead" -> FALSE
       [] from = "Offline" -> to \in {"Running", "Stopped", "Draining"}
-      [] from = "Running" -> to \in {"Failing", "Compacting", "HandingOff",
-                                     "Draining", "Paused", "Stopped", "Crashed"}
-      [] from = "Failing" -> to \in {"Running", "Crashed", "Draining", "Paused"}
-      [] from = "Compacting" -> to \in {"Running", "Failing", "Crashed", "Draining"}
+      [] from = "Running" -> to \in {"Failing", "Overflowed", "Compacting",
+                                     "HandingOff", "Draining", "Paused",
+                                     "Stopped", "Crashed"}
+      [] from = "Failing" -> to \in {"Running", "Overflowed", "Crashed",
+                                     "Draining", "Paused"}
+      [] from = "Overflowed" -> to \in {"Running", "Compacting", "Paused",
+                                        "Draining", "Crashed"}
+      [] from = "Compacting" -> to \in {"Running", "Overflowed", "Failing",
+                                        "Crashed", "Draining"}
       [] from = "HandingOff" -> to \in {"Running", "Failing", "Crashed", "Draining"}
       [] from = "Draining" -> to \in {"Stopped", "Crashed"}
-      [] from = "Paused" -> to \in {"Running", "Draining", "Stopped", "Crashed"}
+      [] from = "Paused" -> to \in {"Running", "Compacting", "Draining",
+                                    "Stopped", "Crashed"}
       [] from = "Crashed" -> to \in {"Restarting", "Dead"}
       [] from = "Restarting" -> to \in {"Running", "Crashed", "Dead",
                                         "Draining", "Paused"}
@@ -27,20 +33,25 @@ CanTransition(from, to) ==
 CONSTANTS MaxRestarts
 
 VARIABLES
-    fiber_alive, heartbeat_healthy, turn_healthy, manual_reconcile_required,
+    launch_pending,
+    fiber_alive, heartbeat_healthy, turn_healthy,
     context_within_budget, context_handoff_needed,
     compaction_active, handoff_active, operator_paused,
     stop_requested, restart_budget_remaining, backoff_elapsed,
-    guardrail_triggered, drain_complete, restart_count, recorded_phase,
+    guardrail_triggered, drain_complete,
+    context_overflow, compact_retry_exhausted,
+    restart_count, recorded_phase,
     trace_idx
 
 INSTANCE TraceData
 
-vars == <<fiber_alive, heartbeat_healthy, turn_healthy, manual_reconcile_required,
+vars == <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
           context_within_budget, context_handoff_needed,
           compaction_active, handoff_active, operator_paused,
           stop_requested, restart_budget_remaining, backoff_elapsed,
-          guardrail_triggered, drain_complete, restart_count,
+          guardrail_triggered, drain_complete,
+          context_overflow, compact_retry_exhausted,
+          restart_count,
           recorded_phase, trace_idx>>
 
 \* ── Phase Derivation (copied from KeeperStateMachine) ────
@@ -48,15 +59,17 @@ vars == <<fiber_alive, heartbeat_healthy, turn_healthy, manual_reconcile_require
 DerivePhase ==
     IF stop_requested /\ drain_complete
        /\ ~compaction_active /\ ~handoff_active THEN "Stopped"
+    ELSE IF launch_pending /\ ~fiber_alive THEN "Offline"
     ELSE IF ~fiber_alive /\ ~restart_budget_remaining THEN "Dead"
     ELSE IF ~fiber_alive /\ restart_budget_remaining /\ backoff_elapsed THEN "Restarting"
     ELSE IF ~fiber_alive /\ restart_budget_remaining THEN "Crashed"
     ELSE IF stop_requested THEN "Draining"
     ELSE IF guardrail_triggered THEN "Failing"
-    ELSE IF operator_paused THEN "Paused"
+    ELSE IF operator_paused \/ (context_overflow /\ compact_retry_exhausted) THEN "Paused"
     ELSE IF handoff_active THEN "HandingOff"
     ELSE IF compaction_active THEN "Compacting"
-    ELSE IF ~heartbeat_healthy \/ ~turn_healthy \/ manual_reconcile_required THEN "Failing"
+    ELSE IF context_overflow THEN "Overflowed"
+    ELSE IF ~heartbeat_healthy \/ ~turn_healthy THEN "Failing"
     ELSE IF fiber_alive THEN "Running"
     ELSE "Offline"
 
@@ -64,10 +77,10 @@ DerivePhase ==
 
 TraceInit ==
     /\ trace_idx = 1
+    /\ launch_pending = Trace[1].launch_pending
     /\ fiber_alive = Trace[1].fiber_alive
     /\ heartbeat_healthy = Trace[1].heartbeat_healthy
     /\ turn_healthy = Trace[1].turn_healthy
-    /\ manual_reconcile_required = Trace[1].manual_reconcile_required
     /\ context_within_budget = Trace[1].context_within_budget
     /\ context_handoff_needed = Trace[1].context_handoff_needed
     /\ compaction_active = Trace[1].compaction_active
@@ -78,6 +91,8 @@ TraceInit ==
     /\ backoff_elapsed = Trace[1].backoff_elapsed
     /\ guardrail_triggered = Trace[1].guardrail_triggered
     /\ drain_complete = Trace[1].drain_complete
+    /\ context_overflow = Trace[1].context_overflow
+    /\ compact_retry_exhausted = Trace[1].compact_retry_exhausted
     /\ restart_count = Trace[1].restart_count
     /\ recorded_phase = Trace[1].recorded_phase
 
@@ -86,10 +101,10 @@ TraceInit ==
 TraceNext ==
     /\ trace_idx < TraceLength
     /\ trace_idx' = trace_idx + 1
+    /\ launch_pending' = Trace[trace_idx + 1].launch_pending
     /\ fiber_alive' = Trace[trace_idx + 1].fiber_alive
     /\ heartbeat_healthy' = Trace[trace_idx + 1].heartbeat_healthy
     /\ turn_healthy' = Trace[trace_idx + 1].turn_healthy
-    /\ manual_reconcile_required' = Trace[trace_idx + 1].manual_reconcile_required
     /\ context_within_budget' = Trace[trace_idx + 1].context_within_budget
     /\ context_handoff_needed' = Trace[trace_idx + 1].context_handoff_needed
     /\ compaction_active' = Trace[trace_idx + 1].compaction_active
@@ -100,6 +115,8 @@ TraceNext ==
     /\ backoff_elapsed' = Trace[trace_idx + 1].backoff_elapsed
     /\ guardrail_triggered' = Trace[trace_idx + 1].guardrail_triggered
     /\ drain_complete' = Trace[trace_idx + 1].drain_complete
+    /\ context_overflow' = Trace[trace_idx + 1].context_overflow
+    /\ compact_retry_exhausted' = Trace[trace_idx + 1].compact_retry_exhausted
     /\ restart_count' = Trace[trace_idx + 1].restart_count
     /\ recorded_phase' = Trace[trace_idx + 1].recorded_phase
 
@@ -116,10 +133,10 @@ TraceSpec == TraceInit /\ [][TraceStep]_vars
 \* ── Safety Invariants ────────────────────────────────────
 
 TypeOK ==
+    /\ launch_pending \in BOOLEAN
     /\ fiber_alive \in BOOLEAN
     /\ heartbeat_healthy \in BOOLEAN
     /\ turn_healthy \in BOOLEAN
-    /\ manual_reconcile_required \in BOOLEAN
     /\ context_within_budget \in BOOLEAN
     /\ context_handoff_needed \in BOOLEAN
     /\ compaction_active \in BOOLEAN
@@ -130,12 +147,14 @@ TypeOK ==
     /\ backoff_elapsed \in BOOLEAN
     /\ guardrail_triggered \in BOOLEAN
     /\ drain_complete \in BOOLEAN
+    /\ context_overflow \in BOOLEAN
+    /\ compact_retry_exhausted \in BOOLEAN
     /\ restart_count \in 0..MaxRestarts+10
     /\ recorded_phase \in PhaseNames
     /\ trace_idx \in 1..TraceLength
 
 RunningRequiresFiber == DerivePhase = "Running" => fiber_alive
-RunningClearsManualReconcile == DerivePhase = "Running" => ~manual_reconcile_required
+OfflineRequiresLaunchPending == DerivePhase = "Offline" => (launch_pending /\ ~fiber_alive)
 StoppedRequiresDrain == DerivePhase = "Stopped" => (stop_requested /\ drain_complete)
 DeadRequiresNoBudget == DerivePhase = "Dead" => ~restart_budget_remaining
 DerivePhaseAgreement == recorded_phase = DerivePhase

@@ -117,50 +117,112 @@ let runtime_keepalive_started_at (config : Coord_utils.config)
     (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 
+type runtime_blocker_surface = {
+  blocker_class : string;
+  summary : string;
+  manual_reconcile : bool;
+}
+
+let runtime_blocker_surface_of_failure_reason
+    (reason : Keeper_registry.failure_reason) =
+  match reason with
+  | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
+      let blocker_class =
+        match kind with
+        | Keeper_registry.Post_commit_timeout ->
+            "ambiguous_post_commit_timeout"
+        | Keeper_registry.Post_commit_failure ->
+            "ambiguous_post_commit_failure"
+      in
+      Some
+        {
+          blocker_class;
+          summary = detail;
+          manual_reconcile = true;
+        }
+  | _ -> None
+
 let runtime_blocker_surface_of_reason (reason : string) =
   let trimmed = String.trim reason in
   if trimmed = "" then
     None
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
   then
-    Some ("autonomous_slot_wait_timeout", trimmed)
+    Some
+      {
+        blocker_class = "autonomous_slot_wait_timeout";
+        summary = trimmed;
+        manual_reconcile = false;
+      }
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then
-    Some ("admission_queue_wait_timeout", trimmed)
+    Some
+      {
+        blocker_class = "admission_queue_wait_timeout";
+        summary = trimmed;
+        manual_reconcile = false;
+      }
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
           && String_util.contains_substring_ci trimmed "semaphore_wait_ms="
   then
-    Some ("turn_timeout_after_queue_wait", trimmed)
+    Some
+      {
+        blocker_class = "turn_timeout_after_queue_wait";
+        summary = trimmed;
+        manual_reconcile = false;
+      }
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then
-    Some ("turn_timeout", trimmed)
+    Some
+      {
+        blocker_class = "turn_timeout";
+        summary = trimmed;
+        manual_reconcile = false;
+      }
   else if String_util.contains_substring_ci trimmed "completion contract"
           || String_util.contains_substring_ci trimmed "completion_contract"
   then
-    Some ("completion_contract_violation", trimmed)
+    Some
+      {
+        blocker_class = "completion_contract_violation";
+        summary = trimmed;
+        manual_reconcile = false;
+      }
   else
     None
 
-let runtime_blocker_fields_json
-    (_config : Coord_utils.config)
+let runtime_blocker_fields_json (config : Coord_utils.config)
     (meta : keeper_meta) =
   let derived =
-    match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
+    match runtime_registry_entry config meta.name with
+    | Some entry -> (
+        match entry.last_failure_reason with
+        | Some reason -> runtime_blocker_surface_of_failure_reason reason
+        | None -> None)
+    | None -> None
+  in
+  let derived =
+    match derived with
     | Some blocker -> Some blocker
     | None ->
-        runtime_blocker_surface_of_reason
-          meta.runtime.proactive_rt.last_reason
+        (match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
+         | Some blocker -> Some blocker
+         | None ->
+             runtime_blocker_surface_of_reason
+               meta.runtime.proactive_rt.last_reason)
   in
   match derived with
-  | Some (blocker_class, summary) ->
+  | Some blocker ->
       [
-        ("runtime_blocker_class", `String blocker_class);
-        ("runtime_blocker_summary", `String summary);
+        ("runtime_blocker_class", `String blocker.blocker_class);
+        ("runtime_blocker_summary", `String blocker.summary);
+        ("runtime_blocker_manual_reconcile", `Bool blocker.manual_reconcile);
       ]
   | None ->
       [
         ("runtime_blocker_class", `Null);
         ("runtime_blocker_summary", `Null);
+        ("runtime_blocker_manual_reconcile", `Bool false);
       ]
 
 let runtime_surface_json config (meta : keeper_meta) =

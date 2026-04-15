@@ -64,6 +64,8 @@ type turn_reason =
   | Never_started
 
 type skip_reason =
+  | Keeper_paused
+  | Approval_pending
   | Scheduled_autonomous_disabled
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -85,6 +87,8 @@ let turn_reason_to_string = function
   | Never_started -> "never_started"
 
 let skip_reason_to_string = function
+  | Keeper_paused -> "keeper_paused"
+  | Approval_pending -> "approval_pending"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
   | Idle_gate_pending _ -> "idle_gate_pending"
   | Cooldown_pending _ -> "cooldown_pending"
@@ -718,6 +722,27 @@ let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation
     ]
     |> List.filter_map Fun.id
   in
+  let blocked_channel =
+    match reactive_triggers with
+    | _ :: _ -> Reactive
+    | [] -> Scheduled_autonomous
+  in
+  let blocked reason =
+    {
+      should_run = false;
+      channel = blocked_channel;
+      verdict = Skip { reasons = (reason, []) };
+      since_last_scheduled_autonomous = None;
+      effective_cooldown = None;
+      task_reactive_cooldown = None;
+      idle_gate_sec = None;
+    }
+  in
+  if meta.paused then
+    blocked Keeper_paused
+  else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name then
+    blocked Approval_pending
+  else
   match reactive_triggers with
   | first :: rest ->
       {

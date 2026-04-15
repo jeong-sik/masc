@@ -64,14 +64,21 @@ module Masc : sig
     | Agent_fitness
     | Agent_update
     | Agents
+    | Autoresearch_cycle
+    | Autoresearch_inject
+    | Autoresearch_start
+    | Autoresearch_status
+    | Autoresearch_stop
     | Batch_add_tasks
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
     | Board_delete
     | Board_get
+    | Board_hearths
     | Board_list
     | Board_post
+    | Board_profile
     | Board_search
     | Board_stats
     | Board_vote
@@ -81,11 +88,6 @@ module Masc : sig
     | Claim_next
     | Claim_task
     | Cleanup_zombies
-    | Autoresearch_cycle
-    | Autoresearch_inject
-    | Autoresearch_start
-    | Autoresearch_status
-    | Autoresearch_stop
     | Code_delete
     | Code_edit
     | Code_git

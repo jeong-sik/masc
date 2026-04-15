@@ -1067,16 +1067,13 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
-  let mutation_boundary_tool_name : string option ref = ref None in
-  let mutation_boundary_summary () =
-    match !mutation_boundary_tool_name with
-    | Some tool_name ->
-        Printf.sprintf
-          "previous committed tool '%s' created a mutation boundary; checkpoint and resume next cycle"
-          tool_name
-    | None ->
-        "a previous committed tool created a mutation boundary; checkpoint and resume next cycle"
-  in
+  (* Mutation boundary mechanism removed. Previously, the first successful
+     mutating tool would open a "boundary" that blocked further tools and
+     exited the OAS loop early. This caused keeper death spirals (#6801) and
+     limited keepers to 1 mutating action per turn.
+     Now: OAS Agent.run completes naturally (max_turns or model end_turn).
+     Failure recovery: evidence records + operator notification via board,
+     not sticky blocker state. See plan: enchanted-strolling-bonbon. *)
   let base_hooks =
     Keeper_hooks_oas.make_hooks
       ~config
@@ -1084,25 +1081,6 @@ let run_turn
       ~session
       ~ctx_snapshot
       ~generation
-      ~pre_tool_use_guard:(fun ~tool_name ~input ->
-        match !mutation_boundary_tool_name with
-        | Some _ when Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
-                        ~tool_name ~input ->
-          None (* coordination/worktree-sandbox tools pass through boundary *)
-        | Some _ -> Some (mutation_boundary_summary ())
-        | None -> None)
-      ~on_tool_executed:(fun ~tool_name ~input ~output_text:_ ~success ->
-        if success
-           && not (Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
-                     ~tool_name ~input)
-           && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
-           && Option.is_none !mutation_boundary_tool_name
-        then begin
-          mutation_boundary_tool_name := Some tool_name;
-          Log.Keeper.info
-            "keeper:%s mutation boundary opened after committed tool=%s"
-            meta.name tool_name
-        end)
       ?max_cost_usd
       ?trajectory_acc
       ()
@@ -1463,21 +1441,19 @@ let run_turn
                 else all_allowed
               in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Tool choice: Auto on all turns.
-           Previous design forced tool_choice=Any on non-last turns
-           (#5566) to prevent text-only "chatting" responses, but this
-           caused fatal interactions with providers that ignore
-           tool_choice (GLM, some Ollama models):
-             1. Provider returns text → OAS contract violation
-             2. Mutating tools already committed → reconcile block
-             3. sticky_reconcile retained → keeper permanently dead
-             4. All keepers stall within ~10 minutes (#6801)
-           Auto lets the model decide; tool use is guided by the system
-           prompt instruction "always call a tool" instead. *)
+              (* Tool choice: Any on all non-last turns.
+           "Must call a tool" is deterministic (API enforces).
+           "Which tool" is non-deterministic (model chooses).
+           OAS handles provider differences:
+             - GLM: Any → Auto (api_openai.ml, GLM only supports auto)
+             - Ollama (supports_tool_choice=false): contract relaxed
+             - Claude/OpenAI: Any = required, enforced by API
+           Reconcile/mutation-boundary removed — #6801 root cause
+           was sticky_reconcile, not tool_choice=Any itself. *)
               let tool_choice =
                 if is_last_turn || List.length all_allowed = 0
                 then current_params.tool_choice (* last turn: preserve caller's choice *)
-                else Some Agent_sdk.Types.Auto (* all other turns: model decides *)
+                else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
               completion_contract_ref :=
                 Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
@@ -1674,19 +1650,8 @@ let run_turn
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name)
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-           ~exit_condition:(fun _turn_count ->
-             Option.is_some !mutation_boundary_tool_name)
-           ~exit_condition_result:(fun turn_count ->
-             let tool_name = !mutation_boundary_tool_name in
-             ( Oas_worker.MutationBoundaryReached
-                 { turns_used = turn_count; tool_name },
-               Some
-                 (match tool_name with
-                  | Some tool ->
-                      Printf.sprintf
-                        "[mutation boundary reached after committed tool: %s]"
-                        tool
-                  | None -> "[mutation boundary reached]") ))
+           (* exit_condition removed with mutation_boundary — OAS runs to
+              natural completion (max_turns or model end_turn). *)
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())

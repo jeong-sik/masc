@@ -24,10 +24,6 @@ let synonyms : (string * string list) list =
      [ "happening"; "activity"; "overview"; "summary"; "monitor"; "big picture" ]);
     ("masc_broadcast",
      [ "notify"; "announce"; "tell"; "inform"; "alert"; "everyone"; "let know" ]);
-    ("masc_heartbeat_start",
-     [ "automatic"; "recurring"; "periodic"; "auto"; "keep alive"; "start pinging" ]);
-    ("masc_heartbeat_stop",
-     [ "stop pinging"; "cancel heartbeat"; "end ping"; "halt" ]);
     ("masc_claim_next",
      [ "pick up"; "grab"; "assign me"; "next task"; "give me work"; "take task" ]);
     ("masc_add_task",
@@ -170,8 +166,6 @@ let synonyms : (string * string list) list =
      [ "governance status"; "policy status"; "rules check"; "compliance check" ]);
     ("masc_governance_feed",
      [ "governance feed"; "policy events"; "rule changes"; "governance log" ]);
-    ("masc_governance_set",
-     [ "set governance"; "change policy"; "update rules"; "configure governance" ]);
     (* masc_autoresearch_* — automated research *)
     ("masc_autoresearch_start",
      [ "start research"; "begin research"; "auto research"; "autoresearch start" ]);
@@ -208,11 +202,6 @@ let synonyms : (string * string list) list =
      [ "update agent"; "change agent"; "agent modify"; "agent settings" ]);
     ("masc_agent_fitness",
      [ "agent fitness"; "agent evaluation"; "agent score"; "rate agent" ]);
-    (* masc auth *)
-    ("masc_auth_status",
-     [ "auth status"; "authentication"; "token status"; "credentials" ]);
-    ("masc_auth_refresh",
-     [ "refresh token"; "renew auth"; "auth refresh"; "token refresh" ]);
     (* masc web search *)
     ("masc_web_search",
      [ "web search"; "search internet"; "search online"; "google" ]);
@@ -231,11 +220,6 @@ let synonyms : (string * string list) list =
      [ "compact keeper"; "shrink context"; "reduce context"; "context overflow fix" ]);
     ("masc_keeper_clear",
      [ "clear keeper"; "reset keeper context"; "wipe keeper history"; "emergency clear" ]);
-    (* masc heartbeat — lifecycle tools *)
-    ("masc_heartbeat_start",
-     [ "start heartbeat"; "begin pinging"; "auto ping"; "keep alive" ]);
-    ("masc_heartbeat_stop",
-     [ "stop heartbeat"; "end ping"; "cancel heartbeat"; "halt ping" ]);
     (* masc core — room operations *)
     ("masc_claim_next",
      [ "claim next task"; "pick up task"; "assign me"; "next task"; "give me work"; "take task" ]);

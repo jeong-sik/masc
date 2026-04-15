@@ -68,19 +68,14 @@ Pair with masc_workflow_guide for next-step recommendations.";
       ("required", `List [`String "assertions"]);
     ];
   };
+
   {
-    name = "masc_init";
-    description = "Create the .masc/ folder to bootstrap a new MASC project namespace in this project. \
-Call once per project when no .masc/ exists yet; if it already exists you auto-join. \
-After init, call masc_join to register your presence, then masc_add_task or masc_claim_next.";
+    name = "masc_heartbeat";
+    description = "Update your heartbeat timestamp to prove you are still active. \
+Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates.";
     input_schema = `Assoc [
       ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Your agent identity: 'claude' (Claude Code), 'gemini' (Gemini CLI), or 'codex' (Codex CLI)");
-        ]);
-      ]);
+      ("properties", `Assoc []);
     ];
   };
 ]

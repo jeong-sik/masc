@@ -1,16 +1,12 @@
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules:
-    - Tool_inline_dispatch_room: masc_start, masc_lock, masc_unlock,
-      masc_set_room, masc_join, masc_leave
-    - Tool_inline_dispatch_comm: masc_bounded_run, masc_broadcast,
-      masc_messages, masc_listen, masc_who
-    - Tool_inline_dispatch_extra: remaining tools (recall,
-      board, conversation, keeper, etc.)
+    - Tool_inline_dispatch_room: masc_start, masc_join, masc_leave
+    - Tool_inline_dispatch_comm: masc_broadcast, masc_messages, masc_who
+    - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
-    Keeps inline: verify, mcp_session, cancellation, subscription,
-    progress, interrupt, approve, reject, pending_interrupts, branch,
-    governance_set, spawn, discover_tools.
+    Keeps inline: mcp_session, approval_pending, approval_resolve,
+    spawn, discover_tools.
 *)
 
 (** Re-export shared types so callers can use
@@ -60,7 +56,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   let arg_get_int key default =
     Safe_ops.json_int ~default key arguments
   in
-  let arg_get_bool key default =
+  let _arg_get_bool key default =
     Safe_ops.json_bool ~default key arguments
   in
   let _arg_get_string_list key =
@@ -82,17 +78,12 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   match name with
   (* ── Room lifecycle (delegated) ─────────────────────────────── *)
   | "masc_start" -> Tool_inline_dispatch_room.handle_start ctx
-  | "masc_lock" -> Tool_inline_dispatch_room.handle_lock ctx
-  | "masc_unlock" -> Tool_inline_dispatch_room.handle_unlock ctx
-  | "masc_set_room" -> Tool_inline_dispatch_room.handle_set_room ctx
   | "masc_join" -> Tool_inline_dispatch_room.handle_join ctx
   | "masc_leave" -> Tool_inline_dispatch_room.handle_leave ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
-  | "masc_bounded_run" -> Tool_inline_dispatch_comm.handle_bounded_run ctx
   | "masc_broadcast" -> Tool_inline_dispatch_comm.handle_broadcast ctx
   | "masc_messages" -> Tool_inline_dispatch_comm.handle_messages ctx
-  | "masc_listen" -> Tool_inline_dispatch_comm.handle_listen ctx
   | "masc_who" -> Tool_inline_dispatch_comm.handle_who ctx
 
   (* ── HITL Approval Queue (#5907) ─────────────────────────────── *)
@@ -116,10 +107,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
            Some (true, Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str)
          | Error msg -> Some (false, msg))
 
-  (* ── Verification ───────────────────────────────────────────── *)
-  | "masc_verify_request" | "masc_verify_submit" | "masc_verify_status"
-  | "masc_verify_pending" | "masc_verify_auto" ->
-      Some (Tool_verification.dispatch config agent_name name arguments)
+  (* Verification tools removed: pruned *)
 
   (* ── MCP Session ────────────────────────────────────────────── *)
   | "masc_mcp_session" ->
@@ -187,37 +175,8 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
        | Ok json -> Some (true, Yojson.Safe.to_string json)
        | Error e -> Some (false, e))
 
-  (* ── Infrastructure tools ───────────────────────────────────── *)
-  | "masc_cancellation" ->
-      Some (Cancellation.handle_cancellation_tool arguments)
-
-  | "masc_subscription" ->
-      Some (Subscriptions.handle_subscription_tool arguments)
-
-  | "masc_progress" ->
-      Progress.set_sse_callback (Mcp_server.sse_broadcast state);
-      Some (Progress.handle_progress_tool arguments)
-
-  | "masc_governance_set" ->
-      let level = arg_get_string "level" "production" in
-      let defaults = ctx.governance_defaults level in
-      let audit_enabled = arg_get_bool "audit_enabled" defaults.audit_enabled in
-      let anomaly_detection = arg_get_bool "anomaly_detection" defaults.anomaly_detection in
-      let g : Mcp_server_eio_governance.governance_config = {
-        level = String.lowercase_ascii level;
-        audit_enabled;
-        anomaly_detection;
-      } in
-      ctx.save_governance config g;
-      let json = `Assoc [
-        ("status", `String "ok");
-        ("governance", `Assoc [
-          ("level", `String g.level);
-          ("audit_enabled", `Bool g.audit_enabled);
-          ("anomaly_detection", `Bool g.anomaly_detection);
-        ]);
-      ] in
-      Some (true, Yojson.Safe.to_string json)
+  (* Infrastructure tools: cancellation, subscription, progress,
+     governance_set removed — pruned from surfaces *)
 
   | "masc_spawn" ->
       let spawn_agent_name = arg_get_string "agent_name" "" in

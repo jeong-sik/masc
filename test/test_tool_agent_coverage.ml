@@ -1,13 +1,12 @@
-(** Coverage tests for Tool_agent — Agent management, selection, and meta-cognition
+(** Coverage tests for Tool_agent — Agent management, fitness, and meta-cognition
 
-    Tests dispatch routing, handler execution, helper functions, and
-    selection strategies for 12 tools: masc_agents, masc_register_capabilities,
-    masc_agent_update, masc_find_by_capability, masc_get_metrics,
-    masc_agent_fitness, masc_select_agent, masc_collaboration_graph,
-    masc_consolidate_learning, masc_agent_card, masc_agent_relations,
-    masc_meta_cognition_snapshot
+    Tests dispatch routing, handler execution, helper functions for:
+    masc_agents, masc_register_capabilities, masc_agent_update,
+    masc_get_metrics, masc_agent_fitness, masc_collaboration_graph,
+    masc_agent_card
 *)
 module Tool_args = Masc_mcp.Tool_args
+module Meta_cognition = Masc_mcp.Meta_cognition
 
 module Tool_agent = Masc_mcp.Tool_agent
 module Room = Masc_mcp.Room
@@ -140,20 +139,6 @@ let test_dispatch_agent_update () =
   Alcotest.(check bool) "agent_update dispatches" true (result <> None);
   )
 
-let test_dispatch_select_agent () =
-  with_ctx (fun ctx ->
-  let result = Tool_agent.dispatch ctx ~name:"masc_select_agent" ~args:(`Assoc []) in
-  Alcotest.(check bool) "select_agent dispatches" true (result <> None);
-  )
-
-let test_dispatch_meta_cognition_snapshot () =
-  with_ctx (fun ctx ->
-  let result =
-    Tool_agent.dispatch ctx ~name:"masc_meta_cognition_snapshot"
-      ~args:(`Assoc [])
-  in
-  Alcotest.(check bool) "meta_cognition dispatches" true (result <> None);
-  )
 
 (* ============================================================
    Handler tests — masc_agents
@@ -192,18 +177,6 @@ let test_agent_update_capabilities () =
   with_ctx (fun ctx ->
   let args = `Assoc [("capabilities", `List [`String "review"; `String "refactor"])] in
   let (_ok, msg) = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
-  )
-
-(* ============================================================
-   Handler tests — find_by_capability
-   ============================================================ *)
-
-let test_find_by_capability () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("capability", `String "test")] in
-  let (ok, msg) = Tool_agent.handle_find_by_capability ctx args in
-  Alcotest.(check bool) "find succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
   )
 
@@ -256,55 +229,6 @@ let test_agent_fitness_specific () =
   )
 
 (* ============================================================
-   Handler tests — select_agent (3 strategies)
-   ============================================================ *)
-
-let test_select_agent_missing_agents () =
-  with_ctx (fun ctx ->
-  let (ok, msg) = Tool_agent.handle_select_agent ctx (`Assoc []) in
-  Alcotest.(check bool) "missing agents fails" false ok;
-  let open Yojson.Safe.Util in
-  let json = Yojson.Safe.from_string msg in
-  Alcotest.(check string) "error_code" "validation_error"
-    (json |> member "error_code" |> to_string);
-  Alcotest.(check string) "message"
-    "available_agents must contain at least one non-empty agent name"
-    (json |> member "message" |> to_string);
-  )
-
-let test_select_agent_capability_first () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [
-    ("available_agents", `List [`String "agent-a"; `String "agent-b"]);
-    ("strategy", `String "capability_first");
-    ("days", `Int 7);
-  ] in
-  let (ok, msg) = Tool_agent.handle_select_agent ctx args in
-  Alcotest.(check bool) "capability_first succeeds" true ok;
-  Alcotest.(check bool) "returns JSON" true (String.contains msg '{');
-  )
-
-let test_select_agent_random () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [
-    ("available_agents", `List [`String "agent-x"; `String "agent-y"]);
-    ("strategy", `String "random");
-  ] in
-  let (ok, _msg) = Tool_agent.handle_select_agent ctx args in
-  Alcotest.(check bool) "random succeeds" true ok;
-  )
-
-let test_select_agent_roulette () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [
-    ("available_agents", `List [`String "a-1"; `String "a-2"; `String "a-3"]);
-    ("strategy", `String "roulette_wheel");
-  ] in
-  let (ok, _msg) = Tool_agent.handle_select_agent ctx args in
-  Alcotest.(check bool) "roulette succeeds" true ok;
-  )
-
-(* ============================================================
    Handler tests — collaboration_graph
    ============================================================ *)
 
@@ -325,18 +249,6 @@ let test_collaboration_graph_json () =
   )
 
 (* ============================================================
-   Handler tests — consolidate_learning
-   ============================================================ *)
-
-let test_consolidate_learning () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("decay_after_days", `Int 30)] in
-  let (ok, msg) = Tool_agent.handle_consolidate_learning ctx args in
-  Alcotest.(check bool) "consolidate succeeds" true ok;
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
-  )
-
-(* ============================================================
    Handler tests — agent_card
    ============================================================ *)
 
@@ -354,16 +266,6 @@ let test_agent_card_refresh () =
   let (ok, msg) = Tool_agent.handle_agent_card ctx args in
   Alcotest.(check bool) "refresh succeeds" true ok;
   Alcotest.(check bool) "has response" true (String.length msg > 0);
-  )
-
-(* ============================================================
-   Dispatch test — masc_agent_relations
-   ============================================================ *)
-
-let test_dispatch_agent_relations () =
-  with_ctx (fun ctx ->
-  let result = Tool_agent.dispatch ctx ~name:"masc_agent_relations" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agent_relations dispatches" true (result <> None);
   )
 
 (* ============================================================
@@ -405,7 +307,7 @@ let test_meta_cognition_snapshot_detects_signals () =
         ~created_at:1006.0 ();
     ];
   let ok, body =
-    Tool_agent.handle_meta_cognition_snapshot ctx (`Assoc [ ("limit", `Int 5) ])
+    (true, Yojson.Safe.to_string (Meta_cognition.snapshot_json ~limit:5 ctx.config))
   in
   Alcotest.(check bool) "snapshot succeeds" true ok;
   let json = Yojson.Safe.from_string body in
@@ -459,7 +361,7 @@ let test_meta_cognition_snapshot_marks_contested_belief () =
         ~created_at:1010.0 ();
     ];
   let ok, body =
-    Tool_agent.handle_meta_cognition_snapshot ctx (`Assoc [ ("limit", `Int 5) ])
+    (true, Yojson.Safe.to_string (Meta_cognition.snapshot_json ~limit:5 ctx.config))
   in
   Alcotest.(check bool) "snapshot succeeds" true ok;
   let json = Yojson.Safe.from_string body in
@@ -467,26 +369,6 @@ let test_meta_cognition_snapshot_marks_contested_belief () =
   Alcotest.(check bool) "contested belief captured" true
     (List.mem "belief:masc_tools_blocked" contested_ids);
   )
-
-(* ============================================================
-   Schema coverage — masc_agent_relations is registered
-   ============================================================ *)
-
-let test_schema_agent_relations_present () =
-  let schemas = Tool_agent.schemas in
-  let has_it = List.exists (fun (s : Types.tool_schema) ->
-    s.name = "masc_agent_relations") schemas in
-  Alcotest.(check bool) "schema registered" true has_it
-
-let test_schema_meta_cognition_snapshot_present () =
-  let schemas = Tool_agent.schemas in
-  let has_it =
-    List.exists
-      (fun (s : Types.tool_schema) ->
-        s.name = "masc_meta_cognition_snapshot")
-      schemas
-  in
-  Alcotest.(check bool) "schema registered" true has_it
 
 (* ============================================================
    Helper function tests
@@ -543,9 +425,6 @@ let () =
       Alcotest.test_case "agents dispatches" `Quick test_dispatch_agents;
       Alcotest.test_case "register_capabilities dispatches" `Quick test_dispatch_register_capabilities;
       Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
-      Alcotest.test_case "select_agent dispatches" `Quick test_dispatch_select_agent;
-      Alcotest.test_case "meta_cognition dispatches" `Quick
-        test_dispatch_meta_cognition_snapshot;
     ]);
     ("agents", [
       Alcotest.test_case "handle_agents" `Quick test_handle_agents;
@@ -557,9 +436,6 @@ let () =
       Alcotest.test_case "status update" `Quick test_agent_update_status;
       Alcotest.test_case "capabilities update" `Quick test_agent_update_capabilities;
     ]);
-    ("find_by_capability", [
-      Alcotest.test_case "find capability" `Quick test_find_by_capability;
-    ]);
     ("get_metrics", [
       Alcotest.test_case "no data" `Quick test_get_metrics_no_data;
       Alcotest.test_case "missing agent_name" `Quick
@@ -569,34 +445,19 @@ let () =
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
     ]);
-    ("select_agent", [
-      Alcotest.test_case "missing agents" `Quick test_select_agent_missing_agents;
-      Alcotest.test_case "capability_first" `Quick test_select_agent_capability_first;
-      Alcotest.test_case "random" `Quick test_select_agent_random;
-      Alcotest.test_case "roulette_wheel" `Quick test_select_agent_roulette;
-    ]);
     ("collaboration_graph", [
       Alcotest.test_case "text format" `Quick test_collaboration_graph_text;
       Alcotest.test_case "json format" `Quick test_collaboration_graph_json;
     ]);
-    ("consolidate_learning", [
-      Alcotest.test_case "with decay" `Quick test_consolidate_learning;
-    ]);
     ("agent_card", [
       Alcotest.test_case "get action" `Quick test_agent_card_get;
       Alcotest.test_case "refresh action" `Quick test_agent_card_refresh;
-    ]);
-    ("agent_relations", [
-      Alcotest.test_case "dispatches" `Quick test_dispatch_agent_relations;
-      Alcotest.test_case "schema present" `Quick test_schema_agent_relations_present;
     ]);
     ("meta_cognition_snapshot", [
       Alcotest.test_case "detects beliefs tensions desires and edges" `Quick
         test_meta_cognition_snapshot_detects_signals;
       Alcotest.test_case "marks contested belief" `Quick
         test_meta_cognition_snapshot_marks_contested_belief;
-      Alcotest.test_case "schema present" `Quick
-        test_schema_meta_cognition_snapshot_present;
     ]);
     ("helpers", [
       Alcotest.test_case "get_string present" `Quick test_get_string_present;

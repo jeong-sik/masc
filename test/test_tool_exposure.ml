@@ -145,18 +145,6 @@ let () =
                   check bool (name ^ " should be visible with flag") true
                     (Tool_catalog.is_visible ~include_hidden:true name))
                 hidden_names);
-          test_case "masc_set_room stays callable as a hidden compatibility alias" `Quick
-            (fun () ->
-              let meta = Tool_catalog.metadata "masc_set_room" in
-              check bool "masc_set_room hidden" false
-                (Tool_catalog.is_visible "masc_set_room");
-              check bool "masc_set_room direct call allowed" true
-                (Tool_catalog.allow_direct_call "masc_set_room");
-              check bool "masc_set_room on system_internal surface" true
-                (Tool_catalog.is_on_surface Tool_catalog.System_internal
-                   "masc_set_room");
-              check (option string) "masc_set_room replacement" (Some "masc_start")
-                meta.replacement);
           test_case "legacy mitosis tools are removed from the public registry" `Quick
             (fun () ->
               let removed_names =
@@ -229,11 +217,11 @@ let () =
                   Tool_catalog.public_mcp_tools
               in
               check (list string) "missing from registry" [] missing);
-          test_case "public surface count is between 40 and 80" `Quick
+          test_case "public surface count is between 30 and 80" `Quick
             (fun () ->
               let count = List.length Tool_catalog.public_mcp_tools in
               check bool "count is within expected range"
-                true (count >= 40 && count <= 80));
+                true (count >= 30 && count <= 80));
           test_case "is_public_mcp returns true for listed tools" `Quick
             (fun () ->
               List.iter

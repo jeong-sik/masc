@@ -90,8 +90,7 @@ let build_keeper_index () =
     "masc_agents", "에이전트 목록 현황 누구";
     "masc_agent_update", "에이전트 업데이트 상태변경";
     "masc_agent_fitness", "에이전트 적합도 평가";
-    "masc_auth_status", "인증 상태 토큰 자격";
-    "masc_auth_refresh", "인증 갱신 토큰 리프레시";
+    (* masc_auth_status, masc_auth_refresh removed during tool-registry-pruning *)
     "masc_web_search", "웹 검색 인터넷 온라인 구글";
     "masc_keeper_up", "키퍼 시작 기동 생성";
     "masc_keeper_down", "키퍼 중지 종료";
@@ -383,11 +382,7 @@ let test_full_universe_worktree_en () =
   ignore (assert_retrieves ~label:"full_worktree" idx
     "create a git worktree for isolated development" "masc_worktree_create")
 
-(** Auth tools should be discoverable via search. *)
-let test_full_universe_auth_en () =
-  let idx = build_keeper_index () in
-  ignore (assert_retrieves ~label:"full_auth" idx
-    "manage authentication tokens and credentials" "masc_auth_status")
+(* Auth tools removed during tool-registry-pruning. *)
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -457,8 +452,6 @@ let () =
             test_tool_search_self_en;
           Alcotest.test_case "worktree via full-universe search (en)" `Quick
             test_full_universe_worktree_en;
-          Alcotest.test_case "auth tools via full-universe search (en)" `Quick
-            test_full_universe_auth_en;
         ] );
       ( "stats",
         [

@@ -38,13 +38,6 @@ let handle_agent_update ctx args =
   in
   result_to_response (Room.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
 
-(** Handle masc_find_by_capability *)
-let handle_find_by_capability ctx args =
-  let ( let*! ) = Tool_args.( let*! ) in
-  let*! capability = get_string_required args "capability" in
-  let json = Room.find_agents_by_capability ctx.config ~capability in
-  (true, Yojson.Safe.to_string json)
-
 (** Handle masc_get_metrics *)
 let handle_get_metrics ctx args =
   let ( let*! ) = Tool_args.( let*! ) in
@@ -210,95 +203,6 @@ let handle_agent_fitness ctx args =
     ] in
     (true, Yojson.Safe.to_string json)
 
-(** Pick random from list *)
-let pick_random = function
-  | [] -> invalid_arg "Tool_agent.pick_random: empty list"
-  | fallback :: _ as lst ->
-      let idx = Random.int (List.length lst) in
-      match List.nth_opt lst idx with
-      | Some x -> x
-      | None -> fallback
-
-(** Handle masc_select_agent *)
-let handle_select_agent ctx args =
-  let available =
-    match Yojson.Safe.Util.member "available_agents" args with
-    | `List items ->
-        List.filter_map
-          (function
-            | `String s ->
-                let trimmed = String.trim s in
-                if trimmed = "" then None else Some trimmed
-            | _ -> None)
-          items
-    | _ -> []
-  in
-  let strategy = get_string args "strategy" "capability_first" in
-  let days = get_int args "days" 7 in
-  if available = [] then
-    error_result_typed ~code:Validation_error
-      "available_agents must contain at least one non-empty agent name"
-  else
-    let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) available in
-    let min_avg = min_avg_time metrics_list in
-    let max_col = max_collabs metrics_list in
-    let scored =
-      List.map (fun (agent_id, metrics) ->
-        let (score, completion, reliability, speed, handoff, collaboration) = score_for ~min_avg ~max_collabs:max_col metrics in
-        (agent_id, score,
-         `Assoc [
-           ("completion", `Float completion);
-           ("reliability", `Float reliability);
-           ("speed", `Float speed);
-           ("handoff", `Float handoff);
-           ("collaboration", `Float collaboration);
-         ])
-      ) metrics_list
-    in
-    let selected =
-      match strategy with
-      | "random" -> pick_random scored
-      | "roulette_wheel" ->
-          let total = List.fold_left (fun acc (_, s, _) -> acc +. max 0.0 s) 0.0 scored in
-          if total <= 0.0 then pick_random scored
-          else
-            let target = Random.float total in  (* intentional: random selection *)
-            let rec pick acc = function
-              | [] -> (match scored with x :: _ -> x | [] -> pick_random scored)
-              | (id, s, comp) :: rest ->
-                  let acc' = acc +. max 0.0 s in
-                  if acc' >= target then (id, s, comp) else pick acc' rest
-            in
-            pick 0.0 scored
-      | "elite_1" | "capability_first" | _ ->
-          match List.fold_left (fun best candidate ->
-            match best with
-            | None -> Some candidate
-            | Some (_, best_score, _) ->
-                let (_, score, _) = candidate in
-                if score > best_score then Some candidate else best
-          ) None scored with
-          | Some result -> result
-          | None -> pick_random scored
-    in
-    let (agent_id, score, components) = selected in
-    let scores_json =
-      `List (List.map (fun (id, s, comp) ->
-        `Assoc [
-          ("agent_id", `String id);
-          ("fitness", `Float s);
-          ("components", comp);
-        ]) scored)
-    in
-    let json = `Assoc [
-      ("selected_agent", `String agent_id);
-      ("fitness", `Float score);
-      ("components", components);
-      ("strategy", `String strategy);
-      ("scores", scores_json);
-    ] in
-    (true, Yojson.Safe.to_string json)
-
 (** Handle masc_collaboration_graph *)
 let handle_collaboration_graph ctx args =
   let format = get_string args "format" "text" in
@@ -326,38 +230,6 @@ let handle_collaboration_graph ctx args =
     else
       (true, String.concat "\n" lines)
 
-(** Handle masc_preferred_partner — closes the Hebbian read loop.
-    Returns the agent with the strongest learned collaboration weight
-    for the given agent_id, so keepers can use it when deciding whom
-    to @mention or delegate to. *)
-let handle_preferred_partner ctx args =
-  let agent_id = match get_string_opt args "agent_id" with
-    | Some id when id <> "" -> id
-    | _ -> ctx.agent_name
-  in
-  match Hebbian_eio.get_preferred_partner ctx.config ~agent_id with
-  | None ->
-    (true, Printf.sprintf "No learned partner for %s yet. Complete tasks together to build affinity." agent_id)
-  | Some partner ->
-    let (synapses, _) = Hebbian_eio.get_graph_data ctx.config in
-    let weight = List.find_opt (fun s ->
-      s.Hebbian_eio.from_agent = agent_id && s.Hebbian_eio.to_agent = partner
-    ) synapses in
-    let w = match weight with Some s -> s.Hebbian_eio.weight | None -> 0.0 in
-    let json = `Assoc [
-      ("agent_id", `String agent_id);
-      ("preferred_partner", `String partner);
-      ("affinity_weight", `Float w);
-      ("note", `String "Based on Hebbian learning from shared task completions. Higher weight = more successful past collaboration.");
-    ] in
-    (true, Yojson.Safe.to_string json)
-
-(** Handle masc_consolidate_learning *)
-let handle_consolidate_learning ctx args =
-  let decay_after_days = get_int args "decay_after_days" 7 in
-  let pruned = Hebbian_eio.consolidate ctx.config ~decay_after_days () in
-  (true, Printf.sprintf "✅ Consolidated. Pruned %d weak connections." pruned)
-
 (** Handle masc_agent_card *)
 let handle_agent_card _ctx args =
   let action = get_string args "action" "get" in
@@ -380,41 +252,16 @@ let handle_agent_card _ctx args =
   in
   (true, Yojson.Safe.to_string response)
 
-(** Handle masc_agent_relations — proxy to Neo4j/GraphQL.
-    MASC is a consumer: it queries the GraphQL API, which owns the data. *)
-let handle_agent_relations ctx args =
-  let _limit = get_int args "limit" 20 |> max 1 |> min 50 in
-  let target = match get_string_opt args "agent_name" with
-    | Some name when name <> "" -> name
-    | _ -> ctx.agent_name
-  in
-  let json = Dashboard_agent_relations.json ~agent_name:target () in
-  (true, Yojson.Safe.to_string json)
-
-(** Handle masc_meta_cognition_snapshot — deterministic room-level read model. *)
-let handle_meta_cognition_snapshot ctx args =
-  let limit = get_int args "limit" 5 |> max 1 |> min 20 in
-  let hearth = get_string_opt args "hearth" in
-  let json = Meta_cognition.snapshot_json ?hearth ~limit ctx.config in
-  (true, Yojson.Safe.to_string json)
-
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
   | "masc_agents" -> Some (handle_agents ctx args)
   | "masc_register_capabilities" -> Some (handle_register_capabilities ctx args)
   | "masc_agent_update" -> Some (handle_agent_update ctx args)
-  | "masc_find_by_capability" -> Some (handle_find_by_capability ctx args)
   | "masc_get_metrics" -> Some (handle_get_metrics ctx args)
   | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
-  | "masc_select_agent" -> Some (handle_select_agent ctx args)
   | "masc_collaboration_graph" -> Some (handle_collaboration_graph ctx args)
-  | "masc_preferred_partner" -> Some (handle_preferred_partner ctx args)
-  | "masc_consolidate_learning" -> Some (handle_consolidate_learning ctx args)
   | "masc_agent_card" -> Some (handle_agent_card ctx args)
-  | "masc_agent_relations" -> Some (handle_agent_relations ctx args)
-  | "masc_meta_cognition_snapshot" ->
-      Some (handle_meta_cognition_snapshot ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas
@@ -424,41 +271,31 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let _tool_spec_read_only =
-  [ "masc_agents"; "masc_agent_card"; "masc_meta_cognition_snapshot" ]
+  [ "masc_agents"; "masc_agent_card" ]
 let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 
 let tool_required_permission = function
   | "masc_agents" | "masc_agent_card" | "masc_agent_fitness"
-  | "masc_select_agent" | "masc_collaboration_graph"
-  | "masc_preferred_partner"
-  | "masc_get_metrics" | "masc_agent_relations"
-  | "masc_meta_cognition_snapshot" ->
+  | "masc_collaboration_graph"
+  | "masc_get_metrics" ->
       Some Types.CanReadState
-  | "masc_register_capabilities" | "masc_agent_update"
-  | "masc_find_by_capability" ->
+  | "masc_register_capabilities" | "masc_agent_update" ->
       Some Types.CanBroadcast
   | _ -> None
-
-(* Heartbeat tools are dispatched by Tool_heartbeat, not Tool_agent.
-   Registering them here under Mod_agent would create a module_tag conflict.
-   Derived from Tool_heartbeat.schemas to stay in sync automatically. *)
-let _heartbeat_tool_names =
-  List.map (fun (s : Types.tool_schema) -> s.name) Tool_heartbeat.schemas
 
 let () =
   List.iter
     (fun (s : Types.tool_schema) ->
-      if not (List.mem s.name _heartbeat_tool_names) then
-        Tool_spec.register
-          (Tool_spec.create
-             ~name:s.name
-             ~description:s.description
-             ~module_tag:Tool_dispatch.Mod_agent
-             ~input_schema:s.input_schema
-             ~handler_binding:Tag_dispatch
-             ~is_read_only:(List.mem s.name _tool_spec_read_only)
-             ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-             ~requires_join:(List.mem s.name _tool_spec_requires_join)
-             ?required_permission:(tool_required_permission s.name)
-             ()))
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:s.name
+           ~description:s.description
+           ~module_tag:Tool_dispatch.Mod_agent
+           ~input_schema:s.input_schema
+           ~handler_binding:Tag_dispatch
+           ~is_read_only:(List.mem s.name _tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ?required_permission:(tool_required_permission s.name)
+           ()))
     schemas

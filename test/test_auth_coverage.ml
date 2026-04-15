@@ -158,8 +158,8 @@ let test_auth_config_file_json () =
 
 let test_permission_for_tool_init () =
   match Auth.permission_for_tool "masc_init" with
-  | Some Types.CanInit -> ()
-  | _ -> fail "expected CanInit"
+  | None -> ()  (* tool removed in registry pruning *)
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_reset () =
   match Auth.permission_for_tool "masc_reset" with
@@ -182,6 +182,8 @@ let test_permission_for_tool_status () =
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_runtime_verify () =
+  (* Tool schema was pruned but the permission map still maps the name
+     to CanReadState. Keep the legacy permission contract. *)
   match Auth.permission_for_tool "masc_runtime_verify" with
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
@@ -429,13 +431,13 @@ let test_permission_for_tool_approve () =
 
 let test_permission_for_tool_auth_enable () =
   match Auth.permission_for_tool "masc_auth_enable" with
-  | Some Types.CanInit -> ()  (* Admin only *)
-  | _ -> fail "expected CanInit"
+  | None -> ()  (* tool removed in registry pruning *)
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_auth_status () =
   match Auth.permission_for_tool "masc_auth_status" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
+  | None -> ()  (* tool removed in registry pruning *)
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_stats () =
   match Auth.permission_for_tool "masc_tool_stats" with

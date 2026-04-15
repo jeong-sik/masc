@@ -70,7 +70,7 @@ let limit_for_category config = function
 
 (** Map tool to rate limit category *)
 let category_for_tool = function
-  | "masc_broadcast" | "masc_listen" -> BroadcastLimit
+  | "masc_broadcast" -> BroadcastLimit
   | "masc_add_task"
   | "masc_done"
   | "masc_claim_next"

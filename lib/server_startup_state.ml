@@ -97,6 +97,12 @@ let activate_lazy ~backend_mode ~tasks =
           pending_lazy_tasks = tasks;
         })
 
+let pending_lazy_tasks () =
+  !state.pending_lazy_tasks
+
+let lazy_tasks_complete () =
+  !state.pending_lazy_tasks = []
+
 let finish_lazy_task ~task =
   update (fun current ->
       let pending_lazy_tasks =

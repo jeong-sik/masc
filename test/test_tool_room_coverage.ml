@@ -68,13 +68,11 @@ let () = test "dispatch_unknown_tool" (fun () ->
   assert (Tool_room.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
 
-(* Test dispatch init *)
+(* Test dispatch init — masc_init was pruned from registry; dispatch returns None. *)
 let () = test "dispatch_init" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("agent_name", `String "init-agent")] in
-  match Tool_room.dispatch ctx ~name:"masc_init" ~args with
-  | Some (success, _result) -> assert success
-  | None -> failwith "dispatch returned None"
+  assert (Tool_room.dispatch ctx ~name:"masc_init" ~args = None)
 )
 
 (* Test dispatch status *)

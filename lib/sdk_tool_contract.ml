@@ -189,8 +189,8 @@ let sdk_bindings : sdk_tool_binding list =
         ];
       discovery_hidden = false;
     };
-    { sdk_name = Tool_heartbeat.heartbeat_schema.name;
-      canonical_operation = Tool_heartbeat.heartbeat_schema.name;
+    { sdk_name = "masc_heartbeat";
+      canonical_operation = "masc_heartbeat";
       description =
         "Send an immediate heartbeat so this agent stays fresh in MASC visibility.";
       input_schema = object_schema [];
@@ -229,7 +229,6 @@ let core_remote_operation_names =
         "masc_agent_update";
         "masc_messages";
         "masc_a2a_subscribe";
-        "masc_poll_events";
         "masc_plan_init";
         "masc_plan_get";
         "masc_plan_update";

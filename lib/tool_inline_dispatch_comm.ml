@@ -1,7 +1,6 @@
 (** Tool_inline_dispatch_comm — communication tool handlers.
 
-    Handles: masc_bounded_run, masc_broadcast, masc_messages,
-    masc_listen, masc_who.
+    Handles: masc_broadcast, masc_messages, masc_who.
 
     Extracted from tool_inline_dispatch.ml to reduce file size. *)
 
@@ -13,61 +12,6 @@ let arg_get_string ctx key default =
 
 let arg_get_int ctx key default =
   Safe_ops.json_int ~default key ctx.arguments
-
-(** masc_bounded_run only accepts configured spawnable agent labels.
-    Arbitrary executables are valid for [Spawn.spawn] test helpers, but not for
-    user-facing bounded runs where we want deterministic validation errors. *)
-let invalid_bounded_agents (agents : string list) : string list =
-  let invalid =
-    agents
-    |> List.map String.trim
-    |> List.filter (fun name ->
-      name = "" || not (Provider_adapter.is_spawnable_agent name))
-  in
-  List.sort_uniq String.compare invalid
-
-(** masc_bounded_run — run a bounded multi-agent execution *)
-let handle_bounded_run (ctx : context) : tool_result option =
-  let module U = Yojson.Safe.Util in
-  let state = ctx.state in
-  let sw = ctx.sw in
-  let arguments = ctx.arguments in
-  let agents = match arguments |> U.member "agents" with
-    | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
-    | _ -> []
-  in
-  let prompt = arg_get_string ctx "prompt" "" in
-  if String.trim prompt = "" then
-    Some (false, Tool_args.error_response "prompt is required")
-  else
-    match invalid_bounded_agents agents with
-    | invalid :: rest ->
-      let invalid_names = String.concat ", " (invalid :: rest) in
-      let allowed =
-        Provider_adapter.spawnable_canonical_names ()
-        |> List.sort_uniq String.compare
-        |> String.concat ", "
-      in
-      Some
-        ( false,
-          Tool_args.error_response_typed
-            ~code:Tool_args.Validation_error
-            (Printf.sprintf
-               "invalid agent name(s): %s. Use configured spawnable agents: %s"
-               invalid_names allowed) )
-    | [] ->
-      let constraints_json = arguments |> U.member "constraints" in
-      let goal_json = arguments |> U.member "goal" in
-      let constraints = Bounded.constraints_of_json constraints_json in
-      let goal = Bounded.goal_of_json goal_json in
-      ignore (state, sw);
-      let spawn_fn agent_name prompt =
-        Spawn.spawn ~agent_name ~prompt
-          ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
-      in
-      let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
-      let json = Bounded.result_to_json result in
-      Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
 
 (** masc_broadcast — broadcast a message to the room *)
 let handle_broadcast (ctx : context) : tool_result option =
@@ -129,37 +73,6 @@ let handle_messages (ctx : context) : tool_result option =
   let since_seq = arg_get_int ctx "since_seq" 0 in
   let limit = arg_get_int ctx "limit" 10 in
   Some (true, Room.get_messages config ~since_seq ~limit)
-
-(** masc_listen — long-poll for a message addressed to this agent *)
-let handle_listen (ctx : context) : tool_result option =
-  let agent_name = ctx.agent_name in
-  let registry = ctx.registry in
-  let timeout = float_of_int (arg_get_int ctx "timeout" 300) in
-  Log.Mcp.info "%s is now listening (timeout: %.0fs)..." agent_name timeout;
-  let msg_opt = ctx.wait_for_message registry ~agent_name ~timeout in
-  (match msg_opt with
-   | Some msg ->
-       (match Json_util.get_string msg "from",
-              Json_util.get_string msg "content",
-              Json_util.get_string msg "timestamp" with
-        | Some from, Some content, Some timestamp ->
-            Some (true, Printf.sprintf {|
-MESSAGE RECEIVED
-From: %s
-Time: %s
-
-%s
-
-Call masc_listen again to continue listening.
-|} from timestamp content)
-        | _ ->
-            Log.Mcp.warn
-              "masc_listen received malformed message (missing from/content/timestamp) for agent %s"
-              agent_name;
-            Some (Tool_args.error_result
-                    "received malformed message (missing from/content/timestamp)"))
-   | None ->
-       Some (true, Printf.sprintf "Listening timed out after %.0fs. No messages received." timeout))
 
 (** masc_who — list agents currently in the room *)
 let handle_who (ctx : context) : tool_result option =

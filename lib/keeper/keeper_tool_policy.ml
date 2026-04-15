@@ -246,8 +246,7 @@ let select_existing_masc_tool_names names =
   |> dedupe_tool_names
 
 let keeper_maintenance_only_tools =
-  [ "masc_heartbeat"; "masc_heartbeat_start";
-    "masc_heartbeat_stop"; "masc_heartbeat_list" ]
+  [ "masc_heartbeat" ]
 
 let is_keeper_maintenance_only_tool name =
   List.mem name keeper_maintenance_only_tools

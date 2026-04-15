@@ -7,7 +7,6 @@ let declared_permission_for_tool tool_name =
 
 let legacy_permission_entries : (string * permission) list =
   [
-    ("masc_init", CanInit);
     ("masc_reset", CanReset);
     ("masc_join", CanJoin);
     ("masc_leave", CanLeave);
@@ -37,29 +36,12 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_observe_traces", CanReadState);
     ("masc_agent_card", CanReadState);
     ("masc_agent_fitness", CanReadState);
-    ("masc_agent_relations", CanReadState);
     ("masc_dashboard", CanReadState);
     ("masc_check", CanReadState);
     ("masc_collaboration_graph", CanReadState);
-    ("masc_preferred_partner", CanReadState);
-    ("masc_feature_flags", CanReadState);
     ("masc_get_metrics", CanReadState);
-    ("masc_meta_cognition_snapshot", CanReadState);
-    ("masc_poll_events", CanReadState);
-    ("masc_recall_search", CanReadState);
-    ("masc_select_agent", CanReadState);
-    ("masc_auth_list", CanReadState);
-    ("masc_verify_auto", CanReadState);
-    ("masc_verify_handoff", CanReadState);
-    ("masc_verify_pending", CanReadState);
-    ("masc_verify_request", CanReadState);
-    ("masc_verify_status", CanReadState);
-    ("masc_verify_submit", CanReadState);
-    ("masc_heartbeat_list", CanReadState);
-    ("masc_heartbeat_result", CanReadState);
     ("masc_plan_get_task", CanReadState);
     ("masc_plan_get", CanReadState);
-    ("masc_pause_status", CanReadState);
     ("masc_workflow_guide", CanReadState);
     ("masc_autoresearch_status", CanReadState);
     ("masc_config", CanReadState);
@@ -70,13 +52,11 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_transition", CanCompleteTask);
     ("masc_release", CanCompleteTask);
     ("masc_broadcast", CanBroadcast);
-    ("masc_listen", CanBroadcast);
     ("masc_heartbeat", CanBroadcast);
     ("masc_webrtc_offer", CanBroadcast);
     ("masc_webrtc_answer", CanBroadcast);
     ("channel_gate", CanBroadcast);
     ("masc_register_capabilities", CanBroadcast);
-    ("masc_find_by_capability", CanBroadcast);
     ("masc_agent_update", CanBroadcast);
     ("masc_operator_action", CanBroadcast);
     ("masc_keeper_up", CanBroadcast);
@@ -122,12 +102,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_board_vote", CanBroadcast);
     ("masc_board_comment_vote", CanBroadcast);
     ("masc_board_delete", CanAdmin);
-    ("masc_auth_enable", CanInit);
-    ("masc_auth_disable", CanInit);
-    ("masc_auth_revoke", CanInit);
-    ("masc_auth_create_token", CanAdmin);
-    ("masc_auth_status", CanReadState);
-    ("masc_auth_refresh", CanReadState);
     ("masc_tool_stats", CanReadState);
     ("masc_tool_help", CanReadState);
     ("masc_tool_list", CanReadState);

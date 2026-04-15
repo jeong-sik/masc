@@ -128,7 +128,7 @@ let test_snapshot_detects_signals () =
         ~created_at:1006.0 ();
     ];
   let ok, body =
-    Tool_agent.handle_meta_cognition_snapshot ctx (`Assoc [ ("limit", `Int 5) ])
+    (true, Yojson.Safe.to_string (Meta_cognition.snapshot_json ~limit:5 ctx.config))
   in
   Alcotest.(check bool) "snapshot succeeds" true ok;
   let json = Yojson.Safe.from_string body in
@@ -181,7 +181,7 @@ let test_snapshot_marks_contested_belief () =
         ~created_at:1010.0 ();
     ];
   let ok, body =
-    Tool_agent.handle_meta_cognition_snapshot ctx (`Assoc [ ("limit", `Int 5) ])
+    (true, Yojson.Safe.to_string (Meta_cognition.snapshot_json ~limit:5 ctx.config))
   in
   Alcotest.(check bool) "snapshot succeeds" true ok;
   let json = Yojson.Safe.from_string body in

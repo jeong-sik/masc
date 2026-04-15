@@ -28,6 +28,27 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
   in
+  let wait_for_lazy_startup () =
+    let rec loop last_log_at =
+      let pending = Server_startup_state.pending_lazy_tasks () in
+      if pending = [] then ()
+      else begin
+        let now = Eio.Time.now clock in
+        let last_log_at =
+          if now -. last_log_at >= 5.0 then begin
+            Log.Keeper.info
+              "autoboot: waiting for lazy startup tasks to finish before keeper boot [%s]"
+              (String.concat ", " pending);
+            now
+          end else
+            last_log_at
+        in
+        Eio.Time.sleep clock 0.25;
+        loop last_log_at
+      end
+    in
+    loop (Eio.Time.now clock)
+  in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
   let keeper_lifecycle_sub =
@@ -249,6 +270,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     if not Env_config.KeeperBootstrap.enabled then
       Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
     else begin
+      wait_for_lazy_startup ();
+      Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock 5.0;
       let config = state.room_config in

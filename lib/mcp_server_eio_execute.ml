@@ -499,15 +499,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args:coerced_args
     | Mod_a2a ->
         Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:coerced_args
-    | Mod_handover ->
-        let ctx : Tool_handover.context = { config; agent_name;
-          fs = state.Mcp_server.fs; proc_mgr = state.Mcp_server.proc_mgr;
-          sw = Some sw } in
-        Tool_handover.dispatch ctx ~name ~args:coerced_args
-    | Mod_heartbeat ->
-        Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:coerced_args
-    | Mod_auth ->
-        Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:coerced_args
+    (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
     | Mod_run ->
         Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
     | Mod_compact ->
@@ -531,17 +523,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_library.dispatch { Tool_library.agent_name } ~name ~args:coerced_args
     | Mod_keeper ->
         Tool_keeper.dispatch (make_keeper_ctx ()) ~name ~args:coerced_args
-    | Mod_repair_loop ->
-        let ctx : _ Tool_repair_loop_types.context =
-          {
-            config;
-            agent_name;
-            sw = Some sw;
-            clock = Some clock;
-            proc_mgr = state.Mcp_server.proc_mgr;
-          }
-        in
-        Tool_repair_loop.dispatch ctx ~name ~args:coerced_args
+    (* Mod_repair_loop removed: tools pruned *)
     | Mod_autoresearch ->
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;
           agent_name = Some agent_name; start_operation = None;

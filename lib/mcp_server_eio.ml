@@ -79,7 +79,7 @@ let read_only_tools_inline =
   ["masc_status"; "masc_who"; "masc_messages"]
 
 let requires_join_tools_inline =
-  ["masc_broadcast"; "masc_listen"; "masc_leave"]
+  ["masc_broadcast"; "masc_leave"]
 
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas

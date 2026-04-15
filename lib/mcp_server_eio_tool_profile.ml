@@ -161,7 +161,6 @@ let label_words_from_identifier ident =
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
   (* Room lifecycle *)
-  ("masc_init", "Initialize Project Scope");
   ("masc_join", "Join Namespace");
   ("masc_leave", "Leave Namespace");
   ("masc_status", "Namespace Status");
@@ -191,8 +190,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_plan_clear_task", "Clear Current Task");
   ("masc_note_add", "Add Note");
   ("masc_deliver", "Deliver Result");
-  ("masc_error_add", "Record Error");
-  ("masc_error_resolve", "Resolve Error");
   (* Agents *)
   ("masc_agents", "List Agent Details");
   ("masc_agent_update", "Update Agent Profile");
@@ -200,9 +197,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_find_by_capability", "Find Agent by Capability");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
-  ("masc_heartbeat_start", "Start Auto-Heartbeat");
-  ("masc_heartbeat_stop", "Stop Auto-Heartbeat");
-  ("masc_heartbeat_list", "List Active Heartbeats");
   (* Operations *)
   ("masc_operator_snapshot", "Operator Snapshot");
   ("masc_operator_digest", "Operator Digest");
@@ -240,11 +234,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_cancel_task", "Cancel Task");
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)
-  ("masc_poll_events", "Poll Events");
   ("masc_cleanup_zombies", "Clean Up Zombie Agents");
   ("masc_dispatch_plan", "Dispatch Plan");
   ("masc_dispatch_assign", "Dispatch Assign");
-  ("masc_compact_context", "Compact Context");
 ]
 
 let custom_title_table : string StringMap.t =
@@ -344,21 +336,6 @@ let tool_output_schema_field = function
              ("agent_name", string_schema);
              ("timestamp", string_schema);
              ("success", bool_schema);
-           ])
-  | "masc_heartbeat_list" ->
-      Some
-        (permissive_object_schema
-           [
-             ("heartbeats", `Assoc [
-               ("type", `String "array");
-               ("items", permissive_object_schema [
-                 ("id", string_schema);
-                 ("agent_name", string_schema);
-                 ("interval", int_schema);
-                 ("message", string_schema);
-                 ("uptime_s", int_schema);
-               ]);
-             ]);
            ])
   | "masc_plan_get" ->
       Some

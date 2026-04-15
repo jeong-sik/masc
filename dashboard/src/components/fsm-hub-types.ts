@@ -12,6 +12,21 @@ export type CompositeObservation = {
   compaction: string
 }
 
+export type LaneKey = keyof Omit<CompositeObservation, 'ts'>
+
+export function extractLaneValue(
+  snapshot: KeeperCompositeSnapshot,
+  key: LaneKey,
+): string {
+  switch (key) {
+    case 'phase': return snapshot.phase
+    case 'turn': return snapshot.turn_phase
+    case 'decision': return snapshot.decision.stage
+    case 'cascade': return snapshot.cascade.state
+    case 'compaction': return snapshot.compaction.stage
+  }
+}
+
 export type TransitionEntry = {
   ts: number
   from: string
@@ -66,7 +81,7 @@ export const initialHubState: HubState = {
   observations: [],
 }
 
-export const TRANSITION_FIELDS: Array<{ field: string; key: keyof Omit<CompositeObservation, 'ts'> }> = [
+export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KSM', key: 'phase' },
   { field: 'KTC', key: 'turn' },
   { field: 'KDP', key: 'decision' },
@@ -82,7 +97,7 @@ export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> =
   recovery_two_store_sync: 'Two-store sync',
 }
 
-export const LANE_LABELS: Record<keyof Omit<CompositeObservation, 'ts'>, string> = {
+export const LANE_LABELS: Record<LaneKey, string> = {
   phase: 'Keeper 생명주기',
   turn: '턴 주기',
   decision: '의사결정',
@@ -152,7 +167,7 @@ export type SwimlaneSegment = {
     PipelineStep) highlight rows that overlap. */
 export type HoveredSegment = {
   field: string  // KSM / KTC / KDP / KCL / KMC
-  laneKey: keyof Omit<CompositeObservation, 'ts'>
+  laneKey: LaneKey
   from: number
   to: number
   value: string

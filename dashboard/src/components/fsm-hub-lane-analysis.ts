@@ -3,14 +3,16 @@ import type { KeeperCompositeSnapshot } from '../api/keeper'
 import {
   type CompositeObservation,
   type InsightTone,
+  type LaneKey,
   type ObservedLaneSummary,
   LANE_LABELS,
   TRANSITION_FIELDS,
+  extractLaneValue,
 } from './fsm-hub-types'
 import { laneChangedAt, laneTransitionCount } from './fsm-hub-derivations'
 
 export function isObservedStall(
-  key: keyof Omit<CompositeObservation, 'ts'>,
+  key: LaneKey,
   value: string,
   observedForSec: number,
 ): boolean {
@@ -38,19 +40,11 @@ export function isObservedStall(
 }
 
 function laneMeaning(
-  key: keyof Omit<CompositeObservation, 'ts'>,
+  key: LaneKey,
   snapshot: KeeperCompositeSnapshot,
   observedForSec: number,
 ): { tone: InsightTone; meaning: string } {
-  const value = key === 'phase'
-    ? snapshot.phase
-    : key === 'turn'
-      ? snapshot.turn_phase
-      : key === 'decision'
-        ? snapshot.decision.stage
-        : key === 'cascade'
-          ? snapshot.cascade.state
-          : snapshot.compaction.stage
+  const value = extractLaneValue(snapshot, key)
 
   const base: { tone: InsightTone; meaning: string } = (() => {
     switch (key) {
@@ -154,15 +148,7 @@ export function deriveObservedLaneSummaries(
     const observedForSec = changedAt > 0 ? Math.max(0, now - changedAt) : 0
     const transitionCount = laneTransitionCount(observations, key)
     const meaning = laneMeaning(key, snapshot, observedForSec)
-    const value = key === 'phase'
-      ? snapshot.phase
-      : key === 'turn'
-        ? snapshot.turn_phase
-        : key === 'decision'
-          ? snapshot.decision.stage
-          : key === 'cascade'
-            ? snapshot.cascade.state
-            : snapshot.compaction.stage
+    const value = extractLaneValue(snapshot, key)
     const stalled = isObservedStall(key, value, observedForSec)
 
     return {

@@ -374,15 +374,20 @@ let build_operation_contexts command_plane_json =
          else
            let linked_session_id, detachment_status =
              match Hashtbl.find_opt detachments operation_id with
-             | Some (session_id, status) -> (session_id, status)
+             | Some (session_id, status_str) ->
+                 (session_id, Option.map Cp_serde.detachment_status_of_string status_str)
              | None ->
                  (trim_to_option (string_field "detachment_session_id" operation), None)
+           in
+           let status =
+             Option.bind (trim_to_option (string_field "status" operation))
+               Cp_serde.operation_status_of_string
            in
            Some
              {
                operation_id;
                linked_session_id;
-               status = string_field ~default:"unknown" "status" operation;
+               status;
                stage = trim_to_option (string_field "stage" operation);
                detachment_status;
                objective = trim_to_option (string_field "objective" operation);
@@ -390,12 +395,20 @@ let build_operation_contexts command_plane_json =
              })
 
 let operation_badge_json (operation : operation_context) =
+  let status_str =
+    match operation.status with
+    | Some s -> Cp_serde.string_of_operation_status s
+    | None -> "unknown"
+  in
+  let detachment_status_str =
+    Option.map Cp_serde.detachment_status_to_string operation.detachment_status
+  in
   `Assoc
     [
       ("operation_id", `String operation.operation_id);
-      ("status", `String operation.status);
+      ("status", `String status_str);
       ("stage", json_string_option operation.stage);
-      ("detachment_status", json_string_option operation.detachment_status);
+      ("detachment_status", json_string_option detachment_status_str);
       ("objective", json_string_option operation.objective);
       ("updated_at", json_string_option operation.updated_at);
     ]

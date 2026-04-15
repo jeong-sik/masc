@@ -15,7 +15,8 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Voice_sessions; Voice_speak; Write ]
 
 let all_masc : Tool_name.Masc.t list =
-  [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_update; Agents
+  [ A2a_delegate; Add_task; Agent_card; Agent_fitness; Agent_timeline
+  ; Agent_update; Agents
   ; Autoresearch_cycle; Autoresearch_inject; Autoresearch_start
   ; Autoresearch_status; Autoresearch_stop
   ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
@@ -26,13 +27,14 @@ let all_masc : Tool_name.Masc.t list =
   ; Code_search; Code_shell; Code_symbols; Code_write; Complete_task
   ; Dashboard; Deliver; Dispatch_assign; Dispatch_plan; Find_by_capability
   ; Governance_feed; Governance_status
-  ; Heartbeat; Join; Leave; List_tasks; Messages; Note_add
+  ; Heartbeat; Join; Keeper_msg_result; Leave; List_tasks; Messages; Note_add
   ; Operation_checkpoint; Operation_finalize; Operation_pause
   ; Operation_resume; Operation_start; Operation_status; Operation_stop
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Register_capabilities; Release_task; Reset; Room_status
-  ; Set_current_task; Status; Task_history; Tasks; Tool_grant; Tool_help
+  ; Persona_list; Set_current_task; Start; Status; Task_history; Tasks
+  ; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
   ; Worktree_status ]

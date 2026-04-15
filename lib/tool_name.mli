@@ -63,6 +63,7 @@ module Masc : sig
     | Add_task
     | Agent_card
     | Agent_fitness
+    | Agent_timeline
     | Agent_update
     | Agents
     | Autoresearch_cycle
@@ -107,6 +108,7 @@ module Masc : sig
     | Governance_status
     | Heartbeat
     | Join
+    | Keeper_msg_result
     | Leave
     | List_tasks
     | Messages
@@ -122,6 +124,7 @@ module Masc : sig
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+    | Persona_list
     | Plan_clear_task
     | Plan_get
     | Plan_get_task
@@ -133,6 +136,7 @@ module Masc : sig
     | Reset
     | Room_status
     | Set_current_task
+    | Start
     | Status
     | Task_history
     | Tasks

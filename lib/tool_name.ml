@@ -159,6 +159,7 @@ module Masc = struct
     | Add_task
     | Agent_card
     | Agent_fitness
+    | Agent_timeline
     | Agent_update
     | Agents
     | Autoresearch_cycle
@@ -203,6 +204,7 @@ module Masc = struct
     | Governance_status
     | Heartbeat
     | Join
+    | Keeper_msg_result
     | Leave
     | List_tasks
     | Messages
@@ -218,6 +220,7 @@ module Masc = struct
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+    | Persona_list
     | Plan_clear_task
     | Plan_get
     | Plan_get_task
@@ -229,6 +232,7 @@ module Masc = struct
     | Reset
     | Room_status
     | Set_current_task
+    | Start
     | Status
     | Task_history
     | Tasks
@@ -251,6 +255,7 @@ module Masc = struct
     | Add_task -> "masc_add_task"
     | Agent_card -> "masc_agent_card"
     | Agent_fitness -> "masc_agent_fitness"
+    | Agent_timeline -> "masc_agent_timeline"
     | Agent_update -> "masc_agent_update"
     | Agents -> "masc_agents"
     | Batch_add_tasks -> "masc_batch_add_tasks"
@@ -295,6 +300,7 @@ module Masc = struct
     | Governance_status -> "masc_governance_status"
     | Heartbeat -> "masc_heartbeat"
     | Join -> "masc_join"
+    | Keeper_msg_result -> "masc_keeper_msg_result"
     | Leave -> "masc_leave"
     | List_tasks -> "masc_list_tasks"
     | Messages -> "masc_messages"
@@ -320,7 +326,9 @@ module Masc = struct
     | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
     | Room_status -> "masc_room_status"
+    | Persona_list -> "masc_persona_list"
     | Set_current_task -> "masc_set_current_task"
+    | Start -> "masc_start"
     | Status -> "masc_status"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
@@ -343,6 +351,7 @@ module Masc = struct
     | "masc_add_task" -> Some Add_task
     | "masc_agent_card" -> Some Agent_card
     | "masc_agent_fitness" -> Some Agent_fitness
+    | "masc_agent_timeline" -> Some Agent_timeline
     | "masc_agent_update" -> Some Agent_update
     | "masc_agents" -> Some Agents
     | "masc_batch_add_tasks" -> Some Batch_add_tasks
@@ -387,6 +396,7 @@ module Masc = struct
     | "masc_governance_status" -> Some Governance_status
     | "masc_heartbeat" -> Some Heartbeat
     | "masc_join" -> Some Join
+    | "masc_keeper_msg_result" -> Some Keeper_msg_result
     | "masc_leave" -> Some Leave
     | "masc_list_tasks" -> Some List_tasks
     | "masc_messages" -> Some Messages
@@ -412,7 +422,9 @@ module Masc = struct
     | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
     | "masc_room_status" -> Some Room_status
+    | "masc_persona_list" -> Some Persona_list
     | "masc_set_current_task" -> Some Set_current_task
+    | "masc_start" -> Some Start
     | "masc_status" -> Some Status
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks

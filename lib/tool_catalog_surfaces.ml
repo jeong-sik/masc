@@ -16,52 +16,34 @@
 (* ================================================================ *)
 
 let keeper_internal_tools =
-  [
-    (* keeper_read removed: dead alias for keeper_fs_read with no schema.
-       Dispatch still accepts it for backward compat. See #4120. *)
-    "keeper_stay_silent";
-    "keeper_fs_read";
-    "keeper_fs_edit";
-    "keeper_memory_search";
-    "keeper_library_search";
-    "keeper_library_read";
-    "keeper_time_now";
-    "keeper_tools_list";
-    "keeper_context_status";
-    "keeper_tasks_list";
-    "keeper_tasks_audit";
-    "keeper_task_claim";
-    "keeper_task_create";
-    "keeper_task_done";
-    "keeper_task_force_release";
-    "keeper_task_force_done";
-    "keeper_broadcast";
-    "keeper_board_get";
-    "keeper_board_post";
-    "keeper_board_list";
-    "keeper_board_comment";
-    "keeper_board_vote";
-    "keeper_board_stats";
-    "keeper_board_search";
-    (* keeper_board_delete removed from default shard in #4309.
-       Dispatch still accepts it for backward compat. *)
-    "keeper_shell";
-    "keeper_bash";
-    "keeper_pr_workflow";
-    "keeper_voice_speak";
-    (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
-       counterpart on MCP surfaces. *)
-    "keeper_voice_listen";
-    "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start";
-    "keeper_voice_session_end";
-    (* Tool discovery *)
-    "keeper_tool_search";
-    (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
-       a regular tool — does not need a keeper shard entry.
-       keeper_unified: cascade name, not a tool. *)
-  ]
+  (* keeper_read removed: dead alias for keeper_fs_read with no schema.
+     Dispatch still accepts it for backward compat. See #4120.
+     keeper_board_delete removed from default shard in #4309.
+     keeper_deliberation_decision: Agent_sdk.Structured result schema, not
+     a regular tool — does not need a keeper shard entry.
+     keeper_unified: cascade name, not a tool. *)
+  List.map Tool_name.to_string
+    Tool_name.[
+      Keeper Stay_silent; Keeper Fs_read; Keeper Fs_edit;
+      Keeper Memory_search; Keeper Library_search; Keeper Library_read;
+      Keeper Time_now; Keeper Tools_list; Keeper Context_status;
+      Keeper Tasks_list; Keeper Tasks_audit;
+      Keeper Task_claim; Keeper Task_create; Keeper Task_done;
+      Keeper Task_force_release; Keeper Task_force_done;
+      Keeper Broadcast;
+      Keeper Board_get; Keeper Board_post; Keeper Board_list;
+      Keeper Board_comment; Keeper Board_vote;
+      Keeper Board_stats; Keeper Board_search;
+      Keeper Shell; Keeper Bash; Keeper Pr_workflow;
+      Keeper Voice_speak;
+      (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
+         counterpart on MCP surfaces. *)
+      Keeper Voice_listen;
+      Keeper Voice_agent; Keeper Voice_sessions;
+      Keeper Voice_session_start; Keeper Voice_session_end;
+      (* Tool discovery *)
+      Keeper Tool_search;
+    ]
 
 (** Immutable alias for keeper-internal tool name membership tests.
     Replaced mutable Hashtbl with plain list — membership via List.mem

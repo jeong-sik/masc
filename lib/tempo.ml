@@ -33,7 +33,7 @@ let default_config = {
 
 (** Get tempo file path *)
 let tempo_file (config : Room_utils.config) =
-  Filename.concat config.base_path ".masc/tempo.json"
+  Filename.concat (Room_utils.masc_dir config) "tempo.json"
 
 (** State to JSON *)
 let state_to_json (state : tempo_state) : Yojson.Safe.t =

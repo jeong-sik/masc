@@ -158,7 +158,7 @@ goal = "test"
 execution_scope = "workspace"
 allowed_paths = ["workspace/yousleepwhen/masc-mcp"]
 tool_preset = "social"
-also_allow = ["keeper_github", "keeper_shell"]
+also_allow = ["keeper_bash", "keeper_shell"]
 |};
   let config = Room.default_config room_dir in
   let initial_meta =
@@ -198,7 +198,7 @@ also_allow = ["keeper_github", "keeper_shell"]
       check
         (list string)
         "tool_also_allow"
-        [ "keeper_github"; "keeper_shell" ]
+        [ "keeper_bash"; "keeper_shell" ]
         (Keeper_types.tool_access_also_allowlist updated.tool_access);
       check
         (list string)

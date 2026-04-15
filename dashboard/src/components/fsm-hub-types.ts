@@ -34,6 +34,13 @@ export type TransitionEntry = {
   field: string
 }
 
+export type TopTransition = {
+  field: string
+  from: string
+  to: string
+  count: number
+}
+
 export type InsightTone = 'ok' | 'info' | 'warn' | 'error'
 
 export type OperationalInsight = {

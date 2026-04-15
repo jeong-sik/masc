@@ -1007,6 +1007,58 @@ let handle_keeper_shell
                  ; "status", Keeper_alerting_path.process_status_to_json st
                  ; "output", `String out
                  ]))
+  | "gh" ->
+    let cmd_str = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+    let timeout_sec = clamp_shell_timeout ~default:io_timeout_sec args in
+    if cmd_str = "" then
+      error_json ~fields:[ "op", `String op ]
+        "cmd is required for gh op. Good: cmd='pr list --state open'. Bad: cmd=''."
+    else
+      let gh_dangerous_prefixes =
+        [ "repo delete"; "repo archive"; "repo transfer"
+        ; "auth logout"; "auth token"
+        ; "secret set"; "secret delete"
+        ; "ssh-key delete"
+        ]
+      in
+      let cmd_lower = String.lowercase_ascii cmd_str in
+      let blocked_prefix =
+        List.find_opt (fun prefix ->
+          String.length cmd_lower >= String.length prefix
+          && String.sub cmd_lower 0 (String.length prefix) = prefix
+        ) gh_dangerous_prefixes
+      in
+      (match blocked_prefix with
+      | Some pat ->
+        Yojson.Safe.to_string
+          (`Assoc
+              [ "ok", `Bool false
+              ; "op", `String op
+              ; "error", `String "gh_dangerous_blocked"
+              ; "blocked_pattern", `String pat
+              ; "hint", `String "This gh command is blocked for safety."
+              ])
+      | None ->
+        (match cwd_target () with
+         | Error e -> path_error e
+         | Ok cwd ->
+           let full_cmd =
+             Keeper_gh_env.with_env config
+               (Printf.sprintf "gh %s 2>&1" cmd_str)
+           in
+           let st, out =
+             Process_eio.run_argv_with_status ~cwd ~timeout_sec
+               [ "bash"; "-lc"; full_cmd ]
+           in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool (st = Unix.WEXITED 0)
+                 ; "op", `String op
+                 ; "cwd", `String cwd
+                 ; "command", `String (Printf.sprintf "gh %s" cmd_str)
+                 ; "status", Keeper_alerting_path.process_status_to_json st
+                 ; "output", `String out
+                 ])))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
@@ -1020,6 +1072,6 @@ let handle_keeper_shell
                    [ "pwd"; "ls"; "cat"; "rg"; "git_status";
                      "find"; "head"; "tail"; "wc"; "tree";
                      "git_log"; "git_diff"; "git_worktree"; "bash";
-                     "git_clone" ]) )
+                     "git_clone"; "gh" ]) )
           ])
 ;;

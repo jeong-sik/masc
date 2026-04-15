@@ -61,7 +61,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '에이전트/키퍼 현황 및 observability 관찰',
+    description: '런타임 디렉터리와 플릿 신호 관찰',
     defaultTab: 'monitoring',
     defaultParams: { section: 'agents' },
     tabs: ['monitoring'],
@@ -121,8 +121,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'agents',
-      label: '에이전트 & 키퍼',
-      description: '이름과 운영 상태를 함께 봅니다. 세션 요약은 오버뷰에서.',
+      label: '런타임 디렉터리',
+      description: '누가 살아 있고 어떤 런타임인지 빠르게 훑어봅니다. 이벤트, 도구, 거버넌스는 플릿 텔레메트리에서 봅니다.',
       params: { section: 'agents' },
     },
     {
@@ -139,8 +139,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'fleet-health',
-      label: 'Keeper 현황',
-      description: '텔레메트리 이벤트, Keeper 비교, 도구 품질, 거버넌스 지표를 통합 뷰로.',
+      label: '플릿 텔레메트리',
+      description: '이벤트 로그, Keeper 비교, 도구 품질, 거버넌스 신호를 한 화면에서 봅니다.',
       params: { section: 'fleet-health' },
     },
     {

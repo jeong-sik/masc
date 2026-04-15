@@ -77,6 +77,41 @@ All protocols run concurrently from a single Eio fiber pool:
 
 ## Quick Start
 
+### Install (prebuilt binary)
+
+Supported: macOS arm64, Linux x86_64. Other platforms must build from source (see below).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc-mcp/main/scripts/install.sh | bash
+```
+
+The installer:
+
+- downloads the latest tagged binary from GitHub Releases into `~/.local/bin/masc-mcp`
+- seeds the minimum config (`./.masc/config/tool_policy.toml`) needed for boot
+- runs `--version` as a smoke check
+
+Pin a version, change the install dir, or skip the config seed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc-mcp/main/scripts/install.sh \
+  | bash -s -- --version v0.8.0 --prefix /usr/local/bin --base-path /path/to/project
+```
+
+`--dry-run` previews everything without writing. Full flag list: `install.sh --help`.
+
+Start the server and check health:
+
+```bash
+masc-mcp --base-path "$PWD" --port 8935
+curl http://127.0.0.1:8935/health
+```
+
+### Build from source
+
+Use this if you need a platform without a release asset, an unreleased commit, or you
+plan to develop on the codebase.
+
 ```bash
 git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp

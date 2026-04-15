@@ -99,15 +99,15 @@ let compaction_stage_to_string = function
    [mark_turn_finished]. Finer-grained breakdown
    ([Prompting]/[ToolCall]) requires Event_bus subscription and is
    tracked as Phase 2 of #7122. *)
-let derive_turn_phase (entry : Keeper_registry.registry_entry) : turn_phase =
+let derive_turn_phase
+    (entry : Keeper_registry.registry_entry)
+    ~(is_live : bool)
+    : turn_phase =
   match entry.phase with
   | Keeper_state_machine.Compacting -> `Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining -> `Finalizing
-  | _ ->
-    (match entry.current_turn_observation with
-     | Some _ -> `Executing
-     | None -> `Idle)
+  | _ -> if is_live then `Executing else `Idle
 
 (* Compaction sub-FSM: compaction_active is the authoritative condition.
    Phase [Compacting] MUST coincide with this condition under the
@@ -156,10 +156,8 @@ let derive_decision_stage
    Finer-grained live cascade state ([`Selecting`] vs [`Trying`] vs
    [`Done`]) remains a Phase 2 follow-up (#7122) requiring Event_bus
    subscription. *)
-let derive_cascade_state (entry : Keeper_registry.registry_entry)
-    : cascade_state =
-  if entry.current_turn_observation <> None then `Trying
-  else `Idle
+let derive_cascade_state ~(is_live : bool) : cascade_state =
+  if is_live then `Trying else `Idle
 
 (* Two-store reconcile pair (RFC-0003 §8, absorbed from P4).
    - [reconcile_data]: a prior turn left an ambiguous side-effect record
@@ -212,23 +210,43 @@ let check_recovery_two_store_sync
     : bool =
   not (reconcile_data && not reconcile_fsm)
 
+(* NoCascadeBeforeMeasurement from KeeperCompositeLifecycle.tla:
+   when the cascade sub-FSM is active, a measurement snapshot must
+   already have been captured. Cascade work pulled through a provider
+   without a preceding measurement indicates the auto-rule gate was
+   bypassed.
+
+   With [derive_cascade_state] projecting [`Trying`] when is_live (#7319),
+   this invariant is now observable from a single snapshot: cascade
+   non-idle AND measurement absent is the violation. *)
+let check_no_cascade_before_measurement
+    ~(cascade_state : cascade_state)
+    ~(measurement_captured : bool)
+    : bool =
+  match cascade_state with
+  | `Idle -> true
+  | `Selecting | `Trying | `Done | `Exhausted -> measurement_captured
+
 let compute_invariants
     ~(phase : Keeper_state_machine.phase)
     ~(conds : Keeper_state_machine.conditions)
     ~(turn_phase : turn_phase)
+    ~(cascade_state : cascade_state)
+    ~(measurement_captured : bool)
     ~(reconcile_data : bool)
     ~(reconcile_fsm : bool)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
-    no_cascade_before_measurement = true;
-    (* trivially true until cascade state is observable — see
-       [derive_cascade_state]. *)
+    no_cascade_before_measurement =
+      check_no_cascade_before_measurement
+        ~cascade_state
+        ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase conds;
     event_priority_monotone = true;
     (* per-snapshot view cannot witness event ordering; this invariant
        becomes checkable when the event-bus broadcast carries priority
-       annotations (follow-up). *)
+       annotations (follow-up to #7122). *)
     recovery_two_store_sync =
       check_recovery_two_store_sync ~reconcile_data ~reconcile_fsm;
   }
@@ -265,16 +283,19 @@ let observe
   in
   let conds = entry.conditions in
   let is_live = entry.current_turn_observation <> None in
-  let turn_phase = derive_turn_phase entry in
+  let turn_phase = derive_turn_phase entry ~is_live in
   let compaction_stage = derive_compaction_stage conds in
   let decision_stage = derive_decision_stage conds ~is_live in
-  let cascade_state = derive_cascade_state entry in
+  let cascade_state = derive_cascade_state ~is_live in
   let (reconcile_data, reconcile_fsm) = derive_reconcile entry in
+  let measurement_captured = entry.last_auto_rules <> None in
   let invariants =
     compute_invariants
       ~phase:entry.phase
       ~conds
       ~turn_phase
+      ~cascade_state
+      ~measurement_captured
       ~reconcile_data
       ~reconcile_fsm
   in

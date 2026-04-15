@@ -189,8 +189,8 @@ let test_coding_preset_has_keeper_bash () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has keeper_bash" true
     (has_tool "keeper_bash" tools);
-  check bool "has keeper_github" true
-    (has_tool "keeper_github" tools)
+  check bool "has keeper_shell" true
+    (has_tool "keeper_shell" tools)
 
 let test_pr_schema_descriptions_distinguish_workflow_lanes () =
   let workflow_desc =
@@ -776,7 +776,7 @@ let () =
         test_research_preset_excludes_keeper_fs_edit;
       test_case "minimal preset excludes keeper_fs_edit" `Quick
         test_minimal_preset_excludes_keeper_fs_edit;
-      test_case "coding preset has keeper_bash and keeper_github" `Quick
+      test_case "coding preset has keeper_bash and keeper_shell" `Quick
         test_coding_preset_has_keeper_bash;
     ]);
     ("autoresearch_tools", [

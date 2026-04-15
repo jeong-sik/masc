@@ -100,6 +100,7 @@
    dashboard_goals
    dashboard_feature_health
    dashboard_provider_runs
+   dashboard_cascade
    proactive_refresh
    server_dashboard_http_runtime_support
    server_dashboard_http_runtime_info
@@ -125,6 +126,7 @@
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
+   server_routes_http_routes_cascade
    server_routes_http_routes_activity
    server_routes_http_routes_channel_gate
    server_h2_gateway
@@ -434,7 +436,6 @@
    keeper_tool_pr_workflow
    keeper_tool_pr_submit
    keeper_tool_pr_review
-   keeper_exec_github
    keeper_exec_preflight
    keeper_exec_task
    keeper_exec_voice
@@ -620,7 +621,6 @@
    keeper_tool_pr_workflow
    keeper_tool_pr_submit
    keeper_tool_pr_review
-   keeper_exec_github
    keeper_exec_preflight
    keeper_exec_task
    keeper_exec_voice

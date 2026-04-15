@@ -5,6 +5,7 @@ import {
   type CompositeObservation,
   type HoveredSegment,
   type LaneKey,
+  type TopTransition,
   fmtDuration,
   displayState,
 } from './fsm-hub-types'
@@ -363,6 +364,68 @@ export function TransitionTrail({
               <span class="text-[var(--text-dim)]">${entry.from}</span>
               <span class="text-[var(--text-muted)]">→</span>
               <span class="text-[var(--text-strong)]">${entry.to}</span>
+            </div>
+          `
+        })}
+      </div>
+    </div>
+  `
+}
+
+/** Top-N transition frequency ranking. Surfaces the (from → to) pairs the
+    keeper takes most often inside the in-memory observation window — useful
+    for spotting churn (e.g. KCL idle ↔ trying repeating means cascade is
+    flapping) and for confirming the keeper exercises every lane it owns. */
+export function TopTransitionsPanel({
+  transitions,
+  hoveredSegment,
+}: {
+  transitions: TopTransition[]
+  hoveredSegment: HoveredSegment | null
+}) {
+  if (transitions.length === 0) {
+    return html`
+      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+        반복되는 전이가 없습니다 — 관측이 더 쌓이거나 lane 변화가 발생하면 표시됩니다
+      </div>
+    `
+  }
+
+  const maxCount = transitions[0]?.count ?? 1
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+      <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        Top Transitions (${transitions.length})
+      </div>
+      <div class="flex flex-col gap-0.5">
+        ${transitions.map((entry) => {
+          const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
+          const matchesHover =
+            hoveredSegment != null && hoveredSegment.field === entry.field
+          const dimmed = hoveredSegment != null && !matchesHover
+          const widthPct = Math.max(4, Math.round((entry.count / maxCount) * 100))
+          const rowCls = matchesHover
+            ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-1'
+            : ''
+          return html`
+            <div
+              class=${`flex items-center gap-2 text-[10px] font-mono leading-tight transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              title=${`${entry.field}: ${entry.from} → ${entry.to} (관측 ${entry.count}회)`}
+            >
+              <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
+              <span class="text-[var(--text-dim)]">${displayState(entry.from)}</span>
+              <span class="text-[var(--text-muted)]">→</span>
+              <span class="text-[var(--text-strong)]">${displayState(entry.to)}</span>
+              <span class="ml-auto flex items-center gap-1.5 shrink-0">
+                <span class="h-1 w-12 rounded-full bg-[var(--white-8)] overflow-hidden">
+                  <span
+                    class="block h-full bg-[var(--accent)]"
+                    style=${`width: ${widthPct}%`}
+                  ></span>
+                </span>
+                <span class="w-[18px] text-right text-[var(--text-dim)]">${entry.count}</span>
+              </span>
             </div>
           `
         })}

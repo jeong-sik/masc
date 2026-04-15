@@ -28,10 +28,10 @@ type record = {
 }
 
 let target_type_to_string = function
-  | Room -> "namespace"
+  | Room -> "root"
 
 let target_type_of_string = function
-  | "room" | "namespace" -> Some Room
+  | "root" | "room" | "namespace" -> Some Room
   | _ -> None
 
 let option_to_yojson = Json_util.option_to_yojson

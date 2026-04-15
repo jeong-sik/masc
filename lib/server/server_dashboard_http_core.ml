@@ -373,7 +373,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
             }
           in
           match
-            Operator_control.digest_json ~actor:"dashboard" ~target_type:"namespace"
+            Operator_control.digest_json ~actor:"dashboard" ~target_type:"root"
               ?command_plane_summary ?swarm_status ctx
           with
           | Ok json ->
@@ -483,7 +483,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
   let namespace_target_type value =
     match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
     | None -> true
-    | Some "namespace" | Some "room" -> true
+    | Some "root" | Some "namespace" | Some "room" -> true
     | Some _ -> false
   in
   let default_namespace_request =
@@ -497,7 +497,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
   else
     let started_at = Unix.gettimeofday () in
     let effective_target_type =
-      Option.value ~default:"namespace" target_type
+      Option.value ~default:"root" target_type
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok

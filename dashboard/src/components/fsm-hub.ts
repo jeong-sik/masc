@@ -16,6 +16,7 @@ import {
   type HubState,
   initialHubState,
   fmtDuration,
+  MAX_OBSERVATIONS,
 } from './fsm-hub-types'
 import {
   observeSnapshot,
@@ -417,8 +418,23 @@ function StatusBar({
           <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[#818cf8]' : 'border-[var(--white-8)] text-[var(--text-dim)]'}`}>
             ${transitionCount} 전환
           </span>
-          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-dim)]">
-            ${observationCount} 관측
+          <span
+            class=${`relative px-1.5 py-0.5 rounded border overflow-hidden ${
+              observationCount >= MAX_OBSERVATIONS
+                ? 'border-[rgba(245,158,11,0.4)] text-[#f59e0b]'
+                : 'border-[var(--white-8)] text-[var(--text-dim)]'
+            }`}
+            title=${`관측 버퍼 ${observationCount}/${MAX_OBSERVATIONS} — 가득 차면 오래된 관측부터 순환 교체됩니다`}
+          >
+            <span
+              class=${`absolute inset-0 ${
+                observationCount >= MAX_OBSERVATIONS
+                  ? 'bg-[rgba(245,158,11,0.08)]'
+                  : 'bg-[rgba(255,255,255,0.03)]'
+              }`}
+              style=${`width: ${Math.round((observationCount / MAX_OBSERVATIONS) * 100)}%`}
+            ></span>
+            <span class="relative">${observationCount}/${MAX_OBSERVATIONS} 관측</span>
           </span>
           ${/* Meta IDs */ ''}
           <span class="text-[var(--text-dim)] opacity-60">corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>

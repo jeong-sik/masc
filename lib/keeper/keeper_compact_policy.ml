@@ -162,7 +162,7 @@ let compact_if_needed
           let msgs_after_fold =
             Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
           in
-          msgs_after_fold
+          Keeper_context_core.repair_broken_tool_call_pairs msgs_after_fold
         in
         let compacted_ctx =
           sync_oas_context { ctx with messages }

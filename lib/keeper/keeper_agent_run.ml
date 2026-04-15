@@ -581,9 +581,10 @@ let run_turn
   (* Repair orphaned ToolResult blocks before passing to OAS Agent.run.
      Stale checkpoints saved before #7237 may contain tool_result blocks
      whose matching tool_use was trimmed. Anthropic API rejects these.
-     repair_orphan_tool_result_messages downgrades orphans to plain Text. *)
+     repair_broken_tool_call_pairs downgrades broken tool_use/tool_result
+     pairs to plain Text before the provider validates adjacency. *)
   let history_messages =
-    Keeper_context_core.repair_orphan_tool_result_messages ctx_work.messages
+    Keeper_context_core.repair_broken_tool_call_pairs ctx_work.messages
   in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry
@@ -1565,6 +1566,11 @@ let run_turn
       Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
       Agent_sdk.Context_reducer.cap_message_tokens ~max_tokens:32000 ~keep_recent:3;
       Agent_sdk.Context_reducer.repair_dangling_tool_calls;
+      {
+        Agent_sdk.Context_reducer.strategy =
+          Agent_sdk.Context_reducer.Custom
+            Keeper_context_core.repair_broken_tool_call_pairs;
+      };
       Agent_sdk.Context_reducer.merge_contiguous;
     ]
   in

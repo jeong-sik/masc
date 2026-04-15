@@ -253,7 +253,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       "- Do not wait for keeper_tasks_list unless the claim call says no eligible task.\n";
     Buffer.add_string ubuf
-      "- Prefer keeper_task_claim before keeper_board_list or keeper_github when you have no claimed task.\n\n");
+      "- Prefer keeper_task_claim before keeper_board_list or keeper_shell when you have no claimed task.\n\n");
   (* 5. Board activity — reactive trigger *)
   if observation.pending_board_events <> [] then (
     Buffer.add_string ubuf

@@ -44,13 +44,12 @@ let synonyms : (string * string list) list =
        "make file"; "update file"; "overwrite"; "append to file" ]);
     ("keeper_shell",
      [ "run command"; "shell read only"; "safe command"; "grep"; "rg search";
-       "list files"; "directory listing"; "git status"; "find file" ]);
+       "list files"; "directory listing"; "git status"; "find file";
+       "pull request"; "issue"; "pr"; "github"; "gh cli"; "create pr";
+       "open issue"; "ci status"; "repository" ]);
     ("keeper_bash",
      [ "run shell"; "execute command"; "build"; "test"; "compile"; "dune build";
        "npm"; "cargo"; "shell command"; "bash command" ]);
-    ("keeper_github",
-     [ "pull request"; "issue"; "pr"; "github"; "gh cli"; "create pr";
-       "open issue"; "ci status"; "repository"; "git hub" ]);
     ("keeper_board_get",
      [ "read post"; "view post"; "get post"; "board post detail";
        "show post"; "inspect post" ]);

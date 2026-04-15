@@ -75,7 +75,6 @@
         test_hitl_approval
         test_keeper_discovered_tools
         test_keeper_tool_affinity
-        test_keeper_github_safety
         test_keeper_github_read_only
         test_worktree_live_context
         test_tool_input_validation
@@ -159,7 +158,6 @@
           test_hitl_approval
           test_keeper_discovered_tools
           test_keeper_tool_affinity
-          test_keeper_github_safety
           test_keeper_github_read_only
           test_worktree_live_context
           test_tool_input_validation
@@ -377,8 +375,6 @@
         test_eval_calibration
         test_goal_janitor
         test_keeper_pr_workflow
-        test_keeper_github_hint
-        test_keeper_gh_hallucination_gate
         test_voice_config)
  (modules
         test_runtime_params
@@ -528,8 +524,6 @@
         test_eval_calibration
         test_goal_janitor
         test_keeper_pr_workflow
-        test_keeper_github_hint
-        test_keeper_gh_hallucination_gate
         test_voice_config)
  (libraries masc_test_deps))
 

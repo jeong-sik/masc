@@ -850,7 +850,7 @@ let test_prompt_includes_claim_first_guidance () =
   check bool "user prompt explains no task_id needed" true
     (contains_substring user "Do not wait for keeper_tasks_list");
   check bool "user prompt prefers claim before browsing" true
-    (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_github")
+    (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_shell")
 
 let test_prompt_omits_claim_first_guidance_when_task_claimed () =
   let current_task_id =

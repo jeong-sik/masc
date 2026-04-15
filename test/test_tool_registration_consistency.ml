@@ -330,8 +330,6 @@ let test_keeper_alias_ssot_consistency () =
     "keeper_bash" (Capability_registry.keeper_backend_tool_name "keeper_bash");
   Alcotest.(check string) "keeper_fs_edit identity"
     "keeper_fs_edit" (Capability_registry.keeper_backend_tool_name "keeper_fs_edit");
-  Alcotest.(check string) "keeper_github identity"
-    "keeper_github" (Capability_registry.keeper_backend_tool_name "keeper_github");
   (* Arbitrary unknown name must pass through *)
   Alcotest.(check string) "unknown identity"
     "foobar" (Capability_registry.keeper_backend_tool_name "foobar")

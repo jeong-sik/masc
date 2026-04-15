@@ -151,7 +151,7 @@ let test_is_on_surface_consistent () =
 (* {1 Cross-classification invariants — independent concern lists stay consistent} *)
 
 let destructive_tools =
-  ["keeper_bash"; "keeper_fs_edit"; "keeper_github"; "keeper_pr_workflow";
+  ["keeper_bash"; "keeper_fs_edit"; "keeper_pr_workflow";
    "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete"]
 
 let test_destructive_check_tools_are_privileged () =

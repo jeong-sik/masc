@@ -316,7 +316,7 @@ let test_risk_contract_risk_from_delivery_contract () =
                       ] );
                   ("repair_budget", `Int 0);
                 ] );
-            ("tool_names", `List [ `String "keeper_bash"; `String "keeper_github" ]);
+            ("tool_names", `List [ `String "keeper_bash"; `String "keeper_shell" ]);
           ])
   in
   Alcotest.(check string) "delivery contract drives critical risk"
@@ -784,15 +784,15 @@ let test_escalation_non_state_mod_unchanged () =
   Alcotest.(check string) "read-only stays low"
     "low" (Gp.risk_level_to_string unchanged)
 
-let test_escalation_read_only_keeper_github_unchanged () =
+let test_escalation_read_only_keeper_shell_gh_unchanged () =
   let unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr view 123")])
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
       ~base_risk:Gp.Low
   in
-  Alcotest.(check string) "read-only keeper_github stays low"
+  Alcotest.(check string) "read-only keeper_shell op=gh stays low"
     "low" (Gp.risk_level_to_string unchanged)
 
 let test_tool_capabilities_known () =
@@ -892,8 +892,8 @@ let () =
         test_escalation_no_trifecta_no_change;
       Alcotest.test_case "escalation: non-state_mod unchanged" `Quick
         test_escalation_non_state_mod_unchanged;
-      Alcotest.test_case "escalation: read-only keeper_github unchanged" `Quick
-        test_escalation_read_only_keeper_github_unchanged;
+      Alcotest.test_case "escalation: read-only keeper_shell op=gh unchanged" `Quick
+        test_escalation_read_only_keeper_shell_gh_unchanged;
       Alcotest.test_case "capabilities: known tool" `Quick
         test_tool_capabilities_known;
       Alcotest.test_case "capabilities: unknown tool" `Quick

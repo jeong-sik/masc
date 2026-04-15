@@ -104,7 +104,8 @@ val shard_autoresearch : shard
 (** Autoresearch shard: start, cycle, status, inject, stop. *)
 
 val coding_tools : Types.tool_schema list
-(** Coding shard tools (keeper_github/keeper_bash + worktree/code inspection).
+(** Coding shard tools (keeper_bash + worktree/code inspection).
+    keeper_shell with op=gh provides GitHub CLI access.
     Not in default shards. *)
 
 val keeper_pr_submit_tools : Types.tool_schema list

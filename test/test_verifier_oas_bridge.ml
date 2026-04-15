@@ -160,7 +160,6 @@ let test_read_tools_are_readonly () =
 let test_write_tools_are_not_readonly () =
   let write_tools = [
     "keeper_bash"; "keeper_fs_edit";
-    "keeper_github";
     "write_file"; "delete_node";
     (* underscore-joined: "read" is NOT at word boundary *)
     "keeper_read"; "bulk_search";
@@ -310,7 +309,7 @@ let test_default_gate_roundtrip () =
       destructive_check_enabled = true;
       allowlist_enabled = false;
       allowed_tools = [];
-      denied_tools = [ "keeper_bash"; "keeper_fs_edit"; "keeper_github" ];
+      denied_tools = [ "keeper_bash"; "keeper_fs_edit" ];
     }
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in

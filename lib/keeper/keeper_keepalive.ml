@@ -55,7 +55,8 @@ let autonomous_turn_limit =
 let () =
   Log.Keeper.info "autonomous_turn_concurrency=%d (env=%s)"
     autonomous_turn_limit
-    (Option.value ~default:"<unset>" (Sys.getenv_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
+    (Option.value ~default:"<unset>"
+       (Env_config_core.raw_value_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 

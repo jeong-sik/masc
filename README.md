@@ -173,6 +173,16 @@ Adaptive OAS timeout: `base 180s + 1.5s per 1K context tokens`, capped at [30, 6
 
 Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers/*.toml`.
 
+Reload contracts:
+
+- env vars are a boot contract unless a runtime control plane says otherwise
+- `config/keepers/*.toml` is reconciled on the next supervisor sweep
+- `config/cascade.json` is applied on the next model resolve/turn
+- `config/keeper_runtime.toml` and `config/tool_policy.toml` require restart
+
+See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
+[docs/TOML-RELOAD-MATRIX.md](docs/TOML-RELOAD-MATRIX.md).
+
 ## Model Cascade
 
 - `config/cascade.json` follows the OAS cascade contract.

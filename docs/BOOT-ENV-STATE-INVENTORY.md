@@ -31,7 +31,12 @@ Scope:
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
 | `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE` | Postgres backend and pool configuration. | backend bootstrap and storage |
 
-Not every environment variable is boot-critical. Most of the long `MASC_*` tail is runtime tuning, transport, dashboard, or keeper behavior. The centralized inventory lives in `lib/config/env_config_*.ml`; a repo-wide scan still finds additional ad-hoc environment reads outside those modules.
+Not every environment variable controls the same part of the runtime, but the
+default operator contract is still boot-time unless a separate runtime control
+plane exists. See [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) for reload classes and
+exceptions. The centralized inventory lives in `lib/config/env_config_*.ml`; a
+repo-wide scan still finds additional ad-hoc environment reads outside those
+modules.
 
 ### 1.2 Config root resolution
 
@@ -67,19 +72,25 @@ The versioned config tree currently contains:
 | --- | --- |
 | `config/cascade.json` | Provider/model cascade and routing defaults. |
 | `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
-| `config/keeper_runtime.toml` | Per-base-path keeper runtime tuning (turn budgets, timeouts, alerts, etc.). See section 1.3. |
+| `config/keeper_runtime.toml` | Per-base-path startup keeper env seeding. See section 1.3 and [`TOML-RELOAD-MATRIX.md`](./TOML-RELOAD-MATRIX.md). |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
 
-### 1.3 keeper_runtime.toml — per-base-path runtime tuning
+### 1.3 keeper_runtime.toml — per-base-path startup keeper env seeding
 
 All `MASC_KEEPER_*` environment variables can be set declaratively in
 `<config_root>/keeper_runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
 vars initializes.
+
+Operational contract:
+
+- This file is `boot_static`, not hot-reloaded.
+- The file seeds a process-local boot override store.
+- Live tuning belongs in `Runtime_params`, not in parent-shell env edits.
 
 **Precedence** (highest first):
 1. Process env var (caller/CI override — never overwritten by TOML)
@@ -121,8 +132,9 @@ max_active_keepers = 12
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values
-are injected via `Unix.putenv` so existing `Env_config_keeper` call
-sites work without API change.
+are recorded in a process-local boot override store so existing
+`Env_config_*` and keeper helpers can resolve TOML-backed defaults
+without mutating the parent environment.
 
 ## 2. Canonical Root and Path Resolution
 

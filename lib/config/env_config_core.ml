@@ -21,24 +21,29 @@ let () = Printexc.register_printer (function
   | Config_error msg -> Some (Printf.sprintf "Env_config_core.Config_error: %s" msg)
   | _ -> None)
 
+let raw_value_opt name =
+  match Sys.getenv_opt name with
+  | Some _ as value -> value
+  | None -> Config_boot_overrides.get_opt name
+
 (** Safe getters with defaults *)
 let get_string ~default name =
-  match Sys.getenv_opt name with
+  match raw_value_opt name with
   | Some v -> v
   | None -> default
 
 let get_int ~default name =
-  match Sys.getenv_opt name with
+  match raw_value_opt name with
   | Some v -> Safe_ops.int_of_string_with_default ~default v
   | None -> default
 
 let get_float ~default name =
-  match Sys.getenv_opt name with
+  match raw_value_opt name with
   | Some v -> Safe_ops.float_of_string_with_default ~default v
   | None -> default
 
 let get_bool ~default name =
-  match Sys.getenv_opt name with
+  match raw_value_opt name with
   | Some v ->
       (match String.trim v |> String.lowercase_ascii with
        | "true" | "1" | "yes" -> true
@@ -89,7 +94,7 @@ let existing_file path =
   Sys.file_exists path && not (Sys.is_directory path)
 
 let home_dir_opt () =
-  Sys.getenv_opt "HOME" |> trim_opt
+  raw_value_opt "HOME" |> trim_opt
 
 (** Log a deprecation warning when a legacy env var is set.
     Called once per legacy var at startup/first-read. *)
@@ -103,7 +108,7 @@ let warn_deprecated ~old_name ~new_name =
   end
 
 let deprecated_opt ~old_name ~new_name =
-  match Sys.getenv_opt old_name |> trim_opt with
+  match raw_value_opt old_name |> trim_opt with
   | Some value ->
       warn_deprecated ~old_name ~new_name;
       Some value
@@ -112,7 +117,7 @@ let deprecated_opt ~old_name ~new_name =
 (** Read [primary] env var first; if unset, fall back to [deprecated] with a
     one-time deprecation warning.  Returns [None] when neither is set. *)
 let resolve_deprecated ~primary ~deprecated =
-  match Sys.getenv_opt primary |> trim_opt with
+  match raw_value_opt primary |> trim_opt with
   | Some _ as v -> v
   | None -> deprecated_opt ~old_name:deprecated ~new_name:primary
 
@@ -141,7 +146,7 @@ let default_http_port = Masc_network_defaults.masc_http_default_port_s
 let default_http_port_int = Masc_network_defaults.masc_http_default_port
 
 let masc_http_port () =
-  match Sys.getenv_opt "MASC_HTTP_PORT" |> trim_opt with
+  match raw_value_opt "MASC_HTTP_PORT" |> trim_opt with
   | Some port -> port
   | None -> Masc_network_defaults.masc_http_default_port_s
 
@@ -150,7 +155,7 @@ let masc_http_port_int () =
     ~default:Masc_network_defaults.masc_http_default_port (masc_http_port ())
 
 let masc_host_opt () =
-  Sys.getenv_opt "MASC_HOST" |> trim_opt
+  raw_value_opt "MASC_HOST" |> trim_opt
 
 let default_host = Masc_network_defaults.masc_http_default_host
 
@@ -165,10 +170,10 @@ let masc_host () =
 (** Centralized MASC_ASSETS_DIR reader.
     Returns None when MASC_ASSETS_DIR is unset or empty. *)
 let assets_dir_opt () =
-  Sys.getenv_opt "MASC_ASSETS_DIR" |> trim_opt
+  raw_value_opt "MASC_ASSETS_DIR" |> trim_opt
 
 let cluster_name_opt () =
-  Sys.getenv_opt "MASC_CLUSTER_NAME" |> trim_opt
+  raw_value_opt "MASC_CLUSTER_NAME" |> trim_opt
 
 (** Centralized MASC_CLUSTER_NAME reader.
     Default: "default". All call sites should use this instead of
@@ -184,7 +189,7 @@ let rec masc_http_base_url () =
   | Error msg -> raise (Config_error msg)
 
 and masc_http_base_url_result () =
-  match Sys.getenv_opt "MASC_HTTP_BASE_URL" |> trim_opt with
+  match raw_value_opt "MASC_HTTP_BASE_URL" |> trim_opt with
   | Some base -> Ok (strip_trailing_slashes base)
   | None ->
       let host =
@@ -203,7 +208,7 @@ and masc_http_base_url_result () =
 (** Read a TCP port from env, validated to [1, 65535]. Returns default on
     missing, empty, out-of-range, or non-integer values. *)
 let get_port ~default name =
-  match Sys.getenv_opt name |> trim_opt with
+  match raw_value_opt name |> trim_opt with
   | Some s -> (
       match int_of_string_opt s with
       | Some p when p > 0 && p < 65536 -> p
@@ -214,13 +219,15 @@ let get_port ~default name =
 
 (** Project base path for .masc data directory.
     Used by board, checkpoint, thompson_sampling, voice, keeper.
-    Set at startup; may be overridden via Unix.putenv before use.
+    Set at startup; may be overridden from inside the running process via
+    [Unix.putenv] before use. Parent-shell env edits do not affect an already
+    running server.
     Returns None when MASC_BASE_PATH is unset or empty. *)
 let base_path_source_opt () =
-  match Sys.getenv_opt "MASC_BASE_PATH_INPUT" |> trim_opt with
+  match raw_value_opt "MASC_BASE_PATH_INPUT" |> trim_opt with
   | Some value -> Some ("MASC_BASE_PATH_INPUT", value)
   | None ->
-      (match Sys.getenv_opt "MASC_BASE_PATH" |> trim_opt with
+      (match raw_value_opt "MASC_BASE_PATH" |> trim_opt with
        | Some value -> Some ("MASC_BASE_PATH", value)
        | None -> None)
 
@@ -260,7 +267,7 @@ let sb_path () =
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
     Valid: "filesystem", "memory". *)
 let storage_type () =
-  match Sys.getenv_opt "MASC_STORAGE_TYPE" |> trim_opt with
+  match raw_value_opt "MASC_STORAGE_TYPE" |> trim_opt with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
       | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
@@ -270,11 +277,11 @@ let storage_type () =
 
 (** Config directory override. *)
 let config_dir_opt () =
-  Sys.getenv_opt "MASC_CONFIG_DIR" |> trim_opt
+  raw_value_opt "MASC_CONFIG_DIR" |> trim_opt
 
 (** Personas directory override. *)
 let personas_dir_opt () =
-  Sys.getenv_opt "MASC_PERSONAS_DIR" |> trim_opt
+  raw_value_opt "MASC_PERSONAS_DIR" |> trim_opt
 
 (** {1 Relay Calibration} *)
 
@@ -286,7 +293,7 @@ let relay_calibration_enabled () =
 
 (** Admin token for privileged endpoints. None = admin auth disabled. *)
 let admin_token_opt () =
-  Sys.getenv_opt "MASC_ADMIN_TOKEN" |> trim_opt
+  raw_value_opt "MASC_ADMIN_TOKEN" |> trim_opt
 
 (** Strict tool auth mode. Default: true.
     true = unknown masc_* tools require worker-level permission. *)
@@ -297,7 +304,7 @@ let tool_auth_strict () =
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
 let log_level_opt () =
-  Sys.getenv_opt "MASC_LOG_LEVEL" |> trim_opt
+  raw_value_opt "MASC_LOG_LEVEL" |> trim_opt
 
 (** Whether telemetry tracking is enabled. Default: true. *)
 let telemetry_enabled () =
@@ -317,13 +324,13 @@ let governance_level () =
 
 (** Git commit hash override for build identity. *)
 let build_git_commit_opt () =
-  Sys.getenv_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
+  raw_value_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
 
 (** {1 Auto Respond} *)
 
 (** Raw MASC_AUTO_RESPOND value for mode parsing. *)
 let auto_respond_opt () =
-  Sys.getenv_opt "MASC_AUTO_RESPOND" |> trim_opt
+  raw_value_opt "MASC_AUTO_RESPOND" |> trim_opt
 
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =

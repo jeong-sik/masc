@@ -5,112 +5,106 @@ open Types
 let declared_permission_for_tool tool_name =
   (Tool_catalog.metadata tool_name).required_permission
 
-let legacy_permission_entries : (string * permission) list =
+(* Variant-sourced permission entries: typos become compile errors. *)
+let legacy_permission_typed : (Tool_name.t * permission) list =
+  let open Tool_name in
   [
-    ("masc_reset", CanReset);
-    ("masc_join", CanJoin);
-    ("masc_leave", CanLeave);
-    ("masc_status", CanReadState);
-    ("masc_who", CanReadState);
-    ("masc_tasks", CanReadState);
-    ("masc_messages", CanReadState);
-    ("masc_agents", CanReadState);
-    ("masc_worktree_list", CanReadState);
-    ("masc_task_history", CanReadState);
-    ("masc_operator_snapshot", CanReadState);
-    ("masc_operator_digest", CanReadState);
-    ("masc_surface_audit", CanReadState);
-    ("masc_keeper_status", CanReadState);
-    ("masc_keeper_list", CanReadState);
-    ("masc_runtime_verify", CanReadState);
-    ("masc_runtime_ollama_probe", CanReadState);
-    ("masc_unit_list", CanReadState);
-    ("masc_operation_status", CanReadState);
-    ("masc_policy_status", CanReadState);
-    ("masc_dispatch_plan", CanReadState);
-    ("masc_observe_topology", CanReadState);
-    ("masc_observe_operations", CanReadState);
-    ("masc_observe_swarm", CanReadState);
-    ("masc_observe_capacity", CanReadState);
-    ("masc_observe_alerts", CanReadState);
-    ("masc_observe_traces", CanReadState);
-    ("masc_agent_card", CanReadState);
-    ("masc_agent_fitness", CanReadState);
-    ("masc_dashboard", CanReadState);
-    ("masc_check", CanReadState);
-    ("masc_collaboration_graph", CanReadState);
-    ("masc_get_metrics", CanReadState);
-    ("masc_plan_get_task", CanReadState);
-    ("masc_plan_get", CanReadState);
-    ("masc_workflow_guide", CanReadState);
-    ("masc_autoresearch_status", CanReadState);
-    ("masc_config", CanReadState);
-    ("masc_add_task", CanAddTask);
-    ("masc_claim_next", CanClaimTask);
-    ("masc_update_priority", CanCompleteTask);
-    ("masc_transition", CanCompleteTask);
-    ("masc_broadcast", CanBroadcast);
-    ("masc_heartbeat", CanBroadcast);
-    ("masc_webrtc_offer", CanBroadcast);
-    ("masc_webrtc_answer", CanBroadcast);
+    (* Room lifecycle *)
+    (Masc Reset, CanReset);
+    (Masc Join, CanJoin);
+    (Masc Leave, CanLeave);
+    (* Read-only state queries *)
+    (Masc Status, CanReadState);
+    (Masc Who, CanReadState);
+    (Masc Tasks, CanReadState);
+    (Masc Messages, CanReadState);
+    (Masc Agents, CanReadState);
+    (Masc Worktree_list, CanReadState);
+    (Masc Task_history, CanReadState);
+    (Masc Operator_snapshot, CanReadState);
+    (Masc Operator_digest, CanReadState);
+    (Masc Surface_audit, CanReadState);
+    (Masc_keeper Status, CanReadState);
+    (Masc_keeper List, CanReadState);
+    (Masc Runtime_verify, CanReadState);
+    (Masc Runtime_ollama_probe, CanReadState);
+    (Masc Operation_status, CanReadState);
+    (Masc Dispatch_plan, CanReadState);
+    (Masc Agent_card, CanReadState);
+    (Masc Agent_fitness, CanReadState);
+    (Masc Dashboard, CanReadState);
+    (Masc Check, CanReadState);
+    (Masc Get_metrics, CanReadState);
+    (Masc Plan_get_task, CanReadState);
+    (Masc Plan_get, CanReadState);
+    (Masc Workflow_guide, CanReadState);
+    (Masc Autoresearch_status, CanReadState);
+    (Masc Config, CanReadState);
+    (* Task / broadcast *)
+    (Masc Add_task, CanAddTask);
+    (Masc Claim_next, CanClaimTask);
+    (Masc Update_priority, CanCompleteTask);
+    (Masc Transition, CanCompleteTask);
+    (Masc Broadcast, CanBroadcast);
+    (Masc Heartbeat, CanBroadcast);
+    (Masc Webrtc_offer, CanBroadcast);
+    (Masc Webrtc_answer, CanBroadcast);
+    (Masc Register_capabilities, CanBroadcast);
+    (Masc Agent_update, CanBroadcast);
+    (Masc Operator_action, CanBroadcast);
+    (Masc_keeper Up, CanBroadcast);
+    (Masc_keeper Down, CanBroadcast);
+    (Masc_keeper Msg, CanBroadcast);
+    (Masc Keeper_msg_result, CanBroadcast);
+    (Masc_keeper Repair, CanBroadcast);
+    (Masc_keeper Reset, CanBroadcast);
+    (Masc_keeper Compact, CanBroadcast);
+    (Masc_keeper Clear, CanBroadcast);
+    (Masc_keeper Create_from_persona, CanBroadcast);
+    (Masc Operator_confirm, CanBroadcast);
+    (Masc Operation_start, CanBroadcast);
+    (Masc Operation_checkpoint, CanBroadcast);
+    (Masc Operation_pause, CanBroadcast);
+    (Masc Operation_resume, CanBroadcast);
+    (Masc Operation_stop, CanBroadcast);
+    (Masc Operation_finalize, CanBroadcast);
+    (Masc Dispatch_assign, CanBroadcast);
+    (Masc Cleanup_zombies, CanBroadcast);
+    (* Admin *)
+    (Masc Autoresearch_start, CanAdmin);
+    (Masc Autoresearch_cycle, CanAdmin);
+    (Masc Autoresearch_inject, CanAdmin);
+    (Masc Autoresearch_stop, CanAdmin);
+    (* Board *)
+    (Masc Board_list, CanReadState);
+    (Masc Board_get, CanReadState);
+    (Masc Board_hearths, CanReadState);
+    (Masc Board_search, CanReadState);
+    (Masc Board_profile, CanReadState);
+    (Masc Board_stats, CanReadState);
+    (Masc Board_post, CanBroadcast);
+    (Masc Board_comment, CanBroadcast);
+    (Masc Board_vote, CanBroadcast);
+    (Masc Board_comment_vote, CanBroadcast);
+    (Masc Board_delete, CanAdmin);
+    (* Tool admin *)
+    (Masc Tool_stats, CanReadState);
+    (Masc Tool_help, CanReadState);
+    (Masc Tool_list, CanReadState);
+    (Masc Tool_grant, CanAdmin);
+    (Masc Tool_revoke, CanAdmin);
+    (Masc Tool_admin_snapshot, CanReadState);
+    (Masc Tool_admin_update, CanAdmin);
+    (* Worktree mutation *)
+    (Masc Worktree_create, CanCreateWorktree);
+    (Masc Worktree_remove, CanRemoveWorktree);
+  ]
+
+let legacy_permission_entries : (string * permission) list =
+  List.map (fun (t, p) -> (Tool_name.to_string t, p)) legacy_permission_typed
+  @ [
+    (* channel_gate is an HTTP endpoint auth marker, not a registered tool. *)
     ("channel_gate", CanBroadcast);
-    ("masc_register_capabilities", CanBroadcast);
-    ("masc_agent_update", CanBroadcast);
-    ("masc_operator_action", CanBroadcast);
-    ("masc_keeper_up", CanBroadcast);
-    ("masc_keeper_down", CanBroadcast);
-    ("masc_keeper_msg", CanBroadcast);
-    ("masc_keeper_msg_result", CanBroadcast);
-    ("masc_keeper_repair", CanBroadcast);
-    ("masc_keeper_reset", CanBroadcast);
-    ("masc_keeper_compact", CanBroadcast);
-    ("masc_keeper_clear", CanBroadcast);
-    ("masc_keeper_create_from_persona", CanBroadcast);
-    ("masc_operator_confirm", CanBroadcast);
-    ("masc_unit_define", CanBroadcast);
-    ("masc_unit_reparent", CanBroadcast);
-    ("masc_unit_reassign", CanBroadcast);
-    ("masc_operation_start", CanBroadcast);
-    ("masc_operation_checkpoint", CanBroadcast);
-    ("masc_operation_pause", CanBroadcast);
-    ("masc_operation_resume", CanBroadcast);
-    ("masc_operation_stop", CanBroadcast);
-    ("masc_operation_finalize", CanBroadcast);
-    ("masc_dispatch_assign", CanBroadcast);
-    ("masc_dispatch_rebalance", CanBroadcast);
-    ("masc_dispatch_escalate", CanBroadcast);
-    ("masc_dispatch_recall", CanBroadcast);
-    ("masc_policy_approve", CanBroadcast);
-    ("masc_policy_deny", CanBroadcast);
-    ("masc_policy_update", CanBroadcast);
-    ("masc_cleanup_zombies", CanBroadcast);
-    ("masc_autoresearch_start", CanAdmin);
-    ("masc_autoresearch_cycle", CanAdmin);
-    ("masc_autoresearch_inject", CanAdmin);
-    ("masc_autoresearch_stop", CanAdmin);
-    ("masc_board_list", CanReadState);
-    ("masc_board_get", CanReadState);
-    ("masc_board_hearths", CanReadState);
-    ("masc_board_search", CanReadState);
-    ("masc_board_profile", CanReadState);
-    ("masc_board_stats", CanReadState);
-    ("masc_board_post", CanBroadcast);
-    ("masc_board_comment", CanBroadcast);
-    ("masc_board_vote", CanBroadcast);
-    ("masc_board_comment_vote", CanBroadcast);
-    ("masc_board_delete", CanAdmin);
-    ("masc_tool_stats", CanReadState);
-    ("masc_tool_help", CanReadState);
-    ("masc_tool_list", CanReadState);
-    ("masc_tool_grant", CanAdmin);
-    ("masc_tool_revoke", CanAdmin);
-    ("masc_tool_admin_snapshot", CanReadState);
-    ("masc_tool_admin_update", CanAdmin);
-    ("masc_portal_open", CanOpenPortal);
-    ("masc_portal_close", CanOpenPortal);
-    ("masc_portal_send", CanSendPortal);
-    ("masc_worktree_create", CanCreateWorktree);
-    ("masc_worktree_remove", CanRemoveWorktree);
   ]
 
 let legacy_permission_for_tool tool_name =

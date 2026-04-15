@@ -153,6 +153,7 @@ module Masc : sig
     | Run_list
     | Run_log
     | Run_plan
+    | Runtime_verify
     | Set_current_task
     | Spawn
     | Start

@@ -249,6 +249,7 @@ module Masc = struct
     | Run_list
     | Run_log
     | Run_plan
+    | Runtime_verify
     | Set_current_task
     | Spawn
     | Start
@@ -369,6 +370,7 @@ module Masc = struct
     | Run_list -> "masc_run_list"
     | Run_log -> "masc_run_log"
     | Run_plan -> "masc_run_plan"
+    | Runtime_verify -> "masc_runtime_verify"
     | Persona_list -> "masc_persona_list"
     | Set_current_task -> "masc_set_current_task"
     | Spawn -> "masc_spawn"
@@ -490,6 +492,7 @@ module Masc = struct
     | "masc_run_list" -> Some Run_list
     | "masc_run_log" -> Some Run_log
     | "masc_run_plan" -> Some Run_plan
+    | "masc_runtime_verify" -> Some Runtime_verify
     | "masc_persona_list" -> Some Persona_list
     | "masc_set_current_task" -> Some Set_current_task
     | "masc_spawn" -> Some Spawn

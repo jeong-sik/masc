@@ -41,6 +41,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Room_status; Runtime_ollama_probe
   ; Persona_list
   ; Run_deliverable; Run_get; Run_init; Run_list; Run_log; Run_plan
+  ; Runtime_verify
   ; Set_current_task; Spawn; Start; Status; Surface_audit; Task_history; Tasks
   ; Tool_admin_snapshot; Tool_admin_update; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Tool_stats; Transition; Update_priority

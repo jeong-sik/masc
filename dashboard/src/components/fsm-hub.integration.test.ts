@@ -23,6 +23,7 @@ import type { KeeperCompositeSnapshot } from '../api/keeper'
 import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { deriveStateEntries, deriveSwimlaneSegments } from './fsm-hub'
+import type { CompositeObservation } from './fsm-hub-types'
 
 /** Server-shaped keeper composite snapshot matching the projected
     RFC-0003/TLA-aligned `/api/v1/keepers/:name/composite` response.
@@ -112,7 +113,7 @@ describe('FSM Hub integration — API response shape', () => {
   })
 
   describe('downstream derivers tolerate real-shape observations', () => {
-    const obsFromSnapshot = (snap: KeeperCompositeSnapshot, ts: number) => ({
+    const obsFromSnapshot = (snap: KeeperCompositeSnapshot, ts: number): CompositeObservation => ({
       ts,
       phase: snap.phase,
       turn: snap.turn_phase,
@@ -123,7 +124,7 @@ describe('FSM Hub integration — API response shape', () => {
 
     it('deriveStateEntries returns a structure when given real-shape data', () => {
       const obs1 = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obs2 = { ...obs1, ts: 110, phase: 'Compacting' }
+      const obs2: CompositeObservation = { ...obs1, ts: 110, phase: 'Compacting' }
       const entries = deriveStateEntries([obs1, obs2])
       expect(entries).not.toBeNull()
       expect(entries?.phase).toBe(110) // phase transitioned at ts=110
@@ -131,7 +132,7 @@ describe('FSM Hub integration — API response shape', () => {
 
     it('deriveSwimlaneSegments handles the full is_live=true projection', () => {
       const obsIdle = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obsLive = {
+      const obsLive: CompositeObservation = {
         ...obsIdle,
         ts: 110,
         turn: 'executing' satisfies KeeperCompositeSnapshot['turn_phase'],

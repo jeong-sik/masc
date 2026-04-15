@@ -73,6 +73,12 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
+  recovery_two_store_sync : bool;
+}
+
+type recovery_projection = {
+  data_record : bool;
+  fsm_condition : bool;
 }
 
 type last_outcome = {
@@ -90,6 +96,7 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
+  recovery : recovery_projection;
   invariants : invariants_check;
   is_live : bool;
   last_outcome : last_outcome option;
@@ -307,12 +314,35 @@ let check_no_cascade_before_measurement
   | Cascade_idle -> true
   | Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted ->
       measurement_captured
+
+let check_recovery_two_store_sync ~(recovery : recovery_projection) : bool =
+  not (recovery.data_record && not recovery.fsm_condition)
+
+let legacy_manual_reconcile_path ~masc_root_dir name =
+  Filename.concat
+    (Filename.concat masc_root_dir "keepers")
+    (name ^ ".manual_reconcile.json")
+
+let derive_recovery ?masc_root_dir (entry : Keeper_registry.registry_entry)
+    : recovery_projection =
+  let data_record =
+    match masc_root_dir with
+    | None -> false
+    | Some root ->
+      Fs_compat.file_exists (legacy_manual_reconcile_path ~masc_root_dir:root entry.name)
+  in
+  {
+    data_record;
+    fsm_condition = false;
+  }
+
 let compute_invariants
     ~(phase : ksm_phase)
     ~(conds : Keeper_state_machine.conditions)
     ~(turn_phase : turn_phase)
     ~(cascade_state : cascade_state)
     ~(measurement_captured : bool)
+    ~(recovery : recovery_projection)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
@@ -322,6 +352,7 @@ let compute_invariants
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase conds;
     event_priority_monotone = true;
+    recovery_two_store_sync = check_recovery_two_store_sync ~recovery;
     (* per-snapshot view cannot witness event ordering; this invariant
        becomes checkable when the event-bus broadcast carries priority
        annotations (follow-up to #7122). *)
@@ -341,6 +372,7 @@ let observe
     ?correlation_id
     ?run_id
     ?now
+    ?masc_root_dir
     (entry : Keeper_registry.registry_entry)
     : snapshot =
   let ts = match now with Some t -> t | None -> Time_compat.now () in
@@ -365,6 +397,7 @@ let observe
   let decision_stage = derive_decision_stage conds ~is_live in
   let cascade_state = derive_cascade_state ~is_live in
   let measurement_captured = entry.last_auto_rules <> None in
+  let recovery = derive_recovery ?masc_root_dir entry in
   let invariants =
     compute_invariants
       ~phase:ksm_phase
@@ -372,6 +405,7 @@ let observe
       ~turn_phase
       ~cascade_state
       ~measurement_captured
+      ~recovery
   in
   {
     correlation_id;
@@ -386,6 +420,7 @@ let observe
       (match entry.last_auto_rules with
        | Some (_ts, summary) -> Some summary
        | None -> None);
+    recovery;
     (* Registry retains the last [Context_measured] auto-rule summary in
        [last_auto_rules]. The wall-clock timestamp is discarded here
        because the snapshot's [ts] field already carries it; if callers
@@ -413,6 +448,7 @@ let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
     "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
     "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
+    "recovery_two_store_sync", `Bool inv.recovery_two_store_sync;
   ]
 
 let measurement_to_json (m : Keeper_state_machine.auto_rule_summary)
@@ -453,6 +489,10 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       | None -> `Assoc [
           "captured", `Bool false;
         ]);
+    "recovery", `Assoc [
+      "data_record", `Bool s.recovery.data_record;
+      "fsm_condition", `Bool s.recovery.fsm_condition;
+    ];
     "invariants", invariants_to_json s.invariants;
     "is_live", `Bool s.is_live;
     "last_outcome", (match s.last_outcome with

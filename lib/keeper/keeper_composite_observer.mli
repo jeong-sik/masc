@@ -13,10 +13,12 @@
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
 
-    Initial scope: derives [ksm_phase] and [kmc_compaction] directly from
-    the registry entry. [kdp_decision] / [kcl_cascade_state] remain
-    [`Undecided`] / [`Idle`] until follow-up PRs wire the
-    [Context_measured] / cascade-runtime observation points.
+    Current scope: [ksm_phase], [ktc_turn_phase], [kmc_compaction], and
+    conservative live projections for [kdp_decision] / [kcl_cascade_state]
+    are derived from the registry entry. Finer-grained live substates such
+    as [Decision_tool_policy_selected], [Cascade_selecting], [Cascade_done],
+    and [Cascade_exhausted] still require additional runtime observation
+    points.
 
     @since RFC-0003 — Composite observer v0. *)
 
@@ -79,6 +81,18 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
+  recovery_two_store_sync : bool;
+}
+
+type recovery_projection = {
+  data_record : bool;
+      (** Legacy [.manual_reconcile.json] sidecar exists under
+          [.masc/keepers/]. This is the persisted-store half of the old
+          two-store recovery protocol. *)
+  fsm_condition : bool;
+      (** Recovery condition latched in the live FSM store. The current
+          runtime no longer carries this signal, so the observer projects
+          [false] until a new SSOT field is introduced. *)
 }
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -100,6 +114,7 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
+  recovery : recovery_projection;
   invariants : invariants_check;
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is
@@ -118,11 +133,16 @@ type snapshot = {
     observer is driven from a known event envelope (OAS event_bus
     envelope, PR OAS#845). When absent, the snapshot uses
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
-    reads within the same keeper transition return the same id. *)
+    reads within the same keeper transition return the same id.
+
+    [masc_root_dir] is optional because most projected state comes from the
+    live registry entry itself. Pass it when callers want the observer to
+    check legacy sidecars such as [.manual_reconcile.json]. *)
 val observe :
   ?correlation_id:string ->
   ?run_id:string ->
   ?now:float ->
+  ?masc_root_dir:string ->
   Keeper_registry.registry_entry ->
   snapshot
 

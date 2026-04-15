@@ -40,6 +40,7 @@ const CANONICAL_PHASE_KEYS = new Set([
   'Offline',
   'Running',
   'Failing',
+  'Overflowed',
   'Compacting',
   'HandingOff',
   'Draining',
@@ -51,7 +52,7 @@ const CANONICAL_PHASE_KEYS = new Set([
 ])
 
 const OFFLINE_PHASES = new Set<string>(['Offline', 'Stopped', 'Dead'])
-const ATTENTION_PHASES = new Set<string>(['Failing', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
+const ATTENTION_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
 
 const UNKNOWN_PHASE_META: PhaseMeta = {
   key: 'unknown',
@@ -69,6 +70,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: '오프라인', description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
   Running: { key: 'Running', label: '실행중', description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
   Failing: { key: 'Failing', label: '오류중', description: '최근 실행에서 오류를 감지했습니다.' },
+  Overflowed: { key: 'Overflowed', label: '오버플로우', description: '하드 context overflow가 발생해 자동 복구 경로를 기다리는 상태입니다.' },
   Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
   HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
   Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
@@ -163,6 +165,7 @@ function normalizePhase(phase: KeeperPhase | string | null | undefined): string 
     offline: 'Offline',
     running: 'Running',
     failing: 'Failing',
+    overflowed: 'Overflowed',
     compacting: 'Compacting',
     handing_off: 'HandingOff',
     handingoff: 'HandingOff',

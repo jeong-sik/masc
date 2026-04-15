@@ -869,7 +869,11 @@ let handle_keeper_get_subroutes state req request reqd =
          Http.Response.json ~status:`Not_found
            (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
        | Some entry ->
-         let snapshot = Keeper_composite_observer.observe entry in
+         let snapshot =
+           Keeper_composite_observer.observe
+             ~masc_root_dir:(Room.masc_root_dir state.Mcp_server.room_config)
+             entry
+         in
          let json = Keeper_composite_observer.snapshot_to_json snapshot in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

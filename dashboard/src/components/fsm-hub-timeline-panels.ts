@@ -40,15 +40,12 @@ const IDLE_LIKE_VALUES = new Set([
   'idle',
   'undecided',
   'accumulating',
-  'Offline',
-  'Paused',
-  'Stopped',
+  'Stable',
 ])
 
 const ALARM_VALUES = new Set([
-  'Crashed',
   'Failing',
-  'Dead',
+  'Overflowed',
   'gate_rejected',
   'exhausted',
 ])

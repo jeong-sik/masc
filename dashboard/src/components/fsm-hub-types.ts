@@ -5,11 +5,11 @@ import type {
 
 export type CompositeObservation = {
   ts: number
-  phase: string
-  turn: string
-  decision: string
-  cascade: string
-  compaction: string
+  phase: KeeperCompositeSnapshot['phase']
+  turn: KeeperCompositeSnapshot['turn_phase']
+  decision: KeeperCompositeSnapshot['decision']['stage']
+  cascade: KeeperCompositeSnapshot['cascade']['state']
+  compaction: KeeperCompositeSnapshot['compaction']['stage']
 }
 
 export type LaneKey = keyof Omit<CompositeObservation, 'ts'>
@@ -162,16 +162,12 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   accumulating: '수집 중',
   // KSM
   Running: '가동 중',
+  Overflowed: '오버플로우',
   Compacting: '압축 중',
   HandingOff: '인수인계',
   Failing: '오류 발생',
-  Crashed: '비정상 종료',
-  Offline: '오프라인',
-  Paused: '일시 중지',
-  Stopped: '정지',
   Draining: '종료 준비',
-  Restarting: '재시작',
-  Dead: '종료됨',
+  Stable: '안정',
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */

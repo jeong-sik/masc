@@ -21,6 +21,7 @@ module KTP = Masc_mcp.Keeper_tool_policy
 module Reg = Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
 module KTypes = Masc_mcp.Keeper_types
+module Kfs = Masc_mcp.Keeper_fs
 
 let read_file path =
   let ic = open_in path in
@@ -278,6 +279,12 @@ let test_cascade_mermaid_healthy_no_reason_note () =
 (* ── Composite Observer: turn-scoped state (issue #7122) ─ *)
 
 let test_obs_bp = "/tmp/test-composite-obs"
+let test_obs_masc_root = Filename.concat test_obs_bp ".masc"
+
+let legacy_manual_reconcile_path name =
+  Filename.concat
+    (Filename.concat test_obs_masc_root "keepers")
+    (name ^ ".manual_reconcile.json")
 
 let make_obs_meta name =
   let json = `Assoc [
@@ -404,6 +411,38 @@ let test_observer_last_outcome_preserved_across_finish_idempotent () =
   check bool "last_outcome preserved across redundant mark_turn_finished"
     true (lo_first = lo_second)
 
+let test_observer_json_includes_recovery_fields () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-recovery-json" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe ~masc_root_dir:test_obs_masc_root entry in
+    let json = Obs.snapshot_to_json snap in
+    let open Yojson.Safe.Util in
+    check bool "recovery.data_record default false"
+      false (json |> member "recovery" |> member "data_record" |> to_bool);
+    check bool "recovery.fsm_condition default false"
+      false (json |> member "recovery" |> member "fsm_condition" |> to_bool);
+    check bool "recovery_two_store_sync default true"
+      true (json |> member "invariants" |> member "recovery_two_store_sync" |> to_bool)
+
+let test_observer_legacy_recovery_sidecar_surfaces_drift () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-recovery-sidecar" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  let sidecar = legacy_manual_reconcile_path name in
+  ignore (Kfs.ensure_dir (Filename.dirname sidecar));
+  Kfs.save_json_atomic sidecar (`Assoc [ "legacy", `Bool true ]);
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe ~masc_root_dir:test_obs_masc_root entry in
+    check bool "legacy sidecar sets data_record" true snap.recovery.data_record;
+    check bool "fsm condition remains false without live SSOT" false snap.recovery.fsm_condition;
+    check bool "legacy sidecar creates recovery drift" false snap.invariants.recovery_two_store_sync
+
 let test_composite_observer_variants_match_tla_sets () =
   let tla = read_file (keeper_composite_lifecycle_tla ()) in
   let check_set label expected actual =
@@ -476,6 +515,10 @@ let () =
       test_case "is_live = false on idle keeper" `Quick test_observer_is_live_false_when_idle;
       test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
       test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
+      test_case "snapshot json includes recovery fields" `Quick
+        test_observer_json_includes_recovery_fields;
+      test_case "legacy recovery sidecar surfaces drift" `Quick
+        test_observer_legacy_recovery_sidecar_surfaces_drift;
       test_case "variant sets match KeeperCompositeLifecycle.tla" `Quick
         test_composite_observer_variants_match_tla_sets;
     ];

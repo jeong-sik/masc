@@ -11,6 +11,7 @@ const PHASE_NODES: Array<{ id: string; label: string }> = [
   { id: 'Offline', label: 'Offline' },
   { id: 'Running', label: 'Running' },
   { id: 'Failing', label: 'Failing' },
+  { id: 'Overflowed', label: 'Overflowed' },
   { id: 'Compacting', label: 'Compacting' },
   { id: 'HandingOff', label: 'HandingOff' },
   { id: 'Draining', label: 'Draining' },
@@ -21,26 +22,55 @@ const PHASE_NODES: Array<{ id: string; label: string }> = [
   { id: 'Dead', label: 'Dead' },
 ]
 
-const BUFFER_PHASES = new Set(['Failing', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
+const BUFFER_PHASES = new Set(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
 const TERMINAL_PHASES = new Set(['Stopped', 'Dead', 'Crashed'])
 
 const PHASE_EDGES: FsmEdge[] = [
   { source: 'Offline', target: 'Running', label: 'boot' },
+  { source: 'Offline', target: 'Draining', label: 'stop requested' },
+  { source: 'Offline', target: 'Stopped', label: 'stop while not started' },
   { source: 'Running', target: 'Failing', label: 'error threshold', type: 'error' },
+  { source: 'Running', target: 'Overflowed', label: 'context overflow', type: 'error' },
   { source: 'Failing', target: 'Running', label: 'recovery', type: 'recovery' },
+  { source: 'Failing', target: 'Overflowed', label: 'context overflow', type: 'error' },
   { source: 'Running', target: 'Compacting', label: 'compact trigger' },
   { source: 'Compacting', target: 'Running', label: 'compact done', type: 'recovery' },
+  { source: 'Compacting', target: 'Overflowed', label: 'compact failed', type: 'error' },
+  { source: 'Compacting', target: 'Failing', label: 'hb fail', type: 'error' },
   { source: 'Running', target: 'HandingOff', label: 'handoff start' },
-  { source: 'HandingOff', target: 'Stopped', label: 'handoff complete' },
+  { source: 'HandingOff', target: 'Running', label: 'handoff done', type: 'recovery' },
+  { source: 'HandingOff', target: 'Failing', label: 'hb fail', type: 'error' },
   { source: 'Running', target: 'Draining', label: 'drain start' },
   { source: 'Draining', target: 'Stopped', label: 'drain complete' },
   { source: 'Running', target: 'Paused', label: 'pause' },
   { source: 'Paused', target: 'Running', label: 'resume', type: 'recovery' },
+  { source: 'Paused', target: 'Compacting', label: 'operator compact', type: 'recovery' },
   { source: 'Running', target: 'Restarting', label: 'restart' },
   { source: 'Restarting', target: 'Running', label: 'boot', type: 'recovery' },
+  { source: 'Restarting', target: 'Paused', label: 'operator pause' },
+  { source: 'Restarting', target: 'Draining', label: 'stop requested' },
   { source: 'Failing', target: 'Crashed', label: 'max retries', type: 'error' },
+  { source: 'Failing', target: 'Draining', label: 'stop requested' },
+  { source: 'Failing', target: 'Paused', label: 'operator pause' },
+  { source: 'Overflowed', target: 'Running', label: 'operator clear', type: 'recovery' },
+  { source: 'Overflowed', target: 'Compacting', label: 'auto-compact', type: 'recovery' },
+  { source: 'Overflowed', target: 'Paused', label: 'retry exhausted' },
+  { source: 'Overflowed', target: 'Draining', label: 'stop requested' },
+  { source: 'Overflowed', target: 'Crashed', label: 'fiber death', type: 'error' },
+  { source: 'Compacting', target: 'Crashed', label: 'fiber death', type: 'error' },
+  { source: 'Compacting', target: 'Draining', label: 'stop requested' },
+  { source: 'HandingOff', target: 'Crashed', label: 'fiber death', type: 'error' },
+  { source: 'HandingOff', target: 'Draining', label: 'stop requested' },
+  { source: 'Draining', target: 'Crashed', label: 'fiber death', type: 'error' },
+  { source: 'Paused', target: 'Draining', label: 'stop requested' },
+  { source: 'Paused', target: 'Stopped', label: 'stop requested' },
+  { source: 'Paused', target: 'Crashed', label: 'fiber death', type: 'error' },
   { source: 'Crashed', target: 'Dead', label: 'no recovery', type: 'error' },
+  { source: 'Crashed', target: 'Restarting', label: 'backoff elapsed', type: 'recovery' },
+  { source: 'Restarting', target: 'Crashed', label: 'launch fail', type: 'error' },
+  { source: 'Restarting', target: 'Dead', label: 'budget exhausted', type: 'error' },
   { source: 'Running', target: 'Stopped', label: 'shutdown' },
+  { source: 'Running', target: 'Crashed', label: 'fiber death', type: 'error' },
 ]
 
 function phaseNodeType(id: string, activePhase: string | null): FsmNode['type'] {
@@ -219,8 +249,17 @@ function clusterNodes(
 }
 
 export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec {
+  const ksmTone: 'active' | 'warn' | 'err' =
+    params.phase === 'Failing'
+      ? 'err'
+      : params.phase === 'Overflowed'
+        || params.phase === 'Compacting'
+        || params.phase === 'HandingOff'
+        || params.phase === 'Draining'
+        ? 'warn'
+        : 'active'
   const nodes: FsmNode[] = [
-    ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, 'active'),
+    ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, ksmTone),
     ...clusterNodes('KTC', 'KTC · turn cycle', KTC_STATES, params.turnPhase, 'active'),
     ...clusterNodes('KDP', 'KDP · decision pipeline', KDP_STATES, params.decisionStage,
       params.decisionStage === 'gate_rejected' ? 'err' : 'active'),

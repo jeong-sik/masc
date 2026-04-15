@@ -86,7 +86,7 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 
 | 변수 | 출처 | 값 도메인 | 비고 |
 |------|------|-----------|------|
-| `ksm_phase` | `KeeperStateMachine.tla` 11-state → 6-state 투사 | `{Running, Failing, Compacting, HandingOff, Draining, Stable}` | Lossy projection. Stable은 turn cycle 밖 |
+| `ksm_phase` | `KeeperStateMachine.tla` 12-state → 7-state 투사 | `{Running, Failing, Overflowed, Compacting, HandingOff, Draining, Stable}` | Lossy projection. Stable은 turn cycle 밖 |
 | `ktc_turn_phase` | `KeeperTurnCycle.tla` / `keeper_unified_turn.ml` | `{idle, prompting, executing, compacting, finalizing}` | |
 | `kdp_decision` | `KeeperDecisionPipeline.tla` | `{undecided, guard_ok, gate_rejected, tool_policy_selected}` | Narrow projection |
 | `kcl_cascade_state` | `CascadeLiveness.tla` | `{idle, selecting, trying, done, exhausted}` | |
@@ -94,12 +94,65 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | `shared_measurement` | `Context_measured` | `Nat` (0 = none, else snapshot id) | **hub** |
 | `measurement_turn` | `turn_tick` at capture | `Nat` | ordering |
 | `reconcile_data` | `Keeper_manual_reconcile` (FS record) | `BOOLEAN` | two-store A |
-| `reconcile_fsm` | `conditions.manual_reconcile_required` | `BOOLEAN` | two-store B |
+| `reconcile_fsm` | live recovery-condition SSOT (legacy placeholder in current runtime) | `BOOLEAN` | two-store B |
 | `turn_tick` | monotone counter | `0..MaxTurnTicks` | model bound |
+
+### Projected state contracts
+
+각 projected state는 "이름만 있는 배지"가 아니라, 의미와 전이 근거가 있어야 한다.
+
+#### KSM
+
+| State | 의미 | 들어올 때 | 나갈 때 |
+|------|------|-----------|---------|
+| `Running` | healthy parent lifecycle | normal init / recovery / compaction done / handoff done | failing, overflowed, compacting, handoff, draining |
+| `Failing` | recovery ownership active | heartbeat/turn/guard path가 healthy를 잃음 | running, overflowed, draining |
+| `Overflowed` | provider-level hard context overflow latched | prompt가 max context를 초과함 | compacting(auto-compact), running(operator clear), draining |
+| `Compacting` | post-turn compaction owns parent lifecycle | compaction entry action fired | running(compaction done), overflowed(compaction failed), failing, draining |
+| `HandingOff` | generation rollover in progress | handoff entry action fired | running(handoff done), failing, draining |
+| `Draining` | graceful stop path owns lifecycle | stop requested while work may still exist | stable bucket via stopped/crashed terminal states |
+| `Stable` | turn-external or terminal raw phases collapsed here | offline, paused, stopped, crashed, restarting, dead | running or another projected parent edge when lifecycle re-enters active work |
+
+#### KTC
+
+| State | 의미 | 들어올 때 | 나갈 때 |
+|------|------|-----------|---------|
+| `idle` | no live turn | no current turn / finalizing finished / overflow/failing abort | prompting, executing, compacting |
+| `prompting` | turn exists and awaits measurement/prompt completion | `StartTurn` | executing, idle |
+| `executing` | live turn is inside provider/tool work | live turn started or cascade attempt in flight | finalizing, compacting, idle on abort |
+| `compacting` | turn is blocked on compaction completion | parent/lifecycle compaction owns the turn | idle |
+| `finalizing` | post-execution cleanup before idle | cascade/provider accepted result or handoff/drain cleanup | idle |
+
+#### KDP
+
+| State | 의미 | 들어올 때 | 나갈 때 |
+|------|------|-----------|---------|
+| `undecided` | no committed decision yet | idle turn or freshly reset turn | guard_ok, gate_rejected |
+| `guard_ok` | gate evaluation passed | live turn survived guard evaluation | tool_policy_selected, undecided on reset |
+| `gate_rejected` | guard blocked the turn | guardrail stop or equivalent veto | undecided on reset/finalize |
+| `tool_policy_selected` | tool restriction set committed | tool policy filtering completed | cascade/select execution or undecided on reset |
+
+#### KCL
+
+| State | 의미 | 들어올 때 | 나갈 때 |
+|------|------|-----------|---------|
+| `idle` | no provider path active | no live turn / turn finished / abort path | selecting, trying |
+| `selecting` | provider path is being chosen | decision advanced past guard_ok | trying, exhausted |
+| `trying` | provider attempt in flight | cascade slot/provider selected | done, exhausted |
+| `done` | provider returned usable output | cascade/provider success accepted | idle/finalizing reset |
+| `exhausted` | every cascade path failed | last provider failed without usable result | idle/failing recovery path |
+
+#### KMC
+
+| State | 의미 | 들어올 때 | 나갈 때 |
+|------|------|-----------|---------|
+| `accumulating` | compaction not currently executing | normal steady state | compacting |
+| `compacting` | memory compaction actively mutates context | compaction entry action fired | done |
+| `done` | compaction completed for the observed turn | compaction completion observed | accumulating on next turn |
 
 ### Actions (narrow abstractions)
 
-`StartTurn`, `MeasurementBroadcast`, `DecideGuard`, `SelectCascade`, `CascadeDone`, `StartCompaction`, `FinishCompaction`, `EnterFailing`, `ClearDataRecord`, `ClearFsmCondition`. 총 10개. 각 action은 sub-FSM transition의 minimum projection이며, 자세한 guard는 원 spec에 위임한다.
+`StartTurn`, `MeasurementBroadcast`, `DecideGuard`, `SelectCascade`, `CascadeDone`, `FinishTurn`, `StartCompaction`, `FinishCompaction`, `EnterFailing`, `ClearDataRecord`, `ClearFsmCondition`, `EnterOverflowed`, `OverflowedAutoCompact`. 총 13개. 각 action은 sub-FSM transition의 minimum projection이며, 자세한 guard는 원 spec에 위임한다.
 
 ### Safety invariants (clean cfg)
 
@@ -138,14 +191,13 @@ L2는 `WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)`이 fairness에 포
     correlation_id : string;
     run_id : string;
     ts : float;
-    ksm_phase : Keeper_state_machine.phase;
-    ktc_turn_phase : [ `Idle | `Prompting | `Executing | `Compacting | `Finalizing ];
-    kdp_decision : [ `Undecided | `Guard_ok | `Gate_rejected | `Tool_policy_selected ];
-    kcl_cascade_state : [ `Idle | `Selecting | `Trying | `Done | `Exhausted ];
-    kmc_compaction : [ `Accumulating | `Compacting | `Done ];
+    ksm_phase : ksm_phase;
+    ktc_turn_phase : turn_phase;
+    kdp_decision : decision_stage;
+    kcl_cascade_state : cascade_state;
+    kmc_compaction : compaction_stage;
     shared_measurement : Keeper_state_machine.auto_rules_summary option;
-    reconcile_data : bool;
-    reconcile_fsm : bool;
+    recovery : recovery_projection;
     invariants : invariants_check;
   }
 
@@ -157,7 +209,10 @@ L2는 `WF_vars(ClearDataRecord) + WF_vars(ClearFsmCondition)`이 fairness에 포
     recovery_two_store_sync : bool;
   }
 
-  val observe : Keeper_registry.registry_entry -> snapshot
+  val observe :
+    ?masc_root_dir:string ->
+    Keeper_registry.registry_entry ->
+    snapshot
   (** Pure projection. Reads the registry entry plus the most recent
       Context_measured event. No mutation, no I/O. *)
   ```

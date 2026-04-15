@@ -426,15 +426,49 @@ export interface KeeperLastOutcome {
   ended_at: number
 }
 
+export type KeeperCompositePhase =
+  | 'Running'
+  | 'Failing'
+  | 'Overflowed'
+  | 'Compacting'
+  | 'HandingOff'
+  | 'Draining'
+  | 'Stable'
+
+export type KeeperCompositeTurnPhase =
+  | 'idle'
+  | 'prompting'
+  | 'executing'
+  | 'compacting'
+  | 'finalizing'
+
+export type KeeperCompositeDecisionStage =
+  | 'undecided'
+  | 'guard_ok'
+  | 'gate_rejected'
+  | 'tool_policy_selected'
+
+export type KeeperCompositeCascadeState =
+  | 'idle'
+  | 'selecting'
+  | 'trying'
+  | 'done'
+  | 'exhausted'
+
+export type KeeperCompositeCompactionStage =
+  | 'accumulating'
+  | 'compacting'
+  | 'done'
+
 export interface KeeperCompositeSnapshot {
   correlation_id: string
   run_id: string
   ts: number
-  phase: string
-  turn_phase: string
-  decision: { stage: string }
-  cascade: { state: string }
-  compaction: { stage: string }
+  phase: KeeperCompositePhase
+  turn_phase: KeeperCompositeTurnPhase
+  decision: { stage: KeeperCompositeDecisionStage }
+  cascade: { state: KeeperCompositeCascadeState }
+  compaction: { stage: KeeperCompositeCompactionStage }
   measurement: KeeperCompositeMeasurement
   recovery: { data_record: boolean; fsm_condition: boolean }
   invariants: KeeperCompositeInvariants

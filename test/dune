@@ -81,6 +81,7 @@
         test_tool_input_validation
         test_autoresearch_codegen
         test_autoresearch_oas_primitives
+        test_autoresearch_target_score
         ; test_contract_risk removed (team session cleanup)
         ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
@@ -104,6 +105,7 @@
         test_run_local_script
         test_tool_prefilter
         test_keeper_state_machine
+        test_keeper_campaign_fsm
         test_keeper_overflow_recovery
         test_telemetry_unified
         test_keeper_topk_llm
@@ -164,6 +166,7 @@
           test_tool_input_validation
           test_autoresearch_codegen
           test_autoresearch_oas_primitives
+          test_autoresearch_target_score
           ; test_contract_risk removed (team session cleanup)
           ; test_contract_composer removed (team session cleanup)
           test_cdal_conformance
@@ -187,6 +190,7 @@
           test_run_local_script
           test_tool_prefilter
           test_keeper_state_machine
+          test_keeper_campaign_fsm
           test_keeper_overflow_recovery
             test_telemetry_unified
           test_keeper_topk_llm

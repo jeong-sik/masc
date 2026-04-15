@@ -147,7 +147,9 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?model_model ~target_file ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn ?(lower_is_better = false) ~workdir () =
+let create_state ~goal ~metric_fn ?model_model ~target_file ?target_score
+    ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn
+    ?(lower_is_better = false) ~workdir () =
   let model_model = match model_model with
     | Some m -> m
     | None -> Provider_adapter.default_model_provider_prefix_result () |> Result.value ~default:"auto"
@@ -163,6 +165,7 @@ let create_state ~goal ~metric_fn ?model_model ~target_file ~cycle_timeout_s ~ma
     metric_fn;
     model_model;
     target_file;
+    target_score;
     status = Running;
     error_message = None;
     current_cycle = 0;
@@ -251,9 +254,42 @@ let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
   in
   (state, record)
 
+let target_reached (state : loop_state) =
+  match state.target_score with
+  | None -> false
+  | Some target ->
+      if state.lower_is_better then state.best_score <= target
+      else state.best_score >= target
+
+let completion_reason (state : loop_state) =
+  if target_reached state then
+    Some "target_score reached"
+  else if state.current_cycle >= state.max_cycles then
+    Some "max_cycles reached"
+  else
+    None
+
+let complete_if_finished (state : loop_state) =
+  match state.status, completion_reason state with
+  | Running, Some "target_score reached" ->
+      let target =
+        match state.target_score with
+        | Some value -> Printf.sprintf "%.4f" value
+        | None -> "n/a"
+      in
+      add_insight
+        { state with status = Completed; updated_at = Time_compat.now () }
+        (Printf.sprintf "Target reached at cycle %d (target=%s, best=%.4f)"
+           state.current_cycle target state.best_score)
+  | Running, Some reason ->
+      add_insight
+        { state with status = Completed; updated_at = Time_compat.now () }
+        (Printf.sprintf "Autoresearch completed: %s" reason)
+  | _ -> state
+
 (** Check if the loop should continue. *)
 let should_continue (state : loop_state) =
-  state.status = Running && state.current_cycle < state.max_cycles
+  state.status = Running && Option.is_none (completion_reason state)
 
 (** Stop a running or persisted loop.
     Acquires [loops_mu] write lock internally. *)
@@ -282,6 +318,7 @@ let stop_loop ~base_path ?reason loop_id =
                 metric_fn = persisted.metric_fn;
                 model_model = persisted.model_model;
                 target_file = persisted.target_file;
+                target_score = persisted.target_score;
                 status = persisted.status;
                 error_message = persisted.error_message;
                 current_cycle = persisted.current_cycle;
@@ -312,16 +349,19 @@ let stop_loop ~base_path ?reason loop_id =
 (** Linked loop status JSON for swarm integration.
     Acquires [loops_mu] read lock internally. *)
 let linked_status_json ~base_path (link : swarm_link) =
-  let current_cycle, status, best_score, error_message, workdir, source_workdir,
-      program_note, warnings, queued_hypothesis =
+  let current_cycle, status, best_score, target_score, error_message, workdir,
+      lower_is_better, source_workdir, program_note, warnings,
+      queued_hypothesis =
     with_loops_ro (fun () ->
       match Hashtbl.find_opt active_loops link.loop_id with
       | Some state ->
           ( state.current_cycle,
             status_to_string state.status,
             state.best_score,
+            state.target_score,
             state.error_message,
             state.workdir,
+            state.lower_is_better,
             state.source_workdir,
             state.program_note,
             state.warnings,
@@ -332,8 +372,10 @@ let linked_status_json ~base_path (link : swarm_link) =
               ( persisted.current_cycle,
                 status_to_string persisted.status,
                 persisted.best_score,
+                persisted.target_score,
                 persisted.error_message,
                 persisted.workdir,
+                persisted.lower_is_better,
                 persisted.source_workdir,
                 persisted.program_note,
                 persisted.warnings,
@@ -342,8 +384,10 @@ let linked_status_json ~base_path (link : swarm_link) =
               ( 0,
                 "missing",
                 0.0,
+                None,
                 Some "state file missing",
                 managed_worktree_dir ~base_path link.loop_id,
+                false,
                 "",
                 link.program_note,
                 [],
@@ -362,6 +406,14 @@ let linked_status_json ~base_path (link : swarm_link) =
       ("status", `String status);
       ("current_cycle", `Int current_cycle);
       ("best_score", `Float best_score);
+      ("target_score", Json_util.float_opt_to_json target_score);
+      ( "target_reached",
+        `Bool
+          (match target_score with
+           | None -> false
+           | Some target ->
+               if lower_is_better then best_score <= target
+               else best_score >= target) );
       ( "last_decision",
         Json_util.string_opt_to_json last_decision );
       ("target_file", `String link.target_file);

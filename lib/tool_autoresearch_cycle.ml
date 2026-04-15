@@ -257,15 +257,21 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
             if state.status <> Autoresearch.Running then
               Error "Loop is not running"
             else if not (Autoresearch.should_continue state) then begin
-              let state = { state with status = Autoresearch.Completed } in
+              let reason =
+                Option.value ~default:"completed" (Autoresearch.completion_reason state)
+              in
+              let state = Autoresearch.complete_if_finished state in
               Hashtbl.replace active_loops id state;
               Autoresearch.save_state ~base_path:ctx.base_path state;
-              Error "completed"
+              Error ("completed:" ^ reason)
             end else
               Ok state)
     in
     match state_or_error with
-    | Error "completed" ->
+    | Error completed when String.starts_with ~prefix:"completed:" completed ->
+      let reason =
+        String.sub completed 10 (String.length completed - 10)
+      in
       let best_score, best_cycle =
         Autoresearch.with_loops_ro (fun () ->
             match Hashtbl.find_opt active_loops id with
@@ -276,7 +282,7 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
         [
           ("loop_id", `String id);
           ("status", `String "completed");
-          ("reason", `String "max_cycles reached");
+          ("reason", `String reason);
           ("best_score", `Float best_score);
           ("best_cycle", `Int best_cycle);
         ]
@@ -593,8 +599,10 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                          else state
                        in
                        Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id effective_record;
-                       let state = { state with
-                         current_cycle = state.current_cycle + 1 } in
+                       let state =
+                         Autoresearch.complete_if_finished
+                           { state with current_cycle = state.current_cycle + 1 }
+                       in
                        Autoresearch.with_loops_rw (fun () ->
                          Hashtbl.replace Autoresearch.active_loops id state);
                        Autoresearch.save_state ~base_path:ctx.base_path state;
@@ -620,6 +628,8 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                              `String
                                (Autoresearch.decision_to_string effective_record.decision) );
                            ("commit_hash", `String commit_hash);
+                           ("status", `String (Autoresearch.status_to_string state.status));
+                           ("target_reached", `Bool (Autoresearch.target_reached state));
                            ("baseline", `Float state.baseline);
                            ("best_score", `Float state.best_score);
                            ( "cycles_remaining",

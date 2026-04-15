@@ -25,6 +25,14 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("metric_fn", `String summary.metric_fn);
       ("model_model", `String summary.model_model);
       ("target_file", `String summary.target_file);
+      ("target_score", Json_util.float_opt_to_json summary.target_score);
+      ( "target_reached",
+        `Bool
+          (match summary.target_score with
+           | None -> false
+           | Some target ->
+               if summary.lower_is_better then summary.best_score <= target
+               else summary.best_score >= target) );
       ("status", `String (Autoresearch.status_to_string summary.status));
       ("current_cycle", `Int summary.current_cycle);
       ("baseline", `Float summary.baseline);
@@ -64,6 +72,7 @@ type start_params = {
   cycle_timeout_s : float;
   model_model : string;
   baseline_override : float option;
+  target_score : float option;
   patience : int option;
   build_verify_fn : string option;
   lower_is_better : bool;
@@ -117,6 +126,7 @@ let prepare_start_params (ctx : context) args =
           cycle_timeout_s;
           model_model;
           baseline_override = get_float_opt args "baseline";
+          target_score = get_float_opt args "target_score";
           patience = get_int_opt args "patience";
           build_verify_fn;
           lower_is_better = get_bool args "lower_is_better" false;
@@ -159,6 +169,7 @@ let setup_running_loop (ctx : context) (params : start_params) =
   let state =
     Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
       ~model_model:params.model_model ~target_file:params.target_file
+      ?target_score:params.target_score
       ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
       ?patience:params.patience ?build_verify_fn:params.build_verify_fn
       ~lower_is_better:params.lower_is_better
@@ -194,8 +205,10 @@ let setup_running_loop (ctx : context) (params : start_params) =
           match baseline_result with
           | Error message -> Error message
           | Ok baseline ->
-              let state = { state with
-                baseline; best_score = baseline; source_workdir } in
+              let state =
+                Autoresearch.complete_if_finished
+                  { state with baseline; best_score = baseline; source_workdir }
+              in
               Ok (register_loop ctx state))
 
 let status_json (ctx : context) ~loop_id json_fields =
@@ -265,12 +278,14 @@ let handle_start (ctx : context) args =
       broadcast_loop_lifecycle "autoresearch_started" state;
       `Assoc [
         ("loop_id", `String state.loop_id);
-        ("status", `String "running");
+        ("status", `String (Autoresearch.status_to_string state.status));
         ("goal", `String params.goal);
         ("metric_fn", `String params.metric_fn);
         ("target_file", `String params.target_file);
         ("model_model", `String params.model_model);
         ("baseline", `Float state.baseline);
+        ("target_score", Json_util.float_opt_to_json state.target_score);
+        ("target_reached", `Bool (Autoresearch.target_reached state));
         ("max_cycles", `Int params.max_cycles);
         ("cycle_timeout_s", `Float params.cycle_timeout_s);
         ("workdir", `String state.workdir);

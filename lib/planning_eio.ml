@@ -237,7 +237,7 @@ let set_deliverable (config : Room.config) ~task_id ~content : (planning_context
 (* ===== Session-level Context ===== *)
 
 let current_task_file (config : Room.config) =
-  Filename.concat config.base_path ".masc/current_task"
+  Filename.concat (Room_utils.masc_dir config) "current_task"
 
 (** Get current task_id for session *)
 let get_current_task (config : Room.config) : string option =

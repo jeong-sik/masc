@@ -1153,11 +1153,20 @@ let run_keepalive_unified_turn
           with
           | Error err ->
             let e_str = Oas.Error.to_string err in
-            Log.Keeper.error "%s: keeper cycle failed: %s"
+            (* The inner [run_keeper_cycle] already emits a detailed ERROR
+               ("keeper cycle FAILED cascade=... max_context=... error=...")
+               for every Error path, so re-logging at ERROR here duplicates
+               the line for the same event. Keep a debug trace for local
+               readers; escalate to ERROR only on the fatal-environment
+               branch, which is the real signal this layer owns. *)
+            Log.Keeper.debug "%s: keeper cycle failed: %s"
               meta_after_observe.name e_str;
             if String_util.contains_substring e_str "Eio switch not available"
                || String_util.contains_substring e_str "Eio net not available"
             then begin
+              Log.Keeper.error
+                "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
+                meta_after_observe.name e_str;
               Keeper_registry.set_failure_reason
                 ~base_path:ctx.config.base_path meta_after_observe.name
                 (Some (Keeper_registry.Exception

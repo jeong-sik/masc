@@ -51,8 +51,8 @@ type session_context = {
   created_by : string option;
   origin_kind : string;
   namespace : string option;
-  status : string;
-  health : string;
+  status : Dashboard_utils.session_lifecycle;
+  health : Dashboard_utils.health_level;
   member_names : string list;
   started_at : string option;
   elapsed_sec : int option;
@@ -96,7 +96,7 @@ type keeper_context = {
 type operation_context = {
   operation_id : string;
   linked_session_id : string option;
-  status : string;
+  status : string option;
   stage : string option;
   detachment_status : string option;
   objective : string option;
@@ -108,10 +108,10 @@ type archived_agent_meta = {
 }
 
 let build_task_lookup config =
-  if not (Room.is_initialized config) then
+  if not (Coord.is_initialized config) then
     []
   else
-    Room.get_tasks_raw config
+    Coord.get_tasks_raw config
     |> List.filter_map (fun (task : Types.task) ->
            if String.trim task.id = "" then None
            else Some (task.id, Printf.sprintf "%s · %s" task.id (compact_text task.title)))
@@ -150,7 +150,7 @@ let latest_message_to agent_name messages =
     None messages
 
 let read_recent_room_event_lines config ~limit =
-  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
     let month_dirs =
@@ -195,19 +195,22 @@ let read_recent_room_event_lines config ~limit =
       month_dirs;
     List.rev !collected
 
+let is_session_concluded (status : Dashboard_utils.session_lifecycle) =
+  match status with
+  | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled -> true
+  | SL_active | SL_running | SL_paused | SL_failed | SL_stopped | SL_expired | SL_unknown -> false
+
 let status_of_archived_session (session : session_context option) =
   match session with
   | Some session ->
-      if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
-      then "inactive"
-      else "offline"
+      if is_session_concluded session.status then "inactive" else "offline"
   | None -> "unknown"
 
 let archived_reason_for_session (session : session_context option) =
   match session with
   | Some session ->
       Some
-        (if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
+        (if is_session_concluded session.status
          then "not in current namespace state"
          else "missing from current namespace state")
   | None -> None
@@ -267,8 +270,8 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
-    if Room.is_initialized config then
-      Room.get_messages_raw config ~since_seq:0 ~limit:200
+    if Coord.is_initialized config then
+      Coord.get_messages_raw config ~since_seq:0 ~limit:200
     else
       []
   in
@@ -281,7 +284,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
         | None -> Some id)
   in
   let room_agents =
-    if Room.is_initialized config then Room.get_agents_raw config else []
+    if Coord.is_initialized config then Coord.get_agents_raw config else []
   in
   let room_agent_by_name =
     room_agents

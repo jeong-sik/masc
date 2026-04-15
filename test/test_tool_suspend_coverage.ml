@@ -15,20 +15,20 @@ module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 module Tool_suspend = Masc_mcp.Tool_suspend
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 (* ============================================================
    Test Helpers
    ============================================================ *)
 
-(** Create a temporary Room.config for isolated tests.
-    Must create directory + .masc/ subdirectory for Room operations. *)
+(** Create a temporary Coord.config for isolated tests.
+    Must create directory + .masc/ subdirectory for Coord operations. *)
 let make_config () =
   let tmp = Printf.sprintf "/tmp/test-suspend-%d" (Random.bits ()) in
   (try Unix.mkdir tmp 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   (try Unix.mkdir (Filename.concat tmp ".masc") 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  Room.default_config tmp
+  Coord.default_config tmp
 
 (** Create a Tool_suspend.context with optional caller *)
 let make_ctx ?caller () : Tool_suspend.context =
@@ -177,169 +177,11 @@ let test_blacklist_replace () =
    Dispatch Tests
    ============================================================ *)
 
-let test_dispatch_suspend () =
-  let ctx = make_ctx ~caller:"admin" () in
-  let args = `Assoc [
-    ("target_agent", `String "bad-agent");
-    ("reason", `String "testing");
-    ("duration_hours", `Float 0.001);
-  ] in
-  match Tool_suspend.dispatch ctx ~name:"masc_suspend" ~args with
-  | Some (_success, msg) ->
-      check bool "returns response" true (String.length msg > 0)
-  | None ->
-      fail "expected Some for masc_suspend"
-
 let test_dispatch_unknown () =
   let ctx = make_ctx () in
   let args = `Assoc [] in
   check (option (pair bool string)) "unknown tool returns None" None
     (Tool_suspend.dispatch ctx ~name:"masc_unknown" ~args)
-
-(* ============================================================
-   handle_suspend Tests
-   ============================================================ *)
-
-let test_handle_suspend_empty_target () =
-  let ctx = make_ctx ~caller:"admin" () in
-  let args = `Assoc [("target_agent", `String "")] in
-  let (success, msg) = Tool_suspend.handle_suspend ctx args in
-  check bool "fails" false success;
-  check bool "error message" true (String.length msg > 0)
-
-let test_handle_suspend_missing_target () =
-  let ctx = make_ctx ~caller:"admin" () in
-  let args = `Assoc [] in
-  let (success, msg) = Tool_suspend.handle_suspend ctx args in
-  check bool "fails" false success;
-  check string "requires target" "target_agent is required" msg
-
-let test_handle_suspend_valid () =
-  let agent_id = "suspend-test-valid" in
-  let ctx = make_ctx ~caller:"admin" () in
-  let args = `Assoc [
-    ("target_agent", `String agent_id);
-    ("reason", `String "test suspension");
-    ("duration_hours", `Float 0.001);
-  ] in
-  let (success, msg) = Tool_suspend.handle_suspend ctx args in
-  check bool "succeeds" true success;
-  (* Verify JSON response *)
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       check bool "has success" true
-         (List.assoc_opt "success" fields = Some (`Bool true));
-       check bool "has target_agent" true
-         (List.assoc_opt "target_agent" fields = Some (`String agent_id));
-       check bool "has reason" true
-         (List.assoc_opt "reason" fields = Some (`String "test suspension"))
-   | _ -> fail "expected JSON assoc");
-  cleanup_blacklist agent_id;
-  (* Also clean up circuit breaker *)
-  Circuit_breaker.force_close_global ~agent_id
-
-let test_handle_suspend_self () =
-  let agent_id = "suspend-self-test" in
-  let ctx = make_ctx ~caller:agent_id () in
-  let args = `Assoc [
-    ("target_agent", `String agent_id);
-    ("reason", `String "self test");
-    ("duration_hours", `Float 0.001);
-  ] in
-  let (success, msg) = Tool_suspend.handle_suspend ctx args in
-  check bool "self-suspend allowed" true success;
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       check bool "is_self_suspend true" true
-         (List.assoc_opt "is_self_suspend" fields = Some (`Bool true))
-   | _ -> fail "expected JSON assoc");
-  cleanup_blacklist agent_id;
-  Circuit_breaker.force_close_global ~agent_id
-
-let test_handle_suspend_default_reason () =
-  let agent_id = "suspend-default-reason" in
-  let ctx = make_ctx ~caller:"admin" () in
-  let args = `Assoc [
-    ("target_agent", `String agent_id);
-  ] in
-  let (success, msg) = Tool_suspend.handle_suspend ctx args in
-  check bool "succeeds" true success;
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       check bool "default reason" true
-         (List.assoc_opt "reason" fields = Some (`String "No reason provided"))
-   | _ -> fail "expected JSON assoc");
-  cleanup_blacklist agent_id;
-  Circuit_breaker.force_close_global ~agent_id
-
-(* ============================================================
-   handle_circuit_status Tests
-   ============================================================ *)
-
-let test_circuit_status_with_agent_id () =
-  let ctx = make_ctx ~caller:"viewer" () in
-  let args = `Assoc [("agent_id", `String "check-agent")] in
-  let (success, msg) = Tool_suspend.handle_circuit_status ctx args in
-  check bool "succeeds" true success;
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       check bool "has agent_id" true
-         (List.assoc_opt "agent_id" fields = Some (`String "check-agent"));
-       check bool "has circuit_breaker" true
-         (List.assoc_opt "circuit_breaker" fields <> None);
-       check bool "has blacklist" true
-         (List.assoc_opt "blacklist" fields <> None)
-   | _ -> fail "expected JSON assoc")
-
-let test_circuit_status_default_agent () =
-  let ctx = make_ctx ~caller:"my-agent" () in
-  let args = `Assoc [] in
-  let (success, msg) = Tool_suspend.handle_circuit_status ctx args in
-  check bool "succeeds" true success;
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       (* Should default to caller_agent *)
-       check bool "defaults to caller" true
-         (List.assoc_opt "agent_id" fields = Some (`String "my-agent"))
-   | _ -> fail "expected JSON assoc")
-
-let test_circuit_status_no_caller () =
-  let ctx = make_ctx () in
-  let args = `Assoc [] in
-  let (success, msg) = Tool_suspend.handle_circuit_status ctx args in
-  check bool "succeeds" true success;
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       check bool "defaults to unknown" true
-         (List.assoc_opt "agent_id" fields = Some (`String "unknown"))
-   | _ -> fail "expected JSON assoc")
-
-let test_circuit_status_blacklisted_agent () =
-  let agent_id = "blacklisted-for-status" in
-  let until = Time_compat.now () +. 3600.0 in
-  Tool_suspend.add_to_blacklist ~agent_id ~until ~reason:"status test";
-  let ctx = make_ctx ~caller:"viewer" () in
-  let args = `Assoc [("agent_id", `String agent_id)] in
-  let (success, msg) = Tool_suspend.handle_circuit_status ctx args in
-  check bool "succeeds" true success;
-  let json = Yojson.Safe.from_string msg in
-  (match json with
-   | `Assoc fields ->
-       (match List.assoc_opt "blacklist" fields with
-        | Some (`Assoc bl_fields) ->
-            check bool "blacklisted true" true
-              (List.assoc_opt "blacklisted" bl_fields = Some (`Bool true));
-            check bool "has remaining_seconds" true
-              (List.assoc_opt "remaining_seconds" bl_fields <> None)
-        | _ -> fail "expected blacklist assoc")
-   | _ -> fail "expected JSON assoc");
-  cleanup_blacklist agent_id
 
 (* ============================================================
    check_can_join Tests
@@ -410,21 +252,7 @@ let () =
       test_case "replace" `Quick test_blacklist_replace;
     ];
     "dispatch", [
-      test_case "masc_suspend" `Quick test_dispatch_suspend;
       test_case "unknown" `Quick test_dispatch_unknown;
-    ];
-    "handle_suspend", [
-      test_case "empty target" `Quick test_handle_suspend_empty_target;
-      test_case "missing target" `Quick test_handle_suspend_missing_target;
-      test_case "valid" `Quick test_handle_suspend_valid;
-      test_case "self suspend" `Quick test_handle_suspend_self;
-      test_case "default reason" `Quick test_handle_suspend_default_reason;
-    ];
-    "handle_circuit_status", [
-      test_case "with agent_id" `Quick test_circuit_status_with_agent_id;
-      test_case "default agent" `Quick test_circuit_status_default_agent;
-      test_case "no caller" `Quick test_circuit_status_no_caller;
-      test_case "blacklisted agent" `Quick test_circuit_status_blacklisted_agent;
     ];
     "check_can_join", [
       test_case "clean agent" `Quick test_check_can_join_clean;

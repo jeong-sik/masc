@@ -25,23 +25,28 @@ up but the Discord bot has not written its runtime heartbeat yet.
 
 ## Quick Start
 
-Run the bot from `sidecars/discord-bot`, but make sure its runtime root matches
-the server's `MASC_BASE_PATH`.
+One command from a clean clone, once the Discord token is in `.env`:
 
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel) &&
-cd "$REPO_ROOT/sidecars/discord-bot" &&
-cp .env.example .env
+cd "$(git rev-parse --show-toplevel)/sidecars/discord-bot"
+cp .env.example .env          # edit DISCORD_BOT_TOKEN (and keeper_map)
+uv pip install -e ".[dev]"    # install once
+./run.sh                      # start the bot
+```
 
-# Required for shared connector state with the local MASC server.
-# Match the same runtime root the server uses.
+`run.sh` resolves `MASC_BASE_PATH` from the enclosing git repo root (same root
+the server uses when both live in this checkout), loads `.env`, and tees both
+stdout and stderr to a dated log file at
+`$MASC_BASE_PATH/.masc/logs/discord-sidecar-YYYYMMDD.log`. The script also
+exposes `./run.sh tail` for live log follow and `./run.sh status` for a quick
+dump of the current `status.json`.
+
+If you want the sidecar to share state with a server that runs outside this
+checkout, export `MASC_BASE_PATH` before invoking `./run.sh`:
+
+```bash
 export MASC_BASE_PATH=/path/to/server/runtime/root
-
-# Install dependencies once.
-uv pip install -e ".[dev]"
-
-# Start the bot from this directory so .env is auto-loaded.
-python -m src
+./run.sh
 ```
 
 ## Setup
@@ -75,6 +80,7 @@ By default the bot writes runtime files under:
 - `.masc/connectors/discord/bindings.json`
 - `.masc/connectors/discord/binding_audit.jsonl`
 - `.masc/connectors/discord/status.json`
+- `.masc/connectors/discord/names.json` (guild + channel id-to-name humanization)
 
 Relative paths resolve from `MASC_BASE_PATH` when it is set; otherwise they
 resolve from the bot's current working directory.
@@ -107,9 +113,25 @@ Use that mode only if the server is configured to read the same files via
 # Install dependencies
 uv pip install -e ".[dev]"
 
-# Run the bot
+# Run the bot (preferred entry point — handles MASC_BASE_PATH + logs)
+./run.sh
+
+# Plain invocation (equivalent when MASC_BASE_PATH is already set)
 python -m src
 ```
+
+### Logs
+
+`./run.sh start` writes combined stdout+stderr to
+`$MASC_BASE_PATH/.masc/logs/discord-sidecar-YYYYMMDD.log`. The file is created
+per calendar day and never auto-rotated; prune manually as needed:
+
+```bash
+find "$MASC_BASE_PATH/.masc/logs" -name 'discord-sidecar-*.log' -mtime +14 -delete
+```
+
+Use `./run.sh tail` to follow today's log, or `./run.sh status` to dump the
+latest `status.json` the sidecar has written.
 
 ### 5. Test
 

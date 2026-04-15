@@ -14,7 +14,7 @@ module Status = Keeper_status
 module Persona = Keeper_persona
 
 type 'a context = 'a Keeper_types.context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -188,11 +188,16 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("social_model", `String meta.social_model);
+            ("social_model",
+              `String (Keeper_social_model.normalize_social_model meta.social_model));
             ( "last_speech_act",
               if String.trim meta.runtime.last_speech_act = ""
               then `Null
               else `String meta.runtime.last_speech_act );
+            ( "last_social_transition_reason",
+              if String.trim meta.runtime.last_social_transition_reason = ""
+              then `Null
+              else `String meta.runtime.last_social_transition_reason );
             ("skill_route", keeper_list_skill_route_json config meta);
             ("cascade_name", `String meta.cascade_name);
             ("created_at", `String meta.created_at);
@@ -354,9 +359,79 @@ let annotate_keeper_repair_json ~(keeper_name : string) body =
         (`Assoc
           ( ("runtime_class", `String "keeper")
           :: ("keeper_name", `String keeper_name)
-          :: ("delegated_tool", `String "masc_repair_loop")
+          :: ("delegated_tool", `String "masc_keeper_repair")
           :: fields ))
   | _ -> body
+
+(* Playground path containment helpers (inlined from deleted Tool_repair_loop). *)
+
+let is_safe_subpath ~parent ~child =
+  if child = parent then true
+  else
+    let parent_with_sep =
+      if Filename.check_suffix parent Filename.dir_sep then parent
+      else parent ^ Filename.dir_sep
+    in
+    let plen = String.length parent_with_sep in
+    String.length child >= plen
+    && String.sub child 0 plen = parent_with_sep
+
+let validate_target_file ~working_dir ~target_file =
+  match target_file with
+  | None -> Ok None
+  | Some tf ->
+      if not (Filename.is_relative tf) then
+        Error "target_file must be a relative path"
+      else
+        let candidate = Filename.concat working_dir tf in
+        let resolved =
+          try Unix.realpath candidate with
+          | Unix.Unix_error _ -> candidate
+        in
+        if is_safe_subpath ~parent:working_dir ~child:resolved then
+          Ok (Some tf)
+        else
+          Error "target_file must reside within working_dir"
+
+let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
+  let playground_rel =
+    Keeper_alerting_path.playground_path_of_keeper agent_name
+  in
+  let playground_abs_raw = Filename.concat base_path playground_rel in
+  match
+    try Ok (Unix.realpath playground_abs_raw) with
+    | Unix.Unix_error _ ->
+        Error
+          (Printf.sprintf
+             "keeper playground directory %S does not exist yet — cannot \
+              validate working_dir containment. Run masc_worktree_create \
+              to provision your playground first. See #6527/#6641."
+             playground_rel)
+  with
+  | Error msg -> Error msg
+  | Ok playground_abs ->
+      let effective_arg =
+        if String.trim working_dir_arg = "" then playground_abs
+        else working_dir_arg
+      in
+      let resolved =
+        try Ok (Unix.realpath effective_arg) with
+        | Unix.Unix_error _ ->
+            Error "working_dir does not exist or is not accessible"
+      in
+      (match resolved with
+      | Error msg -> Error msg
+      | Ok working_dir ->
+          if is_safe_subpath ~parent:playground_abs ~child:working_dir then
+            Ok working_dir
+          else
+            Error
+              (Printf.sprintf
+                 "working_dir must be inside your own keeper playground \
+                  (%s). Cross-keeper repair loops are blocked — use \
+                  masc_worktree_create to provision a workspace under your \
+                  playground first. See #6527/#6641."
+                 playground_rel))
 
 let handle_keeper_repair ctx args : tool_result =
   match resolve_keeper_meta ctx args with
@@ -376,7 +451,7 @@ let handle_keeper_repair ctx args : tool_result =
            rejected. Shares the resolver with tool_repair_loop so the
            same fix applies to both dispatchers. *)
         match
-          Tool_repair_loop.resolve_playground_working_dir
+          resolve_playground_working_dir
             ~agent_name:ctx.agent_name
             ~base_path:ctx.config.base_path
             ~working_dir_arg
@@ -384,7 +459,7 @@ let handle_keeper_repair ctx args : tool_result =
         | Error msg -> (false, msg)
         | Ok working_dir ->
             match
-              Tool_repair_loop.validate_target_file ~working_dir
+              validate_target_file ~working_dir
                 ~target_file:target_file_opt
             with
             | Error msg -> (false, msg)
@@ -483,118 +558,10 @@ let handle_keeper_list ctx args : tool_result =
   in
   (true, body)
 
-let keeper_failure_reason_json (config : Room.config) name =
-  match Keeper_registry.get ~base_path:config.base_path name with
-  | Some entry ->
-      Json_util.option_to_yojson
-        (fun reason -> `String (Keeper_registry.failure_reason_to_string reason))
-        entry.last_failure_reason
-  | None -> `Null
-
-let keeper_phase_json (config : Room.config) name =
-  match Keeper_registry.get ~base_path:config.base_path name with
-  | Some entry -> `String (Keeper_state_machine.phase_to_string entry.phase)
-  | None -> `Null
-
-let keeper_manual_reconcile_record_json (config : Room.config) name =
-  Json_util.option_to_yojson
-    Keeper_manual_reconcile.record_to_yojson
-    (Keeper_manual_reconcile.read config name)
-
-let clear_registry_manual_reconcile ~(ctx : _ context) ~(name : string) =
-  Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path name None;
-  Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path name;
-  (match Keeper_registry.get ~base_path:ctx.config.base_path name with
-   | Some _ ->
-       ignore
-         (Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path
-            name
-            Keeper_state_machine.Manual_reconcile_cleared)
-   | None -> ());
-  invalidate_keeper_list_cache ();
-  invalidate_status_cache name;
-  Keeper_keepalive.wakeup_keeper ~base_path:ctx.config.base_path name
-
-let handle_keeper_reconcile ctx args : tool_result =
-  match resolve_keeper_name ctx args with
-  | Error err -> (false, err)
-  | Ok name ->
-      let action = String.lowercase_ascii (String.trim (get_string args "action" "")) in
-      let record_opt = Keeper_manual_reconcile.read ctx.config name in
-      let pending = Keeper_manual_reconcile.is_pending ctx.config name in
-      (match action with
-       | "inspect" ->
-           (true,
-            Yojson.Safe.to_string
-              (`Assoc
-                [
-                  ("name", `String name);
-                  ("action", `String "inspect");
-                  ("exists", `Bool (Option.is_some record_opt));
-                  ("pending", `Bool pending);
-                  ("record", keeper_manual_reconcile_record_json ctx.config name);
-                  ("phase", keeper_phase_json ctx.config name);
-                  ("last_failure_reason", keeper_failure_reason_json ctx.config name);
-                ]))
-       | "clear" ->
-           let resolution = String.trim (get_string args "resolution" "") in
-           if resolution = "" then
-             error_result_typed ~code:Validation_error
-               "resolution is required for action=clear"
-           else
-             let actor =
-               match get_string_opt args "actor" with
-               | Some value -> value
-               | None -> ctx.agent_name
-             in
-             let evidence_refs = get_string_list args "evidence_refs" in
-             let idempotency_key = get_string_opt args "idempotency_key" in
-             let body =
-               match
-                 Keeper_manual_reconcile.clear
-                   ctx.config
-                   ~keeper_name:name
-                   ~actor
-                   ~resolution
-                   ~evidence_refs
-                   ~idempotency_key
-               with
-               | Keeper_manual_reconcile.Cleared_record record ->
-                   clear_registry_manual_reconcile ~ctx ~name;
-                   `Assoc
-                     [
-                       ("name", `String name);
-                       ("action", `String "clear");
-                       ("cleared", `Bool true);
-                       ("already_cleared", `Bool false);
-                       ("record", Keeper_manual_reconcile.record_to_yojson record);
-                     ]
-               | Keeper_manual_reconcile.Already_cleared record ->
-                   clear_registry_manual_reconcile ~ctx ~name;
-                   `Assoc
-                     [
-                       ("name", `String name);
-                       ("action", `String "clear");
-                       ("cleared", `Bool true);
-                       ("already_cleared", `Bool true);
-                       ("record", Keeper_manual_reconcile.record_to_yojson record);
-                     ]
-               | Keeper_manual_reconcile.No_record ->
-                   clear_registry_manual_reconcile ~ctx ~name;
-                   `Assoc
-                     [
-                       ("name", `String name);
-                       ("action", `String "clear");
-                       ("cleared", `Bool true);
-                       ("already_cleared", `Bool false);
-                       ("record", `Null);
-                     ]
-             in
-             (true, Yojson.Safe.to_string body)
-       | _ ->
-           error_result_typed ~code:Validation_error
-             "action must be one of: inspect, clear")
+(* masc_keeper_reconcile tool removed along with the manual_reconcile
+   blocker mechanism. Failed turns record evidence via Keeper_registry;
+   recovery is autonomous (next turn's observation) or operator-driven
+   (keeper_chat/board), not blocker-driven. *)
 
 (* Recurring loop tools (#3190) removed: zero callers. *)
 
@@ -875,7 +842,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_keeper_msg" -> Some (handle_keeper_msg ctx args)
   | "masc_keeper_msg_result" -> Some (handle_keeper_msg_result ctx args)
   | "masc_keeper_repair" -> Some (handle_keeper_repair ctx args)
-  | "masc_keeper_reconcile" -> Some (handle_keeper_reconcile ctx args)
   | "masc_keeper_down" -> Some (handle_keeper_down ctx args)
   | "masc_keeper_list" -> Some (handle_keeper_list ctx args)
   | "masc_keeper_reset" -> Some (handle_keeper_reset ctx args)
@@ -905,7 +871,7 @@ let tool_required_permission = function
       Some Types.CanReadState
   | "masc_keeper_create_from_persona" | "masc_keeper_up"
   | "masc_keeper_msg" | "masc_keeper_msg_result"
-  | "masc_keeper_repair" | "masc_keeper_reconcile"
+  | "masc_keeper_repair"
   | "masc_keeper_down" | "masc_keeper_reset"
   | "masc_keeper_compact" | "masc_keeper_clear" ->
       Some Types.CanBroadcast

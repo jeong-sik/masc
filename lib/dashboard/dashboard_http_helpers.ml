@@ -35,13 +35,9 @@ let float_of_env_default name ~default ~min_v ~max_v =
   in
   max min_v (min max_v v)
 
-let dashboard_session_list_limit () =
-  int_of_env_default "MASC_DASHBOARD_SESSION_LIST_LIMIT"
-    ~default:20 ~min_v:5 ~max_v:200
+let dashboard_session_list_limit () = 20
 
-let dashboard_session_list_timeout_s () =
-  float_of_env_default "MASC_DASHBOARD_SESSION_LIST_TIMEOUT_S"
-    ~default:5.0 ~min_v:1.0 ~max_v:30.0
+let dashboard_session_list_timeout_s () = 5.0
 
 let operator_snapshot_session_window_seconds () =
   float_of_env_default "MASC_OPERATOR_SNAPSHOT_SESSION_WINDOW_SECONDS"

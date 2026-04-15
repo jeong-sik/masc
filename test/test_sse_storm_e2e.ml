@@ -251,9 +251,6 @@ let with_server f =
   let env =
     merge_env_overrides
       [
-        ("MASC_SSE_RECONNECT_MIN_INTERVAL_S", "1.5");
-        ("MASC_SSE_CONNECT_WINDOW_S", "5.0");
-        ("MASC_SSE_CONNECT_MAX_IN_WINDOW", "1000");
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
@@ -312,10 +309,11 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let sid = Printf.sprintf "storm-agui-%06d" (Random.int 1_000_000) in
   let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
 
-  let first = run_curl ~headers ~max_time:1.0 ~port ~path:"/ag-ui/events?room=default" () in
+  (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
+  let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
 
-  let second = run_curl ~headers ~max_time:1.0 ~port ~path:"/ag-ui/events?room=default" () in
+  let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
 
   Unix.sleepf 2.0;

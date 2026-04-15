@@ -66,8 +66,8 @@ let make_test_ctx () =
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-misc-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  let _ = Room.init config ~agent_name:(Some "test-agent") in
+  let config = Coord.default_config tmp in
+  let _ = Coord.init config ~agent_name:(Some "test-agent") in
   { Tool_misc.config; agent_name = "test-agent" }
 
 (* Test dispatch returns None for unknown tool *)
@@ -80,10 +80,10 @@ let () = test "dispatch_unknown_tool" (fun () ->
 (* Test dispatch dashboard — may require Eio runtime; skip gracefully if unavailable *)
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in
-  ignore (Room.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
-  Room.ensure_room_bootstrap ctx.config;
+  ignore (Coord.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
+  Coord.ensure_room_bootstrap ctx.config;
   let second_room = ctx.config in
-  ignore (Room.add_task second_room ~title:"second task" ~priority:1 ~description:"");
+  ignore (Coord.add_task second_room ~title:"second task" ~priority:1 ~description:"");
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
@@ -112,9 +112,9 @@ let () = test "dispatch_dashboard_compact" (fun () ->
 
 let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
-  Room.ensure_room_bootstrap ctx.config;
+  Coord.ensure_room_bootstrap ctx.config;
   let focused = ctx.config in
-  ignore (Room.add_task focused ~title:"focus task" ~priority:2 ~description:"");
+  ignore (Coord.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
@@ -621,41 +621,7 @@ let () = test "dispatch_tool_admin_update_auth_invalid_does_not_mutate" (fun () 
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_tool_admin_update_unit_policy" (fun () ->
-  let ctx = make_test_ctx () in
-  let define_args =
-    `Assoc
-      [
-        ("unit_id", `String "squad-admin-test");
-        ("kind", `String "squad");
-        ("label", `String "Admin Test Squad");
-        ("parent_unit_id", `String "company-runtime");
-      ]
-  in
-  ignore (Command_plane_v2.upsert_unit ctx.config ~actor:ctx.agent_name define_args);
-  let args =
-    `Assoc
-      [
-        ("section", `String "unit_policy");
-        ("unit_id", `String "squad-admin-test");
-        ( "policy",
-          `Assoc
-            [
-              ("tool_allowlist", `List [ `String "masc_board_post" ]);
-              ("model_allowlist", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-              ("approval_class", `String "guarded");
-            ] );
-      ]
-  in
-  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some (success, result) ->
-      assert success;
-      let json = parse_json result in
-      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "unit_policy");
-      let warnings = Yojson.Safe.Util.(json |> member "warnings" |> to_list) in
-      assert (List.length warnings = 2)
-  | None -> failwith "dispatch returned None"
-)
+(* dispatch_tool_admin_update_unit_policy removed (CP purge: Command_plane_v2 deleted) *)
 
 let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
   Eio_main.run @@ fun env ->

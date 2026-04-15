@@ -49,61 +49,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
     Safe_ops.json_float_opt key arguments in
   ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
   match (name : string) with
-  | "masc_recall_search" ->
-      let module U = Yojson.Safe.Util in
-      let query =
-        Option.value ~default:""
-          (Json_util.get_string arguments "query")
-      in
-      if String.trim query = "" then
-        Some (Tool_args.error_result "query is required")
-      else begin
-      let limit = arguments |> U.member "limit" |> U.to_int_option |> Option.value ~default:5 in
-      (* PR#814 Gap 3: format=grep returns compact grep-like output for LLM parsing *)
-      let format = arguments |> U.member "format" |> U.to_string_option
-        |> Option.value ~default:"json" in
-
-      let recall_config = Auto_recall.make_config
-        ~enabled:true
-        ~sources:[Auto_recall.Recent_broadcasts; Auto_recall.Masc_cache; Auto_recall.File_context]
-        ~max_tokens:4000
-        ~max_broadcasts:limit
-        ()
-      in
-      let result = Auto_recall.fetch_context config ~config:recall_config ~query () in
-      let grep_projection =
-        Auto_recall.format_for_injection result
-      in
-      let agent_name = Safe_ops.json_string ~default:"unknown" "agent_name" arguments in
-      Audit_log.log_action config ~agent_id:agent_name ~action:Audit_log.SearchRefinement
-        ~details:(`Assoc [("query", `String query); ("results", `Int (List.length result.items))])
-        ~outcome:Audit_log.Success ();
-      if format = "grep" then
-        Some (true, if grep_projection = "" then "No results" else grep_projection)
-      else
-        let response = `Assoc [
-          ("success", `Bool true);
-          ("query", `String query);
-          ("items", `List (List.map (fun (item : Auto_recall.recall_item) ->
-            `Assoc [
-              ("source", `String (match item.source with
-                | Auto_recall.Masc_cache -> "cache"
-                | Auto_recall.Recent_broadcasts -> "broadcast"
-                | Auto_recall.File_context -> "file"));
-              ("content", `String item.content);
-              ("relevance", `Float item.relevance);
-              ("metadata", item.metadata);
-            ]
-          ) result.items));
-          ("total_tokens", `Int result.total_tokens);
-          ("truncated", `Bool result.truncated);
-          ("grep_projection", `String grep_projection);
-          ("message", `String (Printf.sprintf "Found %d relevant items for query: %s"
-            (List.length result.items) query));
-        ] in
-        Some (true, Yojson.Safe.to_string response)
-      end
-
   | "masc_board_post" ->
       let (success, message) as result = Tool_board.handle_tool name arguments in
       if success then begin

@@ -145,19 +145,14 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~lightweight_summary:true ctx
     in
     let scope_json =
-      match snapshot_json |> member_assoc "namespace" with
+      match snapshot_json |> member_assoc "root" with
       | `Assoc _ as value -> value
       | _ -> snapshot_json |> member_assoc "room"
     in
     let current_namespace =
-      match trim_to_option (Some (scope_json |> string_field "namespace")) with
+      match trim_to_option (Some (scope_json |> string_field "project")) with
       | Some value -> value
-      | None -> (
-          match trim_to_option (Some (scope_json |> string_field "namespace_id")) with
-          | Some value -> value
-          | None ->
-              trim_to_option (Some (scope_json |> string_field "current_room"))
-              |> Option.value ~default:"default")
+      | None -> "default"
     in
     let sessions =
       Briefing_compactors.relevant_sessions_for_briefing ~current_namespace
@@ -170,10 +165,10 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     in
     let compact_sessions = take 3 (List.map Briefing_compactors.compact_session_json sessions) in
     let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
-    let agents_json = Room.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
+    let agents_json = Coord.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
     let compact_agents = take 5 agents_json in
     let messages_json =
-      Room.get_messages_raw config ~since_seq:0 ~limit:4
+      Coord.get_messages_raw config ~since_seq:0 ~limit:4
       |> List.map (fun (message : Types.message) ->
              `Assoc
                [
@@ -187,8 +182,6 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       `Assoc
         [
           ("room_health", member_assoc "room_health" summary);
-          ("namespace_id", member_assoc "namespace_id" summary);
-          ("namespace", member_assoc "namespace" summary);
           ("active_agents", member_assoc "active_agents" summary);
           ("keeper_pressure", member_assoc "keeper_pressure" summary);
           ("active_operations", member_assoc "active_operations" summary);
@@ -229,9 +222,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
           ( "basis",
             `Assoc
               [
-                ( "namespace",
+                ( "project",
                   member_assoc "summary" mission_json
-                  |> member_assoc "namespace" );
+                  |> member_assoc "project" );
                 ("crew_count", `Int (List.length sessions));
                 ("agent_count", `Int (List.length agents_json));
                 ("keeper_count", `Int (List.length keepers));

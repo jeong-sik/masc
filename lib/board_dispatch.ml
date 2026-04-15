@@ -80,8 +80,8 @@ let reset_for_test () =
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
-  | Some s -> String.lowercase_ascii s = "jsonl"
-  | None -> false
+  | Some Env_config.Board.Jsonl -> true
+  | Some (Env_config.Board.Pg | Env_config.Board.Unknown_backend _) | None -> false
 
 let backend () =
   with_board_rw (fun () ->
@@ -210,12 +210,18 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
   in
   match backend () with
   | Jsonl store ->
+      let needs_full_scan =
+        Option.is_some author_filter
+        ||
+        match sort_by with
+        | Hot -> false
+        | Trending | Recent | Updated | Discussed -> true
+      in
       let fetch_limit =
-        if Option.is_some author_filter then Board.Limits.max_posts
-        else max limit 200
+        if needs_full_scan then Board.Limits.max_posts else max limit 200
       in
       let posts =
-        if Option.is_some author_filter then
+        if needs_full_scan then
           Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
         else
           Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()

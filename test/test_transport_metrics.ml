@@ -201,8 +201,8 @@ let test_transport_health_json () =
   TM.init ();
   ignore (Masc_mcp.Sse.close_all_clients ());
   let base_dir = temp_dir () in
-  let config = Masc_mcp.Room.default_config base_dir in
-  ignore (Masc_mcp.Room.init config ~agent_name:(Some "tester"));
+  let config = Masc_mcp.Coord.default_config base_dir in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "tester"));
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
        ~push:(fun _ -> ()) ~last_event_id:0);

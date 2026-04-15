@@ -24,6 +24,7 @@ let tla_phase = function
   | "offline" -> "Offline"
   | "running" -> "Running"
   | "failing" -> "Failing"
+  | "overflowed" -> "Overflowed"
   | "compacting" -> "Compacting"
   | "handing_off" -> "HandingOff"
   | "draining" -> "Draining"
@@ -37,11 +38,11 @@ let tla_phase = function
 let emit_record oc json =
   let c = Yojson.Safe.Util.member "conditions_after" json in
   Printf.fprintf oc
-    "  [fiber_alive |-> %s, heartbeat_healthy |-> %s, turn_healthy |-> %s, manual_reconcile_required |-> %s, context_within_budget |-> %s, context_handoff_needed |-> %s, compaction_active |-> %s, handoff_active |-> %s, operator_paused |-> %s, stop_requested |-> %s, restart_budget_remaining |-> %s, backoff_elapsed |-> %s, guardrail_triggered |-> %s, drain_complete |-> %s, restart_count |-> %d, recorded_phase |-> %S]"
+    "  [launch_pending |-> %s, fiber_alive |-> %s, heartbeat_healthy |-> %s, turn_healthy |-> %s, context_within_budget |-> %s, context_handoff_needed |-> %s, compaction_active |-> %s, handoff_active |-> %s, operator_paused |-> %s, stop_requested |-> %s, restart_budget_remaining |-> %s, backoff_elapsed |-> %s, guardrail_triggered |-> %s, drain_complete |-> %s, context_overflow |-> %s, compact_retry_exhausted |-> %s, restart_count |-> %d, recorded_phase |-> %S]"
+    (bool_to_tla (get_bool c "launch_pending"))
     (bool_to_tla (get_bool c "fiber_alive"))
     (bool_to_tla (get_bool c "heartbeat_healthy"))
     (bool_to_tla (get_bool c "turn_healthy"))
-    (bool_to_tla (get_bool c "manual_reconcile_required"))
     (bool_to_tla (get_bool c "context_within_budget"))
     (bool_to_tla (get_bool c "context_handoff_needed"))
     (bool_to_tla (get_bool c "compaction_active"))
@@ -52,6 +53,8 @@ let emit_record oc json =
     (bool_to_tla (get_bool c "backoff_elapsed"))
     (bool_to_tla (get_bool c "guardrail_triggered"))
     (bool_to_tla (get_bool c "drain_complete"))
+    (bool_to_tla (get_bool c "context_overflow"))
+    (bool_to_tla (get_bool c "compact_retry_exhausted"))
     (get_int json "restart_count")
     (tla_phase (get_string json "new_phase"))
 

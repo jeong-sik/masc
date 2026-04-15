@@ -59,6 +59,7 @@ export const KEEPER_REPLY_PREVIEW_MAX = 200
 export const MAX_JOURNAL_ENTRIES = 200
 export const OAS_AGENT_EVENT_BUFFER = 50
 export const OAS_KEEPER_SNAPSHOT_MAX = 20
+export const OAS_TELEMETRY_REPLAY_LIMIT = 500
 
 // --- Text truncation (characters) ---
 export const TRIM_TEXT_DEFAULT = 120

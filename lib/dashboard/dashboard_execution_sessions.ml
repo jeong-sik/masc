@@ -182,7 +182,7 @@ let build_session_seed session_json _cards =
           trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
         namespace =
-          (match trim_to_option (string_field "namespace_id" meta) with
+          (match trim_to_option (string_field "project" meta) with
           | Some _ as value -> value
           | None -> trim_to_option (string_field "room_id" meta));
         status = session_status_string session_json;

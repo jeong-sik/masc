@@ -94,6 +94,17 @@ let tool_result_content_for_id ~tool_use_id msgs =
         msg.content)
     msgs
 
+let has_tool_use_id ~tool_use_id msgs =
+  List.exists
+    (fun (msg : Agent_sdk.Types.message) ->
+      List.exists
+        (function
+          | Agent_sdk.Types.ToolUse { id; _ } ->
+              String.equal id tool_use_id
+          | _ -> false)
+        msg.content)
+    msgs
+
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
   match
@@ -588,6 +599,153 @@ let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_
           fail
             "expected overflow retry recovery to keep message history within budget even with a large checkpoint system prompt")
 
+let test_recover_latest_checkpoint_for_overflow_retry_repairs_orphan_tool_result () =
+  let base_dir = temp_dir "keeper_lifecycle_overflow_retry_orphan" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let trace_id = "trace-overflow-retry-orphan" in
+      let meta = make_keeper_meta ~trace_id () in
+      let orphan_id = "call-overflow-orphan" in
+      let dense_ctx =
+        build_dense_context ~turns:22 ~max_tokens:4096
+          ~state_reply:
+            "done\n\n[STATE]\nGoal: repair orphan on overflow retry\nProgress: ready\n[/STATE]"
+      in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:dense_ctx in
+      let checkpoint =
+        { checkpoint with
+          messages =
+            {
+              Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+              content =
+                [
+                  Agent_sdk.Types.ToolResult
+                    {
+                      tool_use_id = orphan_id;
+                      content = "";
+                      is_error = false;
+                      json = Some (`Assoc [ ("path", `String "README.md") ]);
+                    };
+                ];
+              name = None;
+              tool_call_id = None;
+            }
+            :: checkpoint.messages;
+        }
+      in
+      let session = KEC.create_session ~session_id:trace_id ~base_dir in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error _ -> Alcotest.fail "save_oas raw orphan checkpoint failed");
+      match
+        KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
+          ~model:"llama:auto" ~primary_model_max_tokens:256
+      with
+      | Some recovery ->
+          check (option string)
+            "overflow retry drops structured orphan tool result" None
+            (tool_result_content_for_id ~tool_use_id:orphan_id
+               recovery.checkpoint.messages)
+      | None -> fail "expected overflow retry recovery from orphan checkpoint")
+
+let test_rollover_repairs_orphan_tool_result () =
+  let base_dir = temp_dir "keeper_lifecycle_rollover_orphan" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let trace_id = "trace-rollover-orphan" in
+      let meta =
+        {
+          (make_keeper_meta ~trace_id ()) with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+        }
+      in
+      let orphan_id = "call-rollover-orphan" in
+      let checkpoint =
+        {
+          Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+          session_id = trace_id;
+          agent_name = "patch-test";
+          model = "test-model";
+          system_prompt = None;
+          messages =
+            [
+              {
+                Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+                content =
+                  [
+                    Agent_sdk.Types.ToolResult
+                      {
+                        tool_use_id = orphan_id;
+                        content = "";
+                        is_error = false;
+                        json = Some (`Assoc [ ("path", `String "lib/keeper.ml") ]);
+                      };
+                  ];
+                name = None;
+                tool_call_id = None;
+              };
+              Agent_sdk.Types.assistant_msg
+                "done\n\n[STATE]\nGoal: rollover orphan repair\nProgress: ready\n[/STATE]";
+            ];
+          usage = Agent_sdk.Types.empty_usage;
+          turn_count = 2;
+          created_at = 0.0;
+          tools = [];
+          tool_choice = None;
+          disable_parallel_tool_use = false;
+          temperature = None;
+          top_p = None;
+          top_k = None;
+          min_p = None;
+          enable_thinking = None;
+          response_format_json = false;
+          thinking_budget = None;
+          cache_system_prompt = false;
+          max_input_tokens = None;
+          max_total_tokens = Some 4096;
+          context = Agent_sdk.Context.create ();
+          mcp_sessions = [];
+          working_context = None;
+        }
+      in
+      let rollover =
+        KEC.maybe_rollover_oas_handoff
+          ~on_started:(fun () -> ())
+          ~base_dir
+          ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:256
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "rollover attempted" true rollover.attempted;
+      let next_trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id
+      in
+      let next_session = KEC.create_session ~session_id:next_trace_id ~base_dir in
+      match
+        Masc_mcp.Keeper_checkpoint_store.load_oas
+          ~session_dir:next_session.session_dir
+          ~session_id:next_trace_id
+      with
+      | Ok saved ->
+          check (option string)
+            "rollover drops structured orphan tool result" None
+            (tool_result_content_for_id ~tool_use_id:orphan_id saved.messages)
+      | Error _ -> Alcotest.fail "load_oas rollover checkpoint failed")
+
 (* --- patch_checkpoint_last_assistant tests (#5431) --- *)
 
 let make_test_checkpoint ?(session_id = "old-session")
@@ -975,6 +1133,218 @@ let test_save_oas_checkpoint_stubs_old_tool_results () =
            | Some content ->
                check string "recent tool result stays full" recent_output content))
 
+let test_save_oas_checkpoint_repairs_orphaned_tool_result_after_cap () =
+  let base_dir = temp_dir "keeper_lifecycle_save_orphan_tool_result" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-orphan-tool-result" ~base_dir
+      in
+      let tool_id = "tool-orphan-save" in
+      let tool_output = "saved tool output" in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx ->
+        KEC.append_many ctx
+          [
+            Agent_sdk.Types.user_msg "inspect file";
+            tool_use_message ~tool_use_id:tool_id ();
+            tool_result_message ~tool_use_id:tool_id tool_output;
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:2
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          (* trim_messages_preserving_pairs drops the orphan ToolResult
+             along with the ToolUse, so only "done" survives (1 message).
+             The old test expected 2 because it allowed orphan creation
+             and relied on repair to downgrade the ToolResult to text.
+             The new behavior prevents orphans at the source. *)
+          check bool "save cap enforced with pair preservation"
+            true (List.length checkpoint.messages <= 2);
+          check (option string) "orphan tool result removed" None
+            (tool_result_content_for_id ~tool_use_id:tool_id checkpoint.messages))
+
+let test_load_context_repairs_orphaned_tool_result_after_cap () =
+  let base_dir = temp_dir "keeper_lifecycle_load_orphan_tool_result" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-orphan-tool-result" in
+      let session =
+        KEC.create_session ~session_id:trace_id ~base_dir
+      in
+      let tool_id = "tool-orphan-load" in
+      let tool_output = "loaded tool output" in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [
+            Agent_sdk.Types.user_msg "inspect file";
+            tool_use_message ~tool_use_id:tool_id ();
+            tool_result_message ~tool_use_id:tool_id tool_output;
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "save_oas failed: %s" e));
+      let (_session, loaded_opt) =
+        KEC.load_context_from_checkpoint
+          ~max_checkpoint_messages:2
+          ~trace_id
+          ~primary_model_max_tokens:64_000
+          ~base_dir
+      in
+      match loaded_opt with
+      | None -> fail "expected checkpoint context to load"
+      | Some loaded ->
+          check bool "load cap enforced with pair preservation"
+            true (List.length loaded.messages <= 2);
+          check (option string) "loaded orphan tool result removed" None
+            (tool_result_content_for_id ~tool_use_id:tool_id loaded.messages))
+
+let test_deserialize_context_repairs_orphan_tool_result () =
+  let ctx =
+    KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+    |> fun ctx ->
+    KEC.append ctx
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+        content =
+          [
+            Agent_sdk.Types.ToolResult
+              {
+                tool_use_id = "call-orphan-json";
+                content = "";
+                is_error = false;
+                json = Some (`Assoc [ ("path", `String "README.md") ]);
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+      }
+  in
+  let ctx =
+    KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
+  in
+  check (option string) "deserialized orphan tool result downgraded" None
+    (tool_result_content_for_id ~tool_use_id:"call-orphan-json" ctx.messages);
+  match List.hd ctx.messages with
+  | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+      check string "deserialized orphan falls back to marker when payload metadata is absent"
+        "[tool result call-orphan-json]" text
+  | _ -> fail "expected orphan tool result to degrade to text on deserialize"
+
+let test_deserialize_context_preserves_valid_tool_pair () =
+  let tool_id = "call-valid-pair" in
+  let ctx =
+    KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+    |> fun ctx ->
+    KEC.append_many ctx
+      [
+        Agent_sdk.Types.user_msg "read the file";
+        tool_use_message ~tool_use_id:tool_id ();
+        tool_result_message ~tool_use_id:tool_id "paired output";
+        Agent_sdk.Types.assistant_msg "done";
+      ]
+  in
+  let roundtrip =
+    KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
+  in
+  check (option string) "paired tool result stays structured"
+    (Some "paired output")
+    (tool_result_content_for_id ~tool_use_id:tool_id roundtrip.messages)
+
+let test_deserialize_context_repairs_dangling_tool_use () =
+  let tool_id = "call-dangling-use-json" in
+  let ctx =
+    KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+    |> fun ctx ->
+    KEC.append_many ctx
+      [
+        Agent_sdk.Types.user_msg "read the file";
+        tool_use_message ~tool_use_id:tool_id ~name:"keeper_board_comment" ();
+        Agent_sdk.Types.assistant_msg "done";
+      ]
+  in
+  let roundtrip =
+    KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
+  in
+  check bool "dangling tool use removed on deserialize" false
+    (has_tool_use_id ~tool_use_id:tool_id roundtrip.messages);
+  match List.nth_opt roundtrip.messages 1 with
+  | Some { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+      check bool "dangling tool use downgraded to text on deserialize" true
+        (contains_substring text "tool use keeper_board_comment");
+      check bool "dangling tool use id retained on deserialize" true
+        (contains_substring text tool_id)
+  | _ -> fail "expected dangling tool use to downgrade to text on deserialize"
+
+let test_load_context_repairs_dangling_tool_use_after_cap () =
+  let base_dir = temp_dir "keeper_lifecycle_load_dangling_tool_use" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-dangling-tool-use" in
+      let session =
+        KEC.create_session ~session_id:trace_id ~base_dir
+      in
+      let tool_id = "tool-dangling-load" in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [
+            Agent_sdk.Types.user_msg "inspect file";
+            tool_use_message ~tool_use_id:tool_id ~name:"keeper_board_comment" ();
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "save_oas failed: %s" e));
+      let (_session, loaded_opt) =
+        KEC.load_context_from_checkpoint
+          ~max_checkpoint_messages:8
+          ~trace_id
+          ~primary_model_max_tokens:64_000
+          ~base_dir
+      in
+      match loaded_opt with
+      | None -> fail "expected checkpoint context to load"
+      | Some loaded ->
+          check bool "dangling tool use removed on load" false
+            (has_tool_use_id ~tool_use_id:tool_id loaded.messages);
+          match List.nth_opt loaded.messages 1 with
+          | Some { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+              check bool "dangling tool use downgraded to text on load" true
+                (contains_substring text "tool use keeper_board_comment");
+              check bool "dangling tool use id retained on load" true
+                (contains_substring text tool_id)
+          | _ ->
+              fail "expected dangling tool use to downgrade to text on load")
+
 let test_save_oas_checkpoint_strips_summarized_world_state () =
   let base_dir = temp_dir "keeper_lifecycle_save_summary_strip" in
   Fun.protect
@@ -1307,7 +1677,7 @@ let test_dispatch_keeper_phase_event_uses_room_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-phase-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -1328,7 +1698,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-outcome-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -1386,6 +1756,10 @@ let () =
             "overflow retry history budget ignores checkpoint system prompt"
             `Quick
             test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_prompt_in_history_budget;
+          test_case "overflow retry repairs orphan tool result" `Quick
+            test_recover_latest_checkpoint_for_overflow_retry_repairs_orphan_tool_result;
+          test_case "rollover repairs orphan tool result" `Quick
+            test_rollover_repairs_orphan_tool_result;
         ] );
       ( "checkpoint_patch",
         [
@@ -1405,6 +1779,8 @@ let () =
             test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget;
           test_case "save stubs old tool results" `Quick
             test_save_oas_checkpoint_stubs_old_tool_results;
+          test_case "save repairs orphaned tool result after cap" `Quick
+            test_save_oas_checkpoint_repairs_orphaned_tool_result_after_cap;
           test_case "save strips summarized world state" `Quick
             test_save_oas_checkpoint_strips_summarized_world_state;
           test_case "patch replaces last assistant text" `Quick
@@ -1423,6 +1799,16 @@ let () =
             test_load_context_migrates_oversized_text_checkpoint;
           test_case "load migrates summarized world state checkpoint" `Quick
             test_load_context_migrates_summarized_world_state_checkpoint;
+          test_case "load repairs orphaned tool result after cap" `Quick
+            test_load_context_repairs_orphaned_tool_result_after_cap;
+          test_case "deserialize repairs orphaned tool result" `Quick
+            test_deserialize_context_repairs_orphan_tool_result;
+          test_case "deserialize preserves valid tool pair" `Quick
+            test_deserialize_context_preserves_valid_tool_pair;
+          test_case "deserialize repairs dangling tool use" `Quick
+            test_deserialize_context_repairs_dangling_tool_use;
+          test_case "load repairs dangling tool use after cap" `Quick
+            test_load_context_repairs_dangling_tool_use_after_cap;
         ] );
       ( "compact_policy",
         [

@@ -116,6 +116,45 @@ let test_keeper_evidence_chain_verifies () =
         (Printf.sprintf "evidence chain mismatch at turn %d: %s <> %s" turn
            expected actual)
 
+let collision_count (json : Yojson.Safe.t option) =
+  match json with
+  | Some (`Assoc fields) ->
+      (match List.assoc_opt "collision_warnings" fields with
+       | Some (`List warnings) -> List.length warnings
+       | _ -> 0)
+  | _ -> 0
+
+let test_keeper_evidence_ignores_preexisting_dirty_state_without_delta () =
+  with_eio_env @@ fun _env ->
+  with_temp_dir "keeper-evidence-preexisting-dirty" @@ fun base_path ->
+  init_git_repo base_path;
+  let gitignore = Filename.concat base_path ".gitignore" in
+  let tracked = Filename.concat base_path "shared.ml" in
+  Out_channel.with_open_bin gitignore (fun oc -> output_string oc ".masc/\n");
+  Out_channel.with_open_bin tracked (fun oc -> output_string oc "let shared = 1\n");
+  run_in_dir base_path "git add .gitignore shared.ml && git commit -q -m init";
+  Out_channel.with_open_bin tracked (fun oc -> output_string oc "let shared = 2\n");
+  let before_alpha =
+    Keeper_evidence.snapshot_before_turn ~base_path ~keeper_name:"alpha"
+  in
+  let before_beta =
+    Keeper_evidence.snapshot_before_turn ~base_path ~keeper_name:"beta"
+  in
+  let ev1 =
+    Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:"alpha"
+      ~trace_id:"trace-a" ~turn_number:1 ~tool_calls_made:0
+      ~before_hash:before_alpha ()
+  in
+  let ev2 =
+    Keeper_evidence.capture_turn_evidence ~base_path ~keeper_name:"beta"
+      ~trace_id:"trace-b" ~turn_number:1 ~tool_calls_made:0
+      ~before_hash:before_beta ()
+  in
+  Alcotest.(check int) "first keeper sees no collision without new delta" 0
+    (collision_count ev1);
+  Alcotest.(check int) "second keeper also sees no collision without new delta" 0
+    (collision_count ev2)
+
 let () =
   run "keeper_mutex_coverage"
     [
@@ -129,5 +168,7 @@ let () =
       "keeper_evidence", [
         test_case "hash chain verifies in git repo" `Quick
           test_keeper_evidence_chain_verifies;
+        test_case "ignores preexisting dirty state without delta" `Quick
+          test_keeper_evidence_ignores_preexisting_dirty_state_without_delta;
       ];
     ]

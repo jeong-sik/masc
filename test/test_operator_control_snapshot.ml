@@ -59,27 +59,19 @@ let test_snapshot_has_expected_sections () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-      ignore (Room.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
-      ignore (Room.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore (Coord.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
+      ignore (Coord.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let namespace = Yojson.Safe.Util.member "namespace" json in
-      Alcotest.(check bool) "namespace present" true
-        (Yojson.Safe.Util.member "namespace" json <> `Null);
-      Alcotest.(check bool) "namespace initialized" true
-        Yojson.Safe.Util.(namespace |> member "initialized" |> to_bool);
+      let root = Yojson.Safe.Util.member "root" json in
+      Alcotest.(check bool) "root block present" true
+        (root <> `Null);
+      Alcotest.(check bool) "root initialized" true
+        Yojson.Safe.Util.(root |> member "initialized" |> to_bool);
       Alcotest.(check bool) "project nonempty" true
-        (String.trim Yojson.Safe.Util.(namespace |> member "project" |> to_string) <> "");
-      Alcotest.(check string) "namespace field flattened default" "default"
-        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
-      Alcotest.(check string) "namespace_id flattened default" "default"
-        Yojson.Safe.Util.(namespace |> member "namespace_id" |> to_string);
-      Alcotest.(check string) "namespace exposed" "default"
-        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
-      Alcotest.(check string) "namespace mode flattened" "flattened"
-        Yojson.Safe.Util.(namespace |> member "namespace_mode" |> to_string);
+        (String.trim Yojson.Safe.Util.(root |> member "project" |> to_string) <> "");
       Alcotest.(check bool) "sessions present" true
         (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true
@@ -107,15 +99,10 @@ let test_snapshot_has_expected_sections () =
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
         Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
-      Alcotest.(check string) "command plane provenance" "truth"
-        Yojson.Safe.Util.
-          (json |> member "provenance_summary" |> member "command_plane" |> to_string);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
         | `List _ -> true
-        | _ -> false);
-      Alcotest.(check bool) "swarm_status present" true
-        (Yojson.Safe.Util.member "swarm_status" json <> `Null))
+        | _ -> false))
 
 let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Eio_main.run @@ fun env ->
@@ -125,8 +112,8 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
       let request_namespace_pause actor =
         match
@@ -185,9 +172,9 @@ let test_snapshot_summary_view_can_omit_command_plane () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_messages:false ~include_command_plane:false
@@ -210,9 +197,9 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:true ~include_command_plane:false
@@ -241,9 +228,9 @@ let test_snapshot_waiters_share_inflight_result () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -304,32 +291,7 @@ let test_snapshot_waiters_share_inflight_result () =
       in
       Alcotest.(check bool) "healthy inflight slot not evicted" true cached_retained)
 
-let test_orchestra_room_core_shape () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-      ignore (Room.add_task config ~title:"orchestra backlog" ~priority:2 ~description:"");
-      ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
-      let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
-      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
-      Alcotest.(check bool) "namespace node exists" true
-        (List.exists
-           (fun row ->
-             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "namespace")
-           nodes);
-      Alcotest.(check bool) "namespace block present" true
-        (Yojson.Safe.Util.member "namespace" json <> `Null);
-      Alcotest.(check int) "session count" 0
-        Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
-      Alcotest.(check string) "focus kind" "node"
-        Yojson.Safe.Util.(json |> member "focus" |> member "target_kind" |> to_string))
+(* test_orchestra_room_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
@@ -339,8 +301,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =
         Operator_control.action_json ctx
@@ -357,21 +319,12 @@ let test_digest_room_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "namespace"
+      Alcotest.(check string) "target_type" "root"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
-      Alcotest.(check bool) "command_plane present" true
-        (Yojson.Safe.Util.member "command_plane" digest <> `Null);
       Alcotest.(check bool) "operator judge runtime present" true
         (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
-      Alcotest.(check bool) "command_plane microarch present" true
-        (Yojson.Safe.Util.
-           (digest |> member "command_plane" |> member "operations"
-          |> member "microarch")
-         <> `Null);
-      Alcotest.(check bool) "swarm_status present" true
-        (Yojson.Safe.Util.member "swarm_status" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
       let review_queue = Yojson.Safe.Util.(digest |> member "review_queue" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true
@@ -413,9 +366,9 @@ let test_digest_room_includes_tool_host_failure_attention () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
       Dashboard_tool_host_events.record ~fs:() config
         {
           Dashboard_tool_host_events.agent_name = "codex";
@@ -464,10 +417,10 @@ let test_digest_room_includes_tool_host_failure_attention () =
 
 let test_operator_digest_severity_rank_supports_critical () =
   Alcotest.(check int) "critical rank" 3
-    (Operator_digest.severity_rank "critical");
+    (Operator_digest.severity_rank Operator_digest.Sev_critical);
   Alcotest.(check bool) "critical outranks bad" true
-    (Operator_digest.severity_rank "critical"
-    > Operator_digest.severity_rank "bad")
+    (Operator_digest.severity_rank Sev_critical
+    > Operator_digest.severity_rank Sev_bad)
 
 (* test_snapshot_and_digest_expose_role_runtime_census removed:
    depended on team session start/update which is no longer available. *)

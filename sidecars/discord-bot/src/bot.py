@@ -33,7 +33,12 @@ from .formatters import (
     strip_state_blocks,
 )
 from .gate_client import BreakerSnapshot, GateClient, GateResponse
-from .status_store import ConnectorRuntimeStatus, StatusStore
+from .status_store import (
+    ConnectorRuntimeStatus,
+    NamesSnapshot,
+    NamesStore,
+    StatusStore,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,6 +88,7 @@ class GateBot(discord.Client):
         self.binding_store = BindingStore(self.cfg.binding_store_path())
         self.audit_store = BindingAuditStore(self.cfg.binding_audit_path())
         self.status_store = StatusStore(self.cfg.status_path())
+        self.names_store = NamesStore(self.cfg.names_path())
         persisted_bindings = self.binding_store.load()
         if persisted_bindings is None:
             legacy_binding_store = BindingStore(self.cfg.legacy_binding_store_path())
@@ -159,6 +165,7 @@ class GateBot(discord.Client):
         healthy = await self.gate.health_check()
         self._note_gate_health(healthy)
         self._write_runtime_status()
+        self._write_names_snapshot()
         if healthy:
             logger.info("Gate health check: OK")
         else:
@@ -282,6 +289,45 @@ class GateBot(discord.Client):
         except OSError as exc:
             logger.warning("Failed to write Discord status store %s: %s", self.status_store.path, exc)
 
+    def _write_names_snapshot(self) -> None:
+        """Snapshot guild and channel names for dashboard humanization.
+
+        Only runs when the bot is connected. Offline runs leave the
+        previous names.json in place — the OCaml gate reads last-known
+        state and falls back to empty guild_id when a channel is
+        unknown, so stale names are acceptable.
+        """
+        if self.is_closed() or not self.is_ready():
+            return
+        guild_names: dict[str, str] = {}
+        channel_names: dict[str, str] = {}
+        channel_to_guild: dict[str, str] = {}
+        for guild in self.guilds:
+            guild_id = str(guild.id)
+            guild_names[guild_id] = guild.name
+            for channel in guild.text_channels:
+                channel_id = str(channel.id)
+                channel_names[channel_id] = f"#{channel.name}"
+                channel_to_guild[channel_id] = guild_id
+            for thread in guild.threads:
+                thread_id = str(thread.id)
+                channel_names[thread_id] = f"#{thread.name}"
+                channel_to_guild[thread_id] = guild_id
+        snapshot = NamesSnapshot(
+            updated_at=utc_now_iso(),
+            guild_names=guild_names,
+            channel_names=channel_names,
+            channel_to_guild=channel_to_guild,
+        )
+        try:
+            self.names_store.write(snapshot)
+        except OSError as exc:
+            logger.warning(
+                "Failed to write Discord names store %s: %s",
+                self.names_store.path,
+                exc,
+            )
+
     async def _status_heartbeat_loop(self) -> None:
         interval = max(5, self.cfg.status_heartbeat_sec)
         while True:
@@ -290,6 +336,7 @@ class GateBot(discord.Client):
                 healthy = await self.gate.health_check()
                 self._note_gate_health(healthy)
                 self._write_runtime_status()
+                self._write_names_snapshot()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - defensive logging

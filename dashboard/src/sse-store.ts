@@ -5,8 +5,15 @@
 // and named handlers for events with custom logic (conditional hydration,
 // async imports, signal-only updates).
 
-import { lastEvent, connected, reconnectCount, lastDisconnectedAt } from './sse'
-import type { DashboardExecutionResponse } from './types'
+import {
+  lastEvent,
+  connected,
+  reconnectCount,
+  lastDisconnectedAt,
+  pauseQueuedOasRuntimeIngress,
+  resumeQueuedOasRuntimeIngress,
+} from './sse'
+import type { BoardPost, DashboardExecutionResponse, SSEEvent } from './types'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
@@ -14,6 +21,9 @@ import {
   refreshExecution,
   refreshBoard,
   serverStatus,
+  boardPosts,
+  boardSortMode,
+  boardOffset,
 } from './store'
 import {
   requestNamespaceTruth,
@@ -39,17 +49,13 @@ import {
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
   SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
+import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 
 // --- Refresh function registration (avoids circular imports) ---
 
 let _refreshGovernanceFn: (() => void) | null = null
 export function registerGovernanceRefresh(fn: () => void): void {
   _refreshGovernanceFn = fn
-}
-
-let _refreshCommandPlaneFn: (() => void) | null = null
-export function registerCommandPlaneRefresh(fn: () => void): void {
-  _refreshCommandPlaneFn = fn
 }
 
 let _refreshOperatorFn: (() => void) | null = null
@@ -110,7 +116,10 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
   'masc/board_delete':  { target: 'board' },
-  // Board vote notifications — emitted by lib/server/server_bootstrap_loops.ml
+  // Board notifications — emitted by lib/server/server_bootstrap_loops.ml
+  // via JSON-RPC method="notifications/board" (unwrapped to params.type)
+  post_created:         { target: 'board' },
+  comment_added:        { target: 'board' },
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   // Activity graph
@@ -153,7 +162,7 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
     namespaceTruth.value = normalized
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
-      normalized.namespace.status ?? null,
+      normalized.root.status ?? null,
     )
   } catch (err) {
     console.debug('[SSE] namespace-truth snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
@@ -235,7 +244,6 @@ async function refreshActiveRoute(): Promise<void> {
     refreshForRoute(route.value)
   } catch (err) {
     console.debug('[SSE] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
-    _refreshCommandPlaneFn?.()
     _refreshOperatorFn?.()
     _refreshMissionFn?.()
   }
@@ -259,10 +267,19 @@ function handleReconnect(): void {
   // If the server is still warming up after restart, the first fetch may fail.
   // Schedule a single retry after 3s to cover the warm-up window.
   invalidateDashboardCache()
+  pauseQueuedOasRuntimeIngress()
   void hydrateAfterReconnect()
+    .finally(() => {
+      resumeQueuedOasRuntimeIngress()
+    })
 }
 
-function hydrateAfterReconnect(): void {
+async function hydrateAfterReconnect(): Promise<void> {
+  try {
+    await replayOasRuntimeTelemetry()
+  } catch (err) {
+    console.warn('[SSE] reconnect OAS replay failed', err instanceof Error ? err.message : err)
+  }
   requestNamespaceTruthNow()
   void refreshActiveRoute().catch(err =>
     console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),
@@ -277,6 +294,38 @@ function hydrateAfterReconnect(): void {
       console.warn('[SSE] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
     )
   }, SSE_RECONNECT_RETRY_MS)
+}
+
+// --- Board incremental hydration ---
+// When a post_created SSE event carries content and the board is sorted by
+// recent, we can prepend the post directly — zero HTTP fetch. For other sort
+// modes the position is algorithm-dependent so we fall through to refreshBoard.
+
+function handleBoardPostCreated(event: SSEEvent): boolean {
+  if (boardSortMode.value !== 'recent') return false
+  const postId = event.post_id as string | undefined
+  const content = event.content as string | undefined
+  if (!postId || !content) return false
+  if (boardPosts.value.some(p => p.id === postId)) return false
+
+  const now = new Date().toISOString()
+  const post: BoardPost = {
+    id: postId,
+    author: event.author ?? '',
+    title: event.title ?? '',
+    body: content,
+    content,
+    tags: [],
+    created_at: now,
+    updated_at: now,
+    votes: 0,
+    vote_balance: 0,
+    comment_count: 0,
+    hearth: event.hearth ?? undefined,
+  }
+  boardPosts.value = [post, ...boardPosts.value]
+  boardOffset.value = boardPosts.value.length
+  return true
 }
 
 // --- SSE reaction setup ---
@@ -331,6 +380,13 @@ export function setupSSEReaction(): () => void {
       const name = typeof payload.name === 'string' ? payload.name : ''
       const ts_unix = typeof payload.ts_unix === 'number' ? payload.ts_unix : Date.now() / 1000
       compositeTick.value = { name, ts_unix }
+      return
+    }
+
+    // 1b. Board post incremental hydration — when enriched payload is
+    // available and sort=recent, prepend directly and skip the full refresh.
+    if (event.type === 'post_created' && handleBoardPostCreated(event)) {
+      // Hydrated from SSE payload — no HTTP fetch needed.
       return
     }
 

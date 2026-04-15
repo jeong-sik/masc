@@ -133,6 +133,54 @@ let test_list_posts_with_sort () =
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
+let test_recent_sort_bypasses_hot_cutoff () =
+  let create_post_exn ~author ~content =
+    match
+      Board_dispatch.create_post ~author ~content
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let vote_up_exn ~post_id ~voter =
+    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    | Ok _ -> ()
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  for i = 1 to 101 do
+    let hot_post =
+      create_post_exn ~author:(Printf.sprintf "hot-author-%03d" i)
+        ~content:(Printf.sprintf "hot post %03d" i)
+    in
+    vote_up_exn ~post_id:(Board.Post_id.to_string hot_post.id)
+      ~voter:(Printf.sprintf "hot-voter-%03d" i)
+  done;
+  let cold_post =
+    create_post_exn ~author:"recent-cold-author"
+      ~content:"latest cold post should still win recent sort"
+  in
+  let cold_post_id = Board.Post_id.to_string cold_post.id in
+  let recent_posts =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:1 ()
+  in
+  let hot_posts =
+    Board_dispatch.list_posts ~sort_by:Board_dispatch.Hot ~limit:1 ()
+  in
+  let recent_post_id =
+    match recent_posts with
+    | post :: _ -> Board.Post_id.to_string post.id
+    | [] -> Alcotest.fail "expected recent posts"
+  in
+  let hot_post_id =
+    match hot_posts with
+    | post :: _ -> Board.Post_id.to_string post.id
+    | [] -> Alcotest.fail "expected hot posts"
+  in
+  Alcotest.(check string) "recent returns latest post beyond hot top 100"
+    cold_post_id recent_post_id;
+  Alcotest.(check bool) "hot ranking still excludes cold post" false
+    (String.equal hot_post_id cold_post_id)
+
 let test_list_posts_with_filters () =
   let keeper_meta = `Assoc [ ("source", `String "keeper_board_post") ] in
   let scoped_authors = [ "filter-human"; "filter-harness-bot"; "filter-keeper" ] in
@@ -407,6 +455,8 @@ let () =
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
+      Alcotest.test_case "recent bypasses hot cutoff" `Quick
+        (with_eio test_recent_sort_bypasses_hot_cutoff);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
       Alcotest.test_case "comment author filter" `Quick
         (with_eio test_list_posts_matches_comment_author);

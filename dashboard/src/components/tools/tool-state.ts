@@ -15,7 +15,6 @@ export const toolsError = computed<string | null>(() => {
 export const toolsLoading = computed(() => toolsResource.state.value.status === 'loading')
 export const searchQuery = signal('')
 export const categoryFilter = signal('all')
-export const enabledOnly = signal(false)
 export const directOnly = signal(false)
 export const showHidden = signal(false)
 export const showDeprecated = signal(true)
@@ -40,6 +39,10 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
 
 export async function loadTools() {
   await toolsResource.load(() => fetchDashboardTools())
+}
+
+export function hasSurface(item: DashboardToolInventoryItem, surface: string): boolean {
+  return (item.surfaces ?? []).includes(surface)
 }
 
 export function toolMatchesQuery(item: DashboardToolInventoryItem, rawQuery: string): boolean {

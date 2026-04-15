@@ -211,11 +211,9 @@ let find_opt env_name =
 let runtime_value flag =
   get_bool ~default:flag.default flag.env_name
 
-(** Source: "env" if set, "default" if using fallback. *)
+(** Source: "env", "boot_override", or "default". *)
 let runtime_source flag =
-  match Sys.getenv_opt flag.env_name with
-  | Some _ -> "env"
-  | None -> "default"
+  Config_boot_overrides.source flag.env_name
 
 
 (** Lookup the runtime value of a flag using its registry default. *)

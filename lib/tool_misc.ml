@@ -14,7 +14,7 @@ open Tool_args
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -42,33 +42,13 @@ let handle_dashboard ctx args =
       in
       (true, output)
 
-let handle_verify_handoff _ctx args =
-  let original = get_string args "original" "" in
-  let received = get_string args "received" "" in
-  if original = "" || received = "" then
-    (false, "❌ original and received are required")
-  else
-    let threshold =
-      get_float args "threshold" (Level2_config.Drift_guard.default_threshold ())
-    in
-    let result =
-      Drift_guard.verify_handoff ~original ~received ~threshold ()
-      |> Drift_guard.result_to_json
-    in
-    (true, Yojson.Safe.to_string result)
-
 let handle_gc ctx args =
   let days_raw = get_int args "days" 7 in
   let days = max 1 days_raw in
   if days_raw < 1 then
     Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
-  let gc_result = Room.gc ctx.config ~days () in
-  let expired =
-    try Cp_lifecycle.check_expired_decisions ctx.config
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Misc.warn "check_expired_decisions failed: %s" (Printexc.to_string exn);
-      0
-  in
+  let gc_result = Coord.gc ctx.config ~days () in
+  let expired = 0 in
   let decision_note =
     if expired > 0 then Printf.sprintf "\n⏰ Expired %d pending decision(s) past TTL" expired
     else ""
@@ -76,7 +56,7 @@ let handle_gc ctx args =
   (true, gc_result ^ decision_note)
 
 let handle_cleanup_zombies ctx _args =
-  (true, Room.cleanup_zombies ctx.config)
+  (true, Coord.cleanup_zombies ctx.config)
 
 let handle_tool_stats _ctx args =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
@@ -132,7 +112,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_webrtc_offer" -> Some (Tool_misc_transport.handle_webrtc_offer args)
   | "masc_webrtc_answer" -> Some (Tool_misc_transport.handle_webrtc_answer args)
   | "masc_dashboard" -> Some (handle_dashboard ctx args)
-  | "masc_verify_handoff" -> Some (handle_verify_handoff ctx args)
   | "masc_gc" -> Some (handle_gc ctx args)
   | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ctx args)
   | "masc_tool_stats" -> Some (handle_tool_stats ctx args)
@@ -141,7 +120,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ctx.config args)
-  | "masc_feature_flags" -> Some (Tool_misc_admin.handle_feature_flags args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
@@ -152,16 +130,15 @@ let schemas = Tool_schemas_misc.schemas
 
 let _tool_spec_read_only =
   [
-    "masc_verify_handoff";
     "masc_tool_help";
     "masc_web_search";
     "masc_dashboard";
   ]
 
 let tool_required_permission = function
-  | "masc_config" | "masc_dashboard" | "masc_verify_handoff"
+  | "masc_config" | "masc_dashboard"
   | "masc_tool_stats" | "masc_tool_help" | "masc_web_search"
-  | "masc_tool_admin_snapshot" | "masc_feature_flags" ->
+  | "masc_tool_admin_snapshot" ->
       Some Types.CanReadState
   | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
       Some Types.CanBroadcast

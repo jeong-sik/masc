@@ -40,7 +40,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
     namespaceTruth.value = normalized
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
-      normalized.namespace.status ?? null,
+      normalized.root.status ?? null,
     )
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Failed to load project truth'

@@ -91,7 +91,6 @@ let tool_cost_estimate (tool_name : string) : float =
   | "keeper_board_post" -> 0.002
   | "keeper_board_comment" -> 0.001
   | "keeper_bash" -> 0.0001
-  | "keeper_github" -> 0.0001
   | "keeper_fs_edit" -> 0.0001
   (* Read-only tools are essentially free *)
   | _ -> 0.0
@@ -273,7 +272,7 @@ let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulat
 let set_task_id (acc : accumulator) (id : string) : unit =
   acc.task_id <- Some id
 
-(** Clear task binding (e.g., after masc_done). *)
+(** Clear task binding (e.g., after masc_transition action=done). *)
 let clear_task_id (acc : accumulator) : unit =
   acc.task_id <- None
 

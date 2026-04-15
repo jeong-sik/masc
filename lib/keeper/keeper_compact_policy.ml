@@ -111,7 +111,7 @@ let compact_if_needed
           | _ :: _ as explicit -> explicit
           | [] -> Oas_model_resolve.models_of_cascade_name meta.cascade_name
         in
-        let primary_id = match Llm_provider.Cascade_config.parse_model_strings model_labels with
+        let primary_id = match Cascade_config.parse_model_strings model_labels with
           | c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto" in
         Llm_provider.Model_meta.for_model_id primary_id
       in
@@ -162,7 +162,7 @@ let compact_if_needed
           let msgs_after_fold =
             Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
           in
-          msgs_after_fold
+          Keeper_context_core.repair_broken_tool_call_pairs msgs_after_fold
         in
         let compacted_ctx =
           sync_oas_context { ctx with messages }

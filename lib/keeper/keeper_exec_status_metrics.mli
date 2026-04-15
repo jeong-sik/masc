@@ -14,6 +14,6 @@ val summarize_metrics_lines :
   string list -> default_generation:int -> metrics_summary
 val empty_tool_audit_snapshot : tool_audit_snapshot
 val latest_tool_audit_snapshot_from_files :
-  Room.config -> keeper_name:string -> tool_audit_snapshot option
+  Coord.config -> keeper_name:string -> tool_audit_snapshot option
 val accountability_summary_json :
-  Room.config -> keeper_name:string -> agent_name:string -> Yojson.Safe.t
+  Coord.config -> keeper_name:string -> agent_name:string -> Yojson.Safe.t

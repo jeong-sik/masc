@@ -14,8 +14,8 @@ module Http = Masc_mcp.Http_server_eio
 module Http_h2 = Masc_mcp.Http_server_h2
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Room = Masc_mcp.Room
-module Room_utils = Room_utils
+module Coord = Masc_mcp.Coord
+module Coord_utils = Coord_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_memory = Masc_mcp.Keeper_memory
@@ -23,12 +23,12 @@ module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_runtime = Masc_mcp.Keeper_runtime
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
-module Command_plane_v2 = Masc_mcp.Command_plane_v2
 module Dashboard_execution = Masc_mcp.Dashboard_execution
 module Dashboard_mission = Masc_mcp.Dashboard_mission
 (* module Dashboard_proof removed *)
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
+module Config_doctor = Masc_mcp.Config_doctor
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -41,7 +41,6 @@ module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
 module Safe_ops = Safe_ops
 module Tool_board = Masc_mcp.Tool_board
-module Server_command_plane_http = Masc_mcp.Server_command_plane_http
 module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http
 
 
@@ -64,6 +63,21 @@ let mcp_protocol_version_default =
   Server_mcp_transport_http.mcp_protocol_version_default
 
 let default_base_path = Server_mcp_transport_http.default_base_path
+
+let implicit_base_path_resolution_source () =
+  match Env_config.home_dir_opt () with
+  | Some home ->
+      let normalized_home =
+        Env_config.normalize_masc_base_path_input home
+      in
+      let normalized_default =
+        Env_config.normalize_masc_base_path_input (default_base_path ())
+      in
+      if String.equal normalized_home normalized_default then
+        "implicit_home"
+      else
+        "implicit_repo_root"
+  | None -> "implicit_repo_root"
 
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
@@ -283,6 +297,10 @@ let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
+let doctor_json =
+  let doc = "Emit machine-readable JSON instead of text output" in
+  Arg.(value & flag & info ["json"] ~doc)
+
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
    await_shutdown_signal, letting Eio.Fiber.first cancel run_server. *)
@@ -320,7 +338,7 @@ let guard_self_repo_base_path base_path =
        (executable: %s)\n\
        Runtime state would pollute the repo. Use a workspace root instead:\n\
        \  --base-path $MASC_BASE_PATH    (recommended)\n\
-       \  --base-path ~/.masc     (alternative)\n\
+       \  --base-path $HOME              (home-scoped runtime)\n\
        Or start via: sb mcp masc start\n"
       base_path abs_exe;
     exit 1
@@ -351,7 +369,7 @@ let run_cmd host port base_path =
             Env_config.normalize_masc_base_path_input (default_base_path ())
           in
           if String.equal default_path normalized_base_path then
-            "implicit_repo_root"
+            implicit_base_path_resolution_source ()
           else
             "explicit_cli"
   in
@@ -558,9 +576,82 @@ let run_cmd host port base_path =
   try_start 0;
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let cmd =
-  let doc = "MASC MCP Server" in
-  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
-  Cmd.v info Term.(const run_cmd $ host $ port $ base_path)
+let run_cmd_exit host port base_path =
+  run_cmd host port base_path;
+  Cmd.Exit.ok
 
-let () = exit (Cmd.eval cmd)
+let doctor_cmd_exit base_path as_json =
+  let report =
+    Config_doctor.analyze
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let output =
+    if as_json then
+      Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+    else
+      Config_doctor.render_text report
+  in
+  print_endline output;
+  Config_doctor.exit_code report
+
+let doctor_cmd =
+  let doc =
+    "Diagnose config initialization, active config roots, and base-path shadowing"
+  in
+  let info = Cmd.info "doctor" ~doc in
+  Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+
+let init_force =
+  let doc = "Overwrite existing config files instead of skipping them" in
+  Arg.(value & flag & info ["force"] ~doc)
+
+type init_tally = { written : int; skipped : int; failed : int }
+
+let seed_one ~target_root ~force tally rel =
+  match Embedded_config.read rel with
+  | None ->
+    Printf.eprintf "init: missing embedded asset: %s\n" rel;
+    { tally with failed = tally.failed + 1 }
+  | Some content ->
+    let dest = Filename.concat target_root rel in
+    Fs_compat.mkdir_p (Filename.dirname dest);
+    if Fs_compat.file_exists dest && not force then begin
+      Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
+      { tally with skipped = tally.skipped + 1 }
+    end else
+      try
+        Fs_compat.save_file dest content;
+        Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content);
+        { tally with written = tally.written + 1 }
+      with Sys_error msg ->
+        Printf.eprintf "init: %s: %s\n" dest msg;
+        { tally with failed = tally.failed + 1 }
+
+let init_cmd_exit base_path force =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let target_root = Config_doctor.local_base_config_root ~base_path in
+  Fs_compat.mkdir_p target_root;
+  let result =
+    List.fold_left
+      (seed_one ~target_root ~force)
+      { written = 0; skipped = 0; failed = 0 }
+      Embedded_config.file_list
+  in
+  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
+    result.written result.skipped result.failed target_root;
+  if result.failed > 0 then 1 else 0
+
+let init_cmd =
+  let doc = "Seed default .masc/config/ from binary-embedded assets" in
+  let info = Cmd.info "init" ~doc in
+  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+
+let cmd =
+  let doc = "MASC MCP Server and operator diagnostics" in
+  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
+  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
+    info [ doctor_cmd; init_cmd ]
+
+let () = exit (Cmd.eval' cmd)

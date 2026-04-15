@@ -154,7 +154,7 @@ let keeper_entries =
   [
     entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
       "Enable keeper auto-bootstrap";
-    entry ~default:"3" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE"
+    entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
       "Max concurrent active keepers";
     entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"
       "Keeper keepalive snapshot interval";
@@ -187,9 +187,10 @@ let keeper_execution_entries =
       "Max messages before compaction";
     entry ~default:"4000" "MASC_KEEPER_COMPACT_MAX_TOKENS"
       "Max tokens before compaction (0=disabled)";
-    entry ~default:"0.10" "MASC_KEEPER_COST_GATE_USD" "Per-turn cost gate (USD)";
-    entry ~default:"0.50" "MASC_KEEPER_TOOL_COST_MAX_USD"
-      "Max tool call cost (USD)";
+    entry ~default:"0.10" "MASC_KEEPER_COST_GATE_USD"
+      "Legacy keeper cost gate (unused by unified turn cost guard)";
+    entry ~default:"0" "MASC_KEEPER_TOOL_COST_MAX_USD"
+      "Unified turn accumulated cost ceiling (USD, 0=disabled)";
     entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
     entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
       "Unified turn max output tokens";
@@ -687,7 +688,7 @@ let operator_entries =
     entry ~default:"60" "MASC_OPERATOR_JUDGE_INTERVAL_SEC"
       "Operator judge interval (clamped >=15 seconds)";
     entry ~default:"60" "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC"
-      "Room TTL for operator judge cleanup (clamped >=15 seconds)";
+      "Coord TTL for operator judge cleanup (clamped >=15 seconds)";
     entry ~default:"300" "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
       "Session TTL for operator judge cleanup (clamped >=30 seconds)";
     entry ~default:"(none)" "MASC_OPERATOR_JUDGE_TIMEOUT_SEC"

@@ -88,26 +88,26 @@ let room_action_result request result =
 let execute_room_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
-      let* () = validate_target_type "namespace" request in
+      let* () = validate_target_type "root" request in
       let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let result = Room.broadcast ctx.config ~from_agent:request.actor ~content:message in
+      let result = Coord.broadcast ctx.config ~from_agent:request.actor ~content:message in
       room_action_result request (`String result)
   | "namespace_pause" ->
-      let* () = validate_target_type "namespace" request in
+      let* () = validate_target_type "root" request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
-      Room.pause ctx.config ~by:request.actor ~reason;
+      Coord.pause ctx.config ~by:request.actor ~reason;
       room_action_result request
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
-      let* () = validate_target_type "namespace" request in
+      let* () = validate_target_type "root" request in
       let status =
-        match Room.resume ctx.config ~by:request.actor with
+        match Coord.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"
         | `Already_running -> "already_running"
       in
@@ -117,7 +117,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
         (`Assoc [("status", `String "removed");
                  ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
-      let* () = validate_target_type "namespace" request in
+      let* () = validate_target_type "root" request in
       let* title =
         match get_string_opt request.payload "title" with
         | Some value -> Ok value
@@ -127,7 +127,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
       let description =
         get_string request.payload "description" "Injected by operator control plane"
       in
-      let result = Room.add_task ctx.config ~title ~priority ~description in
+      let result = Coord.add_task ctx.config ~title ~priority ~description in
       room_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 

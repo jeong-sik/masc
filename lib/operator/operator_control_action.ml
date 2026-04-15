@@ -15,9 +15,9 @@ let normalize_judgment_surface value =
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
-  match normalized with
-  | "room" | "namespace" -> Ok ("namespace", Operator_judgment.Room)
-  | _ -> Error "target_type must be namespace"
+  if Operator_digest_types.is_root_alias normalized then
+    Ok ("root", Operator_judgment.Coord)
+  else Error "target_type must be root"
 
 let default_fresh_ttl_sec surface =
   match surface with
@@ -126,15 +126,16 @@ let canonical_action_type action_type =
   | other -> other
 
 let normalize_action_target_type target_type =
-  match String.trim target_type |> String.lowercase_ascii with
-  | "room" | "namespace" -> Ok "namespace"
+  let normalized = String.trim target_type |> String.lowercase_ascii in
+  if Operator_digest_types.is_root_alias normalized then Ok "root"
+  else match normalized with
   | "keeper" | "review_item" as value -> Ok value
   | "" -> Ok ""
-  | _ -> Error "target_type must be namespace, keeper, or review_item"
+  | _ -> Error "target_type must be root, keeper, or review_item"
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "namespace"
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "root"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | "review_resolve" | "review_defer" -> "review_item"
   | _ -> ""

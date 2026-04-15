@@ -161,13 +161,16 @@ let maybe_sweep store =
 let board_base_path () =
   Env_config_core.base_path ()
 
+let board_masc_dir () =
+  Coord_utils.masc_root_dir_from
+    ~base_path:(board_base_path ())
+    ~cluster_name:(Env_config_core.cluster_name ())
+
 let persist_path () =
-  let base = board_base_path () in
-  Filename.concat base ".masc/board_posts.jsonl"
+  Filename.concat (board_masc_dir ()) "board_posts.jsonl"
 
 let comments_path () =
-  let base = board_base_path () in
-  Filename.concat base ".masc/board_comments.jsonl"
+  Filename.concat (board_masc_dir ()) "board_comments.jsonl"
 
 let ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -175,7 +178,7 @@ let ensure_dir path =
 
 let ensure_masc_dir () =
   let base = board_base_path () in
-  let dir = Filename.concat base ".masc" in
+  let dir = board_masc_dir () in
   ensure_dir base;
   ensure_dir dir
 
@@ -511,7 +514,13 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
           let h_norm = String.lowercase_ascii (String.trim h) in
           List.filter (fun (p : post) -> p.hearth = Some h_norm) filtered
     in
-    take (min limit 100) filtered  (* Hard cap at 100 *)
+    (* Cap at Limits.max_posts (default 10_000) as an OOM guard. The
+       previous inner cap of 100 was a duplicate of Board_dispatch.list_posts's
+       fetch_limit guard (`max limit 200`) and broke offset-based pagination:
+       when the dashboard requested offset=100 limit=100, Board_dispatch
+       passed probe_fetch=201 here but we returned only 100, so fetched_len
+       never exceeded window_end and has_more went stale at ~100-200 posts. *)
+    take (min limit Limits.max_posts) filtered
   )
 
 (** Full-scan search over all posts (no limit on scan, only on results).

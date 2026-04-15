@@ -106,20 +106,20 @@ end
 
 module Foraging = struct
   (** Default exploration rate (epsilon for epsilon-greedy) *)
-  let exploration_rate () = get_env_float "MASC_FORAGE_EXPLORATION" 0.3
+  let exploration_rate () = 0.3
 end
 
 (** {1 Stigmergy Configuration} *)
 
 module Stigmergy = struct
   (** Pheromone deposit rate per success *)
-  let deposit_rate () = get_env_float "MASC_STIG_DEPOSIT" 0.2
+  let deposit_rate () = 0.2
 
   (** Minimum pheromone strength to follow *)
-  let following_threshold () = get_env_float "MASC_STIG_THRESHOLD" 0.1
+  let following_threshold () = 0.1
 
   (** Number of top trails to consider *)
-  let top_trails_limit () = get_env_int "MASC_STIG_TOP_TRAILS" 5
+  let top_trails_limit () = 5
 end
 
 (** {1 Validation} *)

@@ -114,7 +114,7 @@ let test_dashboard_execution_fixture () =
        | Some v -> Unix.putenv "MASC_STORAGE_TYPE" v
        | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED" "true";
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
@@ -176,7 +176,7 @@ let test_dashboard_execution_live_empty_room () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
@@ -188,12 +188,13 @@ let test_dashboard_execution_live_empty_room () =
             ()
         in
         let open Yojson.Safe.Util in
-        check string "default namespace id" "default"
-          (json |> member "status" |> member "namespace_id" |> to_string);
-        check string "default namespace" "default"
-          (json |> member "status" |> member "namespace" |> to_string);
-        check string "namespace mode flattened" "flattened"
-          (json |> member "status" |> member "namespace_mode" |> to_string);
+        let status = json |> member "status" in
+        let key_absent key j =
+          List.assoc_opt key (to_assoc j) = None
+        in
+        check bool "namespace_id carrier removed" true (key_absent "namespace_id" status);
+        check bool "namespace carrier removed" true (key_absent "namespace" status);
+        check bool "namespace_mode carrier removed" true (key_absent "namespace_mode" status);
         check int "execution queue empty" 0
           (json |> member "execution_queue" |> to_list |> List.length);
         check int "operation briefs empty" 0
@@ -209,12 +210,12 @@ let test_dashboard_execution_namespace_status () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio_main.run @@ fun env ->
-      ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.ensure_room_bootstrap config;
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Lib.Coord.ensure_room_bootstrap config;
       check (option string) "room state current_room flattened" (Some "default")
-        (Lib.Room.read_current_room config);
+        (Lib.Coord.read_current_room config);
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -229,14 +230,14 @@ let test_dashboard_execution_namespace_status () =
           List.assoc_opt key (to_assoc json) = None
         in
         let status = json |> member "status" in
-        check string "status namespace_id exposed" "default"
-          (status |> member "namespace_id" |> to_string);
-        check string "status namespace exposed" "default"
-          (status |> member "namespace" |> to_string);
-        check string "status current_namespace exposed" "default"
-          (status |> member "current_namespace" |> to_string);
-        check string "status namespace mode flattened" "flattened"
-          (status |> member "namespace_mode" |> to_string);
+        check bool "status namespace_id removed" true
+          (key_absent "namespace_id" status);
+        check bool "status namespace removed" true
+          (key_absent "namespace" status);
+        check bool "status current_namespace removed" true
+          (key_absent "current_namespace" status);
+        check bool "status namespace_mode removed" true
+          (key_absent "namespace_mode" status);
         check bool "legacy room removed" true
           (key_absent "room" status);
         check bool "legacy room base path removed" true
@@ -258,9 +259,9 @@ let test_dashboard_shell_namespace_status () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
-      Lib.Room.ensure_room_bootstrap config;
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Lib.Coord.ensure_room_bootstrap config;
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let key_absent key json =
@@ -300,9 +301,9 @@ let test_dashboard_shell_surfaces_workspace_when_different () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config =
-        { (Room_utils.default_config dir) with workspace_path = workspace }
+        { (Coord_utils.default_config dir) with workspace_path = workspace }
       in
-      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Coord.init config ~agent_name:None);
       let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let status = json |> member "status" in
@@ -326,9 +327,9 @@ let test_dashboard_shell_includes_meta_cognition_summary () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -390,15 +391,15 @@ let create_keeper env sw config name =
   | Some (false, err) -> fail err
   | None -> fail "missing masc_keeper_up dispatch"
 
-let test_dashboard_shell_counts_keepers () =
+let test_dashboard_shell_splits_active_and_configured_keepers () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
       Eio.Switch.run (fun sw ->
         Fun.protect
           ~finally:(fun () ->
@@ -412,8 +413,10 @@ let test_dashboard_shell_counts_keepers () =
             let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
             let open Yojson.Safe.Util in
             let counts = json |> member "counts" in
-            check int "shell keeper count from keeper meta" 2
-              (counts |> member "keepers" |> to_int))))
+            check int "shell active keeper count uses runtime" 0
+              (counts |> member "keepers" |> to_int);
+            check int "shell configured keeper inventory stays visible" 2
+              (json |> member "configured_keepers" |> to_int))))
 
 let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
   let dir = test_dir () in
@@ -422,10 +425,10 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -442,18 +445,20 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
             let counts = json |> member "counts" in
             check int "keeper-backed room has no general agents" 0
               (counts |> member "agents" |> to_int);
-            check int "keeper still counted" 1
-              (counts |> member "keepers" |> to_int))))
+            check int "stopped keeper is not counted as active" 0
+              (counts |> member "keepers" |> to_int);
+            check int "configured keeper inventory remains visible" 1
+              (json |> member "configured_keepers" |> to_int))))
 
 let test_dashboard_execution_fresh_join_not_marked_stale () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio_main.run @@ fun env ->
-      ignore (Lib.Room.init config ~agent_name:None);
-      ignore (Lib.Room.join config ~agent_name:"test-agent-fox" ~capabilities:["housekeeping"] ());
+      ignore (Lib.Coord.init config ~agent_name:None);
+      ignore (Lib.Coord.join config ~agent_name:"test-agent-fox" ~capabilities:["housekeeping"] ());
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -516,10 +521,10 @@ let test_patch_surface_json_for_running_keepers_tolerates_null_agent () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:None);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -593,8 +598,8 @@ let () =
             test_dashboard_shell_surfaces_workspace_when_different;
           Alcotest.test_case "shell includes meta cognition summary" `Quick
             test_dashboard_shell_includes_meta_cognition_summary;
-          Alcotest.test_case "shell counts keepers cheaply" `Quick
-            test_dashboard_shell_counts_keepers;
+          Alcotest.test_case "shell splits active and configured keepers" `Quick
+            test_dashboard_shell_splits_active_and_configured_keepers;
           Alcotest.test_case "shell excludes keeper agents from general count" `Quick
             test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick

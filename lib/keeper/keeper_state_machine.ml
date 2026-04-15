@@ -57,7 +57,6 @@ type conditions = {
   fiber_alive : bool;
   heartbeat_healthy : bool;
   turn_healthy : bool;
-  manual_reconcile_required : bool;
   context_within_budget : bool;
   context_handoff_needed : bool;
   compaction_active : bool;
@@ -77,7 +76,6 @@ let default_conditions = {
   fiber_alive = false;
   heartbeat_healthy = true;
   turn_healthy = true;
-  manual_reconcile_required = false;
   context_within_budget = true;
   context_handoff_needed = false;
   compaction_active = false;
@@ -109,8 +107,6 @@ type event =
   | Heartbeat_failed of { consecutive : int; max_allowed : int }
   | Turn_succeeded
   | Turn_failed of { consecutive : int; max_allowed : int }
-  | Manual_reconcile_required of { reason : string }
-  | Manual_reconcile_cleared
   | Context_measured of {
       context_ratio : float;
       message_count : int;
@@ -149,9 +145,6 @@ let event_to_string = function
   | Turn_succeeded -> "turn_succeeded"
   | Turn_failed r ->
     Printf.sprintf "turn_failed(%d/%d)" r.consecutive r.max_allowed
-  | Manual_reconcile_required r ->
-    Printf.sprintf "manual_reconcile_required(%s)" r.reason
-  | Manual_reconcile_cleared -> "manual_reconcile_cleared"
   | Context_measured r ->
     Printf.sprintf "context_measured(ratio=%.3f)" r.context_ratio
   | Compaction_started -> "compaction_started"
@@ -348,7 +341,6 @@ let derive_phase (c : conditions) : phase =
   (* 8. Health degradation *)
   else if not c.heartbeat_healthy
           || not c.turn_healthy
-          || c.manual_reconcile_required
   then Failing
   (* 9. Healthy running *)
   else if c.fiber_alive then Running
@@ -372,10 +364,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
   | Turn_failed { consecutive; max_allowed } ->
     let _ = max_allowed in
     { c with turn_healthy = consecutive = 0 }
-  | Manual_reconcile_required _ ->
-    { c with manual_reconcile_required = true }
-  | Manual_reconcile_cleared ->
-    { c with manual_reconcile_required = false }
   | Context_measured { auto_rules; _ } ->
     { c with
       guardrail_triggered = auto_rules.guardrail_stop;
@@ -434,7 +422,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       fiber_alive = true;
       heartbeat_healthy = true;
       turn_healthy = true;
-      manual_reconcile_required = false;
       compaction_active = false;
       handoff_active = false;
       backoff_elapsed = false;
@@ -473,7 +460,6 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with
       context_overflow = false;
       compact_retry_exhausted = false;
-      manual_reconcile_required = false;
     }
 
 (** Compute entry actions for a phase transition.
@@ -595,7 +581,6 @@ let conditions_to_json (c : conditions) =
     "fiber_alive", `Bool c.fiber_alive;
     "heartbeat_healthy", `Bool c.heartbeat_healthy;
     "turn_healthy", `Bool c.turn_healthy;
-    "manual_reconcile_required", `Bool c.manual_reconcile_required;
     "context_within_budget", `Bool c.context_within_budget;
     "context_handoff_needed", `Bool c.context_handoff_needed;
     "compaction_active", `Bool c.compaction_active;
@@ -625,9 +610,6 @@ let event_to_json (ev : event) : Yojson.Safe.t =
       "consecutive", `Int r.consecutive;
       "max_allowed", `Int r.max_allowed;
     ]
-  | Manual_reconcile_required r ->
-    obj "manual_reconcile_required" ["reason", `String r.reason]
-  | Manual_reconcile_cleared -> obj "manual_reconcile_cleared" []
   | Context_measured r ->
     obj "context_measured" [
       "context_ratio", `Float r.context_ratio;

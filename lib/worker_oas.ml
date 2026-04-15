@@ -151,8 +151,6 @@ let masc_mutating_denied_tools =
     "masc_set_current_task";  (* alias of masc_plan_set_task *)
     "masc_run_init"; "masc_run_plan"; "masc_run_log";
     "masc_run_deliverable";
-    "masc_repair_loop_start"; "masc_repair_loop_iterate";
-    "masc_repair_loop_stop";
     "masc_operator_action"; "masc_operator_confirm";
     "masc_room_delete"; "masc_admin_cleanup"; "masc_admin_reset";
     "masc_gc_force"; "masc_spawn"; "masc_force_leave";

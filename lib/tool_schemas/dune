@@ -6,16 +6,16 @@
  (modules
    tool_schemas_plan
    tool_schemas_worktree
-   tool_schemas_auth
+
    tool_schemas_agent
-   tool_schemas_room
+   tool_schemas_coord
    tool_schemas_control
    tool_schemas_a2a
    tool_schemas_misc
-   tool_schemas_room_core
-   tool_schemas_room_extra
-   tool_schemas_inline_room
-   tool_schemas_inline_verify
+   tool_schemas_coord_core
+   tool_schemas_coord_extra
+   tool_schemas_inline_coord
+
    tool_schemas_inline_infra
    tool_schemas_inline_episodes
    tool_schemas_inline)

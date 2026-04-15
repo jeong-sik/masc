@@ -74,80 +74,18 @@ let local_worker_compat_passthrough_tool_names =
 let local_worker_compat_passthrough_schemas : Types.tool_schema list =
   lookup_schemas_by_name_exn
     ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
-    (Tool_schemas_room_core.schemas
+    (Tool_schemas_coord_core.schemas
      @ Tool_task_schemas.schemas
-     @ Tool_schemas_inline_room.schemas)
+     @ Tool_schemas_inline_coord.schemas)
     local_worker_compat_passthrough_tool_names
 
 let local_worker_internal_schemas : Types.tool_schema list =
   [
-    { Tool_heartbeat.heartbeat_schema with
+    { Types.name = "masc_heartbeat";
       description =
         "Update the worker heartbeat timestamp so long-running local tasks are not reaped as zombies.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
-    };
-    {
-      Types.name = "masc_repair_loop_start";
-      description =
-        "Start a detachable internal code repair loop and persist its initial state.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("plugin_id", `Assoc [ ("type", `String "string") ]);
-                  ("task_spec", `Assoc [ ("type", `String "string") ]);
-                  ("target_mode", `Assoc [ ("type", `String "string") ]);
-                  ("working_dir", `Assoc [ ("type", `String "string") ]);
-                  ("target_file", `Assoc [ ("type", `String "string") ]);
-                  ("source_text", `Assoc [ ("type", `String "string") ]);
-                  ("validator_profile", `Assoc [ ("type", `String "string") ]);
-                  ("model_label", `Assoc [ ("type", `String "string") ]);
-                  ("max_attempts", `Assoc [ ("type", `String "integer") ]);
-                  ("artifact_session_id", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "task_spec" ]);
-          ];
-    };
-    {
-      Types.name = "masc_repair_loop_status";
-      description = "Read the persisted state of an internal code repair loop.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "loop_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_repair_loop_iterate";
-      description =
-        "Execute exactly one repair-loop attempt: validate provided code, generate, or repair.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "loop_id" ]);
-          ];
-    };
-    {
-      Types.name = "masc_repair_loop_stop";
-      description = "Stop an internal code repair loop and persist terminal state.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc [ ("loop_id", `Assoc [ ("type", `String "string") ]) ] );
-            ("required", `List [ `String "loop_id" ]);
-          ];
     };
   ]
 

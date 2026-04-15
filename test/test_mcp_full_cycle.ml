@@ -73,7 +73,7 @@ let test_multi_agent_isolation () =
     | None -> fail (Printf.sprintf "agent %s not found" name)
   ) agents
 
-(** Test: Room context preserved in identity *)
+(** Test: Coord context preserved in identity *)
 let test_room_context () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

@@ -8,7 +8,7 @@ include Keeper_config
 let keeper_debug = Env_config.KeeperRuntime.debug
 
 type 'a context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
   sw: Eio.Switch.t;
   clock: 'a Eio.Time.clock;
@@ -122,6 +122,7 @@ let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
 
 type keeper_profile_defaults = {
   manifest_path : string option;
+  persona_name : string option;
   goal : string option;
   short_goal : string option;
   mid_goal : string option;
@@ -138,7 +139,7 @@ type keeper_profile_defaults = {
   room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
-  execution_scope : string option;
+  execution_scope : Keeper_execution_scope.t option;
   tool_preset : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
@@ -152,6 +153,10 @@ type keeper_profile_defaults = {
   telemetry_feedback_window_hours : int option;
   cascade_name : string option;
   models : string list option;
+  (* Turn budget overrides. None = inherit env default
+     (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
+  max_turns_per_call : int option;
+  max_turns_per_call_scheduled_autonomous : int option;
 }
 
 type persona_summary = {
@@ -165,6 +170,7 @@ type persona_summary = {
 
 let empty_keeper_profile_defaults = {
   manifest_path = None;
+  persona_name = None;
   goal = None;
   short_goal = None;
   mid_goal = None;
@@ -191,6 +197,8 @@ let empty_keeper_profile_defaults = {
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
+  max_turns_per_call = None;
+  max_turns_per_call_scheduled_autonomous = None;
   cascade_name = None;
   models = None;
 }
@@ -235,6 +243,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
+  let has key = List.mem_assoc (k key) doc in
   let removed_present =
     removed_keeper_input_key_names
     |> List.map k
@@ -248,6 +257,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (Printf.sprintf
              "removed keeper TOML keys: %s"
              (String.concat ", " fields))
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "persona_name" with
+        | Some raw when not (validate_name raw) ->
+            Error (Printf.sprintf "invalid persona_name '%s'" raw)
+        | _ -> Ok ())
   in
   let result =
     Result.bind result (fun () ->
@@ -266,6 +282,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     (fun () ->
       {
         manifest_path = None;
+        persona_name = str "persona_name";
         goal = str "goal";
         short_goal =
           str "short_goal"
@@ -291,10 +308,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
            | [] -> None
            | xs -> Some xs);
         allowed_paths =
-          (match strs "allowed_paths" with
-           | [] -> None
-           | xs -> Some xs);
-        execution_scope = str "execution_scope";
+          if has "allowed_paths" then Some (strs "allowed_paths")
+          else None;
+        execution_scope =
+          Option.map Keeper_execution_scope.of_string_lossy
+            (str "execution_scope");
         tool_preset =
           (match str "tool_preset" with
            | None -> None
@@ -315,6 +333,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+        max_turns_per_call = int_ "max_turns_per_call";
+        max_turns_per_call_scheduled_autonomous =
+          int_ "max_turns_per_call_scheduled_autonomous";
         cascade_name = normalize_cascade_name_opt (str "cascade_name");
         models =
           (match strs "models" with
@@ -379,6 +400,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
           | `Assoc _ ->
               {
                 manifest_path = Some path;
+                persona_name = Some name;
                 goal = Safe_ops.json_string_opt "goal" keeper_json;
                 short_goal =
                   normalize_goal_horizon_opt
@@ -407,11 +429,12 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "shards" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
-                allowed_paths =
-                  (match Safe_ops.json_string_list "allowed_paths" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
-                execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
+                (* Persona profiles are not allowed to own execution allowlists.
+                   Keep these in keeper TOML / runtime config only. *)
+                allowed_paths = None;
+                execution_scope =
+                  Option.map Keeper_execution_scope.of_string_lossy
+                    (Safe_ops.json_string_opt "execution_scope" keeper_json);
                 tool_preset =
                   (match Safe_ops.json_string_opt "tool_preset" keeper_json with
                   | None -> None
@@ -443,6 +466,11 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =
                   Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
+                max_turns_per_call =
+                  Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
+                max_turns_per_call_scheduled_autonomous =
+                  Safe_ops.json_int_opt
+                    "max_turns_per_call_scheduled_autonomous" keeper_json;
                 cascade_name =
                   normalize_cascade_name_opt
                     (Safe_ops.json_string_opt "cascade_name" keeper_json);
@@ -453,17 +481,110 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
+let merge_string_list ~base overlay =
+  match overlay with [] -> base | xs -> xs
+
+let merge_keeper_profile_defaults
+    ~(base : keeper_profile_defaults)
+    ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
+  let prefer overlay_value base_value =
+    match overlay_value with Some _ -> overlay_value | None -> base_value
+  in
+  {
+    manifest_path = prefer overlay.manifest_path base.manifest_path;
+    persona_name = prefer overlay.persona_name base.persona_name;
+    goal = prefer overlay.goal base.goal;
+    short_goal = prefer overlay.short_goal base.short_goal;
+    mid_goal = prefer overlay.mid_goal base.mid_goal;
+    long_goal = prefer overlay.long_goal base.long_goal;
+    will = prefer overlay.will base.will;
+    needs = prefer overlay.needs base.needs;
+    desires = prefer overlay.desires base.desires;
+    instructions = prefer overlay.instructions base.instructions;
+    policy_voice_enabled =
+      prefer overlay.policy_voice_enabled base.policy_voice_enabled;
+    mention_targets =
+      merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
+    proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
+    proactive_cooldown_sec =
+      prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
+    room_signal_prompt_enabled =
+      prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
+    shards = prefer overlay.shards base.shards;
+    allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
+    execution_scope = prefer overlay.execution_scope base.execution_scope;
+    tool_preset = prefer overlay.tool_preset base.tool_preset;
+    tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
+    tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    work_discovery_enabled =
+      prefer overlay.work_discovery_enabled base.work_discovery_enabled;
+    work_discovery_sources =
+      prefer overlay.work_discovery_sources base.work_discovery_sources;
+    work_discovery_interval_sec =
+      prefer overlay.work_discovery_interval_sec base.work_discovery_interval_sec;
+    work_discovery_guidance =
+      prefer overlay.work_discovery_guidance base.work_discovery_guidance;
+    telemetry_feedback_enabled =
+      prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      prefer overlay.telemetry_feedback_window_hours
+        base.telemetry_feedback_window_hours;
+    cascade_name = prefer overlay.cascade_name base.cascade_name;
+    models = prefer overlay.models base.models;
+    max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
+    max_turns_per_call_scheduled_autonomous =
+      prefer overlay.max_turns_per_call_scheduled_autonomous
+        base.max_turns_per_call_scheduled_autonomous;
+  }
+
+let resolved_persona_name ~keeper_name
+    (defaults : keeper_profile_defaults) : string =
+  match defaults.persona_name with
+  | Some name when String.trim name <> "" -> name
+  | _ -> keeper_name
+
 let load_keeper_profile_defaults name : keeper_profile_defaults =
-  (* Priority: TOML config/keepers/<name>.toml > persona profile.json *)
+  (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
+     If TOML sets [persona_name], load that persona first and treat TOML as a
+     thin overlay instead of duplicating the full keeper profile. *)
   match keeper_toml_path_opt name with
   | Some toml_path ->
     (match load_keeper_toml toml_path with
-     | Ok (_name, defaults) -> defaults
+     | Ok (_name, defaults) -> (
+         match defaults.persona_name with
+         | Some persona_name ->
+             let persona_defaults =
+               load_keeper_profile_defaults_from_persona persona_name
+             in
+             merge_keeper_profile_defaults ~base:persona_defaults ~overlay:defaults
+         | None -> defaults)
      | Error e ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
        load_keeper_profile_defaults_from_persona name)
   | None ->
     load_keeper_profile_defaults_from_persona name
+
+(** Clamp a profile-provided max-turns override to [1, 50] — the same range
+    enforced by [Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call].
+    Values outside the range are rejected so a typo in TOML cannot silently
+    bypass the budget envelope. *)
+let clamp_max_turns_override : int option -> int option = function
+  | Some n when n >= 1 && n <= 50 -> Some n
+  | _ -> None
+
+let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =
+  match clamp_max_turns_override profile.max_turns_per_call with
+  | Some n -> n
+  | None -> Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+
+let effective_max_turns_per_call_scheduled_autonomous
+    (profile : keeper_profile_defaults) : int =
+  let global_cap = Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call in
+  match clamp_max_turns_override profile.max_turns_per_call_scheduled_autonomous with
+  | Some n -> min n global_cap
+  | None ->
+    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
 
 type keeper_default_source_snapshot = {
   source_kind : string option;
@@ -599,27 +720,28 @@ let list_persona_summaries () : persona_summary list =
     with Sys_error _ -> []
   in
   (* Collect all persona (name, path) from all dirs; later dirs override *)
-  let seen = Hashtbl.create 32 in
+  let module SS = Set.Make (String) in
+  let raw = dirs |> List.concat_map entries_from_dir in
   let all_entries =
-    dirs
-    |> List.concat_map entries_from_dir
-    |> List.filter (fun (name, _) ->
-           if Hashtbl.mem seen name then false
-           else (Hashtbl.add seen name (); true))
+    List.fold_left (fun (acc, seen) (name, path) ->
+      if SS.mem name seen then (acc, seen)
+      else ((name, path) :: acc, SS.add name seen))
+      ([], SS.empty) raw
+    |> fun (acc, _) -> List.rev acc
   in
   all_entries
   |> List.filter_map (fun (name, path) -> load_persona_summary_from_path name path)
   |> List.sort (fun a b -> String.compare a.persona_name b.persona_name)
 
-let keeper_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
+let keeper_dir (config : Coord.config) =
+  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
   ensure_dir d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
-let session_base_dir (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "traces" in
+let session_base_dir (config : Coord.config) =
+  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
   ensure_dir d
 
 (** Strip "keeper-" prefix if already present to prevent double-prefixing.

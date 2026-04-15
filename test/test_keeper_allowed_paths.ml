@@ -1,5 +1,7 @@
 (** Test suite for Keeper_alerting_path.effective_allowed_paths.
-    Verifies computed defaults, wildcard handling, and scope-based behavior. *)
+    Verifies playground-only defaults, wildcard handling, and explicit
+    allowed_paths behavior. Workspace/local scope no longer grants any
+    hardcoded repo-root or state paths. *)
 
 open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
@@ -45,15 +47,6 @@ let with_temp_dir prefix f =
     in
     rm path
   ) (fun () -> f path)
-let workspace_defaults name =
-  [ Printf.sprintf ".masc/keepers/%s/" name;
-    ".masc/traces/";
-    "lib/"; "test/"; "config/"; "bin/"; "scripts/"; "docs/" ]
-
-let workspace_write_defaults name =
-  [ Printf.sprintf ".masc/keepers/%s/" name;
-    ".masc/traces/" ]
-
 (* ── observe_only scope ── *)
 
 let test_observe_only_empty_paths () =
@@ -71,34 +64,33 @@ let test_observe_only_explicit_paths () =
 
 (* ── workspace scope ── *)
 
-let test_workspace_empty_paths_computed_default () =
+let test_workspace_empty_paths_playground_only () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"sangsu" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + [] = playground bundle + computed default"
-    (playground_bundle "sangsu" @ workspace_defaults "sangsu") effective
+  check (list string) "workspace + [] = playground bundle only"
+    (playground_bundle "sangsu") effective
 
 let test_workspace_explicit_paths () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["src/"; "docs/"] ~name:"t" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "workspace + explicit = playground bundle + ws defaults + explicit"
-    (playground_bundle "t" @ workspace_defaults "t" @ ["src/"; "docs/"]) effective
+  check (list string) "workspace + explicit = playground bundle + explicit"
+    (playground_bundle "t" @ ["src/"; "docs/"]) effective
 
-let test_workspace_write_paths_keep_playground_and_state_only () =
+let test_workspace_write_paths_playground_only () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"sangsu" () in
   let effective = KAP.effective_write_allowed_paths ~meta in
-  check (list string) "workspace write defaults exclude repo roots"
-    (playground_bundle "sangsu" @ workspace_write_defaults "sangsu") effective
+  check (list string) "workspace write defaults are playground-only"
+    (playground_bundle "sangsu") effective
 
 let test_workspace_write_paths_preserve_explicit_overrides () =
   let meta = make_meta ~execution_scope:"workspace"
       ~allowed_paths:["workspace/yousleepwhen/oas/"] ~name:"t" () in
   let effective = KAP.effective_write_allowed_paths ~meta in
   check (list string) "explicit write override preserved"
-    (playground_bundle "t" @ workspace_write_defaults "t"
-     @ ["workspace/yousleepwhen/oas/"]) effective
+    (playground_bundle "t" @ ["workspace/yousleepwhen/oas/"]) effective
 
 let test_workspace_star_wildcard () =
   let meta = make_meta ~execution_scope:"workspace"
@@ -126,30 +118,22 @@ let test_star_wildcard_any_scope () =
 
 let test_explicit_paths_any_scope () =
   let paths = ["lib/keeper/"; "test/"] in
-  let non_ws_expected = playground_bundle "t" @ ["lib/keeper/"; "test/"] in
-  (* non-workspace scopes: playground bundle + explicit only *)
+  let expected = playground_bundle "t" @ ["lib/keeper/"; "test/"] in
   List.iter (fun scope ->
     let meta = make_meta ~execution_scope:scope ~allowed_paths:paths ~name:"t" () in
     let effective = KAP.effective_allowed_paths ~meta in
     check (list string) (scope ^ " + explicit = playground bundle + explicit")
-      non_ws_expected effective
-  ) ["observe_only"; "local"];
-  (* workspace scope: playground bundle + workspace defaults + explicit *)
-  let ws_meta = make_meta ~execution_scope:"workspace"
-      ~allowed_paths:paths ~name:"t" () in
-  let ws_effective = KAP.effective_allowed_paths ~meta:ws_meta in
-  check (list string) "workspace + explicit = playground bundle + ws defaults + explicit"
-    (playground_bundle "t" @ workspace_defaults "t" @ ["lib/keeper/"; "test/"]) ws_effective
+      expected effective
+  ) ["observe_only"; "workspace"; "local"]
 
-(* ── keeper name in computed default ── *)
+(* ── keeper name in playground default ── *)
 
-let test_computed_default_uses_keeper_name () =
+let test_playground_default_uses_keeper_name () =
   let meta = make_meta ~execution_scope:"workspace"
       ~name:"cdal-formalist" () in
   let effective = KAP.effective_allowed_paths ~meta in
-  check (list string) "name embedded in path"
-    (playground_bundle "cdal-formalist" @
-     workspace_defaults "cdal-formalist") effective
+  check (list string) "name embedded in playground path"
+    (playground_bundle "cdal-formalist") effective
 
 (* ── playground path ── *)
 
@@ -183,7 +167,7 @@ let test_ensure_playground_bundle_creates_subdirs () =
   ) (fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let config = Masc_mcp.Room.default_config dir in
+    let config = Masc_mcp.Coord.default_config dir in
     let created = KAP.ensure_playground_bundle ~config ~name:"abc" in
     check int "bundle size" 3 (List.length created);
     List.iter (fun path ->
@@ -195,7 +179,7 @@ let with_temp_config f =
   with_temp_dir "keeper_default_root_" (fun dir ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    f (Masc_mcp.Room.default_config dir))
+    f (Masc_mcp.Coord.default_config dir))
 
 let check_default_roots_use_playground (meta : KT.keeper_meta) =
   with_temp_config (fun config ->
@@ -295,12 +279,12 @@ let () =
             test_observe_only_empty_paths;
           test_case "observe_only + explicit = playground + explicit" `Quick
             test_observe_only_explicit_paths;
-          test_case "workspace + [] = playground + computed default" `Quick
-            test_workspace_empty_paths_computed_default;
+          test_case "workspace + [] = playground only" `Quick
+            test_workspace_empty_paths_playground_only;
           test_case "workspace + explicit = playground + explicit" `Quick
             test_workspace_explicit_paths;
-          test_case "workspace write defaults stay in playground/state only" `Quick
-            test_workspace_write_paths_keep_playground_and_state_only;
+          test_case "workspace write defaults are playground-only" `Quick
+            test_workspace_write_paths_playground_only;
           test_case "workspace write defaults preserve explicit overrides" `Quick
             test_workspace_write_paths_preserve_explicit_overrides;
           test_case "workspace + [*] = full access" `Quick
@@ -311,8 +295,8 @@ let () =
             test_star_wildcard_any_scope;
           test_case "explicit paths any scope" `Quick
             test_explicit_paths_any_scope;
-          test_case "keeper name in computed default" `Quick
-            test_computed_default_uses_keeper_name;
+          test_case "keeper name in playground default" `Quick
+            test_playground_default_uses_keeper_name;
         ] );
       ( "playground",
         [

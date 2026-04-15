@@ -31,7 +31,7 @@ const activeView = computed<FleetHealthView>(() => {
 const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
   { key: 'default',      label: '개요' },
   { key: 'event-log',    label: '이벤트 로그' },
-  { key: 'comparison',   label: 'Fleet 비교' },
+  { key: 'comparison',   label: 'Keeper 비교' },
   { key: 'tool-quality', label: '도구 품질' },
   { key: 'governance',   label: '거버넌스' },
 ]
@@ -62,9 +62,12 @@ export function FleetHealthPanel() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-medium text-[var(--text-strong)]">Fleet 건강</h2>
-      </div>
+        <div class="flex flex-col gap-1">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">운영 신호 묶음</div>
+          <p class="m-0 text-[12px] leading-[1.55] text-[var(--text-muted)]">
+            이 화면은 roster가 아니라 이벤트, 비교, 도구 품질, 거버넌스 같은 플릿 신호를 보는 곳입니다.
+          </p>
+        </div>
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

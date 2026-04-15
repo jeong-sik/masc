@@ -2,7 +2,7 @@ open Alcotest
 
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Briefing = Masc_mcp.Dashboard_mission_briefing.For_test
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_mission_briefing_" "" in
@@ -87,8 +87,8 @@ let test_briefing_cold_call_returns_pending () =
        | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
       Briefing.reset_cache ();
-      let config = Room.default_config base_path in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_path in
+      ignore (Coord.init config ~agent_name:None);
       let json =
         Dashboard_mission_briefing.json
           ~config ~sw ~clock ~proc_mgr:None ()
@@ -112,8 +112,8 @@ let test_force_refresh_without_cache_returns_pending () =
       cleanup_dir base_path)
     (fun () ->
       Briefing.reset_cache ();
-      let config = Room.default_config base_path in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_path in
+      ignore (Coord.init config ~agent_name:None);
       let json =
         Dashboard_mission_briefing.json
           ~force:true ~config ~sw ~clock ~proc_mgr:None ()
@@ -136,8 +136,8 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       cleanup_dir base_path)
     (fun () ->
       Briefing.reset_cache ();
-      let config = Room.default_config base_path in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_path in
+      ignore (Coord.init config ~agent_name:None);
       Briefing.seed_cache
         ~cached_at:(Unix.gettimeofday ())
         (`Assoc
@@ -182,7 +182,7 @@ let test_compact_session_json_normalizes_missing_fields () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("goal", `Null); ("namespace_id", `Null); ("status", `Null) ]);
+              ("session", `Assoc [ ("goal", `Null); ("status", `Null) ]);
               ("summary", `Assoc []);
               ("team_health", `Assoc []);
               ("communication_metrics", `Assoc []);
@@ -192,7 +192,7 @@ let test_compact_session_json_normalizes_missing_fields () =
   in
   let compact = Briefing.compact_session_json json in
   check_string_field compact "goal" "unassigned";
-  check_string_field compact "namespace_id" "unknown-namespace";
+  check_string_field compact "project" "default";
   check_string_field compact "status" "unknown";
   check_list_field compact "agent_names" 0;
   check_int_field compact "active_agents_count" 0;
@@ -246,7 +246,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("namespace_id", `String "default"); ("status", `String "interrupted") ]);
+              ("session", `Assoc [ ("project", `String "default"); ("status", `String "interrupted") ]);
               ("summary", `Assoc []);
             ] );
         ("recent_events", `List []);
@@ -259,7 +259,7 @@ let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
         ( "status",
           `Assoc
             [
-              ("session", `Assoc [ ("namespace_id", `String "default"); ("status", `String "running") ]);
+              ("session", `Assoc [ ("project", `String "default"); ("status", `String "running") ]);
               ("summary", `Assoc []);
             ] );
         ( "recent_events",

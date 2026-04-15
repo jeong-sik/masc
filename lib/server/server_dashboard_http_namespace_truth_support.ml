@@ -214,7 +214,7 @@ let derived_meta_attention_item ~meta_cognition_json
                  ] );
            ])
 
-let derived_operator_digest_json (config : Room.config) _execution_json
+let derived_operator_digest_json (config : Coord.config) _execution_json
     meta_cognition_json meta_interpretation =
   let meta_attention =
     Option.bind meta_interpretation
@@ -339,7 +339,7 @@ let namespace_truth_command_summary_json command_summary_json =
       ("provenance", `String "truth");
     ]
 
-let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
+let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
   let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in
   let meta_summary_input, meta_interpretation =
@@ -362,9 +362,14 @@ let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell
   let execution_summary = execution_summary_json execution_json in
   let command_summary = namespace_truth_command_summary_json command_summary_json in
   let shell_counts = json_assoc_field "counts" shell_json in
+  let configured_keepers =
+    Yojson.Safe.Util.member "configured_keepers" shell_json
+  in
   let runtime_count =
-    json_int_field "agents" shell_counts ~default:0
-    + json_int_field "keepers" shell_counts ~default:0
+    json_int_field "total_runtimes" shell_counts
+      ~default:
+        ( json_int_field "agents" shell_counts ~default:0
+        + json_int_field "keepers" shell_counts ~default:0 )
   in
   let focus_json =
     dashboard_namespace_truth_focus_json ~initialized ~runtime_count
@@ -375,13 +380,14 @@ let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell
       [
         ("status", json_assoc_field "status" shell_json);
         ("counts", json_assoc_field "counts" shell_json);
+        ("configured_keepers", configured_keepers);
         ("provenance", `String "truth");
       ]
   in
   `Assoc
       [
         ("generated_at", `String (Types.now_iso ()));
-        ("namespace", namespace_block);
+        ("root", namespace_block);
         ( "execution",
         `Assoc
           [

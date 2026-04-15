@@ -15,6 +15,7 @@ module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Oas_model_resolve
+module AQ = Masc_mcp.Keeper_approval_queue
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -64,6 +65,13 @@ let contains_substring haystack needle =
     else loop (i + 1)
   in
   needle_len = 0 || loop 0
+
+let source_file_contains file_rel needle =
+  let path = Filename.concat (repo_root ()) file_rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> contains_substring (In_channel.input_all ic) needle)
 
 let contains_disallowed_control_char s =
   let rec loop i =
@@ -198,8 +206,8 @@ let test_observe_uses_precollected_board_events () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
            ~title:"Need sangsu" ~content:"@test-keeper please check this"
@@ -219,7 +227,7 @@ let test_observe_uses_precollected_board_events () =
       check int "precollected board events preserved" (List.length events)
         (List.length obs.pending_board_events);
       check bool "board event schedules turn" true
-        (WO.should_run_unified_turn ~meta:minimal_meta obs))
+        (WO.should_run_keeper_cycle ~meta:minimal_meta obs))
 
 let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
   let base_dir = temp_dir () in
@@ -232,8 +240,8 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       (match
          Masc_mcp.Board_dispatch.create_post ~author:"alice"
            ~title:"General update" ~content:"No direct mention here"
@@ -263,8 +271,8 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
       let post_id =
         match
           Masc_mcp.Board_dispatch.create_post ~author:"alice"
@@ -321,7 +329,7 @@ let test_scheduled_turn_uses_cooldown_only () =
   in
   let obs = { base_observation with idle_seconds = 0 } in
   check bool "cooldown opens scheduled turn without idle heuristic" true
-    (WO.should_run_unified_turn ~meta obs)
+    (WO.should_run_keeper_cycle ~meta obs)
 
 let test_scheduled_turn_respects_cooldown () =
   let meta =
@@ -338,7 +346,7 @@ let test_scheduled_turn_respects_cooldown () =
     }
   in
   check bool "cooldown blocks scheduled turn" false
-    (WO.should_run_unified_turn ~meta base_observation)
+    (WO.should_run_keeper_cycle ~meta base_observation)
 
 let test_scheduled_turn_requires_idle_gate () =
   let meta =
@@ -358,8 +366,8 @@ let test_scheduled_turn_requires_idle_gate () =
   in
   let obs = { base_observation with idle_seconds = 120 } in
   check bool "idle gate blocks scheduled turn" false
-    (WO.should_run_unified_turn ~meta obs);
-  let decision = WO.unified_turn_decision ~meta obs in
+    (WO.should_run_keeper_cycle ~meta obs);
+  let decision = WO.keeper_cycle_decision ~meta obs in
   check bool "decision records idle wait reason" true
     (match decision.verdict with
      | WO.Skip { reasons = (first, rest)} ->
@@ -467,7 +475,7 @@ let test_idle_decay_triggers_turn () =
     }
   in
   check bool "idle decay triggers turn before base cooldown" true
-    (WO.should_run_unified_turn ~meta base_observation)
+    (WO.should_run_keeper_cycle ~meta base_observation)
 
 let test_scheduled_turn_decision_uses_backlog_acceleration () =
   let meta =
@@ -492,7 +500,7 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
       failed_task_count = 2;
     }
   in
-  let decision = WO.unified_turn_decision ~meta obs in
+  let decision = WO.keeper_cycle_decision ~meta obs in
   check bool "backlog acceleration opens scheduled turn" true decision.should_run;
   check bool "marks actionable backlog" true
     (match decision.verdict with
@@ -506,7 +514,7 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
-let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
+let test_verdict_reasons_to_strings_uses_structured_run_tags () =
   let verdict =
     WO.Run
       {
@@ -520,17 +528,15 @@ let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
             ] );
       }
   in
-  check (list string) "legacy run tokens preserved"
+  check (list string) "structured run tags"
     [ "scheduled_autonomous_turn";
-      "idle_gate_elapsed";
+      "idle_cooldown_elapsed";
       "cooldown_elapsed";
-      "actionable_backlog";
-      "unclaimed_tasks";
-      "failed_tasks";
+      "task_backlog";
       "task_reactive_cooldown_elapsed" ]
     (WO.verdict_reasons_to_strings verdict)
 
-let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =
+let test_verdict_reasons_to_strings_uses_structured_skip_tags () =
   let idle_gate_verdict =
     WO.Skip
       {
@@ -545,12 +551,54 @@ let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =
           ( WO.Cooldown_pending { remaining_sec = 60 }, [] );
       }
   in
-  check (list string) "legacy idle-gate skip tokens preserved"
-    [ "scheduled_autonomous_turn"; "idle_gate_wait" ]
+  check (list string) "structured idle-gate skip tags"
+    [ "idle_gate_pending" ]
     (WO.verdict_reasons_to_strings idle_gate_verdict);
-  check (list string) "legacy cooldown skip tokens preserved"
-    [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
+  check (list string) "structured cooldown skip tags"
+    [ "cooldown_pending" ]
     (WO.verdict_reasons_to_strings cooldown_verdict)
+
+let test_paused_keeper_blocks_turns_even_with_reactive_signal () =
+  let meta = { minimal_meta with paused = true } in
+  let obs =
+    { base_observation with pending_mentions = [ ("alice", "@keeper wake up") ] }
+  in
+  let decision = WO.unified_turn_decision ~meta obs in
+  check bool "paused keeper does not run" false decision.should_run;
+  check string "channel stays reactive" "reactive"
+    (WO.channel_to_string decision.channel);
+  check (list string) "paused reason is surfaced"
+    [ "keeper_paused" ]
+    (WO.verdict_reasons_to_strings decision.verdict)
+
+let test_pending_approval_blocks_turns_until_resolved () =
+  Eio_main.run @@ fun _env ->
+  let reactive_obs =
+    {
+      base_observation with
+      pending_mentions = [ ("alice", "@keeper continue") ];
+    }
+  in
+  let id =
+    AQ.submit_pending
+      ~keeper_name:minimal_meta.name
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input:(`Assoc [ ("kind", `String "reconcile_required") ])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun _ -> ())
+  in
+  let decision = WO.unified_turn_decision ~meta:minimal_meta reactive_obs in
+  check bool "approval pending blocks turn" false decision.should_run;
+  check (list string) "approval pending reason is surfaced"
+    [ "approval_pending" ]
+    (WO.verdict_reasons_to_strings decision.verdict);
+  match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+  | Ok () ->
+    let resumed = WO.unified_turn_decision ~meta:minimal_meta reactive_obs in
+    check bool "approval resolve re-opens reactive scheduling" true resumed.should_run;
+    check string "resolved approval restores reactive channel" "reactive"
+      (WO.channel_to_string resumed.channel)
+  | Error msg -> Alcotest.fail ("resolve failed: " ^ msg)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =
   with_env "MASC_KEEPER_PROACTIVE_TASK_MIN_COOLDOWN_SEC" "0" (fun () ->
@@ -576,7 +624,7 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
         failed_task_count = 1;
       }
     in
-    let decision = WO.unified_turn_decision ~meta obs in
+    let decision = WO.keeper_cycle_decision ~meta obs in
     check (option int) "task reactive cooldown clamps to positive floor" (Some 300)
       decision.task_reactive_cooldown)
 
@@ -835,6 +883,44 @@ let test_prompt_room_state_section () =
        with Not_found -> false
      in found)
 
+let test_prompt_includes_claim_first_guidance () =
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      active_agent_count = 5;
+    }
+  in
+  let sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "system prompt explains auto-claim" true
+    (contains_substring sys "Call keeper_task_claim with {}");
+  check bool "user prompt adds immediate task move section" true
+    (contains_substring user "### Immediate Task Move");
+  check bool "user prompt explains no task_id needed" true
+    (contains_substring user "Do not wait for keeper_tasks_list");
+  check bool "user prompt prefers claim before browsing" true
+    (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_shell")
+
+let test_prompt_omits_claim_first_guidance_when_task_claimed () =
+  let current_task_id =
+    match Masc_mcp.Keeper_id.Task_id.of_string "task-123" with
+    | Ok value -> value
+    | Error err -> fail ("task id parse failed: " ^ err)
+  in
+  let meta = { minimal_meta with current_task_id = Some current_task_id } in
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      active_agent_count = 5;
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta ~observation:obs ()
+  in
+  check bool "no immediate task move section once task claimed" false
+    (contains_substring user "### Immediate Task Move")
+
 (* ---------- Config tests ---------- *)
 
 let test_unified_turn_runtime_defaults () =
@@ -852,6 +938,20 @@ let test_unified_turn_runtime_defaults () =
 let test_meta_defaults_social_model () =
   check string "default social model" "bdi_speech_v1"
     minimal_meta.social_model
+
+let test_social_model_registry_round_trip () =
+  check (option string) "known model id resolves"
+    (Some "bdi_speech_v1")
+    (KSM.model_id_of_string "bdi_speech_v1"
+    |> Option.map KSM.model_id_to_string);
+  check (option string) "second model id resolves"
+    (Some "magentic_ledger_v1")
+    (KSM.model_id_of_string "magentic_ledger_v1"
+    |> Option.map KSM.model_id_to_string);
+  check bool "unknown model id rejected" true
+    (Option.is_none (KSM.model_id_of_string "experimental_v99"));
+  check string "unknown model normalized to baseline" "bdi_speech_v1"
+    (KSM.normalize_social_model "experimental_v99")
 
 (* ---------- Metrics observation tests ---------- *)
 
@@ -1230,7 +1330,7 @@ let test_silent_proactive_cycle_advances_cooldown_anchor () =
   check bool "silent proactive leaves last_visible_ts untouched" true
     (updated.runtime.proactive_rt.last_visible_ts = 0.0);
   check bool "cooldown blocks immediate rerun after silent cycle" false
-    (WO.should_run_unified_turn ~meta:updated base_observation)
+    (WO.should_run_keeper_cycle ~meta:updated base_observation)
 
 let test_metrics_reactive_failure_does_not_mutate_proactive_runtime () =
   let reactive_observation =
@@ -1284,7 +1384,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let validation : Agent_sdk.Raw_trace.run_validation = {
         run_ref = sample_run_ref; ok = true;
         checks = []; evidence = ["tool_paired:keeper_board_list"];
@@ -1473,7 +1573,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       let validation : Agent_sdk.Raw_trace.run_validation = {
         run_ref = sample_run_ref; ok = true;
         checks = []; evidence = ["tool_paired:keeper_fs_read"];
@@ -1530,7 +1630,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
 
-let test_run_unified_turn_skips_non_executable_phase () =
+let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -1546,7 +1646,7 @@ let test_run_unified_turn_skips_non_executable_phase () =
       KR.clear ();
       Unix.putenv "MASC_BASE_PATH" base_dir;
       let meta = make_meta "phase-gated-keeper" in
-      let config = Masc_mcp.Room.default_config base_dir in
+      let config = Masc_mcp.Coord.default_config base_dir in
       ignore (KR.register ~base_path:base_dir meta.name meta);
       (match KR.dispatch_event ~base_path:base_dir meta.name KP.Operator_pause with
        | Ok _ -> ()
@@ -1556,7 +1656,7 @@ let test_run_unified_turn_skips_non_executable_phase () =
         (Option.map KP.phase_to_string
            (KR.get_phase ~base_path:base_dir meta.name));
       match
-        UT.run_unified_turn
+        UT.run_keeper_cycle
           ~config
           ~meta
           ~observation:base_observation
@@ -1573,6 +1673,20 @@ let test_run_unified_turn_skips_non_executable_phase () =
             (Some "paused")
             (Option.map KP.phase_to_string
                (KR.get_phase ~base_path:base_dir meta.name)))
+
+let test_run_keeper_cycle_records_trajectory_source_contract () =
+  check bool "keeper cycle creates trajectory accumulator" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Trajectory.create_accumulator");
+  check bool "keeper cycle passes trajectory_acc to agent run" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~trajectory_acc");
+  check bool "keeper cycle resolves masc root via Coord.masc_root_dir" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Coord.masc_root_dir config");
+  check bool "keeper cycle finalizes trajectory on completion/failure" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Trajectory.finalize trajectory_acc")
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -1619,16 +1733,25 @@ let test_metrics_persist_social_state_fields () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let routed, social_state =
+      let routed, social_state, transition_reason =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       let updated =
         UT.update_metrics_from_result minimal_meta ~latency_ms:100
-          ~observation:base_observation ~social_state routed
+          ~observation:base_observation ~social_state
+          ~social_transition_reason:
+            (KSM.transition_reason_to_string transition_reason)
+          routed
       in
+      check string "active desire tracked" "maintain_quiet_readiness"
+        updated.runtime.last_active_desire;
+      check string "current intention tracked" "stay_available_without_noise"
+        updated.runtime.last_current_intention;
       check string "speech act tracked" "stay_silent"
         updated.runtime.last_speech_act;
+      check string "transition reason tracked" "headers:explicit_social_headers"
+        updated.runtime.last_social_transition_reason;
       check string "no blocker tracked" "" updated.runtime.last_blocker;
       check string "no need tracked" "" updated.runtime.last_need)
 
@@ -1636,7 +1759,8 @@ let test_metrics_failure_response () =
   let reason = "Agent run failed: Max turns exceeded (turn 10, limit 10)" in
   let updated =
     UT.update_metrics_from_failure minimal_meta ~latency_ms:250
-      ~observation:base_observation ~reason ()
+      ~observation:base_observation ~reason
+      ~social_transition_reason:"failure:run_error" ()
   in
   check int "total_turns +1" (minimal_meta.runtime.usage.total_turns + 1) updated.runtime.usage.total_turns;
   check int "latency recorded" 250 updated.runtime.usage.last_latency_ms;
@@ -1667,7 +1791,9 @@ let test_metrics_failure_response () =
          true
        with Not_found -> false
      in
-     found)
+     found);
+  check string "failure transition reason tracked" "failure:run_error"
+    updated.runtime.last_social_transition_reason
 
 let test_prompt_includes_board_activity_section () =
   let obs =
@@ -2327,9 +2453,9 @@ let test_social_model_silences_skip_only_turn () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let routed, state =
+      let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       check string "speech act" "stay_silent"
         (KSM.speech_act_to_string state.speech_act);
@@ -2337,6 +2463,37 @@ let test_social_model_silences_skip_only_turn () =
         (KSM.delivery_surface_to_string state.delivery_surface);
       check string "visible response suppressed" "" routed.response_text;
       check (list string) "no synthetic tools" [] routed.tools_used)
+
+let test_social_model_unknown_meta_falls_back_to_baseline () =
+  let meta = { minimal_meta with social_model = "experimental_v99" } in
+  let result =
+    make_run_result ~text:"I can respond normally." ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
+  in
+  let routed, state, _ =
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
+  in
+  check string "unknown meta model falls back to baseline"
+    "bdi_speech_v1" state.social_model;
+  check string "visible response preserved"
+    "I can respond normally." routed.response_text
+
+let test_social_model_unknown_header_falls_back_to_baseline () =
+  let result =
+    make_run_result
+      ~text:
+        "SOCIAL_MODEL: experimental_v99\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
+  in
+  let routed, state, _ =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation ~previous_state:None result
+  in
+  check string "unknown header model falls back to baseline"
+    "bdi_speech_v1" state.social_model;
+  check string "visible response suppressed" "" routed.response_text
 
 let test_social_model_infers_visible_reply_without_headers () =
   let result =
@@ -2347,9 +2504,9 @@ let test_social_model_infers_visible_reply_without_headers () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let routed, state =
+      let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       check string "speech act" "inform"
         (KSM.speech_act_to_string state.speech_act);
@@ -2365,9 +2522,9 @@ let test_social_model_empty_text_without_headers_stays_silent () =
     make_run_result ~text:"" ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, transition_reason =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "defer"
     (KSM.speech_act_to_string state.speech_act);
@@ -2375,6 +2532,9 @@ let test_social_model_empty_text_without_headers_stays_silent () =
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "blocker notes empty protocol violation"
     (Some "no tool calls and no social headers") state.blocker;
+  check string "transition reason"
+    "protocol_violation:no_tool_calls_and_no_social_headers"
+    (KSM.transition_reason_to_string transition_reason);
   check string "visible response suppressed" "" routed.response_text;
   check (list string) "no synthetic tools" [] routed.tools_used
 
@@ -2386,9 +2546,9 @@ let test_social_model_state_only_reply_stays_silent () =
       ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "defer"
     (KSM.speech_act_to_string state.speech_act);
@@ -2404,9 +2564,9 @@ let test_social_model_strips_state_block_from_visible_reply () =
       ~tools:[]
       ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
   in
-  let routed, state =
+  let routed, state, _ =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "inform"
     (KSM.speech_act_to_string state.speech_act);
@@ -2434,11 +2594,11 @@ let test_social_model_routes_blocker_to_board_post () =
       Masc_mcp.Board.reset_global_for_test ();
       Masc_mcp.Board_dispatch.reset_for_test ();
       Masc_mcp.Board_dispatch.init_jsonl ();
-      let config = Masc_mcp.Room.default_config base_dir in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "observer"));
-      let routed, state =
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      let routed, state, _ =
         KSM.apply_to_result ~meta:minimal_meta
-          ~observation:base_observation result
+          ~observation:base_observation ~previous_state:None result
       in
       let posts =
         Masc_mcp.Board_dispatch.list_posts
@@ -2465,16 +2625,88 @@ let test_social_model_tool_only_turn_skips_protocol_violation () =
     make_run_result ~text:"" ~tools:["masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
-  let routed, state =
+  let routed, state, transition_reason =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "inform"
     (KSM.speech_act_to_string state.speech_act);
   check string "delivery surface" "visible_reply"
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
+  check string "transition reason" "tool_only:visible_reply"
+    (KSM.transition_reason_to_string transition_reason);
   check bool "tool-only turn synthesizes visible response" true
+    (contains_substring routed.response_text "Tools used: masc_status.");
+  check (list string) "tool list preserved" ["masc_status"] routed.tools_used
+
+let test_social_model_previous_state_of_meta_restores_runtime_fields () =
+  let meta =
+    {
+      minimal_meta with
+      runtime =
+        {
+          minimal_meta.runtime with
+          last_speech_act = "request_help";
+          last_social_transition_reason = "headers:explicit_social_headers";
+          last_active_desire = "seek_help";
+          last_current_intention = "recover_tool_route";
+          last_blocker = "tool route unavailable";
+          last_need = "operator guidance";
+        };
+    }
+  in
+  match KSM.previous_state_of_meta meta with
+  | None -> fail "expected previous social state"
+  | Some state ->
+      check string "social model restored" "bdi_speech_v1" state.social_model;
+      check (option string) "active desire restored"
+        (Some "seek_help") state.active_desire;
+      check (option string) "current intention restored"
+        (Some "recover_tool_route") state.current_intention;
+      check (option string) "blocker restored"
+        (Some "tool route unavailable") state.blocker;
+      check (option string) "need restored"
+        (Some "operator guidance") state.need;
+      check string "speech act restored" "request_help"
+        (KSM.speech_act_to_string state.speech_act);
+      check string "delivery surface inferred from speech act" "board_post"
+        (KSM.delivery_surface_to_string state.delivery_surface)
+
+let test_social_model_tool_only_turn_carries_previous_state () =
+  let result =
+    make_run_result ~text:"" ~tools:["masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let previous_state =
+    Some
+      KSM.
+        {
+          social_model = "bdi_speech_v1";
+          belief_summary = "mentions=1";
+          active_desire = Some "seek_help";
+          current_intention = Some "recover_tool_route";
+          blocker = Some "tool route unavailable";
+          need = Some "operator guidance";
+          speech_act = Request_help;
+          delivery_surface = Board_post;
+        }
+  in
+  let routed, state, _ =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation ~previous_state result
+  in
+  check string "speech act becomes inform for tool-only turn" "inform"
+    (KSM.speech_act_to_string state.speech_act);
+  check (option string) "active desire carried"
+    (Some "seek_help") state.active_desire;
+  check (option string) "current intention carried"
+    (Some "recover_tool_route") state.current_intention;
+  check (option string) "need carried"
+    (Some "operator guidance") state.need;
+  check (option string) "blocker not carried into tool-only turn" None
+    state.blocker;
+  check bool "tool-only response still synthesized" true
     (contains_substring routed.response_text "Tools used: masc_status.");
   check (list string) "tool list preserved" ["masc_status"] routed.tools_used
 
@@ -2483,20 +2715,125 @@ let test_social_model_infers_board_comment_from_tool_use () =
     make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
       ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
   in
-  let routed, state =
+  let routed, state, transition_reason =
     KSM.apply_to_result ~meta:minimal_meta
-      ~observation:base_observation result
+      ~observation:base_observation ~previous_state:None result
   in
   check string "speech act" "comment_board"
     (KSM.speech_act_to_string state.speech_act);
   check string "delivery surface" "board_comment"
     (KSM.delivery_surface_to_string state.delivery_surface);
   check (option string) "no protocol violation blocker" None state.blocker;
+  check string "transition reason" "tool_only:comment_board"
+    (KSM.transition_reason_to_string transition_reason);
   check bool "tool turn keeps synthesized visible response" true
     (contains_substring routed.response_text
        "Tools used: keeper_board_comment, masc_status.");
   check (list string) "tool list preserved"
     ["keeper_board_comment"; "masc_status"] routed.tools_used
+
+let test_social_model_magentic_ledger_silences_tool_only_turn () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let result =
+    make_run_result ~text:"" ~tools:["masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
+  in
+  check string "social model" "magentic_ledger_v1" state.social_model;
+  check string "speech act" "stay_silent"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "silent"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check (option string) "active desire reflects progress ledger"
+    (Some "advance_task_progress") state.active_desire;
+  check (option string) "current intention tracks evidence"
+    (Some "record_progress_evidence") state.current_intention;
+  check string "transition reason" "tool_only:progress_ledger"
+    (KSM.transition_reason_to_string transition_reason);
+  check bool "belief summary is ledger shaped" true
+    (contains_substring state.belief_summary "ledger:phase=advancing");
+  check string "visible response suppressed" "" routed.response_text;
+  check (list string) "tool list preserved" ["masc_status"] routed.tools_used
+
+let test_social_model_magentic_ledger_hides_nonvisible_tool_text () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let result =
+    make_run_result ~text:"" ~tools:["keeper_board_comment"; "masc_status"]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let routed, state, transition_reason =
+    KSM.apply_to_result ~meta ~observation:base_observation
+      ~previous_state:None result
+  in
+  check string "social model" "magentic_ledger_v1" state.social_model;
+  check string "speech act" "comment_board"
+    (KSM.speech_act_to_string state.speech_act);
+  check string "delivery surface" "board_comment"
+    (KSM.delivery_surface_to_string state.delivery_surface);
+  check string "transition reason preserved" "tool_only:comment_board"
+    (KSM.transition_reason_to_string transition_reason);
+  check string "non-visible tool turn does not synthesize text" ""
+    routed.response_text;
+  check (list string) "tool list preserved"
+    ["keeper_board_comment"; "masc_status"] routed.tools_used
+
+let test_social_model_magentic_ledger_previous_state_of_meta_restores_model ()
+    =
+  let meta =
+    {
+      minimal_meta with
+      social_model = "magentic_ledger_v1";
+      runtime =
+        {
+          minimal_meta.runtime with
+          last_speech_act = "inform";
+          last_active_desire = "advance_task_progress";
+          last_current_intention = "record_progress_evidence";
+        };
+    }
+  in
+  match KSM.previous_state_of_meta meta with
+  | None -> fail "expected previous social state"
+  | Some state ->
+      check string "social model restored" "magentic_ledger_v1"
+        state.social_model;
+      check string "speech act restored" "inform"
+        (KSM.speech_act_to_string state.speech_act)
+
+let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
+  let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
+  let previous_state =
+    Some
+      {
+        KSM.social_model = "magentic_ledger_v1";
+        belief_summary = "ledger:phase=stalled; event=goal_idle_timeout";
+        active_desire = Some "recover_forward_motion";
+        current_intention = Some "request_replan";
+        blocker = Some "stalled_without_progress_evidence";
+        need = Some "fresh_plan_or_external_delta";
+        speech_act = KSM.Stay_silent;
+        delivery_surface = KSM.Silent;
+      }
+  in
+  let observation =
+    { base_observation with active_goals = [ "goal-1" ]; idle_seconds = 0 }
+  in
+  let result =
+    make_run_result ~text:"" ~tools:[]
+      ~model:"test-model" ~input_tok:10 ~output_tok:1 ()
+  in
+  let _, state, _ =
+    KSM.apply_to_result ~meta ~observation ~previous_state result
+  in
+  check (option string) "stalled desire carried" (Some "recover_forward_motion")
+    state.active_desire;
+  check (option string) "stalled intention carried" (Some "request_replan")
+    state.current_intention;
+  check bool "belief summary remains stalled" true
+    (contains_substring state.belief_summary "ledger:phase=stalled")
 
 let test_keeper_allowed_tools_exclude_heartbeat () =
   let allowed =
@@ -2664,7 +3001,7 @@ let test_recent_tool_streak_count_ignores_stale_entries () =
 (* ---------- Test runner ---------- *)
 
 let () =
-  run "Keeper Unified Turn"
+  run "Keeper Cycle"
     [
       ( "world_observation",
         [
@@ -2706,10 +3043,14 @@ let () =
             test_idle_decay_triggers_turn;
           test_case "scheduled decision uses backlog acceleration" `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration;
-          test_case "verdict reasons preserve legacy run tokens" `Quick
-            test_verdict_reasons_to_strings_preserves_legacy_run_tokens;
-          test_case "verdict reasons preserve legacy skip tokens" `Quick
-            test_verdict_reasons_to_strings_preserves_legacy_skip_tokens;
+          test_case "verdict reasons use structured run tags" `Quick
+            test_verdict_reasons_to_strings_uses_structured_run_tags;
+          test_case "verdict reasons use structured skip tags" `Quick
+            test_verdict_reasons_to_strings_uses_structured_skip_tags;
+          test_case "paused keeper blocks turns" `Quick
+            test_paused_keeper_blocks_turns_even_with_reactive_signal;
+          test_case "pending approval blocks turns" `Quick
+            test_pending_approval_blocks_turns_until_resolved;
           test_case "task reactive cooldown floor never hits zero" `Quick
             test_task_reactive_cooldown_floor_never_hits_zero;
           test_case "with goals" `Quick test_observation_with_goals;
@@ -2744,6 +3085,10 @@ let () =
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "room state section" `Quick test_prompt_room_state_section;
+          test_case "claim first guidance" `Quick
+            test_prompt_includes_claim_first_guidance;
+          test_case "claim first guidance omitted when task claimed" `Quick
+            test_prompt_omits_claim_first_guidance_when_task_claimed;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
           test_case "sanitize_text_utf8 replaces control chars" `Quick
@@ -2836,8 +3181,14 @@ let () =
             test_tool_query_text_of_user_message_strips_continuity_noise;
           test_case "tool query keeps counted headers" `Quick
             test_tool_query_text_of_user_message_keeps_counted_headers;
+          test_case "social model registry round trip" `Quick
+            test_social_model_registry_round_trip;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
+          test_case "social model unknown meta falls back to baseline" `Quick
+            test_social_model_unknown_meta_falls_back_to_baseline;
+          test_case "social model unknown header falls back to baseline" `Quick
+            test_social_model_unknown_header_falls_back_to_baseline;
           test_case "social model infers visible reply without headers" `Quick
             test_social_model_infers_visible_reply_without_headers;
           test_case "social model empty text without headers stays silent" `Quick
@@ -2850,8 +3201,20 @@ let () =
             test_social_model_routes_blocker_to_board_post;
           test_case "social model tool-only turn skips protocol violation" `Quick
             test_social_model_tool_only_turn_skips_protocol_violation;
+          test_case "social model restores previous state from runtime" `Quick
+            test_social_model_previous_state_of_meta_restores_runtime_fields;
+          test_case "social model tool-only turn carries previous state" `Quick
+            test_social_model_tool_only_turn_carries_previous_state;
           test_case "social model infers board comment from tool use" `Quick
             test_social_model_infers_board_comment_from_tool_use;
+          test_case "magentic ledger silences tool-only turn" `Quick
+            test_social_model_magentic_ledger_silences_tool_only_turn;
+          test_case "magentic ledger hides non-visible tool text" `Quick
+            test_social_model_magentic_ledger_hides_nonvisible_tool_text;
+          test_case "magentic ledger restores previous state model" `Quick
+            test_social_model_magentic_ledger_previous_state_of_meta_restores_model;
+          test_case "magentic ledger stalled state carries until delta" `Quick
+            test_social_model_magentic_ledger_stalled_state_carries_until_delta;
           test_case "render_inline deny" `Quick
             test_render_inline_skip_reason_deny;
           test_case "render_inline cost" `Quick
@@ -2973,8 +3336,10 @@ let () =
         ] );
       ( "phase_gate",
         [
-          test_case "run_unified_turn skips paused keeper" `Quick
-            test_run_unified_turn_skips_non_executable_phase;
+          test_case "run_keeper_cycle skips paused keeper" `Quick
+            test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "run_keeper_cycle records trajectory contract" `Quick
+            test_run_keeper_cycle_records_trajectory_source_contract;
         ] );
       ( "tool_classification",
         [

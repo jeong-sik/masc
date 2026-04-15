@@ -41,8 +41,6 @@ function normalizeMessage(raw: unknown): Message | null {
 function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
   if (!isRecord(raw)) return {}
   return {
-    namespace_id: asString(raw.namespace_id),
-    namespace: asString(raw.namespace),
     project: asString(raw.project),
     cluster: asString(raw.cluster),
     paused: asBoolean(raw.paused),
@@ -286,7 +284,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
   const root = isRecord(raw) ? raw : {}
   return {
     trace_id: asString(root.trace_id),
-    target_type: asString(root.target_type) ?? 'namespace',
+    target_type: asString(root.target_type) ?? 'root',
     target_id: asString(root.target_id) ?? null,
     health: asString(root.health),
     judgment_owner: asString(root.judgment_owner) ?? null,
@@ -304,7 +302,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
     recommendation_summary: normalizeGuidanceSummary(root.recommendation_summary),
-    namespace: normalizeNamespace(root.namespace),
+    root: normalizeNamespace(root.root),
     swarm_status: isRecord(root.swarm_status)
       ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
       : undefined,
@@ -392,7 +390,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const root = isRecord(raw) ? raw : {}
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
   return {
-    namespace: normalizeNamespace(root.namespace),
+    root: normalizeNamespace(root.root),
     sessions: extractArray(root.sessions, ['items', 'sessions'])
       .map(normalizeSession)
       .filter((item): item is OperatorSessionSnapshot => item !== null),

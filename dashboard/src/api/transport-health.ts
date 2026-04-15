@@ -98,6 +98,15 @@ export interface TransportHealthData {
     stale_total: number
   }
   generated_at: string
+  projection_diagnostics?: {
+    source: string
+    cache_state: string
+    last_success_at: string | null
+    last_attempt_at: string | null
+    last_error_at: string | null
+    stale_reason: string | null
+    stale_age_ms: number | null
+  }
 }
 
 type AbortableRequestOptions = {
@@ -128,6 +137,9 @@ export function decodeTransportHealthData(raw: unknown): TransportHealthData | n
   const http2 = isRecord(raw.http2) ? raw.http2 : null
   const cluster = isRecord(raw.cluster) ? raw.cluster : null
   const agentHealth = isRecord(raw.agent_health) ? raw.agent_health : null
+  const projectionDiagnostics = isRecord(raw.projection_diagnostics)
+    ? raw.projection_diagnostics
+    : null
   const generatedAt = asString(raw.generated_at)
 
   if (!summary || !sse || !grpc || !websocket || !webrtc || !streamableHttp || !http2 || !cluster || !agentHealth || !generatedAt) {
@@ -219,6 +231,17 @@ export function decodeTransportHealthData(raw: unknown): TransportHealthData | n
       stale_total: asNumber(agentHealth.stale_total, 0),
     },
     generated_at: generatedAt,
+    projection_diagnostics: projectionDiagnostics
+      ? {
+          source: asString(projectionDiagnostics.source, 'unknown'),
+          cache_state: asString(projectionDiagnostics.cache_state, 'unknown'),
+          last_success_at: asString(projectionDiagnostics.last_success_at) ?? null,
+          last_attempt_at: asString(projectionDiagnostics.last_attempt_at) ?? null,
+          last_error_at: asString(projectionDiagnostics.last_error_at) ?? null,
+          stale_reason: asString(projectionDiagnostics.stale_reason) ?? null,
+          stale_age_ms: asNumber(projectionDiagnostics.stale_age_ms) ?? null,
+        }
+      : undefined,
   }
 }
 

@@ -125,7 +125,12 @@ let apply_post_turn_lifecycle
         message_count = 0;
       }
   | Some cp ->
-      let ctx = context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages cp ~primary_model_max_tokens in
+      let ctx =
+        context_of_oas_checkpoint
+          ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+          cp
+          ~primary_model_max_tokens
+      in
       let current_generation =
         checkpoint_generation cp ~fallback:meta.runtime.generation
       in
@@ -151,6 +156,13 @@ let apply_post_turn_lifecycle
           let () = on_compaction_started () in
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
+          in
+          let compacted_ctx =
+            {
+              compacted_ctx with
+              messages =
+                repair_orphan_tool_result_messages compacted_ctx.messages;
+            }
           in
           (match save_oas_checkpoint
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
@@ -286,7 +298,9 @@ let recover_latest_checkpoint_for_overflow_retry
   let oas_checkpoint =
     Result.to_option oas_result
     |> Option.map (fun checkpoint ->
-      let sanitized, stats = sanitize_oas_checkpoint checkpoint in
+      let sanitized, stats =
+        sanitize_oas_checkpoint ~repair_orphans:false checkpoint
+      in
       if checkpoint_sanitize_changed stats then begin
         Log.Keeper.warn
           "keeper:%s overflow-retry migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
@@ -327,7 +341,11 @@ let recover_latest_checkpoint_for_overflow_retry
           checkpoint_generation checkpoint ~fallback:meta.runtime.generation
         in
         Some
-          ( context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages checkpoint ~primary_model_max_tokens,
+          ( context_of_oas_checkpoint
+              ~repair_orphans:false
+              ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+              checkpoint
+              ~primary_model_max_tokens,
             turn_generation )
     | _, _, Some checkpoint ->
         (try
@@ -348,7 +366,10 @@ let recover_latest_checkpoint_for_overflow_retry
                       ~fallback:meta.runtime.generation
                   in
                   Some
-                    ( context_of_oas_checkpoint ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages checkpoint
+                    ( context_of_oas_checkpoint
+                        ~repair_orphans:false
+                        ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+                        checkpoint
                         ~primary_model_max_tokens,
                       turn_generation )
               | None -> None))
@@ -386,6 +407,13 @@ let recover_latest_checkpoint_for_overflow_retry
             before_tokens;
             after_tokens;
             saved_tokens = max 0 (before_tokens - after_tokens);
+          }
+        in
+        let compacted_ctx =
+          {
+            compacted_ctx with
+            messages =
+              repair_orphan_tool_result_messages compacted_ctx.messages;
           }
         in
         try

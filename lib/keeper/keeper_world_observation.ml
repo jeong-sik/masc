@@ -1,4 +1,4 @@
-(** Keeper_world_observation — Structured world state for unified keeper turns.
+(** Keeper_world_observation — Structured world state for keeper cycles.
 
     Extracts and normalizes observation signals from room state, keeper meta,
     and context so the unified prompt and turn runner consume a single snapshot.
@@ -46,9 +46,11 @@ type world_observation = {
   work_discovery_due : bool;
 }
 
-type unified_turn_channel =
+type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
+
+type unified_turn_channel = keeper_cycle_channel
 
 type turn_reason =
   | Mention_pending
@@ -62,6 +64,8 @@ type turn_reason =
   | Never_started
 
 type skip_reason =
+  | Keeper_paused
+  | Approval_pending
   | Scheduled_autonomous_disabled
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -72,54 +76,44 @@ type turn_verdict =
   | Skip of { reasons : skip_reason * skip_reason list }
 
 let turn_reason_to_string = function
-  | Mention_pending -> "pending_mentions"
-  | Board_event_pending -> "pending_board_events"
-  | Scope_message_pending -> "pending_scope_messages"
+  | Mention_pending -> "mention_pending"
+  | Board_event_pending -> "board_event_pending"
+  | Scope_message_pending -> "scope_message_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
-  | Idle_cooldown_elapsed _ -> "idle_gate_elapsed"
+  | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
   | Cooldown_elapsed -> "cooldown_elapsed"
-  | Task_backlog _ -> "actionable_backlog"
+  | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
 
 let skip_reason_to_string = function
+  | Keeper_paused -> "keeper_paused"
+  | Approval_pending -> "approval_pending"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
-  | Idle_gate_pending _ -> "idle_gate_wait"
-  | Cooldown_pending _ -> "cooldown_wait"
+  | Idle_gate_pending _ -> "idle_gate_pending"
+  | Cooldown_pending _ -> "cooldown_pending"
   | No_signal -> "no_signal"
 
 let channel_to_string = function
   | Reactive -> "reactive"
   | Scheduled_autonomous -> "scheduled_autonomous"
 
-let turn_reason_legacy_tokens = function
-  | Task_backlog { unclaimed; failed } ->
-      [ Some "actionable_backlog";
-        (if unclaimed > 0 then Some "unclaimed_tasks" else None);
-        (if failed > 0 then Some "failed_tasks" else None) ]
-      |> List.filter_map Fun.id
-  | reason -> [ turn_reason_to_string reason ]
-
-let skip_reason_legacy_tokens = function
-  | Scheduled_autonomous_disabled -> [ "scheduled_autonomous_disabled" ]
-  | Idle_gate_pending _ -> [ "scheduled_autonomous_turn"; "idle_gate_wait" ]
-  | Cooldown_pending _ -> [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
-  | No_signal -> [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
-
 let verdict_reasons_to_strings = function
   | Run { reasons = (first, rest) } ->
-      List.concat_map turn_reason_legacy_tokens (first :: rest)
+      List.map turn_reason_to_string (first :: rest)
   | Skip { reasons = (first, rest) } ->
-      List.concat_map skip_reason_legacy_tokens (first :: rest)
-type unified_turn_decision = {
+      List.map skip_reason_to_string (first :: rest)
+type keeper_cycle_decision = {
   should_run : bool;
-  channel : unified_turn_channel;
+  channel : keeper_cycle_channel;
   verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;
   idle_gate_sec : int option;
 }
+
+type unified_turn_decision = keeper_cycle_decision
 
 type board_signal_match = {
   explicit_mention : bool;
@@ -134,7 +128,7 @@ let scope_message_feed_enabled (meta : keeper_meta) : bool =
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
 
-let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
+let collect_message_scope ~(config : Coord.config) ~(meta : keeper_meta) :
     ((string * string) list * (string * string) list * (string * int) list) =
   let targets = message_feed_targets meta in
   let broad_scope = scope_message_feed_enabled meta in
@@ -182,7 +176,7 @@ let collect_message_scope ~(config : Room.config) ~(meta : keeper_meta) :
         let since_seq = room_cursor_for meta room_id in
         let messages =
           try
-            Room.get_all_messages_raw config ~since_seq
+            Coord.get_all_messages_raw config ~since_seq
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | _ -> []
@@ -209,9 +203,9 @@ let apply_message_cursor_updates (meta : keeper_meta)
     meta updates
 
 (** Read room backlog counts. *)
-let read_backlog_counts ~(config : Room.config) : int * int =
+let read_backlog_counts ~(config : Coord.config) : int * int =
   try
-    let backlog = Room.read_backlog config in
+    let backlog = Coord.read_backlog config in
     let unclaimed =
       List.length
         (List.filter
@@ -231,8 +225,8 @@ let read_backlog_counts ~(config : Room.config) : int * int =
   | _ -> (0, 0)
 
 (** Count active agents in room. *)
-let count_active_agents ~(config : Room.config) : int =
-  try List.length (Room.get_agents_raw config)
+let count_active_agents ~(config : Coord.config) : int =
+  try List.length (Coord.get_agents_raw config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> 0
@@ -315,7 +309,7 @@ let board_signal_match
     else { explicit_mention = false; matched_targets = []; score = 0 }
 
 (** Read context ratio from checkpoint if available. *)
-let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
+let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
   try
     let cascade_models =
       Keeper_model_labels.configured_model_labels_of_meta meta
@@ -349,7 +343,7 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   | _ -> 0.0
 
 (** Read continuity summary from checkpoint messages or meta fallback. *)
-let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
+let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
     : string =
   try
     let cascade_models =
@@ -382,17 +376,19 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
         (match snapshot with
          | Some s -> keeper_state_snapshot_to_summary_text s
          | None ->
-             let trimmed = String.trim meta.continuity_summary in
-             if trimmed = "" then "No continuity snapshot available."
-             else trimmed)
+             continuity_fallback_summary_text
+               ~continuity_summary:meta.continuity_summary
+               ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts)
     | None ->
-        let trimmed = String.trim meta.continuity_summary in
-        if trimmed = "" then "No continuity snapshot available." else trimmed
+        continuity_fallback_summary_text
+          ~continuity_summary:meta.continuity_summary
+          ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ ->
-      let trimmed = String.trim meta.continuity_summary in
-      if trimmed = "" then "No continuity snapshot available." else trimmed
+      continuity_fallback_summary_text
+        ~continuity_summary:meta.continuity_summary
+        ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
 
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
@@ -617,7 +613,7 @@ let collect_board_events ~(base_path : string) ~(continuity_summary : string)
     ([], 0, 0)
 
 let observe ~(pending_board_events : pending_board_event list option)
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta) :
     world_observation =
   let pending_mentions, pending_scope_messages, message_cursor_updates =
@@ -717,7 +713,7 @@ let effective_proactive_cooldown =
   effective_scheduled_autonomous_cooldown
 
 
-let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation) =
+let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation) =
   let reactive_triggers =
     [
       (if observation.pending_mentions <> [] then Some Mention_pending else None);
@@ -726,6 +722,27 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
     ]
     |> List.filter_map Fun.id
   in
+  let blocked_channel =
+    match reactive_triggers with
+    | _ :: _ -> Reactive
+    | [] -> Scheduled_autonomous
+  in
+  let blocked reason =
+    {
+      should_run = false;
+      channel = blocked_channel;
+      verdict = Skip { reasons = (reason, []) };
+      since_last_scheduled_autonomous = None;
+      effective_cooldown = None;
+      task_reactive_cooldown = None;
+      idle_gate_sec = None;
+    }
+  in
+  if meta.paused then
+    blocked Keeper_paused
+  else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name then
+    blocked Approval_pending
+  else
   match reactive_triggers with
   | first :: rest ->
       {
@@ -790,7 +807,16 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           has_actionable_tasks
           && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
-        let should_run = idle_gate_elapsed && (cooldown_elapsed || backlog_elapsed) in
+        (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown
+           has elapsed, skip the idle_gate check. task_reactive_cooldown is
+           already a (shorter) subdivision of idle_gate; requiring idle_gate_elapsed
+           on top defeats its purpose. Without this bypass, keepers ignore
+           unclaimed work for idle_gate seconds even when the backlog signal
+           is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
+        let should_run =
+          backlog_elapsed
+          || (idle_gate_elapsed && cooldown_elapsed)
+        in
         let verdict =
           if should_run then
             let run_reasons =
@@ -819,9 +845,8 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
             | first :: rest ->
                 Run { reasons = (first, rest) }
             | [] ->
-                (* Structurally unreachable: idle_gate_elapsed && should_run
-                   and the synthetic Scheduled_autonomous_turn reason
-                   guarantee a non-empty run reason list.
+                (* Structurally unreachable: the synthetic Scheduled_autonomous_turn
+                   tag is always added first, so the list is never empty.
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
                 Log.Keeper.warn
@@ -865,5 +890,9 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           idle_gate_sec = Some idle_gate_sec;
         }
 
-let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
-  (unified_turn_decision ~meta observation).should_run
+let unified_turn_decision = keeper_cycle_decision
+
+let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
+  (keeper_cycle_decision ~meta observation).should_run
+
+let should_run_unified_turn = should_run_keeper_cycle

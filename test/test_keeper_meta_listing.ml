@@ -53,7 +53,7 @@ let write_json path json =
 
 let write_keeper_toml_exn config ~name =
   let keepers_dir =
-    Filename.concat (Room.masc_root_dir config) "config/keepers"
+    Filename.concat (Coord.masc_root_dir config) "config/keepers"
   in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
@@ -65,7 +65,9 @@ room_scope = "current"
 proactive_enabled = false
 |}
 
-let write_keeper_meta_exn ?(autoboot_enabled = true) config ~name ~trace_id =
+let write_keeper_meta_exn ?(autoboot_enabled = true)
+    ?(social_model = "bdi_speech_v1")
+    ?(last_social_transition_reason = "") config ~name ~trace_id =
   let json =
     `Assoc
       [
@@ -73,6 +75,8 @@ let write_keeper_meta_exn ?(autoboot_enabled = true) config ~name ~trace_id =
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String trace_id);
         ("goal", `String "test keeper");
+        ("social_model", `String social_model);
+        ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
       ]
   in
@@ -84,6 +88,14 @@ let write_keeper_meta_exn ?(autoboot_enabled = true) config ~name ~trace_id =
   match Keeper_types.write_meta ~force:true config meta with
   | Ok () -> ()
   | Error e -> fail ("write_meta failed: " ^ e)
+
+let register_keeper_offline_exn config ~name =
+  match Keeper_types.read_meta config name with
+  | Ok (Some meta) ->
+      ignore
+        (Keeper_registry.register_offline ~base_path:config.base_path name meta)
+  | Ok None -> fail ("expected keeper meta for " ^ name)
+  | Error e -> fail ("read_meta failed: " ^ e)
 
 let parse_json_exn body =
   try Yojson.Safe.from_string body
@@ -117,25 +129,15 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_toml_exn config ~name:"dot.name";
-      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu";
       write_keeper_meta_exn config ~name:"dot.name" ~trace_id:"trace-dot-name";
-      ignore
-        (Keeper_manual_reconcile.open_pending
-           config
-           ~keeper_name:"sangsu"
-           ~blocker_class:"ambiguous_post_commit_failure"
-           ~summary:"turn outcome ambiguous"
-           ~failure_reason:(Some "manual reconcile required")
-           ~trace_id:(Some "trace-sangsu")
-           ~generation:(Some 1)
-           ~committed_tools:["keeper_bash"]);
       let dataset_path =
         Filename.concat (Keeper_fs.keeper_dir config) "sangsu.dataset.json"
       in
@@ -160,107 +162,6 @@ let test_keeper_listing_ignores_sidecar_json_files () =
       check int "status handler count filters sidecars" 2
         Yojson.Safe.Util.(json |> member "count" |> to_int))
 
-let test_dashboard_ignores_fileless_manual_reconcile_fallback () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  with_clean_base_path_env @@ fun () ->
-  Eio.Switch.run @@ fun _sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      let meta_json =
-        `Assoc
-          [
-            ("name", `String "sangsu");
-            ("agent_name", `String "keeper-sangsu-agent");
-            ("trace_id", `String "trace-sangsu");
-            ("goal", `String "test keeper");
-          ]
-      in
-      let meta =
-        match Keeper_types.meta_of_json meta_json with
-        | Ok meta -> meta
-        | Error e -> fail ("meta_of_json failed: " ^ e)
-      in
-      (match Keeper_types.write_meta ~force:true config meta with
-       | Ok () -> ()
-       | Error e -> fail ("write_meta failed: " ^ e));
-      ignore (Keeper_registry.register ~base_path:config.base_path meta.name meta);
-      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
-        (Some
-           (Keeper_registry.Ambiguous_partial_commit
-              {
-                kind = Keeper_registry.Post_commit_failure;
-                detail =
-                  "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
-              }));
-      let json = Dashboard_http_keeper.keepers_dashboard_json config in
-      match keeper_json_by_name json "sangsu" with
-      | None -> fail "sangsu missing from keepers dashboard json"
-      | Some keeper ->
-          check bool "reconcile_status stays null without record" true
-            Yojson.Safe.Util.(keeper |> member "reconcile_status" = `Null);
-          check bool "runtime blocker class stays null without record" true
-            Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
-          check bool "runtime blocker manual_reconcile stays null without record" true
-            Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
-
-let test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun _sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.clear ();
-      Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      let meta_json =
-        `Assoc
-          [
-            ("name", `String "sangsu");
-            ("agent_name", `String "keeper-sangsu-agent");
-            ("trace_id", `String "trace-sangsu");
-            ("goal", `String "test keeper");
-          ]
-      in
-      let meta =
-        match Keeper_types.meta_of_json meta_json with
-        | Ok meta -> meta
-        | Error e -> fail ("meta_of_json failed: " ^ e)
-      in
-      (match Keeper_types.write_meta ~force:true config meta with
-       | Ok () -> ()
-       | Error e -> fail ("write_meta failed: " ^ e));
-      ignore (Keeper_registry.register ~base_path:config.base_path meta.name meta);
-      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
-        (Some
-           (Keeper_registry.Ambiguous_partial_commit
-              {
-                kind = Keeper_registry.Post_commit_failure;
-                detail =
-                  "Mutating tools [keeper_fs_edit] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
-              }));
-      let json = Dashboard_http_keeper.keepers_dashboard_json config in
-      match keeper_json_by_name json "sangsu" with
-      | None -> fail "sangsu missing from keepers dashboard json"
-      | Some keeper ->
-          check bool "unsafe reconcile_status stays null without record" true
-            Yojson.Safe.Util.(keeper |> member "reconcile_status" = `Null);
-          check bool "unsafe runtime blocker class stays null without record" true
-            Yojson.Safe.Util.(keeper |> member "runtime_blocker_class" = `Null);
-          check bool "unsafe runtime blocker manual_reconcile stays null without record" true
-            Yojson.Safe.Util.(keeper |> member "runtime_blocker_manual_reconcile" = `Null))
-
 let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -274,10 +175,10 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
-      let config_root = Filename.concat (Room.masc_root_dir config) "config" in
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_root;
       Config_dir_resolver.reset ();
       write_keeper_meta_exn
@@ -286,6 +187,115 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
 
+let test_keeper_list_normalizes_unknown_social_model () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
+        ~social_model:"experimental_v99";
+      register_keeper_offline_exn config ~name:"sangsu";
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
+      in
+      check bool "tool keeper list ok" true ok;
+      let json = parse_json_exn body in
+      match keeper_json_by_name json "sangsu" with
+      | Some keeper ->
+          check string "social_model normalized" "bdi_speech_v1"
+            Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
+      | None -> fail "expected sangsu row in keeper list")
+
+let test_keeper_list_exposes_last_social_transition_reason () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
+        ~last_social_transition_reason:"tool_only:visible_reply";
+      register_keeper_offline_exn config ~name:"sangsu";
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
+      in
+      check bool "tool keeper list ok" true ok;
+      let json = parse_json_exn body in
+      match keeper_json_by_name json "sangsu" with
+      | Some keeper ->
+          check string "transition reason surfaced" "tool_only:visible_reply"
+            Yojson.Safe.Util.(
+              keeper |> member "last_social_transition_reason" |> to_string)
+      | None -> fail "expected sangsu row in keeper list")
+
+let test_keeper_list_preserves_known_social_model () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
+        ~social_model:"magentic_ledger_v1";
+      register_keeper_offline_exn config ~name:"sangsu";
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_list"
+            ~args:(`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_list dispatch"
+      in
+      check bool "tool keeper list ok" true ok;
+      let json = parse_json_exn body in
+      match keeper_json_by_name json "sangsu" with
+      | Some keeper ->
+          check string "known model preserved" "magentic_ledger_v1"
+            Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
+      | None -> fail "expected sangsu row in keeper list")
+
 let () =
   run "keeper_meta_listing"
     [
@@ -293,11 +303,13 @@ let () =
         [
           test_case "keeper_names and keeper_list ignore sidecar json" `Quick
             test_keeper_listing_ignores_sidecar_json_files;
-          test_case "dashboard ignores file-less reconcile fallback" `Quick
-            test_dashboard_ignores_fileless_manual_reconcile_fallback;
-          test_case "dashboard ignores file-less unsafe reconcile fallback" `Quick
-            test_dashboard_ignores_fileless_unsafe_manual_reconcile_fallback;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case "tool keeper list normalizes unknown social model" `Quick
+            test_keeper_list_normalizes_unknown_social_model;
+          test_case "tool keeper list preserves known social model" `Quick
+            test_keeper_list_preserves_known_social_model;
+          test_case "tool keeper list exposes last social transition reason"
+            `Quick test_keeper_list_exposes_last_social_transition_reason;
         ] );
     ]

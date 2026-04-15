@@ -392,13 +392,12 @@ let detachment_index command_plane_json =
     detachments;
   table
 
-let operation_severity ~status ~blocker_summary =
-  if List.mem status [ "failed"; "cancelled" ] then
-    Tone_bad
-  else if status = "paused" || Option.is_some blocker_summary then
-    Tone_warn
-  else
-    Tone_ok
+let operation_severity ~(status : string) ~blocker_summary =
+  match status with
+  | "failed" | "cancelled" -> Tone_bad
+  | "paused" -> Tone_warn
+  | _ when Option.is_some blocker_summary -> Tone_warn
+  | _ -> Tone_ok
 
 let build_operation_contexts command_plane_json =
   let operations =
@@ -427,8 +426,9 @@ let build_operation_contexts command_plane_json =
                  else
                    None
            in
-           let status = string_field ~default:"active" "status" operation in
-           let severity = operation_severity ~status ~blocker_summary in
+           let status_str = string_field ~default:"active" "status" operation in
+           let op_status = status_str in
+           let severity = operation_severity ~status:op_status ~blocker_summary in
            let linked_session_id, linked_detachment_id =
              match Hashtbl.find_opt detachments operation_id with
              | Some (session_id, detachment_id) -> (session_id, detachment_id)
@@ -463,7 +463,7 @@ let build_operation_contexts command_plane_json =
                    [
                      ("operation_id", `String operation_id);
                      ("objective", member_assoc "objective" operation);
-                     ("status", `String status);
+                     ("status", `String status_str);
                      ("stage", member_assoc "stage" operation);
                      ("assigned_unit_id", member_assoc "assigned_unit_id" operation);
                      ("assigned_unit_label", member_assoc "assigned_unit_label" operation_card);

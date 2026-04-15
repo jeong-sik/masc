@@ -20,6 +20,8 @@ import {
   currentTimeRangeFilter,
   setTimeRangeFilter,
   timeRangeLabel,
+  timeRangeShortLabel,
+  timeRangeToMs,
   TIME_RANGE_PRESETS,
   type TimeRangePreset,
 } from '../../observatory-filter-store'
@@ -38,19 +40,6 @@ import { DetailPane } from './detail-pane'
 import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
 
-// --- Time range utilities ---
-
-const RANGE_TO_MS: Record<TimeRangePreset, number> = {
-  '5m': 5 * 60_000,
-  '1h': 60 * 60_000,
-  '24h': 24 * 60 * 60_000,
-  '7d': 7 * 24 * 60 * 60_000,
-}
-
-export function timeRangeToMs(preset: TimeRangePreset): number {
-  return (RANGE_TO_MS[preset] ?? RANGE_TO_MS['1h'] ?? 3_600_000)
-}
-
 const DEFAULT_RANGE: TimeRangePreset = '1h'
 
 // --- Observatory state ---
@@ -59,6 +48,8 @@ interface ObservatoryData {
   loading: boolean
   error: string | null
   events: TelemetryEntry[]
+  totalMatchingEvents: number
+  truncatedEvents: boolean
   hourlyTrend: ToolQualityHourlyPoint[]
   windowStart: number
   windowEnd: number
@@ -70,8 +61,10 @@ function emptyData(): ObservatoryData {
     loading: false,
     error: null,
     events: [],
+    totalMatchingEvents: 0,
+    truncatedEvents: false,
     hourlyTrend: [],
-    windowStart: now - RANGE_TO_MS[DEFAULT_RANGE],
+    windowStart: now - timeRangeToMs(DEFAULT_RANGE),
     windowEnd: now,
   }
 }
@@ -127,7 +120,7 @@ function RangeSelector() {
           onClick=${() => setTimeRangeFilter(preset)}
           aria-pressed=${current === preset}
         >
-          ${timeRangeLabel(preset).replace('최근 ', '')}
+          ${timeRangeShortLabel(preset)}
         </button>
       `)}
     </div>
@@ -161,23 +154,30 @@ export function Observatory() {
     const requestId = ++latestRequestId.current
 
     const now = Date.now()
-    const windowStart = now - RANGE_TO_MS[range]
+    const windowStart = now - timeRangeToMs(range)
     const windowEnd = now
 
     state.value = { ...state.value, loading: true, error: null }
 
     Promise.allSettled([
-      fetchTelemetry({ keeper, n: 500, signal: controller.signal }),
+      fetchTelemetry({
+        keeper,
+        since_ms: windowStart,
+        until_ms: windowEnd,
+        signal: controller.signal,
+      }),
       fetchToolQuality({ n: 2000, signal: controller.signal }),
     ]).then(([telemetryResult, toolQualityResult]) => {
       if (controller.signal.aborted || requestId !== latestRequestId.current) return
 
-      const events = telemetryResult.status === 'fulfilled'
-        ? telemetryResult.value.entries.filter(entry => {
-            const ts = entryTimestampMs(entry)
-            return ts !== null && ts >= windowStart && ts <= windowEnd
-          })
-        : []
+      const telemetry = telemetryResult.status === 'fulfilled'
+        ? telemetryResult.value
+        : null
+
+      const events = telemetry?.entries.filter(entry => {
+        const ts = entryTimestampMs(entry)
+        return ts !== null && ts >= windowStart && ts <= windowEnd
+      }) ?? []
 
       const hourlyTrend = toolQualityResult.status === 'fulfilled'
         ? toolQualityResult.value.hourly_trend ?? []
@@ -191,6 +191,8 @@ export function Observatory() {
         loading: false,
         error: errors.length > 0 ? errors.join(' · ') : null,
         events,
+        totalMatchingEvents: telemetry?.total_matching_entries ?? events.length,
+        truncatedEvents: telemetry?.truncated ?? false,
         hourlyTrend,
         windowStart,
         windowEnd,
@@ -214,7 +216,8 @@ export function Observatory() {
           <p class="text-[11px] text-text-dim">
             ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
             · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
-            · ${data.events.length} events
+            · ${data.totalMatchingEvents} events
+            ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
             ${liveMode.value ? ' · 30s auto-refresh' : ''}
           </p>
         </div>

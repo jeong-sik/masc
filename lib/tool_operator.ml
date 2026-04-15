@@ -2,7 +2,7 @@ open Types
 open Tool_args
 
 type 'a context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -33,7 +33,12 @@ let legacy_action_alias_enums =
     `String "autonomy_tick" ]
 
 let target_type_enums =
-  [ `String "namespace"; `String "keeper"; `String "review_item" ]
+  [
+    `String "root";
+    `String "namespace";
+    `String "keeper";
+    `String "review_item";
+  ]
 
 let snapshot_schema ~remote =
   {
@@ -58,7 +63,7 @@ let snapshot_schema ~remote =
         ];
   }
 
-let digest_target_type_enums = [ `String "namespace" ]
+let digest_target_type_enums = [ `String "root"; `String "namespace" ]
 let judgment_surface_enums =
   [
     `String "command.namespace";

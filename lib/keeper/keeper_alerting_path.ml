@@ -1,6 +1,6 @@
 (** Keeper_alerting path safety and tool output helpers. *)
 
-let project_root_of_config (config : Room.config) : string =
+let project_root_of_config (config : Coord.config) : string =
   let base = config.base_path in
   if Filename.basename base = ".masc" then Filename.dirname base else base
 
@@ -68,27 +68,30 @@ let is_within_root_norm ~(root_norm : string) (path : string) : bool =
 let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
     ?(max_dirs = 2000) ?(max_matches = 8) () : string list =
   let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
-  let visited : (string, unit) Hashtbl.t = Hashtbl.create 64 in
-  let rec walk ~dirs_seen acc dir =
-    if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+  let module StringSet = Set.Make (String) in
+  let rec walk visited ~dirs_seen acc dir =
+    if dirs_seen >= max_dirs || List.length acc >= max_matches then
+      (visited, dirs_seen, acc)
     else
       let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
       if not (is_within_root_norm ~root_norm dir)
-         || Hashtbl.mem visited dir_norm
-      then (dirs_seen, acc)
-      else begin
-        Hashtbl.replace visited dir_norm ();
+         || StringSet.mem dir_norm visited
+      then
+        (visited, dirs_seen, acc)
+      else
+        let visited = StringSet.add dir_norm visited in
         let entries =
           try Sys.readdir dir |> Array.to_list |> List.sort String.compare
           with Sys_error _ -> []
         in
         List.fold_left
-          (fun (dirs_seen, acc) entry ->
-             if dirs_seen >= max_dirs || List.length acc >= max_matches then (dirs_seen, acc)
+          (fun (visited, dirs_seen, acc) entry ->
+             if dirs_seen >= max_dirs || List.length acc >= max_matches then
+               (visited, dirs_seen, acc)
              else
                let path = Filename.concat dir entry in
                match (try Some (Sys.is_directory path) with Sys_error _ -> None) with
-               | None -> (dirs_seen, acc)
+               | None -> (visited, dirs_seen, acc)
                | Some is_dir ->
                    let acc =
                      if entry = anchor then
@@ -98,13 +101,14 @@ let find_suffix_matches_under_root ~root ~anchor ~suffix_rel
                        then candidate :: acc else acc
                      else acc
                    in
-                   if is_dir && is_within_root_norm ~root_norm path
-                   then walk ~dirs_seen:(dirs_seen + 1) acc path
-                   else (dirs_seen, acc))
-          (dirs_seen, acc) entries
-      end
+                   if is_dir && is_within_root_norm ~root_norm path then
+                     walk visited ~dirs_seen:(dirs_seen + 1) acc path
+                   else
+                     (visited, dirs_seen, acc))
+          (visited, dirs_seen, acc) entries
   in
-  walk ~dirs_seen:0 [] root |> snd |> List.rev
+  walk StringSet.empty ~dirs_seen:0 [] root
+  |> fun (_, _, matches) -> List.rev matches
 
 let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path : string) :
     (string option, string) result =
@@ -145,12 +149,12 @@ let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list
        || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
     allowed_norms
 
-let absolute_allowed_paths ~(config : Room.config) ~(allowed_paths : string list)
+let absolute_allowed_paths ~(config : Coord.config) ~(allowed_paths : string list)
     : string list =
   let root = project_root_of_config config in
   allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
 
-let absolute_allowed_paths_result ~(config : Room.config)
+let absolute_allowed_paths_result ~(config : Coord.config)
     ~(allowed_paths : string list) : (string list, string) result =
   let normalized = absolute_allowed_paths ~config ~allowed_paths in
   if allowed_paths <> [] && normalized = [] then
@@ -161,7 +165,7 @@ let absolute_allowed_paths_result ~(config : Room.config)
   else
     Ok normalized
 
-let resolve_keeper_target_path ~(config : Room.config)
+let resolve_keeper_target_path ~(config : Coord.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
   let raw = String.trim raw_path in
@@ -202,33 +206,6 @@ let resolve_keeper_target_path ~(config : Room.config)
              "path_not_in_allowed_paths: %s (allowed: [%s])"
              raw (String.concat ", " allowed_norms))
 
-(** Workspace-scoped state dirs that remain writable outside the playground.
-    These are keeper-private metadata / trace surfaces under [.masc]. *)
-let workspace_state_defaults (safe_name : string) : string list =
-  [ Printf.sprintf ".masc/keepers/%s/" safe_name;
-    ".masc/traces/" ]
-
-(** Additional workspace-scoped read-only repo roots. Keepers may read these
-    when operating in workspace scope, but write containment should stay inside
-    the playground unless the operator explicitly adds extra allowlist entries. *)
-let workspace_repo_read_defaults : string list =
-  [ "lib/";
-    "test/";
-    "config/";
-    "bin/";
-    "scripts/";
-    "docs/" ]
-
-(** Compute effective read allowed_paths from keeper meta.
-    Always prepends the keeper's playground path and, for workspace scope,
-    the workspace read defaults:
-    - `.masc/keepers/<name>/`
-    - `.masc/traces/`
-    - `lib/`, `test/`, `config/`, `bin/`, `scripts/`, `docs/`
-    (project root `.` is no longer included by default; set
-     [`allowed_paths`] explicitly if needed.)
-    - [`*`] → [] (full access, explicit opt-in bypasses path checks)
-    - other  → playground :: workspace_defaults @ explicit *)
 (* Playground path SSOT lives in [Playground_paths] (masc_config). These
    names preserve the historical keeper-facing API. Do not re-implement
    the literal ".masc/playground" layout here — edit [Playground_paths]
@@ -239,62 +216,41 @@ let playground_mind_path = Playground_paths.mind_path
 let playground_repos_path = Playground_paths.repos_path
 let playground_bundle_paths = Playground_paths.bundle_paths
 
-let ensure_playground_bundle ~(config : Room.config) ~(name : string) : string list =
+let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string list =
   let root = project_root_of_config config in
   playground_bundle_paths name
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 
+(** Compute effective read allowed_paths from keeper meta.
+    Returns the playground bundle paths plus any explicit [allowed_paths]
+    entries. [["*"]] means full-access opt-in: the resulting empty list is
+    interpreted by the OAS worker builder as "skip path restriction".
+    Workspace/local scope no longer grants extra hardcoded paths; every
+    additional path must be listed explicitly in [allowed_paths]. *)
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let playground_paths = playground_bundle_paths meta.name in
-  let workspace_defaults =
-    match String.lowercase_ascii meta.execution_scope with
-    | "workspace" ->
-      let safe_name = sanitize_keeper_name meta.name in
-      (* NOTE (#6527 iter 4): `.worktrees/` was previously included
-         here so keepers could read and write worktrees created at the
-         server repository root by the old `worktree_create_r`
-         fallback. That fallback was removed in PR #6542 (iter 2), so
-         new worktrees always land at
-         `.masc/playground/<keeper>/repos/<clone>/.worktrees/<name>/`,
-         which is already inside `playground_paths`. Keeping
-         `.worktrees/` as a workspace default would allow any keeper
-         with workspace scope to read and write into another keeper's
-         server-root worktree or into the MASC repo's own worktrees —
-         exactly the containment leak #6527 is closing. Remove it.
-         Keepers that genuinely need access to a specific worktree can
-         still add it via explicit `allowed_paths` on their keeper
-         meta. *)
-      workspace_state_defaults safe_name @ workspace_repo_read_defaults
-    | _ -> []
-  in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground_paths @ workspace_defaults @ explicit
+  | explicit -> playground_paths @ explicit
 
 (** Compute effective write allowed_paths from keeper meta.
-    This keeps the default write sandbox inside the keeper playground plus
-    keeper-private [.masc] state directories. Workspace repo roots remain
-    read-only by default; operators must opt in explicitly via [allowed_paths]
-    or [`*`] to allow writes there. *)
+    Returns the playground bundle paths plus any explicit [allowed_paths]
+    entries. [["*"]] means full-access opt-in (empty allowlist signals
+    "skip path restriction" to the OAS worker builder). Workspace/local
+    scope no longer grants extra hardcoded paths; every additional path
+    must be listed explicitly in [allowed_paths]. *)
 let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let playground_paths = playground_bundle_paths meta.name in
-  let workspace_defaults =
-    match String.lowercase_ascii meta.execution_scope with
-    | "workspace" ->
-      let safe_name = sanitize_keeper_name meta.name in
-      workspace_state_defaults safe_name
-    | _ -> []
-  in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground_paths @ workspace_defaults @ explicit
+  | explicit -> playground_paths @ explicit
 
 (** Resolve a path for read-only access within the keeper's effective
     allowlist. The allowlist is usually the keeper playground bundle
     plus any explicit custom paths; explicit ["*"] still means full
     project-root access. *)
-let resolve_keeper_read_path ~(config : Room.config)
+let resolve_keeper_read_path ~(config : Coord.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
   let raw = String.trim raw_path in

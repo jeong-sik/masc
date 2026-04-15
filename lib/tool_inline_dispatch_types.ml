@@ -1,14 +1,14 @@
 (** Tool_inline_dispatch_types — shared types for inline dispatch modules.
 
     Extracted to avoid circular dependencies between
-    tool_inline_dispatch, tool_inline_dispatch_room, and tool_inline_dispatch_comm. *)
+    tool_inline_dispatch, tool_inline_dispatch_coord, and tool_inline_dispatch_comm. *)
 
 type tool_result = bool * string
 
 (** Context record capturing all bindings from execute_tool_eio
     that the inline dispatch block needs. *)
 type context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   registry : Session.registry;
   state : Mcp_server.server_state;
@@ -27,10 +27,10 @@ type context = {
   (** Governance types/helpers — passed in to avoid circular deps *)
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
   save_governance :
-    Room.config -> Mcp_server_eio_governance.governance_config -> unit;
-  load_mcp_sessions : Room.config -> Mcp_server_eio_governance.mcp_session_record list;
+    Coord.config -> Mcp_server_eio_governance.governance_config -> unit;
+  load_mcp_sessions : Coord.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
-    Room.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
 (** Helper: run subprocess with 60s timeout *)

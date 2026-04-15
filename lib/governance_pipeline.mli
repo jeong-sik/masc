@@ -61,14 +61,14 @@ val decide :
     - paranoid: confirm Medium+High+Critical, audit all *)
 
 val make_pre_hook :
-  config:Room.config ->
+  config:Coord.config ->
   governance_level:string ->
   Tool_dispatch.pre_hook
 (** Create a Tool_dispatch pre_hook closure for the given governance level.
     Returns [Pass] (proceed) for allowed calls,
     [Reject result] (short-circuit) for confirm-required or denied calls. *)
 
-val install : config:Room.config -> governance_level:string -> unit
+val install : config:Coord.config -> governance_level:string -> unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.
     Called once at server startup. *)
@@ -101,9 +101,9 @@ val combinatorial_risk_escalation :
   input:Yojson.Safe.t ->
   risk_level
 (** If trifecta is active and the tool is a state_modification tool,
-    escalate risk to at least High. Read-only keeper_github subcommands remain
-    at [base_risk] even though the top-level tool can mutate. Otherwise return
-    base_risk unchanged. *)
+    escalate risk to at least High. Read-only keeper_shell op=gh subcommands
+    remain at [base_risk] even though the top-level tool can mutate.
+    Otherwise return base_risk unchanged. *)
 
 val to_oas_approval_callback :
   governance_level:string ->

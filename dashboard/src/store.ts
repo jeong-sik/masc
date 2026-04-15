@@ -64,6 +64,8 @@ export interface ShellCounts {
   agents: number
   tasks: number
   keepers: number
+  total_runtimes: number
+  configured_keepers: number
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
@@ -104,10 +106,22 @@ export const boardExcludeAutomation = signal(false)
 /** Content-category filter: which categories to hide */
 export const boardHiddenCategories = signal<Set<string>>(new Set(['system']))
 export const boardAuthorFilter = signal('')
+/** Number of posts currently loaded — the offset for the next page request. */
+export const boardOffset = signal<number>(0)
+/** true when the server indicates (or we optimistically believe) more posts are available. */
+export const boardHasMore = signal<boolean>(true)
+/** Server-reported total when known; null while has_more=true. */
+export const boardTotal = signal<number | null>(null)
+/** true while a loadMore (append) request is in flight. Distinct from boardLoading (initial/reset). */
+export const boardLoadingMore = signal<boolean>(false)
 
 export function removeBoardPost(postId: string | undefined): void {
   if (!postId) return
-  boardPosts.value = boardPosts.value.filter(p => p.id !== postId)
+  const filtered = boardPosts.value.filter(p => p.id !== postId)
+  if (filtered.length !== boardPosts.value.length) {
+    boardPosts.value = filtered
+    boardOffset.value = filtered.length
+  }
 }
 
 // --- Goals state ---
@@ -117,14 +131,13 @@ export const goalsLoading = signal(false)
 
 // --- OAS monitoring state ---
 
-import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
+import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from './types/oas'
 
 import {
   OAS_AGENT_EVENT_BUFFER,
   OAS_KEEPER_SNAPSHOT_MAX,
   HEARTBEAT_STALE_MS,
   SHELL_TTL_MS,
-
 } from './config/constants'
 
 export const oasAgentEvents = signal<OasAgentEvent[]>([])
@@ -136,13 +149,39 @@ export const oasTotalErrors = signal(0)
 export const oasLastLlmCallTs = signal<number | null>(null)
 export const oasLastErrorTs = signal<number | null>(null)
 
+export function resetOasRuntimeSignals(): void {
+  oasAgentEvents.value = []
+  oasKeeperSnapshots.value = new Map()
+  oasLastKeeperTick.value = null
+  oasTotalEvents.value = 0
+  oasTotalLlmCalls.value = 0
+  oasTotalErrors.value = 0
+  oasLastLlmCallTs.value = null
+  oasLastErrorTs.value = null
+}
+
 export function pushOasAgentEvent(event: OasAgentEvent): void {
   const head = oasAgentEvents.value[0]
-  if (head && head.type === event.type && head.agent_name === event.agent_name && head.timestamp === event.timestamp) {
+  const isDuplicate =
+    head != null
+    && (
+      (head.event_key != null && event.event_key != null && head.event_key === event.event_key)
+      || (
+        head.type === event.type
+        && head.agent_name === event.agent_name
+        && head.keeper_name === event.keeper_name
+        && head.secondary_agent === event.secondary_agent
+        && head.action === event.action
+        && head.event === event.event
+        && head.trigger === event.trigger
+        && head.detail === event.detail
+        && head.timestamp === event.timestamp
+      )
+    )
+  if (isDuplicate) {
     return
   }
   oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
-  oasTotalEvents.value++
 }
 
 /** Record an OAS durable LLM-call event. Increments the global
@@ -150,13 +189,13 @@ export function pushOasAgentEvent(event: OasAgentEvent): void {
  *  surface recency. */
 export function recordOasLlmCall(tsMs: number): void {
   oasTotalLlmCalls.value++
-  oasLastLlmCallTs.value = tsMs
+  oasLastLlmCallTs.value = Math.max(oasLastLlmCallTs.value ?? 0, tsMs)
 }
 
 /** Record an OAS durable error event. */
 export function recordOasError(tsMs: number): void {
   oasTotalErrors.value++
-  oasLastErrorTs.value = tsMs
+  oasLastErrorTs.value = Math.max(oasLastErrorTs.value ?? 0, tsMs)
 }
 
 export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
@@ -175,20 +214,13 @@ export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
     if (oldest) next.delete(oldest)
   }
   oasKeeperSnapshots.value = next
-  oasLastKeeperTick.value = Date.now()
-  oasTotalEvents.value++
+  if (Number.isFinite(snapshot.timestamp)) {
+    const nextTickMs = Math.round(snapshot.timestamp * 1000)
+    oasLastKeeperTick.value = Math.max(oasLastKeeperTick.value ?? 0, nextTickMs)
+  }
 }
 
-export const oasHealthSummary: ReadonlySignal<{
-  agentEventsCount: number
-  keeperSnapshotsCount: number
-  lastKeeperTick: number | null
-  totalEvents: number
-  totalLlmCalls: number
-  totalErrors: number
-  lastLlmCallTs: number | null
-  lastErrorTs: number | null
-}> = computed(() => ({
+export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() => ({
   agentEventsCount: oasAgentEvents.value.length,
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
   lastKeeperTick: oasLastKeeperTick.value,
@@ -394,6 +426,8 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
           agents: data.counts.agents ?? 0,
           tasks: data.counts.tasks ?? 0,
           keepers: data.counts.keepers ?? 0,
+          total_runtimes: data.counts.total_runtimes ?? ((data.counts.agents ?? 0) + (data.counts.keepers ?? 0)),
+          configured_keepers: data.configured_keepers ?? 0,
         }
       }
       shellMetaCognition.value = normalizeShellMetaCognitionSummary(data.meta_cognition)
@@ -415,14 +449,14 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
 export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-  const previousNamespace = serverStatus.value?.namespace
+  const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
   const roomChanged =
-    previousNamespace != null
-    && normalizedStatus?.namespace != null
-    && previousNamespace !== normalizedStatus.namespace
+    previousProject != null
+    && normalizedStatus?.project != null
+    && previousProject !== normalizedStatus.project
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)
@@ -540,22 +574,83 @@ export function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): Board
   return changed ? merged : prev
 }
 
+/** Append incoming posts to the tail, de-duplicated by id. */
+export function appendBoardPosts(prev: BoardPost[], incoming: BoardPost[]): BoardPost[] {
+  if (incoming.length === 0) return prev
+  if (prev.length === 0) return incoming
+  const existing = new Set(prev.map(p => p.id))
+  const fresh = incoming.filter(p => !existing.has(p.id))
+  if (fresh.length === 0) return prev
+  return prev.concat(fresh)
+}
+
+const BOARD_PAGE_SIZE_DEFAULT = 100
+const BOARD_PAGE_SIZE_FILTERED = 200
+
+function boardPageSize(): number {
+  const hasFilter =
+    boardExcludeAutomation.value
+    || boardExcludeSystem.value
+    || boardAuthorFilter.value.trim() !== ''
+  return hasFilter ? BOARD_PAGE_SIZE_FILTERED : BOARD_PAGE_SIZE_DEFAULT
+}
+
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
+    const limit = boardPageSize()
     const data = await fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
+      limit,
+      offset: 0,
     })
     const next = data.posts ?? []
     boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
+    boardOffset.value = next.length
+    boardHasMore.value = typeof data.has_more === 'boolean'
+      ? data.has_more
+      : next.length >= limit
+    boardTotal.value = typeof data.total === 'number' ? data.total : null
     lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.warn('[Board] fetch error:', err)
     showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
     boardLoading.value = false
+  }
+}
+
+/** Append the next page of board posts onto boardPosts. Noop if a request is
+ *  already in flight or the server indicated no more pages. */
+export async function loadMoreBoardPosts(): Promise<void> {
+  if (boardLoadingMore.value || boardLoading.value) return
+  if (!boardHasMore.value) return
+  boardLoadingMore.value = true
+  try {
+    const limit = boardPageSize()
+    const offset = boardOffset.value
+    const data = await fetchDashboardMemory(boardSortMode.value, {
+      excludeSystem: boardExcludeSystem.value,
+      excludeAutomation: boardExcludeAutomation.value,
+      author: boardAuthorFilter.value || undefined,
+      limit,
+      offset,
+    })
+    const incoming = data.posts ?? []
+    const merged = appendBoardPosts(boardPosts.value, incoming)
+    boardPosts.value = merged
+    boardOffset.value = merged.length
+    boardHasMore.value = typeof data.has_more === 'boolean'
+      ? data.has_more
+      : incoming.length >= limit
+    boardTotal.value = typeof data.total === 'number' ? data.total : null
+  } catch (err) {
+    console.warn('[Board] loadMore error:', err)
+    showToast('다음 페이지를 불러오지 못했습니다', 'error')
+  } finally {
+    boardLoadingMore.value = false
   }
 }
 

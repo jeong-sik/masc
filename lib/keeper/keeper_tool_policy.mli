@@ -8,6 +8,8 @@
 
 open Keeper_types
 
+module StringSet : Set.S with type elt = string
+
 (** {1 Policy Initialization} *)
 
 (** Load tool policy configuration from [config/tool_policy.toml].
@@ -45,6 +47,14 @@ val clone_timeout_sec : unit -> float
 val push_timeout_sec : unit -> float
 val pr_create_timeout_sec : unit -> float
 
+(** {1 GH Cache Config} *)
+
+val gh_cache_ttl_sec : unit -> float
+val gh_cache_fetch_page_size : unit -> int
+val gh_cache_fetch_timeout_sec : unit -> float
+val gh_cache_max_alternatives : unit -> int
+val gh_cache_max_output_bytes : unit -> int
+
 (** {1 MASC Schema Injection} *)
 
 (** Filter and inject MASC schemas for keeper tool selection.
@@ -64,17 +74,17 @@ val select_existing_masc_tool_names : string list -> string list
 
 (** {1 Tool Access Lookup}
 
-    O(1) per-tool access checks using hash tables. *)
+    Per-tool access checks using immutable StringSet. *)
 
 type tool_access_lookup = {
   candidate_names : string list;
-  candidate_set : (string, unit) Hashtbl.t;
-  allow_set : (string, unit) Hashtbl.t;
-  deny_set : (string, unit) Hashtbl.t;
+  candidate_set : StringSet.t;
+  allow_set : StringSet.t;
+  deny_set : StringSet.t;
 }
 
-(** Build a hash set from a list of tool names. *)
-val tool_name_set : string list -> (string, unit) Hashtbl.t
+(** Build a StringSet from a list of tool names. *)
+val tool_name_set : string list -> StringSet.t
 
 (** Build a lookup structure from keeper metadata. *)
 val tool_access_lookup_of_meta : keeper_meta -> tool_access_lookup

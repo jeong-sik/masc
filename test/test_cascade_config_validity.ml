@@ -3,7 +3,7 @@
     Guards every profile's model string list against typos, unknown
     provider names, and unsupported aliases by running them through
     the same parser the server uses at runtime
-    ({!Llm_provider.Cascade_config.parse_model_strings}).
+    ({!Masc_mcp.Cascade_config.parse_model_strings}).
 
     Motivation: 2026-04-11 incident adjacent — masc-mcp#6475 introduced a
     new [glm-coding:*] cascade head, and the only way to know if OAS
@@ -116,11 +116,11 @@ let test_profile_parses_non_empty profile () =
     contains_substring ~needle:"unavailable" msg
   in
   let expanded =
-    Llm_provider.Cascade_config.expand_auto_models strings
+    Masc_mcp.Cascade_config.expand_auto_models strings
   in
   List.iter
     (fun s ->
-      match Llm_provider.Cascade_config.parse_model_string_exn s with
+      match Masc_mcp.Cascade_config.parse_model_string_exn s with
       | Ok (cfg : Llm_provider.Provider_config.t) ->
         check bool
           (Printf.sprintf "%s: %S has non-empty model_id" profile s)
@@ -168,7 +168,7 @@ let test_unknown_provider_is_dropped () =
       in
       check int "fixture has both entries" 2 (List.length strings);
       let parsed =
-        Llm_provider.Cascade_config.parse_model_strings strings
+        Masc_mcp.Cascade_config.parse_model_strings strings
       in
       (* At least one entry must be dropped. Using "<" (not "=") keeps
          the test correct if a future registry happens to also gate the

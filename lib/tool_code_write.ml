@@ -15,16 +15,13 @@ open Types
 open Tool_args
 
 type context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
 }
 
 type tool_result = bool * string
 
-let max_write_size =
-  match Sys.getenv_opt "MASC_MAX_WRITE_SIZE_BYTES" with
-  | Some s -> (match int_of_string_opt s with Some n -> n | None -> 1024 * 1024)
-  | None -> 1024 * 1024
+let max_write_size = 1024 * 1024  (* 1 MiB *)
 
 let normalize_dir_prefix path =
   Tool_code.normalize_path path ^ "/"
@@ -34,6 +31,26 @@ let first_nonempty_line output =
   |> String.split_on_char '\n'
   |> List.map String.trim
   |> List.find_opt (fun s -> s <> "")
+
+(* Shell command allowlist *)
+let allowed_shell_commands = [
+  "dune"; "make"; "npm"; "npx"; "node";
+  "git"; "ls"; "cat"; "head"; "tail"; "wc";
+  "rg"; "find"; "diff"; "patch"; "mkdir";
+  "opam"; "ocamlfind"; "tsc";
+]
+
+let validate_code_shell_command (command : string) : (unit, string) result =
+  (* Pipes (|) are allowed: every segment is independently validated
+     against [allowed_shell_commands], and dangerous metacharacters
+     ([;] [`] [$] [&&] standalone [&]) remain blocked by
+     validate_command_coding_with_allowlist. Without pipes, keepers
+     cannot do common composition like `git log | head` or `rg X | wc`,
+     forcing them into noisy multi-call sequences. *)
+  Worker_dev_tools.validate_command_coding_with_allowlist
+    ~allow_pipes:true
+    ~allowed_commands:allowed_shell_commands
+    command
 
 let git_common_root path =
   try
@@ -69,7 +86,7 @@ let dedupe_keep_order paths =
     paths
 
 let allowed_worktree_prefixes config =
-  [ git_common_root config.Room.base_path;
+  [ git_common_root config.Coord.base_path;
     git_common_root (Sys.getcwd ()) ]
   |> List.filter_map (fun root -> root)
   |> dedupe_keep_order
@@ -94,7 +111,7 @@ let validate_writable_path ~(agent_name : string) config path =
     let worktree_prefixes = allowed_worktree_prefixes config in
     let agent_playground_prefix =
       normalize_dir_prefix
-        (Filename.concat config.Room.base_path
+        (Filename.concat config.Coord.base_path
            (Keeper_alerting_path.playground_path_of_keeper agent_name))
     in
     if List.exists
@@ -113,14 +130,6 @@ let validate_writable_path ~(agent_name : string) config path =
         agent_playground_prefix
         canonical_path))
 
-(* Shell command allowlist *)
-let allowed_shell_commands = [
-  "dune"; "make"; "npm"; "npx"; "node";
-  "git"; "ls"; "cat"; "head"; "tail"; "wc";
-  "rg"; "find"; "diff"; "patch"; "mkdir";
-  "opam"; "ocamlfind"; "tsc";
-]
-
 (* Git action allowlist *)
 let allowed_git_actions = [
   "add"; "commit"; "push"; "diff"; "status";
@@ -128,7 +137,8 @@ let allowed_git_actions = [
   "clone";
 ]
 
-let max_output_bytes = 10 * 1024 (* 10KB output limit *)
+let max_output_bytes = 10 * 1024
+let max_output_label = "10KB"
 
 let truncate_output s =
   if String.length s > max_output_bytes then
@@ -270,7 +280,7 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->
-    match Room_git.git_root ~base_path:config.Room.base_path with
+    match Coord_git.git_root ~base_path:config.Coord.base_path with
     | None -> Error (IoError "Not in a git repository")
     | Some root ->
       let worktree_prefix = Tool_code.normalize_path
@@ -470,49 +480,42 @@ let handle_code_shell ctx args =
   let timeout = get_int args "timeout" 30 in
 
   if command = "" then (false, "command parameter required")
-  else begin
-    (* Parse first token to check allowlist *)
-    let tokens = String.split_on_char ' ' (String.trim command) in
-    let executable = match tokens with
-      | [] -> ""
-      | exe :: _ -> Filename.basename exe
-    in
-
-    if not (List.mem executable allowed_shell_commands) then
-      (false, Printf.sprintf "Command '%s' not in allowlist: %s"
-         executable (String.concat ", " allowed_shell_commands))
-    else begin
-      (* Validate cwd if provided *)
-      let cwd_result =
-        if cwd = "" then Ok None
-        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
-          | Ok abs_cwd -> Ok (Some abs_cwd)
-          | Error e -> Error e
-      in
-      match cwd_result with
-      | Error e -> (false, Types.masc_error_to_string e)
-      | Ok cwd_opt ->
-        let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
-        let cmd_parts = ["sh"; "-c"; command] in
-        let full_cmd = match cwd_opt with
-          | None -> cmd_parts
-          | Some dir -> ["sh"; "-c"; Printf.sprintf "cd %s && %s"
-                           (Filename.quote dir) command]
+  else
+    match validate_code_shell_command command with
+    | Error reason -> (false, reason)
+    | Ok () ->
+        (* Validate cwd if provided *)
+        let cwd_result =
+          if cwd = "" then Ok None
+          else
+            match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
+            | Ok abs_cwd -> Ok (Some abs_cwd)
+            | Error e -> Error e
         in
-        match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
-        | Unix.WEXITED code, output ->
-          let response = `Assoc [
-            ("status", `String (if code = 0 then "ok" else "error"));
-            ("exit_code", `Int code);
-            ("output", `String (truncate_output output));
-            ("command", `String command);
-            ("agent", `String ctx.agent_name);
-          ] in
-          (code = 0, Yojson.Safe.pretty_to_string response)
-        | _, output ->
-          (false, Printf.sprintf "Command failed: %s" (truncate_output output))
-    end
-  end
+        (match cwd_result with
+         | Error e -> (false, Types.masc_error_to_string e)
+         | Ok cwd_opt ->
+             let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
+             let cmd_parts = ["sh"; "-c"; command] in
+             let full_cmd =
+               match cwd_opt with
+               | None -> cmd_parts
+               | Some dir ->
+                   [ "sh"; "-c"; Printf.sprintf "cd %s && %s"
+                       (Filename.quote dir) command ]
+             in
+             match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
+             | Unix.WEXITED code, output ->
+                 let response = `Assoc [
+                   ("status", `String (if code = 0 then "ok" else "error"));
+                   ("exit_code", `Int code);
+                   ("output", `String (truncate_output output));
+                   ("command", `String command);
+                   ("agent", `String ctx.agent_name);
+                 ] in
+                 (code = 0, Yojson.Safe.pretty_to_string response)
+             | _, output ->
+                 (false, Printf.sprintf "Command failed: %s" (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let handle_code_git ctx args =
@@ -543,7 +546,7 @@ let handle_code_git ctx args =
     else if cwd = "" then
       (false, "cwd parameter required for clone")
     else
-      match validate_clone_url ~base_path:ctx.config.Room.base_path url with
+      match validate_clone_url ~base_path:ctx.config.Coord.base_path url with
       | Error msg -> (false, msg)
       | Ok () ->
         match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
@@ -551,14 +554,14 @@ let handle_code_git ctx args =
         | Ok abs_cwd ->
           (* Only pass the validated URL — no extra args allowed.
              Depth and timeout are config-driven via [git_clone] in tool_policy.toml. *)
-          let depth = match get_policy_config ~base_path:ctx.config.Room.base_path with
+          let depth = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
             | None -> 0
           in
           let depth_flag =
             if depth > 0 then Printf.sprintf " --depth %d" depth else ""
           in
-          let timeout = match get_policy_config ~base_path:ctx.config.Room.base_path with
+          let timeout = match get_policy_config ~base_path:ctx.config.Coord.base_path with
             | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
             | None -> 120.0
           in
@@ -730,13 +733,13 @@ Use when removing generated, obsolete, or conflicting files during code work.";
 Allowed: dune, make, npm, npx, node, git, ls, cat, head, tail, wc, rg, find, \
 diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and testing code \
 in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
-Returns exit_code and stdout (truncated at 10KB).";
+Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("command", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shell command to run (first token must be in allowlist)");
+          ("description", `String "Single shell command to run (no pipes/chaining; first token must be in allowlist)");
         ]);
         ("cwd", `Assoc [
           ("type", `String "string");

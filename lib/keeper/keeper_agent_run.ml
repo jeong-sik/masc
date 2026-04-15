@@ -358,7 +358,6 @@ let tool_index_entry_of_tool
          || name = "keeper_shell"
          || name = "keeper_bash"
          || name = "keeper_write" then Some "filesystem"
-    else if name = "keeper_github" then Some "vcs"
     else if String.starts_with ~prefix:"masc_board_" name then Some "masc_board"
     else if String.starts_with ~prefix:"masc_keeper_" name then Some "masc_keeper"
     else if String.starts_with ~prefix:"masc_plan_" name then Some "masc_plan"
@@ -393,7 +392,7 @@ let tool_index_entry_of_tool
     message, builds OAS tools + hooks, and delegates to
     [Oas_worker.run_named] which internally calls Agent.run().
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
@@ -412,7 +411,7 @@ let tool_index_entry_of_tool
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
@@ -511,8 +510,12 @@ let run_turn
     | None -> 0
   in
   (* 3. Build base system prompt from meta *)
+  let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   let persona_extended =
-    Keeper_types_profile.load_persona_extended meta.name |> Option.value ~default:""
+    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
+      profile_defaults
+    |> Keeper_types_profile.load_persona_extended
+    |> Option.value ~default:""
   in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
@@ -575,7 +578,14 @@ let run_turn
   (* OAS Utf8_sanitize.sanitize handles UTF-8 repair and control char
      stripping at serialization time (backend_openai_serialize.ml,
      backend_anthropic.ml). No pre-sanitize needed here. See OAS #916. *)
-  let history_messages = ctx_work.messages in
+  (* Repair orphaned ToolResult blocks before passing to OAS Agent.run.
+     Stale checkpoints saved before #7237 may contain tool_result blocks
+     whose matching tool_use was trimmed. Anthropic API rejects these.
+     repair_broken_tool_call_pairs downgrades broken tool_use/tool_result
+     pairs to plain Text before the provider validates adjacency. *)
+  let history_messages =
+    Keeper_context_core.repair_broken_tool_call_pairs ctx_work.messages
+  in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry
   then Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
@@ -621,7 +631,7 @@ let run_turn
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
   if affinity_k > 0
   then (
-    let masc_root = Filename.concat config.base_path ".masc" in
+    let masc_root = Coord.masc_root_dir config in
     let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
@@ -703,9 +713,8 @@ let run_turn
     ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
     ; "keeper_fs_read", "파일 읽기 소스코드 설정"
     ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
-    ; "keeper_shell", "명령어 조회 검색 탐색"
+    ; "keeper_shell", "명령어 조회 검색 탐색 gh github pull request issue pr ci 풀리퀘스트 이슈"
     ; "keeper_bash", "명령어 실행 쉘 빌드 테스트"
-    ; "keeper_github", "깃허브 이슈 풀리퀘스트 PR CI"
     ; "keeper_pr_workflow", "PR 생성 워크트리 커밋 푸시 풀리퀘스트 원���"
     ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
     ; "keeper_library_search", "라이브러리 지식 문서 검색"
@@ -739,7 +748,6 @@ let run_turn
     ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
     ; "masc_governance_status", "거버넌스 상태 규칙 정책"
     ; "masc_governance_feed", "거버넌스 피드 이벤트 로그"
-    ; "masc_governance_set", "거버넌스 설정 규칙 변경"
     ; "masc_autoresearch_start", "자동연구 리서치 시작"
     ; "masc_autoresearch_status", "자동연구 리서치 상태"
     ; "masc_autoresearch_stop", "자동연구 리서치 중지"
@@ -768,15 +776,11 @@ let run_turn
     ; "masc_dashboard", "대시보드 현황 대시 보드 개요"
     ; "masc_plan_clear_task", "계획 태스크 제거 해제 클리어"
     ; "masc_agent_fitness", "에이전트 평가 점수 피트니스"
-    ; "masc_auth_status", "인증 상태 토큰 자격"
-    ; "masc_auth_refresh", "인증 갱신 토큰 리프레시"
     ; "masc_web_search", "웹 검색 인터넷 온라인 구글"
     ; "masc_broadcast", "브로드캐스트 방송 알림 공지"
     ; "masc_claim_next", "다음태스크 가져오기 할당"
     ; "masc_messages", "메시지 대화 채팅 로그"
     ; "masc_leave", "퇴장 나가기 오프라인 종료"
-    ; "masc_heartbeat_start", "하트비트 시작 자동 핑"
-    ; "masc_heartbeat_stop", "하트비트 중지 핑 종료"
       (* masc_broadcast, masc_who, masc_messages require MCP session context
        and fail in keeper. Use keeper_broadcast instead. (#4694) *)
     ]
@@ -1050,14 +1054,12 @@ let run_turn
      the LLM and triggering tool_not_allowed errors. *)
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let allowed_exec_set =
-    let set = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    let base = Keeper_tool_policy.tool_name_set allowed_exec_names in
     (* Core always-tools bypass candidate_set in can_execute, so they
        may be absent from keeper_allowed_tool_names.  Add them back to
        prevent the preset filter from dropping survival-critical tools. *)
-    List.iter
-      (fun name -> Hashtbl.replace set name ())
-      Keeper_tool_registry.core_always_tools;
-    set
+    Keeper_tool_policy.StringSet.union base
+      (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
   in
   let max_tools_per_turn =
     if is_retry
@@ -1072,16 +1074,13 @@ let run_turn
     | Some r -> r
     | None -> ref Agent_sdk.Tool_op.Keep_all
   in
-  let mutation_boundary_tool_name : string option ref = ref None in
-  let mutation_boundary_summary () =
-    match !mutation_boundary_tool_name with
-    | Some tool_name ->
-        Printf.sprintf
-          "previous committed tool '%s' created a mutation boundary; checkpoint and resume next cycle"
-          tool_name
-    | None ->
-        "a previous committed tool created a mutation boundary; checkpoint and resume next cycle"
-  in
+  (* Mutation boundary mechanism removed. Previously, the first successful
+     mutating tool would open a "boundary" that blocked further tools and
+     exited the OAS loop early. This caused keeper death spirals (#6801) and
+     limited keepers to 1 mutating action per turn.
+     Now: OAS Agent.run completes naturally (max_turns or model end_turn).
+     Failure recovery: evidence records + operator notification via board,
+     not sticky blocker state. See plan: enchanted-strolling-bonbon. *)
   let base_hooks =
     Keeper_hooks_oas.make_hooks
       ~config
@@ -1089,25 +1088,6 @@ let run_turn
       ~session
       ~ctx_snapshot
       ~generation
-      ~pre_tool_use_guard:(fun ~tool_name ~input ->
-        match !mutation_boundary_tool_name with
-        | Some _ when Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
-                        ~tool_name ~input ->
-          None (* coordination/worktree-sandbox tools pass through boundary *)
-        | Some _ -> Some (mutation_boundary_summary ())
-        | None -> None)
-      ~on_tool_executed:(fun ~tool_name ~input ~output_text:_ ~success ->
-        if success
-           && not (Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input
-                     ~tool_name ~input)
-           && not (Keeper_tool_registry.is_reconcile_safe_tool tool_name)
-           && Option.is_none !mutation_boundary_tool_name
-        then begin
-          mutation_boundary_tool_name := Some tool_name;
-          Log.Keeper.info
-            "keeper:%s mutation boundary opened after committed tool=%s"
-            meta.name tool_name
-        end)
       ?max_cost_usd
       ?trajectory_acc
       ()
@@ -1198,7 +1178,7 @@ let run_turn
                   selection_mode =
                 let core =
                   Keeper_exec_tools.effective_core_tools ()
-                  |> List.filter (fun name -> Hashtbl.mem allowed_exec_set name)
+                  |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
                 in
                 let discovered =
                   Keeper_discovered_tools.active_names !discovered_ref ~turn
@@ -1229,57 +1209,80 @@ let run_turn
                          Oas_worker.default_model_strings ~cascade_name:rerank_cascade
                        in
                        let config_path = Oas_worker.default_config_path () in
-                       let rerank_fn =
-                         Agent_sdk.Tool_selector.default_rerank_fn
-                           ~sw
-                           ~net
-                           ?config_path
-                           ~cascade_name:rerank_cascade
-                           ~defaults
-                           ~k:selection_limit
-                           ()
+                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
+                          no longer owns cascade orchestration — MASC picks one
+                          provider from the cascade and passes it to the
+                          single-provider rerank API. Graceful degradation via
+                          BM25 fallback lives inside [default_rerank_fn]. *)
+                       let model_strings =
+                         Cascade_config.resolve_model_strings
+                           ?config_path ~name:rerank_cascade ~defaults ()
+                         |> Cascade_config.expand_model_strings_for_execution
                        in
-                       let strategy =
-                         Agent_sdk.Tool_selector.TopK_llm
-                           { k = selection_limit
-                           ; bm25_prefilter_n =
-                               min
-                                 keeper_selection_bm25_prefilter_n
-                                 (List.length preset_tools)
-                           ; always_include = core
-                           ; confidence_threshold = 0.3
-                           ; rerank_fn
-                           }
+                       let providers =
+                         Cascade_config.parse_model_strings model_strings
                        in
-                       (try
-                          let selected =
-                            Agent_sdk.Tool_selector.select_names
-                              ~strategy
-                              ~context:query_text
-                              ~tools:preset_tools
-                          in
-                          if Keeper_types_profile.keeper_debug
-                          then
-                            Log.Keeper.info
-                              "keeper:%s TopK_llm selected %d tools (query_len=%d, \
-                               candidates=%d)"
-                              meta.name
-                              (List.length selected)
-                              (String.length query_text)
-                              (List.length preset_tools);
-                          selected
-                        with
-                        | Eio.Cancel.Cancelled _ as e -> raise e
-                        | exn ->
+                       let healthy =
+                         Cascade_config.filter_healthy ~sw ~net providers
+                       in
+                       (match healthy with
+                        | [] ->
                           Log.Keeper.warn
-                            "keeper:%s TopK_llm failed (%s), falling back to \
-                             core+prefilter+discovered"
+                            "keeper:%s TopK_llm: no healthy provider for cascade \
+                             '%s', falling back to core+prefilter+discovered"
                             meta.name
-                            (Printexc.to_string exn);
-                          [])
-                     | _ ->
-                       Log.Keeper.warn
-                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
+                            rerank_cascade;
+                          []
+                        | first_provider :: _ ->
+                          let rerank_fn =
+                            Agent_sdk.Tool_selector.default_rerank_fn
+                              ~sw
+                              ~net
+                              ~provider:first_provider
+                              ~k:selection_limit
+                              ()
+                          in
+                          let strategy =
+                            Agent_sdk.Tool_selector.TopK_llm
+                              { k = selection_limit
+                              ; bm25_prefilter_n =
+                                  min
+                                    keeper_selection_bm25_prefilter_n
+                                    (List.length preset_tools)
+                              ; always_include = core
+                              ; confidence_threshold = 0.3
+                              ; rerank_fn
+                              }
+                          in
+                          (try
+                             let selected =
+                               Agent_sdk.Tool_selector.select_names
+                                 ~strategy
+                                 ~context:query_text
+                                 ~tools:preset_tools
+                             in
+                             if Keeper_types_profile.keeper_debug
+                             then
+                               Log.Keeper.info
+                                 "keeper:%s TopK_llm selected %d tools \
+                                  (query_len=%d, candidates=%d)"
+                                 meta.name
+                                 (List.length selected)
+                                 (String.length query_text)
+                                 (List.length preset_tools);
+                             selected
+                           with
+                           | Eio.Cancel.Cancelled _ as e -> raise e
+	                           | exn ->
+	                             Log.Keeper.warn
+	                               "keeper:%s TopK_llm failed (%s), falling back to \
+	                                core+prefilter+discovered"
+	                               meta.name
+	                               (Printexc.to_string exn);
+	                             []))
+	                     | _ ->
+	                       Log.Keeper.warn
+	                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
                           to core+prefilter+discovered"
                          meta.name;
                        [])
@@ -1331,7 +1334,7 @@ let run_turn
                 let validated, dropped_names =
                   List.partition
                     (fun n ->
-                       Hashtbl.mem universe_set n && Hashtbl.mem allowed_exec_set n)
+                       Keeper_tool_policy.StringSet.mem n universe_set && Keeper_tool_policy.StringSet.mem n allowed_exec_set)
                     raw
                 in
                 let dropped = List.length dropped_names in
@@ -1468,21 +1471,19 @@ let run_turn
                 else all_allowed
               in
               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
-              (* Tool choice: Auto on all turns.
-           Previous design forced tool_choice=Any on non-last turns
-           (#5566) to prevent text-only "chatting" responses, but this
-           caused fatal interactions with providers that ignore
-           tool_choice (GLM, some Ollama models):
-             1. Provider returns text → OAS contract violation
-             2. Mutating tools already committed → reconcile block
-             3. sticky_reconcile retained → keeper permanently dead
-             4. All keepers stall within ~10 minutes (#6801)
-           Auto lets the model decide; tool use is guided by the system
-           prompt instruction "always call a tool" instead. *)
+              (* Tool choice: Any on all non-last turns.
+           "Must call a tool" is deterministic (API enforces).
+           "Which tool" is non-deterministic (model chooses).
+           OAS handles provider differences:
+             - GLM: Any → Auto (api_openai.ml, GLM only supports auto)
+             - Ollama (supports_tool_choice=false): contract relaxed
+             - Claude/OpenAI: Any = required, enforced by API
+           Reconcile/mutation-boundary removed — #6801 root cause
+           was sticky_reconcile, not tool_choice=Any itself. *)
               let tool_choice =
                 if is_last_turn || List.length all_allowed = 0
                 then current_params.tool_choice (* last turn: preserve caller's choice *)
-                else Some Agent_sdk.Types.Auto (* all other turns: model decides *)
+                else Some Agent_sdk.Types.Any (* all other turns: force tool use *)
               in
               completion_contract_ref :=
                 Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice;
@@ -1515,6 +1516,12 @@ let run_turn
            Capture now once so ts_unix and hook_ms are consistent. *)
               (let now = Time_compat.now () in
                let hook_elapsed_ms = Keeper_timing.round1 ((now -. hook_t0) *. 1000.0) in
+               Keeper_registry.set_turn_decision_stage
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Decision_tool_policy_selected;
+               Keeper_registry.set_turn_cascade_state
+                 ~base_path:config.base_path meta.name
+                 Keeper_registry.Cascade_selecting;
                let disclosure_json =
                  `Assoc
                    [ "ts_unix", `Float now
@@ -1555,7 +1562,7 @@ let run_turn
     }
   in
   let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-  let base_dir = Filename.concat config.base_path ".masc" in
+  let base_dir = Coord.masc_root_dir config in
   (* RFC-MASC-004 Phase 2: Hook-first is now the only path.
      Create bare memory (no imperative seeding). Memory content is
      injected via BeforeTurnParams hook; flush is incremental via
@@ -1586,6 +1593,11 @@ let run_turn
       Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
       Agent_sdk.Context_reducer.cap_message_tokens ~max_tokens:32000 ~keep_recent:3;
       Agent_sdk.Context_reducer.repair_dangling_tool_calls;
+      {
+        Agent_sdk.Context_reducer.strategy =
+          Agent_sdk.Context_reducer.Custom
+            Keeper_context_core.repair_broken_tool_call_pairs;
+      };
       Agent_sdk.Context_reducer.merge_contiguous;
     ]
   in
@@ -1679,19 +1691,8 @@ let run_turn
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name)
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-           ~exit_condition:(fun _turn_count ->
-             Option.is_some !mutation_boundary_tool_name)
-           ~exit_condition_result:(fun turn_count ->
-             let tool_name = !mutation_boundary_tool_name in
-             ( Oas_worker.MutationBoundaryReached
-                 { turns_used = turn_count; tool_name },
-               Some
-                 (match tool_name with
-                  | Some tool ->
-                      Printf.sprintf
-                        "[mutation boundary reached after committed tool: %s]"
-                        tool
-                  | None -> "[mutation boundary reached]") ))
+           (* exit_condition removed with mutation_boundary — OAS runs to
+              natural completion (max_turns or model end_turn). *)
            ?oas_checkpoint:raw_oas_checkpoint
            ?event_bus
            ())
@@ -1965,8 +1966,8 @@ let run_turn
                  (* Emit activity event so episode flushes appear in
                     the activity graph / telemetry surface. *)
                  (try
-                    !Room_hooks.activity_emit_fn config
-                      ~actor:Room_hooks.{ kind = "keeper"; id = meta.name }
+                    !Coord_hooks.activity_emit_fn config
+                      ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
                       ~kind:"episode.flush"
                       ~payload:(`Assoc [
                         ("keeper", `String meta.name);

@@ -69,14 +69,23 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let keeper_names (config : Room.config) =
+let keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
 
-let keeper_count (config : Room.config) : int =
+let keeper_count (config : Coord.config) : int =
   List.length (keeper_names config)
 
-let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
-  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
+let running_keeper_count (config : Coord.config) : int =
+  keeper_names config
+  |> List.fold_left
+       (fun count name ->
+         match Keeper_types.read_meta config name with
+         | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
+         | _ -> count)
+       0
+
+let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
+  let include_goals = false in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
@@ -87,7 +96,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
   in
   let keepers_dir =
-    Filename.concat (Room.masc_root_dir config) "keepers"
+    Filename.concat (Coord.masc_root_dir config) "keepers"
   in
   let shared_sp_events =
     try
@@ -313,11 +322,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
             | None -> None
           in
-          let reconcile_status =
-            if Keeper_manual_reconcile.is_pending config m.name then
-              Some "manual_reconcile_required"
-            else None
-          in
+          (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
             runtime_blocker_fields_json config m
           in
@@ -399,7 +404,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 (let effective_models =
                    Oas_model_resolve.models_of_cascade_name m.cascade_name
                  in
-                 let cfgs = Llm_provider.Cascade_config.parse_model_strings effective_models in
+                 let cfgs = Cascade_config.parse_model_strings effective_models in
                  match cfgs with
                  | [] when effective_models <> [] ->
                      `Assoc [("has_checkpoint", `Bool false)]
@@ -543,10 +548,6 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 match phase with
                 | Some p -> `String p
                 | None -> `Null);
-              ("reconcile_status",
-                match reconcile_status with
-                | Some status -> `String status
-                | None -> `Null);
             ] @ runtime_blocker_fields @ [
               ("supervisor_diagnostics", supervisor_diagnostics);
               ("agent_name", `String m.agent_name);
@@ -575,7 +576,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   let all_goals = Goal_store.list_goals config () in
                   let linked = List.filter (fun (g : Goal_store.goal) ->
                     List.mem g.id m.active_goal_ids) all_goals in
-                  let tasks = Room.get_tasks_safe config in
+                  let tasks = Coord.get_tasks_safe config in
                   let forest = Dashboard_goals.build_forest ~goals:linked ~tasks in
                   `Assoc [
                     ("count", `Int (List.length linked));
@@ -638,7 +639,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
-              ("social_model", `String m.social_model);
+              ("social_model",
+                `String (Keeper_social_model.normalize_social_model m.social_model));
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
@@ -664,6 +666,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 if String.trim m.runtime.last_speech_act = ""
                 then `Null
                 else `String m.runtime.last_speech_act);
+              ("last_social_transition_reason",
+                if String.trim m.runtime.last_social_transition_reason = ""
+                then `Null
+                else `String m.runtime.last_social_transition_reason);
               ("last_blocker",
                 if String.trim m.runtime.last_blocker = ""
                 then `Null
@@ -782,7 +788,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
-let keeper_config_json (config : Room.config) (name : string)
+let keeper_config_json (config : Coord.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   match Keeper_types.read_meta config name with
   | Error msg ->
@@ -794,8 +800,10 @@ let keeper_config_json (config : Room.config) (name : string)
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let active_model = Keeper_exec_status.active_model_of_meta m in
+      let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
       let persona_extended =
-        Keeper_types_profile.load_persona_extended m.name
+        Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
+        |> Keeper_types_profile.load_persona_extended
         |> Option.value ~default:""
       in
       let effective_system_prompt =
@@ -909,12 +917,10 @@ let keeper_config_json (config : Room.config) (name : string)
                Some (`Preset (Keeper_types.tool_preset_to_string preset))
              | None -> None)
         in
-        let turn_outcome : [`Ok | `Failed | `Blocked] option =
+        let turn_outcome : [`Ok | `Failed] option =
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
             Some `Failed
-          | Some entry when entry.conditions.manual_reconcile_required ->
-            Some `Blocked
           | Some _ -> Some `Ok
           | None -> None
         in
@@ -965,7 +971,7 @@ let keeper_config_json (config : Room.config) (name : string)
       (`OK,
        `Assoc [
          ("name", `String m.name);
-         ("execution_scope", `String m.execution_scope);
+         ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
          ("effective_allowed_paths",

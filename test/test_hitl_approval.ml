@@ -60,23 +60,23 @@ let test_risk_classification_low () =
       (GP.risk_level_to_string actual)
   ) tools
 
-let test_keeper_github_read_only_stays_low () =
+let test_keeper_shell_gh_read_only_stays_low () =
   let actual =
     GP.assess_risk
-      ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr view 123")])
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
   in
-  check "keeper_github pr view → low"
+  check "keeper_shell op=gh pr view → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string actual)
 
-let test_keeper_github_mutation_escalates_high () =
+let test_keeper_shell_gh_mutation_escalates_high () =
   let actual =
     GP.assess_risk
-      ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr comment 123 --body hi")])
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
   in
-  check "keeper_github pr comment → high"
+  check "keeper_shell op=gh pr comment → high"
     (GP.risk_level_to_string GP.High)
     (GP.risk_level_to_string actual)
 
@@ -128,7 +128,7 @@ let test_approval_queue_submit_and_resolve () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_code_delete"
         ~input:(`Assoc [("path", `String "/dangerous")])
-        ~risk_level:"critical"
+        ~risk_level:AQ.Critical
     in
     result := Some decision
   );
@@ -175,7 +175,7 @@ let test_approval_queue_reject () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_force_reset"
         ~input:(`Assoc [])
-        ~risk_level:"critical"
+        ~risk_level:AQ.Critical
     in
     result := Some decision
   );
@@ -208,7 +208,7 @@ let test_approval_queue_expire_stale () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_dangerous_tool"
         ~input:(`Assoc [])
-        ~risk_level:"critical"
+        ~risk_level:AQ.Critical
     in
     result := Some decision
   );
@@ -243,7 +243,7 @@ let test_approval_queue_cancel_cleans_up () =
            ~keeper_name:"cancel-test"
            ~tool_name:"masc_dangerous"
            ~input:(`Assoc [])
-           ~risk_level:"critical"
+           ~risk_level:AQ.Critical
        in
        ());
      Eio.Fiber.yield ();
@@ -253,6 +253,34 @@ let test_approval_queue_cancel_cleans_up () =
   (* After cancellation, the pending entry should be cleaned up *)
   let final_count = AQ.pending_count () in
   Alcotest.(check int) "no orphan entries" initial_count final_count
+
+let test_background_pending_callback_and_keeper_lookup () =
+  Eio_main.run @@ fun _env ->
+  let initial_count = AQ.pending_count () in
+  let callback_result = ref None in
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"gate-keeper"
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input:(`Assoc [("kind", `String "reconcile_required")])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> callback_result := Some decision)
+  in
+  Alcotest.(check bool) "keeper has pending approval" true
+    (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
+  Alcotest.(check int) "background entry added"
+    (initial_count + 1) (AQ.pending_count ());
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail ("resolve failed: " ^ msg));
+  Alcotest.(check bool) "keeper pending cleared" false
+    (AQ.has_pending_for_keeper ~keeper_name:"gate-keeper");
+  Alcotest.(check int) "background entry removed"
+    initial_count (AQ.pending_count ());
+  match !callback_result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some _ -> Alcotest.fail "expected approve callback"
+  | None -> Alcotest.fail "expected callback to fire"
 
 (* ── 4. Approval callback integration ────────────────────── *)
 
@@ -307,18 +335,18 @@ let test_callback_production_keeper_write_requires_approval () =
   | Some _ -> Alcotest.fail "expected Approve after operator resolution"
   | None -> Alcotest.fail "keeper write callback did not suspend for approval"
 
-let test_callback_production_keeper_github_read_only_auto_approved () =
+let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
   let cb =
     GP.to_oas_approval_callback
       ~governance_level:"production" ~keeper_name:"test" in
   let decision =
-    cb ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr view 123")])
+    cb ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
   in
   match decision with
   | Agent_sdk.Hooks.Approve -> ()
   | Agent_sdk.Hooks.Reject r ->
-    Alcotest.fail ("expected Approve for read-only keeper_github, got Reject: " ^ r)
+    Alcotest.fail ("expected Approve for read-only keeper_shell op=gh, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
 (* ── Test runner ──────────────────────────────────────────── *)
@@ -329,10 +357,10 @@ let () =
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
       Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
       Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
-      Alcotest.test_case "keeper_github read-only stays low" `Quick
-        test_keeper_github_read_only_stays_low;
-      Alcotest.test_case "keeper_github mutation escalates high" `Quick
-        test_keeper_github_mutation_escalates_high;
+      Alcotest.test_case "keeper_shell op=gh read-only stays low" `Quick
+        test_keeper_shell_gh_read_only_stays_low;
+      Alcotest.test_case "keeper_shell op=gh mutation escalates high" `Quick
+        test_keeper_shell_gh_mutation_escalates_high;
     ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
@@ -346,12 +374,14 @@ let () =
       Alcotest.test_case "expire stale" `Quick test_approval_queue_expire_stale;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
+      Alcotest.test_case "background pending callback" `Quick
+        test_background_pending_callback_and_keeper_lookup;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
       Alcotest.test_case "production keeper write requires approval" `Quick
         test_callback_production_keeper_write_requires_approval;
-      Alcotest.test_case "production keeper_github read-only auto-approved" `Quick
-        test_callback_production_keeper_github_read_only_auto_approved;
+      Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
+        test_callback_production_keeper_shell_gh_read_only_auto_approved;
     ]);
   ]

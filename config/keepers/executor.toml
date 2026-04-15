@@ -1,0 +1,6 @@
+[keeper]
+persona_name = "executor"
+execution_scope = "workspace"
+cascade_name = "keeper_unified"
+telemetry_feedback_enabled = true
+telemetry_feedback_window_hours = 24

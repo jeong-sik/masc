@@ -27,7 +27,7 @@ function syncFlowStateFromDashboardSignals(): boolean {
     return true
   }
 
-  const paused = namespaceTruth.value?.namespace.status?.paused ?? serverStatus.value?.paused
+  const paused = namespaceTruth.value?.root.status?.paused ?? serverStatus.value?.paused
   if (paused === true) {
     flowState.value = 'paused'
     return true

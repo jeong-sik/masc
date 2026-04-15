@@ -58,6 +58,21 @@ val allows_workflow : t -> string -> bool
     as configured in [permissions.shell_write_presets]. *)
 val allows_shell_write : t -> string -> bool
 
+(** GH cache TTL in seconds. From [gh_cache.cache_ttl_sec], default 120.0. *)
+val gh_cache_ttl_sec : t -> float
+
+(** Page size for gh API fetch. From [gh_cache.fetch_page_size], default 100. *)
+val gh_cache_fetch_page_size : t -> int
+
+(** Timeout for gh API fetch subprocess. From [gh_cache.fetch_timeout_sec], default 10.0. *)
+val gh_cache_fetch_timeout_sec : t -> float
+
+(** Max valid alternatives in rejection response. From [gh_cache.max_alternatives], default 20. *)
+val gh_cache_max_alternatives : t -> int
+
+(** Max gh output bytes before truncation. From [gh_cache.max_output_bytes], default 8192. *)
+val gh_cache_max_output_bytes : t -> int
+
 (** Git clone allowed GitHub org names from [git_clone.allowed_orgs]. *)
 val git_clone_allowed_orgs : t -> string list
 

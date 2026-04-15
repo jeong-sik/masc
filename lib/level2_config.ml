@@ -35,8 +35,8 @@ end
 module Hebbian = struct
   let learning_rate () = get_env_float "MASC_HEBBIAN_RATE" 0.075
   let decay_rate () = get_env_float "MASC_HEBBIAN_DECAY" 0.01
-  let min_weight () = get_env_float "MASC_HEBBIAN_MIN_WEIGHT" 0.05
-  let max_weight () = get_env_float "MASC_HEBBIAN_MAX_WEIGHT" 1.0
+  let min_weight () = 0.05
+  let max_weight () = 1.0
 end
 
 (** Get all config as JSON for debugging *)

@@ -34,9 +34,9 @@ let keeper_voice_tool_schemas =
     wasted on meta-introspection instead of productive action.
     See #4961. *)
 let core_always_tools =
-  [ "keeper_context_status";
-    "keeper_stay_silent"; "keeper_tool_search";
-    "extend_turns" ]
+  List.map Tool_name.to_string
+    Tool_name.[ Keeper Context_status; Keeper Stay_silent; Keeper Tool_search ]
+  @ [ "extend_turns" ] (* OAS SDK-provided, not in Tool_name *)
 
 (** Core tools always visible to the LLM.  All other tools are
     discoverable on demand via [keeper_tool_search].
@@ -57,26 +57,28 @@ let core_always_tools =
     the model repeatedly observes but cannot find tools to act. *)
 let core_discovery_tools =
   core_always_tools @
-  [ (* Coordination *)
-    "keeper_broadcast"; "keeper_tasks_list";
-    "keeper_task_claim"; "keeper_task_done"; "keeper_task_create";
-    "keeper_memory_search";
-    (* Filesystem: read + write (action symmetry) *)
-    "keeper_fs_read"; "keeper_fs_edit";
-    (* Board: core interaction *)
-    "keeper_board_get"; "keeper_board_post";
-    "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
-    (* Shell + VCS *)
-    "keeper_shell"; "keeper_github";
-    "keeper_pr_workflow"; "keeper_pr_submit";
-    "keeper_preflight_check";
-    (* Review *)
-    "keeper_pr_review_read"; "keeper_pr_review_comment"; "keeper_pr_review_reply";
-    (* Discovery fallback for meta/admin tools *)
-    "keeper_tools_list";
-    (* External search *)
-    "masc_web_search";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      (* Coordination *)
+      Keeper Broadcast; Keeper Tasks_list;
+      Keeper Task_claim; Keeper Task_done; Keeper Task_create;
+      Keeper Memory_search;
+      (* Filesystem: read + write (action symmetry) *)
+      Keeper Fs_read; Keeper Fs_edit;
+      (* Board: core interaction *)
+      Keeper Board_get; Keeper Board_post;
+      Keeper Board_comment; Keeper Board_vote; Keeper Board_list;
+      (* Shell + VCS *)
+      Keeper Shell;
+      Keeper Pr_workflow; Keeper Pr_submit;
+      Keeper Preflight_check;
+      (* Review *)
+      Keeper Pr_review_read; Keeper Pr_review_comment; Keeper Pr_review_reply;
+      (* Discovery fallback for meta/admin tools *)
+      Keeper Tools_list;
+      (* External search *)
+      Masc Web_search;
+    ]
 
 let effective_core_tools () = core_discovery_tools
 
@@ -97,9 +99,9 @@ let is_core_always_tool (name : string) : bool =
 
     Non-shard tools (injected outside Tool_shard, e.g. keeper_tool_search)
     are listed explicitly below. *)
-let non_shard_read_only_tools = [
-  "keeper_tool_search";  (* injected by Keeper_tool_policy, not in any shard *)
-]
+let non_shard_read_only_tools =
+  List.map Tool_name.to_string
+    Tool_name.[ Keeper Tool_search ] (* injected by Keeper_tool_policy, not in any shard *)
 
 let keeper_read_only_tools =
   Tool_shard.all_read_only_keeper_tools () @ non_shard_read_only_tools
@@ -124,7 +126,7 @@ let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 
 (* ── Input-aware read-only check ─────────────────────────────
-   Some tools (keeper_github, masc_code_git) mix read-only and mutating
+   Some tools (keeper_shell, masc_code_git) mix read-only and mutating
    subcommands within a single tool name. This function inspects the
    JSON input to distinguish calls with no side effects. *)
 
@@ -183,28 +185,39 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
       in
       not has_method_flag && not has_field_flag
 
-(** Extract the effective gh command string from keeper_github JSON input.
-    [handle_keeper_github] uses [cmd] first; if empty, falls back to
-    joining [args].  This function mirrors that logic so the read-only
-    classification matches what actually executes. *)
+(** Extract the effective gh command string from keeper_shell op=gh input.
+    [keeper_exec_shell] uses the [cmd] field. *)
+let normalize_gh_command (cmd : string) : string =
+  let tokens =
+    cmd
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun token -> token <> "")
+  in
+  let rec drop_leading_gh = function
+    | token :: rest when String.lowercase_ascii token = "gh" ->
+        drop_leading_gh rest
+    | remaining -> remaining
+  in
+  String.concat " " (drop_leading_gh tokens)
+
 let gh_effective_cmd (input : Yojson.Safe.t) : string =
   match input with
   | `Assoc fields ->
-    let cmd =
-      match List.assoc_opt "cmd" fields with
-      | Some (`String s) -> String.trim s
-      | _ -> ""
-    in
-    if cmd <> "" then cmd
-    else
-      let args =
-        match List.assoc_opt "args" fields with
-        | Some (`List items) ->
-          List.filter_map (function `String s -> Some s | _ -> None) items
-        | _ -> []
-      in
-      if args <> [] then String.concat " " args else ""
+    (match List.assoc_opt "cmd" fields with
+     | Some (`String s) -> normalize_gh_command s
+     | _ -> "")
   | _ -> ""
+
+(** Check if keeper_shell input has op="gh". *)
+let is_shell_gh_op (input : Yojson.Safe.t) : bool =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "op" fields with
+     | Some (`String s) -> String.trim s = "gh"
+     | _ -> false)
+  | _ -> false
 
 let git_read_only_actions =
   [ "diff"; "status"; "log"; "branch"; "fetch" ]
@@ -218,9 +231,10 @@ let git_action_of_input (input : Yojson.Safe.t) : string =
   | _ -> ""
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
-  if is_effectively_read_only_tool tool_name then true
-  else match tool_name with
-  | "keeper_github" ->
+  match Tool_name.of_string tool_name with
+  | Some (Keeper Shell) when is_shell_gh_op input ->
+    (* keeper_shell with op=gh is input-aware: gh commands can mutate state
+       even though the tool itself is marked read-only by default. *)
     let cmd = gh_effective_cmd input in
     let cmd_lower = String.lowercase_ascii cmd in
     if cmd_lower = "" then false
@@ -232,9 +246,11 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
         String.length cmd_lower >= String.length prefix
         && String.sub cmd_lower 0 (String.length prefix) = prefix
       ) gh_read_only_prefixes
-  | "masc_code_git" -> List.mem (git_action_of_input input) git_read_only_actions
-  | "masc_worktree_list" -> true
-  | _ -> false
+  | Some (Masc Code_git) ->
+    if is_effectively_read_only_tool tool_name then true
+    else List.mem (git_action_of_input input) git_read_only_actions
+  | Some (Masc Worktree_list) -> true
+  | _ -> is_effectively_read_only_tool tool_name
 
 (* ── Input-aware mutation-boundary bypass ────────────────────
    Some tools do mutate state, but they should not open the
@@ -262,45 +278,31 @@ let is_main_worktree_boundary_exempt_with_input
     ~(input : Yojson.Safe.t) : bool =
   if is_read_only_with_input ~tool_name ~input then true
   else
-    match tool_name with
-    | "keeper_task_claim" | "keeper_task_done" | "keeper_task_create" | "keeper_tasks_list"
-    | "keeper_board_post" | "keeper_board_comment" | "keeper_board_vote"
-    | "keeper_board_list" | "keeper_board_get"
-    (* Board delete and cleanup are MASC-state-only mutations (board
-       post store), not main-worktree writes.  Missing here until #6692
-       caused [janitor] to hit a mutation-boundary block loop at
-       2026-04-12 01:15:25 KST: the first [keeper_board_delete] in a
-       cleanup turn succeeded and opened the boundary, and every
-       subsequent [keeper_board_delete] in the same turn was blocked
-       by the [pre_tool_use_guard], burning the turn budget without
-       progress.  The [masc_board_delete] alias was already exempt at
-       line 283 but its [keeper_*] counterpart had drifted out of this
-       list — same structural gap fixed by #6681 for [masc_claim_next]. *)
-    | "keeper_board_delete" | "keeper_board_cleanup"
-    | "keeper_broadcast" -> true
-    (* MASC coordination aliases for the [keeper_*] entries above.
-       These share the same name with a [masc_] prefix because they are
-       exposed via the masc-mcp tool surface instead of the per-keeper
-       surface, but their effect is identical: MASC task/board state
-       only, never the main worktree.  Missing here until #6671 caused
-       [masc_improver] to hang after [masc_add_task] opened a boundary:
-       the follow-up [masc_claim_next] was blocked, the LLM looped on
-       text-only responses, and the turn exhausted cascade budget on
-       [max_tokens] — all downstream of this allowlist gap.  See log
-       timestamp 2026-04-12 09:40:58 "pre_tool_use guard blocked
-       masc_claim_next". *)
-    | "masc_tasks" | "masc_add_task" | "masc_claim_next"
-    | "masc_batch_add_tasks" | "masc_plan_init" | "masc_plan_set_task"
-    | "masc_plan_update" | "masc_plan_get" | "masc_transition"
-    | "masc_broadcast" | "masc_messages" | "masc_status"
-    | "masc_dashboard" | "masc_agents" | "masc_agent_card"
-    | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
-    | "masc_board_comment_vote" | "masc_board_delete"
-    | "masc_board_list" | "masc_board_get" | "masc_board_stats"
-    | "masc_board_hearths" | "masc_board_profile" -> true
-    | "masc_code_edit" | "masc_code_write" | "masc_code_delete"
-    | "masc_code_shell" | "masc_code_git" | "masc_worktree_create"
-    | "keeper_pr_submit" | "keeper_fs_edit" -> true
+    match Tool_name.of_string tool_name with
+    (* Keeper coordination: MASC-state-only mutations *)
+    | Some (Keeper Task_claim) | Some (Keeper Task_done)
+    | Some (Keeper Task_create) | Some (Keeper Tasks_list)
+    | Some (Keeper Board_post) | Some (Keeper Board_comment)
+    | Some (Keeper Board_vote) | Some (Keeper Board_list)
+    | Some (Keeper Board_get) | Some (Keeper Board_delete)
+    | Some (Keeper Board_cleanup) | Some (Keeper Broadcast) -> true
+    (* MASC coordination aliases — same effect domain as keeper_* above *)
+    | Some (Masc Tasks) | Some (Masc Add_task) | Some (Masc Claim_next)
+    | Some (Masc Batch_add_tasks) | Some (Masc Plan_init)
+    | Some (Masc Plan_set_task) | Some (Masc Plan_update)
+    | Some (Masc Plan_get) | Some (Masc Transition)
+    | Some (Masc Broadcast) | Some (Masc Messages) | Some (Masc Status)
+    | Some (Masc Dashboard) | Some (Masc Agents) | Some (Masc Agent_card)
+    | Some (Masc Board_post) | Some (Masc Board_comment)
+    | Some (Masc Board_vote) | Some (Masc Board_comment_vote)
+    | Some (Masc Board_delete) | Some (Masc Board_list)
+    | Some (Masc Board_get) | Some (Masc Board_stats)
+    | Some (Masc Board_hearths) | Some (Masc Board_profile) -> true
+    (* Playground-scoped write tools *)
+    | Some (Masc Code_edit) | Some (Masc Code_write)
+    | Some (Masc Code_delete) | Some (Masc Code_shell)
+    | Some (Masc Code_git) | Some (Masc Worktree_create)
+    | Some (Keeper Pr_submit) | Some (Keeper Fs_edit) -> true
     | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)
@@ -321,13 +323,16 @@ let is_main_worktree_boundary_exempt_with_input
     appear in [committed_mutating_tools] so including them here would
     be misleading dead entries. *)
 let reconcile_safe_tools =
-  [ "keeper_board_post"; "keeper_board_comment";
-    "keeper_board_vote"; "keeper_board_comment_vote";
-    "keeper_broadcast";
-    "keeper_task_done";
-    "masc_board_post"; "masc_board_comment";
-    "masc_board_vote"; "masc_board_comment_vote";
-    "masc_broadcast" ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Keeper Board_post; Keeper Board_comment;
+      Keeper Board_vote; Keeper Board_comment_vote;
+      Keeper Broadcast;
+      Keeper Task_done;
+      Masc Board_post; Masc Board_comment;
+      Masc Board_vote; Masc Board_comment_vote;
+      Masc Broadcast;
+    ]
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length reconcile_safe_tools) in
@@ -355,7 +360,7 @@ let injected_masc_tool_names () =
     metadata.  Consumed by [keeper_tool_policy.keeper_default_model_tools]. *)
 let keeper_tool_search_schema : Types.tool_schema =
   {
-    name = "keeper_tool_search";
+    name = Tool_name.(to_string (Keeper Tool_search));
     description =
       "Search for tools by query describing what you need. \
        Returns tool names, descriptions, and usage guidance. \

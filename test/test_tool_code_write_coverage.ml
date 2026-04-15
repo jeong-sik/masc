@@ -177,6 +177,37 @@ let test_mixed_case_org () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
 
+(* ── validate_code_shell_command ─────────────────────────────────── *)
+
+let test_validate_code_shell_command_allows_pipe () =
+  (* Pipes are now allowed: each segment is independently validated
+     against the allowlist; dangerous metacharacters remain blocked. *)
+  check (result unit string) "piped allowlisted commands accepted"
+    (Ok ())
+    (Tool_code_write.validate_code_shell_command "dune build 2>&1 | tail -5")
+
+let test_validate_code_shell_command_rejects_pipe_to_disallowed () =
+  match
+    Tool_code_write.validate_code_shell_command "dune build | xargs rm -rf"
+  with
+  | Error _ -> ()
+  | Ok () ->
+      fail "expected pipe-to-disallowed-command to be rejected by allowlist"
+
+let test_validate_code_shell_command_allows_direct_build () =
+  check (result unit string) "direct build allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "dune build 2>&1")
+
+let test_validate_code_shell_command_rejects_semicolon () =
+  match
+    Tool_code_write.validate_code_shell_command
+      "dune build; tail -5"
+  with
+  | Error reason ->
+      check bool "reason mentions shell injection" true
+        (String.starts_with ~prefix:"Shell injection syntax" reason)
+  | Ok () -> fail "expected semicolon chaining to be rejected"
+
 (* ── Per-agent containment (#6527 iter 6) ───────────────────────────
    Regression tests for PR #6610 — verify that validate_writable_path
    and validate_clone_cwd refuse cross-agent playground writes even
@@ -211,19 +242,19 @@ let error_msg result =
   | Error (Types.IoError m) -> m
   | Error _ -> "<non-IoError>"
 
-let make_config base_path : Masc_mcp.Room.config =
+let make_config base_path : Masc_mcp.Coord.config =
   (* Override MASC_BASE_PATH so default_config does not pick up the
      developer's global MASC root instead of our fresh tmp tree. The
      test runner sets this env var from the user's shell. *)
   Unix.putenv "MASC_BASE_PATH" base_path;
-  Masc_mcp.Room.default_config base_path
+  Masc_mcp.Coord.default_config base_path
 
 (* Ensure the base path exists as a real git repository so
    Tool_code.validate_path (which requires
-   Room_git.git_root ~base_path) can canonicalise against it.
+   Coord_git.git_root ~base_path) can canonicalise against it.
 
    On macOS, $TMPDIR points to /var/folders/... which is a symlink
-   target of /private/var/folders/... Room_git.git_root returns the
+   target of /private/var/folders/... Coord_git.git_root returns the
    fully realpath-resolved root, so we also realpath-resolve the
    base_path before returning it — otherwise the prefix check inside
    Tool_code.validate_path trips on the `/private/` divergence. *)
@@ -236,7 +267,7 @@ let fresh_base_path () =
   let dir = try Unix.realpath raw_dir with _ -> raw_dir in
   (* Initialise a minimal git repository so validate_path has a
      canonical root. An empty `git init` plus an initial commit
-     is sufficient; Room_git.git_root walks up from base_path. *)
+     is sufficient; Coord_git.git_root walks up from base_path. *)
   let run_git args =
     let cmd = String.concat " "
       (List.map Filename.quote ("git" :: args) @ [">"; "/dev/null"; "2>&1"]) in
@@ -353,6 +384,16 @@ let () =
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
+    ]);
+    ("validate_code_shell_command", [
+      test_case "allows pipe with allowlisted segments" `Quick
+        test_validate_code_shell_command_allows_pipe;
+      test_case "rejects pipe to disallowed command" `Quick
+        test_validate_code_shell_command_rejects_pipe_to_disallowed;
+      test_case "allows direct build" `Quick
+        test_validate_code_shell_command_allows_direct_build;
+      test_case "rejects semicolon" `Quick
+        test_validate_code_shell_command_rejects_semicolon;
     ]);
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick

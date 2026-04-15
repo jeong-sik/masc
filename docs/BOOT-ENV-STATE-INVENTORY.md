@@ -7,6 +7,10 @@ This document answers four operator questions:
 - Where live state, logs, and audit artifacts land on disk.
 - What the current host is actually using right now.
 
+For day-to-day active-root and init diagnosis, prefer
+[`CONFIG-DOCTOR.md`](./CONFIG-DOCTOR.md). This document is the deeper inventory
+behind that operator flow.
+
 Scope:
 
 - Canonical behavior in this document is derived from code.
@@ -31,23 +35,29 @@ Scope:
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
 | `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE` | Postgres backend and pool configuration. | backend bootstrap and storage |
 
-Not every environment variable is boot-critical. Most of the long `MASC_*` tail is runtime tuning, transport, dashboard, or keeper behavior. The centralized inventory lives in `lib/config/env_config_*.ml`; a repo-wide scan still finds additional ad-hoc environment reads outside those modules.
+Not every environment variable controls the same part of the runtime, but the
+default operator contract is still boot-time unless a separate runtime control
+plane exists. See [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) for reload classes and
+exceptions. The centralized inventory lives in `lib/config/env_config_*.ml`; a
+repo-wide scan still finds additional ad-hoc environment reads outside those
+modules.
 
 ### 1.2 Config root resolution
 
-Canonical config-root precedence is:
+Low-level resolver precedence is:
 
 1. `MASC_CONFIG_DIR`
 2. `<MASC_BASE_PATH>/.masc/config`
 3. `~/.masc/config`
-4. `cwd/config`
-5. executable-relative `config/`
-6. legacy repo `config/`
+4. `cwd/config` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
+5. executable-relative `config/` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
 
 Important boot behavior:
 
 - If `MASC_CONFIG_DIR` is unset, bootstrap initializes `<MASC_BASE_PATH>/.masc/config`.
 - Bootstrap copies only missing files from the versioned `config/` tree; it does not overwrite an existing file.
+- Supported launchers and `main_eio.exe doctor` should be read with a simpler operator contract:
+  active config is `MASC_CONFIG_DIR` when set, otherwise `<MASC_BASE_PATH>/.masc/config`.
 - This means a passive base-path config root can exist on disk even when it is not the active config root.
 
 ### 1.3 Personas root resolution
@@ -61,25 +71,34 @@ Keeper bootstrap may also source keeper defaults from `CONFIG_ROOT/keepers/<name
 
 ### 1.4 What the config root contains
 
-The versioned config tree currently contains:
+The checked-in versioned seed config tree currently contains:
 
 | Path | Purpose |
 | --- | --- |
 | `config/cascade.json` | Provider/model cascade and routing defaults. |
 | `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
-| `config/keeper_runtime.toml` | Per-base-path keeper runtime tuning (turn budgets, timeouts, alerts, etc.). See section 1.3. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
 
-### 1.3 keeper_runtime.toml — per-base-path runtime tuning
+`keeper_runtime.toml` is not checked into the repo seed tree. It is an optional
+active-root file at `<active config root>/keeper_runtime.toml`.
 
-All `MASC_KEEPER_*` environment variables can be set declaratively in
-`<config_root>/keeper_runtime.toml`. The TOML file is loaded at server
+### 1.3 keeper_runtime.toml — per-base-path startup keeper env seeding
+
+All live startup-scoped `MASC_KEEPER_*` keeper runtime variables wired through
+`Env_config_keeper` / `Keeper_config` can be set declaratively in
+`<active config root>/keeper_runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
 vars initializes.
+
+Operational contract:
+
+- This file is `boot_static`, not hot-reloaded.
+- The file seeds a process-local boot override store.
+- Live tuning belongs in `Runtime_params`, not in parent-shell env edits.
 
 **Precedence** (highest first):
 1. Process env var (caller/CI override — never overwritten by TOML)
@@ -89,7 +108,10 @@ vars initializes.
 Missing file is not an error (returns 0 overrides, uses env/defaults).
 Parse errors log a warning and fall back to env defaults.
 
-**Sections** (53 knobs total):
+Legacy compatibility names that are no longer read by the unified turn path
+are intentionally excluded from this TOML surface.
+
+**Sections** (64 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
@@ -97,7 +119,7 @@ Parse errors log a warning and fall back to env defaults.
 | `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
 | `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
 | `[heartbeat]` | 7 | `interval_sec`, `max_silence_sec`, `smart_heartbeat` |
-| `[turn]` | 5 | `timeout_sec`, `oas_timeout_sec`, `admission_wait_timeout_sec` |
+| `[turn]` | 16 | `timeout_sec`, `tool_cost_max_usd`, `max_tools_per_turn`, `temperature` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
@@ -117,18 +139,28 @@ max_turns_per_call = 15
 
 [bootstrap]
 max_active_keepers = 12
+
+[turn]
+tool_cost_max_usd = 1.25
+max_tools_per_turn = 64
+llm_rerank = true
 ```
+
+`tool_cost_max_usd = 0` means unlimited and disables the keeper cost gate.
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values
-are injected via `Unix.putenv` so existing `Env_config_keeper` call
-sites work without API change.
+are recorded in a process-local boot override store so existing
+`Env_config_*` and keeper helpers can resolve TOML-backed defaults
+without mutating the parent environment.
 
 ## 2. Canonical Root and Path Resolution
 
 ### 2.1 Root formulas
 
 - Default cluster runtime root: `<base_path>/.masc`
+- When no explicit `base_path` is provided, runtime state falls back to `~/.masc`
+  by treating `HOME` as the implicit base path.
 - Named cluster runtime root: `<base_path>/.masc/clusters/<cluster_name>`
 - Config root: resolved separately by the precedence chain above
 - Personas root: resolved separately from the config root
@@ -296,6 +328,8 @@ Allowed path model:
 Current host note:
 
 - The inspected host also contains auxiliary event and telemetry lanes such as `activity-events/`, `events/`, `telemetry/`, and `data/tool-metrics/`.
+- Repo-local `masc-mcp/logs/` directories are non-canonical historical or
+  harness captures. Live runtime service logs belong under `<runtime_root>/logs/`.
 
 ### 3.9 Auth, Connectors, and Voice
 
@@ -401,7 +435,7 @@ Current log sink observed today:
 
 1. Pick one base-path convention per environment and stick to it.
    - `--base-path /Users/dancer/me` produces `/Users/dancer/me/.masc`
-   - `--base-path /Users/dancer/me/.masc` produces `/Users/dancer/me/.masc/.masc`
+   - `--base-path /Users/dancer/me/.masc` normalizes to `/Users/dancer/me` and warns
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.

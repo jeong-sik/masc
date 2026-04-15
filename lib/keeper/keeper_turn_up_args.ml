@@ -17,7 +17,7 @@ type parsed_args = {
   policy_voice_enabled_opt : bool option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
-  execution_scope_opt : string option;
+  execution_scope_opt : Keeper_execution_scope.t option;
   voice_enabled_opt : bool option;
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
@@ -70,6 +70,20 @@ let parse_present_tool_name_list_opt args key =
   | Some (`List items) ->
       let rec collect acc index = function
         | [] -> Ok (Some (normalize_tool_name_list (List.rev acc)))
+        | `String value :: rest -> collect (value :: acc) (index + 1) rest
+        | _ :: _ ->
+            Error (Printf.sprintf "%s[%d] must be a string" key index)
+      in
+      collect [] 0 items
+  | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
+  | Some _ -> Error (Printf.sprintf "%s must be an array of strings" key)
+
+let parse_present_string_list_opt args key =
+  match json_assoc_member_opt key args with
+  | None -> Ok None
+  | Some (`List items) ->
+      let rec collect acc index = function
+        | [] -> Ok (Some (normalize_name_list (List.rev acc)))
         | `String value :: rest -> collect (value :: acc) (index + 1) rest
         | _ :: _ ->
             Error (Printf.sprintf "%s[%d] must be a string" key index)
@@ -163,21 +177,27 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       parse_compaction_profile_opt args "compaction_profile"
     in
     let tool_access_input_res = parse_tool_access_input args in
-    match compaction_profile_opt_res, tool_access_input_res with
-    | Error e, _ | _, Error e -> Error (false, e)
+    let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
+    match compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res with
+    | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error (false, e)
     | Ok compaction_profile_opt,
-      Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt) ->
+      Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
+      Ok allowed_paths_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
-    let allowed_paths_opt =
-      let raw = get_string_list args "allowed_paths" in
-      if raw = [] then None else Some raw
-    in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
-    let execution_scope_opt = get_string_opt args "execution_scope" in
+    let execution_scope_opt =
+      get_string_opt args "execution_scope"
+      |> Option.map (fun s ->
+        match Keeper_execution_scope.of_string s with
+        | Ok v -> v
+        | Error (`Unknown_scope raw) ->
+          Log.Keeper.warn "keeper_up: unknown execution_scope %S, using default" raw;
+          Keeper_execution_scope.default)
+    in
     let voice_enabled_opt = get_bool_opt args "voice_enabled" in
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in

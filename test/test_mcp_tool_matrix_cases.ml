@@ -49,10 +49,6 @@ let strict_success_names =
     "masc_add_task";
     "masc_agent_card";
     "masc_agents";
-    "masc_auth_disable";
-    "masc_auth_enable";
-    "masc_auth_list";
-    "masc_auth_status";
     "masc_batch_add_tasks";
     "masc_board_comment";
     "masc_board_get";
@@ -63,10 +59,7 @@ let strict_success_names =
     "masc_check";
     "masc_claim_next";
     "masc_dashboard";
-    "masc_handover_create";
-    "masc_handover_list";
     "masc_heartbeat";
-    "masc_init";
     "masc_join";
     "masc_keeper_down";
     "masc_keeper_list";
@@ -83,11 +76,6 @@ let strict_success_names =
     "masc_tool_help";
     "masc_transition";
     "masc_transport_status";
-    "masc_verify_auto";
-    "masc_verify_pending";
-    "masc_verify_request";
-    "masc_verify_status";
-    "masc_verify_submit";
     "masc_websocket_discovery";
     "masc_webrtc_answer";
     "masc_webrtc_offer";
@@ -96,6 +84,8 @@ let strict_success_names =
     "masc_worktree_create";
     "masc_worktree_list";
     "masc_worktree_remove";
+    (* Removed post-pruning:
+       masc_init, masc_auth_*, masc_handover_*, masc_verify_* *)
   ]
 
 let strict_guard_cases =
@@ -277,12 +267,11 @@ let execute_tool_ok fixture ~name ~arguments =
       failwith (Printf.sprintf "setup tool failed for %s: %s" name body)
 
 let ensure_initialized fixture =
-  match execute_tool fixture ~name:"masc_init"
-          ~arguments:(`Assoc [ ("agent_name", `String fixture.agent_name) ])
-  with
-  | true, _ -> ()
-  | false, body when contains_substring body "already initialized" -> ()
-  | false, body -> failwith ("masc_init failed: " ^ body)
+  (* masc_init pruned from registry. Initialise the room state
+     directly so downstream masc_join and other tools can work. *)
+  ignore
+    (Masc_mcp.Coord.init fixture.state.room_config
+       ~agent_name:(Some fixture.agent_name))
 
 let ensure_joined fixture =
   match execute_tool fixture ~name:"masc_join"
@@ -406,7 +395,7 @@ let ensure_verification_request fixture =
   | Some req_id -> req_id
   | None ->
       let base_path =
-        Masc_mcp.Room.masc_dir fixture.state.room_config
+        Masc_mcp.Coord.masc_dir fixture.state.room_config
       in
       let req =
         match
@@ -444,30 +433,10 @@ let ensure_webrtc_offer fixture =
       fixture.webrtc_offer_id <- Some offer_id;
       offer_id
 
-let ensure_handover fixture =
-  match fixture.handover_id with
-  | Some handover_id -> handover_id
-  | None ->
-      let body =
-        execute_tool_ok fixture ~name:"masc_handover_create"
-          ~arguments:
-            (`Assoc
-              [
-                ("agent_name", `String fixture.agent_name);
-                ("task_id", `String (ensure_task fixture));
-                ("reason", `String "explicit");
-                ("goal", `String "Tool Matrix Handover");
-                ("progress", `String "handover summary");
-              ])
-      in
-      let handover_id =
-        match extract_id body ~fields:[ "handover_id"; "id" ]
-                ~prefixes:[ "handover-" ] with
-        | Some value -> value
-        | None -> failwith ("failed to parse handover id from: " ^ body)
-      in
-      fixture.handover_id <- Some handover_id;
-      handover_id
+let ensure_handover _fixture =
+  (* masc_handover_create pruned from registry. Helper retained as a
+     stub for any transitional callers; returns a synthetic id. *)
+  "handover-pruned-stub"
 
 let ensure_library_topic fixture =
   match fixture.library_topic with
@@ -572,8 +541,7 @@ let prepare_for_name fixture name =
     ensure_plan_initialized fixture;
   if List.mem name [ "masc_board_get"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote"; "masc_board_delete" ] then
     ignore (ensure_board_post fixture);
-  if List.mem name [ "masc_verify_submit"; "masc_verify_status"; "masc_verify_auto"; "masc_verify_pending" ] then
-    ignore (ensure_verification_request fixture);
+  (* masc_verify_* tools pruned from registry; no preparation needed. *)
   if name = "masc_webrtc_answer" then
     ignore (ensure_webrtc_offer fixture);
   if List.mem name [ "masc_worktree_create"; "masc_worktree_list" ] then
@@ -588,8 +556,8 @@ let prepare_for_name fixture name =
   end;
   if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
     ignore (ensure_library_topic fixture);
-  if List.mem name [ "masc_handover_get"; "masc_handover_claim" ] then
-    ignore (ensure_handover fixture);
+  (* masc_handover_* tools pruned from registry; no preparation needed. *)
+  let _ = ensure_handover in
   if name = "masc_unlock" then
     ensure_lock fixture
 
@@ -780,8 +748,6 @@ let tool_arguments fixture (schema : Types.tool_schema) =
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_worktree_create" -> [ "base_branch" ]
       | "masc_heartbeat_start" -> [ "interval" ]
-      | "masc_listen" -> [ "timeout" ]
-      | "masc_verify_request" -> [ "verifier" ]
       | "masc_keeper_repair" ->
           [ "source_text"; "max_attempts"; "working_dir" ]
       | "masc_keeper_msg" ->

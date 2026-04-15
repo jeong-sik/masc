@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.status_store import ConnectorRuntimeStatus, StatusStore
+from src.status_store import (
+    ConnectorRuntimeStatus,
+    NamesSnapshot,
+    NamesStore,
+    StatusStore,
+)
 
 
 def test_status_store_writes_connector_runtime_snapshot(tmp_path: Path) -> None:
@@ -47,3 +52,36 @@ def test_status_store_writes_connector_runtime_snapshot(tmp_path: Path) -> None:
         "runtime_bindings_count": 2,
         "updated_at": "2026-04-08T13:00:00Z",
     }
+
+
+def test_names_store_writes_humanization_snapshot(tmp_path: Path) -> None:
+    path = tmp_path / "state" / "discord_names.json"
+    store = NamesStore(path)
+
+    store.write(
+        NamesSnapshot(
+            updated_at="2026-04-15T00:00:00Z",
+            guild_names={"123": "sangsu-lab"},
+            channel_names={"456": "#general", "457": "#dev"},
+            channel_to_guild={"456": "123", "457": "123"},
+        )
+    )
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "updated_at": "2026-04-15T00:00:00Z",
+        "guild_names": {"123": "sangsu-lab"},
+        "channel_names": {"456": "#general", "457": "#dev"},
+        "channel_to_guild": {"456": "123", "457": "123"},
+    }
+
+
+def test_names_store_empty_snapshot_is_valid(tmp_path: Path) -> None:
+    path = tmp_path / "discord_names.json"
+    store = NamesStore(path)
+
+    store.write(NamesSnapshot(updated_at="2026-04-15T00:00:00Z"))
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["guild_names"] == {}
+    assert data["channel_names"] == {}
+    assert data["channel_to_guild"] == {}

@@ -13,13 +13,61 @@ module StringMap = Map.Make (String)
 (* Types                                                             *)
 (* ================================================================ *)
 
+type record_type =
+  | Verdict_record
+  | Label_record
+
+type label_verdict =
+  | Approve_label
+  | Reject_label
+
+let record_type_to_string = function
+  | Verdict_record -> "verdict"
+  | Label_record -> "label"
+
+let record_type_of_string = function
+  | "verdict" -> Some Verdict_record
+  | "label" -> Some Label_record
+  | _ -> None
+
+let label_verdict_to_string = function
+  | Approve_label -> "approve"
+  | Reject_label -> "reject"
+
+let label_verdict_of_string = function
+  | "approve" -> Some Approve_label
+  | "reject" -> Some Reject_label
+  | _ -> None
+
+let verdict_to_string = function
+  | Anti_rationalization.Approve -> "approve"
+  | Anti_rationalization.Reject "" -> "reject"
+  | Anti_rationalization.Reject reason -> "reject:" ^ reason
+
+let verdict_of_string raw =
+  if String.equal raw "approve" then
+    Some Anti_rationalization.Approve
+  else if String.equal raw "reject" then
+    Some (Anti_rationalization.Reject "")
+  else if String.starts_with ~prefix:"reject:" raw then
+    let prefix_len = String.length "reject:" in
+    Some
+      (Anti_rationalization.Reject
+         (String.sub raw prefix_len (String.length raw - prefix_len)))
+  else
+    None
+
+let label_verdict_of_verdict = function
+  | Anti_rationalization.Approve -> Approve_label
+  | Anti_rationalization.Reject _ -> Reject_label
+
 type verdict_record = {
-  record_type : string;           (** "verdict" *)
+  record_type : record_type;
   notes_hash : string;            (** SHA256(task_title ^ "\n" ^ completion_notes) *)
   task_id : string;
   task_title : string;
   agent_name : string;
-  verdict : string;               (** "approve" | "reject:<reason>" *)
+  verdict : Anti_rationalization.verdict;
   gate : Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
   evaluator_cascade : string;
   generator_cascade : string option;
@@ -28,9 +76,9 @@ type verdict_record = {
 }
 
 type label_record = {
-  record_type : string;           (** "label" *)
+  record_type : record_type;
   notes_hash : string;
-  human_verdict : string;         (** "approve" | "reject" *)
+  human_verdict : label_verdict;
   labeler : string;
   reason : string;
   timestamp : float;
@@ -38,8 +86,8 @@ type label_record = {
 
 type divergence = {
   notes_hash : string;
-  evaluator_verdict : string;
-  human_verdict : string;
+  evaluator_verdict : Anti_rationalization.verdict;
+  human_verdict : label_verdict;
   gate : string;
   task_title : string;
 }
@@ -88,12 +136,12 @@ let notes_hash ~(task_title : string) ~(notes : string) : string =
 
 let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
   let base = [
-    ("record_type", `String r.record_type);
+    ("record_type", `String (record_type_to_string r.record_type));
     ("notes_hash", `String r.notes_hash);
     ("task_id", `String r.task_id);
     ("task_title", `String r.task_title);
     ("agent_name", `String r.agent_name);
-    ("verdict", `String r.verdict);
+    ("verdict", `String (verdict_to_string r.verdict));
     ("gate", `String (Anti_rationalization.gate_to_string r.gate));
     ("evaluator_cascade", `String r.evaluator_cascade);
     ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
@@ -107,9 +155,9 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
 
 let label_record_to_json (r : label_record) : Yojson.Safe.t =
   `Assoc [
-    ("record_type", `String r.record_type);
+    ("record_type", `String (record_type_to_string r.record_type));
     ("notes_hash", `String r.notes_hash);
-    ("human_verdict", `String r.human_verdict);
+    ("human_verdict", `String (label_verdict_to_string r.human_verdict));
     ("labeler", `String r.labeler);
     ("reason", `String r.reason);
     ("timestamp", `Float r.timestamp);
@@ -123,15 +171,25 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
     Maps "approve" → passed=true, "reject:*" → passed=false.
     The gate name is recorded as evidence for traceability. *)
 let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
-  let passed = r.verdict = "approve" in
+  let passed =
+    match r.verdict with
+    | Anti_rationalization.Approve -> true
+    | Anti_rationalization.Reject _ -> false
+  in
   let score = if passed then Some 1.0 else Some 0.0 in
   let evidence = [
     Printf.sprintf "gate=%s" (Anti_rationalization.gate_to_string r.gate);
     Printf.sprintf "evaluator=%s" r.evaluator_cascade;
     Printf.sprintf "task_id=%s" r.task_id;
   ] in
-  let detail = if passed then None
-    else Some (Printf.sprintf "rejected at %s gate: %s" (Anti_rationalization.gate_to_string r.gate) r.verdict)
+  let detail =
+    if passed then
+      None
+    else
+      Some
+        (Printf.sprintf "rejected at %s gate: %s"
+           (Anti_rationalization.gate_to_string r.gate)
+           (verdict_to_string r.verdict))
   in
   { Agent_sdk.Harness.passed; score; evidence; detail }
 
@@ -146,17 +204,13 @@ let record_verdict
     ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
     () : unit =
   let hash = notes_hash ~task_title:req.task_title ~notes:req.completion_notes in
-  let verdict_str = match result.verdict with
-    | Anti_rationalization.Approve -> "approve"
-    | Anti_rationalization.Reject reason -> "reject:" ^ reason
-  in
   let record = {
-    record_type = "verdict";
+    record_type = Verdict_record;
     notes_hash = hash;
     task_id;
     task_title = req.task_title;
     agent_name = req.agent_name;
-    verdict = verdict_str;
+    verdict = result.verdict;
     gate = result.gate;
     evaluator_cascade = result.evaluator_cascade;
     generator_cascade = result.generator_cascade;
@@ -174,11 +228,11 @@ let record_verdict
 
 let record_human_label
     ~(notes_hash : string)
-    ~(human_verdict : string)
+    ~(human_verdict : label_verdict)
     ~(labeler : string)
     ~(reason : string) : unit =
   let record = {
-    record_type = "label";
+    record_type = Label_record;
     notes_hash;
     human_verdict;
     labeler;
@@ -212,11 +266,12 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
   (* Separate verdicts and labels *)
   let (verdicts, labels) : Yojson.Safe.t StringMap.t * Yojson.Safe.t StringMap.t =
     List.fold_left (fun (vs, ls) json ->
-      let rt = string_field json "record_type" in
+      let rt = string_field json "record_type" |> record_type_of_string in
       let hash = string_field json "notes_hash" in
-      if rt = "verdict" then (StringMap.add hash json vs, ls)
-      else if rt = "label" then (vs, StringMap.add hash json ls)
-      else (vs, ls)
+      match rt with
+      | Some Verdict_record -> (StringMap.add hash json vs, ls)
+      | Some Label_record -> (vs, StringMap.add hash json ls)
+      | None -> (vs, ls)
     ) (StringMap.empty, StringMap.empty) records
   in
   (* Find disagreements *)
@@ -224,17 +279,23 @@ let find_divergences ?(since = "") ?(until = "") () : divergence list =
     match StringMap.find_opt hash labels with
     | None -> acc
     | Some l_json ->
-      let ev = string_field v_json "verdict" in
-      let hv = string_field l_json "human_verdict" in
-      let ev_norm = if ev = "reject" ||
-                       (String.length ev >= 7 &&
-                        String.sub ev 0 7 = "reject:") then "reject"
-                    else ev in
-      if ev_norm <> hv then
-        { notes_hash = hash; evaluator_verdict = ev; human_verdict = hv;
-          gate = string_field v_json "gate"; task_title = string_field v_json "task_title";
-        } :: acc
-      else acc
+      (match
+         verdict_of_string (string_field v_json "verdict"),
+         label_verdict_of_string (string_field l_json "human_verdict")
+       with
+      | Some ev, Some hv ->
+          if label_verdict_of_verdict ev <> hv then
+            {
+              notes_hash = hash;
+              evaluator_verdict = ev;
+              human_verdict = hv;
+              gate = string_field v_json "gate";
+              task_title = string_field v_json "task_title";
+            }
+            :: acc
+          else
+            acc
+      | _ -> acc)
   ) verdicts []
 
 (* ================================================================ *)
@@ -245,7 +306,9 @@ let select_examples ~(max_examples : int) : calibration_example list =
   let divs = find_divergences () in
   (* Prioritize false positives: evaluator approved but human rejected *)
   let false_positives, others = List.partition (fun d ->
-    d.evaluator_verdict = "approve" && d.human_verdict = "reject"
+    match d.evaluator_verdict, d.human_verdict with
+    | Anti_rationalization.Approve, Reject_label -> true
+    | _ -> false
   ) divs in
   let sorted = false_positives @ others in
   let limited =
@@ -253,8 +316,11 @@ let select_examples ~(max_examples : int) : calibration_example list =
     else List.filteri (fun i _ -> i < max_examples) sorted
   in
   List.map (fun d ->
-    let correct = if d.human_verdict = "approve" then "APPROVE"
-      else "REJECT: evaluator incorrectly approved" in
+    let correct =
+      match d.human_verdict with
+      | Approve_label -> "APPROVE"
+      | Reject_label -> "REJECT: evaluator incorrectly approved"
+    in
     { task_title = d.task_title;
       notes_excerpt = "(see task notes)";
       correct_verdict = correct }
@@ -293,35 +359,50 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       recent_fallback_reasons,
       verdicts_with_generator, cross_model_match =
     List.fold_left (fun (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm) json ->
-      let rt = string_field json "record_type" in
+      let rt = string_field json "record_type" |> record_type_of_string in
       let hash = string_field json "notes_hash" in
-      if rt = "verdict" then begin
-        let v = string_field json "verdict" in
-        let ac', rc' = if v = "approve" then ac + 1, rc else ac, rc + 1 in
-        let gate = string_field json "gate" in
-        let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
-        let gc' = StringMap.add gate (prev + 1) gc in
-        let vh' = StringMap.add hash v vh in
-        let ev_cascade = string_field json "evaluator_cascade" in
-        let gen_cascade = string_field json "generator_cascade" in
-        let vwg', cmm' =
-          if gen_cascade <> "" && ev_cascade <> "" then
-            vwg + 1,
-            (if not (String.equal gen_cascade ev_cascade) then cmm + 1 else cmm)
-          else vwg, cmm
-        in
-        let fbr' =
-          if gate = fallback_tag && List.length fbr < max_fallback_reasons then
-            let reason = string_field json "fallback_reason" in
-            if reason <> "" then reason :: fbr else fbr
-          else fbr
-        in
-        (tv + 1, ac', rc', gc', vh', lh, fbr', vwg', cmm')
-      end else if rt = "label" then
-        (tv, ac, rc, gc, vh, StringMap.add hash (string_field json "human_verdict") lh,
-         fbr, vwg, cmm)
-      else
-        (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+      match rt with
+      | Some Verdict_record -> begin
+          match verdict_of_string (string_field json "verdict") with
+          | Some v ->
+              let ac', rc' =
+                match v with
+                | Anti_rationalization.Approve -> ac + 1, rc
+                | Anti_rationalization.Reject _ -> ac, rc + 1
+              in
+              let gate = string_field json "gate" in
+              let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
+              let gc' = StringMap.add gate (prev + 1) gc in
+              let vh' = StringMap.add hash v vh in
+              let ev_cascade = string_field json "evaluator_cascade" in
+              let gen_cascade = string_field json "generator_cascade" in
+              let vwg', cmm' =
+                if gen_cascade <> "" && ev_cascade <> "" then
+                  vwg + 1,
+                  (if not (String.equal gen_cascade ev_cascade) then cmm + 1 else cmm)
+                else
+                  vwg, cmm
+              in
+              let fbr' =
+                if gate = fallback_tag && List.length fbr < max_fallback_reasons then
+                  let reason = string_field json "fallback_reason" in
+                  if reason <> "" then reason :: fbr else fbr
+                else
+                  fbr
+              in
+              (tv + 1, ac', rc', gc', vh', lh, fbr', vwg', cmm')
+          | None ->
+              (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+        end
+      | Some Label_record -> begin
+          match label_verdict_of_string (string_field json "human_verdict") with
+          | Some v ->
+              (tv, ac, rc, gc, vh, StringMap.add hash v lh, fbr, vwg, cmm)
+          | None ->
+              (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
+        end
+      | None ->
+          (tv, ac, rc, gc, vh, lh, fbr, vwg, cmm)
     ) (0, 0, 0, StringMap.empty, StringMap.empty, StringMap.empty,
        [], 0, 0) records
   in
@@ -331,13 +412,12 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       match StringMap.find_opt hash labeled_hashes with
       | None -> (fp, fn, ag)
       | Some hv ->
-        let ev_norm = if ev = "reject" ||
-                         (String.length ev >= 7 &&
-                          String.sub ev 0 7 = "reject:") then "reject"
-                      else ev in
-        if ev_norm = hv then (fp, fn, ag + 1)
-        else if ev_norm = "approve" && hv = "reject" then (fp + 1, fn, ag)
-        else (fp, fn + 1, ag)
+          if label_verdict_of_verdict ev = hv then
+            (fp, fn, ag + 1)
+          else
+            match ev, hv with
+            | Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
+            | _ -> (fp, fn + 1, ag)
     ) verdict_hashes (0, 0, 0)
   in
   let labeled_total = false_pos + false_neg + agree in

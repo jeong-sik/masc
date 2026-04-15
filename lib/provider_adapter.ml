@@ -1,9 +1,11 @@
 type runtime_kind =
   | Local
+  | Cli_agent
   | Direct_api
 
 type auth_mode =
   | No_auth
+  | Cli_cached_login
   | Api_key of string
   | Vertex_adc of {
       project_env : string;
@@ -63,10 +65,12 @@ let google_cloud_location_env = "GOOGLE_CLOUD_LOCATION"
 
 let string_of_runtime_kind = function
   | Local -> "local"
+  | Cli_agent -> "cli_agent"
   | Direct_api -> "direct_api"
 
 let string_of_auth_mode = function
   | No_auth -> "none"
+  | Cli_cached_login -> "cli_cached_login"
   | Api_key env_name -> "api_key:" ^ env_name
   | Vertex_adc { project_env; location_env } ->
       "vertex_adc:" ^ project_env ^ ":" ^ location_env
@@ -82,9 +86,12 @@ let normalize_label label = String.trim label |> String.lowercase_ascii
 
 let cn_llama = "llama"
 let cn_ollama = "ollama"
-let cn_claude = "claude-api"
-let cn_codex = "codex-api"
-let cn_gemini = "gemini-api"
+let cn_claude = "claude"
+let cn_codex = "codex"
+let cn_gemini = "gemini"
+let cn_claude_api = "claude-api"
+let cn_codex_api = "codex-api"
+let cn_gemini_api = "gemini-api"
 let cn_glm = "glm"
 let cn_openrouter = "openrouter"
 
@@ -123,19 +130,18 @@ let make_local_label (model_id : string) : string =
 let string_of_provider_kind
     : Llm_provider.Provider_config.provider_kind -> string
   = function
-  | Anthropic -> cn_claude
-  | OpenAI_compat -> cn_codex
+  | Anthropic -> cn_claude_api
+  | OpenAI_compat -> cn_codex_api
   | Ollama -> cn_ollama
-  | Gemini -> cn_gemini
+  | Gemini -> cn_gemini_api
   | Gemini_cli -> cn_gemini
   | Glm -> cn_glm
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
 
-(** Single source of truth for all agent adapters.
-    spawn_key maps to Spawn.default_configs keys.
-    default_voice maps to TTS voice names.
-    Adding a new agent = adding one entry here. *)
+(** Single source of truth for all provider/runtime adapters.
+    Simple names ([claude], [codex], [gemini]) are CLI runtimes.
+    Direct API adapters use explicit [*-api] canonical names. *)
 let direct_adapters =
   [
     {
@@ -166,28 +172,61 @@ let direct_adapters =
     };
     {
       canonical_name = cn_claude;
+      runtime_kind = Cli_agent;
+      auth_mode = Cli_cached_login;
+      aliases = [ cn_claude; "claude-code"; "claude_code" ];
+      spawn_key = Some "claude";
+      cascade_prefix = "claude_code";
+      default_voice = Some "Sarah";
+      endpoint_url = None;
+      default_model_id = Some "auto";
+    };
+    {
+      canonical_name = cn_codex;
+      runtime_kind = Cli_agent;
+      auth_mode = Cli_cached_login;
+      aliases = [ cn_codex; "codex-cli"; "codex_cli" ];
+      spawn_key = Some "codex";
+      cascade_prefix = "codex_cli";
+      default_voice = Some "George";
+      endpoint_url = None;
+      default_model_id = Some "auto";
+    };
+    {
+      canonical_name = cn_gemini;
+      runtime_kind = Cli_agent;
+      auth_mode = Cli_cached_login;
+      aliases = [ cn_gemini; "gemini-cli"; "gemini_cli" ];
+      spawn_key = Some "gemini";
+      cascade_prefix = "gemini_cli";
+      default_voice = Some "Roger";
+      endpoint_url = None;
+      default_model_id = Some "auto";
+    };
+    {
+      canonical_name = cn_claude_api;
       runtime_kind = Direct_api;
       auth_mode = Api_key "ANTHROPIC_API_KEY";
-      aliases = [ cn_claude; "claude"; "anthropic"; "claude-code"; "claude-api" ];
-      spawn_key = Some "claude";
+      aliases = [ cn_claude_api; "anthropic" ];
+      spawn_key = None;
       cascade_prefix = "claude";
       default_voice = Some "Sarah";
       endpoint_url = Some (anthropic_api_url ());
       default_model_id = Some "auto";
     };
     {
-      canonical_name = cn_codex;
+      canonical_name = cn_codex_api;
       runtime_kind = Direct_api;
       auth_mode = Api_key "OPENAI_API_KEY";
-      aliases = [ cn_codex; "codex"; "openai"; "codex-cli"; "codex-api" ];
-      spawn_key = Some "codex";
+      aliases = [ cn_codex_api; "openai" ];
+      spawn_key = None;
       cascade_prefix = "openai";
       default_voice = Some "George";
       endpoint_url = Some (openai_api_url ());
       default_model_id = Some "auto";
     };
     {
-      canonical_name = cn_gemini;
+      canonical_name = cn_gemini_api;
       runtime_kind = Direct_api;
       auth_mode =
         Vertex_adc
@@ -195,8 +234,8 @@ let direct_adapters =
             project_env = google_cloud_project_env;
             location_env = google_cloud_location_env;
           };
-      aliases = [ cn_gemini; "gemini"; "google"; "gemini-cli"; "gemini-api" ];
-      spawn_key = Some "gemini";
+      aliases = [ cn_gemini_api; "google" ];
+      spawn_key = None;
       cascade_prefix = "gemini";
       default_voice = Some "Roger";
       endpoint_url = None; (** Resolved dynamically for Gemini *)
@@ -669,6 +708,10 @@ let provider_auth_available label =
   | Some adapter ->
       (match adapter.auth_mode with
        | No_auth -> true
+       | Cli_cached_login ->
+           (match adapter.spawn_key with
+            | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
+            | None -> false)
        | Api_key env_name -> env_present env_name
        | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
@@ -751,7 +794,8 @@ let provider_model_label provider model =
 
 (** Derives the default model label for an adapter from its [runtime_kind]
     and [cascade_prefix].  Local adapters require an explicit model ID
-    (resolved via env); Direct_api adapters use "[cascade_prefix]:auto" when
+    (resolved via env); Cli_agent/Direct_api adapters use
+    "[cascade_prefix]:auto" when
     a default model is configured. *)
 let default_model_label_for_adapter (adapter : adapter) =
   match adapter.runtime_kind with
@@ -759,6 +803,7 @@ let default_model_label_for_adapter (adapter : adapter) =
     Result.map
       (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
       (explicit_llama_model_id_result ())
+  | Cli_agent
   | Direct_api ->
     match adapter.default_model_id with
     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
@@ -771,6 +816,10 @@ let auto_label_for_adapter (adapter : adapter) =
   let is_available =
     match adapter.auth_mode with
     | No_auth -> true
+    | Cli_cached_login ->
+        (match adapter.spawn_key with
+         | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
+         | None -> false)
     | Api_key env_name -> env_present env_name
     | Vertex_adc { project_env; _ } -> env_present project_env
   in
@@ -938,7 +987,7 @@ let auth_detail_of_provider provider =
       note = Some "Unsupported provider" }
   | Some adapter ->
     let auth_kind_base = string_of_auth_mode adapter.auth_mode in
-    if adapter.canonical_name = cn_gemini then
+    if adapter.canonical_name = cn_gemini_api then
       match resolve_gemini_direct_auth () with
       | Gemini_api_key ->
         { auth_kind = "api_key:GEMINI_API_KEY"; status = "configured";
@@ -955,6 +1004,13 @@ let auth_detail_of_provider provider =
         { auth_kind = auth_kind_base; status = "missing_auth";
           available = false; supports_run = false;
           endpoint_url = None; note = Some message }
+    else if adapter.runtime_kind = Cli_agent then
+      let available = provider_auth_available provider in
+      { auth_kind = auth_kind_base;
+        status = (if available then "configured" else "missing_auth");
+        available; supports_run = available;
+        endpoint_url = None;
+        note = Some "Cached CLI login is assumed; final validation happens at execution time." }
     else
       let available = provider_auth_available provider in
       { auth_kind = auth_kind_base;
@@ -969,7 +1025,7 @@ let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider
   | Llm_provider.Provider_config.Glm -> [ "ZAI_API_KEY" ]
   | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
   | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
-  | Llm_provider.Provider_config.Gemini_cli -> [ google_cloud_project_env; google_cloud_location_env ]
+  | Llm_provider.Provider_config.Gemini_cli
   | Llm_provider.Provider_config.Claude_code
   | Llm_provider.Provider_config.Codex_cli
   | Llm_provider.Provider_config.Ollama -> []
@@ -992,6 +1048,7 @@ let all_auth_env_keys () : string list =
   |> List.filter_map (fun (adapter : adapter) ->
     match adapter.auth_mode with
     | No_auth -> None
+    | Cli_cached_login -> None
     | Api_key env_name -> Some env_name
     | Vertex_adc _ -> None)
   |> List.sort_uniq String.compare

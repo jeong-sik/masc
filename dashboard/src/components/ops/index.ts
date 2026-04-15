@@ -33,7 +33,7 @@ import {
   hydrateOpsWorkflow,
   hydrateRecommendedAction,
   hydratedWorkflowId,
-  
+  isRootTarget,
   primaryActionForReviewItem,
   relativeAge,
   reviewDecisionReason,
@@ -186,7 +186,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
 }
 
 function renderSummaryBadges(activeCount: number, deferredCount: number, recentCount: number) {
-  const roomPaused = operatorSnapshot.value?.namespace?.paused
+  const roomPaused = operatorSnapshot.value?.root?.paused
   const roomLabel =
     typeof roomPaused === 'boolean'
       ? roomPaused ? '프로젝트 일시정지' : '프로젝트 진행 중'
@@ -243,13 +243,13 @@ function renderTruth(item: OperatorReviewItem | null) {
     return html`<div class="text-[12px] text-[var(--text-muted)]">큐에서 항목을 고르면 truth를 보여줍니다.</div>`
   }
 
-  if (item.target_type === 'namespace' || item.target_type === 'room') {
-    const room = detailDigest?.namespace ?? snapshot?.namespace ?? {}
+  if (isRootTarget(item.target_type)) {
+    const room = detailDigest?.root ?? snapshot?.root ?? {}
     return html`
       <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
           <div class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.08em]">Project</div>
-          <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
+          <strong>${room.project ?? 'default'}</strong>
           <div class="text-[12px] text-[var(--text-muted)]">${room.project ?? 'project'} · ${room.cluster ?? 'cluster'}</div>
         </div>
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">

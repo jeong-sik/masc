@@ -40,7 +40,7 @@ Do not start with `masc-mcp` if you need:
 │            MASC-MCP  (coordination)               │
 │                                                   │
 │  Room/Board  Keeper   Team-Session  Governance    │
-│  Tasks       Command-Plane         Dashboard      │
+│  Tasks                             Dashboard      │
 │                                                   │
 │         ┌── OAS bridges ──┐                       │
 └─────────┤                 ├───────────────────────┘
@@ -77,6 +77,41 @@ All protocols run concurrently from a single Eio fiber pool:
 
 ## Quick Start
 
+### Install (prebuilt binary)
+
+Supported: macOS arm64, Linux x86_64. Other platforms must build from source (see below).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc-mcp/main/scripts/install.sh | bash
+```
+
+The installer:
+
+- downloads the latest tagged binary from GitHub Releases into `~/.local/bin/masc-mcp`
+- seeds the minimum config (`./.masc/config/tool_policy.toml`) needed for boot
+- runs `--version` as a smoke check
+
+Pin a version, change the install dir, or skip the config seed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc-mcp/main/scripts/install.sh \
+  | bash -s -- --version v0.8.0 --prefix /usr/local/bin --base-path /path/to/project
+```
+
+`--dry-run` previews everything without writing. Full flag list: `install.sh --help`.
+
+Start the server and check health:
+
+```bash
+masc-mcp --base-path "$PWD" --port 8935
+curl http://127.0.0.1:8935/health
+```
+
+### Build from source
+
+Use this if you need a platform without a release asset, an unreleased commit, or you
+plan to develop on the codebase.
+
 ```bash
 git clone https://github.com/jeong-sik/masc-mcp.git
 cd masc-mcp
@@ -89,6 +124,7 @@ dune build
 scripts/run-local.sh --target-dir "$PWD"
 PORT="$(scripts/run-local.sh --print-port --target-dir "$PWD")"
 curl "http://127.0.0.1:${PORT}/health"
+./_build/default/bin/main_eio.exe doctor --base-path "$PWD"
 ```
 
 Defaults:
@@ -106,6 +142,7 @@ Notes:
 - To use a fixed port: `scripts/run-local.sh --target-dir /path/to/project --port 94xx`
 - For shared repo/full-runtime paths, continue using `./start-masc-mcp.sh --http`
 - For a full boot/path/state inventory, see [docs/BOOT-ENV-STATE-INVENTORY.md](docs/BOOT-ENV-STATE-INVENTORY.md)
+- For active config/init diagnosis, use [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md)
 
 Other start modes:
 
@@ -114,7 +151,7 @@ Other start modes:
 | Loopback | `scripts/start-loopback.sh` | Local dev, fixed port 8935, keepers off |
 | Dir-local | `scripts/run-local.sh --target-dir /path` | Per-project isolation, auto port |
 | Full runtime | `./start-masc-mcp.sh --http` | All transports, keeper autoboot, dashboard |
-| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path .` | Manual control |
+| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path "$HOME"` | Manual control |
 
 If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
@@ -155,7 +192,7 @@ Keeper definitions live in `config/keepers/*.toml`. When `MASC_KEEPER_BOOTSTRAP_
 
 ### Turn Budget
 
-Each keeper call to `Agent.run` is limited to `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` turns (default: 5). When exhausted, the keeper saves a checkpoint and resumes in the next heartbeat cycle. The keeper can call `extend_turns` to request more turns up to an absolute ceiling (200).
+Each keeper call to `Agent.run` is limited to `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` turns (default: 15). When exhausted, the keeper saves a checkpoint and resumes in the next heartbeat cycle. The keeper can call `extend_turns` to request more turns up to an absolute ceiling (200).
 
 Adaptive OAS timeout: `base 180s + 1.5s per 1K context tokens`, capped at [30, 600]s.
 
@@ -163,15 +200,31 @@ Adaptive OAS timeout: `base 180s + 1.5s per 1K context tokens`, capped at [30, 6
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MASC_KEEPER_BOOTSTRAP_ENABLED` | `false` | Enable keeper autoboot |
+| `MASC_KEEPER_BOOTSTRAP_ENABLED` | `true` | Enable keeper autoboot |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | `30` | Heartbeat cadence (5-300s) |
-| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | `5` | Turns per Agent.run call (1-50) |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | `15` | Turns per Agent.run call (1-50) |
 | `MASC_KEEPER_OAS_TIMEOUT_SEC` | adaptive | Override OAS timeout (30-600s) |
 | `MASC_KEEPER_TURN_TIMEOUT_SEC` | `1200` | Wall-clock turn guard (60-3600s) |
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | `5` | Restart attempts before Dead |
 | `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | `4` | Consecutive idle calls before Skip |
 
 Full list: `lib/config/env_config_keeper.ml`. Per-keeper config: `config/keepers/*.toml`.
+
+Operator note:
+
+- `repo/config` is the checked-in seed, not the live config root.
+- The supported active root is `MASC_CONFIG_DIR` when set, otherwise `<base-path>/.masc/config`.
+- Use `main_eio.exe doctor` before editing config if there is any doubt.
+
+Reload contracts:
+
+- env vars are a boot contract unless a runtime control plane says otherwise
+- `config/keepers/*.toml` is reconciled on the next supervisor sweep
+- `config/cascade.json` is applied on the next model resolve/turn
+- `config/keeper_runtime.toml` and `config/tool_policy.toml` require restart
+
+See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
+[docs/TOML-RELOAD-MATRIX.md](docs/TOML-RELOAD-MATRIX.md).
 
 ## Model Cascade
 
@@ -202,7 +255,7 @@ Canonical namespace/task hygiene:
 
 For planner / implementer / supervisor separation:
 
-- Runtime: command-plane operations + worker/keeper surfaces
+- Runtime: keeper/worker surfaces directly against board + task hygiene
 - Supervisor: `/mcp/operator` with `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`
 - Runbooks: [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md), [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md)
 
@@ -264,7 +317,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - Legacy `/sse` and `/messages` endpoints are deprecated.
 - Binding to `0.0.0.0` or `::` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
 - `/mcp/operator` is bearer-token only with a remote-safe surface. Do not expose full `/mcp` externally.
-- Retired compatibility surfaces such as command-plane/operator routes are no longer part of the supported front door.
+- Command-plane surfaces (`/api/v1/command-plane/*`, `command_plane_*` MCP tools, `lib/command_plane/`) are scheduled for removal. New callers must not depend on them.
 - See [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
 ## Product and Planning Docs
@@ -282,13 +335,13 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | Document | Description |
 |----------|-------------|
 | [docs/QUICK-START.md](docs/QUICK-START.md) | Install, health check, first workflow |
+| [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md) | Active config/init diagnosis and root selection |
 | [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP config templates |
 | [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) | Benchmark and comparison harnesses |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | Supervised execution / operator workflow |
 | [docs/SWARM-DELIVERY-RUNBOOK.md](docs/SWARM-DELIVERY-RUNBOOK.md) | Single-agent vs swarm delivery |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS/MASC ownership boundary |
-| [docs/COMMAND-PLANE-RUNBOOK.md](docs/COMMAND-PLANE-RUNBOOK.md) | Historical compatibility / command-plane details |
 | [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Dashboard auth bootstrap |
 | [docs/spec/SPEC-INDEX.md](docs/spec/SPEC-INDEX.md) | Spec suite (19 specs) |
 | [ROADMAP.md](ROADMAP.md) | Version, release truth, active tracks |

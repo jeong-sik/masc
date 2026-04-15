@@ -1,0 +1,21 @@
+(include_subdirs no)
+
+(library
+ (name embedded_config)
+ (public_name masc_mcp.embedded_config)
+ (modules embedded_config)
+ (wrapped false))
+
+; Generate embedded_config.ml from the repo's config/ tree at build time.
+; -m plain mode produces:
+;   val read : string -> string option
+;   val file_list : string list
+; The path under config/ becomes the lookup key (e.g. "tool_policy.toml",
+; "keepers/sangsu.toml"). This makes the release binary self-seeding for
+; first-run, removing the network dependency from scripts/install.sh.
+(rule
+ (target embedded_config.ml)
+ (deps (source_tree ../../config))
+ (action
+  (with-stdout-to %{target}
+   (run ocaml-crunch -m plain ../../config))))

@@ -1,7 +1,7 @@
 (lang dune 3.17)
 
 (name masc_mcp)
-(version 0.7.0)
+(version 0.8.0)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -38,7 +38,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
-  (agent_sdk (>= 0.137.0))
+  (agent_sdk (>= 0.148.0))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -78,6 +78,8 @@
   (neo4j_bolt_eio (>= 0.4))
   ; OpenTelemetry observability + OTLP exporter
   (opentelemetry (>= 0.13))
-  (ambient-context-eio (>= 0.2))))
+  (ambient-context-eio (>= 0.2))
+  ; Build-time embedder for default config seeds (init subcommand)
+  (crunch (and :build (>= 4.0)))))
  
 ; Formatting

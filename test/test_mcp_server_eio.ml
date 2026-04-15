@@ -836,7 +836,10 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  Alcotest.(check bool) "init success" true ok_init;
+  (* masc_init pruned from registry — dispatch fails. Initialise the
+     room state directly so downstream masc_join succeeds. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _join_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -844,7 +847,7 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   let _added =
-    Masc_mcp.Room.add_task state.room_config ~title:"managed-claim"
+    Masc_mcp.Coord.add_task state.room_config ~title:"managed-claim"
       ~priority:2 ~description:""
   in
   let request = Yojson.Safe.to_string (`Assoc [
@@ -881,7 +884,10 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  Alcotest.(check bool) "init success" true ok_init;
+  (* masc_init pruned from registry — dispatch fails. Initialise the
+     room state directly so downstream masc_join succeeds. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -889,7 +895,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   ignore
-    (Masc_mcp.Room.add_task state.room_config ~title:"transition-claim"
+    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-claim"
        ~priority:2 ~description:"");
   let request =
     Yojson.Safe.to_string
@@ -933,7 +939,10 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  Alcotest.(check bool) "init success" true ok_init;
+  (* masc_init pruned from registry — dispatch fails. Initialise the
+     room state directly so downstream masc_join succeeds. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -941,7 +950,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   ignore
-    (Masc_mcp.Room.add_task state.room_config ~title:"transition-done"
+    (Masc_mcp.Coord.add_task state.room_config ~title:"transition-done"
        ~priority:2 ~description:"");
   let (ok_claim, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -999,7 +1008,10 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  Alcotest.(check bool) "init success" true ok_init;
+  (* masc_init pruned from registry — dispatch fails. Initialise the
+     room state directly so downstream masc_join succeeds. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
   let (ok_join, _) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_join"
@@ -1007,7 +1019,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   in
   Alcotest.(check bool) "join success" true ok_join;
   ignore
-    (Masc_mcp.Room.add_task state.room_config ~title:"deprecated-claim"
+    (Masc_mcp.Coord.add_task state.room_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");
   let request =
     Yojson.Safe.to_string
@@ -1383,7 +1395,10 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~name:"masc_init"
       ~arguments:(`Assoc [])
   in
-  Alcotest.(check bool) "init success" true ok_init;
+  (* masc_init pruned from registry — dispatch fails. Initialise the
+     room state directly so downstream masc_join succeeds. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
 
   let (ok_join_codex, join_codex_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1426,10 +1441,13 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~name:"masc_init"
       ~arguments:(`Assoc [])
   in
-  Alcotest.(check bool) "init success" true ok_init;
+  (* masc_init pruned from registry — dispatch fails. Initialise the
+     room state directly so downstream masc_join succeeds. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+  let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
 
   let _added =
-    Masc_mcp.Room.add_task state.room_config
+    Masc_mcp.Coord.add_task state.room_config
       ~title:"alias-reuse-task"
       ~priority:2
       ~description:
@@ -1489,14 +1507,13 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
     | Error e -> Alcotest.fail (Types.masc_error_to_string e)
   in
 
-  let (ok_status, status_msg) =
+  let (ok_status, _status_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
       ~name:"masc_auth_status"
       ~arguments:(`Assoc [("agent_name", `String "dashboard-eager-manta")])
   in
-  Alcotest.(check bool) "auth status succeeds" true ok_status;
-  Alcotest.(check bool) "auth status payload returned" true
-    (contains_substring status_msg "Authentication Status");
+  (* masc_auth_status tool pruned from registry; dispatch should fail. *)
+  Alcotest.(check bool) "auth status fails (tool pruned)" false ok_status;
 
   cleanup_dir base_path
 
@@ -1522,7 +1539,10 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
         ~name:"masc_init"
         ~arguments:(`Assoc [])
     in
-    Alcotest.(check bool) "init success" true ok_init;
+    (* masc_init pruned from registry — dispatch fails. Initialise
+       the room state directly so downstream broadcast succeeds. *)
+    Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+    let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
 
     let (ok_broadcast, _broadcast_msg) =
       Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
@@ -1531,7 +1551,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
     in
     Alcotest.(check bool) "broadcast success" true ok_broadcast;
 
-    let agents = Masc_mcp.Room.get_agents_raw state.room_config in
+    let agents = Masc_mcp.Coord.get_agents_raw state.room_config in
     let names = List.map (fun (a : Types.agent) -> a.name) agents in
     Alcotest.(check bool)
       "mcp session must not reuse TERM_SESSION_ID persisted nickname"
@@ -1605,7 +1625,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 117);
@@ -1961,52 +1981,8 @@ let test_handle_request_prompts_get_tool_help () =
     (messages <> []);
   cleanup_dir base_path
 
-let test_handle_request_prompts_get_command_truth_filters_run_id () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Masc_mcp.Room.default_config base_path in
-      ignore (Masc_mcp.Room.init config ~agent_name:(Some "fixture-root"));
-      let append_event ~trace_id ~operation_id ~message ~ts =
-        let event : Masc_mcp.Command_plane_v2.event_record =
-          {
-            event_id = Masc_mcp.Command_plane_v2.next_event_id "trace";
-            trace_id;
-            event_type = "operation_progress";
-            operation_id = Some operation_id;
-            unit_id = None;
-            actor = Some "tester";
-            source = "managed";
-            ts;
-            detail = `Assoc [ ("message", `String message) ];
-          }
-        in
-        Masc_mcp.Command_plane_v2.append_event config event
-      in
-      append_event ~trace_id:"trace-run-alpha" ~operation_id:"op-run-alpha"
-        ~message:"run_id=run-alpha expected event" ~ts:"2026-03-11T09:00:01Z";
-      append_event ~trace_id:"trace-run-beta" ~operation_id:"op-run-beta"
-        ~message:"run_id=run-beta unrelated event" ~ts:"2026-03-11T09:00:02Z";
-      let result =
-        match
-          Masc_mcp.Mcp_prompt_surface.get_json ~config ~name:"command_truth"
-            ~arguments:(`Assoc [ ("run_id", `String "run-alpha") ])
-            []
-        with
-        | Ok json -> json
-        | Error msg -> Alcotest.failf "prompts/get command_truth failed: %s" msg
-      in
-      let text =
-        Yojson.Safe.Util.(
-          result |> member "messages" |> index 0 |> member "content" |> member "text" |> to_string)
-      in
-      Alcotest.(check bool) "run-alpha trace retained" true
-        (contains_substring text "run-alpha");
-      Alcotest.(check bool) "run-beta trace filtered" false
-        (contains_substring text "run-beta"))
+(* test_handle_request_prompts_get_command_truth_filters_run_id removed
+   (CP purge: Command_plane_v2 event_record + append_event deleted) *)
 
 let test_handle_request_resources_list_includes_tool_help () =
   with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
@@ -2155,7 +2131,7 @@ let test_handle_request_resources_read_matrix () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "fixture-root"));
+  ignore (Masc_mcp.Coord.init state.room_config ~agent_name:(Some "fixture-root"));
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in
@@ -2354,7 +2330,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
               }
           else Tool_dispatch.Pass);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let _room_path = Masc_mcp.Room.masc_dir state.room_config in
+      let _room_path = Masc_mcp.Coord.masc_dir state.room_config in
       let ok, msg =
         Mcp_eio.execute_tool_eio ~sw ~clock state ~name:"masc_tool_help"
           ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
@@ -2384,7 +2360,10 @@ let test_execute_tool_autoresearch_uses_resolved_session_agent () =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
           ~name:"masc_init" ~arguments:(`Assoc [])
       in
-      Alcotest.(check bool) "init success" true ok_init;
+      (* masc_init pruned from registry — dispatch fails. Initialise
+         the room state directly so downstream masc_join succeeds. *)
+      Alcotest.(check bool) "init returns failure (tool pruned)" false ok_init;
+      let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
       let (ok_join, _) =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
           ~name:"masc_join"
@@ -2454,8 +2433,7 @@ let eio_tests = [
   "handle prompts/list rejects invalid cursor", `Quick,
     test_handle_request_prompts_list_rejects_invalid_cursor;
   "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
-  "handle prompts/get command_truth filters run_id", `Quick,
-    test_handle_request_prompts_get_command_truth_filters_run_id;
+  (* handle prompts/get command_truth filters run_id removed (CP purge) *)
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
   "handle resources/list rejects unknown field", `Quick,
     test_handle_request_resources_list_rejects_unknown_field;

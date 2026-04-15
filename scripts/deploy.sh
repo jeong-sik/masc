@@ -17,11 +17,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RELEASE_DIR="$REPO_DIR/releases"
-PID_FILE="$REPO_DIR/masc-prod.pid"
 PROD_PORT=8945
 HEALTH_URL="http://127.0.0.1:$PROD_PORT/health"
-BASE_PATH="${MASC_BASE_PATH:-${HOME}/me}"
-LOG_DIR="${BASE_PATH}/logs"
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+RUNTIME_ROOT="${BASE_PATH}/.masc"
+PID_FILE="${RUNTIME_ROOT}/masc-prod.pid"
+LOG_DIR="${RUNTIME_ROOT}/logs"
 LAUNCHD_LABEL="com.jeong-sik.masc-mcp-prod"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 
@@ -145,7 +146,7 @@ else
     restore_env_override MASC_CONFIG_DIR
     restore_env_override MASC_PERSONAS_DIR
 
-    mkdir -p "$LOG_DIR"
+    mkdir -p "$RUNTIME_ROOT" "$LOG_DIR"
 
     MASC_ORCHESTRATOR_ENABLED=0 \
     MASC_AUTO_RESPOND=true \

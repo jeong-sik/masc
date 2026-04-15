@@ -36,7 +36,7 @@ val alert_reply_preview_max_chars : int
 
 val tool_policy_count_warn_threshold : int
 val tool_first_sentence_max_chars : int
-val default_execution_scope : string
+val default_execution_scope : Keeper_execution_scope.t
 val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
@@ -180,7 +180,7 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
-val keeper_tool_cost_max_usd : unit -> float
+val keeper_tool_cost_max_usd : unit -> float option
 val keeper_max_tools_per_turn : unit -> int
 val keeper_retry_max_tools_per_turn : unit -> int
 val keeper_board_event_limit : unit -> int
@@ -214,7 +214,7 @@ val keeper_adaptive_thinking_enabled : unit -> bool
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)
 
-(** Room signal prompt enabled override from env var. *)
+(** Coord signal prompt enabled override from env var. *)
 val keeper_room_signal_prompt_enabled_override : unit -> bool option
 
 (** Force module initialization to guarantee all runtime params are registered

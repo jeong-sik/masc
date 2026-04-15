@@ -6,6 +6,7 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('offline')).toBe('Offline')
     expect(toKeeperPhase('running')).toBe('Running')
     expect(toKeeperPhase('failing')).toBe('Failing')
+    expect(toKeeperPhase('overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('compacting')).toBe('Compacting')
     expect(toKeeperPhase('handing_off')).toBe('HandingOff')
     expect(toKeeperPhase('draining')).toBe('Draining')
@@ -19,6 +20,7 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
   it('accepts PascalCase input for forward compatibility', () => {
     expect(toKeeperPhase('Offline')).toBe('Offline')
     expect(toKeeperPhase('Running')).toBe('Running')
+    expect(toKeeperPhase('Overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
   })
 
@@ -342,5 +344,103 @@ describe('normalizeKeepers lifecycle metrics', () => {
       updated_at: '2026-04-04T14:08:35Z',
       last_activity_ago_s: 42,
     })
+  })
+})
+
+describe('normalizeKeepers turn_budget', () => {
+  it('normalizes override reactive + env autonomous with provenance fields', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'poe',
+        status: 'active',
+        turn_budget: {
+          reactive: {
+            value: 25,
+            source: 'override',
+            env_default: 15,
+            env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL',
+          },
+          scheduled_autonomous: {
+            value: 2,
+            source: 'env',
+            env_default: 2,
+            env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS',
+          },
+          manifest_path: '/abs/config/keepers/poe.toml',
+          clamp_min: 1,
+          clamp_max: 50,
+        },
+      },
+    ])
+    expect(k?.turn_budget).toEqual({
+      reactive: {
+        value: 25,
+        source: 'override',
+        env_default: 15,
+        env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL',
+        raw_override: null,
+      },
+      scheduled_autonomous: {
+        value: 2,
+        source: 'env',
+        env_default: 2,
+        env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS',
+        raw_override: null,
+      },
+      manifest_path: '/abs/config/keepers/poe.toml',
+      clamp_min: 1,
+      clamp_max: 50,
+    })
+  })
+
+  it('returns null when turn_budget is absent', () => {
+    const [k] = normalizeKeepers([{ name: 'no-budget', status: 'active' }])
+    expect(k?.turn_budget).toBeNull()
+  })
+
+  it('returns null when either slot is missing value', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'partial',
+        status: 'active',
+        turn_budget: {
+          reactive: { value: 15, source: 'env' },
+          // scheduled_autonomous missing — should reject the whole budget
+        },
+      },
+    ])
+    expect(k?.turn_budget).toBeNull()
+  })
+
+  it('defaults env_default to current value and clamp to [1,50] when backend omits them', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'minimal',
+        status: 'active',
+        turn_budget: {
+          reactive: { value: 15, source: 'env' },
+          scheduled_autonomous: { value: 2, source: 'env' },
+        },
+      },
+    ])
+    expect(k?.turn_budget?.reactive.env_default).toBe(15)
+    expect(k?.turn_budget?.clamp_min).toBe(1)
+    expect(k?.turn_budget?.clamp_max).toBe(50)
+    expect(k?.turn_budget?.manifest_path).toBeNull()
+  })
+
+  it('coerces unknown source string to env (safe fallback)', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'unknown-source',
+        status: 'active',
+        turn_budget: {
+          reactive: { value: 15, source: 'garbage' },
+          scheduled_autonomous: { value: 2, source: 'override' },
+        },
+      },
+    ])
+    expect(k?.turn_budget?.reactive.source).toBe('env')
+    expect(k?.turn_budget?.scheduled_autonomous.source).toBe('override')
   })
 })

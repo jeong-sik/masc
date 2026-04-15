@@ -9,12 +9,12 @@ type t =
 
 let from_env () =
   match Env_config.Transport.agent_transport_opt () with
-  | Some "grpc" -> Grpc
-  | Some "http" -> Http
-  | Some "ws" | Some "websocket" -> Ws
-  | Some "webrtc" -> Webrtc
-  | Some "local" -> Local
-  | _ -> Local
+  | Some Env_config.Transport.Grpc -> Grpc
+  | Some Env_config.Transport.Http -> Http
+  | Some Env_config.Transport.Ws -> Ws
+  | Some Env_config.Transport.Webrtc -> Webrtc
+  | Some Env_config.Transport.Local -> Local
+  | Some (Env_config.Transport.Unknown_agent_transport _) | None -> Local
 
 let to_string = function
   | Http -> "http"

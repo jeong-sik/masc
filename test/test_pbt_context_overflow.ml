@@ -19,7 +19,11 @@
 
     Property 5 (Reducer integration):
       keeper_agent_run source contains cap_message_tokens in the
-      keeper reducer chain, ordered before repair_dangling_tool_calls. *)
+      keeper reducer chain, ordered before repair_dangling_tool_calls.
+
+    Property 6 (Reducer hardening):
+      keeper_agent_run source contains the keeper-local
+      repair_broken_tool_call_pairs reducer after repair_dangling_tool_calls. *)
 
 module UT = Masc_mcp.Keeper_unified_turn
 
@@ -186,6 +190,63 @@ let test_cap_message_tokens_integration () =
        | _ -> false)
   end
 
+let test_pair_repair_integration () =
+  let find_substring ?(start = 0) haystack needle =
+    let hlen = String.length haystack in
+    let nlen = String.length needle in
+    let rec loop i =
+      if i + nlen > hlen then None
+      else if String.sub haystack i nlen = needle then Some i
+      else loop (i + 1)
+    in
+    if nlen = 0 then Some start else loop start
+  in
+  let has_prompt_root path =
+    Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
+  in
+  let repo_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when has_prompt_root root -> root
+    | _ ->
+        let rec ascend path =
+          if has_prompt_root path then path
+          else
+            let parent = Filename.dirname path in
+            if String.equal parent path then Sys.getcwd () else ascend parent
+        in
+        ascend (Sys.getcwd ())
+  in
+  let target = Filename.concat repo_root "lib/keeper/keeper_agent_run.ml" in
+  if not (Sys.file_exists target) then
+    ()
+  else begin
+    let ic = open_in target in
+    let content = Fun.protect
+      ~finally:(fun () -> close_in ic)
+      (fun () ->
+        let len = in_channel_length ic in
+        let buf = Bytes.create len in
+        really_input ic buf 0 len;
+        Bytes.to_string buf)
+    in
+    let repair_pos =
+      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
+    in
+    let local_pos =
+      match repair_pos with
+      | Some repair_pos ->
+          find_substring ~start:repair_pos content
+            "Keeper_context_core.repair_broken_tool_call_pairs"
+      | None -> None
+    in
+    Alcotest.(check bool)
+      "keeper_agent_run.ml must integrate local pair repair after repair_dangling_tool_calls"
+      true
+      (match repair_pos, local_pos with
+       | Some repair_pos, Some local_pos -> repair_pos < local_pos
+       | _ -> false)
+  end
+
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
@@ -225,5 +286,7 @@ let () =
         test_structural_absence;
       Alcotest.test_case "cap_message_tokens integrated in reducer chain" `Quick
         test_cap_message_tokens_integration;
+      Alcotest.test_case "local pair repair integrated in reducer chain" `Quick
+        test_pair_repair_integration;
     ]);
   ]

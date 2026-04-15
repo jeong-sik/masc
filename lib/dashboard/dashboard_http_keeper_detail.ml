@@ -2,8 +2,6 @@
     Extracts the metrics series iteration loop from keepers_dashboard_json. *)
 
 
-open Dashboard_http_helpers
-
 include Dashboard_http_keeper_metrics
 
 let compute_metrics_window
@@ -574,13 +572,7 @@ let compute_metrics_window
               else float_of_int !guardrail_stop_count /. float_of_int interaction_points_int
             in
             let proactive_previews = List.rev !proactive_previews_rev in
-            let proactive_similarity_warn_threshold =
-              float_of_env_default
-                "MASC_DASHBOARD_PROACTIVE_SIMILARITY_WARN"
-                ~default:0.90
-                ~min_v:0.0
-                ~max_v:1.0
-            in
+            let proactive_similarity_warn_threshold = 0.90 in
             let proactive_similarity_window = 8 in
             let ( proactive_preview_sample_count,
                   proactive_preview_pair_count,

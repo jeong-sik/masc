@@ -9,27 +9,27 @@ include Activity_graph_reducer
 (* File storage paths                                               *)
 (* ================================================================ *)
 
-let root_dir (config : Room_utils.config) =
-  Filename.concat (Room_utils.masc_dir config) "activity-events"
+let root_dir (config : Coord_utils.config) =
+  Filename.concat (Coord_utils.masc_dir config) "activity-events"
 
-let month_dir (config : Room_utils.config) =
+let month_dir (config : Coord_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
   Filename.concat (root_dir config)
     (Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1))
 
-let day_path (config : Room_utils.config) =
+let day_path (config : Coord_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
   Filename.concat (month_dir config) (Printf.sprintf "%02d.jsonl" tm.tm_mday)
 
-let seq_path (config : Room_utils.config) =
+let seq_path (config : Coord_utils.config) =
   Filename.concat (root_dir config) "_seq"
 
-let lock_path (config : Room_utils.config) =
+let lock_path (config : Coord_utils.config) =
   Filename.concat (root_dir config) "_stream"
 
 let ensure_dirs config =
-  Room_utils.mkdir_p (root_dir config);
-  Room_utils.mkdir_p (month_dir config)
+  Coord_utils.mkdir_p (root_dir config);
+  Coord_utils.mkdir_p (month_dir config)
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
@@ -120,7 +120,7 @@ let latest_seq config = read_current_seq config
 
 let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
   let value =
-    Room_utils.with_file_lock config (lock_path config) (fun () ->
+    Coord_utils.with_file_lock config (lock_path config) (fun () ->
         ensure_dirs config;
         let seq = read_current_seq config + 1 in
         write_current_seq config seq;
@@ -393,15 +393,15 @@ let span_end_kind = function
   | _ -> None
 
 let span_end_status = function
-  | "task.done" -> "completed"
-  | "task.released" -> "released"
-  | "task.cancelled" -> "cancelled"
-  | "agent.left" -> "left"
-  | "agent.retired" -> "retired"
-  | "operation.finalized" -> "finalized"
-  | "operation.stopped" -> "stopped"
-  | "keeper.autonomy_completed" -> "completed"
-  | _ -> "ended"
+  | "task.done" -> Span_completed
+  | "task.released" -> Span_released
+  | "task.cancelled" -> Span_cancelled
+  | "agent.left" -> Span_left
+  | "agent.retired" -> Span_retired
+  | "operation.finalized" -> Span_finalized
+  | "operation.stopped" -> Span_stopped
+  | "keeper.autonomy_completed" -> Span_completed
+  | _ -> Span_ended
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
   let events = list_events config ~kinds:[] ~after_seq:0 ~limit () in
@@ -460,7 +460,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
       end_ms = now_ms;
       span_kind = sk;
       label;
-      span_status = "open";
+      span_status = Span_open;
     } :: !closed_spans
   ) open_spans;
   let all_spans = List.rev !closed_spans in

@@ -113,8 +113,12 @@ let test_implicit_dual_roots_are_strict_violation () =
       ~effective_masc_root:(Filename.concat effective ".masc")
       ()
   in
-  Alcotest.(check bool) "fail_fast derived from implicit dual roots" true
-    diag.fail_fast_enabled;
+  Alcotest.(check bool) "strict_mode_requested stays false" false
+    diag.strict_mode_requested;
+  Alcotest.(check bool) "startup_rejected derived from implicit dual roots" true
+    diag.startup_rejected;
+  Alcotest.(check bool) "startup_abort_eligible derived from implicit dual roots" true
+    diag.startup_abort_eligible;
   Alcotest.(check bool) "implicit dual roots violate" true
     (Server_base_path_diagnostics.strict_violation diag)
 
@@ -153,14 +157,12 @@ let test_explicit_resolution_source_escapes_strict_violation () =
   Alcotest.(check bool) "dual roots still detected" true diag.dual_masc_roots;
   Alcotest.(check bool) "warning still present" true
     (Option.is_some diag.warning);
-  (* fail_fast_enabled still reflects user intent (STRICT=true is set),
-     but strict_violation short-circuits because the resolution source
-     is explicit. The escape is layered on strict_violation, not on
-     fail_fast_enabled — the user asked for strict mode, honor that
-     signal, just don't kill the runtime when they also told us
-     exactly where to put the base path. *)
-  Alcotest.(check bool) "fail_fast_enabled reflects user STRICT=true" true
-    diag.fail_fast_enabled;
+  Alcotest.(check bool) "strict_mode_requested reflects user STRICT=true" true
+    diag.strict_mode_requested;
+  Alcotest.(check bool) "startup_rejected false for explicit env source" false
+    diag.startup_rejected;
+  Alcotest.(check bool) "startup_abort_eligible remains true under strict mode" true
+    diag.startup_abort_eligible;
   Alcotest.(check bool) "explicit env source escapes violation" false
     (Server_base_path_diagnostics.strict_violation diag)
 
@@ -188,8 +190,12 @@ let test_explicit_cli_resolution_source_also_escapes () =
       ()
   in
   Alcotest.(check bool) "dual roots still detected" true diag.dual_masc_roots;
-  Alcotest.(check bool) "fail_fast_enabled false without user STRICT" false
-    diag.fail_fast_enabled;
+  Alcotest.(check bool) "strict_mode_requested false without user STRICT" false
+    diag.strict_mode_requested;
+  Alcotest.(check bool) "startup_rejected false for explicit cli source" false
+    diag.startup_rejected;
+  Alcotest.(check bool) "startup_abort_eligible false without user STRICT" false
+    diag.startup_abort_eligible;
   Alcotest.(check bool) "explicit cli source escapes violation" false
     (Server_base_path_diagnostics.strict_violation diag)
 
@@ -229,6 +235,22 @@ let test_to_yojson_exposes_resolution_source () =
   let json = Server_base_path_diagnostics.to_yojson diag in
   Alcotest.(check string) "resolution source" "explicit_cli"
     (json |> member "resolution_source" |> to_string)
+
+let test_to_yojson_exposes_gate_fields () =
+  let diag =
+    Server_base_path_diagnostics.detect ~cwd:"/tmp/repo"
+      ~effective_base_path:"/tmp/workspace"
+      ~effective_masc_root:"/tmp/workspace/.masc"
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let json = Server_base_path_diagnostics.to_yojson diag in
+  Alcotest.(check bool) "strict_mode_requested field" false
+    (json |> member "strict_mode_requested" |> to_bool);
+  Alcotest.(check bool) "startup_rejected field" false
+    (json |> member "startup_rejected" |> to_bool);
+  Alcotest.(check bool) "startup_abort_eligible field" false
+    (json |> member "startup_abort_eligible" |> to_bool)
 
 let test_default_base_path_ignores_inherited_parent_root_in_tests () =
   with_temp_dir "base-path-default" @@ fun root ->
@@ -274,6 +296,21 @@ let test_default_base_path_ignores_inherited_root_without_local_masc () =
     (canonical_path repo)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
+let test_default_base_path_falls_back_to_home_when_unset () =
+  with_temp_dir "base-path-default-home-fallback" @@ fun root ->
+  let repo = Filename.concat root "repo" in
+  let home = Filename.concat root "home" in
+  mkdir_p repo;
+  mkdir_p home;
+  with_cwd repo @@ fun () ->
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_TEST_ALLOW_INHERITED_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "HOME" (Some home) @@ fun () ->
+  Alcotest.(check string) "default base path falls back to home"
+    (canonical_path home)
+    (Server_mcp_transport_http.default_base_path () |> canonical_path)
+
 let () =
   Alcotest.run "Server_base_path_diagnostics"
     [
@@ -295,6 +332,8 @@ let () =
             test_to_yojson_exposes_effective_paths;
           Alcotest.test_case "json exposes resolution source" `Quick
             test_to_yojson_exposes_resolution_source;
+          Alcotest.test_case "json exposes gate fields" `Quick
+            test_to_yojson_exposes_gate_fields;
           Alcotest.test_case "default base path ignores inherited parent root in tests"
             `Quick test_default_base_path_ignores_inherited_parent_root_in_tests;
           Alcotest.test_case
@@ -303,5 +342,8 @@ let () =
           Alcotest.test_case
             "default base path ignores inherited root without local .masc"
             `Quick test_default_base_path_ignores_inherited_root_without_local_masc;
+          Alcotest.test_case
+            "default base path falls back to home when unset"
+            `Quick test_default_base_path_falls_back_to_home_when_unset;
         ] );
     ]

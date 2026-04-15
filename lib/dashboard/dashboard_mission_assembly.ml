@@ -165,12 +165,10 @@ let identity_digest prefix identity =
   Printf.sprintf "%s:%s" prefix (Digest.to_hex (Digest.string identity))
 
 let is_internal_attention incident =
-  let target_type = string_field "target_type" incident in
-  String.equal target_type "namespace" || String.equal target_type "room"
+  Operator_digest_types.is_root_alias (string_field "target_type" incident)
 
 let is_internal_action action =
-  let target_type = string_field "target_type" action in
-  String.equal target_type "namespace" || String.equal target_type "room"
+  Operator_digest_types.is_root_alias (string_field "target_type" action)
 
 let incident_action_types kind =
   match kind with
@@ -220,7 +218,7 @@ let action_matches_incident incident action =
       let action_type = string_field "action_type" action in
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
-let build_keeper_briefs (config : Room.config) (keepers : Yojson.Safe.t list) =
+let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
   let all_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_lookup name =
     List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries
@@ -374,15 +372,17 @@ let build_operation_contexts command_plane_json =
          else
            let linked_session_id, detachment_status =
              match Hashtbl.find_opt detachments operation_id with
-             | Some (session_id, status) -> (session_id, status)
+             | Some (session_id, status_str) ->
+                 (session_id, status_str)
              | None ->
                  (trim_to_option (string_field "detachment_session_id" operation), None)
            in
+           let status = trim_to_option (string_field "status" operation) in
            Some
              {
                operation_id;
                linked_session_id;
-               status = string_field ~default:"unknown" "status" operation;
+               status;
                stage = trim_to_option (string_field "stage" operation);
                detachment_status;
                objective = trim_to_option (string_field "objective" operation);
@@ -390,12 +390,20 @@ let build_operation_contexts command_plane_json =
              })
 
 let operation_badge_json (operation : operation_context) =
+  let status_str =
+    match operation.status with
+    | Some s -> s
+    | None -> "unknown"
+  in
+  let detachment_status_str =
+    operation.detachment_status
+  in
   `Assoc
     [
       ("operation_id", `String operation.operation_id);
-      ("status", `String operation.status);
+      ("status", `String status_str);
       ("stage", json_string_option operation.stage);
-      ("detachment_status", json_string_option operation.detachment_status);
+      ("detachment_status", json_string_option detachment_status_str);
       ("objective", json_string_option operation.objective);
       ("updated_at", json_string_option operation.updated_at);
     ]
@@ -501,8 +509,11 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
          ( attention_count,
            severity_rank
              (match session.top_attention with
-             | Some attention -> string_field ~default:session.health "severity" attention
-             | None -> session.health),
+             | Some attention ->
+                 string_field
+                   ~default:(Dashboard_utils.string_of_health_level session.health)
+                   "severity" attention
+             | None -> Dashboard_utils.string_of_health_level session.health),
            session.last_event_ts,
            `Assoc
              [
@@ -511,8 +522,8 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
                ("created_by", json_string_option session.created_by);
                ("origin_kind", `String session.origin_kind);
                ("namespace", json_string_option session.namespace);
-               ("status", `String session.status);
-               ("health", `String session.health);
+               ("status", `String (Dashboard_utils.string_of_session_lifecycle session.status));
+               ("health", `String (Dashboard_utils.string_of_health_level session.health));
                ("member_names", string_list_json session.member_names);
                ("started_at", json_string_option session.started_at);
                ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);

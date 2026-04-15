@@ -291,8 +291,8 @@ let make_keeper_meta_json ?(name = "route-shadow-demo") () =
 ;;
 
 let seed_auth_and_keeper ~base_path ~keeper_name =
-  let config = Masc_mcp.Room.default_config base_path in
-  ignore (Masc_mcp.Room.init config ~agent_name:(Some "bootstrap-admin"));
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
   Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
   write_file
     (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
@@ -385,6 +385,7 @@ let check_route path expected =
        | Keeper_api.Keeper_post_config -> "config"
        | Keeper_api.Keeper_post_boot -> "boot"
        | Keeper_api.Keeper_post_shutdown -> "shutdown"
+       | Keeper_api.Keeper_post_reset -> "reset"
        | Keeper_api.Keeper_post_unknown -> "unknown")
       path
 ;;
@@ -394,6 +395,7 @@ let test_keeper_post_route_classification () =
   check_route "/api/v1/keepers/sangsu/config" Keeper_api.Keeper_post_config;
   check_route "/api/v1/keepers/sangsu/boot" Keeper_api.Keeper_post_boot;
   check_route "/api/v1/keepers/sangsu/shutdown" Keeper_api.Keeper_post_shutdown;
+  check_route "/api/v1/keepers/sangsu/reset" Keeper_api.Keeper_post_reset;
   check_route "/api/v1/keepers/sangsu" Keeper_api.Keeper_post_unknown;
   check_route "/api/v1/keepers//boot" Keeper_api.Keeper_post_unknown
 ;;
@@ -450,6 +452,76 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
   | Error err -> fail ("failed to read keeper meta after shutdown: " ^ err)
 ;;
 
+let test_merge_keeper_trace_lines_includes_internal_history () =
+  let base_path = Filename.temp_file "dashboard-keeper-trajectory-" "" in
+  (try Sys.remove base_path with
+   | _ -> ());
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
+  let trace_id = "trace-route-shadow-demo-seed" in
+  let internal_history_path =
+    Masc_mcp.Keeper_types.keeper_internal_history_path config trace_id
+  in
+  Fs_compat.mkdir_p (Filename.dirname internal_history_path);
+  write_file
+    internal_history_path
+    (String.concat
+       "\n"
+       [ {|{"timestamp":1000.0,"ts_unix":1000.0,"source":"internal_assistant","role":"assistant","content":"first internal thought"}|}
+       ; {|{"timestamp":1001.0,"ts_unix":1001.0,"source":"internal_assistant","role":"assistant","content":"second internal thought"}|}
+       ]
+     ^ "\n");
+  let trajectory_lines =
+    [
+      Masc_mcp.Trajectory.Tool_call
+        {
+          Masc_mcp.Trajectory.ts = 1002.0;
+          ts_iso = "1970-01-01T00:16:42Z";
+          turn = 3;
+          round = 1;
+          tool_name = "masc_tasks";
+          args_json = "{}";
+          gate_decision = Masc_mcp.Trajectory.Pass;
+          result = Some {|{"ok":true}|};
+          duration_ms = 12;
+          error = None;
+          cost_usd = 0.0;
+        };
+    ]
+  in
+  let merged =
+    Keeper_api.merge_keeper_trace_lines ~config ~trace_id trajectory_lines
+  in
+  check int "merged entry count" 3 (List.length merged);
+  (match List.nth merged 0 with
+   | Masc_mcp.Trajectory.Thinking entry ->
+     check string "first merged content" "first internal thought" entry.content
+   | Masc_mcp.Trajectory.Tool_call _ ->
+     fail "expected internal history entry first");
+  (match List.nth merged 1 with
+   | Masc_mcp.Trajectory.Thinking entry ->
+     check string "second merged content" "second internal thought" entry.content
+   | Masc_mcp.Trajectory.Tool_call _ ->
+     fail "expected internal history entry second");
+  (match List.nth merged 2 with
+   | Masc_mcp.Trajectory.Tool_call entry ->
+     check string "tool entry remains present" "masc_tasks" entry.tool_name
+   | Masc_mcp.Trajectory.Thinking _ ->
+     fail "expected tool entry last");
+  let tool_only =
+    List.filter
+      (function
+        | Masc_mcp.Trajectory.Tool_call _ -> true
+        | Masc_mcp.Trajectory.Thinking _ -> false)
+      merged
+  in
+  check int "thinking entries can still be filtered out" 1 (List.length tool_only))
+;;
+
 let () =
   run
     "dashboard_keeper_routes"
@@ -462,6 +534,10 @@ let () =
             "lifecycle POST routes do not fall through to generic 404"
             `Slow
             test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404
+        ; test_case
+            "merge keeper trace lines includes internal history"
+            `Quick
+            test_merge_keeper_trace_lines_includes_internal_history
         ] )
     ]
 ;;

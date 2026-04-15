@@ -37,7 +37,6 @@ import {
   keeperPhaseForDisplay,
   runtimeBandMeta,
   runtimeBandMetaForAgent,
-  summarizeMonitoringEvidence,
   summarizeKeeperMonitoring,
   type RuntimeBand,
 } from '../lib/monitoring-runtime'
@@ -55,6 +54,23 @@ function runtimeBadgeClass(band: RuntimeBand): string {
   if (band === 'attention') return 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.12)] text-[var(--warn)]'
   if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
   return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
+}
+
+function stageBadgeClass(stageKey: string): string {
+  if (stageKey === 'tool_use') return 'border-[rgba(71,184,255,0.24)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]'
+  if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[rgba(52,211,153,0.22)] bg-[rgba(52,211,153,0.1)] text-[var(--ok)]'
+  if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[rgba(167,139,250,0.24)] bg-[rgba(167,139,250,0.12)] text-[#c4b5fd]'
+  if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.12)] text-[var(--bad)]'
+  if (stageKey === 'paused') return 'border-[rgba(167,139,250,0.24)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
+  return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]'
+}
+
+function compactModelLabel(model: string | null | undefined): string | null {
+  const value = model?.trim()
+  if (!value) return null
+  const parts = value.split(':').map(part => part.trim()).filter(Boolean)
+  if (parts.length >= 2) return parts[parts.length - 1] ?? value
+  return value
 }
 
 interface KeeperInfo {
@@ -343,14 +359,15 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
-    namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
+    namespaceTruthCounts: namespaceTruth.value?.root.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
+    shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
-  const namespaceStatus = namespaceTruth.value?.namespace.status ?? serverStatus.value
-  const namespaceName = namespaceStatus?.namespace ?? 'default'
-  const namespaceBasePath = namespaceStatus?.namespace_base_path ?? null
+  const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
+  const namespaceName = namespaceStatus?.project ?? 'default'
 
   const briefMap = useMemo(
     () => new Map<string, DashboardMissionAgentBrief>(
@@ -390,16 +407,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ),
     [scopedAgents, keeperInfoLookup, keeperList, keeperBriefs],
   )
-  const pageTitle = keeperFilter === 'keeper-only'
-    ? '키퍼 목록'
-    : keeperFilter === 'agent-only'
-      ? '일반 에이전트'
-      : '에이전트 & 키퍼 목록'
   const pageDescription = keeperFilter === 'keeper-only'
-    ? '키퍼만 따로 보고, 런타임 이름은 보조 정보로 확인합니다.'
+    ? '주 이름을 먼저 보고, runtime alias와 FSM 상태는 보조 정보로 확인합니다.'
     : keeperFilter === 'agent-only'
-      ? '키퍼가 연결되지 않은 일반 에이전트만 봅니다.'
-      : '에이전트와 키퍼를 한 목록에서 보고, 운영 상태는 배지로 구분합니다.'
+      ? '키퍼가 연결되지 않은 일반 에이전트만 따로 봅니다.'
+      : '주 이름 기준으로 훑고, 최근 활동과 FSM 상태가 필요한 카드만 열어봅니다.'
 
   const filtered = scopedAgents
     .filter((a: Agent) => {
@@ -457,6 +469,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     : keeperFilter === 'agent-only'
       ? `일반 에이전트 ${expectedScopedCount}개`
       : `에이전트/키퍼 ${expectedScopedCount}개`
+  const configuredKeeperHint =
+    keeperFilter === 'agent-only' || runtimeCounts.configuredKeepers <= 0
+      ? null
+      : `설정된 keeper ${runtimeCounts.configuredKeepers}개`
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -467,30 +483,30 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     executionError.value
       ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 상세 상태 정보를 아직 가져오지 못했습니다.`
       : executionLoaded.value
-        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.`
-        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
+        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.${configuredKeeperHint ? ` ${configuredKeeperHint}.` : ''}`
+        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다.${configuredKeeperHint ? ` ${configuredKeeperHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
       <section class="monitor-surface-card monitor-surface-card-strong p-5">
         <div class="flex flex-col gap-5">
-          <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div class="flex min-w-0 flex-col gap-3">
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
+            <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
-                <h2 class="m-0 text-[20px] font-semibold tracking-[-0.02em] text-[var(--text-strong)]">${pageTitle}</h2>
+                <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">디렉터리 필터</span>
                 <span class="inline-flex items-center rounded-full border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)]">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-[720px] text-[13px] leading-[1.6] text-[var(--text-body)]">${pageDescription}</p>
             </div>
 
-            <label class="flex w-full max-w-[320px] flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
-              <span>키퍼/런타임 이름으로 찾기</span>
+            <label class="flex w-full flex-col gap-2 text-[11px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase">
+              <span>이름 또는 Runtime Alias</span>
               <${TextInput}
                 class="rounded-2xl bg-[var(--white-3)] px-4 py-3 text-[14px] text-[var(--text-body)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
                 name="agent_search"
                 ariaLabel="키퍼 또는 런타임 이름 검색"
                 autoComplete="off"
-                placeholder="키퍼 또는 런타임 이름으로 찾기"
+                placeholder="키퍼 이름 또는 runtime alias로 찾기"
                 value=${search}
                 onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
               />
@@ -524,7 +540,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <p class="m-0 text-[12px] leading-[1.55] text-[var(--text-body)]">${fallbackStateMessage}</p>
                     <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
                       <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
-                      ${namespaceBasePath ? html`<code class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px]">${namespaceBasePath}</code>` : null}
+                      ${configuredKeeperHint ? html`<span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
                     </div>
                   </div>
                 </div>
@@ -540,7 +556,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           const keeperRuntime = keeperRuntimeLookup.get(agent.name) ?? findKeeperRuntime(agent.name, keeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
-          const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
+          const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null
           const isKeeper = keeper != null
           const currentWork = keeper?.current_work ?? brief?.current_work ?? agent.current_task ?? null
           const lastActivityAge = keeperRuntime?.last_activity_ago_s ?? keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
@@ -574,7 +590,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             keeper?.latest_tool_names,
           )
           const visibleTools = recentTools.slice(0, 2)
-          const hiddenToolCount = Math.max(0, recentTools.length - visibleTools.length)
+          const primaryTool = visibleTools[0] ?? null
+          const extraToolCount = Math.max(0, recentTools.length - (primaryTool ? 1 : 0))
           const toolCallCount =
             brief?.latest_tool_call_count
             ?? keeper?.latest_tool_call_count
@@ -594,8 +611,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           const runtimeName = isKeeper
             ? runtimeAgentName(displayName, keeperRuntime?.agent_name ?? keeper?.agent_name ?? agent.name)
             : null
+          const identityLabel = runtimeName ? 'runtime alias' : 'agent runtime'
           const model = keeperRuntime?.model ?? keeper?.model
+          const compactModel = compactModelLabel(model)
           const generation = keeperRuntime?.generation ?? keeper?.generation ?? null
+          const fsmPhaseKey =
+            keeperMonitoring?.phase.key && keeperMonitoring.phase.key !== 'unknown'
+              ? keeperMonitoring.phase.key
+              : fsmPhase
+          const fsmStageKey = keeperMonitoring?.stage.key ?? 'offline'
+          const fsmStageLabel = keeperMonitoring?.stage.label ?? '활동 없음'
+          const fsmStageText = fsmStageLabel === '활동 없음' ? fsmStageLabel : `활동 ${fsmStageLabel}`
           const detailLabel = keeperRuntime ? `${displayName} keeper 상세 보기` : `${displayName} 상세 보기`
           const openDetail = () => {
             if (keeperRuntime) {
@@ -607,92 +633,132 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-4 rounded-[var(--radius-xl)] p-5 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
+              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-3.5 rounded-[18px] p-4 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--bg-1)] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${detailLabel}
               onClick=${openDetail}
             >
-              <div class="flex items-start gap-4">
-                <div class="shrink-0 relative">
-                  <${AgentAvatar}
-                    name=${agent.name}
-                    status=${agent.status}
-                    traits=${agent.traits}
-                    size="xl"
-                    currentWork=${currentWork}
-                    activityAge=${lastActivityAge}
-                  />
-                </div>
-                
-                <div class="flex flex-col min-w-0 flex-1 justify-center py-1">
-                  <strong class="mb-2 min-w-0 overflow-hidden text-[17px] text-[var(--text-strong)] font-semibold leading-[1.3] group-hover:text-[var(--accent)] transition-colors [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
-                  
-                  <div class="flex items-center gap-1.5 flex-wrap mt-1">
-                    <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
-                    <span class="text-[11px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-2 py-0.5 rounded-full">${isKeeper ? '키퍼' : '일반 에이전트'}</span>
-                    ${runtimeName ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${runtimeName}</span>` : null}
-                    ${agent.synthetic ? html`<span class="text-[10px] text-[var(--text-muted)] bg-[var(--white-6)] border border-dashed border-[var(--card-border)] px-1.5 py-px rounded italic" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">파생</span>` : null}
-                    ${monitoringEvidence?.phase && keeperRuntime ? html`<${KeeperPhaseBadge} phase=${keeperPhaseForDisplay(keeperRuntime)} compact />` : null}
-                    ${monitoringEvidence?.stage ? html`<span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]" title=${monitoringEvidence.stage.description}>활동 ${monitoringEvidence.stage.label}</span>` : null}
-                    ${model ? html`<span class="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--white-4)] border border-[var(--card-border)] px-1.5 py-px rounded">${model}</span>` : null}
-                    ${generation != null ? html`<span class="text-[11px] text-[var(--accent)] font-medium bg-[var(--accent-10)] px-1.5 py-px rounded border border-[var(--accent-10)]" title="키퍼 핸드오프가 일어날 때 올라가는 런타임 세대입니다.">세대 ${generation}</span>` : null}
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex min-w-0 flex-1 items-start gap-4">
+                  <div class="shrink-0 relative">
+                    <${AgentAvatar}
+                      name=${agent.name}
+                      status=${agent.status}
+                      traits=${agent.traits}
+                      size="xl"
+                      currentWork=${currentWork}
+                      activityAge=${lastActivityAge}
+                    />
                   </div>
+
+                  <div class="min-w-0 flex-1 py-0.5">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <strong class="min-w-0 overflow-hidden text-[17px] font-semibold leading-[1.3] text-[var(--text-strong)] transition-colors group-hover:text-[var(--accent)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [overflow-wrap:anywhere]">${displayName}</strong>
+                      ${agent.synthetic ? html`
+                        <span class="inline-flex items-center rounded-full border border-dashed border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] italic text-[var(--text-muted)]" title="키퍼 데이터에서 파생된 합성 엔트리입니다.">
+                          파생
+                        </span>
+                      ` : null}
+                    </div>
+
+                    <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                      <span class="uppercase tracking-[0.08em]">${identityLabel}</span>
+                      ${runtimeName ? html`
+                        <span class="text-[var(--text-dim)]">/</span>
+                        <span class="font-mono text-[10px]" translate="no">${runtimeName}</span>
+                      ` : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex shrink-0 items-start">
+                  <span class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
                 </div>
               </div>
 
-              <div class="flex flex-1 flex-col gap-3 border-t border-[var(--border-slate-12)] pt-3">
-                <p class="m-0 text-[13px] leading-[1.5] text-[var(--text-body)] break-words line-clamp-3" title=${summaryText}>${summaryText}</p>
+              <p class="m-0 text-[13px] leading-[1.55] text-[var(--text-body)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
 
-                <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
-                  <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
-                    최근 활동 ${lastActivityAt
+              ${isKeeper ? html`
+                <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] px-3 py-2.5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">FSM</span>
+                    ${fsmPhaseKey
+                      ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`
+                      : html`
+                        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                          생명주기 확인 필요
+                        </span>
+                      `}
+                    <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${stageBadgeClass(fsmStageKey)}" title=${keeperMonitoring?.stage.description ?? '활동 단계 정보가 없습니다.'}>
+                      ${fsmStageText}
+                    </span>
+                    ${generation != null && generation > 0 ? html`
+                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-3)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                        세대 ${generation}
+                      </span>
+                    ` : null}
+                  </div>
+                </div>
+              ` : null}
+
+              <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                  최근 활동
+                  <span class="ml-1 text-[var(--text-body)]">
+                    ${lastActivityAt
                       ? html`<${TimeAgo} timestamp=${lastActivityAt} />`
                       : lastActivityAge != null
                         ? `${formatDuration(lastActivityAge)} 전`
                         : '기록 없음'}
                   </span>
-                  ${isKeeper && ctxPct != null ? html`
-                    <span class="inline-flex items-center gap-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
-                      CTX
-                      <span class="font-mono font-medium ${ctxPct > 85 ? 'text-[var(--bad)]' : ctxPct > 60 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${ctxPct}%</span>
-                      <span class="inline-block w-12 h-1.5 rounded-full bg-[var(--white-6)] overflow-hidden">
-                        <span class="block h-full rounded-full ${ctxPct > 85 ? 'bg-[var(--bad)]' : ctxPct > 60 ? 'bg-[var(--warn)]' : 'bg-[var(--ok)]'}" style="width:${ctxPct}%"></span>
-                      </span>
+                </span>
+                ${isKeeper && ctxPct != null ? html`
+                  <span class="inline-flex items-center gap-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                    <span>CTX</span>
+                    <span class="font-mono font-medium ${ctxPct > 85 ? 'text-[var(--bad)]' : ctxPct > 60 ? 'text-[var(--warn)]' : 'text-[var(--text-strong)]'}">${ctxPct}%</span>
+                    <span class="inline-block h-1.5 w-12 overflow-hidden rounded-full bg-[var(--white-6)]">
+                      <span class="block h-full rounded-full ${ctxPct > 85 ? 'bg-[var(--bad)]' : ctxPct > 60 ? 'bg-[var(--warn)]' : 'bg-[var(--ok)]'}" style="width:${ctxPct}%"></span>
+                    </span>
+                  </span>
+                ` : null}
+                ${compactModel ? html`
+                  <span class="inline-flex items-center gap-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-1">
+                    <span>model</span>
+                    <span class="font-mono text-[10px] text-[var(--text-body)]" translate="no" title=${model ?? undefined}>${compactModel}</span>
+                  </span>
+                ` : null}
+              </div>
+
+              ${(primaryTool || toolCallCount != null || toolAuditAt) ? html`
+                <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                  <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
+                  ${primaryTool ? html`
+                    <span class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-body)]" translate="no">
+                      ${primaryTool}
+                    </span>
+                  ` : null}
+                  ${extraToolCount > 0 ? html`
+                    <span class="inline-flex items-center rounded-full border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                      +${extraToolCount}
+                    </span>
+                  ` : null}
+                  ${!primaryTool && toolCallCount === 0 ? html`
+                    <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                      최근 도구 없음
+                    </span>
+                  ` : null}
+                  ${!primaryTool && toolCallCount != null && toolCallCount > 0 ? html`
+                    <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                      ${toolCallCount}회 관찰됨
+                    </span>
+                  ` : null}
+                  ${toolAuditAt ? html`
+                    <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
+                      감사 <${TimeAgo} timestamp=${toolAuditAt} />
                     </span>
                   ` : null}
                 </div>
-
-                ${(visibleTools.length > 0 || toolCallCount != null || toolAuditAt) ? html`
-                  <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-                    <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">tool</span>
-                    ${visibleTools.map(name => html`
-                      <span class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-body)]">
-                        ${name}
-                      </span>
-                    `)}
-                    ${hiddenToolCount > 0 ? html`
-                      <span class="inline-flex items-center rounded-full border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
-                        +${hiddenToolCount}
-                      </span>
-                    ` : null}
-                    ${visibleTools.length === 0 && toolCallCount === 0 ? html`
-                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
-                        최근 도구 없음
-                      </span>
-                    ` : null}
-                    ${visibleTools.length === 0 && toolCallCount != null && toolCallCount > 0 ? html`
-                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
-                        도구 ${toolCallCount}회
-                      </span>
-                    ` : null}
-                    ${toolAuditAt ? html`
-                      <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-[10px]">
-                        감사 <${TimeAgo} timestamp=${toolAuditAt} />
-                      </span>
-                    ` : null}
-                  </div>
-                ` : null}
-              </div>
+              ` : null}
             </button>
           `
         })}

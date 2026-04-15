@@ -16,7 +16,7 @@ import { executeAction, normalizeStatus } from './helpers'
 
 function parseTarget(value: string): {
   action_type: 'broadcast' | 'keeper_message'
-  target_type: 'namespace' | 'keeper'
+  target_type: 'root' | 'keeper'
   target_id?: string
   label: string
 } {
@@ -24,7 +24,7 @@ function parseTarget(value: string): {
     const name = value.slice('keeper:'.length)
     return { action_type: 'keeper_message', target_type: 'keeper', target_id: name, label: name }
   }
-  return { action_type: 'broadcast', target_type: 'namespace', label: '전체' }
+  return { action_type: 'broadcast', target_type: 'root', label: '전체' }
 }
 
 async function submitQuickMessage() {

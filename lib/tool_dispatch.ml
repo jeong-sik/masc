@@ -191,17 +191,16 @@ let is_idempotent name = with_dispatch_ro (fun () -> Hashtbl.mem idempotent_set 
     ~210 Hashtbl.replace ops. *)
 
 type module_tag =
-  | Mod_plan | Mod_operator | Mod_command_plane
+  | Mod_plan | Mod_operator
   | Mod_local_runtime
   | Mod_worktree
   | Mod_code | Mod_code_write
-  | Mod_a2a | Mod_handover
-  | Mod_heartbeat
-  | Mod_auth | Mod_run
+  | Mod_a2a
+  | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper | Mod_repair_loop
+  | Mod_library | Mod_keeper
   | Mod_inline
   | Mod_autoresearch
   | Mod_shard

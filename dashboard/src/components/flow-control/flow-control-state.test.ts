@@ -18,9 +18,13 @@ vi.mock('../../namespace-truth-store', () => ({
   namespaceTruthInitializing,
 }))
 
-vi.mock('../../store', () => ({
-  serverStatus,
-}))
+vi.mock('../../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store')>()
+  return {
+    ...actual,
+    serverStatus,
+  }
+})
 
 describe('flow-control-state', () => {
   beforeEach(async () => {
@@ -40,7 +44,7 @@ describe('flow-control-state', () => {
 
   it('reuses namespace truth pause state before calling MCP', async () => {
     namespaceTruth.value = {
-      namespace: {
+      root: {
         status: {
           paused: true,
         },
@@ -94,7 +98,7 @@ describe('flow-control-state', () => {
 
     namespaceTruthInitializing.value = false
     namespaceTruth.value = {
-      namespace: {
+      root: {
         status: {
           paused: false,
         },

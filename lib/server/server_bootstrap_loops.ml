@@ -11,7 +11,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Progress.set_sse_callback Sse.broadcast;
   Sse.set_clock clock;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Room_hooks.stop_keeper_fn := Keeper_keepalive.stop_keepalive;
+  Coord_hooks.stop_keeper_fn := Keeper_keepalive.stop_keepalive;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
@@ -27,6 +27,27 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Subsystem_health.mark_dead name;
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
+  in
+  let wait_for_lazy_startup () =
+    let rec loop last_log_at =
+      let pending = Server_startup_state.pending_lazy_tasks () in
+      if pending = [] then ()
+      else begin
+        let now = Eio.Time.now clock in
+        let last_log_at =
+          if now -. last_log_at >= 5.0 then begin
+            Log.Keeper.info
+              "autoboot: waiting for lazy startup tasks to finish before keeper boot [%s]"
+              (String.concat ", " pending);
+            now
+          end else
+            last_log_at
+        in
+        Eio.Time.sleep clock 0.25;
+        loop last_log_at
+      end
+    in
+    loop (Eio.Time.now clock)
   in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
@@ -78,11 +99,16 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = match event with
-      | Board_dispatch.Post_created { post_id; author; title; hearth; _ } ->
+      | Board_dispatch.Post_created { post_id; author; title; content; hearth } ->
+          let preview =
+            if String.length content > 200 then String.sub content 0 200
+            else content
+          in
           let base = [("type", `String "post_created");
                       ("post_id", `String post_id);
                       ("author", `String author);
-                      ("title", `String title)] in
+                      ("title", `String title);
+                      ("content", `String preview)] in
           `Assoc (match hearth with
                   | Some h -> ("hearth", `String h) :: base
                   | None -> base)
@@ -147,8 +173,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ~tags:["board"; activity_kind] ()));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
      can react to new tasks, mentions, or room activity immediately.
-     Room_state.on_broadcast_mention is the active path (Room.broadcast uses
-     Room_state.broadcast); Room_eio.on_broadcast_mention is kept in sync as
+     Coord_state.on_broadcast_mention is the active path (Coord.broadcast uses
+     Coord_state.broadcast); Coord_eio.on_broadcast_mention is kept in sync as
      a safety net for any legacy callers. *)
   let broadcast_mention_handler = (fun mention ->
     match mention with
@@ -160,8 +186,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Keeper_keepalive.wakeup_all_keepers
           ~base_path:state.room_config.base_path ();
         Log.Keeper.info "broadcast → wakeup all keepers (reactive push)") in
-  Room_state.on_broadcast_mention := broadcast_mention_handler;
-  Room_eio.on_broadcast_mention := broadcast_mention_handler;
+  Coord_broadcast.on_broadcast_mention := broadcast_mention_handler;
+  Coord_eio.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
     let cancel_orchestrator =
@@ -188,12 +214,12 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       : bool * string =
     let config = state.room_config in
     let agent_name = actor in
-    let ctx_room : Tool_room.context = { config; agent_name } in
+    let ctx_room : Tool_coord.context = { config; agent_name } in
     let ctx_task : Tool_task.context = { config; agent_name; sw = Some sw } in
     let ctx_agent : Tool_agent.context = { config; agent_name } in
     match name with
     | "masc_status" -> (
-        match Tool_room.dispatch ctx_room ~name ~args with
+        match Tool_coord.dispatch ctx_room ~name ~args with
         | Some result -> result
         | None -> (false, "masc_status: dispatch failed"))
     | "masc_tasks" -> (
@@ -217,7 +243,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ~build_facts:(fun () ->
         let base = Dashboard_governance.factual_snapshot_json
           ~base_path:state.room_config.base_path in
-        let agents = Room.get_agents_status state.room_config in
+        let agents = Coord.get_agents_status state.room_config in
         Operator_control_snapshot.merge_json_objects base
           (`Assoc [("agents", agents)]))
       ());
@@ -249,10 +275,12 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     if not Env_config.KeeperBootstrap.enabled then
       Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
     else begin
+      wait_for_lazy_startup ();
+      Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock 5.0;
       let config = state.room_config in
-      let masc_root = Room.masc_root_dir config in
+      let masc_root = Coord.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let all_names = Keeper_types.keeper_names config in
       let all_count = List.length all_names in
@@ -430,6 +458,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
               sse_guards_reaped http_guards_reaped sessions_reaped;
           let ext_reaped = Sse.reap_dead_external_subscribers () in
+          Transport_metrics.set_grpc_subscribers
+            (Sse.external_subscriber_count_with_prefix "grpc-subscribe-");
           if ext_reaped > 0 then
             Log.Server.info "reaped %d dead external subscribers" ext_reaped;
           if Server_webrtc_transport.is_enabled () then begin
@@ -470,7 +500,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                let days =
                  Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
                in
-               let masc = Room.masc_dir state.room_config in
+               let masc = Coord.masc_dir state.room_config in
                let prune_dir dir =
                  if Sys.file_exists dir then
                    Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
@@ -504,6 +534,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       in
       loop ());
   let resolved_base = state.room_config.base_path in
-  let masc_dir = Room.masc_root_dir state.room_config in
+  let masc_dir = Coord.masc_root_dir state.room_config in
   A2a_tools.init ~masc_dir;
   (resolved_base, masc_dir)

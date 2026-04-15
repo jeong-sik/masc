@@ -12,19 +12,46 @@
 
 import { route, navigate } from './router'
 
-export type TimeRangePreset = '5m' | '1h' | '24h' | '7d'
+export type TimeRangePreset = '5m' | '1h' | '6h' | '24h' | '7d'
 
-export const TIME_RANGE_PRESETS: ReadonlyArray<TimeRangePreset> = ['5m', '1h', '24h', '7d']
+export const TIME_RANGE_PRESETS: ReadonlyArray<TimeRangePreset> = ['5m', '1h', '6h', '24h', '7d']
+
+const TIME_RANGE_SHORT_LABELS: Record<TimeRangePreset, string> = {
+  '5m': '5분',
+  '1h': '1시간',
+  '6h': '6시간',
+  '24h': '24시간',
+  '7d': '7일',
+}
 
 const TIME_RANGE_LABELS: Record<TimeRangePreset, string> = {
   '5m': '최근 5분',
   '1h': '최근 1시간',
+  '6h': '최근 6시간',
   '24h': '최근 24시간',
   '7d': '최근 7일',
 }
 
 export function timeRangeLabel(preset: TimeRangePreset): string {
   return TIME_RANGE_LABELS[preset]
+}
+
+export function timeRangeShortLabel(preset: TimeRangePreset): string {
+  return TIME_RANGE_SHORT_LABELS[preset]
+}
+
+// --- Time range → milliseconds conversion (shared across Observatory & Activity Graph) ---
+
+const RANGE_TO_MS: Record<TimeRangePreset, number> = {
+  '5m': 5 * 60_000,
+  '1h': 60 * 60_000,
+  '6h': 6 * 60 * 60_000,
+  '24h': 24 * 60 * 60_000,
+  '7d': 7 * 24 * 60 * 60_000,
+}
+
+export function timeRangeToMs(preset: TimeRangePreset): number {
+  return RANGE_TO_MS[preset] ?? RANGE_TO_MS['1h']
 }
 
 // --- Reactive accessors (URL → state) ---

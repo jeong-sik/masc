@@ -115,6 +115,9 @@ type agent_runtime_state =
   ; noop_turn_count : int
   ; consecutive_noop_count : int
   ; last_speech_act : string
+  ; last_social_transition_reason : string
+  ; last_active_desire : string
+  ; last_current_intention : string
   ; last_blocker : string
   ; last_need : string
   }
@@ -136,7 +139,7 @@ type keeper_meta =
   ; instructions : string
   ; (* -- Policy -- *)
     policy_voice_enabled : bool
-  ; execution_scope : string
+  ; execution_scope : Keeper_execution_scope.t
   ; allowed_paths : string list
   ; tool_access : tool_access
   ; tool_denylist : string list
@@ -165,7 +168,7 @@ type keeper_meta =
   ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
-      Set when keeper claims a task; cleared on masc_done.
+      Set when keeper claims a task; cleared on masc_transition action=done.
       Propagated to trajectory accumulator for per-task cost tracking. *)
   ; work_discovery_enabled : bool option
   ; work_discovery_sources : string list option
@@ -493,7 +496,7 @@ let map_scheduled_autonomous_rt =
 let now_iso () = Types.now_iso ()
 let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 
-let runtime_meta_write_sync_hook : (Room.config -> keeper_meta -> unit) ref =
+let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
 ;;
 
@@ -670,7 +673,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "desires", `String m.desires
     ; "instructions", `String m.instructions
     ; "policy_voice_enabled", `Bool m.policy_voice_enabled
-    ; "execution_scope", `String m.execution_scope
+    ; "execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope)
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
@@ -738,6 +741,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "noop_turn_count", `Int rt.noop_turn_count
     ; "consecutive_noop_count", `Int rt.consecutive_noop_count
     ; "last_speech_act", `String rt.last_speech_act
+    ; "last_social_transition_reason", `String rt.last_social_transition_reason
+    ; "last_active_desire", `String rt.last_active_desire
+    ; "last_current_intention", `String rt.last_current_intention
     ; "last_blocker", `String rt.last_blocker
     ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
@@ -777,7 +783,7 @@ type parsed_keeper_identity =
 
 type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
-  ; pp_execution_scope : string
+  ; pp_execution_scope : Keeper_execution_scope.t
   ; pp_allowed_paths : string list
   ; pp_tool_access : tool_access
   ; pp_tool_denylist : string list
@@ -897,7 +903,8 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
     in
     let pp_execution_scope =
-      Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
+      Safe_ops.json_string ~default:(Keeper_execution_scope.to_string default_execution_scope) "execution_scope" json
+      |> Keeper_execution_scope.of_string_lossy
     in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
@@ -1117,6 +1124,15 @@ let parse_keeper_state
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
   let consecutive_noop_count = Safe_ops.json_int ~default:0 "consecutive_noop_count" json in
   let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
+  let last_social_transition_reason =
+    Safe_ops.json_string ~default:"" "last_social_transition_reason" json
+  in
+  let last_active_desire =
+    Safe_ops.json_string ~default:"" "last_active_desire" json
+  in
+  let last_current_intention =
+    Safe_ops.json_string ~default:"" "last_current_intention" json
+  in
   let last_blocker = Safe_ops.json_string ~default:"" "last_blocker" json in
   let last_need = Safe_ops.json_string ~default:"" "last_need" json in
   let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
@@ -1152,6 +1168,9 @@ let parse_keeper_state
       ; noop_turn_count
       ; consecutive_noop_count
       ; last_speech_act
+      ; last_social_transition_reason
+      ; last_active_desire
+      ; last_current_intention
       ; last_blocker
       ; last_need
       }
@@ -1335,6 +1354,9 @@ let fallback_canonical_keeper_meta_key_names =
   ; "noop_turn_count"
   ; "consecutive_noop_count"
   ; "last_speech_act"
+  ; "last_social_transition_reason"
+  ; "last_active_desire"
+  ; "last_current_intention"
   ; "last_blocker"
   ; "last_need"
   ; "paused"
@@ -1405,13 +1427,13 @@ let read_meta_file_path path : (keeper_meta option, string) result =
 ;;
 
 (** Sidecar stem suffixes (without the trailing .json).
-    A file like [sangsu.manual_reconcile.json] has stem
-    [sangsu.manual_reconcile]; stripping [.json] and checking
-    [String.ends_with ~suffix] on this stem filters sidecars while
-    allowing keeper names that contain dots (e.g. [dot.name.json]).
-    When adding a new sidecar kind, add its dot-prefixed suffix here. *)
+    A file like [sangsu.dataset.json] has stem [sangsu.dataset]; stripping
+    [.json] and checking [String.ends_with ~suffix] on this stem filters
+    sidecars while allowing keeper names that contain dots (e.g.
+    [dot.name.json]). When adding a new sidecar kind, add its dot-prefixed
+    suffix here. *)
 let keeper_sidecar_stem_suffixes =
-  [ ".manual_reconcile"; ".dataset" ]
+  [ ".dataset" ]
 
 let is_keeper_meta_file f =
   if not (Filename.check_suffix f ".json") then false
@@ -1450,8 +1472,7 @@ let keeper_names config =
      JSON files are scoped to the server's base_path, so test isolation works.
      Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
-     Sidecar files (.dataset, .manual_reconcile) are filtered by
-     is_keeper_meta_file. *)
+     Sidecar files (.dataset) are filtered by is_keeper_meta_file. *)
   persisted_keeper_names config
 ;;
 

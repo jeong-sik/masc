@@ -2,7 +2,7 @@ open Alcotest
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Config = Masc_mcp.Config
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_contract_truth_" "" in
@@ -89,26 +89,19 @@ let test_selected_tools_report_contract_status () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      (* masc_runtime_verify and masc_verify_handoff removed: tools pruned *)
       let tools =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:
             [
               "masc_transition";
-              "masc_runtime_verify";
-              "masc_verify_handoff";
             ]
           state
         |> response_tools
       in
       let canonical = find_tool_exn tools "masc_transition" in
       check string "transition real" "real"
-        (tool_string_field canonical "implementationStatus");
-      let runtime_verify = find_tool_exn tools "masc_runtime_verify" in
-      check string "runtime verify real" "real"
-        (tool_string_field runtime_verify "implementationStatus");
-      let verify_handoff = find_tool_exn tools "masc_verify_handoff" in
-      check string "verify_handoff real" "real"
-        (tool_string_field verify_handoff "implementationStatus"))
+        (tool_string_field canonical "implementationStatus"))
 
 let () =
   run "tool contract truth"

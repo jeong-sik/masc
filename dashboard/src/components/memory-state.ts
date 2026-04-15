@@ -9,8 +9,13 @@ import {
   boardHiddenCategories,
   boardAuthorFilter,
   boardLoading,
+  boardLoadingMore,
+  boardHasMore,
+  boardOffset,
+  boardTotal,
   lastBoardRefreshAt,
   refreshBoard,
+  loadMoreBoardPosts,
 } from '../store'
 import {
   votePost,
@@ -30,8 +35,13 @@ export {
   boardHiddenCategories,
   boardAuthorFilter,
   boardLoading,
+  boardLoadingMore,
+  boardHasMore,
+  boardOffset,
+  boardTotal,
   lastBoardRefreshAt,
   refreshBoard,
+  loadMoreBoardPosts,
 }
 export { votePost }
 export { deleteBoardPost }

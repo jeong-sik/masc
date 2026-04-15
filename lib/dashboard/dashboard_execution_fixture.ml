@@ -30,11 +30,7 @@ let execution_smoke_fixture_json () =
       ( "status",
         `Assoc
           [
-            ("namespace_id", `String "default");
-            ("namespace", `String "default");
-            ("namespace_mode", `String "flattened");
-            ("room", `String "default");
-            ("room_base_path", `String "/tmp/masc-execution-fixture");
+            ("coordination_root", `String "/tmp/masc-execution-fixture");
             ("cluster", `String "fixture");
             ("project", `String "execution-smoke");
             ("tempo_interval_s", `Float 300.0);

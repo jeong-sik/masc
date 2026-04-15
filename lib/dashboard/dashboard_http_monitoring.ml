@@ -10,15 +10,9 @@ open Dashboard_http_helpers
     and counts [ToolCall _] actions, partitioned by outcome.
 
     [~now_ts] is injectable for testing; defaults to wall-clock time. *)
-let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config)
+let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.config)
     : Yojson.Safe.t =
-  let window_hours =
-    float_of_env_default
-      "MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS"
-      ~default:1.0
-      ~min_v:0.1
-      ~max_v:168.0
-  in
+  let window_hours = 1.0 in
   let since = now_ts -. (window_hours *. 3600.0) in
   let entries =
     try Audit_log.read_entries ~n:50_000 config
@@ -115,27 +109,9 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config
   ]
 
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
-  let warn_age_s =
-    int_of_env_default
-      "MASC_DASHBOARD_BOARD_AGE_WARN_SEC"
-      ~default:3600
-      ~min_v:60
-      ~max_v:604800
-  in
-  let bad_age_s =
-    int_of_env_default
-      "MASC_DASHBOARD_BOARD_AGE_BAD_SEC"
-      ~default:21600
-      ~min_v:120
-      ~max_v:1209600
-  in
-  let slo_target_age_s =
-    int_of_env_default
-      "MASC_DASHBOARD_BOARD_SLO_SEC"
-      ~default:900
-      ~min_v:30
-      ~max_v:Masc_time_constants.day_int
-  in
+  let warn_age_s = 3600 in
+  let bad_age_s = 21600 in
+  let slo_target_age_s = 900 in
   try
     let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:200 () in
     let total_posts = List.length posts in
@@ -249,7 +225,7 @@ let slot_monitoring_json () : Yojson.Safe.t =
       ("endpoints", `List []);
     ]
 
-let executor_outcomes_json (config : Room.config) : Yojson.Safe.t =
+let executor_outcomes_json (config : Coord.config) : Yojson.Safe.t =
   try
     let since = Time_compat.now () -. Masc_time_constants.day in
     let events = Telemetry_eio.read_events_since config ~since in

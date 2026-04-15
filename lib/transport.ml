@@ -227,7 +227,6 @@ module Rest = struct
       || String.equal name "masc_messages"
       || String.equal name "masc_a2a_delegate"
       || String.equal name "masc_a2a_subscribe"
-      || String.equal name "masc_poll_events"
     then
       [ "messaging" ]
     else if

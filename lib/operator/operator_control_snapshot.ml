@@ -151,7 +151,7 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
     ]
 
 let append_action_log config (entry : action_log_entry) =
-  Room_utils.mkdir_p (operator_dir config);
+  Coord_utils.mkdir_p (operator_dir config);
   Fs_compat.append_jsonl (action_log_path config) (action_log_entry_to_yojson entry)
 
 let recent_actions_json config =
@@ -169,7 +169,7 @@ let recent_actions_json config =
     `List tail
 
 let recent_messages_json config =
-  Room.get_messages_raw config ~since_seq:0 ~limit:20
+  Coord.get_messages_raw config ~since_seq:0 ~limit:20
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
@@ -250,10 +250,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
 (* Concurrency cap for parallel keeper snapshot fibers.
    Prevents memory bursts when many keepers are processed simultaneously.
    Each keeper fiber does filesystem I/O + heavy JSON construction (~50 fields). *)
-let _keeper_snapshot_max_concurrency =
-  Dashboard_http_helpers.int_of_env_default
-    "MASC_DASHBOARD_KEEPER_SNAPSHOT_MAX_CONCURRENCY"
-    ~default:4 ~min_v:1 ~max_v:32
+let _keeper_snapshot_max_concurrency = 4
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
@@ -441,6 +438,83 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("proactive_enabled", `Bool meta.proactive.enabled);
                        ("proactive_idle_sec", `Int meta.proactive.idle_sec);
                        ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+                       ("turn_budget",
+                         (let profile =
+                            Keeper_types_profile.load_keeper_profile_defaults
+                              meta.name
+                          in
+                          let env_reactive =
+                            Env_config_keeper.KeeperKeepalive
+                            .oas_max_turns_per_call
+                          in
+                          let env_autonomous =
+                            Env_config_keeper.KeeperKeepalive
+                            .oas_max_turns_per_call_scheduled_autonomous
+                          in
+                          let reactive_effective =
+                            Keeper_types_profile.effective_max_turns_per_call
+                              profile
+                          in
+                          let classify_source = function
+                            | Some n when n >= 1 && n <= 50 -> "override"
+                            | Some _ -> "override_invalid"
+                            | None -> "env"
+                          in
+                          let reactive_source =
+                            classify_source profile.max_turns_per_call
+                          in
+                          let autonomous_effective =
+                            Keeper_types_profile
+                            .effective_max_turns_per_call_scheduled_autonomous
+                              profile
+                          in
+                          let autonomous_source =
+                            classify_source
+                              profile.max_turns_per_call_scheduled_autonomous
+                          in
+                          let raw_override_int = function
+                            | Some n -> `Int n
+                            | None -> `Null
+                          in
+                          let manifest_path_json =
+                            match profile.manifest_path with
+                            | Some p -> `String p
+                            | None -> `Null
+                          in
+                          `Assoc
+                            [
+                              ( "reactive",
+                                `Assoc
+                                  [
+                                    ("value", `Int reactive_effective);
+                                    ("source", `String reactive_source);
+                                    ("env_default", `Int env_reactive);
+                                    ( "env_var",
+                                      `String
+                                        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" );
+                                    ( "raw_override",
+                                      raw_override_int
+                                        profile.max_turns_per_call );
+                                  ] );
+                              ( "scheduled_autonomous",
+                                `Assoc
+                                  [
+                                    ("value", `Int autonomous_effective);
+                                    ("source", `String autonomous_source);
+                                    ("env_default", `Int env_autonomous);
+                                    ( "env_var",
+                                      `String
+                                        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
+                                    );
+                                    ( "raw_override",
+                                      raw_override_int
+                                        profile
+                                          .max_turns_per_call_scheduled_autonomous );
+                                  ] );
+                              ("manifest_path", manifest_path_json);
+                              ("clamp_min", `Int 1);
+                              ("clamp_max", `Int 50);
+                            ]));
                        ("last_proactive_reason",
                          string_option_to_json
                            (let value = String.trim meta.runtime.proactive_rt.last_reason in
@@ -601,29 +675,23 @@ let _snapshot_recent_completed_limit () =
 (* sessions_json removed — team session cleanup. Sessions always return []. *)
 
 let room_json config =
-  let initialized = Room.is_initialized config in
+  let initialized = Coord.is_initialized config in
   if not initialized then
     `Assoc
       [
         ("initialized", `Bool false);
         ("project", `String (Filename.basename config.base_path));
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
       ]
   else
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     let tempo = Tempo.get_tempo config in
-    let tasks = Room.get_tasks_raw config in
-    let agents = Room.get_agents_raw config in
+    let tasks = Coord.get_tasks_raw config in
+    let agents = Coord.get_agents_raw config in
     `Assoc
       [
         ("initialized", `Bool true);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("project", `String state.project);
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("paused", `Bool state.paused);
         ("pause_reason", string_option_to_json state.pause_reason);
         ("paused_by", string_option_to_json state.paused_by);
@@ -669,9 +737,7 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 (* Maximum snapshot cache entries.  Each entry holds a full JSON snapshot
    tree which can be several MB.  Unbounded growth caused OOM when the
    dashboard was connected for extended periods (#4795). *)
-let _snapshot_max_entries =
-  Dashboard_http_helpers.int_of_env_default
-    "MASC_DASHBOARD_SNAPSHOT_CACHE_MAX_ENTRIES" ~default:16 ~min_v:4 ~max_v:64
+let _snapshot_max_entries = 16
 
 (* Evict one expired or oldest entry when table reaches _snapshot_max_entries.
    Called inside _snapshot_mu when Eio is ready; pre-Eio callers are
@@ -726,7 +792,7 @@ let invalidate_snapshot_cache () =
   end else
     Hashtbl.clear _snapshot_table
 
-let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
+let namespace_scope_cache_segment (_config : Coord_utils.config) = "default"
 
 let snapshot_json ?actor ?view ?(include_messages = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
@@ -829,7 +895,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
     result
   in
   let config = ctx.config in
-  let initialized = Room.is_initialized config in
+  let initialized = Coord.is_initialized config in
   ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -853,7 +919,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   let command_plane_summary =
     if include_summary_fields && initialized then
       timed "command_plane_summary" (fun () ->
-        Some (Command_plane_v2.summary_json config))
+        Some (`Assoc []))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
@@ -894,7 +960,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);
-         ("namespace", room_json config);
+         ("root", room_json config);
        ]
       @ (
          (* Parallelize independent I/O: sessions, keepers, persistent_agents,
@@ -938,15 +1004,11 @@ let snapshot_json ?actor ?view ?(include_messages = true)
                  else empty_section));
            (fun () ->
              let cp = timed "command_plane_json" (fun () ->
-               if initialized && include_command_plane then
-                 Command_plane_v2.snapshot_json config
-               else `Null)
+               let _ = initialized && include_command_plane in
+               `Null)
              in
              command_plane_ref := cp;
-             swarm_status_ref :=
-               if initialized && include_command_plane then
-                 Swarm_status.build_json_from_snapshot config cp
-               else `Null);
+             swarm_status_ref := `Null);
          ];
          [
            ("sessions", !sessions_ref);

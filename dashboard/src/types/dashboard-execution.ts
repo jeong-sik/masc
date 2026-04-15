@@ -1,6 +1,5 @@
 import type { Agent, BoardPost } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
-import type { CommandPlaneSurface } from './command-plane'
 import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
@@ -97,7 +96,9 @@ export interface DashboardShellResponse {
     agents?: number
     tasks?: number
     keepers?: number
+    total_runtimes?: number
   }
+  configured_keepers?: number
   providers?: Record<string, unknown>
   meta_cognition?: DashboardShellMetaCognitionSummary | null
   auth?: DashboardShellAuthSummary | null
@@ -144,15 +145,16 @@ export interface DashboardNamespaceTruthFocus {
   target_kind?: string | null
   target_id?: string | null
   suggested_tab?: 'command' | 'intervene' | string | null
-  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_surface?: string | null
   suggested_params?: Record<string, string>
 }
 
 export interface DashboardNamespaceTruthResponse {
   generated_at?: string
-  namespace: {
+  root: {
     status?: ServerStatus | null
     counts?: DashboardShellResponse['counts']
+    configured_keepers?: number
     provenance?: string | null
   }
   execution?: {
@@ -365,6 +367,10 @@ export interface DashboardMemoryResponse {
   count?: number
   limit?: number
   offset?: number
+  /** true when more posts exist past this page. Use with offset+limit to request the next page. */
+  has_more?: boolean
+  /** Total number of matching posts when the server could determine it; null when has_more=true. */
+  total?: number | null
   sort_by?: string
 }
 
@@ -458,9 +464,6 @@ export interface DashboardGoalsTreeResponse {
 
 
 export interface ServerStatus {
-  namespace_id?: string
-  namespace?: string
-  namespace_base_path?: string
   coordination_root?: string
   workspace_path?: string
   workspace_differs?: boolean

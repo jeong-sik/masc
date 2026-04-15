@@ -78,7 +78,7 @@ describe('Ops intervene surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      namespace: { paused: false, namespace: 'default' },
+      root: { paused: false, namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -174,7 +174,7 @@ describe('Ops intervene surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      namespace: { paused: true, namespace: 'default' },
+      root: { paused: true, namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],

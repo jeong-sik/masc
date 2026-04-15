@@ -51,7 +51,7 @@ let tool_search_fn
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
 let execute_keeper_tool_call
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ?search_fn
@@ -88,12 +88,12 @@ let execute_keeper_tool_call
   if not (can_execute ~lookup name)
   then
     let reason, hint =
-      if not (Hashtbl.mem lookup.candidate_set name)
+      if not (StringSet.mem name lookup.candidate_set)
       then
         ( "tool does not exist or is not available to your preset"
         , Printf.sprintf
             "'%s' is not a recognized tool. Check spelling or use keeper_tools_list to see available tools." name )
-      else if Hashtbl.mem lookup.deny_set name
+      else if StringSet.mem name lookup.deny_set
       then
         ( "denied_by_policy"
         , Printf.sprintf
@@ -166,13 +166,12 @@ let execute_keeper_tool_call
     | "keeper_voice_sessions"
     | "keeper_voice_session_start"
     | "keeper_voice_session_end" -> Keeper_exec_voice.handle_keeper_voice_tool ~meta ~name ~args
-    | "keeper_github" -> Keeper_exec_github.handle_keeper_github ~config ~meta ~args
-    | "keeper_pr_workflow" -> Keeper_exec_github.handle_keeper_pr_workflow ~config ~meta ~args
-    | "keeper_pr_submit" -> Keeper_exec_github.handle_keeper_pr_submit ~config ~meta ~args
+    | "keeper_pr_workflow" -> Keeper_tool_pr_workflow.handle_keeper_pr_workflow ~config ~meta ~args
+    | "keeper_pr_submit" -> Keeper_tool_pr_submit.handle_keeper_pr_submit ~config ~meta ~args
     | "keeper_preflight_check" -> Keeper_exec_preflight.handle_keeper_preflight_check ~config ~meta ~args
-    | "keeper_pr_review_read" -> Keeper_exec_github.handle_keeper_pr_review_read ~config ~meta ~args
-    | "keeper_pr_review_comment" -> Keeper_exec_github.handle_keeper_pr_review_comment ~config ~meta ~args
-    | "keeper_pr_review_reply" -> Keeper_exec_github.handle_keeper_pr_review_reply ~config ~meta ~args
+    | "keeper_pr_review_read" -> Keeper_tool_pr_review.handle_keeper_pr_review_read ~config ~meta ~args
+    | "keeper_pr_review_comment" -> Keeper_tool_pr_review.handle_keeper_pr_review_comment ~config ~meta ~args
+    | "keeper_pr_review_reply" -> Keeper_tool_pr_review.handle_keeper_pr_review_reply ~config ~meta ~args
     | "keeper_tasks_list"
     | "keeper_tasks_audit"
     | "keeper_task_force_release"

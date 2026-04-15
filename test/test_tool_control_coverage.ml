@@ -55,8 +55,8 @@ let with_ctx ?(initialize = true) f =
              !test_counter)
       in
       Unix.mkdir tmp 0o755;
-      let config = Room.default_config tmp in
-      if initialize then ignore (Room.init config ~agent_name:(Some "test-agent"));
+      let config = Coord.default_config tmp in
+      if initialize then ignore (Coord.init config ~agent_name:(Some "test-agent"));
       f { Tool_control.config; agent_name = "test-agent" })
 
 let () =
@@ -88,9 +88,7 @@ let () =
           assert success;
           let json = parse_json result in
           assert (Yojson.Safe.Util.member "paused" json = `Bool true);
-          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace_mode" json = `String "flattened")
+          assert (Yojson.Safe.Util.member "status" json = `String "paused")
       | None -> failwith "dispatch returned None")
 
 let () =
@@ -114,13 +112,11 @@ let () =
           assert success;
           let json = parse_json result in
           assert (Yojson.Safe.Util.member "paused" json = `Bool false);
-          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace_mode" json = `String "flattened")
+          assert (Yojson.Safe.Util.member "status" json = `String "running")
       | None -> failwith "dispatch returned None")
 
 let () =
-  test "dispatch_pause_status_namespace_hint_normalizes_default" (fun () ->
+  test "dispatch_pause_status_ignores_legacy_namespace_hint" (fun () ->
       with_ctx @@ fun ctx ->
       match
         Tool_control.dispatch ctx ~name:"masc_pause_status"
@@ -129,11 +125,9 @@ let () =
       | Some (success, result) ->
           assert success;
           let json = parse_json result in
-          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
-          assert
-            (Yojson.Safe.Util.member "requested_namespace_id" json
-             = `String "focus-room")
+          assert (Yojson.Safe.Util.member "namespace_id" json = `Null);
+          assert (Yojson.Safe.Util.member "namespace" json = `Null);
+          assert (Yojson.Safe.Util.member "requested_namespace_id" json = `Null)
       | None -> failwith "dispatch returned None")
 
 let () =
@@ -145,10 +139,7 @@ let () =
           let json = parse_json result in
           assert (Yojson.Safe.Util.member "status" json = `String "initializing");
           assert (Yojson.Safe.Util.member "initializing" json = `Bool true);
-          assert (Yojson.Safe.Util.member "paused" json = `Null);
-          assert (Yojson.Safe.Util.member "namespace_id" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace" json = `String "default");
-          assert (Yojson.Safe.Util.member "namespace_mode" json = `String "flattened")
+          assert (Yojson.Safe.Util.member "paused" json = `Null)
       | None -> failwith "dispatch returned None")
 
 let () =

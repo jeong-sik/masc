@@ -1,4 +1,4 @@
-(** Comprehensive coverage tests for Types, Room_utils, and Room_eio modules *)
+(** Comprehensive coverage tests for Types, Coord_utils, and Coord_eio modules *)
 
 (* Initialize RNG for crypto operations *)
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -622,144 +622,144 @@ let test_auth_config_roundtrip () =
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Room_utils.parse_gitdir Tests                                 *)
+(* Coord_utils.parse_gitdir Tests                                 *)
 (* ============================================================ *)
 
 let test_parse_gitdir_worktree () =
   let line = "gitdir: /home/user/project/.git/worktrees/feature-branch" in
-  let result = Room_utils.parse_gitdir_to_main_root line in
+  let result = Coord_utils.parse_gitdir_to_main_root line in
   check bool "is Some" true (Option.is_some result)
 
 let test_parse_gitdir_invalid () =
   let line = "not a gitdir line" in
-  let result = Room_utils.parse_gitdir_to_main_root line in
+  let result = Coord_utils.parse_gitdir_to_main_root line in
   check bool "is None" true (Option.is_none result)
 
 (* ============================================================ *)
-(* Room_utils.sanitize Tests                                     *)
+(* Coord_utils.sanitize Tests                                     *)
 (* ============================================================ *)
 
 let test_sanitize_html () =
   let input = "<script>alert('xss')</script>" in
-  let result = Room_utils.sanitize_html input in
+  let result = Coord_utils.sanitize_html input in
   check bool "no angle brackets" true
     (not (String.contains result '<') && not (String.contains result '>'));
   check bool "escaped lt" true (String.length result > String.length input)
 
 let test_sanitize_html_quotes () =
   let input = "Hello \"world\" & 'friends'" in
-  let result = Room_utils.sanitize_html input in
+  let result = Coord_utils.sanitize_html input in
   check bool "quotes escaped" true
     (not (String.contains result '"') && not (String.contains result '\''))
 
 let test_safe_filename () =
   let input = "file with spaces & special<chars>.txt" in
-  let result = Room_utils.safe_filename input in
+  let result = Coord_utils.safe_filename input in
   check bool "no spaces" false (String.contains result ' ');
   check bool "no ampersand" false (String.contains result '&');
   check bool "no angle" false (String.contains result '<')
 
 let test_safe_filename_valid () =
   let input = "valid_file-name.txt" in
-  let result = Room_utils.safe_filename input in
+  let result = Coord_utils.safe_filename input in
   check string "unchanged" input result
 
 (* ============================================================ *)
-(* Room_utils.validation Tests                                   *)
+(* Coord_utils.validation Tests                                   *)
 (* ============================================================ *)
 
 let test_validate_agent_name_valid () =
-  let result = Room_utils.validate_agent_name "claude-123" in
+  let result = Coord_utils.validate_agent_name "claude-123" in
   check bool "valid" true (is_ok result)
 
 let test_validate_agent_name_r_valid () =
-  let result = Room_utils.validate_agent_name_r "valid-agent" in
+  let result = Coord_utils.validate_agent_name_r "valid-agent" in
   check bool "ok result" true (is_ok result)
 
 let test_validate_task_id_valid () =
-  let result = Room_utils.validate_task_id "task-12345" in
+  let result = Coord_utils.validate_task_id "task-12345" in
   check bool "valid" true (is_ok result)
 
 let test_validate_task_id_r_valid () =
-  let result = Room_utils.validate_task_id_r "task-abc" in
+  let result = Coord_utils.validate_task_id_r "task-abc" in
   check bool "ok result" true (is_ok result)
 
 let test_validate_room_id_valid () =
-  let room_id_result = Room_utils.validate_room_id "room-alpha_01" in
+  let room_id_result = Coord_utils.validate_room_id "room-alpha_01" in
   check (result string string) "valid room id" (Ok "room-alpha_01") room_id_result
 
 let test_validate_room_id_trims_whitespace () =
-  let room_id_result = Room_utils.validate_room_id "  room-alpha_01  " in
+  let room_id_result = Coord_utils.validate_room_id "  room-alpha_01  " in
   check (result string string) "trimmed room id" (Ok "room-alpha_01") room_id_result
 
 let test_validate_room_id_rejects_path_traversal () =
-  let result = Room_utils.validate_room_id "../../tmp/x" in
+  let result = Coord_utils.validate_room_id "../../tmp/x" in
   check bool "invalid traversal" true (is_error result)
 
 let test_validate_room_id_rejects_invalid_chars () =
-  let result = Room_utils.validate_room_id "room id" in
+  let result = Coord_utils.validate_room_id "room id" in
   check bool "invalid chars" true (is_error result)
 
 let test_validate_file_path_valid () =
-  let result = Room_utils.validate_file_path "src/main.ml" in
+  let result = Coord_utils.validate_file_path "src/main.ml" in
   check bool "valid" true (is_ok result)
 
 let test_validate_file_path_too_long () =
   let long_path = String.make 501 'a' in
-  let result = Room_utils.validate_file_path long_path in
+  let result = Coord_utils.validate_file_path long_path in
   check bool "invalid too long" true (is_error result)
 
 let test_validate_file_path_angle_brackets () =
-  let result = Room_utils.validate_file_path "file<name>.txt" in
+  let result = Coord_utils.validate_file_path "file<name>.txt" in
   check bool "invalid angle brackets" true (is_error result)
 
 (* ============================================================ *)
-(* Room_utils.contains_substring Tests                           *)
+(* Coord_utils.contains_substring Tests                           *)
 (* ============================================================ *)
 
 let test_contains_substring_true () =
-  check bool "contains" true (Room_utils.contains_substring "hello world" "world")
+  check bool "contains" true (Coord_utils.contains_substring "hello world" "world")
 
 let test_contains_substring_false () =
-  check bool "not contains" false (Room_utils.contains_substring "hello world" "foo")
+  check bool "not contains" false (Coord_utils.contains_substring "hello world" "foo")
 
 let test_contains_substring_empty () =
-  check bool "empty needle" true (Room_utils.contains_substring "hello" "")
+  check bool "empty needle" true (Coord_utils.contains_substring "hello" "")
 
 (* ============================================================ *)
-(* Room_eio.event_type Tests                                     *)
+(* Coord_eio.event_type Tests                                     *)
 (* ============================================================ *)
 
 let test_room_eio_event_type_to_string () =
-  check string "AgentJoin" "agent_join" (Room_eio.event_type_to_string Room_eio.AgentJoin);
-  check string "AgentLeave" "agent_leave" (Room_eio.event_type_to_string Room_eio.AgentLeave);
-  check string "Broadcast" "broadcast" (Room_eio.event_type_to_string Room_eio.Broadcast);
-  check string "LockAcquire" "lock_acquire" (Room_eio.event_type_to_string Room_eio.LockAcquire);
-  check string "LockRelease" "lock_release" (Room_eio.event_type_to_string Room_eio.LockRelease)
+  check string "AgentJoin" "agent_join" (Coord_eio.event_type_to_string Coord_eio.AgentJoin);
+  check string "AgentLeave" "agent_leave" (Coord_eio.event_type_to_string Coord_eio.AgentLeave);
+  check string "Broadcast" "broadcast" (Coord_eio.event_type_to_string Coord_eio.Broadcast);
+  check string "LockAcquire" "lock_acquire" (Coord_eio.event_type_to_string Coord_eio.LockAcquire);
+  check string "LockRelease" "lock_release" (Coord_eio.event_type_to_string Coord_eio.LockRelease)
 
 (* ============================================================ *)
-(* Room_eio.now_iso Tests                                        *)
+(* Coord_eio.now_iso Tests                                        *)
 (* ============================================================ *)
 
 let test_room_eio_now_iso () =
-  let ts = Room_eio.now_iso () in
+  let ts = Coord_eio.now_iso () in
   check bool "contains T" true (String.contains ts 'T');
   check bool "ends with Z" true (ts.[String.length ts - 1] = 'Z');
   (* Has milliseconds: YYYY-MM-DDTHH:MM:SS.mmmZ *)
   check bool "has ms" true (String.contains ts '.')
 
 (* ============================================================ *)
-(* Room_eio.room_state JSON Tests                                *)
+(* Coord_eio.room_state JSON Tests                                *)
 (* ============================================================ *)
 
 let test_room_eio_default_room_state () =
-  let state = Room_eio.default_room_state () in
+  let state = Coord_eio.default_room_state () in
   check string "protocol_version" "1.0.0" state.protocol_version;
   check bool "not paused" false state.paused;
   check (list string) "no active agents" [] state.active_agents
 
 let test_room_eio_room_state_roundtrip () =
-  let state = Room_eio.{
+  let state = Coord_eio.{
     protocol_version = "1.0.0";
     started_at = 1704067200.0;
     last_updated = 1704070800.0;
@@ -772,38 +772,38 @@ let test_room_eio_room_state_roundtrip () =
     paused_at = Some 1704070000.0;
     pause_reason = Some "Maintenance";
   } in
-  let json = Room_eio.room_state_to_json state in
-  let result = Room_eio.room_state_of_json json in
+  let json = Coord_eio.room_state_to_json state in
+  let result = Coord_eio.room_state_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Room_eio.agent_state JSON Tests                               *)
+(* Coord_eio.agent_state JSON Tests                               *)
 (* ============================================================ *)
 
 let test_room_eio_agent_state_roundtrip () =
-  let agent = Room_eio.{
+  let agent = Coord_eio.{
     name = "test-agent";
     last_seen = 1704067200.0;
     capabilities = ["code"; "review"; "test"];
     status = "active";
   } in
-  let json = Room_eio.agent_state_to_json agent in
-  let result = Room_eio.agent_state_of_json json in
+  let json = Coord_eio.agent_state_to_json agent in
+  let result = Coord_eio.agent_state_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Room_eio.lock_info JSON Tests                                 *)
+(* Coord_eio.lock_info JSON Tests                                 *)
 (* ============================================================ *)
 
 let test_room_eio_lock_info_roundtrip () =
-  let lock = Room_eio.{
+  let lock = Coord_eio.{
     resource = "src/main.ml";
     owner = "claude";
     acquired_at = 1704067200.0;
     expires_at = 1704070800.0;
   } in
-  let json = Room_eio.lock_info_to_json lock in
-  let result = Room_eio.lock_info_of_json json in
+  let json = Coord_eio.lock_info_to_json lock in
+  let result = Coord_eio.lock_info_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_room_eio_lock_info_int_floats () =
@@ -814,35 +814,35 @@ let test_room_eio_lock_info_int_floats () =
     ("acquired_at", `Int 1704067200);
     ("expires_at", `Intlit "1704070800");
   ] in
-  let result = Room_eio.lock_info_of_json json in
+  let result = Coord_eio.lock_info_of_json json in
   check bool "parses int as float" true (is_ok result)
 
 (* ============================================================ *)
-(* Room_eio.message JSON Tests                                   *)
+(* Coord_eio.message JSON Tests                                   *)
 (* ============================================================ *)
 
 let test_room_eio_message_roundtrip () =
-  let msg = Room_eio.{
+  let msg = Coord_eio.{
     seq = 42;
     from_agent = "claude";
     content = "Hello @gemini, please review this";
     mention = Some "gemini";
     timestamp = 1704067200.0;
   } in
-  let json = Room_eio.message_to_json msg in
-  let result = Room_eio.message_of_json json in
+  let json = Coord_eio.message_to_json msg in
+  let result = Coord_eio.message_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_room_eio_message_no_mention () =
-  let msg = Room_eio.{
+  let msg = Coord_eio.{
     seq = 1;
     from_agent = "gemini";
     content = "General broadcast";
     mention = None;
     timestamp = 1704067200.0;
   } in
-  let json = Room_eio.message_to_json msg in
-  let result = Room_eio.message_of_json json in
+  let json = Coord_eio.message_to_json msg in
+  let result = Coord_eio.message_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
@@ -1044,10 +1044,10 @@ let () =
     "sanitize", sanitize_tests;
     "validation", validation_tests;
     "contains_substring", substring_tests;
-    "Room_eio.event", room_eio_event_tests;
-    "Room_eio.time", room_eio_time_tests;
-    "Room_eio.state", room_eio_state_tests;
-    "Room_eio.agent", room_eio_agent_tests;
-    "Room_eio.lock", room_eio_lock_tests;
-    "Room_eio.message", room_eio_message_tests;
+    "Coord_eio.event", room_eio_event_tests;
+    "Coord_eio.time", room_eio_time_tests;
+    "Coord_eio.state", room_eio_state_tests;
+    "Coord_eio.agent", room_eio_agent_tests;
+    "Coord_eio.lock", room_eio_lock_tests;
+    "Coord_eio.message", room_eio_message_tests;
   ]

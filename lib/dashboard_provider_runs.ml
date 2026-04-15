@@ -213,13 +213,20 @@ let llama_snapshot () =
 (** Build snapshot for any direct-API provider.
     Vendor-specific logic (Gemini Vertex ADC, etc.) is encapsulated
     inside Provider_adapter.auth_detail_of_provider. *)
-let direct_provider_snapshot provider =
+let provider_snapshot_of_adapter (adapter : Provider_adapter.adapter) =
+  let provider = adapter.canonical_name in
   let detail = Provider_adapter.auth_detail_of_provider provider in
   let default_model = default_model_for_provider provider in
+  let kind =
+    match adapter.runtime_kind with
+    | Provider_adapter.Local -> "local"
+    | Provider_adapter.Cli_agent -> "cli"
+    | Provider_adapter.Direct_api -> "cloud"
+  in
   {
     provider;
-    kind = "cloud";
-    runtime_kind = "direct_api";
+    kind;
+    runtime_kind = Provider_adapter.string_of_runtime_kind adapter.runtime_kind;
     auth_kind = detail.auth_kind;
     status = detail.status;
     available = detail.available;
@@ -233,15 +240,14 @@ let direct_provider_snapshot provider =
   }
 
 let provider_snapshots () : provider_snapshot list =
-  let direct =
+  let managed =
     Provider_adapter.direct_adapters
     |> List.filter (fun (a : Provider_adapter.adapter) ->
-         a.runtime_kind = Provider_adapter.Direct_api
+         a.runtime_kind <> Provider_adapter.Local
          && a.default_model_id <> None)
-    |> List.map (fun (a : Provider_adapter.adapter) ->
-         direct_provider_snapshot a.canonical_name)
+    |> List.map provider_snapshot_of_adapter
   in
-  llama_snapshot () :: direct
+  llama_snapshot () :: managed
 
 let provider_snapshot_by_name name =
   provider_snapshots ()
@@ -293,7 +299,14 @@ let provider_inventory_json () =
   in
   let cloud_models =
     snapshots
-    |> List.filter (fun snapshot -> snapshot.kind <> "local")
+    |> List.filter (fun snapshot -> snapshot.runtime_kind = "direct_api")
+    |> List.fold_left
+         (fun acc snapshot -> acc + List.length snapshot.models)
+         0
+  in
+  let cli_models =
+    snapshots
+    |> List.filter (fun snapshot -> snapshot.runtime_kind = "cli_agent")
     |> List.fold_left
          (fun acc snapshot -> acc + List.length snapshot.models)
          0
@@ -307,6 +320,7 @@ let provider_inventory_json () =
             ("providers", `Int (List.length snapshots));
             ("local_models", `Int local_models);
             ("cloud_models", `Int cloud_models);
+            ("cli_models", `Int cli_models);
           ] );
       ( "providers",
         `List (List.map provider_snapshot_to_json snapshots) );
@@ -362,7 +376,7 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
 
 (** Check if a model label is runnable (has provider config + auth). *)
 let is_label_runnable (label : string) : bool =
-  match Llm_provider.Cascade_config.parse_model_string label with
+  match Cascade_config.parse_model_string label with
   | None -> false
   | Some _cfg ->
     (* Extract provider prefix from label and check auth detail *)
@@ -387,7 +401,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
         "single-agent run resolved run_id=%s provider=%s requested_model=%s model_label=%s"
         run_id provider model label;
       (* Validate label parses *)
-      match Llm_provider.Cascade_config.parse_model_string label with
+      match Cascade_config.parse_model_string label with
       | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
       | Some _cfg ->
         if not (is_label_runnable label) then

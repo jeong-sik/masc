@@ -81,7 +81,7 @@ let emit_cost_event
     2. Destructive pattern detection — reject dangerous bash/edit commands
     3. Cost event emission — auto-emit per-turn cost to .masc/costs.jsonl
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta_ref Mutable ref to keeper metadata
     @param session Session context for checkpoint persistence
     @param ctx_snapshot Immutable snapshot of working context (reserved, unused)
@@ -100,18 +100,20 @@ let emit_cost_event
     known set. The LLM (non-deterministic) decides which to use. *)
 let suggest_alternatives ~(allowed_tools : string list)
     ~(repeated_tools : string list) ~(max_suggestions : int) : string list =
-  let repeated_set = Hashtbl.create (List.length repeated_tools) in
-  List.iter (fun t -> Hashtbl.replace repeated_set t ()) repeated_tools;
+  let module SS = Set.Make (String) in
+  let repeated_set =
+    List.fold_left (fun acc t -> SS.add t acc) SS.empty repeated_tools
+  in
   allowed_tools
   |> List.filter (fun t ->
-       not (Hashtbl.mem repeated_set t)
+       not (SS.mem t repeated_set)
        && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
      else List.filteri (fun i _ -> i < max_suggestions) candidates
 
-(** Pure decision logic for the on_idle hook.  Testable without Room.config.
+(** Pure decision logic for the on_idle hook.  Testable without Coord.config.
 
     Graduated response to repeated tool calls uses the configured
     [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
@@ -185,7 +187,7 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   loop 0 (List.rev entries)
 
 let make_hooks
-    ~config:(_config : Room.config)
+    ~config:(_config : Coord.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
     ~session:(_session : Keeper_exec_context.session_context)
     ~ctx_snapshot:(_ctx_snapshot : Keeper_exec_context.working_context)

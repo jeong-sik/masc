@@ -20,8 +20,11 @@ import {
   boardHiddenCategories,
   boardAuthorFilter,
   boardLoading,
+  boardLoadingMore,
+  boardHasMore,
   lastBoardRefreshAt,
   refreshBoard,
+  loadMoreBoardPosts,
   SORT_MODES,
   CONTENT_CATEGORIES,
   detailPost,
@@ -75,6 +78,24 @@ function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
 }
 
 // ── Render section (paginated group by category) ──────────────────
+/** Expand the visible slice for this category by PAGE_SIZE.
+ *  If the category has run out of locally-loaded posts AND the server
+ *  still has more, also trigger a server-side page fetch. */
+function expandCategory(
+  category: ContentCategory,
+  limits: Record<string, number>,
+  currentLimit: number,
+  localPostCount: number,
+) {
+  const nextLimit = currentLimit + PAGE_SIZE
+  categoryVisibleLimits.value = { ...limits, [category]: nextLimit }
+  // Exhausted the locally-loaded slice for this category — ask the server
+  // for more. loadMoreBoardPosts is a noop if already loading or has_more=false.
+  if (nextLimit >= localPostCount && boardHasMore.value) {
+    void loadMoreBoardPosts()
+  }
+}
+
 function renderCategorySection(
   category: ContentCategory,
   posts: BoardPost[],
@@ -85,7 +106,17 @@ function renderCategorySection(
   const label = meta ? `${meta.icon} ${meta.label}` : category
   const limits = categoryVisibleLimits.value
   const limit = limits[category] ?? PAGE_SIZE
-  const hasMore = posts.length > limit
+  // "has more" considers both the locally-loaded posts and the server's
+  // signal. Without boardHasMore, once the category's slice catches up to
+  // the loaded window the button disappears and the next server page is
+  // never requested — that was the #7118 regression.
+  const hasMoreLocal = posts.length > limit
+  const hasMoreRemote = boardHasMore.value
+  const hasMore = hasMoreLocal || hasMoreRemote
+  const loadingMore = boardLoadingMore.value
+  const remainingLabel = hasMoreLocal
+    ? `${posts.length - limit}개 남음`
+    : '다음 페이지 불러오기'
 
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
@@ -103,16 +134,18 @@ function renderCategorySection(
       </div>
       ${hasMore ? html`
         <${ScrollSentinel} onVisible=${() => {
-          categoryVisibleLimits.value = { ...limits, [category]: limit + PAGE_SIZE }
+          if (loadingMore) return
+          expandCategory(category, limits, limit, posts.length)
         }} />
         <div class="text-center py-3">
           <button type="button"
-            class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+            class="px-4 py-2 rounded-lg text-[12px] font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer disabled:opacity-50"
+            disabled=${loadingMore}
             onClick=${() => {
-              categoryVisibleLimits.value = { ...limits, [category]: limit + PAGE_SIZE }
+              expandCategory(category, limits, limit, posts.length)
             }}
           >
-            더 보기 (${posts.length - limit}개 남음)
+            ${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
           </button>
         </div>
       ` : null}

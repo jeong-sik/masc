@@ -41,8 +41,9 @@ let init_repo dir =
   run_ok ~cwd:dir "git init -q";
   run_ok ~cwd:dir "git config user.email test@example.com";
   run_ok ~cwd:dir "git config user.name tester";
+  write_file (Filename.concat dir ".gitignore") ".masc/\n";
   write_file (Filename.concat dir "sample.ml") "let value = 1\n";
-  run_ok ~cwd:dir "git add sample.ml && git -c core.hooksPath=/dev/null commit -q -m base"
+  run_ok ~cwd:dir "git add .gitignore sample.ml && git -c core.hooksPath=/dev/null commit -q -m base"
 
 let test_capture_only_on_change () =
   with_temp_dir "worktree-live-context" (fun dir ->

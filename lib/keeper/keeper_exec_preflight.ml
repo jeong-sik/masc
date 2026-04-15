@@ -1,7 +1,7 @@
 open Keeper_types
 
 let handle_keeper_preflight_check
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

@@ -131,48 +131,4 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
       ("required", `List [`String "task_id"; `String "content"]);
     ];
   };
-  {
-    name = "masc_error_add";
-    description = "Add an error/failure to the planning context (PDCA Check phase). Use to track failures, bugs, and issues encountered during task execution.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID");
-        ]);
-        ("error_type", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Type of error: build, test, runtime, logic, api, etc.");
-        ]);
-        ("message", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Error message or description");
-        ]);
-        ("context", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional context (file path, function name, etc.)");
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "error_type"; `String "message"]);
-    ];
-  };
-  {
-    name = "masc_error_resolve";
-    description = "Mark an error as resolved. Use when you've fixed an issue tracked in the planning context.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID");
-        ]);
-        ("error_index", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "0-based index of the error to mark as resolved");
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "error_index"]);
-    ];
-  };
 ]

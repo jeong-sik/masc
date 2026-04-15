@@ -1,18 +1,27 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(** keeper_fs_read max_bytes clamp. [fs_read_default_max_bytes] is the
+    canonical default; [Tool_shard_limits.keeper_fs_read_default_max_bytes]
+    re-exports it at a leaf module so the tool schema in tool_shard.ml
+    can reference the same value without creating a dependency cycle. *)
+let fs_read_default_max_bytes = Tool_shard_limits.keeper_fs_read_default_max_bytes
+let fs_read_min_max_bytes = 512
+let fs_read_max_max_bytes = 200_000
+
 let is_missing_read_path_error (e : string) =
   String.starts_with ~prefix:"path_not_found:" e
   || String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
 
 let handle_keeper_fs_read
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
-    Safe_ops.json_int ~default:20000 "max_bytes" args |> fun n -> max 512 (min 200000 n)
+    Safe_ops.json_int ~default:fs_read_default_max_bytes "max_bytes" args
+    |> fun n -> max fs_read_min_max_bytes (min fs_read_max_max_bytes n)
   in
   let fallback_dir = keeper_default_read_root ~config ~meta in
   match resolve_keeper_read_path ~config ~meta ~raw_path:path with
@@ -44,7 +53,7 @@ let handle_keeper_fs_read
 ;;
 
 let handle_keeper_fs_edit
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

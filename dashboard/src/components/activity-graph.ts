@@ -1,7 +1,7 @@
 // Activity graph surface — runtime event graph + timeline
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { computed, signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { createAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
@@ -26,19 +26,38 @@ import {
 } from './activity-graph-groups'
 import { fetchActivityGraph } from '../api'
 import { registerActivityRefresh } from '../sse-store'
+import { route, navigate, hashForRoute } from '../router'
+import {
+  TIME_RANGE_PRESETS,
+  timeRangeShortLabel,
+} from '../observatory-filter-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
 
 const graphResource = createAsyncResource<ActivityGraphResponse | null>()
-export const selectedTimeRange = signal<string>('all')
+
+// URL-synced time range: reads ?ag_range= param, defaults to 'all'
+const VALID_AG_RANGES = new Set([...TIME_RANGE_PRESETS.filter(p => p !== '5m'), 'all'])
+export const selectedTimeRange = computed(() => {
+  const v = route.value.params.ag_range
+  return v && VALID_AG_RANGES.has(v) ? v : 'all'
+})
+
+function setActivityTimeRange(value: string): void {
+  const next: Record<string, string> = { ...route.value.params }
+  if (value === 'all') {
+    delete next.ag_range
+  } else {
+    next.ag_range = value
+  }
+  navigate(route.value.tab, next)
+}
 const actionFilter = signal<ActionTimelineFilter>('all')
 const showLifecycle = signal(false)
 const expandedActionGroups = signal<Set<string>>(new Set())
 
+// Reuse shared presets + Activity Graph-specific "all" option
 const TIME_RANGES: Array<{ value: string; label: string }> = [
-  { value: '1h', label: '1시간' },
-  { value: '6h', label: '6시간' },
-  { value: '24h', label: '24시간' },
-  { value: '7d', label: '7일' },
+  ...TIME_RANGE_PRESETS.filter(p => p !== '5m').map(p => ({ value: p, label: timeRangeShortLabel(p) })),
   { value: 'all', label: '전체' },
 ]
 
@@ -65,7 +84,7 @@ function TimeRangeSelector() {
               ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'
           }"
-          onClick=${() => { selectedTimeRange.value = value; loadGraph() }}
+          onClick=${() => { setActivityTimeRange(value); loadGraph() }}
         >${label}</button>
       `)}
     </div>
@@ -211,13 +230,21 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                 </div>
                 <div class="mt-3 flex items-center justify-between gap-3 border-t border-[var(--white-6)] pt-3">
                   <span class="text-[11px] text-[var(--text-muted)]">원본 이벤트를 펼쳐서 순서를 확인할 수 있습니다.</span>
-                  <button
-                    type="button"
-                    class="rounded-lg border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
-                    onClick=${() => toggleExpandedGroup(group.id)}
-                  >
-                    ${expanded ? '원본 접기' : '원본 보기'}
-                  </button>
+                  <div class="flex items-center gap-2">
+                    ${group.actor ? html`
+                      <a
+                        class="rounded-lg border border-[var(--accent-20)] bg-[var(--accent-soft)] px-3 py-1.5 text-[11px] text-[var(--accent)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
+                        href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: selectedTimeRange.value !== 'all' ? selectedTimeRange.value : '1h' })}
+                      >관찰소에서 보기</a>
+                    ` : null}
+                    <button
+                      type="button"
+                      class="rounded-lg border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] text-[var(--text-body)] transition-all duration-150 hover:bg-[var(--white-8)]"
+                      onClick=${() => toggleExpandedGroup(group.id)}
+                    >
+                      ${expanded ? '원본 접기' : '원본 보기'}
+                    </button>
+                  </div>
                 </div>
                 ${expanded ? html`
                   <div class="mt-3 flex flex-col gap-2 rounded-xl border border-[var(--white-8)] bg-[rgba(15,23,42,0.42)] p-3">

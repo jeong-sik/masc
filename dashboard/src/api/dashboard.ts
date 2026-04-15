@@ -37,11 +37,6 @@ import type {
   KeeperApprovalQueueItem,
   GovernanceTimelineEvent,
   PendingConfirmation,
-  CommandPlaneHelpResponse,
-  CommandPlaneChainRunResponse,
-  CommandPlaneChainSummary,
-  CommandPlaneSnapshot,
-  CommandPlaneSummarySnapshot,
 } from '../types'
 
 // --- Dashboard projections ---
@@ -347,14 +342,28 @@ export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
   return get('/api/v1/dashboard/perf')
 }
 
+export interface FetchDashboardMemoryOptions {
+  excludeSystem?: boolean
+  excludeAutomation?: boolean
+  author?: string
+  /** Page size. Defaults to 200 when any filter is active, else 100. */
+  limit?: number
+  /** Number of posts to skip from the start of the sorted list. Defaults to 0. */
+  offset?: number
+}
+
 export function fetchDashboardMemory(
   sortMode: BoardSortMode,
-  opts?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string },
+  opts?: FetchDashboardMemoryOptions,
 ): Promise<DashboardMemoryResponse> {
   const params = new URLSearchParams()
   params.set('sort_by', sortMode)
   const hasFilter = opts?.excludeSystem || opts?.excludeAutomation || opts?.author
-  params.set('limit', hasFilter ? '200' : '100')
+  const defaultLimit = hasFilter ? 200 : 100
+  const limit = Math.max(1, Math.min(500, opts?.limit ?? defaultLimit))
+  const offset = Math.max(0, Math.min(5000, opts?.offset ?? 0))
+  params.set('limit', String(limit))
+  if (offset > 0) params.set('offset', String(offset))
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)
@@ -526,9 +535,12 @@ export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
 }
 
-export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {
+export function fetchDashboardMissionSession(
+  sessionId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<DashboardMissionSessionDetailResponse> {
   const query = `?session_id=${encodeURIComponent(sessionId)}`
-  return get(`/api/v1/dashboard/session${query}`)
+  return get(`/api/v1/dashboard/session${query}`, { signal: opts?.signal })
 }
 
 export interface DashboardRuntimeProviderDiscovery {
@@ -563,6 +575,7 @@ export interface DashboardRuntimeProvidersResponse {
     providers?: number
     local_models?: number
     cloud_models?: number
+    cli_models?: number
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
 }
@@ -662,6 +675,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
           providers: asNumber(summary.providers),
           local_models: asNumber(summary.local_models),
           cloud_models: asNumber(summary.cloud_models),
+          cli_models: asNumber(summary.cli_models),
         }
       : null,
     providers: asRecordArray(raw.providers)
@@ -767,9 +781,12 @@ export interface DashboardVerificationRef {
   value: string
 }
 
-export function fetchDashboardMissionBriefing(force = false): Promise<DashboardMissionBriefingResponse> {
+export function fetchDashboardMissionBriefing(
+  force = false,
+  opts?: { signal?: AbortSignal },
+): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/mission/briefing${query}`)
+  return get(`/api/v1/dashboard/mission/briefing${query}`, { signal: opts?.signal })
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
@@ -1268,34 +1285,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   }
 }
 
-// --- Command Plane ---
-
-export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
-  return get('/api/v1/command-plane')
-}
-
-export function fetchCommandPlaneSummary(): Promise<CommandPlaneSummarySnapshot> {
-  return get('/api/v1/command-plane/summary')
-}
-
-export function fetchChainSummary(): Promise<CommandPlaneChainSummary> {
-  return get('/api/v1/chains/summary')
-}
-
-export function fetchChainRun(runId: string): Promise<CommandPlaneChainRunResponse> {
-  return get(`/api/v1/chains/runs/${encodeURIComponent(runId)}`)
-}
-export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {
-  return get('/api/v1/command-plane/help')
-}
-
-export function runCommandPlaneAction(
-  path: string,
-  body: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  return post(path, body)
-}
-
 // --- Keeper config (structured read-only view) ---
 
 export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
@@ -1568,6 +1557,8 @@ export type TelemetryEntry = Record<string, unknown> & {
 export type TelemetryResponse = {
   generated_at: string
   count: number
+  total_matching_entries?: number
+  truncated?: boolean
   entries: TelemetryEntry[]
 }
 
@@ -1624,6 +1615,8 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
   return {
     generated_at: generatedAt,
     count: asNumber(raw.count, 0),
+    total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
+    truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)
       .map(decodeTelemetryEntry)
       .filter((entry): entry is TelemetryEntry => entry !== null),
@@ -1672,6 +1665,8 @@ export function fetchTelemetry(opts?: {
   session_id?: string
   operation_id?: string
   worker_run_id?: string
+  since_ms?: number
+  until_ms?: number
   n?: number
   signal?: AbortSignal
 }): Promise<TelemetryResponse> {
@@ -1681,7 +1676,9 @@ export function fetchTelemetry(opts?: {
   if (opts?.session_id) params.set('session_id', opts.session_id)
   if (opts?.operation_id) params.set('operation_id', opts.operation_id)
   if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
-  if (opts?.n) params.set('n', String(opts.n))
+  if (typeof opts?.since_ms === 'number') params.set('since_ms', String(opts.since_ms))
+  if (typeof opts?.until_ms === 'number') params.set('until_ms', String(opts.until_ms))
+  if (typeof opts?.n === 'number') params.set('n', String(opts.n))
   const qs = params.toString()
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
     .then((raw) => {
@@ -1788,4 +1785,58 @@ export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
 
 export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/keeper/cascade', { keeper, cascade_name })
+}
+
+// ── Cascade config + health (observability) ─────────────
+
+export interface CascadeCandidate {
+  model: string
+  config_weight: number
+  effective_weight: number
+  success_rate: number
+  in_cooldown: boolean
+}
+
+export interface CascadeProfile {
+  name: string
+  source: 'named' | 'default_fallback' | 'hardcoded_defaults'
+  candidates: CascadeCandidate[]
+}
+
+export interface CascadeKeeperProfile {
+  keeper: string
+  cascade_name: string
+  canonical: string
+}
+
+export interface CascadeConfigResponse {
+  updated_at: string
+  config_path: string | null
+  profiles: CascadeProfile[]
+  keeper_profiles: CascadeKeeperProfile[]
+}
+
+export interface CascadeHealthProvider {
+  provider_key: string
+  success_rate: number
+  consecutive_failures: number
+  in_cooldown: boolean
+  cooldown_expires_at: number | null
+  events_in_window: number
+}
+
+export interface CascadeHealthResponse {
+  updated_at: string
+  window_sec: number
+  cooldown_threshold: number
+  cooldown_sec: number
+  providers: CascadeHealthProvider[]
+}
+
+export function fetchCascadeConfig(opts?: AbortableRequestOptions): Promise<CascadeConfigResponse> {
+  return get<CascadeConfigResponse>('/api/v1/cascade/config', { signal: opts?.signal })
+}
+
+export function fetchCascadeHealth(opts?: AbortableRequestOptions): Promise<CascadeHealthResponse> {
+  return get<CascadeHealthResponse>('/api/v1/cascade/health', { signal: opts?.signal })
 }

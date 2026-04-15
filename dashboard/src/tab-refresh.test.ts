@@ -32,12 +32,6 @@ vi.mock('./components/server-config', () => ({
   refreshServerConfig: vi.fn(),
 }))
 
-vi.mock('./command-store', () => ({
-  commandPlaneSurface: { value: 'overview' },
-  refreshCommandPlaneChainSummary: vi.fn(),
-  refreshCommandPlaneCurrentSurface: vi.fn(),
-}))
-
 import { refreshFeatureHealth } from './components/feature-health'
 import { refreshServerConfig } from './components/server-config'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'

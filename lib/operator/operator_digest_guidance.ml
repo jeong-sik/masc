@@ -7,12 +7,12 @@
 module U = Yojson.Safe.Util
 
 let judgment_surface_for_target_type = function
-  | "room" | "namespace" -> "command.namespace"
+  | "root" | "room" | "namespace" -> "command.namespace"
   | _ -> "command.namespace"
 
 let judgment_target_type_of_string = function
-  | "room" | "namespace" -> Operator_judgment.Room
-  | _ -> Operator_judgment.Room
+  | "root" | "room" | "namespace" -> Operator_judgment.Coord
+  | _ -> Operator_judgment.Coord
 
 let fresh_operator_judgment config ~target_type ~target_id =
   let judgment_target_type = judgment_target_type_of_string target_type in

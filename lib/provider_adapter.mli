@@ -10,10 +10,12 @@
 
 type runtime_kind =
   | Local
+  | Cli_agent
   | Direct_api
 
 type auth_mode =
   | No_auth
+  | Cli_cached_login
   | Api_key of string
   | Vertex_adc of {
       project_env : string;
@@ -81,6 +83,9 @@ val cn_ollama : string
 val cn_claude : string
 val cn_codex : string
 val cn_gemini : string
+val cn_claude_api : string
+val cn_codex_api : string
+val cn_gemini_api : string
 val cn_glm : string
 val cn_openrouter : string
 val cn_custom : string
@@ -93,7 +98,7 @@ val string_of_voice_transport : voice_transport -> string
 
 (** {1 Adapter Registry} *)
 
-(** All registered LLM provider adapters. *)
+(** All registered LLM provider/runtime adapters. *)
 val direct_adapters : adapter list
 
 (** All registered voice provider adapters. *)

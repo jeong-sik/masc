@@ -4,9 +4,9 @@
 
 import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
-import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
+import { keeperDisplayStatus, keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
@@ -40,6 +40,7 @@ import {
 import {
   KeeperNeighborhood,
   RuntimeSignals,
+  TurnBudgetSection,
 } from './keeper-detail-runtime'
 import {
   KeeperConfigPanel,
@@ -82,7 +83,7 @@ async function runSocialSweep(): Promise<void> {
     await runOperatorAction({
       actor: currentDashboardActor(),
       action_type: 'social_sweep',
-      target_type: 'namespace',
+      target_type: 'root',
       payload: {},
     })
     invalidateDashboardCache()
@@ -100,7 +101,7 @@ async function refreshAfterRuntimeAction(): Promise<void> {
 }
 
 function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
-  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -110,7 +111,8 @@ function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
-  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
+  const manualReconcile = keeper.runtime_blocker_manual_reconcile === true
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -139,14 +141,22 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>`
           : null}
-        ${keeper.paused && keeper.keepalive_running
-          ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
+        ${keeper.paused && keeper.keepalive_running && manualReconcile
+          ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
+          : keeper.paused && keeper.keepalive_running
+            ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
-        ${runtimeBlockerClass
+        ${manualReconcile
+          ? html`
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+                계속 진행 승인 대기
+              </span>
+            `
+          : runtimeBlockerClass
           ? html`
               <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">
                 ${runtimeBlockerLabel ?? 'Runtime blocker'}
@@ -401,10 +411,11 @@ export function KeeperDetailOverlay() {
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
   const [diagOpen, setDiagOpen] = useState(shouldOpenDiagnostics)
-
-  useEffect(() => {
-    setDiagOpen(keeperNeedsDiagnosticAttention(keeper))
-  }, [keeper.name])
+  const prevKeeperRef = useRef(keeper.name)
+  if (prevKeeperRef.current !== keeper.name) {
+    prevKeeperRef.current = keeper.name
+    setDiagOpen(shouldOpenDiagnostics)
+  }
 
   return html`
     <${DialogOverlay}
@@ -675,6 +686,8 @@ export function KeeperDetailOverlay() {
             <div class="mt-3 text-[11px] text-[var(--text-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
             <${RuntimeSignals} keeper=${keeper} />
           </details>
+
+          <${TurnBudgetSection} keeper=${keeper} />
 
           <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
             <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">

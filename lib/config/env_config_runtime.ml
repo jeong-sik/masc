@@ -233,11 +233,58 @@ end
 (** {1 Transport Configuration} *)
 
 module Transport = struct
+  type h2_mode =
+    | Auto
+    | H1_only
+    | H2_only
+    | Unknown_h2_mode of string
+
+  let normalize_token raw =
+    raw |> String.trim |> String.lowercase_ascii
+
+  let h2_mode_of_string raw =
+    match normalize_token raw with
+    | "1" | "true" | "h2_only" -> H2_only
+    | "0" | "false" | "h1_only" -> H1_only
+    | "auto" -> Auto
+    | other -> Unknown_h2_mode other
+
+  let h2_mode_to_string = function
+    | Auto -> "auto"
+    | H1_only -> "h1_only"
+    | H2_only -> "h2_only"
+    | Unknown_h2_mode value -> value
+
+  type agent_transport =
+    | Http
+    | Grpc
+    | Ws
+    | Webrtc
+    | Local
+    | Unknown_agent_transport of string
+
+  let agent_transport_of_string raw =
+    match normalize_token raw with
+    | "http" -> Http
+    | "grpc" -> Grpc
+    | "ws" | "websocket" -> Ws
+    | "webrtc" -> Webrtc
+    | "local" -> Local
+    | other -> Unknown_agent_transport other
+
+  let agent_transport_to_string = function
+    | Http -> "http"
+    | Grpc -> "grpc"
+    | Ws -> "ws"
+    | Webrtc -> "webrtc"
+    | Local -> "local"
+    | Unknown_agent_transport value -> value
+
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
 
   (** Whether gRPC transport is enabled. Default: true.
-      Runtime-readable (tests change this via putenv). *)
+      Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let grpc_enabled () = Feature_flag_registry.get_bool "MASC_GRPC_ENABLED"
 
   (** gRPC client target address. Derived from grpc_port when unset. *)
@@ -248,27 +295,24 @@ module Transport = struct
   let ws_port = get_port ~default:8937 "MASC_WS_PORT"
 
   (** Whether WebSocket transport is enabled. Default: true.
-      Runtime-readable (tests change this via putenv). *)
+      Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
   (** Whether WebRTC transport is enabled. Default: true.
-      Runtime-readable (tests change this via putenv). *)
+      Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
 
-  (** HTTP mode: "auto", "h2_only", "h1_only". Default: "auto". *)
+  (** HTTP mode: typed variant for "auto", "h2_only", "h1_only". *)
   let use_h2 () =
     match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
-    | Some raw -> (
-        match String.lowercase_ascii raw with
-        | "1" | "true" -> "h2_only"
-        | "0" | "false" -> "h1_only"
-        | "auto" -> "auto"
-        | other -> other)
-    | None -> "auto"
+    | Some raw -> h2_mode_of_string raw
+    | None -> Auto
 
-  (** Agent transport type raw string (e.g. "grpc", "http", "ws"). *)
+  (** Agent transport type variant (e.g. "grpc", "http", "ws"). *)
   let agent_transport_opt () =
-    Sys.getenv_opt "MASC_AGENT_TRANSPORT" |> trim_opt
+    Sys.getenv_opt "MASC_AGENT_TRANSPORT"
+    |> trim_opt
+    |> Option.map agent_transport_of_string
 
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
   let openai_compat_enabled = Feature_flag_registry.get_bool "MASC_OPENAI_COMPAT"
@@ -283,7 +327,7 @@ module Transport = struct
     | _ -> false
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
-      Runtime-readable (tests change this via putenv). *)
+      Re-readable within the process, but operationally a boot-time input. *)
   let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
@@ -326,13 +370,31 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
+  type backend =
+    | Jsonl
+    | Pg
+    | Unknown_backend of string
+
+  let backend_of_string raw =
+    match raw |> String.trim |> String.lowercase_ascii with
+    | "jsonl" -> Jsonl
+    | "pg" -> Pg
+    | other -> Unknown_backend other
+
+  let backend_to_string = function
+    | Jsonl -> "jsonl"
+    | Pg -> "pg"
+    | Unknown_backend value -> value
+
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
     get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
 
-  (** Board backend type (e.g. "jsonl", "pg"). *)
+  (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
   let backend_opt () =
-    Sys.getenv_opt "MASC_BOARD_BACKEND" |> trim_opt
+    Sys.getenv_opt "MASC_BOARD_BACKEND"
+    |> trim_opt
+    |> Option.map backend_of_string
 end
 
 (** {1 Procedural Memory Configuration} *)
@@ -360,11 +422,12 @@ module Tools = struct
   let dispatch_v2_enabled = Feature_flag_registry.get_bool "MASC_DISPATCH_V2"
 
   (** Full tool surface override. Default: false.
-      Runtime-readable (tests change this via putenv). *)
+      Re-readable within the process; callers should still document the
+      effective reload contract at the subsystem boundary. *)
   let full_surface_enabled () = Feature_flag_registry.get_bool "MASC_FULL_SURFACE"
 
   (** Tool list page size, clamped to [10, 1024]. Default: 512.
-      Runtime-readable (tests change this via putenv). *)
+      Re-readable within the process; not a guarantee of shell-level hot reload. *)
   let list_page_size () =
     let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)

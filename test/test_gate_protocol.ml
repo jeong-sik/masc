@@ -1,5 +1,4 @@
 open Alcotest
-open Masc_mcp
 
 let make_msg ?(channel = "discord") ?(content = "hello") ?(keeper_name = "luna")
     ?(channel_user_id = "user-1") ?(idempotency_key = "key-1") () : Gate_protocol.inbound_message =

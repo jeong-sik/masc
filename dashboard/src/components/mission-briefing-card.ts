@@ -155,7 +155,7 @@ export function buildLiveJudgeSituationReport({
   briefing: DashboardMissionBriefingResponse | null | undefined
   target: LiveJudgeTarget
 }): string {
-  const namespace = mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'
+  const namespace = mission?.summary.project ?? 'default'
   const roomHealth = mission?.summary.room_health ?? 'unknown'
   const sessionCount = mission?.sessions.length ?? 0
   const attentionCount = mission?.attention_queue.length ?? 0
@@ -196,7 +196,7 @@ function createLiveJudgeWorkflowContext(
     focus_kind: 'live_judgment',
     operation_id: null,
     summary: `${target.name}에게 상황판 요약을 보내 live 판단을 받습니다.`,
-    payload_preview: `scope ${mission?.summary.namespace ?? mission?.summary.namespace_id ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
+    payload_preview: `scope ${mission?.summary.project ?? 'default'} · attention ${mission?.attention_queue.length ?? 0} · gaps ${metadataGapCount}`,
     suggested_payload: { message },
     preview: {
       keeper_name: target.name,
@@ -231,9 +231,10 @@ export function MissionBriefingCard() {
     || (briefing?.status === 'unavailable' && !briefing?.cached)
 
   useEffect(() => {
-    if (!briefing && !missionBriefingLoading.value && !missionBriefingError.value) {
-      void refreshMissionBriefing()
-    }
+    if (briefing || missionBriefingLoading.value || missionBriefingError.value) return
+    const controller = new AbortController()
+    void refreshMissionBriefing(false, { signal: controller.signal })
+    return () => { controller.abort() }
   }, [briefing, missionBriefingLoading.value, missionBriefingError.value])
 
   const openLiveJudgeIntervene = () => {

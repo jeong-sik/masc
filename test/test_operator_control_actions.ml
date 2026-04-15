@@ -9,8 +9,8 @@ let test_task_inject_executes_immediately () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =
         Operator_control.action_json ctx
@@ -45,7 +45,7 @@ let test_task_inject_executes_immediately () =
       Alcotest.(check int) "pending confirm count" 0 (List.length pending_confirms);
       Alcotest.(check bool) "result present" true
         (Yojson.Safe.Util.member "result" action_json <> `Null);
-      let tasks = Room.get_tasks_raw config in
+      let tasks = Coord.get_tasks_raw config in
       Alcotest.(check int) "task injected" 1 (List.length tasks))
 
 let test_digest_defaults_to_namespace_target () =
@@ -56,15 +56,15 @@ let test_digest_defaults_to_namespace_target () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let digest_json =
         match Operator_control.digest_json ctx with
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "default target_type" "namespace"
+      Alcotest.(check string) "default target_type" "root"
         Yojson.Safe.Util.(digest_json |> member "target_type" |> to_string))
 
 let review_item_from_room_digest ctx =
@@ -85,8 +85,8 @@ let test_review_resolve_hides_matching_item () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
       (match
          Operator_control.action_json ctx
@@ -150,8 +150,8 @@ let test_review_defer_moves_item_to_deferred_queue () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
       (match
          Operator_control.action_json ctx

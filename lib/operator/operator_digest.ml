@@ -9,7 +9,7 @@ open Operator_digest_guidance
 let health_from_attention_items (items : attention_item list) =
   if
     List.exists
-      (fun (item : attention_item) -> String.equal item.severity "bad")
+      (fun (item : attention_item) -> item.severity = Sev_bad)
       items
   then "bad"
   else if items <> [] then "warn"
@@ -53,9 +53,9 @@ let recent_tool_host_failures ~now () =
                   {
                     kind = envelope.cause_code;
                     severity =
-                      Failure_envelope.severity_to_string envelope.severity;
+                      operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
-                    target_type = "namespace";
+                    target_type = "root";
                     target_id = None;
                     actor = None;
                     evidence =
@@ -73,109 +73,7 @@ let recent_tool_host_failures ~now () =
   Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
   |> dedup [] []
 
-let build_room_attention_items ?command_plane_summary config =
-  let command_plane_summary =
-    match command_plane_summary with
-    | Some s -> s
-    | None -> Command_plane_v2.summary_json config
-  in
-  let microarch_signals =
-    command_plane_summary
-    |> U.member "operations"
-    |> U.member "microarch"
-    |> U.member "signals"
-  in
-  let intent_summary =
-    command_plane_summary
-    |> U.member "intents"
-    |> U.member "summary"
-  in
-  let signal_items =
-    [
-      ( "command_issue_pressure",
-        "command-plane issue pressure is elevated",
-        microarch_signals |> U.member "issue_pressure" );
-      ( "command_cache_contention",
-        "command-plane cache contention is elevated",
-        microarch_signals |> U.member "cache_contention" );
-      ( "command_scheduler_efficiency",
-        "command-plane scheduler efficiency is degraded",
-        microarch_signals |> U.member "scheduler_efficiency" );
-      ( "command_routing_confidence",
-        "command-plane routing confidence is degraded",
-        microarch_signals |> U.member "routing_confidence" );
-      ( "command_quality_per_token",
-        "command-plane quality-per-token is degraded",
-        microarch_signals |> U.member "quality_per_token" );
-      ( "command_verification_gate_failures",
-        "command-plane verification gate failures are accumulating",
-        microarch_signals |> U.member "verification_gate_failures" );
-      ( "command_rework_rate",
-        "command-plane rework rate is elevated",
-        microarch_signals |> U.member "rework_rate" );
-      ( "command_artifact_scope_drift",
-        "command-plane artifact scope drift is elevated",
-        microarch_signals |> U.member "artifact_scope_drift" );
-      ( "command_speculative_posture",
-        "command-plane speculative posture needs review",
-        microarch_signals |> U.member "speculative_posture" );
-    ]
-    |> List.filter_map (fun (kind, summary, signal_json) ->
-           match signal_json |> U.member "tone" with
-           | `String "warn" ->
-               Some
-                 {
-                   kind;
-                   severity = "warn";
-                   summary;
-                   target_type = "namespace";
-                   target_id = None;
-                   actor = None;
-                   evidence = signal_json;
-                 }
-           | `String "bad" ->
-               Some
-                 {
-                   kind;
-                   severity = "bad";
-                   summary;
-                   target_type = "namespace";
-                   target_id = None;
-                   actor = None;
-                   evidence = signal_json;
-                 }
-           | _ -> None)
-  in
-  let intent_items =
-    [
-      ( "intent_blocked",
-        "blocked intents need intervention",
-        intent_summary |> U.member "blocked",
-        "blocked" );
-      ( "intent_handoff_ready",
-        "handoff-ready intents need continuity review",
-        intent_summary |> U.member "handoff_ready",
-        "handoff_ready" );
-    ]
-    |> List.filter_map (fun (kind, summary, value_json, field_name) ->
-           match value_json with
-           | `Int count when count > 0 ->
-               Some
-                 {
-                   kind;
-                   severity = if count >= 3 then "bad" else "warn";
-                   summary;
-                   target_type = "namespace";
-                   target_id = None;
-                   actor = None;
-                   evidence =
-                     `Assoc
-                       [
-                         (field_name, `Int count);
-                       ];
-                 }
-           | _ -> None)
-  in
+let build_room_attention_items ?command_plane_summary:_ config =
   let pending_confirms = read_pending_confirms config in
   let pending_items =
     if pending_confirms = [] then []
@@ -183,11 +81,11 @@ let build_room_attention_items ?command_plane_summary config =
       [
         {
           kind = "pending_confirm_waiting";
-          severity = "warn";
+          severity = Sev_warn;
           summary =
             Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
               (List.length pending_confirms);
-          target_type = "namespace";
+          target_type = "root";
           target_id = None;
           actor = None;
           evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
@@ -196,97 +94,10 @@ let build_room_attention_items ?command_plane_summary config =
   in
   List.sort compare_attention
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
-    @ pending_items @ signal_items @ intent_items)
+    @ pending_items)
 
-let room_recommendations ?command_plane_summary config =
-  let command_plane_summary =
-    match command_plane_summary with
-    | Some s -> s
-    | None -> Command_plane_v2.summary_json config
-  in
-  let microarch_signals =
-    command_plane_summary
-    |> U.member "operations"
-    |> U.member "microarch"
-    |> U.member "signals"
-  in
-  let intent_summary =
-    command_plane_summary
-    |> U.member "intents"
-    |> U.member "summary"
-  in
-  let signal_recommendations =
-    [
-      ( microarch_signals |> U.member "issue_pressure",
-        "broadcast",
-        "command-plane issue pressure is elevated",
-        "[operator] Issue pressure is elevated. Inspect blocked operations, run a dispatch tick, and checkpoint or finalize stale work." );
-      ( microarch_signals |> U.member "routing_confidence",
-        "broadcast",
-        "command-plane routing confidence is degraded",
-        "[operator] Routing confidence is low. Inspect candidate scoring and avoid risky manual rebalance until blockers clear." );
-      ( microarch_signals |> U.member "quality_per_token",
-        "broadcast",
-        "command-plane quality-per-token is degraded",
-        "[operator] Quality per token is low. Narrow the task graph, reduce weak candidates, and keep coding stages explicit before spawning more workers." );
-      ( microarch_signals |> U.member "verification_gate_failures",
-        "broadcast",
-        "command-plane verification gate failures are accumulating",
-        "[operator] Verification failures are stacking up. Stop widening the swarm, inspect implement->verify handoff quality, and patch failing gates first." );
-      ( microarch_signals |> U.member "rework_rate",
-        "broadcast",
-        "command-plane rework rate is elevated",
-        "[operator] Rework is high. Deduplicate artifact ownership and collapse parallel work that is touching the same scope." );
-      ( microarch_signals |> U.member "artifact_scope_drift",
-        "broadcast",
-        "command-plane artifact scope drift is elevated",
-        "[operator] Artifact scope drift is rising. Require explicit artifact_scope on coding stages before further routing or review." );
-      ( microarch_signals |> U.member "cache_contention",
-        "broadcast",
-        "command-plane cache contention is elevated",
-        "[operator] Cache contention is elevated. Reduce concurrent hot lanes or rebalance worker placement before scaling further." );
-      ( microarch_signals |> U.member "speculative_posture",
-        "broadcast",
-        "command-plane speculative posture needs review",
-        "[operator] Speculative posture is unstable. Review commit and abort rates before widening speculation." );
-      ( intent_summary |> U.member "blocked",
-        "broadcast",
-        "blocked intents need intervention",
-        "[operator] Some intents are blocked. Inspect intent forecast, missing dependencies, and current focus before issuing more work." );
-      ( intent_summary |> U.member "handoff_ready",
-        "broadcast",
-        "handoff-ready intents need continuity review",
-        "[operator] Handoff-ready intents are accumulating. Review continuity and either finalize or hand off explicitly." );
-    ]
-    |> List.filter_map
-         (fun (signal_json, action_type, reason, message) ->
-           match signal_json with
-           | `Assoc _ -> (
-               match signal_json |> U.member "tone" with
-               | `String ("warn" | "bad" as severity) ->
-                   Some
-                     {
-                       action_type;
-                       target_type = "namespace";
-                       target_id = None;
-                       severity;
-                       reason;
-                       suggested_payload = `Assoc [ ("message", `String message) ];
-                     }
-               | _ -> None)
-           | `Int count when count > 0 ->
-               Some
-                 {
-                   action_type;
-                   target_type = "namespace";
-                   target_id = None;
-                   severity = if count >= 3 then "bad" else "warn";
-                   reason;
-                   suggested_payload = `Assoc [ ("message", `String message) ];
-                 }
-           | _ -> None)
-  in
-  dedup_recommendations signal_recommendations
+let room_recommendations ?command_plane_summary:_ _config =
+  dedup_recommendations []
 
 (* Re-export from Operator_digest_review_types without [include] to
    avoid conflicting [module U] and leaking [open] directives. *)
@@ -295,7 +106,7 @@ type review_item = Operator_digest_review_types.review_item = {
   kind : string;
   target_type : string;
   target_id : string option;
-  severity : string;
+  severity : operator_severity;
   urgency : string;
   summary : string;
   why_now : string;
@@ -319,24 +130,18 @@ let stale_sec_of_iso = Operator_digest_review_types.stale_sec_of_iso
 let review_action_copy = Operator_digest_review_types.review_action_copy
 
 let room_state_json config =
-  if not (Room.is_initialized config) then
+  if not (Coord.is_initialized config) then
     `Assoc
       [
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("project", `String (Filename.basename config.base_path));
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
         ("pause_reason", `Null);
       ]
   else
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     `Assoc
       [
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
@@ -385,8 +190,9 @@ let urgency_rank = function
   | "now" -> 1
   | _ -> 0
 
-let target_rank = function
-  | "room" | "namespace" -> 3
+let target_rank value =
+  if Operator_digest_types.is_root_alias value then 3
+  else match value with
   | "keeper" -> 1
   | _ -> 0
 
@@ -430,7 +236,7 @@ let review_item_to_yojson ~actor (item : review_item) =
       ("kind", `String item.kind);
       ("target_type", `String item.target_type);
       ("target_id", string_option_to_json item.target_id);
-      ("severity", `String item.severity);
+      ("severity", `String (operator_severity_to_string item.severity));
       ("urgency", `String item.urgency);
       ("summary", `String item.summary);
       ("why_now", `String item.why_now);
@@ -476,7 +282,7 @@ let pending_confirm_review_item ~now (entry : pending_confirm) =
         action_type = entry.action_type;
         target_type = entry.target_type;
         target_id = entry.target_id;
-        severity = if Operator_approval.confirm_required entry.action_type then "bad" else "warn";
+        severity = if Operator_approval.confirm_required entry.action_type then Sev_bad else Sev_warn;
         reason = why_now;
         suggested_payload = entry.payload;
       }
@@ -487,7 +293,7 @@ let pending_confirm_review_item ~now (entry : pending_confirm) =
     target_type = entry.target_type;
     target_id = entry.target_id;
     severity =
-      if Operator_approval.confirm_required entry.action_type then "bad" else "warn";
+      if Operator_approval.confirm_required entry.action_type then Sev_bad else Sev_warn;
     urgency = "now";
     summary;
     why_now;
@@ -514,10 +320,7 @@ let namespace_gate_review_item ~room_json =
   if not paused then None
   else
     let room_id =
-      (match json_string_opt room_json "namespace_id" with
-       | Some id -> Some id
-       | None -> json_string_opt room_json "room_id")
-      |> Option.value ~default:"default"
+      json_string_opt room_json "project" |> Option.value ~default:"default"
     in
     let pause_reason =
       json_string_opt room_json "pause_reason" |> Option.value ~default:"운영 점검"
@@ -527,9 +330,9 @@ let namespace_gate_review_item ~room_json =
       Some
         {
           action_type = "namespace_resume";
-          target_type = "namespace";
+          target_type = "root";
           target_id = None;
-          severity = "warn";
+          severity = Sev_warn;
           reason = pause_reason;
           suggested_payload = `Assoc [];
         }
@@ -538,9 +341,9 @@ let namespace_gate_review_item ~room_json =
       {
         id = "namespace_gate:" ^ room_id;
         kind = "namespace_gate";
-        target_type = "namespace";
+        target_type = "root";
         target_id = None;
-        severity = "warn";
+        severity = Sev_warn;
         urgency = "soon";
         summary;
         why_now = pause_reason;
@@ -550,7 +353,7 @@ let namespace_gate_review_item ~room_json =
         stale_sec = None;
         confirm_required = false;
         recommended_action;
-        truth_ref = review_truth_ref_json ~target_type:"namespace" ~target_id:None;
+        truth_ref = review_truth_ref_json ~target_type:"root" ~target_id:None;
         friction =
           `Assoc
             [
@@ -591,22 +394,22 @@ let keeper_review_item ~now keeper_json =
       if reasons = [] then None
       else
         let severity =
-          if List.mem "오프라인" reasons then "bad" else "warn"
+          if List.mem "오프라인" reasons then Sev_bad else Sev_warn
         in
         let recommended_action =
           Some
             {
               action_type =
-                if String.equal severity "bad" then "keeper_recover"
-                else "keeper_probe";
+                (match severity with Sev_bad | Sev_critical -> "keeper_recover"
+                | Sev_warn -> "keeper_probe");
               target_type = "keeper";
               target_id = Some keeper_name;
               severity;
               reason = String.concat " · " reasons;
               suggested_payload =
-                if String.equal severity "bad"
-                then `Assoc [ ("reason", `String "operator review queue") ]
-                else `Assoc [];
+                (match severity with Sev_bad | Sev_critical ->
+                  `Assoc [ ("reason", `String "operator review queue") ]
+                | Sev_warn -> `Assoc []);
             }
         in
         Some
@@ -616,7 +419,8 @@ let keeper_review_item ~now keeper_json =
             target_type = "keeper";
             target_id = Some keeper_name;
             severity;
-            urgency = if String.equal severity "bad" then "now" else "soon";
+            urgency = (match severity with Sev_bad | Sev_critical -> "now"
+              | Sev_warn -> "soon");
             summary = Printf.sprintf "키퍼 %s 점검이 필요합니다." keeper_name;
             why_now = String.concat " · " reasons;
             source = "deterministic";
@@ -686,13 +490,13 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     ?command_plane_summary ?swarm_status (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
-  if not (Room.is_initialized config) then
+  if not (Coord.is_initialized config) then
     let recent_reviews = Operator_review_state.recent_review_decisions_json ~limit:12 config in
     Ok
       (`Assoc
         [
           ("trace_id", `String (trace_id "opsd"));
-          ("target_type", `String "namespace");
+          ("target_type", `String "root");
           ("target_id", `Null);
           ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
@@ -727,7 +531,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     let command_plane_digest_json =
       match command_plane_summary with
       | Some summary -> summary
-      | None -> Command_plane_v2.summary_json config
+      | None -> `Assoc []
     in
     let swarm_status_json =
       match swarm_status with
@@ -736,7 +540,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           Swarm_status.build_json ~timeline_limit_override:6 config
     in
     match target_type with
-    | "namespace" ->
+    | "root" ->
         let confirm_scope = pending_confirm_scope ?actor config in
         let attention_items =
           build_room_attention_items ~command_plane_summary:command_plane_digest_json config
@@ -750,7 +554,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           summary_of_recommendations ~actor:actor_name recommended_actions
         in
         let active_guidance =
-          active_guidance_fields ~config ~actor:actor_name ~target_type:"namespace"
+          active_guidance_fields ~config ~actor:actor_name ~target_type:"root"
             ~target_id:None ~fallback_recommendations:recommended_actions
             ~fallback_summary:fallback_recommendation_summary
         in
@@ -773,7 +577,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           (`Assoc
             ([
               ("trace_id", `String (trace_id "opsd"));
-              ("target_type", `String "namespace");
+              ("target_type", `String "root");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
@@ -796,9 +600,11 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
-              ("namespace", room_state_json);
+              ("root", room_state_json);
               ("worker_cards", `List []);
             ]
             @ review_queue_json ~actor:actor_name active_reviews deferred_reviews recent_reviews
             @ active_guidance))
     | _ -> Error "unsupported target_type"
+(* Note: normalize_digest_target_type accepts "root"/"namespace"/"room" and
+   returns canonical "root" — the match above only needs the canonical case. *)

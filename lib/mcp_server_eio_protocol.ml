@@ -123,7 +123,6 @@ let affected_resource_ids_for_tool = function
   | "masc_plan_set_task"
   | "masc_plan_clear_task" ->
       task_resource_ids
-  | "masc_init"
   | "masc_join"
   | "masc_leave"
   | "masc_register_capabilities"
@@ -546,7 +545,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let clock = Eio.Stdenv.clock env in
 
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
-  Log.Mcp.info "Default room: %s" Mcp_server.(state.room_config.Room.base_path);
+  Log.Mcp.info "Default room: %s" Mcp_server.(state.room_config.Coord.base_path);
 
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
 

@@ -13,6 +13,7 @@ consumer → MASC-MCP (coordination/orchestration) → OAS (agent runtime)
 - 이 문서는 **boundary contract SSOT**다.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
+- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
 - `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
 
 ## 역할 분리
@@ -53,7 +54,9 @@ OAS  ──does not know──→ MASC
 | Area | Status | Notes |
 |------|--------|-------|
 | Context compaction | Partial complete | `context_compact_oas.ml`는 OAS `Context_reducer`를 사용한다. MASC 전체 context system이 OAS `Context.t`로 통합된 것은 아니다. |
-| Event bus bridge | Complete for current `masc:*` flow | `oas_events.ml` publishes, `oas_sse_bridge.ml` relays to dashboard SSE |
+| Event bus bridge | Complete for current native/custom flow | `oas_sse_bridge.ml` relays both OAS native events and `masc:*` custom events, persists them under `.masc/oas-events/`, and feeds dashboard SSE |
+| Dashboard OAS runtime health | Complete with replay/live split | dashboard health SSOT is `durable oas_event replay + live SSE tail`, not live-only counters |
+| Dashboard runtime counts | Complete with truth split | dashboard `counts` means active runtimes; configured keeper inventory is exposed separately as `configured_keepers` |
 | Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Partial complete | OAS Swarm runner is active; current bridge uses `swarm_config` / `agent_entry` + worker metadata while intentionally omitting `collaboration_context`, so fidelity is still incomplete |
@@ -114,6 +117,8 @@ These stay in MASC:
 
 - “Context integration in progress” now means **broader state unification**, not compaction.
 - “Event_bus bridge planned” is no longer true for the current dashboard/SSE path.
+- dashboard OAS runtime health should be read as **durable replay + live tail**, not as a live-only pulse.
+- dashboard runtime `counts` should be read as **active truth**, while keeper inventory belongs to `configured_keepers`.
 - “team_session pending migration” is no longer true; the correct description is **running on OAS Swarm with an incomplete bridge**.
 
 ## Boundary Review Checklist

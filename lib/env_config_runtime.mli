@@ -124,14 +124,33 @@ module Message : sig
 end
 
 module Transport : sig
+  type h2_mode =
+    | Auto
+    | H1_only
+    | H2_only
+    | Unknown_h2_mode of string
+
+  val h2_mode_of_string : string -> h2_mode
+  val h2_mode_to_string : h2_mode -> string
+
+  type agent_transport =
+    | Http
+    | Grpc
+    | Ws
+    | Webrtc
+    | Local
+    | Unknown_agent_transport of string
+
+  val agent_transport_of_string : string -> agent_transport
+  val agent_transport_to_string : agent_transport -> string
   val grpc_port : int
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
   val ws_port : int
   val ws_enabled : unit -> bool
   val webrtc_enabled : unit -> bool
-  val use_h2 : unit -> string
-  val agent_transport_opt : unit -> string option
+  val use_h2 : unit -> h2_mode
+  val agent_transport_opt : unit -> agent_transport option
   val openai_compat_enabled : bool
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
@@ -142,8 +161,15 @@ module Cdal : sig
 end
 
 module Board : sig
+  type backend =
+    | Jsonl
+    | Pg
+    | Unknown_backend of string
+
+  val backend_of_string : string -> backend
+  val backend_to_string : backend -> string
   val flush_interval_sec : float
-  val backend_opt : unit -> string option
+  val backend_opt : unit -> backend option
 end
 
 module ProcMemory : sig

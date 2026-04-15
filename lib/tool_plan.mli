@@ -1,13 +1,13 @@
 (** Plan Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
-    11 tools: plan_init, plan_update, note_add, deliver, plan_get,
-              error_add, error_resolve, plan_set_task, plan_get_task, plan_clear_task
+    9 tools: plan_init, plan_update, note_add, deliver, plan_get,
+             plan_set_task, plan_get_task, plan_clear_task
 *)
 
 (** Tool handler context *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
 }
 
 (** Tool result type *)
@@ -20,8 +20,6 @@ val handle_plan_update : context -> Yojson.Safe.t -> tool_result
 val handle_note_add : context -> Yojson.Safe.t -> tool_result
 val handle_deliver : context -> Yojson.Safe.t -> tool_result
 val handle_plan_get : context -> Yojson.Safe.t -> tool_result
-val handle_error_add : context -> Yojson.Safe.t -> tool_result
-val handle_error_resolve : context -> Yojson.Safe.t -> tool_result
 val handle_plan_set_task : context -> Yojson.Safe.t -> tool_result
 val handle_plan_get_task : context -> Yojson.Safe.t -> tool_result
 val handle_plan_clear_task : context -> Yojson.Safe.t -> tool_result

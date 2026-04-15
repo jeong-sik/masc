@@ -131,10 +131,22 @@ let find_main_eio_exe () =
   let shared_root =
     root |> Filename.dirname |> Filename.dirname |> Filename.dirname
   in
+  let build_roots = [ root; Filename.dirname root; shared_root ] in
   let candidates =
     [
+      Filename.concat root "bin/main_eio.exe";
       Filename.concat root "_build/default/bin/main_eio.exe";
       Filename.concat root "_build/default/masc-mcp/bin/main_eio.exe";
+    ]
+    @ List.concat_map
+        (fun base ->
+          [
+            Filename.concat base "bin/main_eio.exe";
+            Filename.concat base "_build/default/bin/main_eio.exe";
+            Filename.concat base "_build/default/masc-mcp/bin/main_eio.exe";
+          ])
+        build_roots
+    @ [
       Filename.concat shared_root "_build/default/bin/main_eio.exe";
       Filename.concat shared_root "_build/default/masc-mcp/bin/main_eio.exe";
     ]
@@ -347,7 +359,7 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
            (Filename.concat base_path ".masc/.masc/config/cascade.json")))
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
-      let agents_dir = Room.agents_dir (Room.default_config dir) in
+      let agents_dir = Coord.agents_dir (Coord.default_config dir) in
       Fs_compat.mkdir_p agents_dir;
       write_file (Filename.concat agents_dir "alice.json") "{}";
       let state = Mcp_server.create_state ~base_path:dir in
@@ -357,7 +369,7 @@ let test_constructor_is_pure () =
 let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let agents = Room.agents_dir state.Mcp_server.room_config in
+      let agents = Coord.agents_dir state.Mcp_server.room_config in
       Fs_compat.mkdir_p agents;
       write_file (Filename.concat agents "test-agent.json") "{}";
       Server_runtime_bootstrap.restore_persisted_sessions state;
@@ -371,7 +383,7 @@ let test_restore_persisted_sessions_uses_flat_agents_dir () =
 let test_keeper_paths_use_cluster_root () =
   with_temp_dir "startup-cluster" (fun dir ->
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
-          let config = Room.default_config dir in
+          let config = Coord.default_config dir in
           let keeper_dir = Keeper_types.keeper_dir config in
           let expected_root =
             Filename.concat
@@ -383,9 +395,9 @@ let test_keeper_paths_use_cluster_root () =
 
 let test_room_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
-      let config = Room.default_config dir in
-      ignore (Room.init config ~agent_name:None);
-      let root_dir = Room.masc_root_dir config in
+      let config = Coord.default_config dir in
+      ignore (Coord.init config ~agent_name:None);
+      let root_dir = Coord.masc_root_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in
       let traces_dir = Filename.concat root_dir "traces" in
       Alcotest.(check bool) "keeper dir exists" true
@@ -437,7 +449,7 @@ let make_keeper_meta_json ?(name = "sangsu")
 let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
   with_temp_dir "startup-legacy-keepers" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let keepers_dir = Filename.concat masc_root "keepers" in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
       let quarantine_dir =
@@ -476,7 +488,7 @@ let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
 let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
   with_temp_dir "startup-legacy-keepers-current-wins" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let keepers_dir = Filename.concat masc_root "keepers" in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
       let quarantine_path =
@@ -506,7 +518,7 @@ let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
 let test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path () =
   with_temp_dir "startup-resident-keepers-quarantine-source" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let keepers_dir = Filename.concat masc_root "keepers" in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
       Fs_compat.mkdir_p keepers_dir;
@@ -525,7 +537,7 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
   with_temp_dir "startup-blocking-legacy-keepers" (fun dir ->
       write_basepath_keeper_toml dir "sangsu";
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let legacy_dir = Filename.concat masc_root "resident-keepers" in
       let legacy_trace_dir = Filename.concat masc_root "perpetual" in
       Fs_compat.mkdir_p legacy_dir;
@@ -551,7 +563,7 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
 let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
   with_temp_dir "startup-blocking-room-flatten" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let legacy_tasks = Filename.concat masc_root "rooms/focus-room/tasks" in
       Fs_compat.mkdir_p legacy_tasks;
       write_file (Filename.concat masc_root "current_room") "../escape\n";
@@ -575,7 +587,7 @@ let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
 let test_blocking_bootstrap_flattens_single_legacy_room_without_current_room () =
   with_temp_dir "startup-blocking-room-single-fallback" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let legacy_tasks = Filename.concat masc_root "rooms/team-room/tasks" in
       Fs_compat.mkdir_p legacy_tasks;
       write_file
@@ -598,7 +610,7 @@ let test_blocking_bootstrap_flattens_single_legacy_room_without_current_room () 
 let test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms () =
   with_temp_dir "startup-blocking-room-multi-fallback" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let alpha_tasks = Filename.concat masc_root "rooms/alpha-room/tasks" in
       let beta_tasks = Filename.concat masc_root "rooms/beta-room/tasks" in
       Fs_compat.mkdir_p alpha_tasks;
@@ -634,7 +646,7 @@ let test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms () =
 let test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs () =
   with_temp_dir "startup-blocking-room-whitespace" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let spaced_tasks = Filename.concat masc_root "rooms/focus-room /tasks" in
       Fs_compat.mkdir_p spaced_tasks;
       write_file

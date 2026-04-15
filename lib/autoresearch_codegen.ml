@@ -116,7 +116,7 @@ let has_background_capacity () =
   | Some sw, Some net -> (
       try
         let capacity =
-          Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+          Cascade_config.local_capacity_for_selections ~sw ~net
             [ "autoresearch" ]
         in
         not

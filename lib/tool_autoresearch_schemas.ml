@@ -9,9 +9,10 @@ let schemas : Types.tool_schema list = [
     name = "masc_autoresearch_start";
     description = "Start a solo experiment loop: iteratively modify a target file to optimize \
 a metric. Each cycle: read file -> LLM generates change -> measure -> keep if improved, \
-discard if not. Runs autonomously until max_cycles or stopped. Returns loop_id. \
+discard if not. Runs autonomously until max_cycles, target_score, or stopped. Returns loop_id. \
     Requires: goal, metric_fn (shell command outputting a float), target_file. \
-    Set lower_is_better=true for metrics where lower values are better (e.g., loss, BPB).";
+    Set lower_is_better=true for metrics where lower values are better (e.g., loss, BPB). \
+    Optionally set target_score to stop as soon as the threshold is reached.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -41,6 +42,10 @@ discard if not. Runs autonomously until max_cycles or stopped. Returns loop_id. 
           ("type", `String "number");
           ("description", `String "Initial baseline score. If omitted, measured by running metric_fn once.");
         ]);
+        ("target_score", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Optional success threshold. Higher-or-equal wins by default; with lower_is_better=true, lower-or-equal wins.");
+        ]);
         ("model_model", `Assoc [
           ("type", `String "string");
           ("description", `String "Model label for code change generation (uses cascade default)");
@@ -62,7 +67,8 @@ The MODEL receives the full file, generates a modified version, and writes it ba
   {
     name = "masc_autoresearch_status";
     description = "Get the current status of an autoresearch loop. \
-Returns: loop_id, cycle count, baseline, best score, keep/discard counts, recent history.";
+Returns: loop_id, cycle count, baseline, best score, target_score, target_reached, \
+keep/discard counts, recent history.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

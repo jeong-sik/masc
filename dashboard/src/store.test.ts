@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  oasAgentEvents,
-  oasKeeperSnapshots,
-  oasLastKeeperTick,
   oasTotalEvents,
   oasTotalLlmCalls,
   oasTotalErrors,
   oasLastLlmCallTs,
   oasLastErrorTs,
   oasHealthSummary,
+  resetOasRuntimeSignals,
   pushOasAgentEvent,
   updateOasKeeperSnapshot,
   recordOasLlmCall,
@@ -17,14 +15,7 @@ import {
 import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
 
 function resetOasSignals() {
-  oasAgentEvents.value = []
-  oasKeeperSnapshots.value = new Map()
-  oasLastKeeperTick.value = null
-  oasTotalEvents.value = 0
-  oasTotalLlmCalls.value = 0
-  oasTotalErrors.value = 0
-  oasLastLlmCallTs.value = null
-  oasLastErrorTs.value = null
+  resetOasRuntimeSignals()
 }
 
 describe('oasHealthSummary', () => {
@@ -49,7 +40,7 @@ describe('oasHealthSummary', () => {
     pushOasAgentEvent(evt)
     pushOasAgentEvent({ ...evt, timestamp: 2 })
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)
-    expect(oasHealthSummary.value.totalEvents).toBe(2)
+    expect(oasHealthSummary.value.totalEvents).toBe(0)
   })
 
   it('dedups identical consecutive agent events', () => {
@@ -57,14 +48,33 @@ describe('oasHealthSummary', () => {
       type: 'action_executed',
       agent_name: 'dreamer',
       timestamp: 1,
+      event_key: 'same-event',
       action: 'ponder',
     } as unknown as OasAgentEvent
     pushOasAgentEvent(evt)
-    pushOasAgentEvent(evt) // same type+agent+timestamp → should be dropped
+    pushOasAgentEvent(evt)
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
   })
 
-  it('tracks keeper snapshots and last tick', () => {
+  it('keeps distinct events that only share actor and timestamp', () => {
+    pushOasAgentEvent({
+      type: 'action_executed',
+      agent_name: 'dreamer',
+      timestamp: 1,
+      event_key: 'action',
+      action: 'ponder',
+    } as unknown as OasAgentEvent)
+    pushOasAgentEvent({
+      type: 'action_executed',
+      agent_name: 'dreamer',
+      timestamp: 1,
+      event_key: 'lifecycle',
+      detail: 'started',
+    } as unknown as OasAgentEvent)
+    expect(oasHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('tracks keeper snapshots and uses backend tick time', () => {
     const snap: OasKeeperSnapshot = {
       keeper_name: 'runtime-keeper',
       timestamp: 100,
@@ -74,7 +84,7 @@ describe('oasHealthSummary', () => {
     } as OasKeeperSnapshot
     updateOasKeeperSnapshot(snap)
     expect(oasHealthSummary.value.keeperSnapshotsCount).toBe(1)
-    expect(oasHealthSummary.value.lastKeeperTick).not.toBeNull()
+    expect(oasHealthSummary.value.lastKeeperTick).toBe(100_000)
   })
 
   it('starts with zero totals', () => {

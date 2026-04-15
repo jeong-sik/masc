@@ -391,7 +391,7 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 **Proactive**: `PROACTIVE_TEMP_LOW/MID/HIGH`(0.55/0.75/0.9), `PROACTIVE_SIMILARITY`(0.72), `PROACTIVE_MAX_TOKENS`(1024)
 
-**Cost Gates**: `COST_GATE_USD`(0.10), `TOOL_COST_MAX_USD`(0.50)
+**Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
 
 **Unified Turn**: `UNIFIED_TEMP`(0.4), `UNIFIED_MAX_TOKENS`(2048), `UNIFIED_MAX_TURNS`(1000)
 
@@ -407,7 +407,23 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 ### 9.3 Keeper Runtime Spec
 
-keeper 선언과 런타임 상태는 `.masc/keepers/{name}.json`에 영속화된다. keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+Canonical file model:
+
+```text
+<basepath>/.masc/config/personas/{name}/profile.json
+<basepath>/.masc/config/keepers/{name}.toml
+<basepath>/.masc/keepers/{name}.json
+<basepath>/.masc/keepers/{name}/...
+```
+
+- `profile.json`: identity / persona blueprint
+- `keepers/{name}.toml`: deployment declaration for this basepath
+- `.masc/keepers/{name}.json`: durable runtime state
+- `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
+
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+
+Current implementation note: compatibility reasons may still cause some authored fields to be materialized into `.masc/keepers/{name}.json`, but the intended edit surfaces remain persona profile and keeper TOML.
 
 ---
 

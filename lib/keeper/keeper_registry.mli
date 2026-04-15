@@ -33,12 +33,41 @@ val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string
 
 val failure_reason_to_string : failure_reason -> string
-val failure_reason_requires_manual_reconcile : failure_reason -> bool
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
     [set_failure_reason] before raising. *)
 exception Keeper_fiber_crash
+
+type turn_phase =
+  | Turn_idle
+  | Turn_prompting
+  | Turn_executing
+  | Turn_compacting
+  | Turn_finalizing
+
+type decision_stage =
+  | Decision_undecided
+  | Decision_guard_ok
+  | Decision_gate_rejected
+  | Decision_tool_policy_selected
+
+type cascade_state =
+  | Cascade_idle
+  | Cascade_selecting
+  | Cascade_trying
+  | Cascade_done
+  | Cascade_exhausted
+
+type compaction_stage =
+  | Compaction_accumulating
+  | Compaction_compacting
+  | Compaction_done
+
+type turn_measurement = {
+  tm_captured_at : float;
+  tm_auto_rules : Keeper_state_machine.auto_rule_summary;
+}
 
 type registry_entry = {
   base_path : string;
@@ -84,6 +113,10 @@ type registry_entry = {
           keeper turn via [Event_bus.drain]. [None] until the first
           successful drain. Stable per session (= [meta.runtime.trace_id]
           as passed to OAS). *)
+  pending_turn_measurement : turn_measurement option;
+      (** Fresh measurement captured by [Context_measured] and reserved
+          for the next [mark_turn_measurement] call. Hidden from idle
+          observers so the composite snapshot stays turn-scoped. *)
   current_turn_observation : turn_observation option;
       (** Live, turn-scoped observation record (issue #7122 Phase 1).
           [Some _] while a turn is actively executing. [None] outside
@@ -101,6 +134,10 @@ type registry_entry = {
           result": idle keepers never surface stale terminal states
           on the live sub-FSM fields, but operators can still see
           the most recent outcome in [last_outcome]. *)
+  compaction_stage : compaction_stage;
+      (** Explicit KMC projection owned by the runtime, not derived from
+          parent phase on read. This lets the observer surface
+          [done] without guessing from conditions. *)
 }
 
 and turn_observation = {
@@ -109,12 +146,24 @@ and turn_observation = {
           [meta.runtime.usage.total_turns] + 1). *)
   started_at : float;
       (** Unix timestamp when this turn record was installed. *)
+  turn_phase : turn_phase;
+  decision_stage : decision_stage;
+  cascade_state : cascade_state;
+  measurement : turn_measurement option;
+  measurement_bind_count : int;
+      (** Number of [Context_measured] snapshots bound to this live turn.
+          The composite observer's [event_priority_monotone] invariant
+          requires this to stay <= 1. *)
+  selected_model : string option;
 }
 
 and completed_turn_observation = {
   ct_turn_id : int;
   ct_started_at : float;
   ct_ended_at : float;
+  ct_decision_stage : decision_stage;
+  ct_cascade_state : cascade_state;
+  ct_selected_model : string option;
 }
 
 (** Register a keeper with an already-live fiber. Primarily used by tests and
@@ -161,6 +210,38 @@ val set_last_correlation_id : base_path:string -> string -> string -> unit
     [current_turn_observation] with [turn_id = usage.total_turns + 1].
     Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
 val mark_turn_started : base_path:string -> string -> unit
+
+(** Attach the most recent [Context_measured] snapshot to the live turn.
+    No-op if no turn is active or no pending measurement exists. *)
+val mark_turn_measurement : base_path:string -> string -> unit
+
+(** Advance the live turn's projected decision stage. No-op if idle. *)
+val set_turn_decision_stage :
+  base_path:string -> string -> decision_stage -> unit
+
+(** Advance the live turn's projected cascade state. No-op if idle.
+    Sets [turn_phase] to [Turn_executing] for [Cascade_trying] and to
+    [Turn_finalizing] for terminal cascade states. *)
+val set_turn_cascade_state :
+  base_path:string -> string -> cascade_state -> unit
+
+(** Update the live turn's phase directly. No-op if idle. *)
+val set_turn_phase :
+  base_path:string -> string -> turn_phase -> unit
+
+(** Record the surface model selected for the current turn. No-op if idle. *)
+val set_turn_selected_model :
+  base_path:string -> string -> string option -> unit
+
+(** Reset a live turn into the post-compaction retry posture used by
+    overflow recovery. Preserves the bound measurement, but clears the
+    previous cascade attempt and selected model so the next retry starts
+    from [Prompting + Guard_ok + Cascade_idle]. *)
+val prepare_turn_retry_after_compaction :
+  base_path:string -> string -> unit
+
+(** Cross-registry convenience for hooks that only know the keeper name. *)
+val mark_turn_gate_rejected_by_name : string -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle. Idempotent — safe to
@@ -276,7 +357,7 @@ val tool_usage_of_by_name : string ->
     cross-base_path scan (O(n)) when not found in the caller's scope.
     Returns config with the keeper's actual base_path, or the original
     config unchanged if the keeper is not in the registry. *)
-val resolve_config : Room_utils_backend_setup.config -> string -> Room_utils_backend_setup.config
+val resolve_config : Coord_utils_backend_setup.config -> string -> Coord_utils_backend_setup.config
 
 (** Flush in-memory tool usage stats to disk for persistence across restarts. *)
 val flush_tool_usage : base_path:string -> string -> unit

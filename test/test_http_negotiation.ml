@@ -177,10 +177,32 @@ let test_sse_guard_registry_is_shared_with_cleanup_loop () =
       failf "expected first guard insert to succeed, got %s %.3f" reason
         retry_after_s
   | Ok () ->
-      check int "cleanup loop sees the same guard table" 1
+      check int "cleanup keeps fresh guard entries" 0
         (Cleanup_view.reap_stale_guards ());
-      check int "transport view is already clean after shared reap" 0
-        (Transport.reap_stale_guards ())
+      (match Transport.check_sse_connect_guard session_id with
+      | Error ("session_cooldown", retry_after_s) ->
+          check bool "cooldown stays positive" true (retry_after_s > 0.0)
+      | Error (reason, retry_after_s) ->
+          failf "expected shared cooldown guard, got %s %.3f" reason retry_after_s
+      | Ok () ->
+          fail "expected second guard check to observe shared cooldown state")
+
+let test_preserve_guard_keeps_ag_ui_cooldown () =
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let module Cleanup_view = Masc_mcp.Server_mcp_transport_http_sse in
+  let session_id = "ag-ui-preserve-guard" in
+  match Transport.check_sse_connect_guard session_id with
+  | Error (reason, retry_after_s) ->
+      failf "expected first guard insert to succeed, got %s %.3f" reason
+        retry_after_s
+  | Ok () ->
+      Cleanup_view.stop_sse_session_preserve_guard session_id;
+      (match Transport.check_sse_connect_guard session_id with
+      | Ok () -> fail "expected preserved guard to enforce reconnect cooldown"
+      | Error (reason, retry_after_s) ->
+          check string "preserves session cooldown reason" "session_cooldown" reason;
+          check bool "preserved retry-after is positive" true (retry_after_s > 0.0));
+      ignore (Cleanup_view.reap_stale_guards ())
 
 let () =
   Eio_main.run @@ fun env ->
@@ -203,5 +225,7 @@ let () =
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
         test_case "sse guard registry is shared" `Quick
           test_sse_guard_registry_is_shared_with_cleanup_loop;
+        test_case "preserve guard keeps cooldown" `Quick
+          test_preserve_guard_keeps_ag_ui_cooldown;
       ]);
     ]

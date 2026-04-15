@@ -12,6 +12,7 @@ export interface RuntimeCounts {
   keepers: number
   tasks: number
   totalRuntimes: number
+  configuredKeepers: number
   source: RuntimeCountSource
 }
 
@@ -20,8 +21,10 @@ interface ResolveRuntimeCountsOptions {
   agentsCount: number
   keepersCount: number
   tasksCount?: number
-  namespaceTruthCounts?: DashboardNamespaceTruthResponse['namespace']['counts']
+  namespaceTruthCounts?: DashboardNamespaceTruthResponse['root']['counts']
+  namespaceTruthConfiguredKeepers?: number
   shellCounts?: DashboardShellResponse['counts'] | null
+  shellConfiguredKeepers?: number
 }
 
 function normalizeCount(value: unknown): number {
@@ -31,13 +34,17 @@ function normalizeCount(value: unknown): number {
 }
 
 function normalizeCounts(
-  raw: DashboardNamespaceTruthResponse['namespace']['counts'] | DashboardShellResponse['counts'] | null | undefined,
+  raw: DashboardNamespaceTruthResponse['root']['counts'] | DashboardShellResponse['counts'] | null | undefined,
 ) {
   if (!raw) return null
   return {
     agents: normalizeCount(raw.agents),
     keepers: normalizeCount(raw.keepers),
     tasks: normalizeCount(raw.tasks),
+    totalRuntimes:
+      typeof raw.total_runtimes === 'number' && Number.isFinite(raw.total_runtimes)
+        ? Math.max(0, Math.floor(raw.total_runtimes))
+        : normalizeCount(raw.agents) + normalizeCount(raw.keepers),
   }
 }
 
@@ -47,7 +54,9 @@ export function resolveRuntimeCounts({
   keepersCount,
   tasksCount = 0,
   namespaceTruthCounts,
+  namespaceTruthConfiguredKeepers,
   shellCounts,
+  shellConfiguredKeepers,
 }: ResolveRuntimeCountsOptions): RuntimeCounts {
   const live = {
     agents: normalizeCount(agentsCount),
@@ -57,13 +66,20 @@ export function resolveRuntimeCounts({
   const namespace = normalizeCounts(namespaceTruthCounts)
   const shell = normalizeCounts(shellCounts)
   const liveTotalRuntimes = live.agents + live.keepers
-  const namespaceTotalRuntimes = (namespace?.agents ?? 0) + (namespace?.keepers ?? 0)
-  const shellTotalRuntimes = (shell?.agents ?? 0) + (shell?.keepers ?? 0)
+  const namespaceTotalRuntimes = namespace?.totalRuntimes ?? 0
+  const shellTotalRuntimes = shell?.totalRuntimes ?? 0
+  const configuredKeepers =
+    namespaceTruthConfiguredKeepers != null
+      ? normalizeCount(namespaceTruthConfiguredKeepers)
+      : shellConfiguredKeepers != null
+        ? normalizeCount(shellConfiguredKeepers)
+        : live.keepers
 
   if (executionLoaded && (liveTotalRuntimes > 0 || (namespaceTotalRuntimes === 0 && shellTotalRuntimes === 0))) {
     return {
       ...live,
       totalRuntimes: liveTotalRuntimes,
+      configuredKeepers,
       source: 'execution',
     }
   }
@@ -72,6 +88,7 @@ export function resolveRuntimeCounts({
     return {
       ...namespace!,
       totalRuntimes: namespaceTotalRuntimes,
+      configuredKeepers,
       source: 'namespace-truth',
     }
   }
@@ -80,6 +97,7 @@ export function resolveRuntimeCounts({
     return {
       ...shell!,
       totalRuntimes: shellTotalRuntimes,
+      configuredKeepers,
       source: 'shell',
     }
   }
@@ -88,6 +106,7 @@ export function resolveRuntimeCounts({
     return {
       ...live,
       totalRuntimes: liveTotalRuntimes,
+      configuredKeepers,
       source: executionLoaded ? 'execution' : 'partial',
     }
   }
@@ -95,6 +114,7 @@ export function resolveRuntimeCounts({
   return {
     ...live,
     totalRuntimes: liveTotalRuntimes,
+    configuredKeepers,
     source: executionLoaded ? 'execution' : 'unknown',
   }
 }

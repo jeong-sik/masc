@@ -1,7 +1,7 @@
 (** Tests for Governance_pipeline — risk assessment and governance level policies. *)
 
 module Gp = Masc_mcp.Governance_pipeline
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
 
@@ -316,7 +316,7 @@ let test_risk_contract_risk_from_delivery_contract () =
                       ] );
                   ("repair_budget", `Int 0);
                 ] );
-            ("tool_names", `List [ `String "keeper_bash"; `String "keeper_github" ]);
+            ("tool_names", `List [ `String "keeper_bash"; `String "keeper_shell" ]);
           ])
   in
   Alcotest.(check string) "delivery contract drives critical risk"
@@ -545,7 +545,7 @@ let test_hook_development_allows () =
     ~tool_name:"__gov_test_delete"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "ok"));
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
   (match result with
@@ -561,7 +561,7 @@ let test_hook_production_blocks_critical () =
     ~tool_name:"__gov_test_delete2"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
@@ -579,7 +579,7 @@ let test_hook_production_allows_low () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"masc_status" ~args:`Null in
   (match result with
@@ -592,7 +592,7 @@ let test_hook_enterprise_blocks_high () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" in
   let result = hook ~name:"masc_create_room" ~args:`Null in
   (match result with
@@ -608,7 +608,7 @@ let test_hook_paranoid_blocks_medium () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:"masc_join" ~args:`Null in
   (match result with
@@ -625,7 +625,7 @@ let test_blocked_response_structure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:generic_transition_tool ~args:transition_claim_input in
   (match result with
@@ -648,7 +648,7 @@ let test_blocked_response_structure_claim_next () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
-  let config = Room.default_config tmpdir in
+  let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:explicit_claim_tool ~args:`Null in
   (match result with
@@ -784,15 +784,15 @@ let test_escalation_non_state_mod_unchanged () =
   Alcotest.(check string) "read-only stays low"
     "low" (Gp.risk_level_to_string unchanged)
 
-let test_escalation_read_only_keeper_github_unchanged () =
+let test_escalation_read_only_keeper_shell_gh_unchanged () =
   let unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr view 123")])
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
       ~base_risk:Gp.Low
   in
-  Alcotest.(check string) "read-only keeper_github stays low"
+  Alcotest.(check string) "read-only keeper_shell op=gh stays low"
     "low" (Gp.risk_level_to_string unchanged)
 
 let test_tool_capabilities_known () =
@@ -892,8 +892,8 @@ let () =
         test_escalation_no_trifecta_no_change;
       Alcotest.test_case "escalation: non-state_mod unchanged" `Quick
         test_escalation_non_state_mod_unchanged;
-      Alcotest.test_case "escalation: read-only keeper_github unchanged" `Quick
-        test_escalation_read_only_keeper_github_unchanged;
+      Alcotest.test_case "escalation: read-only keeper_shell op=gh unchanged" `Quick
+        test_escalation_read_only_keeper_shell_gh_unchanged;
       Alcotest.test_case "capabilities: known tool" `Quick
         test_tool_capabilities_known;
       Alcotest.test_case "capabilities: unknown tool" `Quick

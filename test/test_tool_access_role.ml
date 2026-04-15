@@ -188,27 +188,22 @@ let test_permissions_promoted_to_metadata_ssot () =
        ~base_path:"/tmp/masc-permission-metadata-ssot" ());
   let expectations =
     [
-      ("masc_init", Types.CanInit);
       ("masc_status", Types.CanReadState);
       ("masc_add_task", Types.CanAddTask);
       ("masc_board_list", Types.CanReadState);
-      ("masc_auth_enable", Types.CanInit);
-      ("masc_operator_action", Types.CanBroadcast);
+      (* CP purge: masc_operator_action, masc_unit_list and other command-plane
+         tool metadata expectations removed with deletion of lib/command_plane/. *)
       ("masc_worktree_create", Types.CanCreateWorktree);
       ("masc_autoresearch_status", Types.CanReadState);
       ("masc_agent_card", Types.CanReadState);
       ("masc_heartbeat", Types.CanBroadcast);
       ("masc_config", Types.CanReadState);
-      ("masc_unit_list", Types.CanReadState);
-      ("masc_pause_status", Types.CanReadState);
       ("masc_tool_list", Types.CanReadState);
       ("masc_runtime_verify", Types.CanReadState);
       ("masc_persona_list", Types.CanReadState);
-      ("masc_keeper_reconcile", Types.CanBroadcast);
       ("masc_keeper_reset", Types.CanBroadcast);
       ("masc_join", Types.CanJoin);
       ("masc_broadcast", Types.CanBroadcast);
-      ("masc_verify_request", Types.CanReadState);
       ("masc_portal_send", Types.CanSendPortal);
       ("channel_gate", Types.CanBroadcast);
     ]

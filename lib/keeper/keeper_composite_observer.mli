@@ -13,39 +13,94 @@
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
 
-    Initial scope: derives [ksm_phase] and [kmc_compaction] directly from
-    the registry entry. [kdp_decision] / [kcl_cascade_state] remain
-    [`Undecided`] / [`Idle`] until follow-up PRs wire the
-    [Context_measured] / cascade-runtime observation points.
+    Current scope: all projected sub-FSM live states are written directly
+    into [Keeper_registry.registry_entry]. The observer no longer infers
+    decision/cascade/compaction state from coarse parent conditions.
 
     @since RFC-0003 — Composite observer v0. *)
 
-type turn_phase =
-  [ `Idle
-  | `Prompting
-  | `Executing
-  | `Compacting
-  | `Finalizing ]
+(** KSM projection mirrored from [PhaseSet] in
+    [specs/keeper-state-machine/KeeperCompositeLifecycle.tla].
 
-type decision_stage =
-  [ `Undecided
-  | `Guard_ok
-  | `Gate_rejected
-  | `Tool_policy_selected ]
+    This is intentionally not the full [Keeper_state_machine.phase] domain:
+    the composite observer collapses turn-external phases into [Ksm_stable]
+    so the state set stays aligned with the observer TLA+ model. *)
+type ksm_phase =
+  | Ksm_running
+  | Ksm_failing
+  | Ksm_overflowed
+  | Ksm_compacting
+  | Ksm_handing_off
+  | Ksm_draining
+  | Ksm_stable
 
-type cascade_state =
-  [ `Idle
-  | `Selecting
-  | `Trying
-  | `Done
-  | `Exhausted ]
+val all_ksm_phases : ksm_phase list
 
-type compaction_stage =
-  [ `Accumulating
-  | `Compacting
-  | `Done ]
+type turn_phase = Keeper_registry.turn_phase =
+  | Turn_idle
+  | Turn_prompting
+  | Turn_executing
+  | Turn_compacting
+  | Turn_finalizing
 
-(** Five safety invariants from KeeperCompositeLifecycle.tla.
+val all_turn_phases : turn_phase list
+
+type decision_stage = Keeper_registry.decision_stage =
+  | Decision_undecided
+  | Decision_guard_ok
+  | Decision_gate_rejected
+  | Decision_tool_policy_selected
+
+val all_decision_stages : decision_stage list
+
+type cascade_state = Keeper_registry.cascade_state =
+  | Cascade_idle
+  | Cascade_selecting
+  | Cascade_trying
+  | Cascade_done
+  | Cascade_exhausted
+
+val all_cascade_states : cascade_state list
+
+type compaction_stage = Keeper_registry.compaction_stage =
+  | Compaction_accumulating
+  | Compaction_compacting
+  | Compaction_done
+
+val all_compaction_stages : compaction_stage list
+
+(** Named TLA actions mirrored as OCaml variants so the observer contract
+    can stay 1:1 with [KeeperCompositeLifecycle.tla]. *)
+type tla_action =
+  | Action_start_turn
+  | Action_measurement_broadcast
+  | Action_decide_guard
+  | Action_select_tool_policy
+  | Action_start_cascade_selection
+  | Action_select_cascade
+  | Action_gate_rejected
+  | Action_cascade_done
+  | Action_cascade_exhausted
+  | Action_finish_turn
+  | Action_start_compaction
+  | Action_finish_compaction
+  | Action_enter_failing
+  | Action_clear_failing
+  | Action_enter_overflowed
+  | Action_overflowed_auto_compact
+
+val all_tla_actions : tla_action list
+
+(** Named TLA invariants mirrored as OCaml variants. *)
+type invariant_key =
+  | Invariant_phase_turn_alignment
+  | Invariant_no_cascade_before_measurement
+  | Invariant_compaction_atomicity
+  | Invariant_event_priority_monotone
+
+val all_invariant_keys : invariant_key list
+
+(** Safety invariants from KeeperCompositeLifecycle.tla.
     Each field is [true] when the invariant holds for the observed
     snapshot. A [false] value signals a composite-level safety violation
     that the dashboard should surface to the operator. *)
@@ -54,7 +109,6 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
-  recovery_two_store_sync : bool;
 }
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -64,20 +118,21 @@ type invariants_check = {
 type last_outcome = {
   turn_id : int;
   ended_at : float;
+  decision_stage : decision_stage;
+  cascade_state : cascade_state;
+  selected_model : string option;
 }
 
 type snapshot = {
   correlation_id : string;
   run_id : string;
   ts : float;
-  ksm_phase : Keeper_state_machine.phase;
+  ksm_phase : ksm_phase;
   ktc_turn_phase : turn_phase;
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  reconcile_data : bool;
-  reconcile_fsm : bool;
   invariants : invariants_check;
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is
@@ -97,6 +152,7 @@ type snapshot = {
     envelope, PR OAS#845). When absent, the snapshot uses
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
     reads within the same keeper transition return the same id. *)
+
 val observe :
   ?correlation_id:string ->
   ?run_id:string ->
@@ -106,16 +162,29 @@ val observe :
 
 (** Stringify [turn_phase] for JSON serialisation. Mirrors the lowercase
     edge labels used in KeeperTurnCycle.tla. *)
+val ksm_phase_to_string : ksm_phase -> string
+val ksm_phase_of_string : string -> ksm_phase option
+
 val turn_phase_to_string : turn_phase -> string
+val turn_phase_of_string : string -> turn_phase option
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
 val decision_stage_to_string : decision_stage -> string
+val decision_stage_of_string : string -> decision_stage option
 
 (** Stringify [cascade_state]. Mirrors CascadeLiveness.tla action labels. *)
 val cascade_state_to_string : cascade_state -> string
+val cascade_state_of_string : string -> cascade_state option
 
 (** Stringify [compaction_stage]. Mirrors MemoryCompaction.tla. *)
 val compaction_stage_to_string : compaction_stage -> string
+val compaction_stage_of_string : string -> compaction_stage option
+
+val tla_action_to_string : tla_action -> string
+val tla_action_of_string : string -> tla_action option
+
+val invariant_key_to_string : invariant_key -> string
+val invariant_key_of_string : string -> invariant_key option
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

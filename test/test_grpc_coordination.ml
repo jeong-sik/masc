@@ -259,7 +259,7 @@ let test_grpc_server_registers_health_service () =
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       with_temp_dir "masc-grpc-health" (fun dir ->
-          let room_config = Room_utils.default_config dir in
+          let room_config = Coord_utils.default_config dir in
           let server =
             Masc_mcp.Masc_grpc_server.create_server
               ~port:Masc_mcp.Masc_grpc_server.default_port
@@ -275,6 +275,34 @@ let test_grpc_server_registers_health_service () =
             (List.mem "grpc.reflection.v1alpha.ServerReflection" services);
           Alcotest.(check bool) "health service registered" true
             (List.mem "grpc.health.v1.Health" services)))
+
+let test_get_status_projects_backlog_tasks () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-status" (fun dir ->
+      let room_config = Coord_utils.default_config dir in
+      ignore (Masc_mcp.Coord.init room_config ~agent_name:(Some "alpha"));
+      ignore
+        (Masc_mcp.Coord.add_task room_config
+           ~title:"Fix stale projection" ~priority:1
+           ~description:"Use backlog SSOT for gRPC status");
+      ignore (Masc_mcp.Coord.claim_next room_config ~agent_name:"alpha");
+      let service =
+        Masc_mcp.Masc_grpc_service.create_service
+          ~room_config
+          ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+      in
+      match Grpc_eio.Service.get_method service "GetStatus" with
+      | Some { handler = `Unary handler; _ } ->
+          let resp = T.StatusResponse.of_bytes (handler "") in
+          Alcotest.(check int) "tasks count" 1 (List.length resp.tasks);
+          let task = List.hd resp.tasks in
+          Alcotest.(check string) "task id" "task-001" task.T.id;
+          Alcotest.(check string) "task title" "Fix stale projection" task.T.title;
+          Alcotest.(check string) "task status" "claimed" task.T.status;
+          Alcotest.(check string) "task assignee" "alpha" task.T.assigned_to;
+          Alcotest.(check int) "task priority" 1 task.T.priority
+      | _ -> Alcotest.fail "GetStatus unary handler missing")
 
 let test_empty_request_handling () =
   (* Verify graceful handling of empty protobuf message (all defaults). *)
@@ -325,6 +353,8 @@ let () =
       ( "service",
         [
           Alcotest.test_case "service_name" `Quick test_service_name;
+          Alcotest.test_case "get_status_projects_backlog_tasks" `Quick
+            test_get_status_projects_backlog_tasks;
         ] );
       ( "server_config",
         [

@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { JsonViewerCard } from '../common/json-viewer'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
 import { formatTimeHms } from '../../lib/format-time'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
@@ -113,8 +113,10 @@ export function ChatMessageBubble({
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const [rawExpanded, setRawExpanded] = useState(false)
+  const [expandedRaw, setExpandedRaw] = useState(false)
+  const [rawExpandedRaw, setRawExpandedRaw] = useState(false)
+  const expanded = showMetadata && expandedRaw
+  const rawExpanded = showMetadata && rawExpandedRaw
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -123,13 +125,6 @@ export function ChatMessageBubble({
   const state = stateRows(entry.details?.stateBlock)
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
-
-  useEffect(() => {
-    if (!showMetadata) {
-      setExpanded(false)
-      setRawExpanded(false)
-    }
-  }, [showMetadata])
 
   return html`
     <article
@@ -209,7 +204,7 @@ export function ChatMessageBubble({
                 class=${`border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)] ${
                   isMessenger ? 'rounded-xl px-2.5 py-1' : 'rounded-full px-3 py-1'
                 }`}
-                onClick=${() => { setExpanded(!expanded) }}
+                onClick=${() => { setExpandedRaw(!expandedRaw) }}
               >
                 ${expanded ? '상세 숨기기' : '상세 보기'}
               </button>
@@ -285,7 +280,7 @@ export function ChatMessageBubble({
                       <button
                         type="button"
                         class="self-start rounded-full border border-[var(--card-border)] bg-[rgba(255,255,255,0.04)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--white-10)] hover:text-[var(--text-body)]"
-                        onClick=${() => { setRawExpanded(!rawExpanded) }}
+                        onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
                       </button>
@@ -314,7 +309,10 @@ export function ChatTranscript({
   variant?: ChatTranscriptVariant
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const lastSignature = entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}`).join('|')
+  const lastSignature = useMemo(
+    () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}`).join('|'),
+    [entries],
+  )
 
   useEffect(() => {
     const el = scrollerRef.current

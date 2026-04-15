@@ -5,15 +5,16 @@ open Server_utils
 open Server_dashboard_http_core
 
 (** Track whether shell cache has been populated at least once.
-    Used for adaptive timeout in namespace-truth: cold path gets more time. *)
-let _shell_warmed = ref false
+    Atomic.t for cross-domain visibility: read from executor pool
+    worker domain via [namespace_truth_snapshot_from_caches].
+    Monotonic false→true; stale false just picks the cold timeout. *)
+let _shell_warmed : bool Atomic.t = Atomic.make false
 
 (** Last-known-good shell result for graceful degradation on timeout.
-    When the shell fiber times out (I/O contention), returning the stale
-    shell JSON is strictly better than returning empty [`Assoc []] which
-    zeros out namespace counts and focus data. Updated on every successful
-    shell fetch. *)
-let _last_good_shell : Yojson.Safe.t ref = ref (`Assoc [])
+    Atomic.t for cross-domain visibility (same reason as [_shell_warmed]).
+    Each update swaps a fully-constructed Yojson.Safe.t value;
+    readers always see a complete snapshot. *)
+let _last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 
 let warm_shell_cache (state : Mcp_server.server_state) =
   let t0 = Time_compat.now () in
@@ -22,8 +23,8 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        dashboard_shell_http_json ?clock:state.Mcp_server.clock
          state.Mcp_server.room_config
      in
-     _shell_warmed := true;
-     _last_good_shell := result;
+     Atomic.set _shell_warmed true;
+     Atomic.set _last_good_shell result;
      Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
        ((Time_compat.now () -. t0) *. 1000.0)
    with
@@ -90,7 +91,7 @@ let _execution_cache =
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
-    Called via [Room_hooks.on_task_mutation_fn] after task add,
+    Called via [Coord_hooks.on_task_mutation_fn] after task add,
     batch_add, and all transitions (claim, start, done, cancel,
     release) routed through [observe_task_transition].
     Best-effort: never raises — cache staleness must not break
@@ -188,7 +189,7 @@ let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
 let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 
-let running_keeper_names (config : Room.config) =
+let running_keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
   |> List.filter_map (fun name ->
          match Keeper_types.read_meta config name with
@@ -197,7 +198,7 @@ let running_keeper_names (config : Room.config) =
              Some name
          | _ -> None)
 
-let patch_surface_json_for_running_keepers (config : Room.config) = function
+let patch_surface_json_for_running_keepers (config : Coord.config) = function
   | `Assoc fields as json ->
       let running = running_keeper_names config in
       if running = [] then json
@@ -293,7 +294,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                ~extra:
                  [
                    ( "readonly_pool",
-                     Room_utils.domain_local_pg_backend_diagnostics_json () );
+                     Coord_utils.domain_local_pg_backend_diagnostics_json () );
                  ])
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -328,10 +329,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
         mark_cached_surface_error _transport_health_cache exn;
         raise exn
   in
-  let interval_s =
-    float_of_env_default "MASC_DASHBOARD_TRANSPORT_HEALTH_INTERVAL_S"
-      ~default:30.0 ~min_v:5.0 ~max_v:120.0
-  in
+  let interval_s = 30.0 in
   Proactive_refresh.start ~sw ~clock
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s)
@@ -362,7 +360,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
              ~extra:
                [
                  ( "readonly_pool",
-                   Room_utils.domain_local_pg_backend_diagnostics_json () );
+                   Coord_utils.domain_local_pg_backend_diagnostics_json () );
                ])
   in
   match fixture, actor, full_mode with
@@ -385,5 +383,17 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
 
-let dashboard_transport_health_http_json ~state:_ =
-  cached_surface_json _transport_health_cache
+let transport_health_cache_diagnostics () =
+  match cached_surface_json _transport_health_cache with
+  | `Assoc fields -> (
+      match List.assoc_opt "projection_diagnostics" fields with
+      | Some (`Assoc diagnostics) -> diagnostics
+      | _ -> [])
+  | _ -> []
+
+let dashboard_transport_health_http_json ~state =
+  let live_json =
+    Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config
+  in
+  extend_projection_diagnostics live_json
+    (("source", `String "live_metrics") :: transport_health_cache_diagnostics ())

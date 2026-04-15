@@ -51,7 +51,7 @@ let dedupe_tool_schemas_by_name (schemas : Types.tool_schema list) =
 
 let default_instructions =
   "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-NAMESPACE: Agents sharing the same base path (.masc/ folder) coordinate together. \
+PROJECT: Agents sharing the same base path (.masc/ folder) coordinate together. \
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
@@ -160,12 +160,11 @@ let label_words_from_identifier ident =
 (** Custom human-readable titles for key tools.
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
-  (* Room lifecycle *)
-  ("masc_init", "Initialize Project Scope");
-  ("masc_join", "Join Namespace");
-  ("masc_leave", "Leave Namespace");
-  ("masc_status", "Namespace Status");
-  ("masc_reset", "Reset Namespace");
+  (* Coord lifecycle *)
+  ("masc_join", "Join Project");
+  ("masc_leave", "Leave Project");
+  ("masc_status", "Project Status");
+  ("masc_reset", "Reset Project");
   ("masc_who", "List Online Agents");
   ("masc_check", "Check Preconditions");
   ("masc_workflow_guide", "Workflow Guide");
@@ -191,18 +190,12 @@ let custom_tool_titles : (string * string) list = [
   ("masc_plan_clear_task", "Clear Current Task");
   ("masc_note_add", "Add Note");
   ("masc_deliver", "Deliver Result");
-  ("masc_error_add", "Record Error");
-  ("masc_error_resolve", "Resolve Error");
   (* Agents *)
   ("masc_agents", "List Agent Details");
   ("masc_agent_update", "Update Agent Profile");
   ("masc_register_capabilities", "Register Agent Capabilities");
-  ("masc_find_by_capability", "Find Agent by Capability");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
-  ("masc_heartbeat_start", "Start Auto-Heartbeat");
-  ("masc_heartbeat_stop", "Stop Auto-Heartbeat");
-  ("masc_heartbeat_list", "List Active Heartbeats");
   (* Operations *)
   ("masc_operator_snapshot", "Operator Snapshot");
   ("masc_operator_digest", "Operator Digest");
@@ -218,13 +211,11 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operation_checkpoint", "Operation Checkpoint");
   (* Worktree *)
   ("masc_worktree_create", "Create Worktree");
-  ("masc_worktree_status", "Worktree Status");
   ("masc_worktree_remove", "Remove Worktree");
   (* Keeper *)
   ("masc_keeper_up", "Start Keeper");
   ("masc_keeper_msg", "Send Keeper Message");
   ("masc_keeper_repair", "Keeper Repair");
-  ("masc_keeper_reconcile", "Keeper Reconcile");
   ("masc_keeper_status", "Keeper Status");
   ("masc_keeper_down", "Stop Keeper");
   ("masc_keeper_compact", "Compact Keeper Context");
@@ -232,7 +223,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_keeper_create_from_persona", "Create Keeper from Persona");
   (* SDK aliases *)
   ("masc_list_tasks", "List Tasks");
-  ("masc_room_status", "Namespace Status");
+  ("masc_room_status", "Project Status");
   ("masc_claim_task", "Claim Task");
   ("masc_set_current_task", "Bind Current Task");
   ("masc_complete_task", "Complete Task");
@@ -240,11 +231,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_cancel_task", "Cancel Task");
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)
-  ("masc_poll_events", "Poll Events");
   ("masc_cleanup_zombies", "Clean Up Zombie Agents");
   ("masc_dispatch_plan", "Dispatch Plan");
   ("masc_dispatch_assign", "Dispatch Assign");
-  ("masc_compact_context", "Compact Context");
 ]
 
 let custom_title_table : string StringMap.t =
@@ -344,21 +333,6 @@ let tool_output_schema_field = function
              ("agent_name", string_schema);
              ("timestamp", string_schema);
              ("success", bool_schema);
-           ])
-  | "masc_heartbeat_list" ->
-      Some
-        (permissive_object_schema
-           [
-             ("heartbeats", `Assoc [
-               ("type", `String "array");
-               ("items", permissive_object_schema [
-                 ("id", string_schema);
-                 ("agent_name", string_schema);
-                 ("interval", int_schema);
-                 ("message", string_schema);
-                 ("uptime_s", int_schema);
-               ]);
-             ]);
            ])
   | "masc_plan_get" ->
       Some

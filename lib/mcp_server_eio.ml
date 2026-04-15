@@ -79,7 +79,7 @@ let read_only_tools_inline =
   ["masc_status"; "masc_who"; "masc_messages"]
 
 let requires_join_tools_inline =
-  ["masc_broadcast"; "masc_listen"; "masc_leave"]
+  ["masc_broadcast"; "masc_leave"]
 
 let mcp_context_required_tools_inline =
   Tool_schemas_inline.schemas
@@ -99,7 +99,7 @@ let () = Tool_dispatch.init_mcp_context_required_set mcp_context_required_tools_
    and worker tools (worker_oas). *)
 let () = Tool_dispatch.init_destructive_set
   [ "keeper_bash"; "keeper_fs_edit";
-    "keeper_github"; "keeper_pr_workflow";
+    "keeper_pr_workflow";
     "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete" ]
 
 (* Tag registry initialization.

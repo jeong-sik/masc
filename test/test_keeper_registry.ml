@@ -545,11 +545,11 @@ let test_find_by_agent_name () =
 
 (* ── resolve_config tests ────────────────────────────────── *)
 
-module Room_setup = Room_utils_backend_setup
+module Coord_setup = Coord_utils_backend_setup
 
 (** Minimal in-memory config for testing resolve_config.
     Only base_path matters; backend is a throwaway Memory instance. *)
-let make_test_config base_path : Room_setup.config =
+let make_test_config base_path : Coord_setup.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
@@ -562,7 +562,7 @@ let make_test_config base_path : Room_setup.config =
     workspace_path = base_path;
     lock_expiry_minutes = 2;
     backend_config;
-    backend = Room_setup.Memory (Backend.Memory.create ());
+    backend = Coord_setup.Memory (Backend.Memory.create ());
   }
 
 let test_resolve_config_scoped_hit () =

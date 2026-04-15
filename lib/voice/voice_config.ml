@@ -68,9 +68,17 @@ let dedupe_keep_order values =
   in
   loop [] [] values
 
+let voice_config_file_in root =
+  let masc_dir =
+    Coord_utils.masc_root_dir_from
+      ~base_path:root
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
+  Filename.concat masc_dir "voice_config.json"
+
 let base_path_voice_config_path_opt () =
   Env_config_core.base_path_opt ()
-  |> Option.map (fun root -> Filename.concat root ".masc/voice_config.json")
+  |> Option.map voice_config_file_in
 
 let repo_voice_config_path_opt () =
   let root =
@@ -78,11 +86,11 @@ let repo_voice_config_path_opt () =
     | Some bp -> bp
     | None ->
       let cwd = Sys.getcwd () in
-      (match Room_utils_backend_setup.find_git_root cwd with
+      (match Coord_utils_backend_setup.find_git_root cwd with
        | Some path -> path
        | None -> cwd)
   in
-  Some (Filename.concat root ".masc/voice_config.json")
+  Some (voice_config_file_in root)
 
 let fallback_voice_config_path () =
   let root =
@@ -90,7 +98,7 @@ let fallback_voice_config_path () =
     | Some bp -> bp
     | None -> Sys.getcwd ()
   in
-  Filename.concat root ".masc/voice_config.json"
+  voice_config_file_in root
 
 let config_path_candidates () =
   [

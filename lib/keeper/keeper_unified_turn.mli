@@ -13,7 +13,7 @@
     3. Observes tool history from result to update metrics
     4. Returns updated keeper_meta
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param generation Current generation counter *)
@@ -31,6 +31,7 @@ val update_metrics_from_result :
       autonomous runtime accounting in the unified loop. *)
   ?update_proactive_rt:bool ->
   ?social_state:Keeper_social_model.social_state ->
+  ?social_transition_reason:string ->
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
 
@@ -41,11 +42,12 @@ val update_metrics_from_failure :
   reason:string ->
   ?is_transient:bool ->
   ?social_state:Keeper_social_model.social_state ->
+  ?social_transition_reason:string ->
   unit ->
   Keeper_types.keeper_meta
 
 val append_metrics_snapshot :
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
@@ -128,12 +130,23 @@ val resolved_max_context_for_turn :
   string list ->
   int
 
-val run_unified_turn :
-  config:Room.config ->
+val run_keeper_cycle :
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   generation:int ->
-  ?channel:Keeper_world_observation.unified_turn_channel ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
+  ?semaphore_wait_ms:int ->
+  ?shared_context:Agent_sdk.Context.t ->
+  unit ->
+  (Keeper_types.keeper_meta, Oas.Error.sdk_error) result
+
+val run_unified_turn :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  observation:Keeper_world_observation.world_observation ->
+  generation:int ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
   ?shared_context:Agent_sdk.Context.t ->
   unit ->

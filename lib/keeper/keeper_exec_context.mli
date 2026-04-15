@@ -59,6 +59,7 @@ val checkpoint_max_tokens :
   Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint :
+  ?repair_orphans:bool ->
   max_checkpoint_messages:int ->
   Agent_sdk.Checkpoint.t -> primary_model_max_tokens:int -> working_context
 
@@ -199,13 +200,13 @@ val apply_post_turn_lifecycle :
   post_turn_lifecycle
 
 val dispatch_keeper_phase_event :
-  config:Room.config ->
+  config:Coord.config ->
   keeper_name:string ->
   Keeper_state_machine.event ->
   unit
 
 val dispatch_post_turn_lifecycle_events :
-  config:Room.config ->
+  config:Coord.config ->
   keeper_name:string ->
   post_turn_lifecycle ->
   unit
@@ -227,7 +228,7 @@ val keeper_write_done : string list -> bool
 
 val keeper_action_kind_of_tool_names : string list -> string
 
-(** {1 Model and Room Utilities} *)
+(** {1 Model and Coord Utilities} *)
 
 val effective_model_labels_for_turn :
   keeper_meta -> string list
@@ -236,9 +237,9 @@ val room_cursor_for : keeper_meta -> string -> int
 
 val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
 
-val room_ids_for_meta : Room.config -> keeper_meta -> string list
+val room_ids_for_meta : Coord.config -> keeper_meta -> string list
 
-val ensure_keeper_room_presence : Room.config -> keeper_meta -> keeper_meta
+val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta
 
 (** {1 Mention Detection} *)
 

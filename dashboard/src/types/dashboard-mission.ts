@@ -1,4 +1,3 @@
-import type { CommandPlaneSwarmStatus, CommandPlaneSnapshot } from './command-plane'
 import type { KeeperDiagnostic, Message } from './core'
 import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
 
@@ -6,8 +5,6 @@ export interface DashboardMissionSummary {
   room_health?: string
   cluster?: string
   project?: string
-  namespace_id?: string | null
-  namespace?: string | null
   paused?: boolean
   tempo_interval_s?: number
   active_agents?: number
@@ -24,7 +21,7 @@ export interface DashboardMissionCommandFocus {
   health?: string
   active_operations?: number
   pending_approvals?: number
-  swarm_overview?: CommandPlaneSwarmStatus['overview']
+  swarm_overview?: Record<string, unknown>
   top_attention?: OperatorAttentionItem | null
   top_action?: OperatorRecommendedAction | null
 }
@@ -330,8 +327,6 @@ export interface DashboardProofWorkerRunEvidence {
 }
 
 export interface OperatorNamespaceSnapshot {
-  namespace_id?: string
-  namespace?: string
   project?: string
   cluster?: string
   paused?: boolean
@@ -527,7 +522,7 @@ export interface OperatorReviewDecision {
 export interface OperatorReviewItem {
   id: string
   kind: 'pending_confirm' | 'namespace_gate' | 'room_gate' | 'session_risk' | 'keeper_pressure' | string
-  target_type: 'namespace' | 'room' | 'keeper' | string
+  target_type: 'root' | 'namespace' | 'room' | 'keeper' | string
   target_id?: string | null
   severity: string
   urgency: 'now' | 'soon' | string
@@ -557,7 +552,7 @@ export interface OperatorReviewSummary {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'namespace' | 'room' | string
+  target_type: 'root' | 'namespace' | 'room' | string
   target_id?: string | null
   health?: string
   judgment_owner?: string | null
@@ -571,8 +566,8 @@ export interface OperatorDigest {
   active_recommendation_summary?: OperatorGuidanceSummary | null
   fallback_recommended_actions?: OperatorRecommendedAction[]
   recommendation_summary?: OperatorGuidanceSummary | null
-  swarm_status?: CommandPlaneSwarmStatus
-  namespace?: OperatorNamespaceSnapshot
+  swarm_status?: Record<string, unknown>
+  root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
   review_queue: OperatorReviewItem[]
@@ -597,13 +592,13 @@ export interface KeeperRecoverResult {
 }
 
 export interface OperatorSnapshot {
-  namespace: OperatorNamespaceSnapshot
+  root: OperatorNamespaceSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
   operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
-  command_plane?: CommandPlaneSnapshot
-  swarm_status?: CommandPlaneSwarmStatus
+  command_plane?: Record<string, unknown>
+  swarm_status?: Record<string, unknown>
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
   pending_confirm_envelope?: PendingConfirmEnvelope | null
@@ -625,7 +620,7 @@ export type OperatorActionType =
   | 'review_resolve'
   | 'review_defer'
 
-export type OperatorTargetType = 'namespace' | 'room' | 'keeper' | 'review_item'
+export type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper' | 'review_item'
 
 export interface OperatorActionRequest {
   actor: string

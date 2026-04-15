@@ -178,10 +178,10 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used jso
         in
         Some
           (Operator_judgment.record config ~surface:"command.namespace"
-             ~target_type:Operator_judgment.Room ~target_id:None ~summary
+             ~target_type:Operator_judgment.Coord ~target_id:None ~summary
              ~confidence ?model_name:(Some model_used)
              ?recommended_action:
-               (build_recommended_action ~actor:keeper_name ~target_type:"namespace"
+               (build_recommended_action ~actor:keeper_name ~target_type:"root"
                   ~target_id:None (json |> member "recommended_action"))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:
@@ -215,12 +215,12 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
             in
             Some
               (Operator_judgment.record config ~surface:"command.swarm"
-                 ~target_type:Operator_judgment.Room
+                 ~target_type:Operator_judgment.Coord
                  ~target_id:(Some session_id) ~summary ~confidence
                  ?model_name:(Some model_used)
                  ?recommended_action:
                    (build_recommended_action ~actor:keeper_name
-                      ~target_type:"namespace" ~target_id:(Some session_id)
+                      ~target_type:"root" ~target_id:(Some session_id)
                       (json |> member "recommended_action"))
                  ~evidence_refs:(parse_string_list json "evidence_refs")
                  ~disagreement_with_truth:
@@ -259,7 +259,7 @@ let compute_judgments
 let should_backoff ~sw ~net =
   try
     let capacity =
-      Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+      Cascade_config.local_capacity_for_selections ~sw ~net
         [ "operator_judge" ]
     in
     capacity.all_discovered && capacity.endpoints_found > 0
@@ -273,7 +273,7 @@ let should_backoff ~sw ~net =
 let refresh_once ~sw ~net
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
-    ~(config : Room.config) ~build_facts =
+    ~(config : Coord.config) ~build_facts =
   let st = get_state config.base_path in
   if should_backoff ~sw ~net then
     let was_online =
@@ -326,7 +326,7 @@ let refresh_once ~sw ~net
             st.last_error <- None)
   end
 
-let start ~sw ~clock ~net ~(config : Room.config)
+let start ~sw ~clock ~net ~(config : Coord.config)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts () =

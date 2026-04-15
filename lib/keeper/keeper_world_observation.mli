@@ -1,4 +1,4 @@
-(** Keeper_world_observation — Structured world state for unified keeper turns.
+(** Keeper_world_observation — Structured world state for keeper cycles.
 
     Extracts and normalizes observation signals from room state, keeper meta,
     and context so the unified prompt builder and turn runner can consume
@@ -82,12 +82,14 @@ type world_observation = {
   work_discovery_due : bool;
 }
 
-type unified_turn_channel =
+type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
-(** Typed reason for running a keeper turn. Each variant corresponds to
-    exactly one code path in {!unified_turn_decision}. *)
+type unified_turn_channel = keeper_cycle_channel
+
+(** Typed reason for running a keeper cycle. Each variant corresponds to
+    exactly one code path in {!keeper_cycle_decision}. *)
 type turn_reason =
   | Mention_pending
   | Board_event_pending
@@ -101,51 +103,50 @@ type turn_reason =
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =
+  | Keeper_paused
+  | Approval_pending
   | Scheduled_autonomous_disabled
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
   | No_signal
 
-(** Turn decision with non-empty reason list (NEL).
+(** Keeper cycle decision with non-empty reason list (NEL).
     [Run] guarantees at least one trigger reason.
     [Skip] guarantees at least one skip reason.
-    Channel is held by [unified_turn_decision], not duplicated here. *)
+    Channel is held by [keeper_cycle_decision], not duplicated here. *)
 type turn_verdict =
   | Run of { reasons : turn_reason * turn_reason list }
   | Skip of { reasons : skip_reason * skip_reason list }
 
 (** Convert a single turn reason to a flat string tag.
-    Encoding is compatibility-oriented: variant payloads
-    (idle_sec, cooldown, unclaimed, failed, remaining_sec) are
-    not included in the output. Returns the same fixed tag
-    regardless of parameter values. *)
+    The tag is a stable snake_case form of the typed variant.
+    Variant payloads are intentionally omitted. *)
 val turn_reason_to_string : turn_reason -> string
 
 (** Convert a single skip reason to a flat string tag.
-    Encoding is compatibility-oriented: variant payloads
-    (remaining_sec) are not included in the output. *)
+    The tag is a stable snake_case form of the typed variant.
+    Variant payloads are intentionally omitted. *)
 val skip_reason_to_string : skip_reason -> string
 
 (** Convert channel to string tag. *)
-val channel_to_string : unified_turn_channel -> string
+val channel_to_string : keeper_cycle_channel -> string
 
 (** Extract all reasons as flat string tags from a verdict.
-    Tags are compatibility-oriented and do not include variant payloads.
-    Scheduled-autonomous run verdicts preserve the legacy flat tokens
-    that downstream logs and prompts previously consumed, including the
-    synthetic ["scheduled_autonomous_turn"], ["cooldown_elapsed"],
-    ["unclaimed_tasks"], and ["failed_tasks"] tags. *)
+    Tags map 1:1 to the typed reasons carried by the verdict and do not
+    include variant payloads. *)
 val verdict_reasons_to_strings : turn_verdict -> string list
 
-type unified_turn_decision = {
+type keeper_cycle_decision = {
   should_run : bool;
-  channel : unified_turn_channel;
+  channel : keeper_cycle_channel;
   verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;
   idle_gate_sec : int option;
 }
+
+type unified_turn_decision = keeper_cycle_decision
 
 type board_signal_match = {
   explicit_mention : bool;
@@ -177,11 +178,11 @@ val board_signal_match :
 
     @param pending_board_events Pre-collected board event summaries for this
       heartbeat, if already fetched during triage
-    @param config Room configuration for I/O operations
+    @param config Coord configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
   pending_board_events:pending_board_event list option ->
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   world_observation
 
@@ -204,8 +205,14 @@ val effective_proactive_cooldown :
   base_cooldown:int -> since_last:int ->
   ?consecutive_noop_count:int -> unit -> int
 
+val keeper_cycle_decision :
+  meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
+
 val unified_turn_decision :
-  meta:Keeper_types.keeper_meta -> world_observation -> unified_turn_decision
+  meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
+
+val should_run_keeper_cycle :
+  meta:Keeper_types.keeper_meta -> world_observation -> bool
 
 val should_run_unified_turn :
   meta:Keeper_types.keeper_meta -> world_observation -> bool

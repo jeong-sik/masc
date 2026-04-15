@@ -20,9 +20,6 @@ import type {
 function normalizeServerStatus(raw: unknown): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
-    namespace_id: asString(raw.namespace_id),
-    namespace: asString(raw.namespace),
-    namespace_base_path: asString(raw.namespace_base_path),
     coordination_root: asString(raw.coordination_root),
     workspace_path: asString(raw.workspace_path),
     workspace_differs: asBoolean(raw.workspace_differs),
@@ -129,22 +126,24 @@ function normalizeFocus(raw: unknown): DashboardNamespaceTruthFocus | null {
 
 export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthResponse {
   const root = isRecord(raw) ? raw : {}
-  const namespaceBlock = isRecord(root.namespace) ? root.namespace : {}
+  const namespaceBlock = isRecord(root.root) ? root.root : {}
   const executionBlock = isRecord(root.execution) ? root.execution : {}
   const commandBlock = isRecord(root.command) ? root.command : {}
   const metaCognitionBlock = isRecord(root.meta_cognition) ? root.meta_cognition : {}
   const operatorBlock = isRecord(root.operator) ? root.operator : {}
   return {
     generated_at: asString(root.generated_at),
-    namespace: {
+    root: {
       status: normalizeServerStatus(namespaceBlock.status),
       counts: isRecord(namespaceBlock.counts)
         ? {
             agents: asNumber(namespaceBlock.counts.agents),
             tasks: asNumber(namespaceBlock.counts.tasks),
             keepers: asNumber(namespaceBlock.counts.keepers),
+            total_runtimes: asNumber(namespaceBlock.counts.total_runtimes),
           }
         : undefined,
+      configured_keepers: asNumber(namespaceBlock.configured_keepers),
       provenance: asString(namespaceBlock.provenance) ?? null,
     },
     execution: {

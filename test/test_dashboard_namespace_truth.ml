@@ -147,10 +147,16 @@ let test_dashboard_namespace_truth_empty_room () =
         let open Yojson.Safe.Util in
         check string "cluster default"
           "default"
-          (json |> member "namespace" |> member "status" |> member "cluster" |> to_string);
+          (json |> member "root" |> member "status" |> member "cluster" |> to_string);
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);
+        check int "configured keepers default to zero"
+          0
+          (json |> member "root" |> member "configured_keepers" |> to_int);
+        check int "namespace counts expose total runtimes"
+          0
+          (json |> member "root" |> member "counts" |> member "total_runtimes" |> to_int);
         check string "focus source"
           "namespace"
           (json |> member "focus" |> member "source" |> to_string);
@@ -214,9 +220,9 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -237,10 +243,10 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
             let focus_label = json |> member "focus" |> member "label" |> to_string in
             check int "keeper-only room counts general agents as zero"
               0
-              (json |> member "namespace" |> member "counts" |> member "agents" |> to_int);
+              (json |> member "root" |> member "counts" |> member "agents" |> to_int);
             check int "keeper-only room still counts keeper meta"
               1
-              (json |> member "namespace" |> member "counts" |> member "keepers" |> to_int);
+              (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
             check bool "keeper-only room does not report empty room focus"
               false
               (String.equal focus_label
@@ -256,15 +262,15 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"codex-test-agent"
            ~agent_type_override:(Some "codex")
            ~capabilities:["typescript"]
            ());
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -285,10 +291,10 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
             let focus_label = json |> member "focus" |> member "label" |> to_string in
             check int "mixed room counts one general agent"
               1
-              (json |> member "namespace" |> member "counts" |> member "agents" |> to_int);
+              (json |> member "root" |> member "counts" |> member "agents" |> to_int);
             check int "mixed room counts one keeper"
               1
-              (json |> member "namespace" |> member "counts" |> member "keepers" |> to_int);
+              (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
             check bool "mixed room avoids empty runtime fallback"
               false
               (String.equal focus_label
@@ -330,8 +336,8 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -391,8 +397,8 @@ let test_dashboard_namespace_truth_exposes_latest_meta_digest () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -455,8 +461,8 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -543,7 +549,7 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
           (json |> member "status" = `Null);
         check bool "namespace block present"
           true
-          (json |> member "namespace" <> `Null);
+          (json |> member "root" <> `Null);
         check int "execution summary falls back to zero operations"
           0
           (json |> member "execution" |> member "summary" |> member "active_operations" |> to_int);
@@ -560,11 +566,11 @@ let test_last_good_shell_fallback_preserves_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      ignore (Lib.Room.init state.Lib.Mcp_server.room_config ~agent_name:None);
+      ignore (Lib.Coord.init state.Lib.Mcp_server.room_config ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so _last_good_shell gets populated. *)
       Lib.Server_dashboard_http.warm_shell_cache state;
-      let last_good = !(Lib.Server_dashboard_http._last_good_shell) in
+      let last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
       check bool "last good shell is non-empty after warm"
         true
         (last_good <> `Assoc []);
@@ -576,20 +582,20 @@ let test_last_good_shell_fallback_preserves_counts () =
         (counts <> `Null);
       (* Verify namespace-truth snapshot_from_caches uses the stale shell data
          even when the warmed flag is false (cold path, simulating timeout). *)
-      Lib.Server_dashboard_http._shell_warmed := false;
+      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
       let snapshot =
         match Lib.Server_dashboard_http.namespace_truth_snapshot_from_caches state with
         | Some json -> json
         | None -> fail "expected cached namespace-truth snapshot"
       in
-      let ns_counts = snapshot |> member "namespace" |> member "counts" in
+      let ns_counts = snapshot |> member "root" |> member "counts" in
       (* Shell was warmed once then reset; snapshot_from_caches should still
          produce a valid namespace block via the _last_good_shell fallback. *)
       check bool "namespace counts block present in fallback snapshot"
         true
         (ns_counts <> `Null);
       (* Restore warmed state for subsequent tests. *)
-      Lib.Server_dashboard_http._shell_warmed := true)
+      Atomic.set Lib.Server_dashboard_http._shell_warmed true)
 
 let test_namespace_truth_snapshot_hash_ignores_generated_at () =
   Fun.protect

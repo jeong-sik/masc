@@ -13,10 +13,87 @@ let keeper_suffix_tools = "/tools"
 let keeper_suffix_config = "/config"
 let keeper_suffix_boot = "/boot"
 let keeper_suffix_shutdown = "/shutdown"
+let keeper_suffix_reset = "/reset"
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
     (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
+
+let trajectory_line_ts = function
+  | Trajectory.Tool_call entry -> entry.ts
+  | Trajectory.Thinking entry -> entry.ts
+
+let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
+    : Trajectory.trajectory_line list =
+  let seen = Hashtbl.create 32 in
+  List.filter
+    (function
+      | Trajectory.Tool_call _ -> true
+      | Trajectory.Thinking entry ->
+          let key =
+            Printf.sprintf "%.6f\x1f%b\x1f%s"
+              entry.ts entry.redacted entry.content
+          in
+          if Hashtbl.mem seen key then false
+          else (
+            Hashtbl.add seen key ();
+            true))
+    lines
+
+let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
+    : Trajectory.trajectory_line option =
+  let source = Safe_ops.json_string ~default:"" "source" json in
+  let content = Safe_ops.json_string ~default:"" "content" json in
+  if source <> "internal_assistant" || String.trim content = "" then None
+  else
+    let ts =
+      match Safe_ops.json_float_opt "ts_unix" json with
+      | Some value when value > 0.0 -> value
+      | _ ->
+          match Safe_ops.json_float_opt "timestamp" json with
+          | Some value when value > 0.0 -> value
+          | _ -> 0.0
+    in
+    if ts <= 0.0 then None
+    else
+      let ts_iso =
+        match Safe_ops.json_string_opt "ts_iso" json with
+        | Some value when String.trim value <> "" -> value
+        | _ ->
+            match Safe_ops.json_string_opt "ts" json with
+            | Some value when String.trim value <> "" -> value
+            | _ -> Dashboard_utils.iso_of_unix ts
+      in
+      Some
+        (Trajectory.Thinking
+           {
+             ts;
+             ts_iso;
+             turn = Safe_ops.json_int ~default:0 "turn" json;
+             content;
+             content_length = String.length content;
+             redacted = Safe_ops.json_bool ~default:false "redacted" json;
+           })
+
+let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
+    : Trajectory.trajectory_line list =
+  let path = Keeper_types.keeper_internal_history_path config trace_id in
+  Fs_compat.load_jsonl path
+  |> List.filter_map internal_history_json_to_trajectory_line
+
+let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
+    (trajectory_lines : Trajectory.trajectory_line list)
+    : Trajectory.trajectory_line list =
+  let internal_lines = read_internal_history_lines ~config ~trace_id in
+  dedupe_thinking_lines (trajectory_lines @ internal_lines)
+  |> List.sort (fun left right ->
+         let cmp = Float.compare (trajectory_line_ts left) (trajectory_line_ts right) in
+         if cmp <> 0 then cmp
+         else
+           match left, right with
+           | Trajectory.Thinking _, Trajectory.Tool_call _ -> -1
+           | Trajectory.Tool_call _, Trajectory.Thinking _ -> 1
+           | _ -> 0)
 
 let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -161,6 +238,7 @@ type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_boot
   | Keeper_post_shutdown
+  | Keeper_post_reset
   | Keeper_post_unknown
 
 let classify_keeper_post_route req_path =
@@ -177,6 +255,7 @@ let classify_keeper_post_route req_path =
   else if ends_with keeper_suffix_config then Keeper_post_config
   else if ends_with keeper_suffix_boot then Keeper_post_boot
   else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
+  else if ends_with keeper_suffix_reset then Keeper_post_reset
   else Keeper_post_unknown
 
 let is_valid_keeper_name name =
@@ -294,6 +373,7 @@ let handle_keeper_lifecycle_post ~sw ~clock ~tool_name ~action state agent_name 
     match action with
     | "boot" -> Ok keeper_suffix_boot
     | "shutdown" -> Ok keeper_suffix_shutdown
+    | "reset" -> Ok keeper_suffix_reset
     | unknown ->
         Error (Printf.sprintf "unknown keeper lifecycle action: %s" unknown)
   in
@@ -394,7 +474,7 @@ let handle_keeper_get_subroutes state req request reqd =
            (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
     else
       let config = state.Mcp_server.room_config in
-      let masc_root = Filename.concat config.base_path ".masc" in
+      let masc_root = Coord.masc_root_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
           ~default:24
@@ -460,6 +540,9 @@ let handle_keeper_get_subroutes state req request reqd =
        | Ok (Some m) ->
          let trajectory_default_limit = 50 in
          let trajectory_max_limit = 500 in
+         let trace_id =
+           Keeper_id.Trace_id.to_string m.runtime.trace_id
+         in
          let limit =
            Server_utils.int_query_param req "limit"
              ~default:trajectory_default_limit
@@ -478,10 +561,16 @@ let handle_keeper_get_subroutes state req request reqd =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
          in
-         let masc_root = Filename.concat config.base_path ".masc" in
-         let all_lines =
+         let masc_root = Coord.masc_root_dir config in
+         let trajectory_lines =
            Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
-             ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
+             ~trace_id
+         in
+         let all_lines =
+           if include_thinking then
+             merge_keeper_trace_lines ~config ~trace_id trajectory_lines
+           else
+             trajectory_lines
          in
          (* Filter out thinking entries if not requested *)
          let lines =
@@ -499,7 +588,7 @@ let handle_keeper_get_subroutes state req request reqd =
          in
          let json = `Assoc [
            ("keeper", `String name);
-           ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
+           ("trace_id", `String trace_id);
            ("generation", `Int m.runtime.generation);
            ("total_entries", `Int total);
            ("showing", `Int (List.length recent));
@@ -619,12 +708,10 @@ let handle_keeper_get_subroutes state req request reqd =
               | None -> None))
         | _ -> None
       in
-      let turn_outcome : [`Ok | `Failed | `Blocked] option =
+      let turn_outcome : [`Ok | `Failed] option =
         match Keeper_registry.get ~base_path:state.Mcp_server.room_config.base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
           Some `Failed
-        | Some entry when entry.conditions.manual_reconcile_required ->
-          Some `Blocked
         | Some _ -> Some `Ok
         | None -> None
       in
@@ -782,7 +869,9 @@ let handle_keeper_get_subroutes state req request reqd =
          Http.Response.json ~status:`Not_found
            (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
        | Some entry ->
-         let snapshot = Keeper_composite_observer.observe entry in
+         let snapshot =
+           Keeper_composite_observer.observe entry
+         in
          let json = Keeper_composite_observer.snapshot_to_json snapshot in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

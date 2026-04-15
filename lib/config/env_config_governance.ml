@@ -17,12 +17,10 @@ module Inference = struct
     max 5
       (get_int ~default:timeout_seconds_int "MASC_OPERATOR_JUDGE_TIMEOUT_SEC")
 
-  (** Dashboard governance judge timeout.
-      Falls back to the global inference timeout unless explicitly overridden. *)
+  (** Dashboard governance judge timeout: falls back to the global
+      inference timeout (timeout_seconds_int), floored at 5 seconds. *)
   let dashboard_governance_judge_timeout_seconds =
-    max 5
-      (get_int ~default:timeout_seconds_int
-         "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC")
+    max 5 timeout_seconds_int
 
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =
@@ -127,7 +125,7 @@ module Operator = struct
   (** Operator judge interval, clamped to >= 15s. Default: 60. *)
   let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
 
-  (** Room TTL for operator judge cleanup, clamped to >= 15s. Default: 60. *)
+  (** Coord TTL for operator judge cleanup, clamped to >= 15s. Default: 60. *)
   let room_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC")
 
   (** Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. *)
@@ -141,7 +139,8 @@ end
 
 module Dashboard_config = struct
   (** Whether dashboard fixtures are enabled. Default: false.
-      Runtime-readable (tests change this via putenv). *)
+      Re-readable within the process; this does not imply shell-level
+      hot reload as an operator contract. *)
   let fixtures_enabled () = Feature_flag_registry.get_bool "MASC_DASHBOARD_FIXTURES_ENABLED"
 
   (** Whether the proactive command-plane snapshot cache should run.

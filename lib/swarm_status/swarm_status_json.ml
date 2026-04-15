@@ -9,15 +9,70 @@ let lane_phase_to_string = function
   | Awaiting_approval -> "awaiting_approval"
   | Lane_completed -> "completed"
 
+let lane_phase_of_string = function
+  | "forming" -> Forming
+  | "dispatching" -> Dispatching
+  | "executing" -> Executing
+  | "blocked" -> Blocked
+  | "awaiting_approval" -> Awaiting_approval
+  | "completed" -> Lane_completed
+  | _ -> Forming
+
 let lane_motion_to_string = function
   | Waiting -> "waiting"
   | Moving -> "moving"
   | Stalled -> "stalled"
   | Terminal -> "terminal"
 
+let lane_motion_of_string = function
+  | "waiting" -> Waiting
+  | "moving" -> Moving
+  | "stalled" -> Stalled
+  | "terminal" -> Terminal
+  | _ -> Waiting
+
 let flag_severity_to_string = function
   | Flag_bad -> "bad"
   | Flag_warn -> "warn"
+
+let flag_code_of_string = function
+  | "projected_only" -> Some Projected_only
+  | "missing_trace_events" -> Some Missing_trace_events
+  | "pending_manual_confirmation" -> Some Pending_manual_confirmation
+  | "missing_worker_binding" -> Some Missing_worker_binding
+  | "missing_runtime_progress" -> Some Missing_runtime_progress
+  | "stale_data" -> Some Stale_data
+  | "dashboard_source_split" -> Some Dashboard_source_split
+  | _ -> None
+
+let swarm_operation_status_to_string = function
+  | SOp_active -> "active" | SOp_planned -> "planned" | SOp_paused -> "paused"
+  | SOp_completed -> "completed" | SOp_cancelled -> "cancelled" | SOp_failed -> "failed"
+
+let swarm_operation_status_of_string = function
+  | "active" -> SOp_active | "planned" -> SOp_planned | "paused" -> SOp_paused
+  | "completed" -> SOp_completed | "cancelled" -> SOp_cancelled | "failed" -> SOp_failed
+  | _ -> SOp_active
+
+let swarm_detachment_status_to_string = function
+  | SDet_active -> "active" | SDet_awaiting_approval -> "awaiting_approval"
+  | SDet_stalled -> "stalled" | SDet_completed -> "completed"
+  | SDet_cancelled -> "cancelled" | SDet_failed -> "failed" | SDet_stopped -> "stopped"
+
+let swarm_detachment_status_of_string = function
+  | "active" -> SDet_active | "awaiting_approval" -> SDet_awaiting_approval
+  | "stalled" -> SDet_stalled | "completed" -> SDet_completed
+  | "cancelled" -> SDet_cancelled | "failed" -> SDet_failed | "stopped" -> SDet_stopped
+  | _ -> SDet_active
+
+let swarm_decision_status_to_string = function
+  | SDec_pending -> "pending" | SDec_approved -> "approved"
+  | SDec_denied -> "denied" | SDec_expired -> "expired"
+
+let swarm_decision_status_of_string = function
+  | "pending" -> SDec_pending | "approved" -> SDec_approved
+  | "denied" -> SDec_denied | "expired" -> SDec_expired
+  | _ -> SDec_pending
 
 let flag_code_to_string = function
   | Projected_only -> "projected_only"

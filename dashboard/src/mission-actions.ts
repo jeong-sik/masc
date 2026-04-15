@@ -3,6 +3,7 @@ import {
   fetchDashboardMissionBriefing,
   fetchDashboardMissionSession,
 } from './api'
+import { isAbortError } from './lib/async-state'
 import {
   missionSnapshot,
   missionLoading,
@@ -72,7 +73,10 @@ export async function refreshMissionSnapshot(
   return inflightMissionSnapshotRefresh
 }
 
-export async function refreshMissionSessionDetail(sessionId: string | null | undefined): Promise<void> {
+export async function refreshMissionSessionDetail(
+  sessionId: string | null | undefined,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
   if (!sessionId) {
     missionSessionDetail.value = null
     missionSessionDetailError.value = null
@@ -82,20 +86,28 @@ export async function refreshMissionSessionDetail(sessionId: string | null | und
   missionSessionDetailLoading.value = true
   missionSessionDetailError.value = null
   try {
-    const raw = await fetchDashboardMissionSession(sessionId)
+    const raw = await fetchDashboardMissionSession(sessionId, { signal: opts?.signal })
+    if (opts?.signal?.aborted) return
     missionSessionDetail.value = normalizeMissionSessionDetail(raw)
   } catch (err) {
+    if (isAbortError(err)) return
     missionSessionDetailError.value = err instanceof Error ? err.message : 'Failed to load session detail'
   } finally {
-    missionSessionDetailLoading.value = false
+    if (!opts?.signal?.aborted) {
+      missionSessionDetailLoading.value = false
+    }
   }
 }
 
-export async function refreshMissionBriefing(force = false): Promise<void> {
+export async function refreshMissionBriefing(
+  force = false,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
   missionBriefingLoading.value = true
   missionBriefingError.value = null
   try {
-    const raw = await fetchDashboardMissionBriefing(force)
+    const raw = await fetchDashboardMissionBriefing(force, { signal: opts?.signal })
+    if (opts?.signal?.aborted) return
     const normalized = normalizeMissionBriefing(raw)
     missionBriefing.value = normalized
     if (normalized.refreshing || normalized.status === 'pending') {
@@ -104,9 +116,12 @@ export async function refreshMissionBriefing(force = false): Promise<void> {
       clearMissionBriefingPoll()
     }
   } catch (err) {
+    if (isAbortError(err)) return
     missionBriefingError.value = err instanceof Error ? err.message : 'Failed to load mission briefing'
     clearMissionBriefingPoll()
   } finally {
-    missionBriefingLoading.value = false
+    if (!opts?.signal?.aborted) {
+      missionBriefingLoading.value = false
+    }
   }
 }

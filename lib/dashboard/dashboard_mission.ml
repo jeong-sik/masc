@@ -8,8 +8,8 @@ type session_context = Dashboard_mission_assembly.session_context = {
   created_by : string option;
   origin_kind : string;
   namespace : string option;
-  status : string;
-  health : string;
+  status : Dashboard_utils.session_lifecycle;
+  health : Dashboard_utils.health_level;
   member_names : string list;
   started_at : string option;
   elapsed_sec : int option;
@@ -37,9 +37,9 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-let room_scope_cache_segment (_config : Room_utils.config) = "default"
+let room_scope_cache_segment (_config : Coord_utils.config) = "default"
 
-let room_scoped_cache_key (config : Room_utils.config) prefix actor_name =
+let room_scoped_cache_key (config : Coord_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) actor_name
 
@@ -212,8 +212,14 @@ let _build_session_context session_json _cards =
       else
         "live=recent_turns · planned=known_members"
     in
-    let status = session_status_string session_json in
-    let is_terminal = List.mem status [ "completed"; "interrupted"; "cancelled"; "expired" ] in
+    let status =
+      Dashboard_utils.session_lifecycle_of_string
+        (session_status_string session_json)
+    in
+    let is_terminal = match status with
+      | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled | SL_expired -> true
+      | SL_active | SL_running | SL_paused | SL_failed | SL_stopped | SL_unknown -> false
+    in
     let blocker_summary =
       if is_terminal then
         (* Terminal sessions cannot be blocked — suppress stale blockers *)
@@ -242,22 +248,25 @@ let _build_session_context session_json _cards =
         created_by = trim_to_option (string_field "created_by" meta);
         origin_kind = session_origin_kind meta;
         namespace =
-          (match trim_to_option (string_field "namespace_id" meta) with
+          (match trim_to_option (string_field "project" meta) with
            | Some _ as value -> value
            | None -> trim_to_option (string_field "room_id" meta));
         status;
         health =
           (if is_terminal then
              (* Terminal sessions get neutral health — no false alarms *)
-             "ok"
+             Dashboard_utils.HL_ok
            else
-             match session_card with
-             | Some card ->
-                 trim_to_option (string_field "health" card)
-                 |> Option.value ~default:"ok"
-             | None ->
-                 trim_to_option (string_field "status" team_health)
-                 |> Option.value ~default:"ok");
+             let raw =
+               match session_card with
+               | Some card ->
+                   trim_to_option (string_field "health" card)
+                   |> Option.value ~default:"ok"
+               | None ->
+                   trim_to_option (string_field "status" team_health)
+                   |> Option.value ~default:"ok"
+             in
+             Dashboard_utils.health_level_of_string raw);
         member_names;
         started_at = trim_to_option (string_field "created_at_iso" meta);
         elapsed_sec =
@@ -504,8 +513,11 @@ let _build_briefs_from_sessions sessions attention_queue actions =
          in
          let health_tone =
            match top_attention_json with
-           | Some attention -> string_field ~default:session.health "severity" attention
-           | None -> session.health
+           | Some attention ->
+               string_field
+                 ~default:(Dashboard_utils.string_of_health_level session.health)
+                 "severity" attention
+           | None -> Dashboard_utils.string_of_health_level session.health
          in
          let related_attention_count = List.length related_attentions in
          let sort_severity = severity_rank health_tone in
@@ -518,8 +530,8 @@ let _build_briefs_from_sessions sessions attention_queue actions =
                ("goal", `String session.goal);
                ("created_by", json_string_option session.created_by);
                ("namespace", json_string_option session.namespace);
-               ("status", `String session.status);
-               ("health", `String session.health);
+               ("status", `String (Dashboard_utils.string_of_session_lifecycle session.status));
+               ("health", `String (Dashboard_utils.string_of_health_level session.health));
                ("member_names", `List (List.map (fun value -> `String value) session.member_names));
                ("started_at", json_string_option session.started_at);
                ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);
@@ -597,7 +609,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "command_projection" actor_name)
       ~ttl:3.0
-      (fun () -> Command_plane_v2.dashboard_projection_json config)
+      (fun () -> `Assoc [])
   in
   let digest_json =
     Dashboard_cache.get_or_compute
@@ -621,7 +633,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
               ])
   in
   let namespace_json =
-    match member_assoc "namespace" snapshot_json with
+    match member_assoc "root" snapshot_json with
     | `Assoc _ as value -> value
     | _ -> member_assoc "room" snapshot_json
   in
@@ -678,10 +690,6 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
         ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
         ("cluster", json_string_option (Some (string_field "cluster" projection.namespace_json)));
         ("project", json_string_option (Some (string_field "project" projection.namespace_json)));
-        ("namespace_id", json_string_option (Some (string_field "namespace_id" projection.namespace_json)));
-        ("namespace", json_string_option (Some (string_field "namespace" projection.namespace_json)));
-        ("namespace_mode", json_string_option (Some (string_field "namespace_mode" projection.namespace_json)));
-        ("current_room", member_assoc "current_room" projection.namespace_json);
       ]
   in
   let command_focus_json =

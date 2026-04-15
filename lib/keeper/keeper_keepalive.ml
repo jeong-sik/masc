@@ -55,7 +55,8 @@ let autonomous_turn_limit =
 let () =
   Log.Keeper.info "autonomous_turn_concurrency=%d (env=%s)"
     autonomous_turn_limit
-    (Option.value ~default:"<unset>" (Sys.getenv_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
+    (Option.value ~default:"<unset>"
+       (Env_config_core.raw_value_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
 
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
 
@@ -352,56 +353,8 @@ let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   Atomic.set grpc_env_ref env
 ;;
 
-(* Per-keeper throttle for the "keepalive turn skipped: manual reconcile
-   pending" INFO log. Without this, every scheduled keepalive tick
-   emits one line per stuck keeper — 6 stuck keepers × ~30s tick rate
-   flooded /tmp/masc-min-p-restart.log with 266 identical skip lines
-   in 14 minutes on 2026-04-12. The underlying state is a legitimate
-   operator-only recovery point (cleared via the [keeper_manual_reconcile]
-   MCP tool), so we cannot drop the log entirely — operators need
-   periodic confirmation that the keeper is still blocked. We emit
-   INFO at most once per [skip_log_throttle_sec] per keeper; the rest
-   go to DEBUG for deep-investigation scenarios.
-
-   The throttle table is guarded by a [Stdlib.Mutex] even though all
-   production call sites live on a single Eio domain. Reason: the
-   module exposes [should_log_manual_reconcile_skip] in the [.mli] so
-   regression tests can exercise the window semantics — exposing it
-   admits a call path where an unrelated caller on another domain
-   reaches the table, and OCaml 5's Hashtbl is not multi-domain safe.
-   The mutex is cheap relative to Hashtbl ops and avoids reasoning
-   about hypothetical yield points inside Hashtbl internals. *)
-let skip_log_throttle_sec = 60.0
-
-let manual_reconcile_skip_log_mutex = Mutex.create ()
-
-let manual_reconcile_skip_log_last_ts : (string, float) Hashtbl.t =
-  Hashtbl.create 16
-
-let should_log_manual_reconcile_skip ~(now : float) keeper_name =
-  Mutex.lock manual_reconcile_skip_log_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock manual_reconcile_skip_log_mutex)
-    (fun () ->
-      match
-        Hashtbl.find_opt manual_reconcile_skip_log_last_ts keeper_name
-      with
-      | Some last when now -. last < skip_log_throttle_sec -> false
-      | _ ->
-          Hashtbl.replace manual_reconcile_skip_log_last_ts keeper_name now;
-          true)
-;;
-
-(** Test-only reset for the throttle table. Clears every [(keeper, ts)]
-    entry, restoring the "never logged" state used by test setup
-    fixtures. Production code must not call this — doing so would
-    flood the log on the next tick. *)
-let reset_skip_log_throttle () =
-  Mutex.lock manual_reconcile_skip_log_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock manual_reconcile_skip_log_mutex)
-    (fun () -> Hashtbl.clear manual_reconcile_skip_log_last_ts)
-;;
+(* Skip log throttle removed with manual_reconcile blocker — no more
+   sticky reconcile state means no flood of "reconcile pending" skip logs. *)
 
 let format_since_last_scheduled_autonomous = function
   | Some s when s = max_int -> "never"
@@ -458,7 +411,7 @@ let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
-      ~(config : Room.config)
+      ~(config : Coord.config)
       (signal : Board_dispatch.keeper_board_signal)
   =
   let running_names =
@@ -697,8 +650,9 @@ let write_heartbeat_snapshot
       match continuity_snapshot with
       | Some s -> keeper_state_snapshot_to_summary_text s
       | None ->
-        let trimmed = String.trim meta_current.continuity_summary in
-        if trimmed = "" then "No continuity snapshot available." else trimmed
+        continuity_fallback_summary_text
+          ~continuity_summary:meta_current.continuity_summary
+          ~last_continuity_update_ts:meta_current.runtime.last_continuity_update_ts
     in
     let repetition_risk =
       repetition_risk_score ~messages:c_messages ~candidate_reply:None
@@ -935,113 +889,28 @@ let keeper_agent_status (meta : keeper_meta) =
     | None -> Types.Active)
 ;;
 
-let manual_reconcile_blocker_detail (config : Room.config) keeper_name =
-  match Keeper_manual_reconcile.read config keeper_name with
-  | Some ({ status = Keeper_manual_reconcile.Pending; summary; failure_reason; _ } as record)
-    ->
-      let detail =
-        match failure_reason with
-        | Some value when String.trim value <> "" -> value
-        | _ when String.trim summary <> "" -> summary
-        | _ -> record.blocker_class
-      in
-      `Pending detail
-  | Some { status = Keeper_manual_reconcile.Cleared; _ } -> `Cleared
-  | None -> `Absent
-
-let sync_manual_reconcile_condition ~(config : Room.config) ~(keeper_name : string) =
-  match
-    manual_reconcile_blocker_detail config keeper_name,
-    Keeper_registry.get ~base_path:config.base_path keeper_name
-  with
-  | `Pending detail, Some entry
-    when not entry.conditions.manual_reconcile_required ->
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:config.base_path keeper_name
-        (Keeper_state_machine.Manual_reconcile_required { reason = detail }))
-  | (`Cleared | `Absent), Some entry
-    when entry.conditions.manual_reconcile_required ->
-      (* Reverse sync: file removed/cleared but FSM condition still true.
-         Without this, keepers whose reconcile file was deleted externally
-         or cleared by a previous server instance stay in Failing forever. *)
-      Log.Keeper.info
-        "sync_reconcile: clearing stale FSM manual_reconcile_required for %s (no file)"
-        keeper_name;
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:config.base_path keeper_name
-        Keeper_state_machine.Manual_reconcile_cleared)
-  | _ -> ()
-
 (** Reset stale turn failures so the keeper can exit Failing phase.
     Called unconditionally after presence sync (whether I/O was skipped or not).
-    If the underlying issue persists, the next turn will re-fail. *)
+    If the underlying issue persists, the next turn will re-fail.
+    Manual reconcile blocker logic removed — see plan:
+    enchanted-strolling-bonbon. *)
 let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
   let stale_turn_failures =
     Keeper_registry.get_turn_failures
       ~base_path:ctx.config.base_path meta.name
   in
   if stale_turn_failures > 0 then begin
-    sync_manual_reconcile_condition ~config:ctx.config ~keeper_name:meta.name;
-    let blocker_detail = manual_reconcile_blocker_detail ctx.config meta.name in
-    let sticky_manual_reconcile =
-      match blocker_detail with
-      | `Pending _ -> true
-      | `Cleared | `Absent -> false
-    in
-    (* When the system already classified the partial commit as
-       auto-recoverable ("cursors already advanced, re-trigger risk is
-       low"), clear the reconcile blocker too. Retaining a sticky
-       blocker after an auto-recoverable judgment is contradictory and
-       causes all keepers to stall within ~10 minutes of server start.
-       See #6801 for the full failure chain. *)
-    let reason_str =
-      match blocker_detail with
-      | `Pending detail -> detail
-      | `Cleared -> "cleared"
-      | `Absent -> "none"
-    in
-    if sticky_manual_reconcile then
-      Log.Keeper.warn
-        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — clearing reconcile blocker."
-        stale_turn_failures meta.name reason_str;
-    begin
-      Keeper_registry.reset_turn_failures
-        ~base_path:ctx.config.base_path meta.name;
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:ctx.config.base_path meta.name
-        Keeper_state_machine.Heartbeat_ok);
-      (* Always dispatch Turn_succeeded to unblock the keeper.
-         Previously, sticky_manual_reconcile retained the blocker even
-         when auto-recoverable, causing permanent keeper stall. *)
-      if sticky_manual_reconcile then begin
-        ignore (Keeper_manual_reconcile.clear ctx.config
-          ~keeper_name:meta.name
-          ~actor:"heartbeat_recovery"
-          ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
-          ~evidence_refs:[]
-          ~idempotency_key:None);
-        (* Turn_succeeded alone does NOT reset manual_reconcile_required;
-           Manual_reconcile_cleared is still required to exit Failing. *)
-        ignore (Keeper_registry.dispatch_event
-          ~base_path:ctx.config.base_path meta.name
-          Keeper_state_machine.Manual_reconcile_cleared);
-        Log.Keeper.info
-          "heartbeat recovery: cleared reconcile blocker + FSM condition for %s (auto-recoverable, re-trigger risk low)"
-          meta.name
-      end;
-      dispatch_keepalive_event ~ctx ~keeper_name:meta.name
-        Keeper_state_machine.Turn_succeeded;
-      Log.Keeper.info
-        "heartbeat recovery: reset %d stale turn failures for %s"
-        stale_turn_failures meta.name
-    end
+    Keeper_registry.reset_turn_failures
+      ~base_path:ctx.config.base_path meta.name;
+    ignore (Keeper_registry.dispatch_event
+      ~base_path:ctx.config.base_path meta.name
+      Keeper_state_machine.Heartbeat_ok);
+    dispatch_keepalive_event ~ctx ~keeper_name:meta.name
+      Keeper_state_machine.Turn_succeeded;
+    Log.Keeper.info
+      "heartbeat recovery: reset %d stale turn failures for %s"
+      stale_turn_failures meta.name
   end
-
-let keeper_requires_manual_reconcile ~(config : Room.config) ~keeper_name =
-  sync_manual_reconcile_condition ~config ~keeper_name;
-  match manual_reconcile_blocker_detail config keeper_name with
-  | `Pending _ -> true
-  | `Cleared | `Absent -> false
 
 let sync_keeper_presence
       ~(ctx : _ context)
@@ -1174,39 +1043,30 @@ let run_keepalive_unified_turn
         obs.pending_mentions <> [] || obs.pending_scope_messages <> []
       in
       let turn_decision =
-        Keeper_world_observation.unified_turn_decision
+        Keeper_world_observation.keeper_cycle_decision
           ~meta:meta_after_triage
           obs
       in
-      let manual_reconcile_pending =
-        keeper_requires_manual_reconcile
-          ~config:ctx.config
-          ~keeper_name:meta_after_triage.name
-      in
+      (* Manual reconcile blocker check removed — keepers no longer get
+         stuck behind sticky blockers. Failed turns record evidence via
+         Keeper_registry; recovery is autonomous (next turn's observation)
+         or operator-driven (board/keeper_chat), not blocker-driven. *)
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
-        && (not manual_reconcile_pending)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
           meta_after_triage
           obs.message_cursor_updates
       in
+      let format_opt_int = function
+        | Some value -> string_of_int value
+        | None -> "-"
+      in
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
       let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
-      if manual_reconcile_pending && turn_decision.should_run then (
-        let now = Time_compat.now () in
-        let log_fn =
-          if should_log_manual_reconcile_skip ~now meta_after_triage.name
-          then Log.Keeper.info
-          else Log.Keeper.debug
-        in
-        log_fn
-          "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
-          meta_after_triage.name channel_str
-          (String.concat "," verdict_strs));
-      if (not should_run_turn) && (not manual_reconcile_pending) then (
+      if not should_run_turn then (
         let log_not_scheduled =
           match turn_decision.verdict with
           | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->
@@ -1214,14 +1074,16 @@ let run_keepalive_unified_turn
           | _ -> Log.Keeper.info
         in
         log_not_scheduled
-          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] idle=%ds since_last=%s idle_gate=%s cooldown=%s task_cooldown=%s"
           meta_after_triage.name
           turn_decision.should_run channel_str
           (String.concat "," verdict_strs)
+          obs.idle_seconds
           (format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)
-          (match turn_decision.idle_gate_sec with
-           | Some s -> string_of_int s | None -> "-"));
+          (format_opt_int turn_decision.idle_gate_sec)
+          (format_opt_int turn_decision.effective_cooldown)
+          (format_opt_int turn_decision.task_reactive_cooldown));
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"
@@ -1279,7 +1141,7 @@ let run_keepalive_unified_turn
         with_keeper_turn_slot ~keeper_name:meta_after_triage.name
           ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
           match
-            Keeper_unified_turn.run_unified_turn
+            Keeper_unified_turn.run_keeper_cycle
               ~config:ctx.config
               ~meta:meta_after_observe
               ~observation:obs
@@ -1291,7 +1153,7 @@ let run_keepalive_unified_turn
           with
           | Error err ->
             let e_str = Oas.Error.to_string err in
-            Log.Keeper.error "%s: unified turn failed: %s"
+            Log.Keeper.error "%s: keeper cycle failed: %s"
               meta_after_observe.name e_str;
             if String_util.contains_substring e_str "Eio switch not available"
                || String_util.contains_substring e_str "Eio net not available"
@@ -1313,9 +1175,6 @@ let run_keepalive_unified_turn
                  meta_after_observe.name e;
                meta_after_observe)
           | Ok updated ->
-            (* Clear manual_reconcile trap after successful turn *)
-            dispatch_keepalive_event ~ctx ~keeper_name:updated.name
-              Keeper_state_machine.Manual_reconcile_cleared;
             updated))
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe
@@ -1334,7 +1193,7 @@ let run_keepalive_unified_turn
         meta_after_triage.name wait_sec;
       meta_after_triage
     | exn ->
-      Log.Keeper.error "%s: unified turn exception: %s"
+      Log.Keeper.error "%s: keeper cycle exception: %s"
         meta_after_triage.name (Printexc.to_string exn);
       meta_after_triage)
 ;;
@@ -1355,7 +1214,7 @@ let refresh_work_as_heartbeat
         (fun _room_id ->
            try
              ignore
-               (Room.heartbeat
+               (Coord.heartbeat
                   ctx.config
                   ~agent_name:meta_after_proactive.agent_name);
              true
@@ -1390,7 +1249,7 @@ let dispatch_recurring_keepalive
         | Keeper_recurring.Broadcast msg ->
           (try
              let _ =
-               Room.broadcast
+               Coord.broadcast
                  ctx.config
                  ~from_agent:meta_after_proactive.agent_name
                  ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
@@ -1543,7 +1402,7 @@ let run_heartbeat_loop
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Room.heartbeat success after turn. *)
+     Updated ONLY on Coord.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let max_silence () =
@@ -1678,7 +1537,7 @@ let run_heartbeat_loop
           raise Keeper_registry.Keeper_fiber_crash
         end;
         (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Room.heartbeat to prove room I/O health.
+                 After turn, call Coord.heartbeat to prove room I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
                  On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
         refresh_work_as_heartbeat
@@ -1745,11 +1604,13 @@ let set_keeper_paused_state ~agent_name paused =
          ~base_path:entry.base_path
          entry.name
          { entry.meta with paused };
-       (* RFC-0002: dispatch resume event through state machine *)
-       if not paused then
-         ignore (Keeper_registry.dispatch_event
-           ~base_path:entry.base_path entry.name
-           Keeper_state_machine.Operator_resume))
+       ignore
+         (Keeper_registry.dispatch_event
+            ~base_path:entry.base_path entry.name
+            (if paused
+             then Keeper_state_machine.Operator_pause
+             else Keeper_state_machine.Operator_resume));
+       if not paused then Atomic.set entry.fiber_wakeup true)
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =
@@ -1976,9 +1837,9 @@ let start_keeper_grpc_heartbeat
 
 let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_meta =
   try
-    if not (Room_utils.is_initialized ctx.config)
+    if not (Coord_utils.is_initialized ctx.config)
     then (
-      let (_init_msg : string) = Room.init ctx.config ~agent_name:None in
+      let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
       ());
     let synced = ensure_keeper_room_presence ctx.config m in
     (match write_meta ctx.config synced with

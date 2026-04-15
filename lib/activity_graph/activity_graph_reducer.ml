@@ -6,7 +6,7 @@ type node_acc = {
   node_id : string;
   node_kind : string;
   mutable label : string;
-  mutable status : string;
+  mutable status : node_status;
   mutable weight : int;
   mutable semantic_weight : float;
   mutable last_event_at : string;
@@ -32,7 +32,7 @@ let payload_string field json =
   | _ -> None
 
 let is_generic_status = function
-  | "" | "active" | "observed" -> true
+  | Unset | Active | Observed -> true
   | _ -> false
 
 (* Semantic weight multiplier by event kind.
@@ -59,7 +59,7 @@ let semantic_multiplier = function
 
 let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
     ~(kind : string) ~(label : string)
-    ~(status : string) ~(ts_iso : string) ~(meta : Yojson.Safe.t)
+    ~(status : node_status) ~(ts_iso : string) ~(meta : Yojson.Safe.t)
     ~(sw_delta : float) =
   match Hashtbl.find_opt nodes id with
   | Some node ->
@@ -67,7 +67,7 @@ let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
       node.semantic_weight <- node.semantic_weight +. sw_delta;
       node.last_event_at <- ts_iso;
       if node.label = id || node.label = "" then node.label <- label;
-      if status <> ""
+      if status <> Unset
          && (not (is_generic_status status) || is_generic_status node.status)
       then
         node.status <- status;
@@ -123,12 +123,12 @@ let reduce_event ~nodes ~edges (value : event) =
   let sw = semantic_multiplier value.kind in
   let room_node_id = "room:" ^ value.room_id in
   ensure_node nodes ~id:room_node_id ~kind:"room" ~label:value.room_id
-    ~status:"room" ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
+    ~status:Coord ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
   let actor_id =
     match value.actor with
     | Some actor ->
         let id =
-          ensure_entity_node nodes actor ~fallback_status:"active"
+          ensure_entity_node nodes actor ~fallback_status:Active
             ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
         ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
@@ -140,7 +140,7 @@ let reduce_event ~nodes ~edges (value : event) =
     match value.subject with
     | Some subject ->
         let id =
-          ensure_entity_node nodes subject ~fallback_status:"observed"
+          ensure_entity_node nodes subject ~fallback_status:Observed
             ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
         ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
@@ -165,56 +165,56 @@ let reduce_event ~nodes ~edges (value : event) =
     | None -> ()
   in
   (match value.kind with
-  | "agent.joined" -> set_subject_status "active"
-  | "agent.left" -> set_subject_status "offline"
-  | "agent.spawned" -> set_subject_status "spawned"
-  | "agent.retired" -> set_subject_status "retired"
-  | "agent.compacted" -> set_subject_status "compacting"
+  | "agent.joined" -> set_subject_status Active
+  | "agent.left" -> set_subject_status Offline
+  | "agent.spawned" -> set_subject_status Spawned
+  | "agent.retired" -> set_subject_status Retired
+  | "agent.compacted" -> set_subject_status Compacting
   | "agent.handoff" ->
-      set_actor_status "handoff";
-      set_subject_status "active";
+      set_actor_status Handoff;
+      set_subject_status Active;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"hands_off_to" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "task.created" ->
-      set_subject_status "todo";
+      set_subject_status Todo;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"creates" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "task.claimed" ->
-      set_subject_status "claimed";
+      set_subject_status Claimed;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "task.started" ->
-      set_subject_status "in_progress";
+      set_subject_status In_progress;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "task.released" ->
-      set_subject_status "todo";
+      set_subject_status Todo;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "task.done" ->
-      set_subject_status "done";
+      set_subject_status Done;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "task.cancelled" ->
-      set_subject_status "cancelled";
+      set_subject_status Cancelled;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
@@ -233,14 +233,14 @@ let reduce_event ~nodes ~edges (value : event) =
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "board.posted" ->
-      set_subject_status "posted";
+      set_subject_status Posted;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"posts" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "board.commented" ->
-      set_subject_status "discussed";
+      set_subject_status Discussed;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"comments_on" ~active:false
@@ -253,7 +253,7 @@ let reduce_event ~nodes ~edges (value : event) =
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "decision.opened" ->
-      set_subject_status "open";
+      set_subject_status Open;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"opens" ~active:false
@@ -265,32 +265,32 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
-  | "decision.resolved" -> set_subject_status "resolved"
+  | "decision.resolved" -> set_subject_status Resolved
   | "policy.approved" ->
-      set_subject_status "approved";
+      set_subject_status Approved;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"governs" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "policy.denied" ->
-      set_subject_status "denied";
+      set_subject_status Denied;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"governs" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "operation.started" ->
-      set_subject_status "running";
+      set_subject_status Running;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"operates_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
-  | "operation.paused" -> set_subject_status "paused"
-  | "operation.resumed" -> set_subject_status "running"
-  | "operation.stopped" -> set_subject_status "stopped"
-  | "operation.finalized" -> set_subject_status "finalized"
+  | "operation.paused" -> set_subject_status Paused
+  | "operation.resumed" -> set_subject_status Running
+  | "operation.stopped" -> set_subject_status Stopped
+  | "operation.finalized" -> set_subject_status Finalized
   | "team.turn" ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
@@ -303,10 +303,10 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_edge edges ~source ~target ~kind:"participates_in"
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
-  | "keeper.autonomy_started" -> set_actor_status "autonomy"
-  | "keeper.autonomy_completed" -> set_actor_status "active"
-  | "keeper.guardrail" -> set_actor_status "guardrail"
-  | "keeper.compaction" -> set_actor_status "compacting"
+  | "keeper.autonomy_started" -> set_actor_status Autonomy
+  | "keeper.autonomy_completed" -> set_actor_status Active
+  | "keeper.guardrail" -> set_actor_status Guardrail
+  | "keeper.compaction" -> set_actor_status Compacting
   | "tool.called" ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->

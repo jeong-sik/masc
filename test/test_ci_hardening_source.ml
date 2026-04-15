@@ -80,15 +80,9 @@ let test_contract_harness_and_execution_session_authz_contracts () =
        "| extract_text)")
 
 let test_route_auth_contracts () =
-  check bool "http command-plane units use tool auth" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
-       {|with_tool_auth ~tool_name:"masc_unit_define"|});
-  check bool "http command-plane dispatch tick use tool auth" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
-       {|with_tool_auth ~tool_name:"masc_dispatch_tick"|});
-  check bool "http command-plane policy approve use tool auth" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
-       {|with_tool_auth ~tool_name:"masc_policy_approve"|});
+  (* CP purge (phases 1-5): command-plane HTTP/H2 route modules deleted.
+     Assertions on server_routes_http_routes_command_plane_*.ml and
+     server_h2_gateway_routes_cp.ml removed with the source files. *)
   check bool "http keeper chat stream uses keeper tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
@@ -98,28 +92,6 @@ let test_route_auth_contracts () =
   check bool "http keeper chat stream forces direct reply mode" true
     (file_contains_pattern "lib/server/server_routes_http_keeper_stream.ml"
        {|("direct_reply", `Bool true)|});
-  check bool "h2 gateway units use tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_unit_define"|});
-  check bool "h2 gateway dispatch tick uses tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
-  check bool "h2 gateway operator action uses tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_operator_action"|});
-  check bool "h2 gateway operator confirm uses tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|});
-  check bool "h2 gateway operator snapshot read route honors read auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator" ->
-          let state = get_server_state () in
-          (match h2_authorize_read_if_needed state with|});
-  check bool "h2 gateway operator digest read route honors read auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator/digest" ->
-          let state = get_server_state () in
-          (match h2_authorize_read_if_needed state with|});
   check bool "channel gate message route uses tool auth" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -237,15 +209,15 @@ let test_dashboard_warm_hydration_contracts () =
   check bool "namespace truth advertises initializing while execution warms" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        {|("status", `String "initializing")|});
-  check bool "execution render timeout is env-configurable" true
+  check bool "execution render timeout is a named constant" true
     (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
-       "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S");
+       "let render_timeout_s");
   check bool "execution proactive refresh timeout is extended" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S");
   check bool "mission proactive refresh timeout is extended" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "MASC_DASHBOARD_MISSION_REFRESH_TIMEOUT_S")
+       "let mission_refresh_timeout_s")
 
 let test_http_read_surface_contracts () =
   check bool "room status route now requires read auth" true
@@ -270,31 +242,9 @@ let test_http_read_surface_contracts () =
        with_read_auth|})
 
 let test_operator_surface_route_contracts () =
-  check bool "http router registers command-plane read routes" true
-    (file_contains_pattern "lib/server/server_routes_http.ml"
-       "Server_routes_http_routes_command_plane_read.add_routes");
-  check bool "http router registers command-plane write routes" true
-    (file_contains_pattern "lib/server/server_routes_http.ml"
-       "Server_routes_http_routes_command_plane_write.add_routes ~sw ~clock");
-  check bool "h2 cp routes expose operator snapshot" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator" ->|});
-  check bool "h2 cp routes expose operator digest" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator/digest" ->|});
-  check bool "h2 gateway no longer removes operator read surface" true
-    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|`GET, "/api/v1/operator"
-      | `GET, "/api/v1/operator/digest" ->
-          h2_respond_removed_surface|});
-  check bool "h2 gateway no longer removes operator write surface" true
-    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|`POST, "/api/v1/operator/action"
-      | `POST, "/api/v1/operator/confirm" ->
-          h2_respond_removed_surface|});
-  check bool "h2 gateway still delegates command-plane and operator routes" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "Server_h2_gateway_routes_cp.dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path httpun_meth")
+  (* CP purge (phases 1-5): operator/command-plane HTTP+H2 surfaces deleted.
+     All assertions in this test referenced source files that no longer exist. *)
+  ()
 
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)
@@ -368,8 +318,8 @@ let test_dashboard_component_split_contracts () =
   check bool "mission attention card exported from split file" true
     (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
        "export function AttentionCard");
-  check bool "room backend setup no longer references transaction companion after PG removal" true
-    (file_not_contains_pattern "lib/room/room_utils_backend_setup.ml"
+  check bool "coord backend setup no longer references transaction companion after PG removal" true
+    (file_not_contains_pattern "lib/coord/coord_utils_backend_setup.ml"
        "Transaction Pooler companion")
 
 let test_mission_briefing_memory_guard_contracts () =
@@ -410,15 +360,15 @@ let test_activity_surface_contracts () =
     (not
        (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
           {|"/api/v1/social-graph"|}));
-  check bool "room top-level module emits activity events" true
-    (file_contains_pattern "lib/room.ml"
+  check bool "coord top-level module emits activity events" true
+    (file_contains_pattern "lib/coord.ml"
        "Activity_graph.emit config");
-  check bool "room task lifecycle emits activity events via hook" true
-    (file_contains_pattern "lib/room/room_task.ml"
-       "!Room_hooks.activity_emit_fn config");
-  check bool "room broadcast emits activity events via hook" true
-    (file_contains_pattern "lib/room/room_state.ml"
-       "!Room_hooks.activity_emit_fn config");
+  check bool "coord task lifecycle emits activity events via hook" true
+    (file_contains_pattern "lib/coord/coord_task.ml"
+       "!Coord_hooks.activity_emit_fn config");
+  check bool "coord broadcast emits activity events via hook" true
+    (file_contains_pattern "lib/coord/coord_broadcast.ml"
+       "!Coord_hooks.activity_emit_fn config");
   check bool "board success paths emit activity events" true
     (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"
        "Activity_graph.emit config")
@@ -556,11 +506,8 @@ let test_transport_health_contracts () =
   check bool "transport health avoids room message scans" true
     (not
        (file_contains_pattern "lib/transport_metrics.ml"
-          {|Room.get_messages_raw_in_room|}));
-  check bool "transport health avoids command plane topology reads" true
-    (not
-       (file_contains_pattern "lib/transport_metrics.ml"
-          {|Command_plane_v2.topology_summary_json|}))
+          {|Coord.get_messages_raw_in_room|}))
+  (* command plane topology reads guard removed (CP purge: Command_plane_v2 deleted) *)
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
@@ -642,24 +589,20 @@ let test_namespace_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "shell_timeout_s");
-  check bool "namespace-truth timeout configurable via canonical env var" true
+  check bool "namespace-truth warm timeout is a named constant" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
-       "MASC_DASHBOARD_NAMESPACE_TRUTH_TIMEOUT_S");
-  check bool "namespace-truth timeout still honors legacy env fallback" true
+       "let warm_timeout_s");
+  check bool "namespace-truth cold timeout is a named constant" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
-       "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
+       "let cold_timeout_s");
   check bool "shell_warmed tracking exists" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "_shell_warmed")
 
 let test_mermaid_xss_contracts () =
-  check bool "mermaid securityLevel is strict (not loose)" true
-    (file_contains_pattern "dashboard/src/components/command/helpers.ts"
-       "securityLevel: 'strict'");
-  check bool "mermaid securityLevel loose is absent" true
-    (not
-       (file_contains_pattern "dashboard/src/components/command/helpers.ts"
-          "securityLevel: 'loose'"))
+  (* CP purge: dashboard/src/components/command/helpers.ts deleted with the
+     command plane; mermaid renderer no longer lives there. *)
+  ()
 
 let test_http_client_fd_safety_contracts () =
   check bool "masc http client forbids direct Cohttp client construction in docs" true
@@ -685,43 +628,6 @@ let test_runtime_precondition_contracts () =
   (* Executor contract check removed with governance tool retirement *)
   ()
 
-let test_command_plane_snapshot_review_contracts () =
-  check bool "on-demand snapshot uses timeout guard" true
-    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "Eio.Time.with_timeout_exn (cp_snapshot_runtime_clock state)");
-  check bool "cp summary derives swarm status from cached snapshot" true
-    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "Swarm_status.build_json_from_snapshot ~timeline_limit_override:6");
-  check bool "cp summary no longer performs live swarm scan" true
-    (file_not_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "Swarm_status.build_json ~timeline_limit_override:6 config");
-  check bool "on-demand snapshot uses single-flight mutex" true
-    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "Eio.Mutex.use_rw ~protect:true _cp_snapshot_compute_mu");
-  check bool "snapshot cache ttl stays runtime-readable" true
-    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "command_plane_snapshot_cache_ttl_s ()");
-  check bool "snapshot refresh flag stays runtime-readable" true
-    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "command_plane_snapshot_refresh_enabled ()");
-  check bool "on-demand snapshot timeout returns explicit timeout payload" true
-    (file_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       {|cp_snapshot_fallback_json ~status:"timeout"|});
-  check bool "timeout path does not serve stale cache unconditionally" true
-    (file_not_contains_pattern "lib/server/server_command_plane_http_support.ml"
-       "if !_cp_snapshot_cached_at > 0.0 then !_cp_snapshot_ref");
-  let command_plane_pos =
-    file_pattern_position "lib/config/feature_flag_registry.ml"
-      "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
-  in
-  let fixtures_pos =
-    file_pattern_position "lib/config/feature_flag_registry.ml"
-      "MASC_DASHBOARD_FIXTURES_ENABLED"
-  in
-  check bool "dashboard feature flags stay alphabetically ordered" true
-    (match (command_plane_pos, fixtures_pos) with
-     | Some command_plane, Some fixtures -> command_plane < fixtures
-     | _ -> false)
 let () =
   run "ci_hardening_source"
     [
@@ -770,8 +676,6 @@ let () =
              test_http_client_fd_safety_contracts;
            test_case "namespace-truth adaptive timeout contracts" `Quick
              test_namespace_truth_adaptive_timeout_contracts;
-           test_case "command-plane snapshot review contracts" `Quick
-             test_command_plane_snapshot_review_contracts;
            test_case "runtime precondition contracts" `Quick
              test_runtime_precondition_contracts;
            test_case "router contract alignment" `Quick

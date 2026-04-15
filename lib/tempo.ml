@@ -32,8 +32,8 @@ let default_config = {
 }
 
 (** Get tempo file path *)
-let tempo_file (config : Room_utils.config) =
-  Filename.concat config.base_path ".masc/tempo.json"
+let tempo_file (config : Coord_utils.config) =
+  Filename.concat (Coord_utils.masc_dir config) "tempo.json"
 
 (** State to JSON *)
 let state_to_json (state : tempo_state) : Yojson.Safe.t =
@@ -56,7 +56,7 @@ let state_of_json (json : Yojson.Safe.t) : tempo_state option =
     None
 
 (** Load current tempo state *)
-let load_state (config : Room_utils.config) : tempo_state =
+let load_state (config : Coord_utils.config) : tempo_state =
   let default_state = { current_interval_s = default_config.default_interval_s;
                         last_adjusted = 0.0; reason = "default" } in
   let path = tempo_file config in
@@ -65,7 +65,7 @@ let load_state (config : Room_utils.config) : tempo_state =
     | Ok json ->
       (match state_of_json json with Some state -> state | None -> default_state)
     | Error e ->
-        Log.Room.debug "tempo: state load failed (%s): %s" path e;
+        Log.Coord.debug "tempo: state load failed (%s): %s" path e;
         default_state
   else
     { current_interval_s = default_config.default_interval_s;
@@ -73,7 +73,7 @@ let load_state (config : Room_utils.config) : tempo_state =
       reason = "default" }
 
 (** Save tempo state *)
-let save_state (config : Room_utils.config) (state : tempo_state) : unit =
+let save_state (config : Coord_utils.config) (state : tempo_state) : unit =
   let path = tempo_file config in
   let masc_dir = Filename.concat config.base_path ".masc" in
   Fs_compat.mkdir_p masc_dir;
@@ -82,7 +82,7 @@ let save_state (config : Room_utils.config) (state : tempo_state) : unit =
   Fs_compat.save_file path content
 
 (** Set tempo manually *)
-let set_tempo (config : Room_utils.config) ~interval_s ~reason : tempo_state =
+let set_tempo (config : Coord_utils.config) ~interval_s ~reason : tempo_state =
   let clamped =
     max default_config.min_interval_s
       (min default_config.max_interval_s interval_s)
@@ -96,7 +96,7 @@ let set_tempo (config : Room_utils.config) ~interval_s ~reason : tempo_state =
   state
 
 (** Get current tempo *)
-let get_tempo (config : Room_utils.config) : tempo_state =
+let get_tempo (config : Coord_utils.config) : tempo_state =
   load_state config
 
 (** Check if task is pending (not done/cancelled) *)
@@ -126,8 +126,8 @@ let calculate_adaptive_tempo (tasks : Types.task list) : float * string =
        Printf.sprintf "slow - %d low priority task(s)" (List.length tasks))
 
 (** Adjust tempo adaptively based on current tasks *)
-let adjust_tempo (config : Room_utils.config) : tempo_state =
-  let tasks = Room.get_tasks_raw config in
+let adjust_tempo (config : Coord_utils.config) : tempo_state =
+  let tasks = Coord.get_tasks_raw config in
   let pending = List.filter is_pending_task tasks in
   let (interval, reason) = calculate_adaptive_tempo pending in
   let state = set_tempo config ~interval_s:interval ~reason in
@@ -150,7 +150,7 @@ let format_state (state : tempo_state) : string =
   Printf.sprintf "⏱️ Tempo: %s (%s, adjusted %s)" interval_str state.reason age
 
 (** Reset tempo to default *)
-let reset_tempo (config : Room_utils.config) : tempo_state =
+let reset_tempo (config : Coord_utils.config) : tempo_state =
   set_tempo config
     ~interval_s:default_config.default_interval_s
     ~reason:"reset to default"

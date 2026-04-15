@@ -69,32 +69,6 @@ let schemas : tool_schema list = [
     ];
   };
   {
-    name = "masc_select_agent";
-    description = "Select the best agent for a task using weighted fitness scoring (completion, reliability, speed).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("available_agents", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "List of available agent names to choose from");
-        ]);
-        ("strategy", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "capability_first"; `String "elite_1"; `String "roulette_wheel"; `String "random"]);
-          ("description", `String "Selection strategy (default: capability_first)");
-          ("default", `String "capability_first");
-        ]);
-        ("days", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Days of metrics to consider (default: 7)");
-          ("default", `Int 7);
-        ]);
-      ]);
-      ("required", `List [`String "available_agents"]);
-    ];
-  };
-  {
     name = "masc_register_capabilities";
     description = "Register your skill tags so other agents can discover you by capability.";
     input_schema = `Assoc [
@@ -111,21 +85,6 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "agent_name"; `String "capabilities"]);
-    ];
-  };
-
-  {
-    name = "masc_find_by_capability";
-    description = "Search for active (non-zombie) agents that have a specific capability tag.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("capability", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Capability to search for (e.g., 'typescript')");
-        ]);
-      ]);
-      ("required", `List [`String "capability"]);
     ];
   };
 
@@ -153,35 +112,6 @@ let schemas : tool_schema list = [
   };
 
   {
-    name = "masc_preferred_partner";
-    description = "Get the agent with the strongest learned collaboration affinity for a given agent. Closes the Hebbian learning loop: strengthened connections from shared task completions become actionable partner suggestions. Use when deciding whom to @mention, delegate to, or collaborate with.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent to find a partner for. Defaults to the calling agent.");
-        ]);
-      ]);
-    ];
-  };
-
-  {
-    name = "masc_consolidate_learning";
-    description = "Apply decay to old collaboration patterns and prune weak Hebbian connections.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("decay_after_days", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Apply decay to connections older than this (default: 7)");
-          ("default", `Int 7);
-        ]);
-      ]);
-    ];
-  };
-
-  {
     name = "masc_get_metrics";
     description = "Fetch raw performance metrics for an agent: task completion, timing, error rates, collaboration history.";
     input_schema = `Assoc [
@@ -200,46 +130,6 @@ let schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "agent_name"]);
-    ];
-  };
-
-  {
-    name = "masc_agent_relations";
-    description = "Query an agent's collaboration network and trust relationships from Neo4j via GraphQL.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent name to query. Defaults to calling agent if omitted.");
-        ]);
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Max relations to return (default: 20)");
-          ("minimum", `Int 1);
-          ("maximum", `Int 50);
-          ("default", `Int 20);
-        ]);
-      ]);
-    ];
-  };
-
-  {
-    name = "masc_meta_cognition_snapshot";
-    description = "Read a namespace-level meta-cognition snapshot derived from board, task, agent, and governance artifacts. Use this to inspect shared beliefs, tensions, desires, and discourse edges.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("limit", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Maximum items to return per section (default: 5, max: 20)");
-          ("default", `Int 5);
-        ]);
-        ("hearth", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional hearth/topic filter (e.g. ops, research, code-review)");
-        ]);
-      ]);
     ];
   };
 

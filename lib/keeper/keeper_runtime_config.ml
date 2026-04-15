@@ -1,4 +1,4 @@
-(** Keeper_runtime_config — load runtime tuning from
+(** Keeper_runtime_config — load startup keeper env seeding from
     [<base_path>/.masc/config/keeper_runtime.toml].  See [.mli] for design. *)
 
 (* TOML key → env var name. Every keeper runtime knob maps here so
@@ -37,6 +37,17 @@ let key_to_env =
     "turn.admission_wait_timeout_sec",  "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
+    "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
+    "turn.tool_cost_max_usd",           "MASC_KEEPER_TOOL_COST_MAX_USD";
+    "turn.max_tools_per_turn",          "MASC_KEEPER_MAX_TOOLS_PER_TURN";
+    "turn.board_event_limit",           "MASC_KEEPER_BOARD_EVENT_LIMIT";
+    "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
+    "turn.llm_rerank_cascade",          "MASC_KEEPER_LLM_RERANK_CASCADE";
+    "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
+    "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
+    "turn.llama_slots",                 "MASC_KEEPER_LLAMA_SLOTS";
+    "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
+    "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     (* [supervisor] *)
     "supervisor.max_restarts",          "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS";
     "supervisor.backoff_base_sec",      "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S";
@@ -81,7 +92,7 @@ let read_file path =
   try Ok (In_channel.with_open_text path In_channel.input_all)
   with Sys_error msg -> Error msg
 
-(** Format a TOML scalar back to a string suitable for putenv.
+(** Format a TOML scalar back to a string suitable for the boot override store.
     Booleans → "true"/"false"; floats keep their TOML representation;
     strings pass through as-is. String arrays are not supported — they
     have no env var equivalent in the keeper config. *)
@@ -95,15 +106,15 @@ let value_to_string = function
   | Keeper_toml_loader.Toml_string_array _ -> None
 
 (** Apply one TOML key to the corresponding env var, unless the env var
-    is already set (caller override wins).  Returns [true] iff a putenv
-    actually happened.
+    is already set (caller override wins). Returns [true] iff a boot
+    override was actually recorded.
 
     [~env_lookup] and [~env_set] are injectable for testing: production
-    uses [Sys.getenv_opt] / [Unix.putenv]; tests supply a fake env to
-    avoid global process env pollution. *)
+    uses [Env_config_core.raw_value_opt] / [Config_boot_overrides.set];
+    tests supply a fake env to avoid global process env dependence. *)
 let apply_one
-    ?(env_lookup = Sys.getenv_opt)
-    ?(env_set = Unix.putenv)
+    ?(env_lookup = Env_config_core.raw_value_opt)
+    ?(env_set = Config_boot_overrides.set)
     (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
   match env_lookup env_name with
   | Some _ ->
@@ -123,7 +134,7 @@ let apply_one
     the number of overrides that would be applied, plus a list of
     (env_name, value) pairs. Exposed for testing without env side effects. *)
 let resolve_overrides
-    ?(env_lookup = Sys.getenv_opt)
+    ?(env_lookup = Env_config_core.raw_value_opt)
     (doc : Keeper_toml_loader.toml_doc) =
   let applied = ref [] in
   let count =

@@ -7,7 +7,7 @@
 
 (** Tool handler context *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
 }
 
 (** Tool result type *)
@@ -100,43 +100,6 @@ let handle_plan_get ctx args : tool_result =
       | Error e ->
           (false, Printf.sprintf "❌ Planning context not found: %s" e)
 
-let handle_error_add ctx args : tool_result =
-  let task_id = get_string args "task_id" "" in
-  let error_type = get_string args "error_type" "" in
-  let message = get_string args "message" "" in
-  let context = match get_string args "context" "" with "" -> None | s -> Some s in
-  let result = Planning_eio.add_error ctx.config ~task_id ~error_type ~message ?context () in
-  match result with
-  | Ok plan_ctx ->
-      let unresolved_count = List.length (List.filter (fun (e : Planning_eio.error_entry) -> not e.resolved) plan_ctx.errors) in
-      let response = `Assoc [
-        ("status", `String "added");
-        ("task_id", `String task_id);
-        ("error_type", `String error_type);
-        ("total_errors", `Int (List.length plan_ctx.errors));
-        ("unresolved_count", `Int unresolved_count);
-      ] in
-      (true, Yojson.Safe.to_string response)
-  | Error e ->
-      (false, Printf.sprintf "❌ Failed to add error: %s" e)
-
-let handle_error_resolve ctx args : tool_result =
-  let task_id = get_string args "task_id" "" in
-  let error_index = get_int args "error_index" 0 in
-  let result = Planning_eio.resolve_error ctx.config ~task_id ~index:error_index in
-  match result with
-  | Ok plan_ctx ->
-      let unresolved_count = List.length (List.filter (fun (e : Planning_eio.error_entry) -> not e.resolved) plan_ctx.errors) in
-      let response = `Assoc [
-        ("status", `String "resolved");
-        ("task_id", `String task_id);
-        ("error_index", `Int error_index);
-        ("remaining_unresolved", `Int unresolved_count);
-      ] in
-      (true, Yojson.Safe.to_string response)
-  | Error e ->
-      (false, Printf.sprintf "❌ Failed to resolve error: %s" e)
-
 let handle_plan_set_task ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
   if task_id = "" then
@@ -181,8 +144,6 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_note_add" -> Some (handle_note_add ctx args)
   | "masc_deliver" -> Some (handle_deliver ctx args)
   | "masc_plan_get" -> Some (handle_plan_get ctx args)
-  | "masc_error_add" -> Some (handle_error_add ctx args)
-  | "masc_error_resolve" -> Some (handle_error_resolve ctx args)
   | "masc_plan_set_task" -> Some (handle_plan_set_task ctx args)
   | "masc_plan_get_task" -> Some (handle_plan_get_task ctx args)
   | "masc_plan_clear_task" -> Some (handle_plan_clear_task ctx args)

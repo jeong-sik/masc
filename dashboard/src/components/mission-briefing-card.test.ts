@@ -85,7 +85,7 @@ function sampleBriefing(): DashboardMissionBriefingResponse {
 
 function sampleOperatorSnapshot(): OperatorSnapshot {
   return {
-    namespace: {
+    root: {
       paused: false,
     },
     sessions: [],

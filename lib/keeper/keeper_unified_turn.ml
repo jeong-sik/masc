@@ -1,4 +1,4 @@
-(** Keeper_unified_turn — Single entry point for keeper turns via OAS Agent.run().
+(** Keeper_unified_turn — Single entry point for keeper cycles via OAS Agent.run().
 
     Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
@@ -34,8 +34,18 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
 
 let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
   string_contains_substring
-    ~needle:(String.lowercase_ascii needle)
+      ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
+
+let finalize_trajectory_acc (trajectory_acc : Trajectory.accumulator)
+    (outcome : Trajectory.trajectory_outcome) : unit =
+  try
+    ignore (Trajectory.finalize trajectory_acc outcome)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.error "trajectory finalize failed (keeper cycle): %s"
+        (Printexc.to_string exn)
 
 (** {1 Retry & Side-Effect Safety}
 
@@ -66,7 +76,7 @@ let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
 
     These errors may recur with the same payload, so they are NOT
     eligible for same-turn retry.  They ARE eligible for auto-recovery
-    (skip manual reconcile) when all committed tools are reconcile-safe:
+    when all committed tools are reconcile-safe (idempotent/board-like):
     the keeper's next heartbeat cycle will build a fresh prompt. *)
 let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
   match err with
@@ -134,26 +144,20 @@ let summarize_post_commit_failure
   let committed_tools = committed_mutating_tools tool_names in
   let tools = String.concat ", " committed_tools in
   let err_preview = short_preview (Oas.Error.to_string err) in
-  let manual_reconcile_required =
-    not (Keeper_tool_registry.all_tools_reconcile_safe committed_tools)
-  in
+  (* Manual reconcile blocker removed — no "required/not required" branching.
+     Evidence is recorded via Keeper_registry; the next turn's observation
+     signals the failure for autonomous or operator-driven recovery. *)
   match kind with
   | Keeper_registry.Post_commit_timeout ->
       Printf.sprintf
-        "Mutating tools [%s] committed before the turn timed out; retry stayed disabled and %s (error: %s)"
-        tools
-        (if manual_reconcile_required
-         then "manual reconcile is required"
-         else "manual reconcile is not required")
-        err_preview
+        "Mutating tools [%s] committed before the turn timed out; evidence \
+         recorded (error: %s)"
+        tools err_preview
   | Keeper_registry.Post_commit_failure ->
       Printf.sprintf
-        "Mutating tools [%s] committed before the turn failed; retry stayed disabled and %s (error: %s)"
-        tools
-        (if manual_reconcile_required
-         then "manual reconcile is required"
-         else "manual reconcile is not required")
-        err_preview
+        "Mutating tools [%s] committed before the turn failed; evidence \
+         recorded (error: %s)"
+        tools err_preview
 
 let classify_post_commit_failure
     ~(tool_names : string list)
@@ -179,10 +183,6 @@ let classify_post_commit_failure
       ( reclassified,
         Keeper_registry.Ambiguous_partial_commit
           { kind = resolved_kind; detail } )
-
-let blocker_class_of_post_commit_kind = function
-  | Keeper_registry.Post_commit_timeout -> "ambiguous_post_commit_timeout"
-  | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
 
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
@@ -229,6 +229,15 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
   match err with
   | Oas.Error.Api (ContextOverflow _) -> true
   | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
+  | _ -> false
+
+let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
+  match err with
+  | Oas.Error.Internal msg ->
+      string_contains_substring_ci
+        ~needle:"all models failed" msg
+      || string_contains_substring_ci
+           ~needle:"response rejected by accept" msg
   | _ -> false
 
 type overflow_retry_plan = {
@@ -320,7 +329,7 @@ let context_overflow_event_of_error
         }
 
 let pause_keeper_for_overflow
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
   let paused_meta =
@@ -345,6 +354,84 @@ let pause_keeper_for_overflow
     "%s: keeper paused after unresolved context overflow (%s)"
     meta.name reason;
   paused_meta
+
+let sync_keeper_paused_state
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(paused : bool) : keeper_meta =
+  let synced_meta =
+    {
+      meta with
+      paused;
+      updated_at = now_iso ();
+    }
+  in
+  (match write_meta config synced_meta with
+   | Ok () -> ()
+   | Error err ->
+     Log.Keeper.error
+       "%s: keeper %s write_meta failed: %s"
+       meta.name
+       (if paused then "pause" else "resume")
+       err);
+  Keeper_registry.update_meta ~base_path:config.base_path meta.name synced_meta;
+  dispatch_keeper_phase_event
+    ~config
+    ~keeper_name:meta.name
+    (if paused
+     then Keeper_state_machine.Operator_pause
+     else Keeper_state_machine.Operator_resume);
+  (if not paused then
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | Some entry -> Atomic.set entry.fiber_wakeup true
+    | None -> ());
+  synced_meta
+
+let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) =
+  match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
+  | Some entry -> entry.meta
+  | None -> fallback_meta
+
+let enqueue_reconcile_continue_gate
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(failure_reason : Keeper_registry.failure_reason)
+    ~(committed_tools : string list)
+    ~(error_detail : string) : string =
+  let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
+  let input =
+    `Assoc [
+      ("kind", `String "reconcile_required");
+      ("keeper_name", `String meta.name);
+      ("failure_reason", `String reason_text);
+      ("error_detail", `String error_detail);
+      ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
+    ]
+  in
+  Keeper_approval_queue.submit_pending
+    ~keeper_name:meta.name
+    ~tool_name:"keeper_continue_after_reconcile"
+    ~input
+    ~risk_level:Keeper_approval_queue.Critical
+    ~on_resolution:(fun decision ->
+      let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
+      match decision with
+      | Agent_sdk.Hooks.Approve
+      | Agent_sdk.Hooks.Edit _ ->
+        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:false in
+        Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
+        Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
+        Log.Keeper.info
+          "%s: reconcile continue gate approved; auto-resumed keeper"
+          meta.name
+      | Agent_sdk.Hooks.Reject reason ->
+        let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true in
+        Keeper_registry.set_failure_reason
+          ~base_path:config.base_path meta.name
+          (Some failure_reason);
+        Log.Keeper.warn
+          "%s: reconcile continue gate rejected; keeper remains paused (%s)"
+          meta.name reason)
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
    per (keeper_name, model_labels) because cascade config is static at
@@ -573,7 +660,7 @@ let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : st
     (String.sub digest 0 8)
 
 let append_decision_record
-    ~(config : Room.config)
+    ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
@@ -839,23 +926,16 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?(is_autonomous_turn = true)
     ?(update_proactive_rt = true)
     ?social_state
+    ?social_transition_reason
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
-  let used_model_id =
-    let strip_latest s =
-      if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
-      then String.sub s 0 (String.length s - 7) else s
-    in
-    let used = strip_latest result.model_used in
-    let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
-    let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
-    match List.find_opt (fun (c : Llm_provider.Provider_config.t) ->
-      c.model_id = result.model_used || c.model_id = used
-    ) cfgs with
-    | Some c -> c.model_id
-    | None -> used  (* Use actual API response model, not stale cascade label *)
-  in
+  (* Use cascade_observation.selected_model (canonical, no :latest suffix)
+     instead of parsing model strings and stripping :latest manually.
+     surface_model_used already extracts this from cascade_observation.
+     Removes L3 (Cascade_config.parse_model_strings direct call) and
+     L6 (strip_latest model ID parsing) boundary violations. See #5626. *)
+  let used_model_id = surface_model_used in
   let turn_cost =
     let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
     Llm_provider.Pricing.estimate_cost ~pricing
@@ -1022,6 +1102,14 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          then now_iso ()
          else rt.last_autonomous_action_at);
       last_speech_act = Social.speech_act_to_string social_state.speech_act;
+      last_social_transition_reason =
+        (match social_transition_reason with
+         | Some reason -> String.trim reason
+         | None -> rt.last_social_transition_reason);
+      last_active_desire =
+        Option.value ~default:"" social_state.active_desire;
+      last_current_intention =
+        Option.value ~default:"" social_state.current_intention;
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous
          failures do not persist in the runtime JSON and mislead the
@@ -1033,7 +1121,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let append_metrics_snapshot ~(config : Room.config) ~(meta : keeper_meta)
+let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
@@ -1229,7 +1317,8 @@ let broadcast_lifecycle_events ~(name : string)
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
-    ~(reason : string) ?(is_transient = false) ?social_state () : keeper_meta =
+    ~(reason : string) ?(is_transient = false) ?social_state
+    ?social_transition_reason () : keeper_meta =
   ignore is_transient; (* Param retained for caller compatibility; no longer
                           used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
@@ -1238,7 +1327,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   in
   let preview =
     let trimmed = String.trim reason in
-    if trimmed = "" then "unified turn failed"
+    if trimmed = "" then "keeper cycle failed"
     else short_preview trimmed
   in
   {
@@ -1279,6 +1368,20 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
          | Some (state : Social.social_state) ->
              Social.speech_act_to_string state.speech_act
          | None -> meta.runtime.last_speech_act);
+      last_social_transition_reason =
+        (match social_transition_reason with
+         | Some value -> String.trim value
+         | None -> meta.runtime.last_social_transition_reason);
+      last_active_desire =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.active_desire
+         | None -> meta.runtime.last_active_desire);
+      last_current_intention =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.current_intention
+         | None -> meta.runtime.last_current_intention);
       last_blocker =
         (match social_state with
          | Some (state : Social.social_state) ->
@@ -1292,19 +1395,20 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
+let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
-    ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
+    ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
   (* 0. Phase gate + state-aware cascade routing *)
   let registry_base_path = config.base_path in
+  let previous_social_state = Social.previous_state_of_meta meta in
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       Log.Keeper.info
-        "%s: unified turn skipped in non-executable phase=%s"
+        "%s: keeper cycle skipped in non-executable phase=%s"
         meta.name (Keeper_state_machine.phase_to_string phase);
       Ok meta
   | phase_opt ->
@@ -1347,6 +1451,14 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
       Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+      let masc_root = Coord.masc_root_dir config in
+      let trajectory_acc =
+        Trajectory.create_accumulator
+          ~masc_root
+          ~keeper_name:meta.name
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~generation:meta.runtime.generation
+      in
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
@@ -1429,6 +1541,14 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
          block clears the field, preventing stale state on idle keepers. *)
       Keeper_registry.mark_turn_started
         ~base_path:config.base_path meta.name;
+      Keeper_registry.mark_turn_measurement
+        ~base_path:config.base_path meta.name;
+      (match Keeper_registry.get ~base_path:config.base_path meta.name with
+       | Some { current_turn_observation = Some { measurement = Some _; _ }; _ } ->
+           Keeper_registry.set_turn_decision_stage
+             ~base_path:config.base_path meta.name
+             Keeper_registry.Decision_guard_ok
+       | _ -> ());
       let run_result, latency_ms =
         Fun.protect ~finally:(fun () ->
           Keeper_exec_tools.remove_tool_call_observer side_effect_observer;
@@ -1445,16 +1565,22 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let remaining_turn_budget_s () =
             Float.max 0.0 (turn_deadline -. Eio.Time.now clock)
           in
+          let keeper_profile =
+            Keeper_types_profile.load_keeper_profile_defaults meta.name
+          in
           let do_run ~run_meta ~max_context ~run_generation ~is_retry
               ~oas_timeout_s =
             let max_idle_turns, max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
                   ( Env_config_keeper.KeeperKeepalive.max_idle_turns_reactive,
-                    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call )
+                    Keeper_types_profile.effective_max_turns_per_call
+                      keeper_profile )
               | Keeper_world_observation.Scheduled_autonomous ->
                   ( Env_config_keeper.KeeperKeepalive.max_idle_turns_autonomous,
-                    Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous )
+                    Keeper_types_profile
+                    .effective_max_turns_per_call_scheduled_autonomous
+                      keeper_profile )
             in
             Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
               ~max_context ~build_turn_prompt
@@ -1467,7 +1593,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~oas_timeout_s
-              ~max_cost_usd
+              ?max_cost_usd
+              ~trajectory_acc
               ~is_retry
               ?shared_context
               ?event_bus:(Keeper_event_bus.get ())
@@ -1476,12 +1603,25 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           let rec retry_loop ~run_meta ~max_context ~run_generation
               ~attempt ~is_retry
               ~overflow_retry_used =
+            let mark_terminal_error err =
+              if is_cascade_exhausted_error err then
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_exhausted
+              else
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Turn_finalizing
+            in
             let max_turns =
               match channel with
               | Keeper_world_observation.Reactive ->
-                  Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call
+                  Keeper_types_profile.effective_max_turns_per_call
+                    keeper_profile
               | Keeper_world_observation.Scheduled_autonomous ->
-                  Env_config_keeper.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
+                  Keeper_types_profile
+                  .effective_max_turns_per_call_scheduled_autonomous
+                    keeper_profile
             in
             let attempt_result =
               match
@@ -1501,11 +1641,26 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                                 (remaining_turn_budget_s ());
                           }))
               | Some oas_timeout_s ->
+                  Keeper_registry.set_turn_cascade_state
+                    ~base_path:config.base_path meta.name
+                    Keeper_registry.Cascade_trying;
                   do_run ~run_meta ~max_context ~run_generation ~is_retry
                     ~oas_timeout_s
             in
             match attempt_result with
-            | Ok _ as ok -> ok
+            | Ok result ->
+                let selected_model =
+                  match result.cascade_observation with
+                  | Some observation -> observation.selected_model
+                  | None -> None
+                in
+                Keeper_registry.set_turn_selected_model
+                  ~base_path:config.base_path meta.name
+                  selected_model;
+                Keeper_registry.set_turn_cascade_state
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Cascade_done;
+                Ok result
             | Error err ->
                 let committed_tools =
                   committed_mutating_tools !mutating_tools_committed
@@ -1530,10 +1685,11 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                     else "transient error"
                   in
                   Log.Keeper.warn
-                    "%s: %s after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (error: %s)"
+                    "%s: %s after committed reconcile-safe tool(s) [%s] — auto-recovering (error: %s)"
                     meta.name reason
                     (String.concat ", " committed_tools)
                     err_preview;
+                  mark_terminal_error err;
                   Error err
                 end else if committed_tools <> [] then begin
                   let reclassified, failure_reason =
@@ -1569,6 +1725,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                       meta.name
                       (String.concat ", " committed_tools)
                       err_preview;
+                  mark_terminal_error reclassified;
                   Error reclassified
                 end else if is_transient_network_error err
                               && attempt <= max_transient_retries then begin
@@ -1598,6 +1755,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                         ~error:err
                     with
                     | Some retry_plan ->
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_compacting;
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name
@@ -1612,6 +1772,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                                after_tokens =
                                  retry_plan.compaction.after_tokens;
                              });
+                        Keeper_registry.prepare_turn_retry_after_compaction
+                          ~base_path:config.base_path meta.name;
                         let retry_meta =
                           if retry_plan.retry_generation = run_meta.runtime.generation
                           then run_meta
@@ -1636,16 +1798,24 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                         mark_paused_after_overflow
                           ~run_meta
                           ~reason:"auto_compact_recovery_unavailable";
+                        Keeper_registry.set_turn_phase
+                          ~base_path:config.base_path meta.name
+                          Keeper_registry.Turn_finalizing;
                         Error err
                   else begin
                     mark_paused_after_overflow
                       ~run_meta
                       ~reason:"overflow_persisted_after_auto_compact_retry";
+                    Keeper_registry.set_turn_phase
+                      ~base_path:config.base_path meta.name
+                      Keeper_registry.Turn_finalizing;
                     Error err
                   end
                 end
-                else
+                else begin
+                  mark_terminal_error err;
                   Error err
+                end
           in
           (* Wall-clock timeout guards against indefinite TCP-level hangs
              from upstream LLM providers. Without this, a single stalled
@@ -1672,15 +1842,19 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             then begin
               (* Timeouts are inherently transient — the provider was
                  reachable (tools executed) but took too long.  Board-only
-                 committed tools are duplicate-tolerant, so we skip
-                 manual_reconcile.  Unlike the retry_loop path, no
-                 is_transient check is needed: a wall-clock timeout after
-                 successful tool execution is always transient by nature. *)
+                 committed tools are duplicate-tolerant, so we auto-recover
+                 instead of recording an integrity failure.  Unlike the
+                 retry_loop path, no is_transient check is needed: a
+                 wall-clock timeout after successful tool execution is
+                 always transient by nature. *)
               Log.Keeper.warn
-                "%s: turn wall-clock timeout after committed reconcile-safe tool(s) [%s] — auto-recovering, no manual reconcile (timeout: %s)"
+                "%s: turn wall-clock timeout after committed reconcile-safe tool(s) [%s] — auto-recovering (timeout: %s)"
                 meta.name
                 (String.concat ", " committed_tools)
                 msg;
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
               Error (Oas.Error.Api (Timeout { message = msg }))
             end else if committed_tools <> [] then begin
               let timeout_err =
@@ -1709,12 +1883,19 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               in
               post_commit_failure_reason := Some failure_reason;
               Log.Keeper.error
-                "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure, manual reconcile required"
+                "%s: turn wall-clock timeout after committed mutating tool call(s) [%s] — treating as integrity failure; evidence recorded for next-turn observation"
                 meta.name
                 (String.concat ", " committed_tools);
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
               Error reclassified
-            end else
-              Error (Oas.Error.Internal msg))))
+            end else begin
+              Keeper_registry.set_turn_phase
+                ~base_path:config.base_path meta.name
+                Keeper_registry.Turn_finalizing;
+              Error (Oas.Error.Internal msg)
+            end)))
       in
       (* Drain correlation_id from the subscription created before the
          turn. Unsubscribe is handled by [unsubscribe_event_bus] in the
@@ -1730,13 +1911,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
        | _ -> ());
       match run_result with
       | Error err ->
+          finalize_trajectory_acc trajectory_acc
+            (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
           let is_transient = is_transient_network_error err in
           let is_server_parse_rejection = is_server_rejected_parse_error err in
           let is_auto_recoverable = is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
-            "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
+            "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name effective_cascade_name max_context latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
@@ -1746,8 +1929,9 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                " (transient, cooldown preserved)"
              else "")
             (short_preview e_str);
-          let social_state =
-            Social.derive_failure_state ~meta ~observation ~reason:e_str
+          let social_state, social_transition_reason =
+            Social.derive_failure_state ~meta ~observation
+              ~previous_state:previous_social_state ~reason:e_str
           in
           let failure_meta_base =
             match !paused_meta_override with
@@ -1760,69 +1944,58 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~latency_ms
               ~observation
               ~reason:e_str
-              ~is_transient ~social_state ()
+              ~is_transient
+              ~social_state
+              ~social_transition_reason:
+                (Social.transition_reason_to_string social_transition_reason)
+              ()
           in
-          if is_ambiguous_partial then begin
-            (* Reconcile-safe partial commits stay file-less; unsafe ones
-               open a manual_reconcile record immediately so keepalive and
-               status surfaces share one blocker truth source. *)
-            let failure_reason =
-              Option.value
-                ~default:
-                  (Keeper_registry.Ambiguous_partial_commit {
-                    kind = Keeper_registry.Post_commit_failure;
-                    detail = e_str;
-                  })
-                !post_commit_failure_reason
-            in
-            let manual_reconcile_required =
-              Keeper_registry.failure_reason_requires_manual_reconcile
-                failure_reason
-            in
-            Keeper_registry.set_failure_reason ~base_path:config.base_path
-              meta.name
-              (Some failure_reason);
-            if manual_reconcile_required then begin
-              let blocker_class =
-                match failure_reason with
-                | Keeper_registry.Ambiguous_partial_commit { kind; _ } ->
-                    blocker_class_of_post_commit_kind kind
-                | _ -> "ambiguous_post_commit_failure"
-              in
+          let updated_meta =
+            if is_ambiguous_partial then begin
+              (* Ambiguous partial commit must not auto-resume silently.
+                 The keeper is paused and an explicit continue gate is
+                 raised for the operator. Approving the gate auto-resumes
+                 the keeper; rejecting it leaves the keeper paused. *)
               let committed_tools =
                 committed_mutating_tools !mutating_tools_committed
               in
-              let summary =
-                match failure_reason with
-                | Keeper_registry.Ambiguous_partial_commit { detail; _ } -> detail
-                | _ -> e_str
+              let failure_reason =
+                Option.value
+                  ~default:
+                    (Keeper_registry.Ambiguous_partial_commit {
+                      kind = Keeper_registry.Post_commit_failure;
+                      detail = e_str;
+                    })
+                  !post_commit_failure_reason
               in
-              ignore
-                (Keeper_manual_reconcile.open_pending
-                   config
-                   ~keeper_name:meta.name
-                   ~blocker_class
-                   ~summary
-                   ~failure_reason:
-                     (Some
-                        (Keeper_registry.failure_reason_to_string failure_reason))
-                   ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-                   ~generation:(Some meta.runtime.generation)
-                   ~committed_tools);
-              Log.Keeper.error
-                "%s: ambiguous partial commit retained manual reconcile \
-                 blocker (tools=[%s])"
+              Keeper_registry.set_failure_reason ~base_path:config.base_path
                 meta.name
-                (String.concat ", "
-                   committed_tools)
-            end else
+                (Some failure_reason);
+              let paused_meta =
+                sync_keeper_paused_state
+                  ~config
+                  ~meta:updated_meta
+                  ~paused:true
+              in
+              let approval_id =
+                enqueue_reconcile_continue_gate
+                  ~config
+                  ~meta:paused_meta
+                  ~failure_reason
+                  ~committed_tools
+                  ~error_detail:e_str
+              in
               Log.Keeper.warn
-                "%s: auto-recoverable partial commit (tools=[%s]); \
-                 continuing without manual reconcile block"
+                "%s: ambiguous partial commit (tools=[%s], reason=%s); \
+                 paused keeper and opened continue gate id=%s"
                 meta.name
-                (String.concat ", "
-                   (committed_mutating_tools !mutating_tools_committed))
-          end;
+                (String.concat ", " committed_tools)
+                (Keeper_registry.failure_reason_to_string failure_reason)
+                approval_id;
+              paused_meta
+            end else
+              updated_meta
+          in
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -1837,6 +2010,28 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            | Error msg ->
                Log.Keeper.error
                  "write_meta failed after unified turn failure: %s" msg);
+          if is_ambiguous_partial then begin
+            let failure_reason =
+              Option.value
+                ~default:
+                  (Keeper_registry.Ambiguous_partial_commit {
+                    kind = Keeper_registry.Post_commit_failure;
+                    detail = e_str;
+                  })
+                !post_commit_failure_reason
+            in
+            Keeper_registry.set_failure_reason ~base_path:config.base_path
+              meta.name
+              (Some failure_reason);
+            let committed_tools =
+              committed_mutating_tools !mutating_tools_committed
+            in
+            Log.Keeper.info
+              "%s: reconcile-required failure latched as %s after committed tools [%s]"
+              meta.name
+              (Keeper_registry.failure_reason_to_string failure_reason)
+              (String.concat ", " committed_tools)
+          end;
           let base_path = config.base_path in
           (* Transient errors (429 rate limit, 503 overloaded, network
              timeout) do not count toward the consecutive failure threshold.
@@ -1866,40 +2061,16 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           end;
           Error err
       | Ok result ->
+          finalize_trajectory_acc trajectory_acc Trajectory.Completed;
           let explicit_accountability_claim =
             Social.extract_accountability_claim result
           in
-          let result, social_state =
-            Social.apply_to_result ~meta ~observation result
+          let result, social_state, social_transition_reason =
+            Social.apply_to_result ~meta ~observation
+              ~previous_state:previous_social_state result
           in
           let used_model_id =
-            let strip_latest s =
-              if
-                String.length s > 7
-                && String.sub s (String.length s - 7) 7 = ":latest"
-              then String.sub s 0 (String.length s - 7)
-              else s
-            in
-            let used = strip_latest result.model_used in
-            let cascade_models =
-              match dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models) with
-              | _ :: _ as explicit -> explicit
-              | [] -> Oas_model_resolve.models_of_cascade_name effective_cascade_name
-            in
-            let cfgs =
-              Llm_provider.Cascade_config.parse_model_strings cascade_models
-            in
-            match
-              List.find_opt
-                (fun (c : Llm_provider.Provider_config.t) ->
-                  c.model_id = result.model_used || c.model_id = used)
-                cfgs
-            with
-            | Some c -> c.model_id
-            | None ->
-                (match cfgs with
-                | c :: _ -> c.model_id
-                | [] -> result.model_used)
+            Keeper_agent_run.surface_model_used result
           in
           let turn_cost =
             let pricing =
@@ -1940,6 +2111,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             update_metrics_from_result lifecycle.updated_meta ~latency_ms
               ~observation
               ~social_state
+              ~social_transition_reason:
+                (Social.transition_reason_to_string social_transition_reason)
               ~update_proactive_rt:true
               result
           in
@@ -1969,7 +2142,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
                Log.Keeper.error
-                 "write metrics snapshot failed after unified turn: %s"
+                 "write metrics snapshot failed after keeper cycle: %s"
                  (Printexc.to_string exn));
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
@@ -2071,7 +2244,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 ()
           | None -> ());
           Log.Keeper.info
-            "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
+            "%s: keeper cycle OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
             updated_meta.name (Keeper_agent_run.surface_model_used result)
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
@@ -2089,8 +2262,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()
-           | Error msg ->
-               Log.Keeper.error "write_meta failed after unified turn: %s" msg);
+           | Error msg -> Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
           (* 8. Handle stop reason *)
           (match result.stop_reason with
            | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
@@ -2113,3 +2285,5 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
           Ok updated_meta
+
+let run_unified_turn = run_keeper_cycle

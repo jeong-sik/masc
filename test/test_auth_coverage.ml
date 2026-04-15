@@ -158,8 +158,8 @@ let test_auth_config_file_json () =
 
 let test_permission_for_tool_init () =
   match Auth.permission_for_tool "masc_init" with
-  | Some Types.CanInit -> ()
-  | _ -> fail "expected CanInit"
+  | None -> ()  (* tool removed in registry pruning *)
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_reset () =
   match Auth.permission_for_tool "masc_reset" with
@@ -182,6 +182,8 @@ let test_permission_for_tool_status () =
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_runtime_verify () =
+  (* Tool schema was pruned but the permission map still maps the name
+     to CanReadState. Keep the legacy permission contract. *)
   match Auth.permission_for_tool "masc_runtime_verify" with
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
@@ -215,11 +217,6 @@ let test_permission_for_tool_claim_next () =
   match Auth.permission_for_tool "masc_claim_next" with
   | Some Types.CanClaimTask -> ()
   | _ -> fail "expected CanClaimTask"
-
-let test_permission_for_tool_done () =
-  match Auth.permission_for_tool "masc_done" with
-  | Some Types.CanCompleteTask -> ()
-  | _ -> fail "expected CanCompleteTask"
 
 let test_permission_for_tool_broadcast () =
   match Auth.permission_for_tool "masc_broadcast" with
@@ -429,13 +426,13 @@ let test_permission_for_tool_approve () =
 
 let test_permission_for_tool_auth_enable () =
   match Auth.permission_for_tool "masc_auth_enable" with
-  | Some Types.CanInit -> ()  (* Admin only *)
-  | _ -> fail "expected CanInit"
+  | None -> ()  (* tool removed in registry pruning *)
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_auth_status () =
   match Auth.permission_for_tool "masc_auth_status" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
+  | None -> ()  (* tool removed in registry pruning *)
+  | _ -> fail "expected None (removed tool)"
 
 let test_permission_for_tool_stats () =
   match Auth.permission_for_tool "masc_tool_stats" with
@@ -524,11 +521,6 @@ let test_permission_for_tool_autoresearch_stop () =
 
 let test_permission_for_tool_keeper_create_from_persona () =
   match Auth.permission_for_tool "masc_keeper_create_from_persona" with
-  | Some Types.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
-
-let test_permission_for_tool_keeper_reconcile () =
-  match Auth.permission_for_tool "masc_keeper_reconcile" with
   | Some Types.CanBroadcast -> ()
   | _ -> fail "expected CanBroadcast"
 
@@ -719,7 +711,6 @@ let () =
       test_case "add_task" `Quick test_permission_for_tool_add_task;
       test_case "claim" `Quick test_permission_for_tool_claim;
       test_case "claim_next" `Quick test_permission_for_tool_claim_next;
-      test_case "done" `Quick test_permission_for_tool_done;
       test_case "broadcast" `Quick test_permission_for_tool_broadcast;
       test_case "webrtc_offer" `Quick test_permission_for_tool_webrtc_offer;
       test_case "webrtc_answer" `Quick test_permission_for_tool_webrtc_answer;
@@ -759,8 +750,6 @@ let () =
         test_permission_for_tool_autoresearch_stop;
       test_case "keeper_create_from_persona" `Quick
         test_permission_for_tool_keeper_create_from_persona;
-      test_case "keeper_reconcile" `Quick
-        test_permission_for_tool_keeper_reconcile;
       test_case "set_param" `Quick test_permission_for_tool_set_param;
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;

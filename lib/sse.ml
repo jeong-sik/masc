@@ -42,10 +42,7 @@ let max_clients = 200
     (Eio.Stream.create 0 blocks add until a matching take).
     64 events at 3-10s intervals covers 3-10 minutes of buffering.
     A client that falls this far behind should reconnect. *)
-let stream_capacity =
-  match Sys.getenv_opt "MASC_SSE_STREAM_CAPACITY" with
-  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 8 (min 1024 v) | None -> 64)
-  | None -> 64
+let stream_capacity = 64
 
 (** SSE client state.
     [event_stream] is the per-session mailbox.  [broadcast] pushes here;
@@ -402,6 +399,13 @@ let with_ext_sub_ro f = Eio_guard.with_mutex_ro ext_sub_mutex f
 let current_external_subscriber_count () =
   with_ext_sub_ro (fun () -> Hashtbl.length external_subscribers)
 
+let current_external_subscriber_count_with_prefix prefix =
+  with_ext_sub_ro (fun () ->
+    Hashtbl.fold
+      (fun sub_id _ acc ->
+        if String.starts_with ~prefix sub_id then acc + 1 else acc)
+      external_subscribers 0)
+
 (** Register an external subscriber that receives formatted SSE events
     on every broadcast.  The [callback] must not block (use best-effort).
 
@@ -424,6 +428,9 @@ let unsubscribe_external id =
 (** Number of external subscribers (for diagnostics). *)
 let external_subscriber_count () =
   current_external_subscriber_count ()
+
+let external_subscriber_count_with_prefix prefix =
+  current_external_subscriber_count_with_prefix prefix
 
 (** Fan out an event string to all external subscribers.
     Dead subscribers (where [is_alive] returns [false]) are automatically

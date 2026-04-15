@@ -17,6 +17,21 @@ let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
 let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
 let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
+let normalize_gh_command (cmd : string) : string =
+  let tokens =
+    cmd
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun token -> token <> "")
+  in
+  let rec drop_leading_gh = function
+    | token :: rest when String.lowercase_ascii token = "gh" ->
+        drop_leading_gh rest
+    | remaining -> remaining
+  in
+  String.concat " " (drop_leading_gh tokens)
+
 let clamp_shell_timeout ?(min_sec = 1.0) ~default args =
   Safe_ops.json_float ~default "timeout_sec" args
   |> fun n -> max min_sec (min user_timeout_max_sec n)
@@ -146,7 +161,7 @@ let update_playground_repo_cache
       (Printexc.to_string exn))
 
 let resolve_keeper_shell_read_cwd
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -162,7 +177,7 @@ let resolve_keeper_shell_read_cwd
   | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
 
 let resolve_keeper_shell_write_cwd
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -183,7 +198,7 @@ let resolve_keeper_shell_write_cwd
    The container-side root comes from
    [Env_config_keeper.DockerPlayground.container_playground_root] so the
    mount point is configurable (default "/home/keeper/playground"). *)
-let docker_playground_cwd ~(config : Room.config) ~(meta : keeper_meta) host_cwd =
+let docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
   let playground_prefix =
     Filename.concat root Playground_paths.all_playgrounds_prefix
@@ -263,7 +278,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   | None -> None
 
 let resolve_keeper_shell_read_path
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -322,7 +337,7 @@ let resolve_keeper_shell_read_path
     resolve_with_autocorrect resolved_raw_path
 
 let handle_keeper_bash
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -518,7 +533,7 @@ let handle_keeper_bash
 ;;
 
 let handle_keeper_shell
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -1007,6 +1022,75 @@ let handle_keeper_shell
                  ; "status", Keeper_alerting_path.process_status_to_json st
                  ; "output", `String out
                  ]))
+  | "gh" ->
+    let cmd_str =
+      Safe_ops.json_string ~default:"" "cmd" args
+      |> normalize_gh_command
+    in
+    (* gh runs against remote network, so 1s floor from shell default is
+       too aggressive (observed: keepers passing timeout_sec=1 kills
+       [gh pr create] mid-TCP). Floor at 5s and default at the configured
+       pr_create timeout (tool_policy.toml, default 30s). *)
+    let gh_default_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
+    let timeout_sec =
+      clamp_shell_timeout ~min_sec:5.0 ~default:gh_default_timeout args
+    in
+    if cmd_str = "" then
+      error_json ~fields:[ "op", `String op ]
+        "cmd is required for gh op. Good: cmd='pr list --state open'. Bad: cmd=''."
+    else
+      let allowed_orgs = Keeper_tool_policy.git_clone_allowed_orgs () in
+      (match Worker_dev_tools.validate_gh_command ~allowed_orgs cmd_str with
+       | Error reason ->
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool false
+               ; "op", `String op
+               ; "error", `String "gh_command_blocked"
+               ; "reason", `String reason
+               ; "hint", `String
+                   "Run `gh --help` shapes: pr/issue/repo/release/label/run/\
+                    workflow/api/project/ruleset/search/status/cache/gist. \
+                    auth/secret/ssh-key are blocked."
+               ])
+       | Ok () ->
+         (match cwd_target () with
+          | Error e -> path_error e
+          | Ok cwd ->
+            let full_cmd =
+              Keeper_gh_env.with_env config
+                (Printf.sprintf "gh %s 2>&1" cmd_str)
+            in
+            let st, out =
+              Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                [ "bash"; "-lc"; full_cmd ]
+            in
+            if process_status_is_timeout st then
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool false
+                    ; "op", `String op
+                    ; "cwd", `String cwd
+                    ; "command", `String (Printf.sprintf "gh %s" cmd_str)
+                    ; "error", `String "gh_command_timed_out"
+                    ; "timeout_sec", `Float timeout_sec
+                    ; "status", Keeper_alerting_path.process_status_to_json st
+                    ; "output", `String out
+                    ; "hint", `String
+                        "gh network call exceeded timeout_sec. Retry with a \
+                         larger value (e.g. timeout_sec=60) or narrow the \
+                         query (--state, --limit, --json)."
+                    ])
+            else
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool (st = Unix.WEXITED 0)
+                    ; "op", `String op
+                    ; "cwd", `String cwd
+                    ; "command", `String (Printf.sprintf "gh %s" cmd_str)
+                    ; "status", Keeper_alerting_path.process_status_to_json st
+                    ; "output", `String out
+                    ])))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc
@@ -1020,6 +1104,6 @@ let handle_keeper_shell
                    [ "pwd"; "ls"; "cat"; "rg"; "git_status";
                      "find"; "head"; "tail"; "wc"; "tree";
                      "git_log"; "git_diff"; "git_worktree"; "bash";
-                     "git_clone" ]) )
+                     "git_clone"; "gh" ]) )
           ])
 ;;

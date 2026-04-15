@@ -101,7 +101,7 @@ let keeper_schemas : tool_schema list = [
         ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
         ("execution_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
+          ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
@@ -235,13 +235,13 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("execution_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
-          ("description", `String "Execution scope: observe_only (read-only), workspace (write to allowed paths), local (full access). Default: workspace.");
+          ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
+          ("description", `String "Execution scope. 'observe_only' blocks all writes. 'workspace'/'local' enable writes within playground (.masc/playground/<name>/). Extra paths must be listed explicitly in allowed_paths. Default: workspace.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Restrict file writes to these path prefixes. Empty list uses computed defaults based on execution_scope. Use [\"*\"] for explicit full access.");
+          ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/). Use [\"*\"] for explicit full access.");
         ]);
         ("tool_access",
           tool_access_schema
@@ -296,6 +296,11 @@ let keeper_schemas : tool_schema list = [
         ("tail_bytes", `Assoc [
           ("type", `String "integer");
           ("description", `String "How many bytes from the end of files to scan for tails (default: 60000).");
+        ]);
+        ("tail_order", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "oldest_first"; `String "newest_first"]);
+          ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
         ]);
         ("fast", `Assoc [
           ("type", `String "boolean");
@@ -404,42 +409,7 @@ let keeper_schemas : tool_schema list = [
     ];
   };
 
-  {
-    name = "masc_keeper_reconcile";
-    description = "Inspect or clear a keeper manual-reconcile blocker. Use inspect to review the persisted blocker record, then clear with operator evidence once the committed side effects have been reconciled.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("action", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "inspect"; `String "clear"]);
-          ("description", `String "inspect returns the persisted blocker record. clear marks it cleared and re-enables keepalive turns.");
-        ]);
-        ("resolution", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Required for clear. Operator summary of how the ambiguous side effects were reconciled.");
-        ]);
-        ("evidence_refs", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional evidence references (task ids, board posts, logs, notes) that justify the clear.");
-        ]);
-        ("actor", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional operator identity. Defaults to the calling agent_name.");
-        ]);
-        ("idempotency_key", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional idempotency key for repeated clear requests.");
-        ]);
-      ]);
-      ("required", `List [`String "name"; `String "action"]);
-    ];
-  };
+  (* masc_keeper_reconcile removed with manual_reconcile blocker system. *)
 
   {
     name = "masc_keeper_down";

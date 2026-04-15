@@ -6,6 +6,30 @@
 
 (** {1 Types} *)
 
+(** Node status variant. Replaces stringly-typed status.
+    @since 7182 *)
+type node_status =
+  | Active | Offline | Spawned | Retired | Compacting | Handoff
+  | Autonomy | Guardrail
+  | Todo | Claimed | In_progress | Done | Cancelled
+  | Posted | Discussed
+  | Open | Resolved
+  | Approved | Denied
+  | Running | Paused | Stopped | Finalized
+  | Observed | Coord | Unset
+
+val node_status_to_string : node_status -> string
+val node_status_of_string : string -> node_status
+
+(** Span status variant (separate lifecycle from node status).
+    @since 7182 *)
+type span_status =
+  | Span_open | Span_completed | Span_released | Span_cancelled
+  | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
+
+val span_status_to_string : span_status -> string
+val span_status_of_string : string -> span_status
+
 type entity_ref = {
   kind : string;
   id : string;
@@ -27,7 +51,7 @@ type graph_node = {
   id : string;
   kind : string;
   label : string;
-  status : string;
+  status : node_status;
   weight : int;
   semantic_weight : float;
   last_event_at : string;
@@ -85,7 +109,7 @@ val client_count : unit -> int
 val format_sse_event : event -> string
 
 val emit :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?actor:entity_ref ->
   ?subject:entity_ref ->
   ?tags:string list ->
@@ -95,19 +119,19 @@ val emit :
   event
 
 val list_events :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
   unit ->
   event list
 
-val latest_seq : Room_utils.config -> int
+val latest_seq : Coord_utils.config -> int
 
 (** {1 JSON responses} *)
 
 val json_response :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -115,7 +139,7 @@ val json_response :
   Yojson.Safe.t
 
 val graph_json :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?kinds:string list ->
   ?limit:int ->
   ?timeline_limit:int ->
@@ -131,13 +155,13 @@ type agent_span = {
   end_ms : int;
   span_kind : string;
   label : string;
-  span_status : string;
+  span_status : span_status;
 }
 
 val agent_span_to_yojson : agent_span -> Yojson.Safe.t
 
 val agent_spans_json :
-  Room_utils.config ->
+  Coord_utils.config ->
   ?limit:int ->
   ?since_ms:int ->
   unit ->

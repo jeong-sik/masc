@@ -159,35 +159,18 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with required_permission = Some Types.CanLeave } );
     ( "masc_broadcast",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
-    ( "masc_listen",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_messages",
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "masc_who",
       { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "channel_gate",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
-    ( "masc_verify_auto",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_pending",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_request",
-      { default_metadata with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_status",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
-    ( "masc_verify_submit",
-      { default_metadata with required_permission = Some Types.CanReadState } );
-    ( "masc_recall_search",
-      { readonly_tool with required_permission = Some Types.CanReadState } );
     ( "masc_portal_open",
       { default_metadata with required_permission = Some Types.CanOpenPortal } );
     ( "masc_portal_close",
       { default_metadata with required_permission = Some Types.CanOpenPortal } );
     ( "masc_portal_send",
       { default_metadata with required_permission = Some Types.CanSendPortal } );
-    ( "masc_set_room",
-      hidden_active ~canonical_name:"masc_start" ~replacement:"masc_start"
-        "Compatibility alias that only selects the project coordination root. Prefer masc_start for truthful namespace onboarding." );
     ( "masc_room_status",
       hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
         "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
@@ -242,8 +225,6 @@ let explicit_metadata : (string * metadata) list =
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
     ("masc_tool_grant", destructive_tool);
     ("masc_tool_revoke", destructive_tool);
-    ( "masc_keeper_reconcile",
-      { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_keeper_reset",
       { default_metadata with required_permission = Some Types.CanBroadcast } );
     ( "masc_keeper_compact",
@@ -259,9 +240,6 @@ let explicit_metadata : (string * metadata) list =
        signaling endpoints in server_h2_gateway.ml — kept for now. *)
     ("masc_webrtc_offer", deprecated "Pruned from all surfaces in #4999");
     ("masc_webrtc_answer", deprecated "Pruned from all surfaces in #4999");
-    (* Voice MCP tool: deprecated after voice group removal from tool_policy.toml.
-       Schema still registered in keeper_schema.ml for backward compat dispatch. *)
-    ("masc_voice_ping_pong", deprecated "Voice group removed from tool_policy.toml");
   ]
 
 (* ================================================================ *)
@@ -279,7 +257,7 @@ let register_metadata name (meta : metadata) =
 (* ================================================================ *)
 
 (* Delegate to surfaces sub-module *)
-let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_set
+let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_tools
 
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
 

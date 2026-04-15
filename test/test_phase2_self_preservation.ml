@@ -6,7 +6,6 @@ open Alcotest
 module R = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
-module KMR = Masc_mcp.Keeper_manual_reconcile
 module Cfg = Env_config
 
 let bp = "/tmp/test-phase2"
@@ -118,26 +117,6 @@ let test_failure_reason_ambiguous_partial_commit_kind_string () =
   check string "ambiguous partial commit kind string"
     "post_commit_timeout"
     (R.ambiguous_partial_commit_kind_to_string R.Post_commit_timeout)
-
-let test_failure_reason_manual_reconcile_required () =
-  check bool "ambiguous partial commit requires manual reconcile" true
-    (R.failure_reason_requires_manual_reconcile
-       (R.Ambiguous_partial_commit
-          {
-            kind = R.Post_commit_failure;
-            detail = "turn outcome ambiguous";
-          }));
-  check bool "reconcile-safe ambiguous partial commit does not require manual reconcile" false
-    (R.failure_reason_requires_manual_reconcile
-       (R.Ambiguous_partial_commit
-          {
-            kind = R.Post_commit_failure;
-            detail =
-              "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required (error: Completion contract [require_tool_use] violated)";
-          }));
-  check bool "turn failures do not require manual reconcile" false
-    (R.failure_reason_requires_manual_reconcile
-       (R.Turn_consecutive_failures 2))
 
 (* ── Config defaults ──────────────────────────────────── *)
 
@@ -255,65 +234,6 @@ let test_dead_tombstone_is_registered () =
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "k1");
   check bool "Dead is not running" false (R.is_running ~base_path:bp "k1")
 
-let test_manual_reconcile_store_roundtrip () =
-  let dir = Filename.concat (Filename.get_temp_dir_name ()) "test-phase2-manual-reconcile" in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  let config = Masc_mcp.Room.default_config dir in
-  let record =
-    KMR.open_pending config
-      ~keeper_name:"k1"
-      ~blocker_class:"ambiguous_post_commit_timeout"
-      ~summary:"turn outcome ambiguous"
-      ~failure_reason:(Some "ambiguous_partial_commit(post_commit_timeout:test)")
-      ~trace_id:(Some "trace-k1")
-      ~generation:(Some 2)
-      ~committed_tools:["keeper_shell"; "keeper_task_done"]
-  in
-  check bool "pending after open" true (KMR.is_pending config "k1");
-  check string "cache key opened" record.updated_at
-    (match String.split_on_char '|' (KMR.cache_key config "k1") with
-     | _status :: updated_at :: _ -> updated_at
-     | _ -> "");
-  match KMR.clear config ~keeper_name:"k1" ~actor:"tester"
-          ~resolution:"verified downstream side effects"
-          ~evidence_refs:["board:p-1"; "task:T-1"]
-          ~idempotency_key:(Some "idem-1")
-  with
-  | KMR.Cleared_record cleared ->
-      check bool "not pending after clear" false (KMR.is_pending config "k1");
-      (* delete-on-clear: the on-disk record is gone after a successful
-         clear so legacy readers can never mistake a Cleared file for a
-         blocker. The in-memory Cleared_record is the one-shot audit. *)
-      check string "record removed after clear" "missing"
-        (match KMR.read config "k1" with
-         | Some record -> (
-             match record.status with
-             | KMR.Cleared -> "cleared"
-             | KMR.Pending -> "pending")
-         | None -> "missing");
-      check string "resolution carried in return value"
-        "verified downstream side effects"
-        (Option.value ~default:"" cleared.resolution);
-      check string "cleared_by carried in return value" "tester"
-        (Option.value ~default:"" cleared.cleared_by);
-      (* Idempotent retry: on delete-on-clear, a second clear with the
-         same idempotency key returns No_record because the file is gone.
-         This is a deliberate semantic change — callers that previously
-         relied on the Already_cleared signal must treat No_record as
-         "already handled". *)
-      (match KMR.clear config ~keeper_name:"k1" ~actor:"tester"
-               ~resolution:"retry"
-               ~evidence_refs:[]
-               ~idempotency_key:(Some "idem-1")
-       with
-       | KMR.No_record -> ()
-       | KMR.Cleared_record _ ->
-           fail "retry should not reopen a cleared record"
-       | KMR.Already_cleared _ ->
-           fail "retry cannot observe Already_cleared after delete-on-clear")
-  | KMR.Already_cleared _ -> fail "expected first clear to mutate"
-  | KMR.No_record -> fail "expected persisted record"
-
 (* ── Test runner ──────────────────────────────────────── *)
 
 let () =
@@ -338,8 +258,6 @@ let () =
         test_failure_reason_ambiguous_partial_commit;
       test_case "ambiguous partial commit kind string" `Quick
         test_failure_reason_ambiguous_partial_commit_kind_string;
-      test_case "manual reconcile helper" `Quick
-        test_failure_reason_manual_reconcile_required;
     ];
     "config", [
       test_case "ratio default" `Quick test_self_preservation_ratio_default;
@@ -363,8 +281,5 @@ let () =
     ];
     "dead_tombstone", [
       eio_test "Dead is registered but not running" test_dead_tombstone_is_registered;
-    ];
-    "manual_reconcile_store", [
-      eio_test "pending -> clear roundtrip" test_manual_reconcile_store_roundtrip;
     ];
   ]

@@ -4,6 +4,7 @@
  (name masc_config)
  (public_name masc_mcp.config)
  (modules
+   config_boot_overrides
    env_config
    env_config_core
    env_config_governance

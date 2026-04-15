@@ -26,22 +26,20 @@ let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
     preset-allowed names + core_always_tools. *)
 let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
   let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let set = Keeper_tool_policy.tool_name_set allowed_names in
-  List.iter
-    (fun name -> Hashtbl.replace set name ())
-    Keeper_tool_registry.core_always_tools;
-  set
+  let base = Keeper_tool_policy.tool_name_set allowed_names in
+  Keeper_tool_policy.StringSet.union base
+    (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
 (** Filter core_discovery_tools by preset (the fix). *)
 let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
   let allowed_set = build_allowed_exec_set meta in
   List.filter
-    (fun name -> Hashtbl.mem allowed_set name)
+    (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
     Keeper_tool_registry.core_discovery_tools
 
 (* Write/VCS tools that require coding/delivery/full presets *)
 let write_vcs_tools =
-  [ "keeper_fs_edit"; "keeper_pr_workflow"; "keeper_github" ]
+  [ "keeper_fs_edit"; "keeper_pr_workflow" ]
 
 (* ── Test 1: Core discovery tools respect preset ──────────────── *)
 
@@ -105,7 +103,7 @@ let test_atomic_write_not_empty () =
   let json =
     `Assoc [ ("name", `String "test"); ("status", `String "ok") ]
   in
-  Room_utils.write_json_local path json;
+  Coord_utils.write_json_local path json;
   let content = Fs_compat.load_file path in
   check bool "file not empty after atomic write" true
     (String.length content > 0);
@@ -126,7 +124,7 @@ let test_concurrent_atomic_writes_never_empty () =
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let path = Filename.concat dir "agent.json" in
   (* Seed with initial content *)
-  Room_utils.write_json_local path
+  Coord_utils.write_json_local path
     (`Assoc [ ("name", `String "init") ]);
   let empty_seen = ref false in
   let iterations = 200 in
@@ -137,7 +135,7 @@ let test_concurrent_atomic_writes_never_empty () =
       let json =
         `Assoc [ ("name", `String (Printf.sprintf "v%d" i)) ]
       in
-      Room_utils.write_json_local path json;
+      Coord_utils.write_json_local path json;
       Eio.Fiber.yield ()
     done);
   (* Reader fiber: read concurrently *)

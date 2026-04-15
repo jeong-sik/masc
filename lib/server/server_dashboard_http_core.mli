@@ -27,8 +27,8 @@ val run_dashboard_compute :
   ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Room.config ->
-  (config:Room.config -> sw:Eio.Switch.t -> 'a) ->
+  config:Coord.config ->
+  (config:Coord.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 
 (** Internal cached surfaces for proactive refresh loops.
@@ -51,7 +51,7 @@ val with_dashboard_timeout :
 
 (** {1 Cache Key Helpers} *)
 
-val room_scoped_cache_key : Room.config -> string -> string -> string
+val room_scoped_cache_key : Coord.config -> string -> string -> string
 
 (** {1 Projection Diagnostics} *)
 
@@ -76,7 +76,7 @@ val operator_actor_hint : Httpun.Request.t -> string option
 (** {1 Batch API} *)
 
 val dashboard_batch_json :
-  ?compact:bool -> Room.config -> Yojson.Safe.t
+  ?compact:bool -> Coord.config -> Yojson.Safe.t
 
 (** {1 Operator Snapshot/Digest} *)
 
@@ -137,18 +137,18 @@ val dashboard_mission_briefing_http_json :
 
 (** {1 Shell and Data Helpers} *)
 
-val dashboard_shell_status_json : Room.config -> Yojson.Safe.t
-val dashboard_task_json : Room.config -> Types.task -> Yojson.Safe.t
+val dashboard_shell_status_json : Coord.config -> Yojson.Safe.t
+val dashboard_task_json : Coord.config -> Types.task -> Yojson.Safe.t
 val dashboard_agent_json : Types.agent -> Yojson.Safe.t
 val dashboard_message_json : Types.message -> Yojson.Safe.t
 (* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
-val dashboard_tasks_safe : Room.config -> Types.task list
-val dashboard_agents_safe : Room.config -> Types.agent list
+val dashboard_tasks_safe : Coord.config -> Types.task list
+val dashboard_agents_safe : Coord.config -> Types.agent list
 val dashboard_messages_safe :
-  Room.config -> since_seq:int -> limit:int -> Types.message list
+  Coord.config -> since_seq:int -> limit:int -> Types.message list
 val provider_capacity_json : unit -> Yojson.Safe.t
 val dashboard_shell_http_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?request:Httpun.Request.t ->
-  Room.config ->
+  Coord.config ->
   Yojson.Safe.t

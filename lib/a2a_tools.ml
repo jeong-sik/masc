@@ -290,7 +290,7 @@ let discover config ?(endpoint : string option) ?(capability : string option) ?(
       | Stdlib.Error err -> Stdlib.Error err)
   | None ->
     (* Local discovery - list agents in room *)
-    let agents = Room.get_agents_raw config in
+    let agents = Coord.get_agents_raw config in
     (* Filter by capability if specified *)
     let filtered = match capability with
       | None -> agents
@@ -331,7 +331,7 @@ let discover config ?(endpoint : string option) ?(capability : string option) ?(
 *)
 let query_skill config ~schemas ~agent_name ~skill_id : (Yojson.Safe.t, string) result =
   (* First, find the agent *)
-  let agents = Room.get_agents_raw config in
+  let agents = Coord.get_agents_raw config in
   let agent_opt = List.find_opt (fun (a : agent) -> a.name = agent_name) agents in
   match agent_opt with
   | None -> Error (Printf.sprintf "Agent '%s' not found" agent_name)
@@ -375,9 +375,7 @@ let query_skill config ~schemas ~agent_name ~skill_id : (Yojson.Safe.t, string) 
 let delegate config ~agent_name ~target ~message
     ?(task_type_str = "async")
     ?(artifacts : artifact list = [])
-    ?(timeout = match Sys.getenv_opt "MASC_A2A_DELEGATION_TIMEOUT_SEC" with
-                | Some s -> (match int_of_string_opt s with Some n -> n | None -> 300)
-                | None -> 300)
+    ?(timeout = 300)
     () : (Yojson.Safe.t, string) result =
   (* BUG: Prevent self-delegation — creates blocking self-portal *)
   if String.equal agent_name target then
@@ -397,7 +395,7 @@ let delegate config ~agent_name ~target ~message
         (Yojson.Safe.to_string (`List (List.map artifact_to_yojson artifacts)))
     in
     let full_message = message ^ artifacts_json in
-    let portal_result = Room.portal_open_r config
+    let portal_result = Coord.portal_open_r config
       ~agent_name
       ~target_agent:target
       ~initial_message:(Some full_message)

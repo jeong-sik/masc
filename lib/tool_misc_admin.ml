@@ -13,7 +13,7 @@ module U = Yojson.Safe.Util
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -110,6 +110,10 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
     schemas
     |> List.map (fun (schema : Types.tool_schema) ->
            let help_entry = Tool_help_registry.entry_of_schema schema in
+           let metadata_fields =
+             Tool_catalog.metadata_to_fields schema.name
+             |> List.filter (fun (key, _value) -> not (String.equal key "surfaces"))
+           in
            `Assoc
              ([
                 ("name", `String schema.name);
@@ -125,7 +129,7 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
                    | Some ss -> List.map (fun s -> `String s) (List.rev ss)
                    | None -> []));
               ]
-             @ Tool_catalog.metadata_to_fields schema.name))
+             @ metadata_fields))
   in
   `Assoc
     [
@@ -247,7 +251,7 @@ let handle_tool_admin_snapshot ctx args =
         ( "command_plane",
           `Assoc
             [
-              ("policy_status", Command_plane_v2.policy_status_json ctx.config);
+              ("policy_status", `Assoc []);
               ("enforcement_summary", enforcement_summary_json ());
             ] );
         ( "tool_inventory",
@@ -320,48 +324,5 @@ let handle_tool_admin_update ctx args =
               ]
           in
           (true, Yojson.Safe.to_string payload))
-  | "unit_policy" ->
-      (match Command_plane_v2.policy_update_json ctx.config ~actor:ctx.agent_name args with
-      | Error err -> (false, Yojson.Safe.to_string (`Assoc [ ("status", `String "error"); ("message", `String err) ]))
-      | Ok json ->
-          let warnings =
-            let policy_json = U.member "policy" args in
-            let items = ref [] in
-            if U.member "tool_allowlist" policy_json <> `Null then
-              items :=
-                `Assoc
-                  [
-                    ("field", `String "tool_allowlist");
-                    ("status", `String "advisory_only");
-                    ("enforcement", `String "none");
-                    ("reason",
-                     `String
-                       "Stored in CPv2 policy but not yet enforced by runtime tool dispatch.");
-                  ]
-                :: !items;
-            if U.member "model_allowlist" policy_json <> `Null then
-              items :=
-                `Assoc
-                  [
-                    ("field", `String "model_allowlist");
-                    ("status", `String "advisory_only");
-                    ("enforcement", `String "none");
-                    ("reason",
-                     `String
-                       "Stored in CPv2 policy but not yet enforced by runtime model selection.");
-                  ]
-                :: !items;
-            `List (List.rev !items)
-          in
-          let payload =
-            `Assoc
-              [
-                ("status", `String "ok");
-                ("section", `String "unit_policy");
-                ("warnings", warnings);
-                ("result", json);
-              ]
-          in
-          (true, Yojson.Safe.to_string payload))
   | _ ->
-      (false, "section must be one of: auth | unit_policy")
+      (false, "section must be one of: auth")

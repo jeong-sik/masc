@@ -123,11 +123,6 @@ let test_derive_failing_turn () =
   let c = { running_conditions with turn_healthy = false } in
   check phase_t "turn unhealthy = Failing" SM.Failing (SM.derive_phase c)
 
-let test_derive_failing_manual_reconcile () =
-  let c = { running_conditions with manual_reconcile_required = true } in
-  check phase_t "manual reconcile required = Failing"
-    SM.Failing (SM.derive_phase c)
-
 let test_derive_priority_stop_over_compact () =
   (* TLA+ fix: Stopped requires no buffer ops in flight.
      stop + drain_complete + compaction_active → Draining (not Stopped). *)
@@ -268,50 +263,6 @@ let test_apply_failing_to_crashed () =
     ~event:(SM.Fiber_terminated { outcome = "fatal" }) in
   check phase_t "Failing + fiber death -> Crashed" SM.Crashed tr.new_phase
 
-let test_apply_manual_reconcile_required_to_failing () =
-  let tr = apply_ok
-    ~current_phase:SM.Running
-    ~conditions:running_conditions
-    ~event:(SM.Manual_reconcile_required { reason = "ambiguous_partial_commit" }) in
-  check phase_t "Running -> Failing" SM.Failing tr.new_phase;
-  check bool "manual reconcile sticky" true
-    tr.updated_conditions.manual_reconcile_required
-
-let test_apply_heartbeat_ok_does_not_clear_manual_reconcile () =
-  let failing_conds = { running_conditions with manual_reconcile_required = true } in
-  let tr = apply_ok
-    ~current_phase:SM.Failing
-    ~conditions:failing_conds
-    ~event:SM.Heartbeat_ok in
-  check phase_t "still Failing until clean turn succeeds" SM.Failing tr.new_phase;
-  check bool "manual reconcile preserved" true
-    tr.updated_conditions.manual_reconcile_required
-
-let test_apply_turn_succeeded_does_not_clear_manual_reconcile () =
-  let failing_conds = { running_conditions with
-    turn_healthy = false;
-    manual_reconcile_required = true;
-  } in
-  let tr = apply_ok
-    ~current_phase:SM.Failing
-    ~conditions:failing_conds
-    ~event:SM.Turn_succeeded in
-  check phase_t "manual reconcile still blocks Running" SM.Failing tr.new_phase;
-  check bool "manual reconcile preserved" true
-    tr.updated_conditions.manual_reconcile_required
-
-let test_apply_manual_reconcile_cleared_clears_manual_reconcile () =
-  let failing_conds = { running_conditions with
-    manual_reconcile_required = true;
-  } in
-  let tr = apply_ok
-    ~current_phase:SM.Failing
-    ~conditions:failing_conds
-    ~event:SM.Manual_reconcile_cleared in
-  check phase_t "explicit clear returns to Running" SM.Running tr.new_phase;
-  check bool "manual reconcile cleared" false
-    tr.updated_conditions.manual_reconcile_required
-
 let test_apply_partial_heartbeat_failure () =
   (* Partial failure (1/5) should still mark unhealthy and go to Failing *)
   let tr = apply_ok
@@ -451,7 +402,6 @@ let test_dead_rejects_all_events () =
       check phase_t "Dead" SM.Dead current
     | _ -> fail "expected Terminal_state error"
   ) [ SM.Heartbeat_ok; SM.Fiber_started; SM.Operator_resume;
-      SM.Manual_reconcile_required { reason = "test" };
       SM.Compaction_started; SM.Handoff_started ]
 
 let test_stopped_rejects_all_events () =
@@ -465,8 +415,7 @@ let test_stopped_rejects_all_events () =
     | SM.Terminal_state { current; _ } ->
       check phase_t "Stopped" SM.Stopped current
     | _ -> fail "expected Terminal_state error"
-  ) [ SM.Heartbeat_ok; SM.Fiber_started; SM.Operator_resume;
-      SM.Manual_reconcile_required { reason = "test" } ]
+  ) [ SM.Heartbeat_ok; SM.Fiber_started; SM.Operator_resume ]
 
 (* ── can_transition matrix tests ───────────────────────── *)
 
@@ -1100,7 +1049,6 @@ let test_chain_no_phoenix () =
     SM.Heartbeat_failed { consecutive=1; max_allowed=5 };
     SM.Turn_succeeded;
     SM.Turn_failed { consecutive=1; max_allowed=10 };
-    SM.Manual_reconcile_required { reason="test" };
     SM.Context_measured {
       context_ratio=0.5; message_count=10; token_count=5000;
       auto_rules={ reflect=false; plan=false; compact=false;
@@ -1335,7 +1283,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     SM.fiber_alive = false;
     heartbeat_healthy = false;
     turn_healthy = false;
-    manual_reconcile_required = true;
     context_within_budget = false;
     context_handoff_needed = true;
     compaction_active = true;
@@ -1358,8 +1305,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
   check bool "fiber_alive reset" true updated.fiber_alive;
   check bool "hb_healthy reset" true updated.heartbeat_healthy;
   check bool "turn_healthy reset" true updated.turn_healthy;
-  check bool "manual_reconcile_required reset" false
-    updated.manual_reconcile_required;
   check bool "compaction_active reset" false updated.compaction_active;
   check bool "handoff_active reset" false updated.handoff_active;
   check bool "backoff_elapsed reset" false updated.backoff_elapsed;
@@ -1455,7 +1400,6 @@ let test_invariant_stop_requested_monotonic () =
     SM.Heartbeat_failed { consecutive=1; max_allowed=5 };
     SM.Turn_succeeded;
     SM.Turn_failed { consecutive=1; max_allowed=10 };
-    SM.Manual_reconcile_required { reason="test" };
     SM.Compaction_started;
     SM.Compaction_completed { before_tokens=100; after_tokens=50 };
     SM.Handoff_started;
@@ -1511,8 +1455,6 @@ let test_invariant_budget_exhaustion_permanent () =
      can set restart_budget_remaining back to true. *)
   let all_events = [
     SM.Heartbeat_ok; SM.Fiber_started;
-    SM.Manual_reconcile_required { reason="test" };
-    SM.Manual_reconcile_cleared;
     SM.Supervisor_restart_attempt { attempt=99 };
     SM.Restart_budget_exhausted;
     SM.Operator_resume;
@@ -1524,14 +1466,10 @@ let test_invariant_budget_exhaustion_permanent () =
       | Heartbeat_ok -> { conds_no_budget with heartbeat_healthy = true }
       | Fiber_started -> { conds_no_budget with
           fiber_alive = true; heartbeat_healthy = true;
-          turn_healthy = true; manual_reconcile_required = false;
+          turn_healthy = true;
           compaction_active = false;
           handoff_active = false; backoff_elapsed = false;
           guardrail_triggered = false; drain_complete = false }
-      | Manual_reconcile_required _ ->
-        { conds_no_budget with manual_reconcile_required = true }
-      | Manual_reconcile_cleared ->
-        { conds_no_budget with manual_reconcile_required = false }
       | Supervisor_restart_attempt _ -> { conds_no_budget with backoff_elapsed = true }
       | Restart_budget_exhausted -> { conds_no_budget with restart_budget_remaining = false }
       | Operator_resume -> { conds_no_budget with operator_paused = false }
@@ -1551,7 +1489,6 @@ let test_invariant_derive_matches_matrix () =
     SM.Heartbeat_failed { consecutive=5; max_allowed=5 };
     SM.Turn_succeeded;
     SM.Turn_failed { consecutive=3; max_allowed=10 };
-    SM.Manual_reconcile_required { reason="test" };
     SM.Compaction_started;
     SM.Compaction_completed { before_tokens=100; after_tokens=50 };
     SM.Compaction_failed { reason="test" };
@@ -1621,7 +1558,6 @@ let test_invariant_priority_chain () =
     SM.fiber_alive = true;
     heartbeat_healthy = true;
     turn_healthy = true;
-    manual_reconcile_required = true;
     context_within_budget = true;
     context_handoff_needed = true;
     compaction_active = true;
@@ -1661,12 +1597,9 @@ let test_invariant_priority_chain () =
   (* Remove handoff: compaction wins *)
   let no_handoff = { no_paused with handoff_active = false } in
   check phase_t "no handoff: Compacting" SM.Compacting (SM.derive_phase no_handoff);
-  (* Remove compaction: manual reconcile still forces Failing *)
+  (* Remove compaction: healthy Running *)
   let no_compact = { no_handoff with compaction_active = false } in
-  check phase_t "no compact: manual reconcile -> Failing"
-    SM.Failing (SM.derive_phase no_compact);
-  let no_reconcile = { no_compact with manual_reconcile_required = false } in
-  check phase_t "no manual reconcile: Running" SM.Running (SM.derive_phase no_reconcile)
+  check phase_t "no compact: Running" SM.Running (SM.derive_phase no_compact)
 
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
@@ -1761,9 +1694,6 @@ let test_mermaid_terminal_class () =
 (** Static verification that every boolean condition field in the FSM
     has both a setter event (false->true) and a clearer event (true->false).
 
-    Motivation: bug where manual_reconcile_required could be set but
-    recovery code forgot to dispatch Manual_reconcile_cleared.
-
     Approach: for each field, iterate ALL events and call update_conditions
     on two base states (all-false, all-true) to detect which events set
     and which events clear each field. Assert every non-exempt field has
@@ -1777,7 +1707,6 @@ let test_setclear_coverage () =
     "fiber_alive",               (fun c -> c.fiber_alive);
     "heartbeat_healthy",         (fun c -> c.heartbeat_healthy);
     "turn_healthy",              (fun c -> c.turn_healthy);
-    "manual_reconcile_required", (fun c -> c.manual_reconcile_required);
     "context_within_budget",     (fun c -> c.context_within_budget);
     "context_handoff_needed",    (fun c -> c.context_handoff_needed);
     "compaction_active",         (fun c -> c.compaction_active);
@@ -1797,7 +1726,6 @@ let test_setclear_coverage () =
     fiber_alive = false;
     heartbeat_healthy = false;
     turn_healthy = false;
-    manual_reconcile_required = false;
     context_within_budget = false;
     context_handoff_needed = false;
     compaction_active = false;
@@ -1817,7 +1745,6 @@ let test_setclear_coverage () =
     fiber_alive = true;
     heartbeat_healthy = true;
     turn_healthy = true;
-    manual_reconcile_required = true;
     context_within_budget = true;
     context_handoff_needed = true;
     compaction_active = true;
@@ -1849,10 +1776,6 @@ let test_setclear_coverage () =
       SM.Turn_succeeded;
     "Turn_failed",
       SM.Turn_failed { consecutive = 3; max_allowed = 10 };
-    "Manual_reconcile_required",
-      SM.Manual_reconcile_required { reason = "test" };
-    "Manual_reconcile_cleared",
-      SM.Manual_reconcile_cleared;
     "Context_measured(guardrail+handoff)",
       SM.Context_measured {
         context_ratio = 0.95; message_count = 100; token_count = 50000;
@@ -2018,7 +1941,6 @@ let () =
       test_case "Compacting" `Quick test_derive_compacting;
       test_case "Failing (heartbeat)" `Quick test_derive_failing_heartbeat;
       test_case "Failing (turn)" `Quick test_derive_failing_turn;
-      test_case "Failing (manual reconcile)" `Quick test_derive_failing_manual_reconcile;
       test_case "priority: Stop > Compact" `Quick test_derive_priority_stop_over_compact;
       test_case "priority: Guardrail > Paused" `Quick test_derive_priority_guardrail_over_paused;
       test_case "priority: Handoff > Compact" `Quick test_derive_priority_handoff_over_compact;
@@ -2035,10 +1957,6 @@ let () =
       test_case "drain + fiber death -> Crashed" `Quick test_apply_drain_fiber_death;
       test_case "drain complete + fiber exit -> Stopped" `Quick test_apply_drain_complete_then_fiber_exit;
       test_case "Failing + fiber death -> Crashed" `Quick test_apply_failing_to_crashed;
-      test_case "manual reconcile required -> Failing" `Quick test_apply_manual_reconcile_required_to_failing;
-      test_case "heartbeat ok does not clear manual reconcile" `Quick test_apply_heartbeat_ok_does_not_clear_manual_reconcile;
-      test_case "turn succeeded does not clear manual reconcile" `Quick test_apply_turn_succeeded_does_not_clear_manual_reconcile;
-      test_case "manual reconcile cleared -> Running" `Quick test_apply_manual_reconcile_cleared_clears_manual_reconcile;
       test_case "partial heartbeat -> Failing" `Quick test_apply_partial_heartbeat_failure;
       test_case "fiber terminated -> Crashed" `Quick test_apply_fiber_terminated_crash;
       test_case "crash -> restart -> Running" `Quick test_apply_crash_restart_lifecycle;

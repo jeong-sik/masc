@@ -53,8 +53,8 @@ val is_effectively_read_only_tool : string -> bool
     Used by the side-effect observer to block retry after committed mutations. *)
 val has_mutating_side_effect : string -> bool
 
-(** Input-aware mutation check for mixed tools such as [keeper_github] where
-    read-only and mutating subcommands share the same tool name. *)
+(** Input-aware mutation check for mixed tools such as [keeper_shell] with
+    op=gh where read-only and mutating subcommands share the same tool name. *)
 val has_mutating_side_effect_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
@@ -143,7 +143,7 @@ val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
     Guards against double "keeper-" prefix. See #5104. *)
 
 val execute_keeper_tool_call :
-  config:Room.config ->
+  config:Coord.config ->
   meta:keeper_meta ->
   ctx_work:working_context ->
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->

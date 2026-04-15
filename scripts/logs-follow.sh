@@ -17,11 +17,11 @@ usage() {
   cat <<'EOF'
 Usage: scripts/logs-follow.sh [options]
 
-Follow MASC structured server logs from <base-path>/logs/system_log_YYYY-MM-DD.jsonl.
-When run from a worktree, the script resolves the repo root automatically.
+Follow MASC structured server logs from <base-path>/.masc/logs/system_log_YYYY-MM-DD.jsonl.
+If you pass a repo or worktree path, the script resolves it to the owning repo root automatically.
 
 Options:
-  --base-path <path>    Override MASC base path (default: repo root)
+  --base-path <path>    Override MASC base path (default: MASC_BASE_PATH or HOME)
   --date <YYYY-MM-DD>   Read a specific log file instead of today's rotating file
   --lines <n>           Tail last N lines before following (default: 40, use 0 for only new lines)
   --level <level>       Minimum level: debug|info|warn|error (default: debug)
@@ -185,9 +185,9 @@ require_cmd jq
 require_cmd tail
 validate_args
 
-BASE_PATH_INPUT="${BASE_PATH_OVERRIDE:-$REPO_ROOT}"
+BASE_PATH_INPUT="${BASE_PATH_OVERRIDE:-${MASC_BASE_PATH:-${HOME:-$REPO_ROOT}}}"
 BASE_PATH="$(resolve_base_path "$BASE_PATH_INPUT")"
-LOG_DIR="$BASE_PATH/logs"
+LOG_DIR="$BASE_PATH/.masc/logs"
 
 jq_filter='
   def rank:

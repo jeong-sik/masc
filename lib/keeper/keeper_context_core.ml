@@ -10,6 +10,8 @@
 open Printf
 open Keeper_types
 
+module StringSet = Set.Make (String)
+
 (* ================================================================ *)
 (* Constants                                                         *)
 (* ================================================================ *)
@@ -223,6 +225,171 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
          |> Option.map Inference_utils.sanitize_text_utf8);
     }
 
+let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
+  List.filter_map
+    (function
+      | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+      | _ -> None)
+    msg.content
+
+let tool_result_ids_of_message (msg : Agent_sdk.Types.message) : string list =
+  List.filter_map
+    (function
+      | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+      | _ -> None)
+    msg.content
+
+let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
+  List.exists
+    (function
+      | Agent_sdk.Types.ToolResult _ -> true
+      | _ -> false)
+    msg.content
+
+(** Trim messages to at most [max_count] while preserving ToolUse/ToolResult
+    pairing.  Drops from the front.  If the drop point lands on a
+    ToolResult whose ToolUse would be the last dropped message, advance
+    the drop by 1 so the orphan ToolResult is also removed (pair stays
+    together on the dropped side).  This may yield fewer than [max_count]
+    messages but never creates orphans.
+
+    Root cause of recurring "unexpected tool_use_id" errors: the previous
+    implementation used [List.filteri (fun i _ -> i >= drop)] which splits
+    on message index, breaking mid-pair boundaries. *)
+let trim_messages_preserving_pairs
+    (messages : Agent_sdk.Types.message list) ~(max_count : int)
+    : Agent_sdk.Types.message list =
+  let n = List.length messages in
+  if n <= max_count then messages
+  else
+    let drop = n - max_count in
+    (* If the first kept message would be an orphan ToolResult,
+       drop it too so the pair stays together on the removed side. *)
+    let effective_drop =
+      match List.nth_opt messages drop with
+      | Some msg when has_tool_result_block msg ->
+        (* Advance drop to skip the orphan ToolResult *)
+        drop + 1
+      | _ -> drop
+    in
+    List.filteri (fun i _ -> i >= effective_drop) messages
+
+let tool_result_text_of_block
+    ~(tool_use_id : string)
+    ~(content : string)
+    ~(json : Yojson.Safe.t option) : string =
+  let content = Inference_utils.sanitize_text_utf8 (String.trim content) in
+  if content <> "" then content
+  else
+    match json with
+    | Some value -> Yojson.Safe.to_string value
+    | None -> Printf.sprintf "[tool result %s]" tool_use_id
+
+let tool_use_text_of_block
+    ~(tool_use_id : string)
+    ~(tool_name : string)
+    ~(input : Yojson.Safe.t) : string =
+  let tool_name = Inference_utils.sanitize_text_utf8 (String.trim tool_name) in
+  let tool_use_id = Inference_utils.sanitize_text_utf8 (String.trim tool_use_id) in
+  let tool_name =
+    if tool_name = "" then "unknown_tool" else tool_name
+  in
+  let input_json = Yojson.Safe.to_string input |> Inference_utils.sanitize_text_utf8 in
+  Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
+
+let repair_dangling_tool_use_messages
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let repair_with_next
+      (current : Agent_sdk.Types.message)
+      (next_opt : Agent_sdk.Types.message option) =
+    let next_tool_result_ids =
+      match next_opt with
+      | Some next -> tool_result_ids_of_message next
+      | None -> []
+    in
+    let has_dangling =
+      List.exists
+        (function
+          | Agent_sdk.Types.ToolUse { id; _ } ->
+              not (List.mem id next_tool_result_ids)
+          | _ -> false)
+        current.content
+    in
+    if not has_dangling then current
+    else
+      let content =
+        List.map
+          (function
+            | Agent_sdk.Types.ToolUse { id; name; input }
+              when not (List.mem id next_tool_result_ids) ->
+                Agent_sdk.Types.Text
+                  (tool_use_text_of_block
+                     ~tool_use_id:id ~tool_name:name ~input)
+            | other -> other)
+          current.content
+      in
+      { current with content }
+  in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | [ current ] ->
+        List.rev (repair_with_next current None :: acc)
+    | current :: ((next :: _) as rest) ->
+        let repaired = repair_with_next current (Some next) in
+        loop (repaired :: acc) rest
+  in
+  loop [] messages
+
+let repair_orphan_tool_result_messages
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let rec loop prev acc = function
+    | [] -> List.rev acc
+    | msg :: rest ->
+        let repaired =
+          if not (has_tool_result_block msg) then msg
+          else
+            let prev_tool_use_ids =
+              match prev with
+              | Some previous -> tool_use_ids_of_message previous
+              | None -> []
+            in
+            (* Anthropic validates ToolResult blocks against ToolUse blocks
+               in the immediately previous message. If checkpoint capping
+               drops that predecessor, the resumed history becomes invalid.
+               Downgrade only the orphaned structured result blocks to
+               plain text so the semantic output survives without replaying
+               provider-specific tool metadata. *)
+            let has_orphan =
+              List.exists
+                (function
+                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
+                      not (List.mem tool_use_id prev_tool_use_ids)
+                  | _ -> false)
+                msg.content
+            in
+            if not has_orphan then msg
+            else
+              let content =
+                List.map
+                  (function
+                    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+                        Agent_sdk.Types.Text
+                          (tool_result_text_of_block ~tool_use_id ~content ~json)
+                    | other -> other)
+                  msg.content
+              in
+              { msg with content }
+        in
+        loop (Some repaired) (repaired :: acc) rest
+  in
+  loop None [] messages
+
+let repair_broken_tool_call_pairs
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  messages
+  |> repair_dangling_tool_use_messages
+  |> repair_orphan_tool_result_messages
+
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
     ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
@@ -236,7 +403,10 @@ let deserialize_context (s : string) ~max_tokens : working_context =
   let json = Yojson.Safe.from_string s in
   let open Yojson.Safe.Util in
   let system_prompt = json |> member "system_prompt" |> to_string in
-  let messages = json |> member "messages" |> to_list |> List.map message_of_json in
+  let messages =
+    json |> member "messages" |> to_list |> List.map message_of_json
+    |> repair_broken_tool_call_pairs
+  in
   let _legacy_token_count = json |> member "token_count" |> to_int_option in
   sync_oas_context
     {
@@ -342,14 +512,14 @@ let render_jsonl_lines (lines : string list) : string =
   | _ -> String.concat "\n" lines ^ "\n"
 
 let dedupe_preserve_order (lines : string list) : string list =
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create (List.length lines) in
-  List.filter
-    (fun line ->
-       if Hashtbl.mem seen line then false
-       else (
-         Hashtbl.add seen line ();
-         true))
-    lines
+  let rec go seen acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      if StringSet.mem line seen
+      then go seen acc rest
+      else go (StringSet.add line seen) (line :: acc) rest
+  in
+  go StringSet.empty [] lines
 
 let migrate_session_history_logs
     ~(session_dir : string) : history_migration_stats =
@@ -813,9 +983,14 @@ let sanitize_checkpoint_messages
     ([], empty_checkpoint_sanitize_stats)
 
 let sanitize_oas_checkpoint
+    ?(repair_orphans = true)
     (cp : Agent_sdk.Checkpoint.t)
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
+  let messages =
+    if repair_orphans then repair_broken_tool_call_pairs messages
+    else messages
+  in
   ({ cp with messages }, stats)
 
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
@@ -830,20 +1005,22 @@ let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
       | _ -> fallback)
 
 let context_of_oas_checkpoint
+    ?(repair_orphans = true)
     ~(max_checkpoint_messages : int)
     (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
-  let cp, _ = sanitize_oas_checkpoint cp in
+  let cp, _ = sanitize_oas_checkpoint ~repair_orphans cp in
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let max_tokens =
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
   let messages =
-    let n = List.length cp.messages in
-    if n <= max_checkpoint_messages then cp.messages
-    else
-      let drop = n - max_checkpoint_messages in
-      List.filteri (fun i _ -> i >= drop) cp.messages
+    let messages =
+      trim_messages_preserving_pairs cp.messages
+        ~max_count:max_checkpoint_messages
+    in
+    if repair_orphans then repair_broken_tool_call_pairs messages
+    else messages
   in
   sync_oas_context
     {
@@ -881,11 +1058,11 @@ let save_oas_checkpoint
      Without this, checkpoints grow unbounded between compaction cycles,
      causing multi-GB transient allocations when loaded by concurrent keepers. *)
   let capped_messages =
-    let n = List.length ctx.messages in
-    if n <= max_checkpoint_messages then ctx.messages
-    else
-      let drop = n - max_checkpoint_messages in
-      List.filteri (fun i _ -> i >= drop) ctx.messages
+    trim_messages_preserving_pairs ctx.messages
+      ~max_count:max_checkpoint_messages
+  in
+  let capped_messages_were_truncated =
+    List.length capped_messages < List.length ctx.messages
   in
   (* Stub old tool results at save time: keep only the most recent turn's
      results in full. During Agent.run the reducer uses keep_recent:3, but
@@ -897,6 +1074,11 @@ let save_oas_checkpoint
       capped_messages
   in
   let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
+  let capped_messages =
+    if capped_messages_were_truncated
+    then repair_broken_tool_call_pairs capped_messages
+    else capped_messages
+  in
   let state =
     {
       Agent_sdk.Types.config =

@@ -38,9 +38,9 @@ let test_get_int_missing () =
 let test_context_creation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Room.default_config "/tmp/test" in
+  let config = Masc_mcp.Coord.default_config "/tmp/test" in
   let ctx : Tool_plan.context = { config } in
-  check bool "context created" true (ctx.config.Masc_mcp.Room.base_path = "/tmp/test")
+  check bool "context created" true (ctx.config.Masc_mcp.Coord.base_path = "/tmp/test")
 
 (* ============================================================
    Dispatch Tests
@@ -49,7 +49,7 @@ let test_context_creation () =
 let make_ctx () : Tool_plan.context =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Room.default_config "/tmp/test-plan" in
+  let config = Masc_mcp.Coord.default_config "/tmp/test-plan" in
   ({ config } : Tool_plan.context)
 
 let test_dispatch_plan_init () =
@@ -91,6 +91,7 @@ let test_dispatch_plan_get () =
   | None -> fail "expected Some"
 
 let test_dispatch_error_add () =
+  (* masc_error_add removed: tool pruned from registry *)
   let ctx = make_ctx () in
   let args = `Assoc [
     ("task_id", `String "task-001");
@@ -98,15 +99,16 @@ let test_dispatch_error_add () =
     ("message", `String "error msg")
   ] in
   match Tool_plan.dispatch ctx ~name:"masc_error_add" ~args with
-  | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
-  | None -> fail "expected Some"
+  | None -> ()
+  | Some _ -> fail "expected None (masc_error_add pruned)"
 
 let test_dispatch_error_resolve () =
+  (* masc_error_resolve removed: tool pruned from registry *)
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("error_index", `Int 0)] in
   match Tool_plan.dispatch ctx ~name:"masc_error_resolve" ~args with
-  | Some (_, msg) -> check bool "has message" true (String.length msg > 0)
-  | None -> fail "expected Some"
+  | None -> ()
+  | Some _ -> fail "expected None (masc_error_resolve pruned)"
 
 let test_dispatch_plan_set_task () =
   let ctx = make_ctx () in

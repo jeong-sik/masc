@@ -1,12 +1,12 @@
 module Schema = Graphql.Schema
 module Arg = Schema.Arg
-module Room = Room
-module Room_utils = Room_utils
+module Coord = Coord
+module Coord_utils = Coord_utils
 module Types = Types
 open Types
 
 type ctx = {
-  room_config: Room_utils.config;
+  room_config: Coord_utils.config;
 }
 
 type response_status = [ `OK | `Bad_request ]
@@ -533,38 +533,38 @@ let variables_of_yojson = function
   | Some _ -> []
 
 let get_agents config : Types.agent list =
-  let dir = Room_utils.agents_dir config in
-  Room_utils.list_dir config dir
+  let dir = Coord_utils.agents_dir config in
+  Coord_utils.list_dir config dir
   |> List.filter (fun name -> Filename.check_suffix name ".json")
   |> List.filter_map (fun name ->
       let path = Filename.concat dir name in
-      let json = Room_utils.read_json config path in
+      let json = Coord_utils.read_json config path in
       match Types.agent_of_yojson json with
       | Ok agent -> Some agent
       | Error e ->
-          Log.Room.debug "get_agents: skipping invalid agent file %s: %s" name e;
+          Log.Coord.debug "get_agents: skipping invalid agent file %s: %s" name e;
           None)
   |> List.sort (fun (a : Types.agent) (b : Types.agent) -> String.compare a.name b.name)
 
 let get_messages config : Types.message list =
-  let dir = Room_utils.messages_dir config in
-  Room_utils.list_dir config dir
-  |> List.filter Room.is_valid_filename
+  let dir = Coord_utils.messages_dir config in
+  Coord_utils.list_dir config dir
+  |> List.filter Coord.is_valid_filename
   |> List.filter (fun name -> Filename.check_suffix name ".json")
   |> List.filter_map (fun name ->
       let path = Filename.concat dir name in
-      let json = Room_utils.read_json config path in
+      let json = Coord_utils.read_json config path in
       match Types.message_of_yojson json with
       | Ok msg -> Some msg
       | Error e ->
-          Log.Room.debug "get_messages: skipping invalid message file %s: %s" name e;
+          Log.Coord.debug "get_messages: skipping invalid message file %s: %s" name e;
           None)
   |> List.sort (fun (a : Types.message) (b : Types.message) -> compare a.seq b.seq)
 
 let tasks_connection config first after =
   let tasks : Types.task list =
-    if Room_utils.is_initialized config then
-      Room.get_tasks_raw config
+    if Coord_utils.is_initialized config then
+      Coord.get_tasks_raw config
     else
       []
   in
@@ -584,7 +584,7 @@ let tasks_connection config first after =
 
 let agents_connection config first after =
   let agents : Types.agent list =
-    if Room_utils.is_initialized config then
+    if Coord_utils.is_initialized config then
       get_agents config
     else
       []
@@ -605,7 +605,7 @@ let agents_connection config first after =
 
 let messages_connection config first after =
   let messages : Types.message list =
-    if Room_utils.is_initialized config then
+    if Coord_utils.is_initialized config then
       get_messages config
     else
       []
@@ -639,7 +639,7 @@ let schema =
     Schema.field "status"
       ~typ:(Schema.non_null room_state_typ)
       ~args:Arg.[]
-      ~resolve:(fun info () -> Room.read_state info.ctx.room_config);
+      ~resolve:(fun info () -> Coord.read_state info.ctx.room_config);
     Schema.field "tasks"
       ~typ:(Schema.non_null task_connection_typ)
       ~args:Arg.[

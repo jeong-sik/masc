@@ -13,6 +13,11 @@
 
 설정 시스템은 MASC MCP 서버의 모든 조정 가능한 동작을 12-Factor App 원칙에 따라 환경변수로 외부화한다. 5개 계층(Core, Runtime, Governance, Keeper, Level2/Level4)으로 분류되며, 런타임 오버라이드 + 감사 경로를 제공한다.
 
+운영 reload 계약은 별도 문서로 분리한다:
+
+- [`../ENV-CONTRACT.md`](../ENV-CONTRACT.md)
+- [`../TOML-RELOAD-MATRIX.md`](../TOML-RELOAD-MATRIX.md)
+
 ---
 
 ## 2. 설정 해석 계층
@@ -371,7 +376,7 @@ masc_set_param(key, value)
 |------|--------|------|
 | `-p`, `--port` | 8935 | HTTP 리스닝 포트 |
 | `--host` | `127.0.0.1` | 바인드 주소 |
-| `--base-path` | `MASC_BASE_PATH` 또는 `cwd` 기반 | `.masc` 폴더 위치 |
+| `--base-path` | `MASC_BASE_PATH` 또는 `HOME` 기반 (`HOME` 없을 때만 `cwd`) | `.masc` 폴더 위치 |
 
 ---
 

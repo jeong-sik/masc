@@ -89,29 +89,6 @@ Use from the answering side after a prior masc_webrtc_offer call.";
     ];
   };
   {
-    name = "masc_verify_handoff";
-    description = "Compare original and received context to detect semantic drift after handoff (default threshold: 0.85).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("original", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Original context before handoff");
-        ]);
-        ("received", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Received context after handoff");
-        ]);
-        ("threshold", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Similarity threshold (default: 0.85)");
-          ("default", `Float 0.85);
-        ]);
-      ]);
-      ("required", `List [`String "original"; `String "received"]);
-    ];
-  };
-  {
     name = "masc_gc";
     description = "Run garbage collection: remove zombie agents, archive stale tasks, delete old messages (default: 7-day threshold).";
     input_schema = `Assoc [
@@ -249,25 +226,6 @@ After masc_tool_admin_snapshot to review current state before making changes.";
         ]);
       ]);
       ("required", `List [`String "section"]);
-    ];
-  };
-  {
-    name = "masc_feature_flags";
-    description = "List all boolean feature flags with their canonical defaults, runtime values, \
-lifecycle state, and source (env or default). Flags are grouped by category: transport, tool, \
-keeper, dashboard, inference, runtime. Filter by category or show only overridden flags.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("category", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Filter by category (transport, tool, keeper, dashboard, inference, runtime)");
-        ]);
-        ("only_overridden", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "If true, show only flags where runtime value differs from default");
-        ]);
-      ]);
     ];
   };
 ]

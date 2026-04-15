@@ -6,8 +6,7 @@
     3. Branch name sanitization (reject shell metacharacters)
     4. Worktree step failure propagation (no remote → clean error)
 
-    Does NOT test: actual git push / gh pr create (requires real remote).
-    Those are covered by the safety gate in test_keeper_github_safety.ml. *)
+    Does NOT test: actual git push / gh pr create (requires real remote). *)
 
 open Alcotest
 open Masc_mcp
@@ -101,8 +100,8 @@ let with_room f =
       (try rm_rf dir with _ -> ()))
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" dir;
-      let config = Room.default_config dir in
-      let _msg = Room.init config ~agent_name:(Some "test-keeper") in
+      let config = Coord.default_config dir in
+      let _msg = Coord.init config ~agent_name:(Some "test-keeper") in
       f config)
 
 let call_tool config meta name input =
@@ -428,7 +427,7 @@ let test_task_claim_then_done_lifecycle () =
   with_room (fun config ->
     let meta = make_meta_with_preset "delivery" in
     (* Add a task *)
-    let _ = Room.add_task config ~title:"Lifecycle test" ~priority:1 ~description:"test" in
+    let _ = Coord.add_task config ~title:"Lifecycle test" ~priority:1 ~description:"test" in
     (* Claim it — response is {"result": "string"} *)
     let claim_result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let claim_json = parse_json claim_result in
@@ -474,7 +473,7 @@ let test_second_claim_on_single_task_returns_no_tasks () =
       | Error e -> failwith e
     in
     (* Add exactly one task *)
-    let _ = Room.add_task config ~title:"Single task" ~priority:1 ~description:"test" in
+    let _ = Coord.add_task config ~title:"Single task" ~priority:1 ~description:"test" in
     (* Keeper A claims it *)
     let _ = call_tool config meta_a "keeper_task_claim" (`Assoc []) in
     (* Keeper B tries to claim — response is {"result": "string"} *)
@@ -526,9 +525,9 @@ let with_real_repo_room f =
       (match saved_base with Some v -> Unix.putenv "MASC_BASE_PATH" v | None -> Unix.putenv "MASC_BASE_PATH" ""))
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" repo_root;
-      let config = Room.default_config repo_root in
-      (* Room may already be initialized in the real repo *)
-      (try ignore (Room.init config ~agent_name:(Some "test-integration")) with _ -> ());
+      let config = Coord.default_config repo_root in
+      (* Coord may already be initialized in the real repo *)
+      (try ignore (Coord.init config ~agent_name:(Some "test-integration")) with _ -> ());
       f config repo_root)
 
 let with_local_git_repo_room f =
@@ -573,8 +572,8 @@ let with_local_git_repo_room f =
       run_cmd_exn [ "git"; "-C"; dir; "remote"; "add"; "origin"; remote_dir ];
       run_cmd_exn [ "git"; "-C"; dir; "push"; "-u"; "origin"; "main" ];
       run_cmd_exn [ "git"; "-C"; dir; "fetch"; "origin" ];
-      let config = Room.default_config dir in
-      ignore (Room.init config ~agent_name:(Some "test-local-git"));
+      let config = Coord.default_config dir in
+      ignore (Coord.init config ~agent_name:(Some "test-local-git"));
       f config dir)
 
 let derive_worktree_id keeper_name branch =

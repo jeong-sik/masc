@@ -158,6 +158,160 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
   `
 }
 
+// ── Turn Budget ──────────────────────────────────────────
+
+export function hasTurnBudgetDivergence(keeper: Keeper): boolean {
+  const b = keeper.turn_budget
+  if (!b) return false
+  return (
+    b.reactive.source === 'override' ||
+    b.reactive.source === 'override_invalid' ||
+    b.scheduled_autonomous.source === 'override' ||
+    b.scheduled_autonomous.source === 'override_invalid'
+  )
+}
+
+interface BudgetSlot {
+  value: number
+  source: 'override' | 'env' | 'override_invalid'
+  env_default: number
+  env_var: string
+  raw_override: number | null
+}
+
+function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { min: number; max: number }): string {
+  const lines: string[] = []
+  if (slot.source === 'override') {
+    lines.push(`Source: TOML override`)
+    if (manifest) lines.push(`File:   ${manifest}`)
+    lines.push(`Value:  ${slot.value}  (env default was ${slot.env_default})`)
+  } else if (slot.source === 'override_invalid') {
+    lines.push(`Source: env default (override REJECTED)`)
+    if (manifest) lines.push(`File:   ${manifest}`)
+    if (slot.raw_override != null) {
+      lines.push(`Raw:    ${slot.raw_override}  — out of range [${clamp.min}, ${clamp.max}]`)
+    }
+    lines.push(`Value:  ${slot.value}  (fell back to env default)`)
+  } else {
+    lines.push(`Source: env default`)
+    lines.push(`Env:    ${slot.env_var} = ${slot.value}`)
+    lines.push(`Note:   no override in TOML`)
+  }
+  lines.push(`Range:  [${clamp.min}, ${clamp.max}]`)
+  return lines.join('\n')
+}
+
+function BudgetRow({ label, slot, manifest, clamp }: {
+  label: string
+  slot: BudgetSlot
+  manifest: string | null
+  clamp: { min: number; max: number }
+}) {
+  const isOverride = slot.source === 'override'
+  const isInvalid = slot.source === 'override_invalid'
+  const delta = slot.value - slot.env_default
+  const deltaText = delta === 0
+    ? null
+    : delta > 0
+      ? `+${delta} vs env`
+      : `${delta} vs env`
+
+  let valueClass: string
+  let pill
+  if (isInvalid) {
+    valueClass = 'text-red-300 underline decoration-wavy decoration-red-400 underline-offset-4 cursor-help'
+    pill = html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-red-300">invalid</span>`
+  } else if (isOverride) {
+    valueClass = 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
+    pill = html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
+  } else {
+    valueClass = 'text-[var(--text-muted)] cursor-help'
+    pill = html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`
+  }
+
+  return html`
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <span class="text-xs text-[var(--text-muted)]">${label}</span>
+      <div class="flex items-center gap-2">
+        ${isOverride && deltaText
+          ? html`<span class="text-[10px] text-[var(--text-muted)] tabular-nums">${deltaText}</span>`
+          : null}
+        <span
+          class="text-xs font-medium tabular-nums ${valueClass}"
+          title=${buildBudgetTooltip(slot, manifest, clamp)}
+        >${slot.value}</span>
+        ${pill}
+      </div>
+    </div>
+  `
+}
+
+export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
+  const budget = keeper.turn_budget
+  if (!budget) {
+    return html`
+      <div class="text-[11px] text-[var(--text-muted)] italic">
+        턴 예산 정보를 아직 수신하지 못했습니다. 서버 재시작 후 확인해주세요.
+      </div>
+    `
+  }
+
+  const hasOverride =
+    budget.reactive.source === 'override' ||
+    budget.scheduled_autonomous.source === 'override'
+  const hasInvalid =
+    budget.reactive.source === 'override_invalid' ||
+    budget.scheduled_autonomous.source === 'override_invalid'
+  const clamp = { min: budget.clamp_min, max: budget.clamp_max }
+
+  return html`
+    <div class="flex flex-col gap-1.5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          턴 예산 (OAS 호출당)
+        </span>
+        ${hasInvalid
+          ? html`<span class="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-red-300">invalid override</span>`
+          : hasOverride
+            ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
+            : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">inherited</span>`}
+      </div>
+      <${BudgetRow}
+        label="반응형"
+        slot=${budget.reactive}
+        manifest=${budget.manifest_path}
+        clamp=${clamp}
+      />
+      <${BudgetRow}
+        label="예약 자율"
+        slot=${budget.scheduled_autonomous}
+        manifest=${budget.manifest_path}
+        clamp=${clamp}
+      />
+      <span class="text-[11px] text-[var(--text-muted)] leading-snug mt-1">
+        반응형 = 보드/멘션 반응 턴 예산, 예약 자율 = 자율 주기 턴 예산.
+        값에 마우스를 올리면 설정 출처와 기본값 비교를 확인할 수 있습니다.
+      </span>
+    </div>
+  `
+}
+
+export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
+  const diverges = hasTurnBudgetDivergence(keeper)
+  return html`
+    <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open=${diverges}>
+      <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-amber-400' : 'bg-accent/50'}"></span>
+        턴 예산
+        ${diverges ? html`<span class="text-[9px] text-amber-300 font-normal normal-case tracking-normal">(재정의됨)</span>` : null}
+      </summary>
+      <div class="mt-3">
+        <${TurnBudgetPanel} keeper=${keeper} />
+      </div>
+    </details>
+  `
+}
+
 // ── Runtime Signals ──────────────────────────────────────
 
 // Helper: format a 0–1 ratio as percentage or '-'
@@ -333,7 +487,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   const keeperConfig = peekLoadedKeeperConfig(keeper.name)
   const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
-  const namespaceStatus = operatorSnapshot.value?.namespace ?? {}
+  const namespaceStatus = operatorSnapshot.value?.root ?? {}
   const missionBrief = resolveKeeperMissionBrief(keeper)
   const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
   const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)
@@ -343,7 +497,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const auditSource = observedAudit.toolAuditSource
   const auditAt = observedAudit.toolAuditAt
   const namespaceName =
-    namespaceStatus.namespace ?? namespaceStatus.namespace_id ?? serverStatus.value?.namespace ?? 'default'
+    namespaceStatus.project ?? serverStatus.value?.project ?? 'default'
   const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
   const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'

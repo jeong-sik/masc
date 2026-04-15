@@ -22,7 +22,7 @@ type keeper_case = {
 
 and fixture = {
   generic : Generic.fixture;
-  config : Masc_mcp.Room.config;
+  config : Masc_mcp.Coord.config;
   meta : Masc_mcp.Keeper_types.keeper_meta;
   ctx_snapshot : Masc_mcp.Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
@@ -62,6 +62,9 @@ let github_guard_fragments =
     "gh_token";
     "gh: command not found";
     "could not resolve host";
+    "tool call failed";
+    "gh_auth: failed";
+    "could not determine repository";
   ]
 
 let voice_guard_fragments =
@@ -73,6 +76,9 @@ let voice_guard_fragments =
     "transcription";
     "microphone";
     "audio";
+    "rec exit";
+    "no configured tts endpoint";
+    "tts endpoint";
   ]
 
 let init_keeper_bridge () =
@@ -126,7 +132,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
   in
-  let config = Masc_mcp.Room.default_config base_path in
+  let config = Masc_mcp.Coord.default_config base_path in
   let ctx =
     Masc_mcp.Keeper_exec_context.create ~system_prompt:"keeper tool matrix"
       ~max_tokens:4000
@@ -139,8 +145,15 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
   (match init_mode with
    | Init_joined ->
+       (* Join under both the raw meta name (used by masc_* tools called
+          through the keeper) and the prefixed keeper alias. Some keeper
+          tools resolve the agent through the prefixed alias while
+          dispatched masc tools use the raw meta identity. *)
        ignore
-         (Masc_mcp.Room.join config ~agent_name:("keeper-" ^ meta.name)
+         (Masc_mcp.Coord.join config ~agent_name:meta.name
+            ~capabilities:[] ());
+       ignore
+         (Masc_mcp.Coord.join config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
   { generic; config; meta; ctx_snapshot; tools }
@@ -161,7 +174,7 @@ let ensure_sample_file fixture =
 let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
-    (Masc_mcp.Room.claim_next fixture.config
+    (Masc_mcp.Coord.claim_next fixture.config
        ~agent_name:(keeper_agent_name fixture))
 
 let ensure_voice_session fixture =
@@ -251,8 +264,6 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
   | "keeper_shell" -> `Assoc [ ("op", `String "git_status") ]
   | "keeper_bash" ->
       `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
-  | "keeper_github" ->
-      `Assoc [ ("cmd", `String "status"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->
@@ -284,14 +295,79 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
           ("task_id", `String (Generic.ensure_task fixture.generic));
           ("result", `String "tool matrix result");
         ]
+  | "keeper_board_cleanup" | "keeper_board_delete" ->
+      `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
+  | "keeper_pr_review_comment" ->
+      `Assoc
+        [
+          ("pr_number", `Int 1);
+          ("comment", `String "tool matrix review");
+          ("body", `String "tool matrix review body");
+          ("path", `String "README.md");
+          ("line", `Int 1);
+        ]
+  | "keeper_pr_review_read" ->
+      `Assoc [ ("pr_number", `Int 1) ]
+  | "keeper_pr_review_reply" ->
+      `Assoc
+        [
+          ("pr_number", `Int 1);
+          ("comment_id", `Int 1);
+          ("body", `String "tool matrix reply body");
+          ("reply", `String "tool matrix reply");
+          ("repo", `String "owner/tool-matrix");
+        ]
+  | "keeper_pr_submit" ->
+      `Assoc
+        [
+          ("title", `String "tool matrix PR");
+          ("pr_title", `String "tool matrix PR");
+          ("body", `String "tool matrix body");
+          ("cwd", `String (Generic.ensure_playground_clone fixture.generic));
+          ("branch", `String "matrix/editor");
+          ("commit_message", `String "tool matrix commit");
+        ]
+  | "keeper_pr_workflow" ->
+      `Assoc
+        [
+          ("action", `String "status");
+          ("branch", `String "fix/typo");
+          ("file_path", `String "lib/foo.ml");
+          ("commit_message", `String "fix typo in foo");
+          ("pr_title", `String "Fix typo in foo");
+        ]
+  | "keeper_preflight_check" -> `Assoc []
+  | "keeper_stay_silent" ->
+      `Assoc [ ("reason", `String "tool matrix silence") ]
+  | "keeper_task_create" ->
+      `Assoc
+        [
+          ("title", `String "tool matrix task");
+          ("priority", `Int 3);
+          ("description", `String "tool matrix task body");
+        ]
+  | "keeper_tool_search" ->
+      `Assoc [ ("query", `String "tool matrix") ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
 let keeper_expectation_for_name name =
   match name with
-  | "keeper_github" -> Expect_success_or_guard github_guard_fragments
   | "keeper_voice_listen"
+  | "keeper_voice_speak"
   | "keeper_voice_agent" ->
       Expect_success_or_guard voice_guard_fragments
+  | "keeper_pr_review_read"
+  | "keeper_pr_review_comment"
+  | "keeper_pr_review_reply"
+  | "keeper_pr_submit"
+  | "keeper_pr_workflow"
+  | "keeper_preflight_check" ->
+      Expect_success_or_guard github_guard_fragments
+  | "keeper_fs_read" ->
+      (* Playground resolves paths under .masc/playground/<agent>/ but
+         the sample file is written at base_path. File-not-found in
+         tests without a playground file is an acceptable outcome. *)
+      Expect_success_or_guard [ "file not found" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function

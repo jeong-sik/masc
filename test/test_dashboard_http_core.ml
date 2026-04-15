@@ -41,7 +41,7 @@ let with_test_env f =
       with_env "SB_PG_URL" "" @@ fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Room_utils.default_config dir in
+      let config = Coord_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env
         ~net:(Eio.Stdenv.net env)
@@ -124,6 +124,14 @@ let test_dashboard_shell_http_json_includes_paths () =
   check bool "paths include cwd" true
     (match paths |> member "cwd" with
      | `String value -> String.length value > 0
+     | _ -> false);
+  check bool "paths include strict_mode_requested bool" true
+    (match paths |> member "strict_mode_requested" with
+     | `Bool _ -> true
+     | _ -> false);
+  check bool "paths include startup_rejected bool" true
+    (match paths |> member "startup_rejected" with
+     | `Bool _ -> true
      | _ -> false);
   check bool "shell config resolution is object or null" true
     (match config_resolution with

@@ -975,6 +975,99 @@ let test_save_oas_checkpoint_stubs_old_tool_results () =
            | Some content ->
                check string "recent tool result stays full" recent_output content))
 
+let test_save_oas_checkpoint_repairs_orphaned_tool_result_after_cap () =
+  let base_dir = temp_dir "keeper_lifecycle_save_orphan_tool_result" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-orphan-tool-result" ~base_dir
+      in
+      let tool_id = "tool-orphan-save" in
+      let tool_output = "saved tool output" in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx ->
+        KEC.append_many ctx
+          [
+            Agent_sdk.Types.user_msg "inspect file";
+            tool_use_message ~tool_use_id:tool_id ();
+            tool_result_message ~tool_use_id:tool_id tool_output;
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:2
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          check int "save cap still enforced" 2
+            (List.length checkpoint.messages);
+          check (option string) "orphan tool result no longer structured" None
+            (tool_result_content_for_id ~tool_use_id:tool_id checkpoint.messages);
+          (match List.hd checkpoint.messages with
+           | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+               check string "orphan tool result downgraded to text"
+                 tool_output text
+           | _ -> fail "expected downgraded text message after save cap"))
+
+let test_load_context_repairs_orphaned_tool_result_after_cap () =
+  let base_dir = temp_dir "keeper_lifecycle_load_orphan_tool_result" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let trace_id = "trace-load-orphan-tool-result" in
+      let session =
+        KEC.create_session ~session_id:trace_id ~base_dir
+      in
+      let tool_id = "tool-orphan-load" in
+      let tool_output = "loaded tool output" in
+      let checkpoint =
+        make_test_checkpoint ~session_id:trace_id
+          [
+            Agent_sdk.Types.user_msg "inspect file";
+            tool_use_message ~tool_use_id:tool_id ();
+            tool_result_message ~tool_use_id:tool_id tool_output;
+            Agent_sdk.Types.assistant_msg "done";
+          ]
+      in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error e ->
+           Alcotest.fail
+             (Printf.sprintf "save_oas failed: %s" e));
+      let (_session, loaded_opt) =
+        KEC.load_context_from_checkpoint
+          ~max_checkpoint_messages:2
+          ~trace_id
+          ~primary_model_max_tokens:64_000
+          ~base_dir
+      in
+      match loaded_opt with
+      | None -> fail "expected checkpoint context to load"
+      | Some loaded ->
+          check int "load cap still enforced" 2
+            (List.length loaded.messages);
+          check (option string) "loaded orphan tool result no longer structured" None
+            (tool_result_content_for_id ~tool_use_id:tool_id loaded.messages);
+          (match List.hd loaded.messages with
+           | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+               check string "loaded orphan tool result downgraded to text"
+                 tool_output text
+           | _ -> fail "expected downgraded text message after load cap"))
+
 let test_save_oas_checkpoint_strips_summarized_world_state () =
   let base_dir = temp_dir "keeper_lifecycle_save_summary_strip" in
   Fun.protect
@@ -1405,6 +1498,8 @@ let () =
             test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget;
           test_case "save stubs old tool results" `Quick
             test_save_oas_checkpoint_stubs_old_tool_results;
+          test_case "save repairs orphaned tool result after cap" `Quick
+            test_save_oas_checkpoint_repairs_orphaned_tool_result_after_cap;
           test_case "save strips summarized world state" `Quick
             test_save_oas_checkpoint_strips_summarized_world_state;
           test_case "patch replaces last assistant text" `Quick
@@ -1423,6 +1518,8 @@ let () =
             test_load_context_migrates_oversized_text_checkpoint;
           test_case "load migrates summarized world state checkpoint" `Quick
             test_load_context_migrates_summarized_world_state_checkpoint;
+          test_case "load repairs orphaned tool result after cap" `Quick
+            test_load_context_repairs_orphaned_tool_result_after_cap;
         ] );
       ( "compact_policy",
         [

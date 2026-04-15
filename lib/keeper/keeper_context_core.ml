@@ -223,6 +223,69 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
          |> Option.map Inference_utils.sanitize_text_utf8);
     }
 
+let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
+  List.filter_map
+    (function
+      | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+      | _ -> None)
+    msg.content
+
+let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
+  List.exists
+    (function
+      | Agent_sdk.Types.ToolResult _ -> true
+      | _ -> false)
+    msg.content
+
+let tool_result_text_of_block
+    ~(tool_use_id : string)
+    ~(content : string)
+    ~(json : Yojson.Safe.t option) : string =
+  let content = Inference_utils.sanitize_text_utf8 (String.trim content) in
+  if content <> "" then content
+  else
+    match json with
+    | Some value -> Yojson.Safe.to_string value
+    | None -> Printf.sprintf "[tool result %s]" tool_use_id
+
+let repair_orphan_tool_result_messages
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let rec loop prev acc = function
+    | [] -> List.rev acc
+    | msg :: rest ->
+        let repaired =
+          if not (has_tool_result_block msg) then msg
+          else
+            let prev_tool_use_ids =
+              match prev with
+              | Some previous -> tool_use_ids_of_message previous
+              | None -> []
+            in
+            let has_orphan =
+              List.exists
+                (function
+                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
+                      not (List.mem tool_use_id prev_tool_use_ids)
+                  | _ -> false)
+                msg.content
+            in
+            if not has_orphan then msg
+            else
+              let content =
+                List.map
+                  (function
+                    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+                        Agent_sdk.Types.Text
+                          (tool_result_text_of_block ~tool_use_id ~content ~json)
+                    | other -> other)
+                  msg.content
+              in
+              { msg with content }
+        in
+        loop (Some repaired) (repaired :: acc) rest
+  in
+  loop None [] messages
+
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
     ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
@@ -236,7 +299,10 @@ let deserialize_context (s : string) ~max_tokens : working_context =
   let json = Yojson.Safe.from_string s in
   let open Yojson.Safe.Util in
   let system_prompt = json |> member "system_prompt" |> to_string in
-  let messages = json |> member "messages" |> to_list |> List.map message_of_json in
+  let messages =
+    json |> member "messages" |> to_list |> List.map message_of_json
+    |> repair_orphan_tool_result_messages
+  in
   let _legacy_token_count = json |> member "token_count" |> to_int_option in
   sync_oas_context
     {
@@ -816,7 +882,7 @@ let sanitize_oas_checkpoint
     (cp : Agent_sdk.Checkpoint.t)
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
-  ({ cp with messages }, stats)
+  ({ cp with messages = repair_orphan_tool_result_messages messages }, stats)
 
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
@@ -844,6 +910,7 @@ let context_of_oas_checkpoint
     else
       let drop = n - max_checkpoint_messages in
       List.filteri (fun i _ -> i >= drop) cp.messages
+    |> repair_orphan_tool_result_messages
   in
   sync_oas_context
     {
@@ -897,6 +964,9 @@ let save_oas_checkpoint
       capped_messages
   in
   let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
+  let capped_messages =
+    repair_orphan_tool_result_messages capped_messages
+  in
   let state =
     {
       Agent_sdk.Types.config =

@@ -5,19 +5,7 @@ open Keeper_types
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 
-let execution_session_state_json config (meta : keeper_meta) =
-  let _ = config in
-  let _ = meta in
-  `String "removed"
 
-let execution_session_bridge_json config (meta : keeper_meta) =
-  let _ = config in
-  let _ = meta in
-  `Assoc
-    [
-      ("enabled", `Bool false);
-      ("status", `String "removed");
-    ]
 
 let drift_surface_json () =
   `Assoc

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
 
 import {
   fetchKeeperComposite,
@@ -12,6 +12,163 @@ import { EmptyState } from './common/empty-state'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 
+export type CompositeObservation = {
+  ts: number
+  phase: string
+  turn: string
+  decision: string
+  cascade: string
+  compaction: string
+}
+
+type TransitionEntry = {
+  ts: number
+  from: string
+  to: string
+  field: string
+}
+
+type HubState = {
+  keeperName: string | null
+  snapshot: KeeperCompositeSnapshot | null
+  loading: boolean
+  error: string | null
+  lastFetchAt: number
+  observations: CompositeObservation[]
+}
+
+type HubAction =
+  | { type: 'fetch_started'; keeperName: string }
+  | { type: 'fetch_succeeded'; keeperName: string; snapshot: KeeperCompositeSnapshot; fetchedAt: number }
+  | { type: 'fetch_failed'; keeperName: string; error: string }
+
+const MAX_OBSERVATIONS = 30
+const MAX_TRANSITION_HISTORY = 20
+
+const initialHubState: HubState = {
+  keeperName: null,
+  snapshot: null,
+  loading: false,
+  error: null,
+  lastFetchAt: 0,
+  observations: [],
+}
+
+const TRANSITION_FIELDS: Array<{ field: string; key: keyof Omit<CompositeObservation, 'ts'> }> = [
+  { field: 'KSM', key: 'phase' },
+  { field: 'KTC', key: 'turn' },
+  { field: 'KDP', key: 'decision' },
+  { field: 'KCL', key: 'cascade' },
+  { field: 'KMC', key: 'compaction' },
+]
+
+function observeSnapshot(
+  snapshot: KeeperCompositeSnapshot,
+  ts: number,
+): CompositeObservation {
+  return {
+    ts,
+    phase: snapshot.phase,
+    turn: snapshot.turn_phase,
+    decision: snapshot.decision.stage,
+    cascade: snapshot.cascade.state,
+    compaction: snapshot.compaction.stage,
+  }
+}
+
+function sameObservation(
+  left: CompositeObservation,
+  right: CompositeObservation,
+): boolean {
+  return left.phase === right.phase
+    && left.turn === right.turn
+    && left.decision === right.decision
+    && left.cascade === right.cascade
+    && left.compaction === right.compaction
+}
+
+export function appendCompositeObservation(
+  observations: CompositeObservation[],
+  next: CompositeObservation,
+  maxEntries = MAX_OBSERVATIONS,
+): CompositeObservation[] {
+  const last = observations[observations.length - 1]
+  if (last && sameObservation(last, next)) return observations
+  return [...observations, next].slice(-Math.max(1, maxEntries))
+}
+
+export function deriveTransitionHistory(
+  observations: CompositeObservation[],
+  maxEntries = MAX_TRANSITION_HISTORY,
+): TransitionEntry[] {
+  const entries: TransitionEntry[] = []
+  for (let index = 1; index < observations.length; index += 1) {
+    const prev = observations[index - 1]
+    const next = observations[index]
+    if (!prev || !next) continue
+    for (const { field, key } of TRANSITION_FIELDS) {
+      if (prev[key] !== next[key]) {
+        entries.push({
+          ts: next.ts,
+          from: prev[key],
+          to: next[key],
+          field,
+        })
+      }
+    }
+  }
+  return entries.slice(-Math.max(1, maxEntries)).reverse()
+}
+
+export function derivePhaseLog(
+  observations: CompositeObservation[],
+  maxEntries = MAX_OBSERVATIONS,
+): string[] {
+  const phases: string[] = []
+  for (const observation of observations) {
+    if (phases[phases.length - 1] !== observation.phase) {
+      phases.push(observation.phase)
+    }
+  }
+  return phases.slice(-Math.max(1, maxEntries))
+}
+
+function reduceHubState(state: HubState, action: HubAction): HubState {
+  const current =
+    state.keeperName === action.keeperName
+      ? state
+      : {
+          ...initialHubState,
+          keeperName: action.keeperName,
+        }
+
+  switch (action.type) {
+    case 'fetch_started':
+      return {
+        ...current,
+        loading: true,
+        error: null,
+      }
+    case 'fetch_succeeded': {
+      const observation = observeSnapshot(action.snapshot, action.fetchedAt)
+      return {
+        keeperName: action.keeperName,
+        snapshot: action.snapshot,
+        loading: false,
+        error: null,
+        lastFetchAt: action.fetchedAt,
+        observations: appendCompositeObservation(current.observations, observation),
+      }
+    }
+    case 'fetch_failed':
+      return {
+        ...current,
+        loading: false,
+        error: action.error,
+      }
+  }
+}
+
 /**
  * FSM Hub — architecture audit surface for the composite keeper lifecycle.
  *
@@ -22,65 +179,20 @@ import { buildCompositeFsmSpec } from './keeper-fsm-specs'
  */
 export function FsmHub() {
   const [selected, setSelected] = useState<string | null>(null)
-  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [pollTick, setPollTick] = useState(0)
-  const [lastFetchAt, setLastFetchAt] = useState(0)
   const [now, setNow] = useState(() => Date.now() / 1000)
   const [graphOpen, setGraphOpen] = useState(false)
-  // Transition history: client-side log of observed state changes.
-  const [history, setHistory] = useState<{ ts: number; from: string; to: string; field: string }[]>([])
-  const prevSnapshotRef = useRef<{ phase: string; turn: string; decision: string; cascade: string; compaction: string } | null>(null)
-  // Phase sparkline: every observed KSM phase, newest last (max 30).
-  const [phaseLog, setPhaseLog] = useState<string[]>([])
-
-  // Track transitions whenever snapshot changes
-  useEffect(() => {
-    if (!snapshot) return
-    const cur = {
-      phase: snapshot.phase,
-      turn: snapshot.turn_phase,
-      decision: snapshot.decision.stage,
-      cascade: snapshot.cascade.state,
-      compaction: snapshot.compaction.stage,
-    }
-    const prev = prevSnapshotRef.current
-    if (prev) {
-      const entries: { ts: number; from: string; to: string; field: string }[] = []
-      const now_ts = Date.now() / 1000
-      if (prev.phase !== cur.phase) entries.push({ ts: now_ts, from: prev.phase, to: cur.phase, field: 'KSM' })
-      if (prev.turn !== cur.turn) entries.push({ ts: now_ts, from: prev.turn, to: cur.turn, field: 'KTC' })
-      if (prev.decision !== cur.decision) entries.push({ ts: now_ts, from: prev.decision, to: cur.decision, field: 'KDP' })
-      if (prev.cascade !== cur.cascade) entries.push({ ts: now_ts, from: prev.cascade, to: cur.cascade, field: 'KCL' })
-      if (prev.compaction !== cur.compaction) entries.push({ ts: now_ts, from: prev.compaction, to: cur.compaction, field: 'KMC' })
-      if (entries.length > 0) {
-        setHistory(h => [...entries, ...h].slice(0, 20))
-      }
-    }
-    prevSnapshotRef.current = cur
-    // Append current phase to sparkline log
-    setPhaseLog(log => [...log, cur.phase].slice(-30))
-  }, [snapshot])
-
-  // Reset history + sparkline when switching keepers
-  useEffect(() => {
-    setHistory([])
-    setPhaseLog([])
-    prevSnapshotRef.current = null
-  }, [selected])
+  const requestIdRef = useRef(0)
 
   const keeperList = keepers.value
   const keeperNames = useMemo(
     () => keeperList.map(k => k.name).sort(),
     [keeperList],
   )
-
-  useEffect(() => {
-    if (selected == null && keeperNames.length > 0) {
-      const first = keeperNames[0]
-      if (first) setSelected(first)
-    }
+  const activeSelected = useMemo(() => {
+    if (selected && keeperNames.includes(selected)) return selected
+    return keeperNames[0] ?? null
   }, [keeperNames, selected])
 
   useEffect(() => {
@@ -95,26 +207,53 @@ export function FsmHub() {
 
   const tick = compositeTick.value
   const shouldRefetchForTick =
-    selected != null && tick.name === selected ? tick.ts_unix : 0
-
-  const doFetch = useCallback(async (name: string) => {
-    try {
-      const data = await fetchKeeperComposite(name)
-      setSnapshot(data)
-      setLastFetchAt(Date.now() / 1000)
-      setLoading(false)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'composite fetch failed')
-      setLoading(false)
-    }
-  }, [])
+    activeSelected != null && tick.name === activeSelected ? tick.ts_unix : 0
 
   useEffect(() => {
-    if (!selected) return
-    setLoading(true)
-    setError(null)
-    doFetch(selected)
-  }, [selected, shouldRefetchForTick, pollTick, doFetch])
+    if (!activeSelected) return
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    dispatch({ type: 'fetch_started', keeperName: activeSelected })
+    void (async () => {
+      try {
+        const data = await fetchKeeperComposite(activeSelected)
+        if (requestIdRef.current !== requestId) return
+        dispatch({
+          type: 'fetch_succeeded',
+          keeperName: activeSelected,
+          snapshot: data,
+          fetchedAt: Date.now() / 1000,
+        })
+      } catch (err) {
+        if (requestIdRef.current !== requestId) return
+        dispatch({
+          type: 'fetch_failed',
+          keeperName: activeSelected,
+          error: err instanceof Error ? err.message : 'composite fetch failed',
+        })
+      }
+    })()
+  }, [activeSelected, shouldRefetchForTick, pollTick])
+
+  const view = useMemo(
+    () =>
+      hub.keeperName === activeSelected
+        ? hub
+        : {
+            ...initialHubState,
+            keeperName: activeSelected,
+          },
+    [activeSelected, hub],
+  )
+  const history = useMemo(
+    () => deriveTransitionHistory(view.observations),
+    [view.observations],
+  )
+  const phaseLog = useMemo(
+    () => derivePhaseLog(view.observations),
+    [view.observations],
+  )
+  const { snapshot, loading, error, lastFetchAt } = view
 
   return html`
     <div class="flex flex-col gap-3">
@@ -124,14 +263,14 @@ export function FsmHub() {
         now=${now}
         lastFetchAt=${lastFetchAt}
         keeperNames=${keeperNames}
-        selected=${selected}
+        selected=${activeSelected}
         onSelect=${setSelected}
         loading=${loading}
         transitionCount=${history.length}
         observationCount=${phaseLog.length}
       />
 
-      ${selected == null ? html`
+      ${activeSelected == null ? html`
         <${EmptyState} message="관찰할 키퍼를 선택하세요" />
       ` : loading && !snapshot ? html`
         <div class="flex items-center justify-center gap-2 py-10 text-[11px] text-[var(--text-dim)]">

@@ -3,8 +3,6 @@
     Tests the tick engine using Eio.Stdenv.clock (real clock).
     Each test uses very short intervals (0.05s-0.2s) to keep tests fast. *)
 
-open Masc_mcp
-
 let passed = ref 0
 let failed = ref 0
 

@@ -249,7 +249,7 @@ masc_keeper_up(name: "sangsu")
 전제조건:
 - `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
 - `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
-- 기본적으로 git repo root를 `MASC_BASE_PATH`로 자동 해석한다.
+- 명시적인 `MASC_BASE_PATH`가 없으면 `HOME`을 implicit base path로 사용한다. 따라서 기본 runtime state는 `~/.masc/` 아래에 놓인다.
 - `start-masc-mcp.sh`는 worktree에서 실행해도 위 규칙을 그대로 따른다.
 - shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 명시적으로 덮어쓴다.
 - resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 뒤에만 `~/.masc/config`, repo `config/` 자동 탐색이 fallback으로 동작한다. repo `config/`는 체크인된 default/example source이며, 마지막 fallback이다.

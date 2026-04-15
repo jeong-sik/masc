@@ -291,6 +291,37 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
       check bool "repo config copied to base path config" true
         (Sys.file_exists (Filename.concat bootstrapped_config "cascade.json")))
 
+let test_default_base_path_falls_back_to_home_when_unset () =
+  with_temp_dir "start-masc-script-home-fallback" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      ignore (make_config_root dir);
+      make_fake_eio_exe dir;
+      let home_dir = Filename.concat dir "home" in
+      mkdir_p home_dir;
+      let capture = Filename.concat dir "captured-home-fallback.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("HOME", home_dir);
+              ("MASC_BASE_PATH", "");
+              ("MASC_CONFIG_DIR", "");
+            ]
+          (Printf.sprintf "%s --http --port 9969" (quote script))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let captured = read_file capture in
+      let expected_home = canonical_path home_dir in
+      check bool "default base path falls back to home" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_home));
+      check bool "default config root follows home fallback" true
+        (contains_substring captured
+           ("MASC_CONFIG_DIR=" ^ Filename.concat expected_home ".masc/config")))
+
 let test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
@@ -513,9 +544,10 @@ let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_parent = canonical_path parent in
       check bool "explicit base path resets config root to base path" true
         (contains_substring captured
-           ("MASC_CONFIG_DIR=" ^ Filename.concat parent ".masc/config"));
+           ("MASC_CONFIG_DIR=" ^ Filename.concat expected_parent ".masc/config"));
       check bool "stderr explains repo-local config ignore" true
         (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR");
       check bool "stderr explains repo-local personas ignore" true
@@ -546,10 +578,11 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       let captured = read_file capture in
+      let expected_parent = canonical_path parent in
       check bool "parent env repo-local config ignored under external base path"
         true
         (contains_substring captured
-           ("MASC_CONFIG_DIR=" ^ Filename.concat parent ".masc/config"));
+           ("MASC_CONFIG_DIR=" ^ Filename.concat expected_parent ".masc/config"));
       check bool "parent env repo-local config ignore is logged" true
         (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR"))
 
@@ -668,6 +701,8 @@ let () =
             test_realtime_transports_default_to_base_path_config_and_preserve_override;
           test_case "bootstraps base path config from repo when unset" `Quick
             test_bootstraps_base_path_config_from_repo_when_unset;
+          test_case "default base path falls back to home when unset" `Quick
+            test_default_base_path_falls_back_to_home_when_unset;
           test_case
             "absolute inherited base path with dual .masc roots is preserved"
             `Quick

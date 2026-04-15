@@ -133,7 +133,8 @@ maybe_prune_trpg_room() {
   fi
 
   local room_id="${MASC_TRPG_PRUNE_ROOM_ID:-default}"
-  local base_path="${MASC_TRPG_PRUNE_BASE_PATH:-${MASC_BASE_PATH:-${HOME}/me}}"
+  local default_base_path="${HOME:-$PWD}"
+  local base_path="${MASC_TRPG_PRUNE_BASE_PATH:-${MASC_BASE_PATH:-$default_base_path}}"
   local keep_sessions="${MASC_TRPG_PRUNE_KEEP_SESSIONS:-1}"
   local -a prune_args=(
     --room-id "$room_id"

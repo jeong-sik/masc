@@ -335,11 +335,19 @@ repo_local_personas_dir_match() {
 
 clear_repo_local_config_for_explicit_base_path() {
     local resolved_base_path="$1"
+    local resolved_repo_env_root="$REPO_ENV_ROOT"
+    local resolved_script_dir="$SCRIPT_DIR"
 
     if [ "$BASE_PATH_EXPLICIT" != "1" ]; then
         return 0
     fi
-    if [ "$resolved_base_path" = "$REPO_ENV_ROOT" ] || [ "$resolved_base_path" = "$SCRIPT_DIR" ]; then
+    if [ -d "$resolved_repo_env_root" ]; then
+        resolved_repo_env_root="$(cd "$resolved_repo_env_root" && pwd -P)"
+    fi
+    if [ -d "$resolved_script_dir" ]; then
+        resolved_script_dir="$(cd "$resolved_script_dir" && pwd -P)"
+    fi
+    if [ "$resolved_base_path" = "$resolved_repo_env_root" ] || [ "$resolved_base_path" = "$resolved_script_dir" ]; then
         return 0
     fi
 
@@ -454,7 +462,7 @@ PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
 WORKTREE_PORT_HINT=""
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
-BASE_PATH="${MASC_BASE_PATH:-$SCRIPT_DIR}"
+BASE_PATH="${MASC_BASE_PATH:-${HOME:-$SCRIPT_DIR}}"
 HOST="${MASC_HOST:-127.0.0.1}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
 EIO_MODE="true"
@@ -516,6 +524,8 @@ if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
 elif [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && is_absolute_path "$BASE_PATH"; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_env"
+elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${HOME:-}" ] && [ "$BASE_PATH" = "$HOME" ]; then
+    BASE_PATH_RESOLUTION_SOURCE="implicit_home"
 fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then

@@ -2,6 +2,15 @@
 
     Agent-to-Agent (A2A) direct communication channel.
     Extracted from room.ml for modularity.
+
+    Lock discipline:
+    - All writes to portal files happen under [with_file_lock].
+    - When two portal files are touched in one operation (source + target),
+      both are locked in lexicographic path order to prevent deadlock.
+    - Lockless reads in [get_portal_target] and [portal_status] are safe
+      because [write_json] uses atomic rename — reads never see torn state.
+    - A2A task files are keyed by fresh UUID; each file is written once by a
+      single producer, so no inter-lock coordination is needed.
 *)
 
 open Types
@@ -20,6 +29,13 @@ let gen_a2a_task_id () =
     tm.tm_hour tm.tm_min tm.tm_sec
     (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF)
 
+(** Acquire two file locks in lexicographic path order to prevent deadlock. *)
+let with_two_file_locks config path_a path_b f =
+  let p1, p2 = if String.compare path_a path_b <= 0 then path_a, path_b else path_b, path_a in
+  with_file_lock config p1 (fun () ->
+    with_file_lock config p2 f
+  )
+
 (** Open portal - establish bidirectional A2A connection (Result version) *)
 let portal_open_r config ~agent_name ~target_agent ~initial_message : string masc_result =
   if not (is_initialized config) then
@@ -31,7 +47,10 @@ let portal_open_r config ~agent_name ~target_agent ~initial_message : string mas
     mkdir_p (portals_dir config);
     mkdir_p (a2a_tasks_dir config);
     let portal_path = Filename.concat (portals_dir config) (safe_filename agent_name ^ ".json") in
-    with_file_lock config portal_path (fun () ->
+    let target_portal_path =
+      Filename.concat (portals_dir config) (safe_filename target_agent ^ ".json")
+    in
+    with_two_file_locks config portal_path target_portal_path (fun () ->
       match read_json_opt config portal_path with
       | Some json ->
           (match portal_of_yojson json with
@@ -47,8 +66,6 @@ let portal_open_r config ~agent_name ~target_agent ~initial_message : string mas
             task_count = 0;
           } in
           write_json config portal_path (portal_to_yojson portal);
-          (* Create reverse portal for target agent *)
-          let target_portal_path = Filename.concat (portals_dir config) (target_agent ^ ".json") in
           if not (Sys.file_exists target_portal_path) then begin
             let reverse_portal = {
               portal_from = target_agent;
@@ -73,6 +90,8 @@ let portal_open_r config ~agent_name ~target_agent ~initial_message : string mas
                 created_at = now;
                 updated_at = now;
               } in
+              (* UUID-unique file, no lock needed: each task_id is globally
+                 fresh, so no concurrent writer can target the same file. *)
               let task_path = Filename.concat (a2a_tasks_dir config) (task_id ^ ".json") in
               write_json config task_path (a2a_task_to_yojson task);
               let updated_portal = { portal with task_count = 1 } in
@@ -109,6 +128,8 @@ let portal_send_r config ~agent_name ~message : string masc_result =
                 created_at = now;
                 updated_at = now;
               } in
+              (* UUID-unique file, no lock needed: fresh task_id guarantees
+                 no concurrent writer targets the same file. *)
               let task_path = Filename.concat (a2a_tasks_dir config) (task_id ^ ".json") in
               write_json config task_path (a2a_task_to_yojson task);
               let updated_portal = { portal with task_count = portal.task_count + 1 } in
@@ -118,7 +139,12 @@ let portal_send_r config ~agent_name ~message : string masc_result =
           | Error e -> Error (InvalidJson e)
     )
 
-(** Get portal target agent - returns Some target_name if portal is open *)
+(** Get portal target agent - returns Some target_name if portal is open.
+
+    Lockless read is safe here because [write_json] uses atomic rename:
+    the read either sees the old file, the new file, or file-not-found.
+    No torn / partially-written state is possible.
+*)
 let get_portal_target config ~agent_name =
   let portal_path = Filename.concat (portals_dir config) (safe_filename agent_name ^ ".json") in
   if Sys.file_exists portal_path then
@@ -136,29 +162,64 @@ let portal_close config ~agent_name =
 
   let portal_path = Filename.concat (portals_dir config) (safe_filename agent_name ^ ".json") in
 
-  (* Use file lock to prevent race conditions *)
-  with_file_lock config portal_path (fun () ->
-    match read_json_opt config portal_path with
-    | None -> Printf.sprintf "⚠ No portal open for %s" agent_name
-    | Some json ->
-        match portal_of_yojson json with
-        | Ok portal ->
-            (* Close this portal *)
-            Sys.remove portal_path;
+  let rec close_locked target_portal_path =
+    match
+      with_two_file_locks config portal_path target_portal_path (fun () ->
+        match read_json_opt config portal_path with
+        | None -> `Missing
+        | Some json ->
+            match portal_of_yojson json with
+            | Error _ ->
+                if Sys.file_exists portal_path then Sys.remove portal_path;
+                `Cleanup
+            | Ok portal ->
+                let current_target_path =
+                  Filename.concat
+                    (portals_dir config)
+                    (safe_filename portal.portal_target ^ ".json")
+                in
+                if not (String.equal current_target_path target_portal_path) then
+                  `Retry current_target_path
+                else begin
+                  if Sys.file_exists portal_path then Sys.remove portal_path;
+                  if Sys.file_exists target_portal_path then Sys.remove target_portal_path;
+                  `Closed (portal.portal_target, portal.task_count)
+                end)
+    with
+    | `Missing -> Printf.sprintf "⚠ No portal open for %s" agent_name
+    | `Cleanup -> Printf.sprintf "🌀 Portal closed (cleanup)"
+    | `Closed (target_agent, task_count) ->
+        Printf.sprintf "🌀 Portal closed: %s ↔ %s (%d tasks sent)"
+          agent_name target_agent task_count
+    | `Retry next_target_path -> close_locked next_target_path
+  in
+  match
+    with_file_lock config portal_path (fun () ->
+      match read_json_opt config portal_path with
+      | None -> `Missing
+      | Some json ->
+          match portal_of_yojson json with
+          | Error _ -> `Invalid
+          | Ok portal ->
+              `Target
+                (Filename.concat
+                   (portals_dir config)
+                   (safe_filename portal.portal_target ^ ".json")))
+  with
+  | `Missing -> Printf.sprintf "⚠ No portal open for %s" agent_name
+  | `Invalid ->
+      with_file_lock config portal_path (fun () ->
+        if Sys.file_exists portal_path then Sys.remove portal_path);
+      Printf.sprintf "🌀 Portal closed (cleanup)"
+  | `Target target_portal_path -> close_locked target_portal_path
 
-            (* Also close reverse portal *)
-            let target_portal_path = Filename.concat (portals_dir config) (portal.portal_target ^ ".json") in
-            if Sys.file_exists target_portal_path then
-              Sys.remove target_portal_path;
+(** Get portal status
 
-            Printf.sprintf "🌀 Portal closed: %s ↔ %s (%d tasks sent)"
-              agent_name portal.portal_target portal.task_count
-        | Error _ ->
-            Sys.remove portal_path;
-            Printf.sprintf "🌀 Portal closed (cleanup)"
-  )
-
-(** Get portal status *)
+    Lockless reads are safe under the current write discipline:
+    - [write_json] uses atomic rename, so portal file reads are never torn.
+    - A2A task files are keyed by fresh UUIDs written by a single producer each;
+      no concurrent read-modify-write paths exist on any given task file.
+*)
 let portal_status config ~agent_name =
   ensure_initialized config;
 

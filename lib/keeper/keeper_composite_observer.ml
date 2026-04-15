@@ -117,34 +117,49 @@ let derive_compaction_stage (conds : Keeper_state_machine.conditions)
   if conds.compaction_active then `Compacting
   else `Accumulating
 
-(* Decision pipeline stage (issue #7122 Phase 2 follow-up).
+(* Decision pipeline stage.
 
-   Only [Gate_rejected] is observable from the registry today
-   ([guardrail_triggered] is a sticky condition). [Guard_ok] and
-   [Tool_policy_selected] are per-turn-internal and require either
-   Event_bus subscription (TurnStarted → Guard pass) or an explicit
-   field on [current_turn_observation] populated by the decision
-   audit. Returning [Undecided] for the non-rejected case is the
-   honest placeholder — we do not have observability for the
-   intermediate states yet. Anything else would be a stale-state lie. *)
-let derive_decision_stage (conds : Keeper_state_machine.conditions)
+   Three inputs determine the decision projection:
+   1. [guardrail_triggered] (sticky condition) → [Gate_rejected].
+   2. [current_turn_observation <> None] (is_live) → the turn started,
+      so guards MUST have passed. This is a logical implication, not a
+      guess: the turn loop calls guard evaluation before
+      [mark_turn_started], and a guard rejection prevents the turn from
+      starting at all. Projecting [Guard_ok] when a turn is running is
+      provably correct.
+   3. Otherwise → [Undecided]. No turn is running, no guardrail tripped.
+
+   [Tool_policy_selected] remains a Phase 2 follow-up (#7122) since it
+   requires knowing whether tool selection has occurred within the
+   current turn, which is per-call-internal state. *)
+let derive_decision_stage
+    (conds : Keeper_state_machine.conditions)
+    ~(is_live : bool)
     : decision_stage =
   if conds.guardrail_triggered then `Gate_rejected
+  else if is_live then `Guard_ok
   else `Undecided
 
-(* Cascade state (issue #7122 Phase 2 follow-up).
+(* Cascade state.
 
-   [cascade_observation] is produced by [Oas_worker.run_named] only
-   on the success path, after the cascade has already terminated.
-   Persisting it into the registry post-hoc would surface stale
-   [`Done`/`Trying`] on idle keepers — strictly worse than [`Idle`].
-   Live cascade state requires Event_bus subscription on
-   [TurnStarted]/[ToolCalled] events that flow through the OAS
-   pipeline. Until that wiring lands, the only honest projection
-   is [`Idle`]. See #7122 for the design constraints that ruled out
-   the post-hoc-persist approach. *)
-let derive_cascade_state (_ : Keeper_registry.registry_entry) : cascade_state =
-  `Idle
+   [is_live] means the OAS worker call is in flight. During that window
+   the cascade is either selecting a provider or executing inference —
+   both map to [`Trying`] at the dashboard granularity. When the turn
+   finishes ([is_live = false]), the cascade is no longer active, so
+   [`Idle`] is correct.
+
+   This avoids the "stale state on idle keepers" problem that ruled out
+   the post-hoc-persist approach (see #7122), because the projection
+   derives from [current_turn_observation] which is atomically cleared
+   by [mark_turn_finished].
+
+   Finer-grained live cascade state ([`Selecting`] vs [`Trying`] vs
+   [`Done`]) remains a Phase 2 follow-up (#7122) requiring Event_bus
+   subscription. *)
+let derive_cascade_state (entry : Keeper_registry.registry_entry)
+    : cascade_state =
+  if entry.current_turn_observation <> None then `Trying
+  else `Idle
 
 (* Two-store reconcile pair (RFC-0003 §8, absorbed from P4).
    - [reconcile_data]: a prior turn left an ambiguous side-effect record
@@ -249,9 +264,10 @@ let observe
     | _ -> stable_run_id entry
   in
   let conds = entry.conditions in
+  let is_live = entry.current_turn_observation <> None in
   let turn_phase = derive_turn_phase entry in
   let compaction_stage = derive_compaction_stage conds in
-  let decision_stage = derive_decision_stage conds in
+  let decision_stage = derive_decision_stage conds ~is_live in
   let cascade_state = derive_cascade_state entry in
   let (reconcile_data, reconcile_fsm) = derive_reconcile entry in
   let invariants =
@@ -283,7 +299,7 @@ let observe
     reconcile_data;
     reconcile_fsm;
     invariants;
-    is_live = (entry.current_turn_observation <> None);
+    is_live;
     last_outcome =
       (match entry.last_completed_turn with
        | Some lc ->

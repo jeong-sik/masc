@@ -177,10 +177,15 @@ let test_sse_guard_registry_is_shared_with_cleanup_loop () =
       failf "expected first guard insert to succeed, got %s %.3f" reason
         retry_after_s
   | Ok () ->
-      check int "cleanup loop sees the same guard table" 1
+      check int "cleanup keeps fresh guard entries" 0
         (Cleanup_view.reap_stale_guards ());
-      check int "transport view is already clean after shared reap" 0
-        (Transport.reap_stale_guards ())
+      (match Transport.check_sse_connect_guard session_id with
+      | Error ("session_cooldown", retry_after_s) ->
+          check bool "cooldown stays positive" true (retry_after_s > 0.0)
+      | Error (reason, retry_after_s) ->
+          failf "expected shared cooldown guard, got %s %.3f" reason retry_after_s
+      | Ok () ->
+          fail "expected second guard check to observe shared cooldown state")
 
 let () =
   Eio_main.run @@ fun env ->

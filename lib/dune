@@ -394,6 +394,10 @@
    ;; Keeper contract
    keeper_schema
    keeper_execution_scope
+   keeper_social_model_types
+   keeper_social_model_protocol
+   keeper_social_model_bdi_speech_v1
+   keeper_social_model_registry
    keeper_social_model
    keeper_cascade_profile
    keeper_cascade_routing

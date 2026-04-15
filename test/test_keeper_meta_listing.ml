@@ -65,7 +65,8 @@ room_scope = "current"
 proactive_enabled = false
 |}
 
-let write_keeper_meta_exn ?(autoboot_enabled = true) config ~name ~trace_id =
+let write_keeper_meta_exn ?(autoboot_enabled = true)
+    ?(social_model = "bdi_speech_v1") config ~name ~trace_id =
   let json =
     `Assoc
       [
@@ -73,6 +74,7 @@ let write_keeper_meta_exn ?(autoboot_enabled = true) config ~name ~trace_id =
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String trace_id);
         ("goal", `String "test keeper");
+        ("social_model", `String social_model);
         ("autoboot_enabled", `Bool autoboot_enabled);
       ]
   in
@@ -175,6 +177,37 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
 
+let test_keeper_list_normalizes_unknown_social_model () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"sangsu";
+      write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
+        ~social_model:"experimental_v99";
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        Tool_keeper.handle_keeper_list ctx
+          (`Assoc [ ("limit", `Int 10); ("detailed", `Bool true) ])
+      in
+      check bool "tool keeper list ok" true ok;
+      let json = parse_json_exn body in
+      match keeper_json_by_name json "sangsu" with
+      | Some keeper ->
+          check string "social_model normalized" "bdi_speech_v1"
+            Yojson.Safe.Util.(keeper |> member "social_model" |> to_string)
+      | None -> fail "expected sangsu row in keeper list")
+
 let () =
   run "keeper_meta_listing"
     [
@@ -184,5 +217,7 @@ let () =
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case "tool keeper list normalizes unknown social model" `Quick
+            test_keeper_list_normalizes_unknown_social_model;
         ] );
     ]

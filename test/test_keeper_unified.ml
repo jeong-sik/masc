@@ -65,6 +65,13 @@ let contains_substring haystack needle =
   in
   needle_len = 0 || loop 0
 
+let source_file_contains file_rel needle =
+  let path = Filename.concat (repo_root ()) file_rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> contains_substring (In_channel.input_all ic) needle)
+
 let contains_disallowed_control_char s =
   let rec loop i =
     if i >= String.length s then false
@@ -219,7 +226,7 @@ let test_observe_uses_precollected_board_events () =
       check int "precollected board events preserved" (List.length events)
         (List.length obs.pending_board_events);
       check bool "board event schedules turn" true
-        (WO.should_run_unified_turn ~meta:minimal_meta obs))
+        (WO.should_run_keeper_cycle ~meta:minimal_meta obs))
 
 let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
   let base_dir = temp_dir () in
@@ -321,7 +328,7 @@ let test_scheduled_turn_uses_cooldown_only () =
   in
   let obs = { base_observation with idle_seconds = 0 } in
   check bool "cooldown opens scheduled turn without idle heuristic" true
-    (WO.should_run_unified_turn ~meta obs)
+    (WO.should_run_keeper_cycle ~meta obs)
 
 let test_scheduled_turn_respects_cooldown () =
   let meta =
@@ -338,7 +345,7 @@ let test_scheduled_turn_respects_cooldown () =
     }
   in
   check bool "cooldown blocks scheduled turn" false
-    (WO.should_run_unified_turn ~meta base_observation)
+    (WO.should_run_keeper_cycle ~meta base_observation)
 
 let test_scheduled_turn_requires_idle_gate () =
   let meta =
@@ -358,8 +365,8 @@ let test_scheduled_turn_requires_idle_gate () =
   in
   let obs = { base_observation with idle_seconds = 120 } in
   check bool "idle gate blocks scheduled turn" false
-    (WO.should_run_unified_turn ~meta obs);
-  let decision = WO.unified_turn_decision ~meta obs in
+    (WO.should_run_keeper_cycle ~meta obs);
+  let decision = WO.keeper_cycle_decision ~meta obs in
   check bool "decision records idle wait reason" true
     (match decision.verdict with
      | WO.Skip { reasons = (first, rest)} ->
@@ -467,7 +474,7 @@ let test_idle_decay_triggers_turn () =
     }
   in
   check bool "idle decay triggers turn before base cooldown" true
-    (WO.should_run_unified_turn ~meta base_observation)
+    (WO.should_run_keeper_cycle ~meta base_observation)
 
 let test_scheduled_turn_decision_uses_backlog_acceleration () =
   let meta =
@@ -492,7 +499,7 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
       failed_task_count = 2;
     }
   in
-  let decision = WO.unified_turn_decision ~meta obs in
+  let decision = WO.keeper_cycle_decision ~meta obs in
   check bool "backlog acceleration opens scheduled turn" true decision.should_run;
   check bool "marks actionable backlog" true
     (match decision.verdict with
@@ -574,7 +581,7 @@ let test_task_reactive_cooldown_floor_never_hits_zero () =
         failed_task_count = 1;
       }
     in
-    let decision = WO.unified_turn_decision ~meta obs in
+    let decision = WO.keeper_cycle_decision ~meta obs in
     check (option int) "task reactive cooldown clamps to positive floor" (Some 300)
       decision.task_reactive_cooldown)
 
@@ -1266,7 +1273,7 @@ let test_silent_proactive_cycle_advances_cooldown_anchor () =
   check bool "silent proactive leaves last_visible_ts untouched" true
     (updated.runtime.proactive_rt.last_visible_ts = 0.0);
   check bool "cooldown blocks immediate rerun after silent cycle" false
-    (WO.should_run_unified_turn ~meta:updated base_observation)
+    (WO.should_run_keeper_cycle ~meta:updated base_observation)
 
 let test_metrics_reactive_failure_does_not_mutate_proactive_runtime () =
   let reactive_observation =
@@ -1566,7 +1573,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
         Yojson.Safe.Util.(
           json |> member "scheduled_autonomous_outcome" |> to_string))
 
-let test_run_unified_turn_skips_non_executable_phase () =
+let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -1592,7 +1599,7 @@ let test_run_unified_turn_skips_non_executable_phase () =
         (Option.map KP.phase_to_string
            (KR.get_phase ~base_path:base_dir meta.name));
       match
-        UT.run_unified_turn
+        UT.run_keeper_cycle
           ~config
           ~meta
           ~observation:base_observation
@@ -1609,6 +1616,20 @@ let test_run_unified_turn_skips_non_executable_phase () =
             (Some "paused")
             (Option.map KP.phase_to_string
                (KR.get_phase ~base_path:base_dir meta.name)))
+
+let test_run_keeper_cycle_records_trajectory_source_contract () =
+  check bool "keeper cycle creates trajectory accumulator" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Trajectory.create_accumulator");
+  check bool "keeper cycle passes trajectory_acc to agent run" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~trajectory_acc");
+  check bool "keeper cycle resolves masc root via Room.masc_root_dir" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Room.masc_root_dir config");
+  check bool "keeper cycle finalizes trajectory on completion/failure" true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "Trajectory.finalize trajectory_acc")
 
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
@@ -2700,7 +2721,7 @@ let test_recent_tool_streak_count_ignores_stale_entries () =
 (* ---------- Test runner ---------- *)
 
 let () =
-  run "Keeper Unified Turn"
+  run "Keeper Cycle"
     [
       ( "world_observation",
         [
@@ -3013,8 +3034,10 @@ let () =
         ] );
       ( "phase_gate",
         [
-          test_case "run_unified_turn skips paused keeper" `Quick
-            test_run_unified_turn_skips_non_executable_phase;
+          test_case "run_keeper_cycle skips paused keeper" `Quick
+            test_run_keeper_cycle_skips_non_executable_phase;
+          test_case "run_keeper_cycle records trajectory contract" `Quick
+            test_run_keeper_cycle_records_trajectory_source_contract;
         ] );
       ( "tool_classification",
         [

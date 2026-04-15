@@ -1042,7 +1042,7 @@ let run_keepalive_unified_turn
         obs.pending_mentions <> [] || obs.pending_scope_messages <> []
       in
       let turn_decision =
-        Keeper_world_observation.unified_turn_decision
+        Keeper_world_observation.keeper_cycle_decision
           ~meta:meta_after_triage
           obs
       in
@@ -1140,7 +1140,7 @@ let run_keepalive_unified_turn
         with_keeper_turn_slot ~keeper_name:meta_after_triage.name
           ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
           match
-            Keeper_unified_turn.run_unified_turn
+            Keeper_unified_turn.run_keeper_cycle
               ~config:ctx.config
               ~meta:meta_after_observe
               ~observation:obs
@@ -1152,7 +1152,7 @@ let run_keepalive_unified_turn
           with
           | Error err ->
             let e_str = Oas.Error.to_string err in
-            Log.Keeper.error "%s: unified turn failed: %s"
+            Log.Keeper.error "%s: keeper cycle failed: %s"
               meta_after_observe.name e_str;
             if String_util.contains_substring e_str "Eio switch not available"
                || String_util.contains_substring e_str "Eio net not available"
@@ -1192,7 +1192,7 @@ let run_keepalive_unified_turn
         meta_after_triage.name wait_sec;
       meta_after_triage
     | exn ->
-      Log.Keeper.error "%s: unified turn exception: %s"
+      Log.Keeper.error "%s: keeper cycle exception: %s"
         meta_after_triage.name (Printexc.to_string exn);
       meta_after_triage)
 ;;

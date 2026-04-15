@@ -474,7 +474,7 @@ let handle_keeper_get_subroutes state req request reqd =
            (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
     else
       let config = state.Mcp_server.room_config in
-      let masc_root = Filename.concat config.base_path ".masc" in
+      let masc_root = Room.masc_root_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
           ~default:24
@@ -561,7 +561,7 @@ let handle_keeper_get_subroutes state req request reqd =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
          in
-         let masc_root = Filename.concat config.base_path ".masc" in
+         let masc_root = Room.masc_root_dir config in
          let trajectory_lines =
            Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
              ~trace_id

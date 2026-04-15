@@ -78,7 +78,7 @@ let line_block label value =
   else Printf.sprintf "%s: %s\n" label value
 
 let autonomous_trigger_lines
-    ~(decision : Keeper_world_observation.unified_turn_decision)
+    ~(decision : Keeper_world_observation.keeper_cycle_decision)
     ~(observation : Keeper_world_observation.world_observation) : string list =
   match decision.channel, decision.should_run with
   | Keeper_world_observation.Scheduled_autonomous, true ->
@@ -280,7 +280,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
           "- Economy: Hustle (minimize actions, conserve budget)\n");
   (* 7. Autonomous trigger — why this turn was scheduled *)
   let turn_decision =
-    Keeper_world_observation.unified_turn_decision ~meta observation
+    Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
   let autonomous_trigger =
     autonomous_trigger_lines ~decision:turn_decision ~observation

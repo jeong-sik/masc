@@ -631,7 +631,7 @@ let run_turn
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
   if affinity_k > 0
   then (
-    let masc_root = Filename.concat config.base_path ".masc" in
+    let masc_root = Room.masc_root_dir config in
     let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
@@ -1535,7 +1535,7 @@ let run_turn
     }
   in
   let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-  let base_dir = Filename.concat config.base_path ".masc" in
+  let base_dir = Room.masc_root_dir config in
   (* RFC-MASC-004 Phase 2: Hook-first is now the only path.
      Create bare memory (no imperative seeding). Memory content is
      injected via BeforeTurnParams hook; flush is incremental via

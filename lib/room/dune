@@ -26,19 +26,7 @@
   mention
   resilience
   heartbeat
-  nickname
-  ;; New aliases (Room-free names for gradual migration)
-  agent_lifecycle
-  agent_status
-  coord_state
-  coord_init
-  coord_query
-  coord_status
-  coord_hooks
-  task_engine
-  task_schedule
-  gc_engine
-  worktree_ops)
+  nickname)
  (libraries
   masc_types
   masc_core

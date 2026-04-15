@@ -307,18 +307,39 @@ let handle_code_search ctx args =
         ] in
         (true, Yojson.Safe.to_string response)
     | Unix.WEXITED 2, output ->
-        (* rg error: invalid regex, missing file, etc. Provide actionable help. *)
+        (* rg error: invalid regex, missing file, etc. Pick the right hint
+           by scanning the rg output, since exit-2 is overloaded. *)
+        let trimmed_out = String.trim output in
+        let mentions_no_file =
+          let lower = String.lowercase_ascii trimmed_out in
+          let contains s sub =
+            let ls = String.length s and lsub = String.length sub in
+            let rec scan i =
+              if i + lsub > ls then false
+              else if String.sub s i lsub = sub then true
+              else scan (i + 1)
+            in
+            scan 0
+          in
+          contains lower "no such file" || contains lower "is a directory"
+        in
         let hint =
-          if is_regex then
+          if mentions_no_file then
+            Printf.sprintf
+              "Search target not found. The 'path' argument resolved to %S — check that it \
+               exists and is reachable from the keeper's allowed roots. (Empty/missing 'path' \
+               defaults to '.')"
+              search_path
+          else if is_regex then
             "Regex error: check your pattern syntax, or set is_regex=false for literal search."
           else
             "Literal search failed. If your query contains regex chars (*+?[](){}^$|.\\), \
              try simplifying the query or set is_regex=true with a valid regex."
         in
         (false, Printf.sprintf "❌ %s\nrg output: %s" hint
-           (if output = "" then "(empty)" else
-             let s = String.trim output in
-             if String.length s > 300 then String.sub s 0 300 ^ "..." else s))
+           (if trimmed_out = "" then "(empty)"
+            else if String.length trimmed_out > 300 then String.sub trimmed_out 0 300 ^ "..."
+            else trimmed_out))
     | status, output ->
         let code = match status with
           | Unix.WEXITED n -> Printf.sprintf "exit %d" n

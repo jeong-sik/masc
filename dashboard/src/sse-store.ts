@@ -13,7 +13,7 @@ import {
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
 } from './sse'
-import type { DashboardExecutionResponse } from './types'
+import type { BoardPost, DashboardExecutionResponse, SSEEvent } from './types'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
@@ -21,6 +21,9 @@ import {
   refreshExecution,
   refreshBoard,
   serverStatus,
+  boardPosts,
+  boardSortMode,
+  boardOffset,
 } from './store'
 import {
   requestNamespaceTruth,
@@ -299,6 +302,38 @@ async function hydrateAfterReconnect(): Promise<void> {
   }, SSE_RECONNECT_RETRY_MS)
 }
 
+// --- Board incremental hydration ---
+// When a post_created SSE event carries content and the board is sorted by
+// recent, we can prepend the post directly — zero HTTP fetch. For other sort
+// modes the position is algorithm-dependent so we fall through to refreshBoard.
+
+function handleBoardPostCreated(event: SSEEvent): boolean {
+  if (boardSortMode.value !== 'recent') return false
+  const postId = event.post_id as string | undefined
+  const content = event.content as string | undefined
+  if (!postId || !content) return false
+  if (boardPosts.value.some(p => p.id === postId)) return false
+
+  const now = new Date().toISOString()
+  const post: BoardPost = {
+    id: postId,
+    author: event.author ?? '',
+    title: event.title ?? '',
+    body: content,
+    content,
+    tags: [],
+    created_at: now,
+    updated_at: now,
+    votes: 0,
+    vote_balance: 0,
+    comment_count: 0,
+    hearth: event.hearth ?? undefined,
+  }
+  boardPosts.value = [post, ...boardPosts.value]
+  boardOffset.value = boardPosts.value.length
+  return true
+}
+
 // --- SSE reaction setup ---
 
 export function setupSSEReaction(): () => void {
@@ -351,6 +386,13 @@ export function setupSSEReaction(): () => void {
       const name = typeof payload.name === 'string' ? payload.name : ''
       const ts_unix = typeof payload.ts_unix === 'number' ? payload.ts_unix : Date.now() / 1000
       compositeTick.value = { name, ts_unix }
+      return
+    }
+
+    // 1b. Board post incremental hydration — when enriched payload is
+    // available and sort=recent, prepend directly and skip the full refresh.
+    if (event.type === 'post_created' && handleBoardPostCreated(event)) {
+      // Hydrated from SSE payload — no HTTP fetch needed.
       return
     }
 

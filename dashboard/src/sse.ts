@@ -373,6 +373,69 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
+    // Path A board events — emitted by server_bootstrap_loops.ml via
+    // JSON-RPC notifications/board envelope (unwrapped to params.type).
+    case 'post_created':
+      addTypedJournalEntry(
+        event.author ?? agent,
+        formatBoardJournalText('Post', event.content ?? event.title),
+        'board',
+        'board_post',
+        {
+          author: event.author ?? agent,
+          severity: event.severity,
+          source: event.source,
+          narrativeText: formatBoardNarrative('게시글', event.author ?? agent, event.content ?? event.title),
+          preview: normalizePreview(event.content ?? event.title),
+          postId: event.post_id,
+        },
+      )
+      break
+    case 'comment_added':
+      addTypedJournalEntry(
+        event.author ?? agent,
+        formatBoardJournalText('Comment', event.content),
+        'board',
+        'board_comment',
+        {
+          author: event.author ?? agent,
+          severity: event.severity,
+          source: event.source,
+          narrativeText: formatBoardNarrative('댓글', event.author ?? agent, event.content),
+          preview: normalizePreview(event.content),
+          postId: event.post_id,
+        },
+      )
+      break
+    case 'post_voted':
+      addTypedJournalEntry(
+        event.voter ?? agent,
+        `Vote ${event.direction ?? '?'} on post ${event.post_id ?? ''}`,
+        'board',
+        'board_vote',
+        {
+          author: event.voter ?? agent,
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(event.voter ?? agent)}가 게시글에 ${event.direction === 'up' ? '추천' : '비추천'} 투표했습니다`,
+          postId: event.post_id,
+        },
+      )
+      break
+    case 'comment_voted':
+      addTypedJournalEntry(
+        event.voter ?? agent,
+        `Vote ${event.direction ?? '?'} on comment ${event.comment_id ?? ''}`,
+        'board',
+        'board_vote',
+        {
+          author: event.voter ?? agent,
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(event.voter ?? agent)}가 댓글에 ${event.direction === 'up' ? '추천' : '비추천'} 투표했습니다`,
+        },
+      )
+      break
     case 'keeper_turn_complete':
       addTypedJournalEntry(
         event.name ?? agent,

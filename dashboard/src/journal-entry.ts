@@ -87,6 +87,7 @@ export function classifyJournalKind(entry: JournalEntry): 'board' | 'tasks' | 'k
     case 'board_post':
     case 'board_comment':
     case 'board_delete':
+    case 'board_vote':
       return 'board'
     case 'task_update':
       return 'tasks'
@@ -111,6 +112,8 @@ export function journalDisplayText(entry: JournalEntry): string {
       return entry.preview ? `Post: ${entry.preview}` : (entry.text || 'New post')
     case 'board_comment':
       return entry.preview ? `Comment: ${entry.preview}` : (entry.text || 'New comment')
+    case 'board_vote':
+      return entry.text || 'Vote'
     default:
       return entry.text
   }

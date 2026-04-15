@@ -1347,6 +1347,32 @@ function TurnPipelineStrip({
 
 // ── Zone 4: Health Grid ─────────────────────────────────
 
+/** Human-readable descriptions for MeasurementCard auto-rule flags.
+    Indexed by rule name → { on: "this fires next turn", off: "nothing
+    pending" } so the tooltip reflects the active half of the flag. */
+const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }> = {
+  reflect: {
+    on: 'Keeper will pause before the next turn to self-evaluate its recent output (Reflexion loop).',
+    off: 'No reflection pending — keeper runs its next turn without self-check.',
+  },
+  plan: {
+    on: 'Keeper will re-plan its remaining steps before executing the next action.',
+    off: 'No re-plan scheduled — keeper follows its existing plan.',
+  },
+  compact: {
+    on: 'Context compaction is scheduled — older messages will be summarized to reclaim token budget.',
+    off: 'No compaction pending — the context window still has room.',
+  },
+  handoff: {
+    on: 'Keeper will emit a handover capsule and pass state to the next generation.',
+    off: 'No handoff scheduled — this generation continues running.',
+  },
+  guardrail: {
+    on: 'A guardrail has tripped — the keeper will halt pending operator intervention.',
+    off: 'No guardrail active — keeper runs under its normal safety envelope.',
+  },
+}
+
 function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const m = snapshot.measurement
   return html`
@@ -1364,7 +1390,10 @@ function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
           </div>
           <div class="flex items-center gap-2 font-mono">
             <${Flag} label="guardrail" on=${m.auto_rules.guardrail_stop} tone="warn" />
-            <span class="text-[10px] text-[var(--text-dim)]">drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
+            <span
+              class="text-[10px] text-[var(--text-dim)] cursor-help"
+              title="Goal drift: 0 = keeper is on-target; higher = keeper output is diverging from its declared goal. Values above ~0.5 typically trigger the guardrail."
+            >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
           ${m.auto_rules.guardrail_reason ? html`
             <div class="text-[9px] text-[#f59e0b] mt-0.5">사유: ${m.auto_rules.guardrail_reason}</div>
@@ -1377,6 +1406,12 @@ function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   `
 }
 
+export function flagTooltip(label: string, on: boolean): string {
+  const desc = MEASUREMENT_FLAG_DESCRIPTIONS[label]
+  if (!desc) return `${label}: ${on ? 'active' : 'inactive'}`
+  return `${label} (${on ? 'active' : 'inactive'})\n${on ? desc.on : desc.off}`
+}
+
 function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: 'ok' | 'warn' }) {
   const offCls = 'text-[var(--text-dim)] border-[var(--white-8)]'
   const onCls =
@@ -1384,7 +1419,10 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
       ? 'text-[#f59e0b] border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.08)]'
       : 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]'
   return html`
-    <span class=${`rounded-full border px-2 py-0.5 text-[10px] ${on ? onCls : offCls}`}>
+    <span
+      class=${`rounded-full border px-2 py-0.5 text-[10px] cursor-help ${on ? onCls : offCls}`}
+      title=${flagTooltip(label, on)}
+    >
       ${label}
     </span>
   `

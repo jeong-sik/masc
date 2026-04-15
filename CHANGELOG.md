@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-15
+
+### Changed
+- **Tool registry pruning** (#7184): removed 65 dead tools with zero
+  usage in April 2026 tool_usage logs. Deleted 5 entire subsystems
+  (verify_*, auth_*, repair_loop_*, handover_*, heartbeat internals)
+  as 19 source files + ~7,700 lines. Also pruned individual dead
+  handlers, schemas, permission entries, and dispatch arms for 25+
+  system-internal tools (agent eval, error tracking, lock/unlock,
+  cancellation, subscription, progress, feature_flags, init,
+  governance_set, set_room, etc.). keeper_denied surface reduced to
+  `masc_reset`, `masc_spawn` only. masc_heartbeat dispatch relocated
+  from deleted tool_heartbeat.ml to tool_room.ml.
+
 ### Added
 - Operator-facing context overflow recovery tools (#7115). Two new MCP
   tools paired with the `Overflowed` phase introduced in #7083:

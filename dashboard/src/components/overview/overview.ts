@@ -713,8 +713,8 @@ function ConfigTruthCard() {
 
         <div class="flex flex-col gap-2">
           <${RouteLink}
-            tab="lab"
-            params=${{ section: 'inspector' }}
+            tab="command"
+            params=${{ section: 'operations', view: 'inspector' }}
             class="rounded-xl border border-accent/25 bg-[var(--accent-10)] px-4 py-3 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/18"
             title="운영 인스펙터 열기"
           >

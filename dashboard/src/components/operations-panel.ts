@@ -1,23 +1,30 @@
-// MASC Dashboard — Operations Panel (Phase 5)
-// FilterChips toggle for ops/governance sub-views within the operations section.
+// MASC Dashboard — Operations Panel (Phase 5+6)
+// FilterChips toggle for ops/governance/connectors/inspector sub-views.
+// Phase 6: connectors and inspector absorbed as sub-views.
 
 import { html } from 'htm/preact'
 import { FilterChips } from './common/filter-chips'
 import { Ops } from './ops'
 import { Governance } from './governance'
+import { ConnectorStatusPanel } from './connector-status'
+import { LabInspector } from './lab-inspector'
 import { route } from '../router'
 
-export type OpsView = 'default' | 'ops' | 'governance'
+export type OpsView = 'default' | 'ops' | 'governance' | 'connectors' | 'inspector'
+
+const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'connectors', 'inspector']
 
 const VIEW_CHIPS: { key: OpsView; label: string }[] = [
   { key: 'default', label: '전체' },
   { key: 'ops', label: '개입' },
   { key: 'governance', label: '거버넌스' },
+  { key: 'connectors', label: '커넥터' },
+  { key: 'inspector', label: '인스펙터' },
 ]
 
 function currentView(): OpsView {
   const view = route.value.params.view
-  if (view === 'ops' || view === 'governance') return view
+  if (view && (VALID_VIEWS as string[]).includes(view)) return view as OpsView
   return 'default'
 }
 
@@ -43,14 +50,18 @@ export function OperationsPanel() {
       />
       ${view === 'ops'
         ? html`<${Ops} />`
-        : view === 'governance'
-          ? html`<${Governance} />`
-          : html`
-              <${Ops} />
-              <div class="mt-4">
-                <${Governance} />
-              </div>
-            `}
+      : view === 'governance'
+        ? html`<${Governance} />`
+      : view === 'connectors'
+        ? html`<${ConnectorStatusPanel} />`
+      : view === 'inspector'
+        ? html`<${LabInspector} />`
+      : html`
+            <${Ops} />
+            <div class="mt-4">
+              <${Governance} />
+            </div>
+          `}
     </div>
   `
 }

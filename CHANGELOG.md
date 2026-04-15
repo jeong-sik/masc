@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-04-16
+
+### Changed
+
+- **Gate runtime path migration**: default storage paths move from
+  `.masc/connectors/<kind>/*` to `.gate/runtime/<kind>/*` for Discord
+  (OCaml + Python sidecar) and iMessage (OCaml). The pre-v0.9.0 layout is
+  demoted to `legacy_*_path` so existing deployments see a transparent
+  read-fallback — next write lands at the new default (#7467, #7468, #7470).
+- iMessage's OCaml `configured_read_path` gained a required `~legacy`
+  parameter, matching the Discord resolver in
+  `Channel_gate_discord_names`. Read priority: env var > new default (if
+  file exists) > legacy (if file exists) > new default (stable for later
+  creation) (#7468).
+- Discord sidecar cleanup: the `LEGACY_BASE_ROOT = Path("sidecars/discord-bot")`
+  constant and `_resolve_legacy_storage_path` helper were removed. They
+  served a 2026-Q1 cwd-relative layout (`sidecars/discord-bot/.gate/discord_*`)
+  that is no longer auto-discovered; deployments still on it must set
+  `DISCORD_*_PATH` env vars explicitly (#7470).
+
+### Deferred to v0.9.2
+
+- iMessage, Slack, Telegram sidecar migrations (Python). These sidecars
+  currently have **no read-fallback loop** in their `bot.py` entry, unlike
+  Discord. Each needs a 1-tier fallback wired in before the `DEFAULT_*` →
+  `LEGACY_*` rotation can safely ship.
+
 ## [0.9.0] - 2026-04-16
 
 ### Added

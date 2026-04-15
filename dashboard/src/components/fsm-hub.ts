@@ -30,9 +30,10 @@ export function FsmHub() {
   const [now, setNow] = useState(() => Date.now() / 1000)
   const [graphOpen, setGraphOpen] = useState(false)
   // Transition history: client-side log of observed state changes.
-  // Accumulates up to MAX_HISTORY entries per selected keeper.
   const [history, setHistory] = useState<{ ts: number; from: string; to: string; field: string }[]>([])
   const prevSnapshotRef = useRef<{ phase: string; turn: string; decision: string; cascade: string; compaction: string } | null>(null)
+  // Phase sparkline: every observed KSM phase, newest last (max 30).
+  const [phaseLog, setPhaseLog] = useState<string[]>([])
 
   // Track transitions whenever snapshot changes
   useEffect(() => {
@@ -58,11 +59,14 @@ export function FsmHub() {
       }
     }
     prevSnapshotRef.current = cur
+    // Append current phase to sparkline log
+    setPhaseLog(log => [...log, cur.phase].slice(-30))
   }, [snapshot])
 
-  // Reset history when switching keepers
+  // Reset history + sparkline when switching keepers
   useEffect(() => {
     setHistory([])
+    setPhaseLog([])
     prevSnapshotRef.current = null
   }, [selected])
 
@@ -136,7 +140,7 @@ export function FsmHub() {
         <${EmptyState} message=${error} compact />
       ` : snapshot ? html`
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
-        <${HeroPhase} snapshot=${snapshot} />
+        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} />
 
         ${/* ── Zone 2b: Transition History Trail ── */ ''}
         <${TransitionTrail} history=${history} now=${now} />
@@ -237,7 +241,36 @@ function StatusBar({
 
 // ── Zone 2: Hero Phase ──────────────────────────────────
 
-function HeroPhase({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+const PHASE_DOT_COLOR: Record<string, string> = {
+  Running: 'bg-emerald-400',
+  Compacting: 'bg-amber-400',
+  HandingOff: 'bg-violet-400',
+  Failing: 'bg-red-400',
+  Crashed: 'bg-red-500',
+  Draining: 'bg-amber-300',
+  Restarting: 'bg-blue-400',
+  Offline: 'bg-zinc-600',
+  Paused: 'bg-zinc-600',
+  Stopped: 'bg-zinc-600',
+  Dead: 'bg-zinc-800',
+}
+
+function PhaseSparkline({ log }: { log: string[] }) {
+  if (log.length < 2) return null
+  return html`
+    <div class="flex items-center gap-[3px] mt-2" title="Phase history (oldest → newest)">
+      <span class="text-[8px] text-[var(--text-dim)] mr-1">history</span>
+      ${log.map((phase, i) => {
+        const isLast = i === log.length - 1
+        const dotColor = PHASE_DOT_COLOR[phase] ?? 'bg-[var(--accent)]'
+        const size = isLast ? 'w-2.5 h-2.5 ring-1 ring-white/20' : 'w-1.5 h-1.5'
+        return html`<span class=${`rounded-full ${dotColor} ${size} shrink-0`} title=${phase}></span>`
+      })}
+    </div>
+  `
+}
+
+function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; phaseLog: string[] }) {
   const prevRef = useRef(snapshot.phase)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -273,6 +306,7 @@ function HeroPhase({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
         </div>
         ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono">phase changed</span>` : null}
       </div>
+      <${PhaseSparkline} log=${phaseLog} />
     </div>
   `
 }

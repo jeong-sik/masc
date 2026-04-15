@@ -496,9 +496,19 @@ let handle_check ctx args =
   (true, Yojson.Safe.to_string result)
 
 (* Dispatch function *)
+let handle_heartbeat ctx _args =
+  let result = Room.heartbeat ctx.config ~agent_name:ctx.agent_name in
+  (* Room.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
+  let success = not (String.length result >= 3
+    && Char.code result.[0] = 0xe2
+    && Char.code result.[1] = 0x9a
+    && Char.code result.[2] = 0xa0) in
+  (success, result)
+
 let dispatch ctx ~name ~args : tool_result option =
   match name with
   | "masc_status" -> Some (handle_status ctx args)
+  | "masc_heartbeat" -> Some (handle_heartbeat ctx args)
   | "masc_reset" -> Some (handle_reset ctx args)
   | "masc_workflow_guide" -> Some (handle_workflow_guide ctx args)
   | "masc_check" -> Some (handle_check ctx args)
@@ -513,9 +523,13 @@ let schemas = Tool_schemas_room.schemas
 let _tool_spec_read_only = [ "masc_status" ]
 let _tool_spec_system_internal = [ "masc_reset" ]
 
+let _tool_spec_requires_join = [ "masc_heartbeat" ]
+
 let tool_required_permission = function
   | "masc_status" | "masc_workflow_guide" | "masc_check" ->
       Some Types.CanReadState
+  | "masc_heartbeat" ->
+      Some Types.CanBroadcast
   | "masc_reset" ->
       Some Types.CanReset
   | _ -> None
@@ -531,6 +545,7 @@ let () =
            ~module_tag:Tool_dispatch.Mod_room
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ~requires_join:(List.mem s.name _tool_spec_requires_join)
            ~is_read_only:(List.mem s.name _tool_spec_read_only)
            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)

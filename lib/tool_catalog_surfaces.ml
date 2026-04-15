@@ -195,7 +195,11 @@ let admin_surface_tools =
 
 let keeper_internal_surface_tools = keeper_internal_tools
 
-let keeper_denied_surface_tools = []
+let keeper_denied_surface_tools =
+  [
+    "masc_reset";
+    "masc_spawn";
+  ]
 
 let system_internal_surface_tools =
   [

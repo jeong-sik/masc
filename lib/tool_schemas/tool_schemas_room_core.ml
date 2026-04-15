@@ -68,4 +68,14 @@ Pair with masc_workflow_guide for next-step recommendations.";
       ("required", `List [`String "assertions"]);
     ];
   };
+
+  {
+    name = "masc_heartbeat";
+    description = "Update your heartbeat timestamp to prove you are still active. \
+Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 ]

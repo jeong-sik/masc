@@ -1,6 +1,7 @@
-(** Tool_compact — Standalone MCP tool for context compaction.
+(** Tool_compact — OAS-backed compaction pipeline.
 
     masc_compact_context removed: pruned from surfaces.
+    Compaction is now handled internally by OAS agent lifecycle.
 
     @since 2.95.0 — Issue #1441 *)
 

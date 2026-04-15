@@ -4,6 +4,28 @@ open Keeper_exec_shared
 (* GH credential isolation — SSOT in Keeper_gh_env. *)
 let with_keeper_gh_env = Keeper_gh_env.with_env
 
+(* ------------------------------------------------------------------ *)
+(* Rejection history: tracks per-(repo, kind, number) rejection count  *)
+(* locally in this module so that the gate can escalate its response   *)
+(* on repeated hallucinations of the same number. #7199.               *)
+(*                                                                     *)
+(* Lives here (not in Keeper_gh_cache) because adding functions to     *)
+(* private_modules with .mli triggers dune interface-mismatch errors.  *)
+(* ------------------------------------------------------------------ *)
+
+let _rejection_history : (string * Keeper_gh_cache.entity_kind * int, int) Hashtbl.t =
+  Hashtbl.create 16
+
+let record_rejection ~repo_slug ~kind ~number : int =
+  let key = (repo_slug, kind, number) in
+  let prev = match Hashtbl.find_opt _rejection_history key with
+    | Some n -> n
+    | None -> 0
+  in
+  let count = prev + 1 in
+  Hashtbl.replace _rejection_history key count;
+  count
+
 (** Pre-compiled regex for gh CLI "not found" error messages.
     Matches case-insensitively against multiple known error phrases
     to detect hallucinated issue/PR numbers. *)
@@ -332,16 +354,15 @@ let handle_keeper_github
              Keeper_gh_cache.validate_number ~config ~repo_slug:slug ~kind ~number
            with
            | `Valid | `Unknown -> None
-           | `Invalid valids -> Some (kind, number, valids, slug))
+           | `Invalid valids ->
+             let rc = record_rejection ~repo_slug:slug ~kind ~number in
+             Some (kind, number, valids, rc, slug))
       in
       (match invalid_number with
-       | Some (kind, number, valids, slug) ->
+       | Some (kind, number, valids, rejection_count, slug) ->
          let kind_label =
            match kind with Keeper_gh_cache.PR -> "PR" | Issue -> "issue"
          in
-         (* Cap the suggestion list so the tool response doesn't balloon
-            when a repo has 100 PRs -- 20 numbers is enough for the LLM
-            to recognize the range and pick a recent one. *)
          let shown =
            let rec take n = function
              | [] -> []
@@ -353,16 +374,6 @@ let handle_keeper_github
          let valid_str =
            shown |> List.map string_of_int |> String.concat ", "
          in
-         Log.Keeper.warn
-           "keeper_github hallucination-gate: %s #%d not in %s (keeper=%s)"
-           kind_label number slug meta.name;
-         (* The reason field is the first thing the LLM reads. Put the
-            valid numbers DIRECTLY in the reason — don't rely on the LLM
-            parsing a separate JSON array field. Also clarify that the
-            REPO is correct, only the NUMBER is wrong. Without this,
-            nick0cave interpreted "does not exist in jeong-sik/masc-mcp"
-            as a repo-access failure and abandoned the task.
-            Ref: #7176 *)
          let sub_label =
            match kind with Keeper_gh_cache.PR -> "pr" | Issue -> "issue"
          in
@@ -372,24 +383,46 @@ let handle_keeper_github
              Printf.sprintf "gh %s view %d" sub_label recent
            | [] -> Printf.sprintf "gh %s list --state open" sub_label
          in
+         let is_repeat = rejection_count >= 2 in
+         Log.Keeper.warn
+           "keeper_github hallucination-gate: %s #%d not in %s (keeper=%s, rejection=%d)"
+           kind_label number slug meta.name rejection_count;
+         (* Escalate the rejection message on repeated attempts.
+            First rejection: explain the error + offer alternatives.
+            Second+: mandate the suggested command and explicitly tell
+            the LLM to stop retrying the same number. Without this,
+            poe retried issue #7036 three times in a row (#7199). *)
+         let reason =
+           if is_repeat then
+             Printf.sprintf
+               "ALREADY REJECTED (attempt %d). \
+                %s #%d does NOT exist — you already tried this. \
+                STOP retrying this number. \
+                Use EXACTLY this command instead: %s"
+               rejection_count kind_label number suggested
+           else
+             Printf.sprintf
+               "WRONG NUMBER (not a repo problem). \
+                %s #%d does not exist. \
+                The repo %s is correct. \
+                Pick from these valid %s numbers: [%s]."
+               kind_label number slug kind_label valid_str
+         in
+         let hint =
+           if is_repeat then
+             Printf.sprintf "MANDATORY: %s" suggested
+           else
+             Printf.sprintf "Try: %s" suggested
+         in
          Yojson.Safe.to_string
            (`Assoc
                [ "ok", `Bool false
-               ; "error", `String "number_not_found"
-               ; ( "reason"
-                 , `String
-                     (Printf.sprintf
-                        "WRONG NUMBER (not a repo problem). \
-                         %s #%d does not exist. \
-                         The repo %s is correct. \
-                         Pick from these valid %s numbers: [%s]."
-                        kind_label number slug kind_label valid_str) )
+               ; "error", `String (if is_repeat then "number_already_rejected" else "number_not_found")
+               ; "reason", `String reason
                ; "valid_numbers", `List (List.map (fun n -> `Int n) shown)
                ; "suggested_command", `String suggested
-               ; ( "hint"
-                 , `String
-                     (Printf.sprintf
-                        "Try: %s" suggested) )
+               ; "hint", `String hint
+               ; "rejection_count", `Int rejection_count
                ; "cmd", `String ("gh " ^ gh_raw)
                ])
        | None ->

@@ -535,13 +535,10 @@ function StatusBar({
         .filter(([_, ok]) => !ok)
         .map(([k]) => k)
     : []
-  const recoveryDrift = snapshot != null
-    && (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition)
-  const hasAnomaly = brokenInvariants.length > 0 || recoveryDrift
+  const hasAnomaly = brokenInvariants.length > 0
   const anomalyTitle = hasAnomaly
     ? [
         brokenInvariants.length > 0 ? `깨진 invariant: ${brokenInvariants.join(', ')}` : '',
-        recoveryDrift ? 'recovery 양 store 불일치' : '',
       ].filter(Boolean).join(' · ')
     : ''
 

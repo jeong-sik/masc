@@ -1027,56 +1027,70 @@ let handle_keeper_shell
       Safe_ops.json_string ~default:"" "cmd" args
       |> normalize_gh_command
     in
-    let timeout_sec = clamp_shell_timeout ~default:io_timeout_sec args in
+    (* gh runs against remote network, so 1s floor from shell default is
+       too aggressive (observed: keepers passing timeout_sec=1 kills
+       [gh pr create] mid-TCP). Floor at 5s and default at the configured
+       pr_create timeout (tool_policy.toml, default 30s). *)
+    let gh_default_timeout = Keeper_tool_policy.pr_create_timeout_sec () in
+    let timeout_sec =
+      clamp_shell_timeout ~min_sec:5.0 ~default:gh_default_timeout args
+    in
     if cmd_str = "" then
       error_json ~fields:[ "op", `String op ]
         "cmd is required for gh op. Good: cmd='pr list --state open'. Bad: cmd=''."
     else
-      let gh_dangerous_prefixes =
-        [ "repo delete"; "repo archive"; "repo transfer"
-        ; "auth logout"; "auth token"
-        ; "secret set"; "secret delete"
-        ; "ssh-key delete"
-        ]
-      in
-      let cmd_lower = String.lowercase_ascii cmd_str in
-      let blocked_prefix =
-        List.find_opt (fun prefix ->
-          String.length cmd_lower >= String.length prefix
-          && String.sub cmd_lower 0 (String.length prefix) = prefix
-        ) gh_dangerous_prefixes
-      in
-      (match blocked_prefix with
-      | Some pat ->
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "op", `String op
-              ; "error", `String "gh_dangerous_blocked"
-              ; "blocked_pattern", `String pat
-              ; "hint", `String "This gh command is blocked for safety."
-              ])
-      | None ->
-        (match cwd_target () with
-         | Error e -> path_error e
-         | Ok cwd ->
-           let full_cmd =
-             Keeper_gh_env.with_env config
-               (Printf.sprintf "gh %s 2>&1" cmd_str)
-           in
-           let st, out =
-             Process_eio.run_argv_with_status ~cwd ~timeout_sec
-               [ "bash"; "-lc"; full_cmd ]
-           in
-           Yojson.Safe.to_string
-             (`Assoc
-                 [ "ok", `Bool (st = Unix.WEXITED 0)
-                 ; "op", `String op
-                 ; "cwd", `String cwd
-                 ; "command", `String (Printf.sprintf "gh %s" cmd_str)
-                 ; "status", Keeper_alerting_path.process_status_to_json st
-                 ; "output", `String out
-                 ])))
+      let allowed_orgs = Keeper_tool_policy.git_clone_allowed_orgs () in
+      (match Worker_dev_tools.validate_gh_command ~allowed_orgs cmd_str with
+       | Error reason ->
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "ok", `Bool false
+               ; "op", `String op
+               ; "error", `String "gh_command_blocked"
+               ; "reason", `String reason
+               ; "hint", `String
+                   "Run `gh --help` shapes: pr/issue/repo/release/label/run/\
+                    workflow/api/project/ruleset/search/status/cache/gist. \
+                    auth/secret/ssh-key are blocked."
+               ])
+       | Ok () ->
+         (match cwd_target () with
+          | Error e -> path_error e
+          | Ok cwd ->
+            let full_cmd =
+              Keeper_gh_env.with_env config
+                (Printf.sprintf "gh %s 2>&1" cmd_str)
+            in
+            let st, out =
+              Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                [ "bash"; "-lc"; full_cmd ]
+            in
+            if process_status_is_timeout st then
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool false
+                    ; "op", `String op
+                    ; "cwd", `String cwd
+                    ; "command", `String (Printf.sprintf "gh %s" cmd_str)
+                    ; "error", `String "gh_command_timed_out"
+                    ; "timeout_sec", `Float timeout_sec
+                    ; "status", Keeper_alerting_path.process_status_to_json st
+                    ; "output", `String out
+                    ; "hint", `String
+                        "gh network call exceeded timeout_sec. Retry with a \
+                         larger value (e.g. timeout_sec=60) or narrow the \
+                         query (--state, --limit, --json)."
+                    ])
+            else
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool (st = Unix.WEXITED 0)
+                    ; "op", `String op
+                    ; "cwd", `String cwd
+                    ; "command", `String (Printf.sprintf "gh %s" cmd_str)
+                    ; "status", Keeper_alerting_path.process_status_to_json st
+                    ; "output", `String out
+                    ])))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

@@ -150,6 +150,10 @@ and turn_observation = {
   decision_stage : decision_stage;
   cascade_state : cascade_state;
   measurement : turn_measurement option;
+  measurement_bind_count : int;
+      (** Number of [Context_measured] snapshots bound to this live turn.
+          The composite observer's [event_priority_monotone] invariant
+          requires this to stay <= 1. *)
   selected_model : string option;
 }
 

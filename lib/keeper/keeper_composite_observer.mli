@@ -69,6 +69,37 @@ type compaction_stage = Keeper_registry.compaction_stage =
 
 val all_compaction_stages : compaction_stage list
 
+(** Named TLA actions mirrored as OCaml variants so the observer contract
+    can stay 1:1 with [KeeperCompositeLifecycle.tla]. *)
+type tla_action =
+  | Action_start_turn
+  | Action_measurement_broadcast
+  | Action_decide_guard
+  | Action_select_tool_policy
+  | Action_start_cascade_selection
+  | Action_select_cascade
+  | Action_gate_rejected
+  | Action_cascade_done
+  | Action_cascade_exhausted
+  | Action_finish_turn
+  | Action_start_compaction
+  | Action_finish_compaction
+  | Action_enter_failing
+  | Action_clear_failing
+  | Action_enter_overflowed
+  | Action_overflowed_auto_compact
+
+val all_tla_actions : tla_action list
+
+(** Named TLA invariants mirrored as OCaml variants. *)
+type invariant_key =
+  | Invariant_phase_turn_alignment
+  | Invariant_no_cascade_before_measurement
+  | Invariant_compaction_atomicity
+  | Invariant_event_priority_monotone
+
+val all_invariant_keys : invariant_key list
+
 (** Safety invariants from KeeperCompositeLifecycle.tla.
     Each field is [true] when the invariant holds for the observed
     snapshot. A [false] value signals a composite-level safety violation
@@ -148,6 +179,12 @@ val cascade_state_of_string : string -> cascade_state option
 (** Stringify [compaction_stage]. Mirrors MemoryCompaction.tla. *)
 val compaction_stage_to_string : compaction_stage -> string
 val compaction_stage_of_string : string -> compaction_stage option
+
+val tla_action_to_string : tla_action -> string
+val tla_action_of_string : string -> tla_action option
+
+val invariant_key_to_string : invariant_key -> string
+val invariant_key_of_string : string -> invariant_key option
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

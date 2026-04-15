@@ -137,6 +137,7 @@ and turn_observation = {
   decision_stage : decision_stage;
   cascade_state : cascade_state;
   measurement : turn_measurement option;
+  measurement_bind_count : int;
   selected_model : string option;
 }
 
@@ -389,6 +390,7 @@ let mark_turn_started ~base_path name =
       decision_stage = Decision_undecided;
       cascade_state = Cascade_idle;
       measurement = None;
+      measurement_bind_count = 0;
       selected_model = None;
     } in
     { e with
@@ -403,7 +405,11 @@ let mark_turn_measurement ~base_path name =
       {
         e with
         current_turn_observation =
-          Some { obs with measurement = Some measurement };
+          Some {
+            obs with
+            measurement = Some measurement;
+            measurement_bind_count = obs.measurement_bind_count + 1;
+          };
         pending_turn_measurement = None;
       }
     | _ -> e)

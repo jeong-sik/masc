@@ -102,6 +102,18 @@ DecisionSet    == {"undecided", "guard_ok", "gate_rejected",
                    "tool_policy_selected"}
 CascadeSet     == {"idle", "selecting", "trying", "done", "exhausted"}
 CompactionSet  == {"accumulating", "compacting", "done"}
+ActionSet      == {
+                   "StartTurn", "MeasurementBroadcast", "DecideGuard",
+                   "SelectToolPolicy", "StartCascadeSelection",
+                   "SelectCascade", "GateRejected", "CascadeDone",
+                   "CascadeExhausted", "FinishTurn", "StartCompaction",
+                   "FinishCompaction", "EnterFailing", "ClearFailing",
+                   "EnterOverflowed", "OverflowedAutoCompact"
+                  }
+InvariantSet   == {
+                   "PhaseTurnAlignment", "NoCascadeBeforeMeasurement",
+                   "CompactionAtomicity", "EventPriorityMonotone"
+                  }
 
 TypeOK ==
     /\ ksm_phase \in PhaseSet

@@ -484,6 +484,21 @@ let test_observer_json_includes_terminal_fields () =
       "glm-4.5"
       (json |> member "last_outcome" |> member "selected_model" |> to_string)
 
+let test_observer_event_priority_detects_competing_measurement () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-event-priority" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  dispatch_obs_measurement name;
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_measurement ~base_path:test_obs_bp name;
+  dispatch_obs_measurement name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check bool "second measurement for same live turn breaks monotonicity"
+      false snap.invariants.event_priority_monotone
+
 let test_composite_observer_variants_match_tla_sets () =
   let tla = read_file (keeper_composite_lifecycle_tla ()) in
   let check_set label expected actual =
@@ -509,6 +524,20 @@ let test_composite_observer_variants_match_tla_sets () =
     "CompactionSet matches observer compaction variants"
     (extract_tla_set ~marker:"CompactionSet" tla)
     (List.map Obs.compaction_stage_to_string Obs.all_compaction_stages)
+
+let test_composite_observer_named_sets_match_tla_sets () =
+  let tla = read_file (keeper_composite_lifecycle_tla ()) in
+  let check_set label expected actual =
+    check (list string) label expected actual
+  in
+  check_set
+    "ActionSet matches observer tla_action variants"
+    (extract_tla_set ~marker:"ActionSet" tla)
+    (List.map Obs.tla_action_to_string Obs.all_tla_actions);
+  check_set
+    "InvariantSet matches observer invariant_key variants"
+    (extract_tla_set ~marker:"InvariantSet" tla)
+    (List.map Obs.invariant_key_to_string Obs.all_invariant_keys)
 
 (* ── Test Suite ──────────────────────────────────────── *)
 
@@ -559,7 +588,11 @@ let () =
       test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
       test_case "snapshot json includes terminal fields" `Quick
         test_observer_json_includes_terminal_fields;
+      test_case "event priority detects competing measurement" `Quick
+        test_observer_event_priority_detects_competing_measurement;
       test_case "variant sets match KeeperCompositeLifecycle.tla" `Quick
         test_composite_observer_variants_match_tla_sets;
+      test_case "named sets match KeeperCompositeLifecycle.tla" `Quick
+        test_composite_observer_named_sets_match_tla_sets;
     ];
   ]

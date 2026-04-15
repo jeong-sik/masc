@@ -68,6 +68,58 @@ type compaction_stage = Keeper_registry.compaction_stage =
 let all_compaction_stages =
   [ Compaction_accumulating; Compaction_compacting; Compaction_done ]
 
+type tla_action =
+  | Action_start_turn
+  | Action_measurement_broadcast
+  | Action_decide_guard
+  | Action_select_tool_policy
+  | Action_start_cascade_selection
+  | Action_select_cascade
+  | Action_gate_rejected
+  | Action_cascade_done
+  | Action_cascade_exhausted
+  | Action_finish_turn
+  | Action_start_compaction
+  | Action_finish_compaction
+  | Action_enter_failing
+  | Action_clear_failing
+  | Action_enter_overflowed
+  | Action_overflowed_auto_compact
+
+let all_tla_actions =
+  [
+    Action_start_turn;
+    Action_measurement_broadcast;
+    Action_decide_guard;
+    Action_select_tool_policy;
+    Action_start_cascade_selection;
+    Action_select_cascade;
+    Action_gate_rejected;
+    Action_cascade_done;
+    Action_cascade_exhausted;
+    Action_finish_turn;
+    Action_start_compaction;
+    Action_finish_compaction;
+    Action_enter_failing;
+    Action_clear_failing;
+    Action_enter_overflowed;
+    Action_overflowed_auto_compact;
+  ]
+
+type invariant_key =
+  | Invariant_phase_turn_alignment
+  | Invariant_no_cascade_before_measurement
+  | Invariant_compaction_atomicity
+  | Invariant_event_priority_monotone
+
+let all_invariant_keys =
+  [
+    Invariant_phase_turn_alignment;
+    Invariant_no_cascade_before_measurement;
+    Invariant_compaction_atomicity;
+    Invariant_event_priority_monotone;
+  ]
+
 type invariants_check = {
   phase_turn_alignment : bool;
   no_cascade_before_measurement : bool;
@@ -171,6 +223,56 @@ let compaction_stage_of_string = function
   | "done" -> Some Compaction_done
   | _ -> None
 
+let tla_action_to_string = function
+  | Action_start_turn -> "StartTurn"
+  | Action_measurement_broadcast -> "MeasurementBroadcast"
+  | Action_decide_guard -> "DecideGuard"
+  | Action_select_tool_policy -> "SelectToolPolicy"
+  | Action_start_cascade_selection -> "StartCascadeSelection"
+  | Action_select_cascade -> "SelectCascade"
+  | Action_gate_rejected -> "GateRejected"
+  | Action_cascade_done -> "CascadeDone"
+  | Action_cascade_exhausted -> "CascadeExhausted"
+  | Action_finish_turn -> "FinishTurn"
+  | Action_start_compaction -> "StartCompaction"
+  | Action_finish_compaction -> "FinishCompaction"
+  | Action_enter_failing -> "EnterFailing"
+  | Action_clear_failing -> "ClearFailing"
+  | Action_enter_overflowed -> "EnterOverflowed"
+  | Action_overflowed_auto_compact -> "OverflowedAutoCompact"
+
+let tla_action_of_string = function
+  | "StartTurn" -> Some Action_start_turn
+  | "MeasurementBroadcast" -> Some Action_measurement_broadcast
+  | "DecideGuard" -> Some Action_decide_guard
+  | "SelectToolPolicy" -> Some Action_select_tool_policy
+  | "StartCascadeSelection" -> Some Action_start_cascade_selection
+  | "SelectCascade" -> Some Action_select_cascade
+  | "GateRejected" -> Some Action_gate_rejected
+  | "CascadeDone" -> Some Action_cascade_done
+  | "CascadeExhausted" -> Some Action_cascade_exhausted
+  | "FinishTurn" -> Some Action_finish_turn
+  | "StartCompaction" -> Some Action_start_compaction
+  | "FinishCompaction" -> Some Action_finish_compaction
+  | "EnterFailing" -> Some Action_enter_failing
+  | "ClearFailing" -> Some Action_clear_failing
+  | "EnterOverflowed" -> Some Action_enter_overflowed
+  | "OverflowedAutoCompact" -> Some Action_overflowed_auto_compact
+  | _ -> None
+
+let invariant_key_to_string = function
+  | Invariant_phase_turn_alignment -> "PhaseTurnAlignment"
+  | Invariant_no_cascade_before_measurement -> "NoCascadeBeforeMeasurement"
+  | Invariant_compaction_atomicity -> "CompactionAtomicity"
+  | Invariant_event_priority_monotone -> "EventPriorityMonotone"
+
+let invariant_key_of_string = function
+  | "PhaseTurnAlignment" -> Some Invariant_phase_turn_alignment
+  | "NoCascadeBeforeMeasurement" -> Some Invariant_no_cascade_before_measurement
+  | "CompactionAtomicity" -> Some Invariant_compaction_atomicity
+  | "EventPriorityMonotone" -> Some Invariant_event_priority_monotone
+  | _ -> None
+
 (* ================================================================ *)
 (* Derivation from registry entry                                   *)
 (* ================================================================ *)
@@ -244,7 +346,19 @@ let check_no_cascade_before_measurement
   | Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted ->
       measurement_captured
 
+let check_event_priority_monotone
+    (entry : Keeper_registry.registry_entry)
+    : bool =
+  match entry.current_turn_observation with
+  | None -> true
+  | Some obs ->
+      obs.measurement_bind_count <= 1
+      && not
+           (Option.is_some obs.measurement
+            && Option.is_some entry.pending_turn_measurement)
+
 let compute_invariants
+    (entry : Keeper_registry.registry_entry)
     ~(phase : ksm_phase)
     ~(turn_phase : turn_phase)
     ~(cascade_state : cascade_state)
@@ -258,10 +372,7 @@ let compute_invariants
         ~cascade_state
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase compaction_stage;
-    event_priority_monotone = true;
-    (* per-snapshot view cannot witness event ordering; this invariant
-       becomes checkable when the event-bus broadcast carries priority
-       annotations (follow-up to #7122). *)
+    event_priority_monotone = check_event_priority_monotone entry;
   }
 
 (* ================================================================ *)
@@ -304,6 +415,7 @@ let observe
   let measurement_captured = Option.is_some measurement in
   let invariants =
     compute_invariants
+      entry
       ~phase:ksm_phase
       ~turn_phase
       ~cascade_state

@@ -117,7 +117,7 @@ export const goalsLoading = signal(false)
 
 // --- OAS monitoring state ---
 
-import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
+import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from './types/oas'
 
 import {
   OAS_AGENT_EVENT_BUFFER,
@@ -138,7 +138,23 @@ export const oasLastErrorTs = signal<number | null>(null)
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
   const head = oasAgentEvents.value[0]
-  if (head && head.type === event.type && head.agent_name === event.agent_name && head.timestamp === event.timestamp) {
+  const isDuplicate =
+    head != null
+    && (
+      (head.event_key != null && event.event_key != null && head.event_key === event.event_key)
+      || (
+        head.type === event.type
+        && head.agent_name === event.agent_name
+        && head.keeper_name === event.keeper_name
+        && head.secondary_agent === event.secondary_agent
+        && head.action === event.action
+        && head.event === event.event
+        && head.trigger === event.trigger
+        && head.detail === event.detail
+        && head.timestamp === event.timestamp
+      )
+    )
+  if (isDuplicate) {
     return
   }
   oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
@@ -175,20 +191,14 @@ export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
     if (oldest) next.delete(oldest)
   }
   oasKeeperSnapshots.value = next
-  oasLastKeeperTick.value = Date.now()
+  if (Number.isFinite(snapshot.timestamp)) {
+    const nextTickMs = Math.round(snapshot.timestamp * 1000)
+    oasLastKeeperTick.value = Math.max(oasLastKeeperTick.value ?? 0, nextTickMs)
+  }
   oasTotalEvents.value++
 }
 
-export const oasHealthSummary: ReadonlySignal<{
-  agentEventsCount: number
-  keeperSnapshotsCount: number
-  lastKeeperTick: number | null
-  totalEvents: number
-  totalLlmCalls: number
-  totalErrors: number
-  lastLlmCallTs: number | null
-  lastErrorTs: number | null
-}> = computed(() => ({
+export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() => ({
   agentEventsCount: oasAgentEvents.value.length,
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
   lastKeeperTick: oasLastKeeperTick.value,

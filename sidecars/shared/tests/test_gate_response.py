@@ -55,6 +55,21 @@ class TestFromJson:
         assert resp.reply == ""
         assert resp.error == ""
 
+    def test_prefers_destination_id_when_present(self) -> None:
+        data = {"ok": True, "destination_id": "new-key", "keeper_name": "legacy", "reply": "hi"}
+        resp = GateResponse.from_json(data)
+        assert resp.keeper_name == "new-key"
+
+    def test_falls_back_to_keeper_name_when_destination_id_missing(self) -> None:
+        data = {"ok": True, "keeper_name": "legacy-only", "reply": "hi"}
+        resp = GateResponse.from_json(data)
+        assert resp.keeper_name == "legacy-only"
+
+    def test_accepts_destination_id_without_keeper_name(self) -> None:
+        data = {"ok": True, "destination_id": "future-only", "reply": "hi"}
+        resp = GateResponse.from_json(data)
+        assert resp.keeper_name == "future-only"
+
 
 class TestFromError:
     def test_creates_error_response(self) -> None:

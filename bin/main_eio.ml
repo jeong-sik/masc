@@ -65,6 +65,21 @@ let mcp_protocol_version_default =
 
 let default_base_path = Server_mcp_transport_http.default_base_path
 
+let implicit_base_path_resolution_source () =
+  match Env_config.home_dir_opt () with
+  | Some home ->
+      let normalized_home =
+        Env_config.normalize_masc_base_path_input home
+      in
+      let normalized_default =
+        Env_config.normalize_masc_base_path_input (default_base_path ())
+      in
+      if String.equal normalized_home normalized_default then
+        "implicit_home"
+      else
+        "implicit_repo_root"
+  | None -> "implicit_repo_root"
+
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
@@ -320,7 +335,7 @@ let guard_self_repo_base_path base_path =
        (executable: %s)\n\
        Runtime state would pollute the repo. Use a workspace root instead:\n\
        \  --base-path $MASC_BASE_PATH    (recommended)\n\
-       \  --base-path ~/.masc     (alternative)\n\
+       \  --base-path $HOME              (home-scoped runtime)\n\
        Or start via: sb mcp masc start\n"
       base_path abs_exe;
     exit 1
@@ -351,7 +366,7 @@ let run_cmd host port base_path =
             Env_config.normalize_masc_base_path_input (default_base_path ())
           in
           if String.equal default_path normalized_base_path then
-            "implicit_repo_root"
+            implicit_base_path_resolution_source ()
           else
             "explicit_cli"
   in

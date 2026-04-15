@@ -28,8 +28,10 @@ Truth fields:
 - `effective_masc_root`
 - `cwd_masc_root`
 - `roots_diverge`
+- `strict_mode_requested`
+- `startup_rejected`
 
-If `effective_base_path` is not the repo you expected, fix that first. In shared `~/me` setups, the live auth store may be `~/me/.masc/auth` even when the server process is running from a sub-repo worktree.
+If `effective_base_path` is not the base path you expected, fix that first. In shared `~/me` setups, the live auth store may be `~/me/.masc/auth` even when the server process is running from a sub-repo worktree.
 
 ## 2. Understand the Gate
 
@@ -62,12 +64,13 @@ For dashboard-side keeper lifecycle control, the target shape is:
 When running from a worktree but using a shared local coordination root, start the server with an explicit base path:
 
 ```bash
-MASC_BASE_PATH="$HOME/me" \
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+MASC_BASE_PATH="$BASE_PATH" \
 MASC_ALLOW_INHERITED_BASE_PATH=1 \
 ./_build/default/bin/main_eio.exe \
   --host 127.0.0.1 \
   --port 8935 \
-  --base-path "$HOME/me"
+  --base-path "$BASE_PATH"
 ```
 
 Then re-check `/health` and confirm `effective_base_path` is the same path you intended.
@@ -81,7 +84,8 @@ If you do not, the reliable local fallback is to seed the auth store directly.
 1. Back up the auth config:
 
 ```bash
-cp "$HOME/me/.masc/auth/config.json" "$HOME/me/.masc/auth/config.json.bak"
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+cp "$BASE_PATH/.masc/auth/config.json" "$BASE_PATH/.masc/auth/config.json.bak"
 ```
 
 2. Generate a token and its SHA256 hash:
@@ -199,8 +203,9 @@ If you need to go back to anonymous loopback behavior:
 Example:
 
 ```bash
-mv "$HOME/me/.masc/auth/config.json.bak" "$HOME/me/.masc/auth/config.json"
-rm -f "$HOME/me/.masc/auth/agents/codex-tool-matrix.json"
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
+rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
 ```
 
 ## 8. Known Failure Modes

@@ -129,6 +129,8 @@ sites work without API change.
 ### 2.1 Root formulas
 
 - Default cluster runtime root: `<base_path>/.masc`
+- When no explicit `base_path` is provided, runtime state falls back to `~/.masc`
+  by treating `HOME` as the implicit base path.
 - Named cluster runtime root: `<base_path>/.masc/clusters/<cluster_name>`
 - Config root: resolved separately by the precedence chain above
 - Personas root: resolved separately from the config root
@@ -296,6 +298,8 @@ Allowed path model:
 Current host note:
 
 - The inspected host also contains auxiliary event and telemetry lanes such as `activity-events/`, `events/`, `telemetry/`, and `data/tool-metrics/`.
+- Repo-local `masc-mcp/logs/` directories are non-canonical historical or
+  harness captures. Live runtime service logs belong under `<runtime_root>/logs/`.
 
 ### 3.9 Auth, Connectors, and Voice
 
@@ -401,7 +405,7 @@ Current log sink observed today:
 
 1. Pick one base-path convention per environment and stick to it.
    - `--base-path /Users/dancer/me` produces `/Users/dancer/me/.masc`
-   - `--base-path /Users/dancer/me/.masc` produces `/Users/dancer/me/.masc/.masc`
+   - `--base-path /Users/dancer/me/.masc` normalizes to `/Users/dancer/me` and warns
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.

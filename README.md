@@ -114,7 +114,7 @@ Other start modes:
 | Loopback | `scripts/start-loopback.sh` | Local dev, fixed port 8935, keepers off |
 | Dir-local | `scripts/run-local.sh --target-dir /path` | Per-project isolation, auto port |
 | Full runtime | `./start-masc-mcp.sh --http` | All transports, keeper autoboot, dashboard |
-| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path .` | Manual control |
+| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path "$HOME"` | Manual control |
 
 If you bind to a non-loopback address such as `0.0.0.0`, treat that as a remote exposure path and configure auth first. See [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 

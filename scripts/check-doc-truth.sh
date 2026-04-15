@@ -79,7 +79,7 @@ require_not_contains docs/TUI-GUIDE.md './start-masc-mcp.sh --tui'
 require_contains docs/QUICK-START.md '"method":"initialize"'
 require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'
 require_contains docs/QUICK-START.md 'masc_join(agent_name="codex")'
-require_contains docs/QUICK-START.md '기본적으로 git repo root를 `MASC_BASE_PATH`로 자동 해석한다.'
+require_contains docs/QUICK-START.md '명시적인 `MASC_BASE_PATH`가 없으면 `HOME`을 implicit base path로 사용한다.'
 
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'

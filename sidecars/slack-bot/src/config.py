@@ -15,9 +15,14 @@ from urllib.parse import urlparse
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-DEFAULT_STATE_DIR: Final[str] = ".masc/connectors/slack"
-DEFAULT_BINDING_STORE_PATH: Final[str] = ".masc/connectors/slack/bindings.json"
-DEFAULT_STATUS_PATH: Final[str] = ".masc/connectors/slack/status.json"
+DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/slack"
+DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/slack/bindings.json"
+DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/slack/status.json"
+
+# Legacy read-fallback (pre-v0.9.0 layout). See bot.py _load_bindings —
+# loads from here if the new default is absent, then writes to the new
+# default on next save.
+LEGACY_BINDING_STORE_PATH: Final[str] = ".masc/connectors/slack/bindings.json"
 
 
 def _is_loopback_host(raw_host: str | None) -> bool:
@@ -72,6 +77,8 @@ class BotConfig(BaseSettings):
     # State paths
     binding_store_path: str = Field(default=DEFAULT_BINDING_STORE_PATH)
     status_path: str = Field(default=DEFAULT_STATUS_PATH)
+    # Legacy read-fallback (pre-v0.9.0 layout). Not env-configurable.
+    legacy_binding_store_path: str = Field(default=LEGACY_BINDING_STORE_PATH)
 
     @field_validator("slack_bot_token")
     @classmethod

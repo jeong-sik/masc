@@ -268,7 +268,7 @@ export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
     <div class="flex flex-col gap-1.5">
       <div class="flex items-center gap-2 mb-1">
         <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-          턴 예산 (per OAS call)
+          턴 예산 (OAS 호출당)
         </span>
         ${hasInvalid
           ? html`<span class="rounded-full bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-red-300">invalid override</span>`
@@ -277,23 +277,38 @@ export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
             : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">inherited</span>`}
       </div>
       <${BudgetRow}
-        label="반응형 (reactive)"
+        label="반응형"
         slot=${budget.reactive}
         manifest=${budget.manifest_path}
         clamp=${clamp}
       />
       <${BudgetRow}
-        label="예약 자율 (scheduled autonomous)"
+        label="예약 자율"
         slot=${budget.scheduled_autonomous}
         manifest=${budget.manifest_path}
         clamp=${clamp}
       />
       <span class="text-[11px] text-[var(--text-muted)] leading-snug mt-1">
-        반응형 = 보드/멘션 반응 턴 예산, 예약 자율 = idle cycle 턴 예산.
-        값에 마우스를 올리면 source path와 env default 비교가 tooltip으로 나타납니다.
-        실제 소비 진행(turn_count/budget)은 현재 backend에 노출되지 않아 표시하지 않습니다.
+        반응형 = 보드/멘션 반응 턴 예산, 예약 자율 = 자율 주기 턴 예산.
+        값에 마우스를 올리면 설정 출처와 기본값 비교를 확인할 수 있습니다.
       </span>
     </div>
+  `
+}
+
+export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
+  const diverges = hasTurnBudgetDivergence(keeper)
+  return html`
+    <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm" open=${diverges}>
+      <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-amber-400' : 'bg-accent/50'}"></span>
+        턴 예산
+        ${diverges ? html`<span class="text-[9px] text-amber-300 font-normal normal-case tracking-normal">(재정의됨)</span>` : null}
+      </summary>
+      <div class="mt-3">
+        <${TurnBudgetPanel} keeper=${keeper} />
+      </div>
+    </details>
   `
 }
 

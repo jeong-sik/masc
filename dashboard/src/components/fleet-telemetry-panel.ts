@@ -251,10 +251,10 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               <td class="py-1.5 text-right text-[10px] text-[var(--text-dim)]">${row.model}</td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
-                  ? html`<span class="rounded bg-red-500/15 px-1 py-0.5 text-[9px] font-semibold text-red-300" title="잘못된 TOML override">!</span>`
+                  ? html`<span class="rounded bg-red-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-red-300" title="TOML override가 범위를 벗어남">ERR</span>`
                   : row.budget_source === 'override'
-                    ? html`<span class="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-semibold text-amber-300" title="TOML override 적용됨">O</span>`
-                    : html`<span class="text-[9px] text-[var(--text-dim)]">-</span>`}
+                    ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300" title="TOML override 적용됨">OVR</span>`
+                    : html`<span class="text-[9px] text-[var(--text-dim)]">\u2014</span>`}
               </td>
               <td class="py-1.5 text-center">
                 <button
@@ -426,6 +426,7 @@ export function FleetTelemetryPanel() {
         ? 'ok'
         : 'warn'
   const sourcesWithData = value.telemetry_sources.filter(source => source.entry_count > 0).length
+  const budgetOverrideCount = value.rows.filter(r => r.budget_source === 'override' || r.budget_source === 'override_invalid').length
 
   if (value.loading && value.rows.length === 0) {
     return html`<${LoadingState}>Keeper 텔레메트리 불러오는 중...<//>`
@@ -468,6 +469,7 @@ export function FleetTelemetryPanel() {
             ${activeCount > 0 ? html`<span class="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-emerald-400">${activeCount} 가동</span>` : null}
             ${attentionCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-amber-400">${attentionCount} 주의</span>` : null}
             ${offlineCount > 0 ? html`<span class="rounded-full bg-[var(--white-8)] px-1.5 py-0.5 text-[var(--text-dim)]">${offlineCount} 오프라인</span>` : null}
+            ${budgetOverrideCount > 0 ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-amber-300">${budgetOverrideCount} 예산 재정의</span>` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">

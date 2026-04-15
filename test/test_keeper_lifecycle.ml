@@ -588,6 +588,115 @@ let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_
           fail
             "expected overflow retry recovery to keep message history within budget even with a large checkpoint system prompt")
 
+let test_legacy_checkpoint_roundtrip_preserves_tool_pairing () =
+  let base_dir = temp_dir "keeper_lifecycle_legacy_tool_pairing" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let meta = make_keeper_meta ~trace_id:"trace-legacy-tool-pairing" () in
+      let session =
+        KEC.create_session
+          ~session_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~base_dir
+      in
+      let tool_use_id = "call-legacy-1" in
+      let legacy_ctx =
+        KEC.create ~system_prompt:"legacy structured" ~max_tokens:2048
+        |> fun ctx ->
+        KEC.append_many ctx
+          [
+            Agent_sdk.Types.user_msg "run the search";
+            tool_use_message ~name:"grep_search" ~tool_use_id ();
+            tool_result_message ~tool_use_id "3 hits";
+          ]
+      in
+      ignore (KEC.save_checkpoint session legacy_ctx ~generation:4);
+      let loaded_opt =
+        load_context ~base_dir
+          ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~max_tokens:1024
+      in
+      match loaded_opt with
+      | Some loaded ->
+          let has_tool_use =
+            List.exists
+              (fun (msg : Agent_sdk.Types.message) ->
+                List.exists
+                  (function
+                    | Agent_sdk.Types.ToolUse { id; name; _ } ->
+                        String.equal id tool_use_id
+                        && String.equal name "grep_search"
+                    | _ -> false)
+                  msg.content)
+              loaded.messages
+          in
+          let has_tool_result =
+            List.exists
+              (fun (msg : Agent_sdk.Types.message) ->
+                List.exists
+                  (function
+                    | Agent_sdk.Types.ToolResult { tool_use_id = id; content; _ } ->
+                        String.equal id tool_use_id
+                        && String.equal content "3 hits"
+                    | _ -> false)
+                  msg.content)
+              loaded.messages
+          in
+          check bool "tool use restored" true has_tool_use;
+          check bool "tool result restored" true has_tool_result
+      | None -> Alcotest.fail "expected legacy checkpoint context")
+
+let test_context_of_oas_checkpoint_drops_orphan_tool_result () =
+  let checkpoint =
+    {
+      Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+      session_id = "trace-oas-orphan-tool-result";
+      agent_name = "keeper-lifecycle";
+      model = "llama:auto";
+      system_prompt = Some "oas malformed";
+      messages =
+        [
+          Agent_sdk.Types.assistant_msg "flattened legacy tool call text";
+          tool_result_message ~tool_use_id:"orphan-call" "orphan output";
+        ];
+      usage = Agent_sdk.Types.empty_usage;
+      turn_count = 2;
+      created_at = 0.0;
+      tools = [];
+      tool_choice = None;
+      disable_parallel_tool_use = false;
+      temperature = None;
+      top_p = None;
+      top_k = None;
+      min_p = None;
+      enable_thinking = None;
+      response_format_json = false;
+      thinking_budget = None;
+      cache_system_prompt = false;
+      max_input_tokens = None;
+      max_total_tokens = Some 4096;
+      context = Agent_sdk.Context.create ();
+      mcp_sessions = [];
+      working_context = None;
+    }
+  in
+  let loaded =
+    KEC.context_of_oas_checkpoint ~max_checkpoint_messages:120 checkpoint
+      ~primary_model_max_tokens:1024
+  in
+  let has_orphan_tool_result =
+    List.exists
+      (fun (msg : Agent_sdk.Types.message) ->
+        List.exists
+          (function
+            | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
+                String.equal tool_use_id "orphan-call"
+            | _ -> false)
+          msg.content)
+      loaded.messages
+  in
+  check bool "orphan tool result dropped" false has_orphan_tool_result
+
 (* --- patch_checkpoint_last_assistant tests (#5431) --- *)
 
 let make_test_checkpoint ?(session_id = "old-session")
@@ -1382,6 +1491,10 @@ let () =
             test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint;
           test_case "overflow retry falls back to legacy checkpoint" `Quick
             test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint;
+          test_case "legacy checkpoint roundtrip preserves tool pairing" `Quick
+            test_legacy_checkpoint_roundtrip_preserves_tool_pairing;
+          test_case "OAS checkpoint drops orphan tool result" `Quick
+            test_context_of_oas_checkpoint_drops_orphan_tool_result;
           test_case
             "overflow retry history budget ignores checkpoint system prompt"
             `Quick

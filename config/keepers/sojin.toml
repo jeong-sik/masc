@@ -52,7 +52,7 @@ room_scope = "current"
 mention_targets = ["sojin", "소진", "이슈사냥꾼", "hawk"]
 
 proactive_enabled = true
-execution_scope = "base"
+execution_scope = "workspace"
 
 tool_preset = "delivery"
 

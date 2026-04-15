@@ -71,7 +71,7 @@ room_scope = "current"
 mention_targets = ["minjae", "민재", "실험가", "poc", "labrat"]
 
 proactive_enabled = true
-execution_scope = "base"
+execution_scope = "workspace"
 
 tool_preset = "delivery"
 

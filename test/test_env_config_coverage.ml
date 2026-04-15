@@ -93,6 +93,38 @@ let test_base_path_collapses_masc_dir_env () =
     check string "base_path collapses .masc leaf"
       "/tmp/masc-custom-root" (Env_config.base_path ()))
 
+(* ============================================================
+   base_path HOME fallback Tests
+   ============================================================ *)
+
+let test_base_path_falls_back_to_home () =
+  with_env "MASC_BASE_PATH" "" (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" "" (fun () ->
+      with_env "HOME" "/home/testuser" (fun () ->
+        check string "base_path falls back to HOME" "/home/testuser"
+          (Env_config.base_path ()))))
+
+let test_base_path_falls_back_to_dot_when_no_home () =
+  with_env "MASC_BASE_PATH" "" (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" "" (fun () ->
+      with_env "HOME" "" (fun () ->
+        check string "base_path falls back to dot" "."
+          (Env_config.base_path ()))))
+
+let test_base_path_env_wins_over_home () =
+  with_env "MASC_BASE_PATH" "/opt/masc" (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" "" (fun () ->
+      with_env "HOME" "/home/testuser" (fun () ->
+        check string "MASC_BASE_PATH wins over HOME" "/opt/masc"
+          (Env_config.base_path ()))))
+
+let test_base_path_home_with_masc_leaf_collapsed () =
+  with_env "MASC_BASE_PATH" "" (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" "" (fun () ->
+      with_env "HOME" "/home/testuser/.masc" (fun () ->
+        check string "HOME .masc leaf collapsed" "/home/testuser"
+          (Env_config.base_path ()))))
+
 let test_base_path_raw_prefers_preserved_input_env () =
   with_env "MASC_BASE_PATH_INPUT" "/tmp/masc-custom-root/.masc" (fun () ->
     with_env "MASC_BASE_PATH" "/tmp/masc-custom-root" (fun () ->

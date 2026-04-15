@@ -45,13 +45,17 @@ let run_shell_ok ~cwd cmd =
   let rc = Sys.command (Printf.sprintf "cd %s && %s" quoted_cwd cmd) in
   Alcotest.(check int) ("shell command: " ^ cmd) 0 rc
 
-let make_ctx () =
+let make_ctx_in_dir base_dir =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir () in
   let config = Coord.default_config base_dir in
   ignore (Coord.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_code.context = { config; agent_name = "test-agent" } in
+  ctx
+
+let make_ctx () =
+  let base_dir = temp_dir () in
+  let ctx = make_ctx_in_dir base_dir in
   (ctx, base_dir)
 
 let dispatch_exn ctx ~name ~args =
@@ -120,7 +124,7 @@ let test_code_search_with_options () =
   cleanup_dir base_dir
 
 let test_code_search_with_file_pattern_finds_matches () =
-  let ctx, base_dir = make_ctx () in
+  let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
@@ -131,6 +135,7 @@ let test_code_search_with_file_pattern_finds_matches () =
         "let mascot_needle = 1\n";
       write_text_file (Filename.concat base_dir "ignore.md")
         "mascot_needle should not be matched\n";
+      let ctx = make_ctx_in_dir base_dir in
       let args = `Assoc [
         ("query", `String "mascot_needle");
         ("path", `String ".");

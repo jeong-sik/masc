@@ -24,9 +24,7 @@ let handle_resume ctx _args =
   | `Resumed -> (true, Printf.sprintf "Resumed by %s" ctx.agent_name)
   | `Already_running -> (true, "Default project scope is not paused")
 
-let handle_pause_status ctx args =
-  let requested_namespace = get_string args "namespace_id" "" |> String.trim in
-  let namespace_id = "default" in
+let handle_pause_status ctx _args =
   let pause_state =
     if not (Room.is_initialized ctx.config) then `Initializing
     else
@@ -42,46 +40,30 @@ let handle_pause_status ctx args =
         `Assoc
           [
             ("ok", `Bool true);
-            ("namespace_id", `String namespace_id);
-            ("namespace", `String namespace_id);
-            ("namespace_mode", `String "flattened");
             ("initializing", `Bool false);
             ("status", `String "paused");
             ("paused", `Bool true);
             ("paused_by", Json_util.string_opt_to_json by);
-            ( "pause_reason",
-              Json_util.string_opt_to_json reason );
+            ("pause_reason", Json_util.string_opt_to_json reason);
             ("paused_at", Json_util.string_opt_to_json at);
-            ("message", `String "Default project scope is paused");
-            ( "requested_namespace_id",
-              if requested_namespace = "" then `Null
-              else `String requested_namespace );
+            ("message", `String "Server is paused");
           ]
     | `Running ->
         `Assoc
           [
             ("ok", `Bool true);
-            ("namespace_id", `String namespace_id);
-            ("namespace", `String namespace_id);
-            ("namespace_mode", `String "flattened");
             ("initializing", `Bool false);
             ("status", `String "running");
             ("paused", `Bool false);
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("message", `String "Default project scope is running (not paused)");
-            ( "requested_namespace_id",
-              if requested_namespace = "" then `Null
-              else `String requested_namespace );
+            ("message", `String "Server is running (not paused)");
           ]
     | `Initializing ->
         `Assoc
           [
             ("ok", `Bool true);
-            ("namespace_id", `String namespace_id);
-            ("namespace", `String namespace_id);
-            ("namespace_mode", `String "flattened");
             ("initializing", `Bool true);
             ("status", `String "initializing");
             ("paused", `Null);
@@ -90,10 +72,7 @@ let handle_pause_status ctx args =
             ("paused_at", `Null);
             ( "message",
               `String
-                "Default project namespace is initializing; pause state is not available yet" );
-            ( "requested_namespace_id",
-              if requested_namespace = "" then `Null
-              else `String requested_namespace );
+                "Server is initializing; pause state is not available yet" );
           ]
   in
   (true, Yojson.Safe.to_string payload)

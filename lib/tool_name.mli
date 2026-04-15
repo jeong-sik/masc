@@ -105,13 +105,21 @@ module Masc : sig
     | Dispatch_assign
     | Dispatch_plan
     | Find_by_capability
+    | Gc
+    | Get_metrics
     | Governance_feed
     | Governance_status
     | Heartbeat
     | Join
     | Keeper_msg_result
     | Leave
+    | Library_add
+    | Library_list
+    | Library_promote
+    | Library_read
+    | Library_search
     | List_tasks
+    | Mcp_session
     | Messages
     | Note_add
     | Operation_checkpoint
@@ -149,6 +157,7 @@ module Masc : sig
     | Spawn
     | Start
     | Status
+    | Surface_audit
     | Task_history
     | Tasks
     | Tool_admin_snapshot
@@ -157,9 +166,12 @@ module Masc : sig
     | Tool_help
     | Tool_list
     | Tool_revoke
+    | Tool_stats
     | Transition
     | Update_priority
     | Web_search
+    | Webrtc_answer
+    | Webrtc_offer
     | Who
     | Workflow_guide
     | Worktree_create

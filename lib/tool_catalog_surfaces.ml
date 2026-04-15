@@ -187,26 +187,27 @@ let keeper_denied_surface_tools =
   List.map Tool_name.to_string Tool_name.[ Masc Reset; Masc Spawn ]
 
 let system_internal_surface_tools =
-  [
-    (* MCP protocol internals *)
-    "masc_mcp_session";
-    (* Session lifecycle — auto-called *)
-    "masc_reset";
-    (* Maintenance *)
-    "masc_cleanup_zombies"; "masc_gc";
-    (* Agent evaluation — system loop *)
-    "masc_agent_fitness";
-    (* Internal monitoring *)
-    "masc_autoresearch_status";
-    "masc_tool_stats"; "masc_surface_audit";
-    (* Phase 2 addition *)
-    "masc_get_metrics";
-    (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
-    "masc_webrtc_offer"; "masc_webrtc_answer";
-    (* Library tools *)
-    "masc_library_add"; "masc_library_list"; "masc_library_promote";
-    "masc_library_read"; "masc_library_search";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      (* MCP protocol internals *)
+      Masc Mcp_session;
+      (* Session lifecycle — auto-called *)
+      Masc Reset;
+      (* Maintenance *)
+      Masc Cleanup_zombies; Masc Gc;
+      (* Agent evaluation — system loop *)
+      Masc Agent_fitness;
+      (* Internal monitoring *)
+      Masc Autoresearch_status;
+      Masc Tool_stats; Masc Surface_audit;
+      (* Phase 2 addition *)
+      Masc Get_metrics;
+      (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
+      Masc Webrtc_offer; Masc Webrtc_answer;
+      (* Library tools *)
+      Masc Library_add; Masc Library_list; Masc Library_promote;
+      Masc Library_read; Masc Library_search;
+    ]
 
 (* ================================================================ *)
 (* Role catalogs — curated subsets for agent role assignment.        *)

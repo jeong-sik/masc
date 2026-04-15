@@ -237,6 +237,36 @@ let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
       | _ -> false)
     msg.content
 
+(** Trim messages to at most [max_count] while preserving ToolUse/ToolResult
+    pairing.  Drops from the front, but if the drop point falls between an
+    Assistant(ToolUse) and its User(ToolResult), adjusts to keep the pair.
+
+    This prevents orphan ToolResult blocks that cause "unexpected tool_use_id"
+    errors from OpenAI-compatible APIs (GLM, Groq, etc.).
+
+    Root cause: the previous implementation used [List.filteri (fun i _ -> i >= drop)]
+    which splits on message index, breaking mid-pair boundaries. *)
+let trim_messages_preserving_pairs
+    (messages : Agent_sdk.Types.message list) ~(max_count : int)
+    : Agent_sdk.Types.message list =
+  let n = List.length messages in
+  if n <= max_count then messages
+  else
+    let drop = n - max_count in
+    let effective_drop =
+      match List.nth_opt messages drop with
+      | Some msg when has_tool_result_block msg ->
+        if drop > 0 then
+          (match List.nth_opt messages (drop - 1) with
+           | Some prev when prev.Agent_sdk.Types.role = Agent_sdk.Types.Assistant
+             && tool_use_ids_of_message prev <> [] ->
+             drop - 1
+           | _ -> drop)
+        else drop
+      | _ -> drop
+    in
+    List.filteri (fun i _ -> i >= effective_drop) messages
+
 let tool_result_text_of_block
     ~(tool_use_id : string)
     ~(content : string)
@@ -917,12 +947,9 @@ let context_of_oas_checkpoint
     checkpoint_max_tokens cp ~fallback:primary_model_max_tokens
   in
   let messages =
-    let n = List.length cp.messages in
     let messages =
-      if n <= max_checkpoint_messages then cp.messages
-      else
-        let drop = n - max_checkpoint_messages in
-        List.filteri (fun i _ -> i >= drop) cp.messages
+      trim_messages_preserving_pairs cp.messages
+        ~max_count:max_checkpoint_messages
     in
     if repair_orphans then repair_orphan_tool_result_messages messages
     else messages
@@ -963,11 +990,8 @@ let save_oas_checkpoint
      Without this, checkpoints grow unbounded between compaction cycles,
      causing multi-GB transient allocations when loaded by concurrent keepers. *)
   let capped_messages =
-    let n = List.length ctx.messages in
-    if n <= max_checkpoint_messages then ctx.messages
-    else
-      let drop = n - max_checkpoint_messages in
-      List.filteri (fun i _ -> i >= drop) ctx.messages
+    trim_messages_preserving_pairs ctx.messages
+      ~max_count:max_checkpoint_messages
   in
   let capped_messages_were_truncated =
     List.length capped_messages < List.length ctx.messages

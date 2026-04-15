@@ -19,6 +19,9 @@ Thumbs.db
 # MASC runtime data (not part of source)
 .masc/
 
+# Git worktrees (local only, never tracked)
+.worktrees/
+
 
 # Tool metrics JSONL persistence (runtime data)
 data/tool-metrics/

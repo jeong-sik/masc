@@ -153,7 +153,7 @@ let test_spawnable_agents_nonempty () =
 
 let test_spawnable_agents_contains_claude () =
   let agents = Masc_mcp.Provider_adapter.spawnable_canonical_names () in
-  check bool "contains claude-api" true (List.mem "claude-api" agents)
+  check bool "contains claude" true (List.mem "claude" agents)
 
 let test_agent_type_of_mention_claude () =
   let t = Auto_responder.agent_type_of_mention "claude-rare-beaver" in

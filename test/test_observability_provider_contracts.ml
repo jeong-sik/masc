@@ -13,8 +13,8 @@ module Adapter = Masc_mcp.Provider_adapter
 
 let test_alias_roundtrip () =
   let cases =
-    [ ("anthropic", "claude-api"); ("Claude", "claude-api");
-      ("google", "gemini-api"); ("Gemini", "gemini-api");
+    [ ("anthropic", "claude-api"); ("Claude", "claude");
+      ("google", "gemini-api"); ("Gemini", "gemini");
       ("openai", "codex-api"); ("OpenAI", "codex-api");
       ("llama", "llama"); ("llamacpp", "llama");
       ("glm", "glm"); ("zai", "glm");
@@ -56,6 +56,8 @@ let test_adapter_well_formed () =
 
 let test_runtime_kind_strings () =
   check string "local" "local" (Adapter.string_of_runtime_kind Adapter.Local);
+  check string "cli_agent" "cli_agent"
+    (Adapter.string_of_runtime_kind Adapter.Cli_agent);
   check string "direct_api" "direct_api"
     (Adapter.string_of_runtime_kind Adapter.Direct_api)
 
@@ -71,6 +73,18 @@ let test_resolve_canonical_wraps_adapter () =
     in
     check (option string) ("consistent: " ^ label) via_adapter via_fn)
     labels
+
+let test_dashboard_provider_snapshots_include_cli_and_api () =
+  Eio_main.run (fun _env ->
+    let open Masc_mcp.Dashboard_provider_runs in
+    let claude_cli = provider_snapshot_by_name "claude" in
+    let claude_api = provider_snapshot_by_name "claude-api" in
+    check bool "cli snapshot present" true (Option.is_some claude_cli);
+    check bool "api snapshot present" true (Option.is_some claude_api);
+    check string "cli runtime kind" "cli_agent"
+      (Option.get claude_cli).runtime_kind;
+    check string "api runtime kind" "direct_api"
+      (Option.get claude_api).runtime_kind)
 
 let test_default_registry_populated () =
   (* Verify default_registry is usable by resolving a known provider.
@@ -224,6 +238,8 @@ let () =
           test_case "unknown returns none" `Quick test_unknown_returns_none;
           test_case "adapter well formed" `Quick test_adapter_well_formed;
           test_case "runtime kind strings" `Quick test_runtime_kind_strings;
+          test_case "dashboard snapshots include cli and api" `Quick
+            test_dashboard_provider_snapshots_include_cli_and_api;
         ] );
       ( "oas_model_resolve",
         [

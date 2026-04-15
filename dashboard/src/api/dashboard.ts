@@ -580,6 +580,7 @@ export interface DashboardRuntimeProvidersResponse {
     providers?: number
     local_models?: number
     cloud_models?: number
+    cli_models?: number
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
 }
@@ -679,6 +680,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
           providers: asNumber(summary.providers),
           local_models: asNumber(summary.local_models),
           cloud_models: asNumber(summary.cloud_models),
+          cli_models: asNumber(summary.cli_models),
         }
       : null,
     providers: asRecordArray(raw.providers)

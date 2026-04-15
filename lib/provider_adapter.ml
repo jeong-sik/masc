@@ -401,11 +401,6 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let ends_with ~suffix s =
-  let slen = String.length s in
-  let plen = String.length suffix in
-  slen >= plen && String.sub s (slen - plen) plen = suffix
-
 let normalize_base_url value =
   let trimmed = String.trim value in
   if String.length trimmed > 1 && trimmed.[String.length trimmed - 1] = '/' then
@@ -457,18 +452,18 @@ let compose_voice_endpoint_url ~base_url ~path =
   let base_path = Uri.path base_uri in
   let base_path =
     if base_path = "" then "/"
-    else if ends_with ~suffix:"/" base_path && String.length base_path > 1 then
+    else if String.ends_with ~suffix:"/" base_path && String.length base_path > 1 then
       String.sub base_path 0 (String.length base_path - 1)
     else base_path
   in
   let final_path =
     if path = "/mcp" then
-      if ends_with ~suffix:"/mcp" base_path then base_path
+      if String.ends_with ~suffix:"/mcp" base_path then base_path
       else if base_path = "/" then "/mcp"
       else base_path ^ "/mcp"
     else if path = "/health" then
-      if ends_with ~suffix:"/health" base_path then base_path
-      else if ends_with ~suffix:"/mcp" base_path then
+      if String.ends_with ~suffix:"/health" base_path then base_path
+      else if String.ends_with ~suffix:"/mcp" base_path then
         String.sub base_path 0 (String.length base_path - 4) ^ "/health"
       else if base_path = "/" then "/health"
       else base_path ^ "/health"

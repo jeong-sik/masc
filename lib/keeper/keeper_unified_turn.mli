@@ -128,12 +128,23 @@ val resolved_max_context_for_turn :
   string list ->
   int
 
+val run_keeper_cycle :
+  config:Room.config ->
+  meta:Keeper_types.keeper_meta ->
+  observation:Keeper_world_observation.world_observation ->
+  generation:int ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
+  ?semaphore_wait_ms:int ->
+  ?shared_context:Agent_sdk.Context.t ->
+  unit ->
+  (Keeper_types.keeper_meta, Oas.Error.sdk_error) result
+
 val run_unified_turn :
   config:Room.config ->
   meta:Keeper_types.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   generation:int ->
-  ?channel:Keeper_world_observation.unified_turn_channel ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
   ?shared_context:Agent_sdk.Context.t ->
   unit ->

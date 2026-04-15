@@ -1,4 +1,4 @@
-(** Keeper_world_observation — Structured world state for unified keeper turns.
+(** Keeper_world_observation — Structured world state for keeper cycles.
 
     Extracts and normalizes observation signals from room state, keeper meta,
     and context so the unified prompt and turn runner consume a single snapshot.
@@ -46,9 +46,11 @@ type world_observation = {
   work_discovery_due : bool;
 }
 
-type unified_turn_channel =
+type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
+
+type unified_turn_channel = keeper_cycle_channel
 
 type turn_reason =
   | Mention_pending
@@ -97,15 +99,17 @@ let verdict_reasons_to_strings = function
       List.map turn_reason_to_string (first :: rest)
   | Skip { reasons = (first, rest) } ->
       List.map skip_reason_to_string (first :: rest)
-type unified_turn_decision = {
+type keeper_cycle_decision = {
   should_run : bool;
-  channel : unified_turn_channel;
+  channel : keeper_cycle_channel;
   verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
   effective_cooldown : int option;
   task_reactive_cooldown : int option;
   idle_gate_sec : int option;
 }
+
+type unified_turn_decision = keeper_cycle_decision
 
 type board_signal_match = {
   explicit_mention : bool;
@@ -703,7 +707,7 @@ let effective_proactive_cooldown =
   effective_scheduled_autonomous_cooldown
 
 
-let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation) =
+let keeper_cycle_decision ~(meta : keeper_meta) (observation : world_observation) =
   let reactive_triggers =
     [
       (if observation.pending_mentions <> [] then Some Mention_pending else None);
@@ -859,5 +863,9 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           idle_gate_sec = Some idle_gate_sec;
         }
 
-let should_run_unified_turn ~(meta : keeper_meta) (observation : world_observation) =
-  (unified_turn_decision ~meta observation).should_run
+let unified_turn_decision = keeper_cycle_decision
+
+let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
+  (keeper_cycle_decision ~meta observation).should_run
+
+let should_run_unified_turn = should_run_keeper_cycle

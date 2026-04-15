@@ -1,4 +1,4 @@
-(** Keeper_unified_turn — Single entry point for keeper turns via OAS Agent.run().
+(** Keeper_unified_turn — Single entry point for keeper cycles via OAS Agent.run().
 
     Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
@@ -34,8 +34,18 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
 
 let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
   string_contains_substring
-    ~needle:(String.lowercase_ascii needle)
+      ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
+
+let finalize_trajectory_acc (trajectory_acc : Trajectory.accumulator)
+    (outcome : Trajectory.trajectory_outcome) : unit =
+  try
+    ignore (Trajectory.finalize trajectory_acc outcome)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.error "trajectory finalize failed (keeper cycle): %s"
+        (Printexc.to_string exn)
 
 (** {1 Retry & Side-Effect Safety}
 
@@ -1220,7 +1230,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   in
   let preview =
     let trimmed = String.trim reason in
-    if trimmed = "" then "unified turn failed"
+    if trimmed = "" then "keeper cycle failed"
     else short_preview trimmed
   in
   {
@@ -1274,10 +1284,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     };
   }
 
-let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
+let run_keeper_cycle ~(config : Room.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(generation : int)
-    ?(channel : Keeper_world_observation.unified_turn_channel = Scheduled_autonomous)
+    ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
@@ -1286,7 +1296,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       Log.Keeper.info
-        "%s: unified turn skipped in non-executable phase=%s"
+        "%s: keeper cycle skipped in non-executable phase=%s"
         meta.name (Keeper_state_machine.phase_to_string phase);
       Ok meta
   | phase_opt ->
@@ -1329,6 +1339,14 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let base_dir = session_base_dir config in
       (* Ensure session dir tree for filesystem fallback (issue #3019) *)
       Keeper_types.mkdir_p (Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+      let masc_root = Room.masc_root_dir config in
+      let trajectory_acc =
+        Trajectory.create_accumulator
+          ~masc_root
+          ~keeper_name:meta.name
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~generation:meta.runtime.generation
+      in
       (* 3. Derive parameters: cascade.json -> keeper env-var fallback *)
       let temperature =
         Cascade_inference.resolve_temperature
@@ -1456,6 +1474,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~temperature ~max_tokens
               ~oas_timeout_s
               ?max_cost_usd
+              ~trajectory_acc
               ~is_retry
               ?shared_context
               ?event_bus:(Keeper_event_bus.get ())
@@ -1722,13 +1741,15 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
        | _ -> ());
       match run_result with
       | Error err ->
+          finalize_trajectory_acc trajectory_acc
+            (Trajectory.Failed (Oas.Error.to_string err));
           let e_str = Oas.Error.to_string err in
           let is_transient = is_transient_network_error err in
           let is_server_parse_rejection = is_server_rejected_parse_error err in
           let is_auto_recoverable = is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
           Log.Keeper.error
-            "%s: unified turn FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
+            "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name effective_cascade_name max_context latency_ms
             (if is_ambiguous_partial then
                " (ambiguous partial commit)"
@@ -1797,7 +1818,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            | Ok () -> ()
            | Error msg ->
                Log.Keeper.error
-                 "write_meta failed after unified turn failure: %s" msg);
+                 "write_meta failed after keeper cycle failure: %s" msg);
           let base_path = config.base_path in
           (* Transient errors (429 rate limit, 503 overloaded, network
              timeout) do not count toward the consecutive failure threshold.
@@ -1827,6 +1848,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           end;
           Error err
       | Ok result ->
+          finalize_trajectory_acc trajectory_acc Trajectory.Completed;
           let explicit_accountability_claim =
             Social.extract_accountability_claim result
           in
@@ -1904,7 +1926,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
                Log.Keeper.error
-                 "write metrics snapshot failed after unified turn: %s"
+                 "write metrics snapshot failed after keeper cycle: %s"
                  (Printexc.to_string exn));
           (* Emit turn-completed event to Activity Graph for timeline token visibility *)
           (try
@@ -2006,7 +2028,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                 ()
           | None -> ());
           Log.Keeper.info
-            "%s: unified turn OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
+            "%s: keeper cycle OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
             updated_meta.name (Keeper_agent_run.surface_model_used result)
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
@@ -2024,8 +2046,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()
-           | Error msg ->
-               Log.Keeper.error "write_meta failed after unified turn: %s" msg);
+           | Error msg -> Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
           (* 8. Handle stop reason *)
           (match result.stop_reason with
            | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
@@ -2048,3 +2069,5 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
           Ok updated_meta
+
+let run_unified_turn = run_keeper_cycle

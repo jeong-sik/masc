@@ -88,17 +88,18 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('PrometheusMetrics')
   })
 
-  it('renders FilterChips with 3 options', async () => {
+  it('renders FilterChips with 4 options', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     const chips = container.querySelectorAll('[data-testid="chip"]')
-    expect(chips.length).toBe(3)
+    expect(chips.length).toBe(4)
     expect(chips[0]?.textContent).toBe('전체')
-    expect(chips[1]?.textContent).toBe('프로바이더')
-    expect(chips[2]?.textContent).toBe('메트릭')
+    expect(chips[1]?.textContent).toBe('Cascade')
+    expect(chips[2]?.textContent).toBe('프로바이더')
+    expect(chips[3]?.textContent).toBe('메트릭')
   })
 
   it('falls back to default for unknown view param', async () => {

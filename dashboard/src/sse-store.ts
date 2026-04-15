@@ -5,7 +5,14 @@
 // and named handlers for events with custom logic (conditional hydration,
 // async imports, signal-only updates).
 
-import { lastEvent, connected, reconnectCount, lastDisconnectedAt } from './sse'
+import {
+  lastEvent,
+  connected,
+  reconnectCount,
+  lastDisconnectedAt,
+  pauseQueuedOasRuntimeIngress,
+  resumeQueuedOasRuntimeIngress,
+} from './sse'
 import type { DashboardExecutionResponse } from './types'
 import {
   keeperHeartbeats,
@@ -39,6 +46,7 @@ import {
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
   SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
+import { replayOasRuntimeTelemetry } from './oas-runtime-store'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -259,10 +267,19 @@ function handleReconnect(): void {
   // If the server is still warming up after restart, the first fetch may fail.
   // Schedule a single retry after 3s to cover the warm-up window.
   invalidateDashboardCache()
+  pauseQueuedOasRuntimeIngress()
   void hydrateAfterReconnect()
+    .finally(() => {
+      resumeQueuedOasRuntimeIngress()
+    })
 }
 
-function hydrateAfterReconnect(): void {
+async function hydrateAfterReconnect(): Promise<void> {
+  try {
+    await replayOasRuntimeTelemetry()
+  } catch (err) {
+    console.warn('[SSE] reconnect OAS replay failed', err instanceof Error ? err.message : err)
+  }
   requestNamespaceTruthNow()
   void refreshActiveRoute().catch(err =>
     console.warn('[SSE] reconnect route refresh failed', err instanceof Error ? err.message : err),

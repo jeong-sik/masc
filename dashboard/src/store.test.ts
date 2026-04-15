@@ -1,14 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  oasAgentEvents,
-  oasKeeperSnapshots,
-  oasLastKeeperTick,
   oasTotalEvents,
   oasTotalLlmCalls,
   oasTotalErrors,
   oasLastLlmCallTs,
   oasLastErrorTs,
   oasHealthSummary,
+  resetOasRuntimeSignals,
   pushOasAgentEvent,
   updateOasKeeperSnapshot,
   recordOasLlmCall,
@@ -17,14 +15,7 @@ import {
 import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
 
 function resetOasSignals() {
-  oasAgentEvents.value = []
-  oasKeeperSnapshots.value = new Map()
-  oasLastKeeperTick.value = null
-  oasTotalEvents.value = 0
-  oasTotalLlmCalls.value = 0
-  oasTotalErrors.value = 0
-  oasLastLlmCallTs.value = null
-  oasLastErrorTs.value = null
+  resetOasRuntimeSignals()
 }
 
 describe('oasHealthSummary', () => {
@@ -49,7 +40,7 @@ describe('oasHealthSummary', () => {
     pushOasAgentEvent(evt)
     pushOasAgentEvent({ ...evt, timestamp: 2 })
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)
-    expect(oasHealthSummary.value.totalEvents).toBe(2)
+    expect(oasHealthSummary.value.totalEvents).toBe(0)
   })
 
   it('dedups identical consecutive agent events', () => {

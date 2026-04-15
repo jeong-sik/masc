@@ -16,6 +16,11 @@
 
 set -euo pipefail
 
+readonly EXIT_FATAL=2
+readonly EXIT_TIMEOUT=3
+readonly EXIT_DRIFT=4
+readonly EXIT_SETUP=5
+
 BINARY="${1:-_build/default/bin/main_eio.exe}"
 PORT="${SMOKE_PORT:-18935}"
 BOOT_WAIT_SEC="${BOOT_WAIT_SEC:-5}"
@@ -23,8 +28,8 @@ BOOT_WAIT_SEC="${BOOT_WAIT_SEC:-5}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-[ -x "$BINARY" ] || { echo "smoke: binary not executable: $BINARY" >&2; exit 5; }
-[ -f config/tool_policy.toml ] || { echo "smoke: config/tool_policy.toml missing" >&2; exit 5; }
+[ -x "$BINARY" ] || { echo "smoke: binary not executable: $BINARY" >&2; exit "$EXIT_SETUP"; }
+[ -f config/tool_policy.toml ] || { echo "smoke: config/tool_policy.toml missing" >&2; exit "$EXIT_SETUP"; }
 
 tmp=$(mktemp -d -t masc-smoke.XXXXXX)
 trap 'rm -rf "$tmp"; [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null || true' EXIT
@@ -53,12 +58,12 @@ case "$state" in
   fatal)
     echo "smoke: FATAL during boot:" >&2
     grep -B2 -A2 -E 'FATAL|Fatal ' "$log" >&2 || true
-    exit 2
+    exit "$EXIT_FATAL"
     ;;
   pending)
     echo "smoke: did not reach listening within ${BOOT_WAIT_SEC}s" >&2
     tail -30 "$log" >&2
-    exit 3
+    exit "$EXIT_TIMEOUT"
     ;;
   listening) echo "smoke: boot OK" ;;
 esac
@@ -79,17 +84,25 @@ actual_subcmds=$(awk '
   }
 ' "$help_txt" | sort -u)
 
-# Subcommands the README claims exist (matches `main_eio.exe SUBCMD` and
-# `masc-mcp SUBCMD` where SUBCMD is a bare lowercase token, not a flag).
-readme_subcmds=$(grep -hoE '(main_eio\.exe|masc-mcp) +[a-z][a-z0-9_-]*' README.md \
+# Subcommands the README claims exist. Restrict to lines/segments inside
+# backticks (inline `code` or ``` fenced blocks ```), so prose like
+# "use masc-mcp in Claude" never trips the gate.
+readme_subcmds=$(awk '
+  /^```/        { in_fence = !in_fence; next }
+  in_fence      { print; next }
+  /`/ {
+    s = $0
+    while (match(s, /`[^`]+`/)) {
+      print substr(s, RSTART + 1, RLENGTH - 2)
+      s = substr(s, RSTART + RLENGTH)
+    }
+  }
+' README.md \
+  | grep -hoE '(main_eio\.exe|masc-mcp) +[a-z][a-z0-9_-]*' \
   | awk '{print $2}' | sort -u)
 
 drift=0
 for sub in $readme_subcmds; do
-  # ignore obvious noise (config sample words that match the regex by accident)
-  case "$sub" in
-    install|build|run|on|off|via|in|to|of|the|a|an) continue ;;
-  esac
   if ! echo "$actual_subcmds" | grep -qx "$sub"; then
     echo "drift: README references '$sub' subcommand but binary --help lists no such command" >&2
     drift=1
@@ -103,7 +116,7 @@ if [ "$drift" -ne 0 ]; then
   echo "" >&2
   echo "Either the README is ahead of this build (release was cut before merge)," >&2
   echo "or the README claims a subcommand that no longer exists." >&2
-  exit 4
+  exit "$EXIT_DRIFT"
 fi
 
 echo "smoke: doc drift check OK"

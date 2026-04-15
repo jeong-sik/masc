@@ -391,9 +391,19 @@ let test_masc_spawn_schema () =
 
 (* test_masc_runtime_verify_schema removed: tool pruned *)
 
-(* test_masc_persona_list_schema and test_masc_keeper_create_from_persona_schema
-   removed: persona concept deleted, schema fields
-   policy_voice_enabled/policy_shell_mode/initiative_* removed in #2607. *)
+(* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
+
+let test_masc_keeper_create_from_persona_schema () =
+  match find_tool "masc_keeper_create_from_persona" with
+  | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
+  | Some schema ->
+      match get_json_assoc "properties" schema.input_schema with
+      | Some props ->
+          Alcotest.(check bool) "has persona_name" true
+            (List.mem_assoc "persona_name" props);
+          Alcotest.(check bool) "omits social_model" false
+            (List.mem_assoc "social_model" props)
+      | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
 
 let test_masc_keeper_up_schema () =
   match find_tool "masc_keeper_up" with
@@ -407,6 +417,8 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "mid_goal" props);
           Alcotest.(check bool) "has long_goal" true
             (List.mem_assoc "long_goal" props);
+          Alcotest.(check bool) "omits social_model" false
+            (List.mem_assoc "social_model" props);
           Alcotest.(check bool) "has autoboot_enabled" true
             (List.mem_assoc "autoboot_enabled" props);
           Alcotest.(check bool) "omits models" false
@@ -683,6 +695,8 @@ let () =
       Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
     ];
     "keeper_runtime_tools", [
+      Alcotest.test_case "keeper-create-from-persona" `Quick
+        test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-msg" `Quick

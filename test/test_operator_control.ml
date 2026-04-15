@@ -83,6 +83,10 @@ let () =
           Alcotest.test_case "keeper status defaults name to caller" `Quick
             Test_operator_control_keeper
             .test_keeper_status_defaults_name_to_caller;
+          Alcotest.test_case "keeper up rejects non-public social_model arg"
+            `Quick
+            Test_operator_control_keeper
+            .test_keeper_up_rejects_non_public_social_model_arg;
           Alcotest.test_case "keeper status accepts agent alias" `Quick
             Test_operator_control_keeper
             .test_keeper_status_accepts_agent_name_alias;

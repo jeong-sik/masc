@@ -157,6 +157,47 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Alcotest.(check bool) "keepalive running false" false
         Yojson.Safe.Util.(status_json |> member "keepalive_running" |> to_bool))
 
+let test_keeper_up_rejects_non_public_social_model_arg () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let ok, body =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String "social-model-keeper");
+                ("goal", `String "Reject social model override");
+                ("social_model", `String "magentic_ledger_v1");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up rejected" false ok;
+      Alcotest.(check bool) "mentions non-public keeper args" true
+        (contains_substring body "non-public keeper args");
+      Alcotest.(check bool) "mentions social_model" true
+        (contains_substring body "social_model"))
+
 let test_keeper_status_defaults_name_to_caller () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

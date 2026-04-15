@@ -65,6 +65,14 @@ let normalize_cascade_name_opt = function
   | None -> None
   | Some raw -> Some (Keeper_cascade_profile.canonicalize raw)
 
+let normalize_social_model_opt = function
+  | None -> None
+  | Some raw -> (
+      match Keeper_social_model_types.model_id_of_string raw with
+      | Some model_id ->
+          Some (Keeper_social_model_types.model_id_to_string model_id)
+      | None -> None)
+
 let lower_string_list_opt = function
   | [] -> None
   | xs -> Some (List.map String.lowercase_ascii xs)
@@ -151,6 +159,7 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
+  social_model : string option;
   cascade_name : string option;
   models : string list option;
   (* Turn budget overrides. None = inherit env default
@@ -197,6 +206,7 @@ let empty_keeper_profile_defaults = {
   work_discovery_guidance = None;
   telemetry_feedback_enabled = None;
   telemetry_feedback_window_hours = None;
+  social_model = None;
   max_turns_per_call = None;
   max_turns_per_call_scheduled_autonomous = None;
   cascade_name = None;
@@ -278,6 +288,19 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  let result =
+    Result.bind result (fun () ->
+        match str "social_model" with
+        | Some raw -> (
+            match normalize_social_model_opt (Some raw) with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid social_model '%s' (allowed: bdi_speech_v1, magentic_ledger_v1)"
+                     raw))
+        | None -> Ok ())
+  in
   Result.map
     (fun () ->
       {
@@ -336,6 +359,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
+        social_model = normalize_social_model_opt (str "social_model");
         cascade_name = normalize_cascade_name_opt (str "cascade_name");
         models =
           (match strs "models" with
@@ -471,6 +495,22 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 max_turns_per_call_scheduled_autonomous =
                   Safe_ops.json_int_opt
                     "max_turns_per_call_scheduled_autonomous" keeper_json;
+                social_model =
+                  (match
+                     normalize_social_model_opt
+                       (Safe_ops.json_string_opt "social_model" keeper_json)
+                   with
+                  | Some _ as normalized -> normalized
+                  | None -> (
+                      match
+                        Safe_ops.json_string_opt "social_model" keeper_json
+                      with
+                      | Some raw ->
+                          Log.Keeper.warn
+                            "persona profile %s has invalid social_model '%s'; ignoring"
+                            path raw;
+                          None
+                      | None -> None));
                 cascade_name =
                   normalize_cascade_name_opt
                     (Safe_ops.json_string_opt "cascade_name" keeper_json);
@@ -530,6 +570,7 @@ let merge_keeper_profile_defaults
     telemetry_feedback_window_hours =
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
+    social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;

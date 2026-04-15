@@ -3,6 +3,16 @@ open Alcotest
 module TL = Masc_mcp.Keeper_toml_loader
 module KTP = Masc_mcp.Keeper_types_profile
 
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
 (* ================================================================ *)
 (* TOML parser tests                                                 *)
 (* ================================================================ *)
@@ -418,6 +428,7 @@ goal = "analyze logs"
 short_goal = "current session"
 mid_goal = "build patterns"
 long_goal = "continuous improvement"
+social_model = "magentic_ledger_v1"
 will = "detect issues"
 needs = "log access"
 desires = "low false positives"
@@ -435,12 +446,35 @@ policy_voice_enabled = false
     | Ok d ->
       check (option string) "persona_name" (Some "analyst") d.persona_name;
       check (option string) "goal" (Some "analyze logs") d.goal;
+      check (option string) "social_model" (Some "magentic_ledger_v1")
+        d.social_model;
       check (option string) "will" (Some "detect issues") d.will;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
       check (option bool) "policy_voice" (Some false) d.policy_voice_enabled
+
+let test_profile_rejects_invalid_social_model () =
+  let input = {|
+[keeper]
+goal = "test"
+social_model = "experimental_v99"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected invalid social_model error"
+       | Error msg ->
+           check bool "mentions invalid social_model" true
+             (try
+                ignore
+                  (Str.search_forward
+                     (Str.regexp_string "invalid social_model")
+                     msg 0);
+                true
+              with Not_found -> false))
 
 let test_profile_rejects_removed_model_keys () =
   let input = {|
@@ -770,6 +804,35 @@ let test_persona_resolver_defaults_to_research_tool_preset () =
       check string "persona default tool_preset" "research"
         (Yojson.Safe.Util.to_string tool_preset)
 
+let test_persona_resolver_rejects_non_public_social_model_arg () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper"
+  }
+}
+|};
+  match
+    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+      (`Assoc
+        [
+          ("persona_name", `String "probe");
+          ("social_model", `String "magentic_ledger_v1");
+        ])
+  with
+  | Ok _ -> fail "expected non-public social_model rejection"
+  | Error e ->
+      check bool "mentions non-public keeper args" true
+        (Str.string_match (Str.regexp_string "non-public keeper args") e 0
+         || contains_substring e "non-public keeper args");
+      check bool "mentions social_model" true (contains_substring e "social_model")
+
 (* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
@@ -836,6 +899,8 @@ let () =
         [
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
+          test_case "rejects invalid social_model" `Quick
+            test_profile_rejects_invalid_social_model;
           test_case "musician soul_profile maps to relationship" `Quick
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
@@ -865,5 +930,7 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona profile canonicalizes soul_profile" `Quick
             test_persona_resolver_defaults_to_research_tool_preset;
+          test_case "persona resolver rejects non-public social_model arg" `Quick
+            test_persona_resolver_rejects_non_public_social_model_arg;
         ] );
     ]

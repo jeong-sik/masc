@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   appendCompositeObservation,
+  deriveLaneDwellHistograms,
   deriveObservedLaneSummaries,
   deriveOperationalInsight,
   derivePhaseLog,
@@ -237,6 +238,59 @@ describe('fsm-hub derived state', () => {
 
     expect(result.tone).toBe('info')
     expect(result.headline).toContain('Compaction currently owns the turn')
+  })
+})
+
+describe('deriveLaneDwellHistograms', () => {
+  it('aggregates dwell time per state per lane', () => {
+    const observations = [
+      observation({ ts: 100, phase: 'Running', turn: 'idle' }),
+      observation({ ts: 110, phase: 'Running', turn: 'executing' }),
+      observation({ ts: 130, phase: 'Compacting', turn: 'compacting' }),
+    ]
+    const histograms = deriveLaneDwellHistograms(observations, 150)
+
+    const ksm = histograms.find((h) => h.field === 'KSM')
+    expect(ksm).toBeDefined()
+    expect(ksm!.entries).toHaveLength(2)
+    expect(ksm!.entries[0]).toEqual({ value: 'Running', seconds: 30, pct: 60 })
+    expect(ksm!.entries[1]).toEqual({ value: 'Compacting', seconds: 20, pct: 40 })
+
+    const ktc = histograms.find((h) => h.field === 'KTC')
+    expect(ktc).toBeDefined()
+    const idleDwell = ktc!.entries.find((e) => e.value === 'idle')
+    expect(idleDwell?.seconds).toBe(10)
+    const execDwell = ktc!.entries.find((e) => e.value === 'executing')
+    expect(execDwell?.seconds).toBe(20)
+  })
+
+  it('returns empty array for no observations', () => {
+    expect(deriveLaneDwellHistograms([], 100)).toEqual([])
+  })
+
+  it('extends trailing segment to boundsEnd (current state gets live dwell)', () => {
+    const observations = [
+      observation({ ts: 100, phase: 'Running' }),
+    ]
+    const histograms = deriveLaneDwellHistograms(observations, 200)
+    const ksm = histograms.find((h) => h.field === 'KSM')
+    expect(ksm!.entries[0]).toEqual({
+      value: 'Running',
+      seconds: 100,
+      pct: 100,
+    })
+  })
+
+  it('pct sums to 100 for each lane', () => {
+    const observations = [
+      observation({ ts: 10, cascade: 'idle' }),
+      observation({ ts: 30, cascade: 'trying' }),
+      observation({ ts: 50, cascade: 'idle' }),
+    ]
+    const histograms = deriveLaneDwellHistograms(observations, 60)
+    const kcl = histograms.find((h) => h.field === 'KCL')
+    const totalPct = kcl!.entries.reduce((sum, e) => sum + e.pct, 0)
+    expect(totalPct).toBeCloseTo(100, 5)
   })
 })
 

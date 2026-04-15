@@ -41,6 +41,19 @@ export type TopTransition = {
   count: number
 }
 
+export type DwellEntry = {
+  value: string
+  seconds: number
+  pct: number
+}
+
+export type LaneDwell = {
+  field: string
+  laneKey: LaneKey
+  totalSeconds: number
+  entries: DwellEntry[]
+}
+
 export type InsightTone = 'ok' | 'info' | 'warn' | 'error'
 
 export type OperationalInsight = {

@@ -21,12 +21,13 @@ import {
   observeSnapshot,
   appendCompositeObservation,
   deriveTopTransitions,
+  deriveLaneDwellHistograms,
   deriveTransitionHistory,
   derivePhaseLog,
   deriveStateEntries,
 } from './fsm-hub-derivations'
 import { OperationalMeaningPanel, HeroPhase, TurnPipelineStrip, CompositeGraphPanel } from './fsm-hub-pipeline-panels'
-import { SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
+import { DwellHistogramPanel, SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
 import { MeasurementCard, InvariantsPanel, RecoveryStatePanel } from './fsm-hub-health-panels'
 
 // ── Backward-compatible re-exports ─────────────────────
@@ -35,7 +36,9 @@ import { MeasurementCard, InvariantsPanel, RecoveryStatePanel } from './fsm-hub-
 
 export type {
   CompositeObservation,
+  DwellEntry,
   HoveredSegment,
+  LaneDwell,
   OperationalInsight,
   ObservedLaneSummary,
   StateEntries,
@@ -48,6 +51,7 @@ export { displayState } from './fsm-hub-types'
 
 export {
   appendCompositeObservation,
+  deriveLaneDwellHistograms,
   deriveTransitionHistory,
   deriveTopTransitions,
   derivePhaseLog,
@@ -230,6 +234,10 @@ export function FsmHub() {
     () => deriveStateEntries(view.observations),
     [view.observations],
   )
+  const dwellHistograms = useMemo(
+    () => deriveLaneDwellHistograms(view.observations, now),
+    [view.observations, now],
+  )
   const { snapshot, loading, error, lastFetchAt } = view
 
   return html`
@@ -284,6 +292,11 @@ export function FsmHub() {
             hoveredSegment=${hoveredSegment}
             onHoverSegment=${setHoveredSegment}
           />
+        <//>
+
+        ${/* ── Zone 3c: Dwell Time Histogram (collapsible) ── */ ''}
+        <${CollapsibleZone} id="dwell-histogram" title="상태 체류 시간" defaultOpen=${true}>
+          <${DwellHistogramPanel} histograms=${dwellHistograms} hoveredSegment=${hoveredSegment} />
         <//>
 
         ${/* ── Zone 4: Health Grid (collapsible) ── */ ''}

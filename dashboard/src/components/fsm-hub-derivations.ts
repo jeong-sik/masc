@@ -2,6 +2,8 @@ import type { KeeperCompositeSnapshot } from '../api/keeper'
 
 import {
   type CompositeObservation,
+  type DwellEntry,
+  type LaneDwell,
   type LaneKey,
   type StateEntries,
   type SwimlaneSegment,
@@ -257,4 +259,49 @@ export function deriveSwimlaneSegments(
   const tail = segments[segments.length - 1]
   if (tail && boundsEnd > tail.to) tail.to = boundsEnd
   return segments
+}
+
+/** Per-lane dwell histogram. For each sub-FSM lane, sums the time spent in
+    every observed state value across the in-memory observation buffer.
+    [boundsEnd] (typically `Date.now() / 1000`) extends the trailing
+    segment so the *current* state's dwell reflects "how long has it been
+    held" instead of "interval between last two observations".
+
+    Output: lanes in [TRANSITION_FIELDS] order, entries sorted by dwell
+    desc. Empty observation buffer → empty array. */
+export function deriveLaneDwellHistograms(
+  observations: CompositeObservation[],
+  boundsEnd: number,
+): LaneDwell[] {
+  if (observations.length === 0) return []
+  const result: LaneDwell[] = []
+  for (const { field, key } of TRANSITION_FIELDS) {
+    const segments = deriveSwimlaneSegments(observations, key, boundsEnd)
+    const dwellByValue = new Map<string, number>()
+    let total = 0
+    for (const seg of segments) {
+      const seconds = Math.max(0, seg.to - seg.from)
+      if (seconds === 0) continue
+      dwellByValue.set(seg.value, (dwellByValue.get(seg.value) ?? 0) + seconds)
+      total += seconds
+    }
+    const entries: DwellEntry[] = Array.from(dwellByValue.entries())
+      .map(([value, seconds]) => ({
+        value,
+        seconds,
+        pct: total > 0 ? (seconds / total) * 100 : 0,
+      }))
+      .sort((a, b) => {
+        if (b.seconds !== a.seconds) return b.seconds - a.seconds
+        return a.value.localeCompare(b.value)
+      })
+    if (entries.length === 0) continue
+    result.push({
+      field,
+      laneKey: key,
+      totalSeconds: total,
+      entries,
+    })
+  }
+  return result
 }

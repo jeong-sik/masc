@@ -70,7 +70,7 @@ let core_discovery_tools =
       Keeper Board_comment; Keeper Board_vote; Keeper Board_list;
       (* Shell + VCS *)
       Keeper Shell;
-      Keeper Pr_workflow; Keeper Pr_submit;
+      Keeper Pr_workflow;
       Keeper Preflight_check;
       (* Review *)
       Keeper Pr_review_read; Keeper Pr_review_comment; Keeper Pr_review_reply;
@@ -287,7 +287,7 @@ let is_main_worktree_boundary_exempt_with_input
     | Some (Masc Code_edit) | Some (Masc Code_write)
     | Some (Masc Code_delete) | Some (Masc Code_shell)
     | Some (Masc Code_git) | Some (Masc Worktree_create)
-    | Some (Keeper Pr_submit) | Some (Keeper Fs_edit) -> true
+    | Some (Keeper Fs_edit) -> true
     | _ -> false
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

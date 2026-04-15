@@ -362,7 +362,7 @@ let handle_keeper_pr_workflow
           [ "ok", `Bool !step_ok
           ; "deprecated", `Bool true
           ; "migration_hint", `String
-              "Use masc_worktree_create + masc_code_write/masc_code_edit + keeper_pr_submit for multi-file changes."
+              "Use masc_worktree_create + masc_code_write/masc_code_edit + masc_code_git + keeper_shell op=gh for normal PR work."
           ; "steps", `String (Buffer.contents steps)
           ; "pr_url", `String !pr_url
           ; "error", `String !step_error
@@ -370,4 +370,3 @@ let handle_keeper_pr_workflow
           ])
         )
 ;;
-

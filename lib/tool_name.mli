@@ -29,7 +29,6 @@ module Keeper : sig
     | Pr_review_comment
     | Pr_review_read
     | Pr_review_reply
-    | Pr_submit
     | Pr_workflow
     | Preflight_check
     | Shell

@@ -390,7 +390,8 @@ let rec skip_git_global_options = function
     a sandboxed cwd by default, but explicit cwd overrides still need this
     guard. Redirect checkout/switch/branch mutations to a sandboxed PR lane:
     either keeper_pr_workflow for the legacy one-shot worktree helper, or a
-    playground/explicit worktree flow that later submits with keeper_pr_submit.
+    playground/explicit worktree flow that later pushes and opens a PR via
+    keeper_shell op=gh.
 
     Handles tab-separated tokens, global git options like [-C dir], and real
     branch mutation forms (create, rename, copy). Allows read-only listing. *)

@@ -65,6 +65,13 @@ val extract_gh_target_number :
 val gh_mutates_entity :
   string -> entity_kind option
 
+(** Deterministic safety classifier for destructive or credential-sensitive
+    gh CLI commands. Ignores leading global flags like [--repo owner/name]
+    before matching the command shape. Returns the canonical blocked pattern
+    when [cmd] matches one of the blocked forms. *)
+val gh_dangerous_command :
+  string -> string option
+
 (* ---- Repo slug + flag utilities ------------------------------- *)
 
 val with_keeper_gh_env : Room.config -> string -> string

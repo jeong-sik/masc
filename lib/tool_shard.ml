@@ -333,7 +333,7 @@ For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
   {
     name = "keeper_pr_workflow";
     description = "Legacy one-shot worktree PR helper: creates a temporary repo worktree, writes one file, commits, pushes, and opens a draft PR. \
-It is not the playground-clone path. Prefer keeper_pr_submit after editing in a playground clone or explicit worktree. \
+It is not the playground-clone path. Prefer masc_worktree_create + masc_code_edit/masc_code_write + masc_code_git + keeper_shell op=gh for normal PR work. \
 Provide all 5 required params: branch, file_path, file_content, commit_message, pr_title. \
 Example: branch='fix/typo', file_path='lib/foo.ml', file_content='let x = 1', \
 commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delivery preset.";
@@ -349,31 +349,6 @@ commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delive
         ("base_branch", `Assoc [("type", `String "string"); ("description", `String "Base branch to target (default: main)")]);
       ]);
       ("required", `List [`String "branch"; `String "file_path"; `String "file_content"; `String "commit_message"; `String "pr_title"]);
-    ];
-  };
-]
-
-(** Keeper PR submit — multi-file commit + push + draft PR creation.
-    Supersedes keeper_pr_workflow for multi-file changes. *)
-let keeper_pr_submit_tools : Types.tool_schema list = [
-  {
-    name = "keeper_pr_submit";
-    description = "Canonical submit step for a playground clone or repo worktree: commit staged changes with keeper identity, push, and open a draft PR. \
-Works in any worktree or playground repos directory. \
-Provide cwd (worktree path), commit_message, pr_title. \
-Optional: pr_body, base_branch (default: main), draft (default: true), files (array, default: git add -A).";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Working directory — must be inside .worktrees/ or .masc/playground/")]);
-        ("commit_message", `Assoc [("type", `String "string"); ("description", `String "Git commit message")]);
-        ("pr_title", `Assoc [("type", `String "string"); ("description", `String "Pull request title")]);
-        ("pr_body", `Assoc [("type", `String "string"); ("description", `String "PR description (defaults to pr_title)")]);
-        ("base_branch", `Assoc [("type", `String "string"); ("description", `String "Target branch (default: main)")]);
-        ("draft", `Assoc [("type", `String "boolean"); ("description", `String "Open as draft PR (default: true)")]);
-        ("files", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Specific files to stage (default: git add -A)")]);
-      ]);
-      ("required", `List [`String "cwd"; `String "commit_message"; `String "pr_title"]);
     ];
   };
 ]

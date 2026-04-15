@@ -226,6 +226,30 @@ let test_input_aware_mutation_detection () =
     true
     (has_side_effect ~tool_name:"masc_code_git" ~input:(mk_action "commit"))
 
+let test_dangerous_gh_command_classifier () =
+  let open Keeper_gh_shared in
+  let cases =
+    [
+      ("repo delete owner/repo", Some "repo delete");
+      ("--repo owner/repo repo delete owner/repo", Some "repo delete");
+      ("-R owner/repo repo archive owner/repo", Some "repo archive");
+      ("--hostname github.example.com repo transfer owner/repo", Some "repo transfer");
+      ("auth logout", Some "auth logout");
+      ("AUTH TOKEN", Some "auth token");
+      ("secret set MY_SECRET", Some "secret set");
+      ("ssh-key delete 123", Some "ssh-key delete");
+      ("pr merge 123", None);
+      ("repo view owner/repo", None);
+      ("issue comment 42 --body ok", None);
+    ]
+  in
+  List.iter (fun (cmd, expected) ->
+    Alcotest.(check (option string))
+      (Printf.sprintf "dangerous classifier: %s" cmd)
+      expected
+      (gh_dangerous_command cmd)
+  ) cases
+
 let test_tool_call_observer_receives_keeper_context () =
   let seen = ref None in
   let observer ~keeper_name ~tool_name ~input ~success =
@@ -378,6 +402,8 @@ let () =
             test_api_via_args;
           Alcotest.test_case "input-aware mutation detection" `Quick
             test_input_aware_mutation_detection;
+          Alcotest.test_case "dangerous gh classifier" `Quick
+            test_dangerous_gh_command_classifier;
           Alcotest.test_case "tool observer receives keeper context" `Quick
             test_tool_call_observer_receives_keeper_context;
           Alcotest.test_case "task claim mutating but boundary exempt" `Quick

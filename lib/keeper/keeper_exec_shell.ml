@@ -1,5 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
+open Keeper_gh_shared
 
 (** Shell operation timeout constants.
     - [io_timeout_sec]: commands that may block on network/disk I/O
@@ -1014,21 +1015,7 @@ let handle_keeper_shell
       error_json ~fields:[ "op", `String op ]
         "cmd is required for gh op. Good: cmd='pr list --state open'. Bad: cmd=''."
     else
-      let gh_dangerous_prefixes =
-        [ "repo delete"; "repo archive"; "repo transfer"
-        ; "auth logout"; "auth token"
-        ; "secret set"; "secret delete"
-        ; "ssh-key delete"
-        ]
-      in
-      let cmd_lower = String.lowercase_ascii cmd_str in
-      let blocked_prefix =
-        List.find_opt (fun prefix ->
-          String.length cmd_lower >= String.length prefix
-          && String.sub cmd_lower 0 (String.length prefix) = prefix
-        ) gh_dangerous_prefixes
-      in
-      (match blocked_prefix with
+      (match gh_dangerous_command cmd_str with
       | Some pat ->
         Yojson.Safe.to_string
           (`Assoc

@@ -108,9 +108,6 @@ val coding_tools : Types.tool_schema list
     keeper_shell with op=gh provides GitHub CLI access.
     Not in default shards. *)
 
-val keeper_pr_submit_tools : Types.tool_schema list
-(** Multi-file PR submit tool schema. *)
-
 val keeper_preflight_tools : Types.tool_schema list
 (** Pre-flight validation tool schema. *)
 

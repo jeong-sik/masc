@@ -639,9 +639,9 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
   check bool "playground is default coding workspace" true
     (contains_substring prompt "default coding workspace");
   check bool "pr workflow deprecated" true
-    (contains_substring prompt "Do NOT use keeper_pr_workflow");
-  check bool "pr submit marked canonical" true
-    (contains_substring prompt "`keeper_pr_submit` is the canonical submit step")
+    (contains_substring prompt "Do NOT use `keeper_pr_workflow`");
+  check bool "gh pr create path documented" true
+    (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft")
 
 let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
@@ -669,9 +669,9 @@ let test_system_prompt_prefers_submit_over_legacy_workflow () =
       ~instructions:""
       ()
   in
-  check bool "mentions pr submit" true
+  check bool "mentions gh create path" true
     (contains_substring sys
-       "keeper_pr_submit (submit staged changes from a playground clone or repo worktree)");
+       "keeper_shell op=gh (PR/issues via gh CLI; after masc_code_git push");
   check bool "marks pr workflow as legacy helper" true
     (contains_substring sys
        "keeper_pr_workflow (legacy one-shot worktree helper)")

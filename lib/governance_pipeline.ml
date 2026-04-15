@@ -74,7 +74,6 @@ let capability_classification : (string * capability_class list) list = [
   ("keeper_library_read",      [Sensitive_access]);
   (* State modification *)
   ("keeper_fs_edit",           [State_modification]);
-  ("keeper_pr_workflow",       [State_modification]);
 ]
 
 let tool_capabilities name =
@@ -293,8 +292,7 @@ let baseline_risk ~tool_name ~input =
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
-  | "keeper_fs_edit" | "keeper_write"
-  | "keeper_pr_workflow" -> true
+  | "keeper_fs_edit" | "keeper_write" -> true
   | "keeper_shell" ->
     (* keeper_shell is mutating only when op=gh AND the gh command mutates *)
     Keeper_tool_registry.is_shell_gh_op input

@@ -45,9 +45,10 @@ let core_always_tools =
     selection accuracy for small models):
     - Removed from core: keeper_time_now (trivial, shell fallback),
       keeper_tasks_audit (admin), keeper_board_delete (admin #4309),
-      keeper_board_cleanup (admin), keeper_bash (redundant with
-      keeper_shell op=bash).
+      keeper_board_cleanup (admin).
     - keeper_tools_list moved from core_always to discoverable.
+    - keeper_bash stays visible because it is the write-side git path
+      after removing legacy PR wrappers.
     - 26 → 20 tools.  9B tool selection accuracy improves with fewer
       choices (vLLM Semantic Router research: k=3-5 optimal for 7-9B).
 
@@ -70,7 +71,7 @@ let core_discovery_tools =
       Keeper Board_comment; Keeper Board_vote; Keeper Board_list;
       (* Shell + VCS *)
       Keeper Shell;
-      Keeper Pr_workflow;
+      Keeper Bash;
       Keeper Preflight_check;
       (* Review *)
       Keeper Pr_review_read; Keeper Pr_review_comment; Keeper Pr_review_reply;

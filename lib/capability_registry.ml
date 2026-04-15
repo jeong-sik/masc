@@ -174,7 +174,7 @@ let privileged_public_tool_names : string list =
 
 let privileged_keeper_tool_names : string list =
   [ "keeper_bash"; "keeper_fs_edit";
-    "keeper_pr_workflow"; "masc_worktree_create" ]
+    "masc_worktree_create" ]
 
 (* Derived from Tool_catalog_surfaces.keeper_internal_replacement (SSOT).
    Returns the masc_* backend name for aliased tools, identity otherwise. *)

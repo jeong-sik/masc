@@ -330,27 +330,6 @@ For read-only ops use keeper_shell, for file edits use keeper_fs_edit.";
       ("required", `List [`String "cmd"]);
     ];
   };
-  {
-    name = "keeper_pr_workflow";
-    description = "Legacy one-shot worktree PR helper: creates a temporary repo worktree, writes one file, commits, pushes, and opens a draft PR. \
-It is not the playground-clone path. Prefer masc_worktree_create + masc_code_edit/masc_code_write + masc_code_git + keeper_shell op=gh for normal PR work. \
-Provide all 5 required params: branch, file_path, file_content, commit_message, pr_title. \
-Example: branch='fix/typo', file_path='lib/foo.ml', file_content='let x = 1', \
-commit_message='fix typo', pr_title='Fix typo in foo'. Requires coding or delivery preset.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("branch", `Assoc [("type", `String "string"); ("description", `String "Branch name for the PR (e.g. fix/changelog-unreleased)")]);
-        ("file_path", `Assoc [("type", `String "string"); ("description", `String "File path to create or overwrite, relative to repo root")]);
-        ("file_content", `Assoc [("type", `String "string"); ("description", `String "Full file content to write")]);
-        ("commit_message", `Assoc [("type", `String "string"); ("description", `String "Git commit message")]);
-        ("pr_title", `Assoc [("type", `String "string"); ("description", `String "PR title")]);
-        ("pr_body", `Assoc [("type", `String "string"); ("description", `String "PR body/description (optional, defaults to pr_title)")]);
-        ("base_branch", `Assoc [("type", `String "string"); ("description", `String "Base branch to target (default: main)")]);
-      ]);
-      ("required", `List [`String "branch"; `String "file_path"; `String "file_content"; `String "commit_message"; `String "pr_title"]);
-    ];
-  };
 ]
 
 (** Pre-flight validation for keeper autonomous work. *)

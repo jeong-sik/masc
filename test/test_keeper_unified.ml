@@ -638,10 +638,12 @@ let test_capabilities_prompt_distinguishes_playground_and_worktree () =
     (contains_substring prompt ".masc/playground/");
   check bool "playground is default coding workspace" true
     (contains_substring prompt "default coding workspace");
-  check bool "pr workflow deprecated" true
-    (contains_substring prompt "Do NOT use `keeper_pr_workflow`");
+  check bool "git path documented via keeper_bash" true
+    (contains_substring prompt "keeper_bash cmd='git status'");
   check bool "gh pr create path documented" true
-    (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft")
+    (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");
+  check bool "legacy pr workflow removed from prompt" false
+    (contains_substring prompt "keeper_pr_workflow")
 
 let test_world_prompt_distinguishes_playground_and_worktree () =
   let prompt = Prompt_registry.get_prompt "keeper.world" in
@@ -656,7 +658,7 @@ let test_world_prompt_distinguishes_playground_and_worktree () =
     (contains_substring prompt
        ".masc/playground/{your-name}/repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
 
-let test_system_prompt_prefers_submit_over_legacy_workflow () =
+let test_system_prompt_prefers_bash_and_gh_pr_lane () =
   let sys =
     Masc_mcp.Keeper_prompt.build_keeper_system_prompt
       ~goal:"test goal"
@@ -669,12 +671,14 @@ let test_system_prompt_prefers_submit_over_legacy_workflow () =
       ~instructions:""
       ()
   in
+  check bool "mentions git path via keeper_bash" true
+    (contains_substring sys
+       "keeper_bash (run commands, including git add/commit/push inside worktrees)");
   check bool "mentions gh create path" true
     (contains_substring sys
-       "keeper_shell op=gh (PR/issues via gh CLI; after masc_code_git push");
-  check bool "marks pr workflow as legacy helper" true
-    (contains_substring sys
-       "keeper_pr_workflow (legacy one-shot worktree helper)")
+       "keeper_shell op=gh (PR/issues via gh CLI; after git push");
+  check bool "legacy pr workflow removed" false
+    (contains_substring sys "keeper_pr_workflow")
 
 let test_prompt_includes_autonomous_trigger_section () =
   let meta =
@@ -2785,7 +2789,7 @@ let () =
           test_case "world prompt distinguishes playground and worktree" `Quick
             test_world_prompt_distinguishes_playground_and_worktree;
           test_case "prefers submit over legacy workflow" `Quick
-            test_system_prompt_prefers_submit_over_legacy_workflow;
+            test_system_prompt_prefers_bash_and_gh_pr_lane;
           test_case "includes autonomous trigger section" `Quick
             test_prompt_includes_autonomous_trigger_section;
           test_case "omits autonomous trigger for reactive turn" `Quick

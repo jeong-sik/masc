@@ -30,7 +30,6 @@ module Keeper = struct
     | Pr_review_comment
     | Pr_review_read
     | Pr_review_reply
-    | Pr_workflow
     | Preflight_check
     | Shell
     | Stay_silent
@@ -77,7 +76,6 @@ module Keeper = struct
     | Pr_review_comment -> "keeper_pr_review_comment"
     | Pr_review_read -> "keeper_pr_review_read"
     | Pr_review_reply -> "keeper_pr_review_reply"
-    | Pr_workflow -> "keeper_pr_workflow"
     | Preflight_check -> "keeper_preflight_check"
     | Shell -> "keeper_shell"
     | Stay_silent -> "keeper_stay_silent"
@@ -124,7 +122,6 @@ module Keeper = struct
     | "keeper_pr_review_comment" -> Some Pr_review_comment
     | "keeper_pr_review_read" -> Some Pr_review_read
     | "keeper_pr_review_reply" -> Some Pr_review_reply
-    | "keeper_pr_workflow" -> Some Pr_workflow
     | "keeper_preflight_check" -> Some Preflight_check
     | "keeper_shell" -> Some Shell
     | "keeper_stay_silent" -> Some Stay_silent

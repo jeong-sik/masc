@@ -191,16 +191,9 @@ let test_coding_preset_has_keeper_bash () =
   check bool "has keeper_shell" true
     (has_tool "keeper_shell" tools)
 
-let test_pr_schema_descriptions_prefer_gh_cli_lane () =
-  let workflow_desc =
-    match raw_schema_by_name "keeper_pr_workflow" with
-    | Some schema -> schema.description
-    | None -> fail "keeper_pr_workflow schema missing"
-  in
-  check bool "workflow is legacy" true
-    (String_util.contains_substring workflow_desc "Legacy one-shot worktree PR helper");
-  check bool "workflow points to gh lane" true
-    (String_util.contains_substring workflow_desc "keeper_shell op=gh");
+let test_legacy_pr_schemas_removed () =
+  check bool "workflow schema removed" true
+    (raw_schema_by_name "keeper_pr_workflow" = None);
   check bool "submit schema removed" true
     (raw_schema_by_name "keeper_pr_submit" = None)
 
@@ -937,6 +930,6 @@ let () =
     ]);
     ("pr_lane_wording", [
       test_case "schema descriptions distinguish workflow lanes" `Quick
-        test_pr_schema_descriptions_prefer_gh_cli_lane;
+        test_legacy_pr_schemas_removed;
     ]);
   ]

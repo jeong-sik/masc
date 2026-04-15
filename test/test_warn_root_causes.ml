@@ -39,9 +39,12 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
     (fun name -> Hashtbl.mem allowed_set name)
     Keeper_tool_registry.core_discovery_tools
 
-(* Write/VCS tools that require coding/delivery/full presets *)
-let write_vcs_tools =
-  [ "keeper_fs_edit"; "keeper_pr_workflow" ]
+(* Direct write tools require coding/delivery/full presets. *)
+let write_only_tools = [ "keeper_fs_edit" ]
+
+(* keeper_bash stays visible across presets for read-only shell usage.
+   Mutating shell commands are gated separately by shell_write_presets. *)
+let shell_bridge_tools = [ "keeper_bash" ]
 
 (* ── Test 1: Core discovery tools respect preset ──────────────── *)
 
@@ -52,17 +55,21 @@ let test_core_tools_filtered_by_research_preset () =
       tool_access = Preset { preset = Research; also_allow = [] };
       tool_denylist = [] }
   in
-  (* Precondition: write/VCS tools ARE in unfiltered core *)
+  (* Precondition: direct write tools ARE in unfiltered core *)
   List.iter (fun t ->
     if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
       fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
-  ) write_vcs_tools;
+  ) write_only_tools;
   let filtered = filter_core_by_preset meta in
-  (* Write/VCS tools must NOT survive preset filter *)
+  (* Direct write tools must NOT survive preset filter. *)
   List.iter (fun t ->
     if List.mem t filtered then
       fail (Printf.sprintf "%s should be excluded for research preset" t)
-  ) write_vcs_tools;
+  ) write_only_tools;
+  List.iter (fun t ->
+    if not (List.mem t filtered) then
+      fail (Printf.sprintf "%s should stay visible for read-only shell use" t)
+  ) shell_bridge_tools;
   (* Core always-tools must survive *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
@@ -91,7 +98,7 @@ let test_core_tools_include_write_for_coding_preset () =
   List.iter (fun t ->
     if not (List.mem t filtered) then
       fail (Printf.sprintf "%s should be included for coding preset" t)
-  ) write_vcs_tools
+  ) (write_only_tools @ shell_bridge_tools)
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
@@ -160,11 +167,11 @@ let () =
     [
       ( "allowlist_preset_filter",
         [
-          test_case "research preset excludes write/VCS tools" `Quick
+          test_case "research preset excludes direct write tools" `Quick
             test_core_tools_filtered_by_research_preset;
-          test_case "social preset excludes write/VCS tools" `Quick
+          test_case "social preset excludes direct write tools" `Quick
             test_core_tools_filtered_by_social_preset;
-          test_case "coding preset includes write/VCS tools" `Quick
+          test_case "coding preset includes shell + write tools" `Quick
             test_core_tools_include_write_for_coding_preset;
         ] );
       ( "atomic_agent_json",

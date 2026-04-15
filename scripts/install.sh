@@ -93,7 +93,10 @@ DEST="$PREFIX/masc-mcp"
 
 SKIP_DL=0
 if [ -e "$DEST" ] && [ "$FORCE" -eq 0 ]; then
-  if existing_ver=$("$DEST" --version 2>/dev/null | tail -n1); then
+  # The pipeline `... | tail -n1` masks the binary's own exit status, so
+  # ask the binary directly first, then capture its output.
+  if "$DEST" --version >/dev/null 2>&1; then
+    existing_ver=$("$DEST" --version 2>/dev/null | tail -n1)
     if [ "$existing_ver" = "${VERSION#v}" ]; then
       log "already at $VERSION ($DEST), skipping download"
       SKIP_DL=1

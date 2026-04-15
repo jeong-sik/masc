@@ -36,7 +36,6 @@
    cascade_model_resolve
    cascade_throttle
    cancellation
-   channel_gate
    gate_keeper_backend
    config
    config_doctor

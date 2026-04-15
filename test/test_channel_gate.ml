@@ -1,5 +1,4 @@
 open Alcotest
-open Masc_mcp
 
 let make_message ?(content = "hello") ?(keeper_name = "luna")
     ?(channel_user_id = "user-1") ?(idempotency_key = "key-1") () =

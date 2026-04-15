@@ -42,12 +42,16 @@ async function loadOverview() {
   vi.doMock('../../observatory-store', () => ({
     topActiveAgents,
   }))
-  vi.doMock('../../store', () => ({
-    shellMetaCognition,
-    shellConfigResolution,
-    shellRuntimeResolution,
-    serverStatus,
-  }))
+  vi.doMock('../../store', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../store')>()
+    return {
+      ...actual,
+      shellMetaCognition,
+      shellConfigResolution,
+      shellRuntimeResolution,
+      serverStatus,
+    }
+  })
   vi.doMock('../../sse', () => ({
     journal: [],
     connected,

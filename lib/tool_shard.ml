@@ -354,45 +354,55 @@ let keeper_pr_review_tools : Types.tool_schema list = [
   {
     name = "keeper_pr_review_read";
     description = "Read PR metadata, diff, reviews, and comments. \
-Returns title, body, changed files, review threads, and truncated diff (max 64KB). Read-only.";
+Returns title, body, changed files, review threads, and truncated diff (max 64KB). Read-only. \
+Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name)")]);
-        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number")]);
+        ("pr_number", `Assoc [("type", `String "integer"); ("description", `String "PR number (preferred field name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number (legacy alias for pr_number)")]);
       ]);
-      ("required", `List [`String "repo"; `String "number"]);
+      (* No `required` for the number — the handler reads either
+         pr_number or number and emits a clear error if both are
+         missing. Schema-level required=[number] rejected callers
+         that learned the historical pr_number key. *)
+      ("required", `List [`String "repo"]);
     ];
   };
   {
     name = "keeper_pr_review_comment";
     description = "Submit a PR review with optional inline comments. \
-Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires delivery or coding preset.";
+Events: COMMENT, APPROVE, REQUEST_CHANGES. Requires delivery or coding preset. \
+Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name)")]);
-        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number")]);
+        ("pr_number", `Assoc [("type", `String "integer"); ("description", `String "PR number (preferred field name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number (legacy alias for pr_number)")]);
         ("body", `Assoc [("type", `String "string"); ("description", `String "Review body text")]);
         ("event", `Assoc [("type", `String "string"); ("enum", `List [`String "COMMENT"; `String "APPROVE"; `String "REQUEST_CHANGES"]); ("description", `String "Review event type")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "File path for inline comment (optional)")]);
         ("line", `Assoc [("type", `String "integer"); ("description", `String "Line number for inline comment (optional)")]);
       ]);
-      ("required", `List [`String "repo"; `String "number"; `String "body"; `String "event"]);
+      ("required", `List [`String "repo"; `String "body"; `String "event"]);
     ];
   };
   {
     name = "keeper_pr_review_reply";
-    description = "Reply to a specific PR review comment. Requires delivery or coding preset.";
+    description = "Reply to a specific PR review comment. Requires delivery or coding preset. \
+Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("repo", `Assoc [("type", `String "string"); ("description", `String "GitHub repo (owner/name)")]);
-        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number")]);
+        ("pr_number", `Assoc [("type", `String "integer"); ("description", `String "PR number (preferred field name)")]);
+        ("number", `Assoc [("type", `String "integer"); ("description", `String "PR number (legacy alias for pr_number)")]);
         ("comment_id", `Assoc [("type", `String "integer"); ("description", `String "Comment ID to reply to")]);
         ("body", `Assoc [("type", `String "string"); ("description", `String "Reply body text")]);
       ]);
-      ("required", `List [`String "repo"; `String "number"; `String "comment_id"; `String "body"]);
+      ("required", `List [`String "repo"; `String "comment_id"; `String "body"]);
     ];
   };
 ]

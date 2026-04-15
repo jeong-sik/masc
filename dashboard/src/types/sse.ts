@@ -9,6 +9,13 @@ export type SSEEventType =
   | 'masc/board_post'
   | 'board_comment'
   | 'masc/board_comment'
+  | 'board_delete'
+  | 'masc/board_delete'
+  // Path A board events (notifications/board envelope, unwrapped to params.type)
+  | 'post_created'
+  | 'comment_added'
+  | 'post_voted'
+  | 'comment_voted'
   | 'heartbeat'
   | 'keeper_heartbeat'
   | 'keeper_handoff'
@@ -73,7 +80,12 @@ export interface SSEEvent {
   task_id?: string
   status?: string
   post_id?: string
+  comment_id?: string
+  title?: string
   author?: string
+  voter?: string
+  direction?: 'up' | 'down' | string
+  hearth?: string
   agent_name?: string
   keeper_name?: string
   event_type?: string
@@ -134,6 +146,7 @@ export type JournalEventType =
   | 'board_post'
   | 'board_comment'
   | 'board_delete'
+  | 'board_vote'
   | 'keeper_heartbeat'
   | 'keeper_handoff'
   | 'keeper_compaction'

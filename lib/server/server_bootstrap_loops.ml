@@ -99,11 +99,16 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = match event with
-      | Board_dispatch.Post_created { post_id; author; title; hearth; _ } ->
+      | Board_dispatch.Post_created { post_id; author; title; content; hearth } ->
+          let preview =
+            if String.length content > 200 then String.sub content 0 200
+            else content
+          in
           let base = [("type", `String "post_created");
                       ("post_id", `String post_id);
                       ("author", `String author);
-                      ("title", `String title)] in
+                      ("title", `String title);
+                      ("content", `String preview)] in
           `Assoc (match hearth with
                   | Some h -> ("hearth", `String h) :: base
                   | None -> base)

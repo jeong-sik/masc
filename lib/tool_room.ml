@@ -437,7 +437,7 @@ let check_assertion st assertion =
   let (passed, fix_hint) = match assertion with
     | "namespace_ready" | "room_set" ->
         (st.room_set,
-         "Call masc_start with your project root path. masc_set_room remains only as a compatibility alias.")
+         "Call masc_start with your project root path.")
     | "joined" ->
         (st.joined,
          "Call masc_join to register your agent in the project namespace")

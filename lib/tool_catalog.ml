@@ -171,9 +171,6 @@ let explicit_metadata : (string * metadata) list =
       { default_metadata with required_permission = Some Types.CanOpenPortal } );
     ( "masc_portal_send",
       { default_metadata with required_permission = Some Types.CanSendPortal } );
-    ( "masc_set_room",
-      hidden_active ~canonical_name:"masc_start" ~replacement:"masc_start"
-        "Compatibility alias that only selects the project coordination root. Prefer masc_start for truthful namespace onboarding." );
     ( "masc_room_status",
       hidden_active ~canonical_name:"masc_status" ~replacement:"masc_status"
         "Managed-agent compatibility alias. Prefer masc_status for canonical namespace state reads." );
@@ -260,7 +257,7 @@ let register_metadata name (meta : metadata) =
 (* ================================================================ *)
 
 (* Delegate to surfaces sub-module *)
-let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_set
+let keeper_internal_set = Tool_catalog_surfaces.keeper_internal_tools
 
 let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
 

@@ -16,73 +16,48 @@
 (* ================================================================ *)
 
 let keeper_internal_tools =
-  [
-    (* keeper_read removed: dead alias for keeper_fs_read with no schema.
-       Dispatch still accepts it for backward compat. See #4120. *)
-    "keeper_stay_silent";
-    "keeper_fs_read";
-    "keeper_fs_edit";
-    "keeper_memory_search";
-    "keeper_library_search";
-    "keeper_library_read";
-    "keeper_time_now";
-    "keeper_tools_list";
-    "keeper_context_status";
-    "keeper_tasks_list";
-    "keeper_tasks_audit";
-    "keeper_task_claim";
-    "keeper_task_create";
-    "keeper_task_done";
-    "keeper_task_force_release";
-    "keeper_task_force_done";
-    "keeper_broadcast";
-    "keeper_board_get";
-    "keeper_board_post";
-    "keeper_board_list";
-    "keeper_board_comment";
-    "keeper_board_vote";
-    "keeper_board_stats";
-    "keeper_board_search";
-    (* keeper_board_delete removed from default shard in #4309.
-       Dispatch still accepts it for backward compat. *)
-    "keeper_shell";
-    "keeper_bash";
-    "keeper_pr_workflow";
-    "keeper_voice_speak";
-    (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
-       counterpart on MCP surfaces. *)
-    "keeper_voice_listen";
-    "keeper_voice_agent";
-    "keeper_voice_sessions";
-    "keeper_voice_session_start";
-    "keeper_voice_session_end";
-    (* Tool discovery *)
-    "keeper_tool_search";
-    (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
-       a regular tool — does not need a keeper shard entry.
-       keeper_unified: cascade name, not a tool. *)
-  ]
+  (* keeper_read removed: dead alias for keeper_fs_read with no schema.
+     Dispatch still accepts it for backward compat. See #4120.
+     keeper_board_delete removed from default shard in #4309.
+     keeper_deliberation_decision: Agent_sdk.Structured result schema, not
+     a regular tool — does not need a keeper shard entry.
+     keeper_unified: cascade name, not a tool. *)
+  List.map Tool_name.to_string
+    Tool_name.[
+      Keeper Stay_silent; Keeper Fs_read; Keeper Fs_edit;
+      Keeper Memory_search; Keeper Library_search; Keeper Library_read;
+      Keeper Time_now; Keeper Tools_list; Keeper Context_status;
+      Keeper Tasks_list; Keeper Tasks_audit;
+      Keeper Task_claim; Keeper Task_create; Keeper Task_done;
+      Keeper Task_force_release; Keeper Task_force_done;
+      Keeper Broadcast;
+      Keeper Board_get; Keeper Board_post; Keeper Board_list;
+      Keeper Board_comment; Keeper Board_vote;
+      Keeper Board_stats; Keeper Board_search;
+      Keeper Shell; Keeper Bash; Keeper Pr_workflow;
+      Keeper Voice_speak;
+      (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
+         counterpart on MCP surfaces. *)
+      Keeper Voice_listen;
+      Keeper Voice_agent; Keeper Voice_sessions;
+      Keeper Voice_session_start; Keeper Voice_session_end;
+      (* Tool discovery *)
+      Keeper Tool_search;
+    ]
 
-(** Immutable alias for keeper-internal tool name membership tests.
-    Replaced mutable Hashtbl with plain list — membership via List.mem
-    is O(n) but the list is <50 elements, so the overhead is negligible. *)
-let keeper_internal_set : string list = keeper_internal_tools
-
-let keeper_internal_replacement = function
-  | "keeper_board_get" -> Some "masc_board_get"
-  | "keeper_board_post" -> Some "masc_board_post"
-  | "keeper_board_list" -> Some "masc_board_list"
-  | "keeper_board_comment" -> Some "masc_board_comment"
-  | "keeper_board_vote" -> Some "masc_board_vote"
-  | "keeper_board_stats" -> Some "masc_board_stats"
-  | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_voice_speak"
-  | "keeper_voice_agent"
-  | "keeper_voice_sessions"
-  | "keeper_voice_session_start"
-  | "keeper_voice_session_end" -> None
-  | "keeper_tasks_list" -> Some "masc_tasks"
-  | "keeper_broadcast" -> Some "masc_broadcast"
+(* keeper_voice_* tools have no masc_* counterpart — default None. *)
+let keeper_internal_replacement name =
+  let open Tool_name in
+  match of_string name with
+  | Some (Keeper Board_get) -> Some (to_string (Masc Board_get))
+  | Some (Keeper Board_post) -> Some (to_string (Masc Board_post))
+  | Some (Keeper Board_list) -> Some (to_string (Masc Board_list))
+  | Some (Keeper Board_comment) -> Some (to_string (Masc Board_comment))
+  | Some (Keeper Board_vote) -> Some (to_string (Masc Board_vote))
+  | Some (Keeper Board_stats) -> Some (to_string (Masc Board_stats))
+  | Some (Keeper Board_search) -> Some (to_string (Masc Board_search))
+  | Some (Keeper Tasks_list) -> Some (to_string (Masc Tasks))
+  | Some (Keeper Broadcast) -> Some (to_string (Masc Broadcast))
   | _ -> None
 
 (* ================================================================ *)
@@ -92,8 +67,8 @@ let keeper_internal_replacement = function
 (** Tools that mutate the workspace filesystem. Canonical list shared by
     cdal_contract_bridge.ml and contract_risk.ml. *)
 let workspace_mutating_tool_names =
-  [ "keeper_fs_edit"; "keeper_write";
-    "create_text_file"; "edit_text_file"; "file_write" ]
+  List.map Tool_name.to_string Tool_name.[ Keeper Fs_edit; Keeper Write ]
+  @ [ "edit_text_file"; "file_write" ] (* external/worker tool names *)
 
 (* ================================================================ *)
 (* Surface type + canonical lists                                   *)
@@ -110,117 +85,121 @@ type surface =
   | System_internal
 
 let public_mcp_surface_tools =
-  [
-    (* Room lifecycle *)
-    "masc_start"; "masc_join"; "masc_leave"; "masc_status";
-    (* Messaging *)
-    "masc_broadcast"; "masc_messages"; "masc_who";
-    (* Task coordination *)
-    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
-    "masc_claim_next"; "masc_transition";
-    (* Planning *)
-    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    (* Heartbeat *)
-    "masc_heartbeat";
-    (* Keeper interaction *)
-    "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reset";
-    "masc_keeper_down";
-    "masc_persona_list";
-    (* Board *)
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote";
-    (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card";
-    (* Utility *)
-    "masc_tool_help"; "masc_web_search"; "masc_check";
-    (* Board extended *)
-    "masc_board_comment_vote";
-    (* Agent discovery *)
-    "masc_agent_timeline";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      (* Room lifecycle *)
+      Masc Start; Masc Join; Masc Leave; Masc Status;
+      (* Messaging *)
+      Masc Broadcast; Masc Messages; Masc Who;
+      (* Task coordination *)
+      Masc Add_task; Masc Batch_add_tasks; Masc Tasks;
+      Masc Claim_next; Masc Transition;
+      (* Planning *)
+      Masc Plan_init; Masc Plan_get; Masc Plan_set_task; Masc Plan_update;
+      (* Heartbeat *)
+      Masc Heartbeat;
+      (* Keeper interaction — most go through Masc_keeper module;
+         masc_keeper_msg_result is a Masc-level result delivery. *)
+      Masc_keeper Msg; Masc Keeper_msg_result;
+      Masc_keeper List; Masc_keeper Status;
+      Masc_keeper Up; Masc_keeper Repair; Masc_keeper Reset;
+      Masc_keeper Down;
+      Masc Persona_list;
+      (* Board *)
+      Masc Board_post; Masc Board_list; Masc Board_get;
+      Masc Board_comment; Masc Board_vote;
+      (* Agent discovery *)
+      Masc Agents; Masc Dashboard; Masc Agent_card;
+      (* Utility *)
+      Masc Tool_help; Masc Web_search; Masc Check;
+      (* Board extended *)
+      Masc Board_comment_vote;
+      (* Agent discovery *)
+      Masc Agent_timeline;
+    ]
 
 let spawned_agent_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
-    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
-    "masc_messages";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_board_list"; "masc_board_post"; "masc_board_comment";
-    "masc_board_vote"; "masc_board_get";
-    "masc_tool_help"; "masc_web_search";
-    "masc_spawn";
-    (* Phase 2: surface SSOT *)
-    "masc_code_delete"; "masc_code_edit"; "masc_code_git";
-    "masc_code_shell"; "masc_code_write";
-    "masc_deliver";
-    "masc_plan_clear_task"; "masc_plan_get_task";
-    "masc_update_priority";
-    "masc_workflow_guide";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status; Masc Tasks; Masc Claim_next; Masc Transition;
+      Masc Task_history; Masc Broadcast; Masc Join; Masc Leave;
+      Masc Who; Masc Agent_update; Masc Add_task; Masc Heartbeat;
+      Masc Messages;
+      Masc Worktree_create; Masc Worktree_remove; Masc Worktree_list;
+      Masc Board_list; Masc Board_post; Masc Board_comment;
+      Masc Board_vote; Masc Board_get;
+      Masc Tool_help; Masc Web_search;
+      Masc Spawn;
+      (* Phase 2: surface SSOT *)
+      Masc Code_delete; Masc Code_edit; Masc Code_git;
+      Masc Code_shell; Masc Code_write;
+      Masc Deliver;
+      Masc Plan_clear_task; Masc Plan_get_task;
+      Masc Update_priority;
+      Masc Workflow_guide;
+    ]
 
 let local_worker_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_add_task"; "masc_heartbeat";
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_search";
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status; Masc Tasks; Masc Claim_next; Masc Transition;
+      Masc Add_task; Masc Heartbeat;
+      Masc Board_post; Masc Board_list; Masc Board_get;
+      Masc Board_comment; Masc Board_vote; Masc Board_search;
+      Masc Code_search; Masc Code_symbols; Masc Code_read;
+      Masc Worktree_create; Masc Worktree_remove; Masc Worktree_list;
+      Masc Run_init; Masc Run_plan; Masc Run_log;
+      Masc Run_deliverable; Masc Run_get; Masc Run_list;
+    ]
 
 let session_min_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next";
-    "masc_plan_set_task"; "masc_transition"; "masc_add_task";
-    "masc_broadcast"; "masc_heartbeat";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status; Masc Tasks; Masc Claim_next;
+      Masc Plan_set_task; Masc Transition; Masc Add_task;
+      Masc Broadcast; Masc Heartbeat;
+    ]
 
 let admin_surface_tools =
-  [
-    "masc_autoresearch_cycle"; "masc_autoresearch_inject";
-    "masc_autoresearch_start"; "masc_autoresearch_stop";
-    "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
-    "masc_tool_admin_snapshot";
-    "masc_config";
-    (* Phase 2: surface SSOT *)
-    "masc_keeper_create_from_persona"; "masc_keeper_reset";
-    "masc_pause"; "masc_resume";
-    "masc_runtime_ollama_probe"; "masc_tool_list";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Autoresearch_cycle; Masc Autoresearch_inject;
+      Masc Autoresearch_start; Masc Autoresearch_stop;
+      Masc Tool_admin_update; Masc Tool_grant; Masc Tool_revoke;
+      Masc Tool_admin_snapshot;
+      Masc Config;
+      (* Phase 2: surface SSOT *)
+      Masc_keeper Create_from_persona; Masc_keeper Reset;
+      Masc Pause; Masc Resume;
+      Masc Runtime_ollama_probe; Masc Tool_list;
+    ]
 
-let keeper_internal_surface_tools = keeper_internal_tools
 
 let keeper_denied_surface_tools =
-  [
-    "masc_reset";
-    "masc_spawn";
-  ]
+  List.map Tool_name.to_string Tool_name.[ Masc Reset; Masc Spawn ]
 
 let system_internal_surface_tools =
-  [
-    (* MCP protocol internals *)
-    "masc_mcp_session";
-    (* Session lifecycle — auto-called *)
-    "masc_reset";
-    (* Maintenance *)
-    "masc_cleanup_zombies"; "masc_gc";
-    (* Agent evaluation — system loop *)
-    "masc_agent_fitness";
-    (* Internal monitoring *)
-    "masc_autoresearch_status";
-    "masc_tool_stats"; "masc_surface_audit";
-    (* Phase 2 addition *)
-    "masc_get_metrics";
-    (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
-    "masc_webrtc_offer"; "masc_webrtc_answer";
-    (* Library tools *)
-    "masc_library_add"; "masc_library_list"; "masc_library_promote";
-    "masc_library_read"; "masc_library_search";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      (* MCP protocol internals *)
+      Masc Mcp_session;
+      (* Session lifecycle — auto-called *)
+      Masc Reset;
+      (* Maintenance *)
+      Masc Cleanup_zombies; Masc Gc;
+      (* Agent evaluation — system loop *)
+      Masc Agent_fitness;
+      (* Internal monitoring *)
+      Masc Autoresearch_status;
+      Masc Tool_stats; Masc Surface_audit;
+      (* Phase 2 addition *)
+      Masc Get_metrics;
+      (* WebRTC signaling — deprecated as MCP tools but used as HTTP endpoints *)
+      Masc Webrtc_offer; Masc Webrtc_answer;
+      (* Library tools *)
+      Masc Library_add; Masc Library_list; Masc Library_promote;
+      Masc Library_read; Masc Library_search;
+    ]
 
 (* ================================================================ *)
 (* Role catalogs — curated subsets for agent role assignment.        *)
@@ -230,41 +209,43 @@ let system_internal_surface_tools =
 (* ================================================================ *)
 
 let coordination_role_tools : string list =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_add_task";
-    "masc_broadcast";
-    "masc_join";
-    "masc_leave";
-    "masc_who";
-    "masc_heartbeat";
-    "masc_messages";
-    "masc_board_list";
-    "masc_board_post";
-    "masc_board_comment";
-    "masc_board_vote";
-    "masc_board_get";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_spawn";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status;
+      Masc Tasks;
+      Masc Add_task;
+      Masc Broadcast;
+      Masc Join;
+      Masc Leave;
+      Masc Who;
+      Masc Heartbeat;
+      Masc Messages;
+      Masc Board_list;
+      Masc Board_post;
+      Masc Board_comment;
+      Masc Board_vote;
+      Masc Board_get;
+      Masc Claim_next;
+      Masc Transition;
+      Masc Spawn;
+    ]
 
 let execution_role_tools : string list =
-  [
-    "masc_heartbeat";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_broadcast";
-    "masc_code_search";
-    "masc_code_symbols";
-    "masc_code_read";
-    "masc_run_init";
-    "masc_run_log";
-    "masc_run_deliverable";
-    "masc_run_get";
-    "masc_tool_help";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Heartbeat;
+      Masc Claim_next;
+      Masc Transition;
+      Masc Broadcast;
+      Masc Code_search;
+      Masc Code_symbols;
+      Masc Code_read;
+      Masc Run_init;
+      Masc Run_log;
+      Masc Run_deliverable;
+      Masc Run_get;
+      Masc Tool_help;
+    ]
 
 (* ================================================================ *)
 (* Surface query functions                                          *)
@@ -276,7 +257,7 @@ let tools_for_surface = function
   | Local_worker -> local_worker_surface_tools
   | Session_min -> session_min_surface_tools
   | Admin -> admin_surface_tools
-  | Keeper_internal -> keeper_internal_surface_tools
+  | Keeper_internal -> keeper_internal_tools
   | Keeper_denied -> keeper_denied_surface_tools
   | System_internal -> system_internal_surface_tools
 

@@ -720,13 +720,14 @@ let list_persona_summaries () : persona_summary list =
     with Sys_error _ -> []
   in
   (* Collect all persona (name, path) from all dirs; later dirs override *)
-  let seen = Hashtbl.create 32 in
+  let module SS = Set.Make (String) in
+  let raw = dirs |> List.concat_map entries_from_dir in
   let all_entries =
-    dirs
-    |> List.concat_map entries_from_dir
-    |> List.filter (fun (name, _) ->
-           if Hashtbl.mem seen name then false
-           else (Hashtbl.add seen name (); true))
+    List.fold_left (fun (acc, seen) (name, path) ->
+      if SS.mem name seen then (acc, seen)
+      else ((name, path) :: acc, SS.add name seen))
+      ([], SS.empty) raw
+    |> fun (acc, _) -> List.rev acc
   in
   all_entries
   |> List.filter_map (fun (name, path) -> load_persona_summary_from_path name path)

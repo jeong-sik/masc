@@ -910,7 +910,7 @@ let keeper_config_json (config : Room.config) (name : string)
                Some (`Preset (Keeper_types.tool_preset_to_string preset))
              | None -> None)
         in
-        let turn_outcome : [`Ok | `Failed | `Blocked] option =
+        let turn_outcome : [`Ok | `Failed] option =
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
             Some `Failed

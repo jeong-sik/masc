@@ -655,8 +655,21 @@ export interface Keeper {
   tool_audit_source?: string | null
   tool_audit_at?: string | null
   turn_budget?: {
-    reactive: { value: number; source: 'override' | 'env' }
-    scheduled_autonomous: { value: number; source: 'override' | 'env' }
+    reactive: {
+      value: number
+      source: 'override' | 'env'
+      env_default: number
+      env_var: string
+    }
+    scheduled_autonomous: {
+      value: number
+      source: 'override' | 'env'
+      env_default: number
+      env_var: string
+    }
+    manifest_path: string | null
+    clamp_min: number
+    clamp_max: number
   } | null
   conversation_tail_count?: number
   k2k_count?: number

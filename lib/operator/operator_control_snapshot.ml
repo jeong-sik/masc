@@ -446,6 +446,14 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                             Keeper_types_profile.load_keeper_profile_defaults
                               meta.name
                           in
+                          let env_reactive =
+                            Env_config_keeper.KeeperKeepalive
+                            .oas_max_turns_per_call
+                          in
+                          let env_autonomous =
+                            Env_config_keeper.KeeperKeepalive
+                            .oas_max_turns_per_call_scheduled_autonomous
+                          in
                           let reactive_effective =
                             Keeper_types_profile.effective_max_turns_per_call
                               profile
@@ -467,6 +475,11 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                             | Some n when n >= 1 && n <= 50 -> "override"
                             | _ -> "env"
                           in
+                          let manifest_path_json =
+                            match profile.manifest_path with
+                            | Some p -> `String p
+                            | None -> `Null
+                          in
                           `Assoc
                             [
                               ( "reactive",
@@ -474,13 +487,25 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                                   [
                                     ("value", `Int reactive_effective);
                                     ("source", `String reactive_source);
+                                    ("env_default", `Int env_reactive);
+                                    ( "env_var",
+                                      `String
+                                        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" );
                                   ] );
                               ( "scheduled_autonomous",
                                 `Assoc
                                   [
                                     ("value", `Int autonomous_effective);
                                     ("source", `String autonomous_source);
+                                    ("env_default", `Int env_autonomous);
+                                    ( "env_var",
+                                      `String
+                                        "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
+                                    );
                                   ] );
+                              ("manifest_path", manifest_path_json);
+                              ("clamp_min", `Int 1);
+                              ("clamp_max", `Int 50);
                             ]));
                        ("last_proactive_reason",
                          string_option_to_json

@@ -106,17 +106,25 @@ export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number
 
 function normalizeTurnBudget(raw: unknown): Keeper['turn_budget'] {
   if (!isRecord(raw)) return null
-  const readSlot = (v: unknown): { value: number; source: 'override' | 'env' } | null => {
+  const readSlot = (v: unknown) => {
     if (!isRecord(v)) return null
     const value = asNumber(v.value)
     if (value == null) return null
-    const source = v.source === 'override' ? 'override' : 'env'
-    return { value, source }
+    const source: 'override' | 'env' = v.source === 'override' ? 'override' : 'env'
+    const envDefault = asNumber(v.env_default) ?? value
+    const envVar = asString(v.env_var) ?? ''
+    return { value, source, env_default: envDefault, env_var: envVar }
   }
   const reactive = readSlot(raw.reactive)
   const scheduled = readSlot(raw.scheduled_autonomous)
   if (!reactive || !scheduled) return null
-  return { reactive, scheduled_autonomous: scheduled }
+  return {
+    reactive,
+    scheduled_autonomous: scheduled,
+    manifest_path: asString(raw.manifest_path) ?? null,
+    clamp_min: asNumber(raw.clamp_min) ?? 1,
+    clamp_max: asNumber(raw.clamp_max) ?? 50,
+  }
 }
 
 function normalizePromptSegments(

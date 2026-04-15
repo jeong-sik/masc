@@ -160,26 +160,55 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
 
 // ── Turn Budget ──────────────────────────────────────────
 
-function BudgetRow({ label, value, source, usage }: {
-  label: string
+interface BudgetSlot {
   value: number
   source: 'override' | 'env'
-  usage?: string
+  env_default: number
+  env_var: string
+}
+
+function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { min: number; max: number }): string {
+  const lines: string[] = []
+  if (slot.source === 'override') {
+    lines.push(`Source: TOML override`)
+    if (manifest) lines.push(`File:   ${manifest}`)
+    lines.push(`Value:  ${slot.value}  (env default was ${slot.env_default})`)
+  } else {
+    lines.push(`Source: env default`)
+    lines.push(`Env:    ${slot.env_var} = ${slot.value}`)
+    lines.push(`Note:   no override in TOML`)
+  }
+  lines.push(`Range:  [${clamp.min}, ${clamp.max}]`)
+  return lines.join('\n')
+}
+
+function BudgetRow({ label, slot, manifest, clamp }: {
+  label: string
+  slot: BudgetSlot
+  manifest: string | null
+  clamp: { min: number; max: number }
 }) {
-  const isOverride = source === 'override'
+  const isOverride = slot.source === 'override'
+  const delta = slot.value - slot.env_default
+  const deltaText = delta === 0
+    ? null
+    : delta > 0
+      ? `+${delta} vs env`
+      : `${delta} vs env`
+
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
       <span class="text-xs text-[var(--text-muted)]">${label}</span>
       <div class="flex items-center gap-2">
-        ${usage ? html`<span class="text-[10px] text-[var(--text-muted)] tabular-nums">${usage}</span>` : null}
+        ${isOverride && deltaText
+          ? html`<span class="text-[10px] text-[var(--text-muted)] tabular-nums">${deltaText}</span>`
+          : null}
         <span
           class="text-xs font-medium tabular-nums ${isOverride
-            ? 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/50 underline-offset-4'
-            : 'text-[var(--text-muted)]'}"
-          title=${isOverride
-            ? `Override: config/keepers/<name>.toml 에 설정됨`
-            : `Env default: MASC_KEEPER_OAS_MAX_TURNS_PER_CALL${label.includes('자율') ? '_SCHEDULED_AUTONOMOUS' : ''}`}
-        >${value}</span>
+            ? 'text-[var(--text-strong)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
+            : 'text-[var(--text-muted)] cursor-help'}"
+          title=${buildBudgetTooltip(slot, manifest, clamp)}
+        >${slot.value}</span>
         ${isOverride
           ? html`<span class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">override</span>`
           : html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-[var(--text-muted)]">env</span>`}
@@ -198,13 +227,10 @@ export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
     `
   }
 
-  const turnCount = typeof keeper.turn_count === 'number' ? keeper.turn_count : null
-  const reactiveUsage =
-    turnCount != null ? `${turnCount}/${budget.reactive.value}` : undefined
-
   const hasOverride =
     budget.reactive.source === 'override' ||
     budget.scheduled_autonomous.source === 'override'
+  const clamp = { min: budget.clamp_min, max: budget.clamp_max }
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -214,22 +240,24 @@ export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
         </span>
         ${hasOverride
           ? html`<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300">drift</span>`
-          : null}
+          : html`<span class="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-emerald-400">inherited</span>`}
       </div>
       <${BudgetRow}
         label="반응형 (reactive)"
-        value=${budget.reactive.value}
-        source=${budget.reactive.source}
-        usage=${reactiveUsage}
+        slot=${budget.reactive}
+        manifest=${budget.manifest_path}
+        clamp=${clamp}
       />
       <${BudgetRow}
         label="예약 자율 (scheduled autonomous)"
-        value=${budget.scheduled_autonomous.value}
-        source=${budget.scheduled_autonomous.source}
+        slot=${budget.scheduled_autonomous}
+        manifest=${budget.manifest_path}
+        clamp=${clamp}
       />
       <span class="text-[11px] text-[var(--text-muted)] leading-snug mt-1">
-        반응형은 보드/멘션 반응 턴, 예약 자율은 idle cycle 턴 예산입니다.
-        Override는 TOML에서 재정의된 값이고, env는 전역 기본값 상속입니다.
+        반응형 = 보드/멘션 반응 턴 예산, 예약 자율 = idle cycle 턴 예산.
+        값에 마우스를 올리면 source path와 env default 비교가 tooltip으로 나타납니다.
+        실제 소비 진행(turn_count/budget)은 현재 backend에 노출되지 않아 표시하지 않습니다.
       </span>
     </div>
   `

@@ -10,7 +10,9 @@ import {
   deriveSwimlaneSegments,
   deriveTimeAxisTicks,
   deriveTransitionHistory,
+  isTransitionInSegment,
   type CompositeObservation,
+  type HoveredSegment,
 } from './fsm-hub'
 
 function observation(
@@ -325,5 +327,31 @@ describe('deriveTimeAxisTicks', () => {
       expect(tick.ts).toBeGreaterThan(100)
       expect(tick.ts).toBeLessThanOrEqual(200)
     }
+  })
+})
+
+describe('isTransitionInSegment', () => {
+  const segKSM: HoveredSegment = { field: 'KSM', laneKey: 'phase', from: 100, to: 200, value: 'Running' }
+
+  it('returns false when no segment is hovered', () => {
+    expect(isTransitionInSegment({ ts: 150, field: 'KSM' }, null)).toBe(false)
+  })
+
+  it('returns false when fields disagree', () => {
+    expect(isTransitionInSegment({ ts: 150, field: 'KTC' }, segKSM)).toBe(false)
+  })
+
+  it('includes the segment start and end inclusively', () => {
+    expect(isTransitionInSegment({ ts: 100, field: 'KSM' }, segKSM)).toBe(true)
+    expect(isTransitionInSegment({ ts: 200, field: 'KSM' }, segKSM)).toBe(true)
+  })
+
+  it('excludes ts outside the segment window', () => {
+    expect(isTransitionInSegment({ ts: 99, field: 'KSM' }, segKSM)).toBe(false)
+    expect(isTransitionInSegment({ ts: 201, field: 'KSM' }, segKSM)).toBe(false)
+  })
+
+  it('returns true for a field+ts that overlap the hovered segment', () => {
+    expect(isTransitionInSegment({ ts: 150, field: 'KSM' }, segKSM)).toBe(true)
   })
 })

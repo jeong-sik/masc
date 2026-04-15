@@ -8,6 +8,7 @@ import {
 import { fetchGateKeepers } from '../api/gate'
 import { keepers } from '../store'
 import { compositeTick } from '../composite-signals'
+import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { EmptyState } from './common/empty-state'
 
 import {
@@ -234,26 +235,15 @@ export function FsmHub() {
     })()
   }, [activeSelected, shouldRefetchForTick, pollTick])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined
-    const handler = (ev: KeyboardEvent) => {
-      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
-      const target = ev.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-        if (target.isContentEditable) return
-      }
-      if (ev.key < '1' || ev.key > '9') return
+  useGlobalShortcut(
+    (ev) => ev.key >= '1' && ev.key <= '9',
+    (ev) => {
       const idx = ev.key.charCodeAt(0) - '1'.charCodeAt(0)
-      const target_name = keeperNames[idx]
-      if (!target_name) return
-      ev.preventDefault()
-      setSelected(target_name)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [keeperNames])
+      const name = keeperNames[idx]
+      if (name) setSelected(name)
+    },
+    [keeperNames],
+  )
 
   const view = useMemo(
     () =>

@@ -58,6 +58,9 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
     return 'A healthy provider path or manual reconcile must clear Failing before Running can resume.'
   }
+  if (snapshot.phase === 'Overflowed') {
+    return 'Context overflow must resolve through compaction or explicit operator clearance before the lifecycle can settle.'
+  }
   if (snapshot.phase === 'Compacting' || snapshot.compaction.stage === 'compacting') {
     return 'KMC should reach done and then KSM should hand control back to Running.'
   }
@@ -66,6 +69,9 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   }
   if (snapshot.phase === 'Draining') {
     return 'Draining should complete before the lifecycle settles into Stopped.'
+  }
+  if (snapshot.phase === 'Stable') {
+    return 'The lifecycle is outside the active turn cycle; the next meaningful edge should come from a new live turn or operator action.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
     return 'The blocked turn should finalize back to idle without entering cascade/tool execution.'
@@ -184,7 +190,7 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Restarting') {
+  if (snapshot.phase === 'Overflowed' || snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Stable') {
     return {
       tone: 'warn',
       headline: `${snapshot.phase} is the active lifecycle edge`,

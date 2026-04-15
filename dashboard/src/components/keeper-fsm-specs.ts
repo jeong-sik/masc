@@ -178,7 +178,7 @@ export function buildCascadeSpec(params: CascadeParams): FsmGraphSpec {
 // sub-FSMs is captured by the invariants panel, not the graph edges.
 
 export interface CompositeFsmParams {
-  phase: string            // KSM — keeper lifecycle (11 phases, we show a reduced set)
+  phase: string            // KSM — Running | Failing | Overflowed | Compacting | HandingOff | Draining | Stable
   turnPhase: string        // KTC — idle | prompting | executing | compacting | finalizing
   decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected
   cascadeState: string     // KCL — idle | selecting | trying | done | exhausted
@@ -186,8 +186,7 @@ export interface CompositeFsmParams {
 }
 
 const KSM_STATES = [
-  'Offline', 'Running', 'Failing', 'Compacting', 'HandingOff',
-  'Paused', 'Stopped', 'Crashed', 'Dead',
+  'Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Stable',
 ]
 const KTC_STATES = ['idle', 'prompting', 'executing', 'compacting', 'finalizing']
 const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selected']

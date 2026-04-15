@@ -100,16 +100,12 @@ export function OperationalMeaningPanel({
 
 const PHASE_BAR_FILL: Record<string, string> = {
   Running: '#22c55e',
+  Overflowed: '#fb923c',
   Compacting: '#f59e0b',
   HandingOff: '#a78bfa',
   Failing: '#ef4444',
-  Crashed: '#ef4444',
   Draining: '#fbbf24',
-  Restarting: '#60a5fa',
-  Offline: '#52525b',
-  Paused: '#52525b',
-  Stopped: '#52525b',
-  Dead: '#27272a',
+  Stable: '#71717a',
 }
 
 function PhaseSparkline({
@@ -190,16 +186,12 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   accumulating: 'Collecting messages; context not yet full',
   // KSM (Phase) — used in Hero
   Running: 'Keeper is actively running turns',
+  Overflowed: 'Prompt context exceeded the current budget before compaction resolved it',
   Compacting: 'Compacting context to reclaim token budget',
   HandingOff: 'Transferring state to the next generation',
   Failing: 'Experiencing errors, will retry or recover',
-  Crashed: 'Unrecoverable error — needs operator intervention',
-  Offline: 'Not started or explicitly shut down',
-  Paused: 'Temporarily paused by operator',
-  Stopped: 'Gracefully stopped',
   Draining: 'Finishing current work before shutdown',
-  Restarting: 'Shutting down and restarting',
-  Dead: 'Permanently terminated',
+  Stable: 'Outside the active turn cycle; idle terminal or quiescent parent phases collapse here',
 }
 
 export function HeroPhase({
@@ -228,13 +220,11 @@ export function HeroPhase({
 
   const phaseColor: Record<string, string> = {
     Running: 'text-emerald-400',
+    Overflowed: 'text-orange-400',
     Compacting: 'text-amber-400',
     HandingOff: 'text-violet-400',
     Failing: 'text-red-400',
-    Crashed: 'text-red-500',
-    Offline: 'text-[var(--text-dim)]',
-    Paused: 'text-[var(--text-dim)]',
-    Stopped: 'text-[var(--text-dim)]',
+    Stable: 'text-[var(--text-dim)]',
   }
   const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null

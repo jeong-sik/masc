@@ -24,16 +24,15 @@ import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { deriveStateEntries, deriveSwimlaneSegments } from './fsm-hub'
 
-/** Server-shaped keeper composite snapshot matching the actual
-    `/api/v1/keepers/:name/composite` response observed from a live
-    MASC v0.8.0 server on 2026-04-15. If the server changes this
-    shape, the parse should fail here, not silently produce undefined
-    in the swimlane. */
+/** Server-shaped keeper composite snapshot matching the projected
+    RFC-0003/TLA-aligned `/api/v1/keepers/:name/composite` response.
+    If the server changes this shape, the parse should fail here,
+    not silently produce undefined in the swimlane. */
 const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   correlation_id: '10510-64f79d602ce6c-60c',
   run_id: 'r-1776233076-0',
   ts: 1776235685.221697,
-  phase: 'running',
+  phase: 'Running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   cascade: { state: 'idle' },
@@ -124,7 +123,7 @@ describe('FSM Hub integration — API response shape', () => {
 
     it('deriveStateEntries returns a structure when given real-shape data', () => {
       const obs1 = obsFromSnapshot(REAL_COMPOSITE_SHAPE, 100)
-      const obs2 = { ...obs1, ts: 110, phase: 'compacting' }
+      const obs2 = { ...obs1, ts: 110, phase: 'Compacting' }
       const entries = deriveStateEntries([obs1, obs2])
       expect(entries).not.toBeNull()
       expect(entries?.phase).toBe(110) // phase transitioned at ts=110

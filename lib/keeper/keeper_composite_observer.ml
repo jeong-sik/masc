@@ -1,29 +1,72 @@
 (** Composite observer — pure projection. See [.mli] for contract. *)
 
+type ksm_phase =
+  | Ksm_running
+  | Ksm_failing
+  | Ksm_overflowed
+  | Ksm_compacting
+  | Ksm_handing_off
+  | Ksm_draining
+  | Ksm_stable
+
+let all_ksm_phases =
+  [
+    Ksm_running;
+    Ksm_failing;
+    Ksm_overflowed;
+    Ksm_compacting;
+    Ksm_handing_off;
+    Ksm_draining;
+    Ksm_stable;
+  ]
+
 type turn_phase =
-  [ `Idle
-  | `Prompting
-  | `Executing
-  | `Compacting
-  | `Finalizing ]
+  | Turn_idle
+  | Turn_prompting
+  | Turn_executing
+  | Turn_compacting
+  | Turn_finalizing
+
+let all_turn_phases =
+  [ Turn_idle; Turn_prompting; Turn_executing; Turn_compacting; Turn_finalizing ]
 
 type decision_stage =
-  [ `Undecided
-  | `Guard_ok
-  | `Gate_rejected
-  | `Tool_policy_selected ]
+  | Decision_undecided
+  | Decision_guard_ok
+  | Decision_gate_rejected
+  | Decision_tool_policy_selected
+
+let all_decision_stages =
+  [
+    Decision_undecided;
+    Decision_guard_ok;
+    Decision_gate_rejected;
+    Decision_tool_policy_selected;
+  ]
 
 type cascade_state =
-  [ `Idle
-  | `Selecting
-  | `Trying
-  | `Done
-  | `Exhausted ]
+  | Cascade_idle
+  | Cascade_selecting
+  | Cascade_trying
+  | Cascade_done
+  | Cascade_exhausted
+
+let all_cascade_states =
+  [
+    Cascade_idle;
+    Cascade_selecting;
+    Cascade_trying;
+    Cascade_done;
+    Cascade_exhausted;
+  ]
 
 type compaction_stage =
-  [ `Accumulating
-  | `Compacting
-  | `Done ]
+  | Compaction_accumulating
+  | Compaction_compacting
+  | Compaction_done
+
+let all_compaction_stages =
+  [ Compaction_accumulating; Compaction_compacting; Compaction_done ]
 
 type invariants_check = {
   phase_turn_alignment : bool;
@@ -41,7 +84,7 @@ type snapshot = {
   correlation_id : string;
   run_id : string;
   ts : float;
-  ksm_phase : Keeper_state_machine.phase;
+  ksm_phase : ksm_phase;
   ktc_turn_phase : turn_phase;
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
@@ -52,30 +95,78 @@ type snapshot = {
   last_outcome : last_outcome option;
 }
 
+let ksm_phase_to_string = function
+  | Ksm_running -> "Running"
+  | Ksm_failing -> "Failing"
+  | Ksm_overflowed -> "Overflowed"
+  | Ksm_compacting -> "Compacting"
+  | Ksm_handing_off -> "HandingOff"
+  | Ksm_draining -> "Draining"
+  | Ksm_stable -> "Stable"
+
+let ksm_phase_of_string = function
+  | "Running" -> Some Ksm_running
+  | "Failing" -> Some Ksm_failing
+  | "Overflowed" -> Some Ksm_overflowed
+  | "Compacting" -> Some Ksm_compacting
+  | "HandingOff" -> Some Ksm_handing_off
+  | "Draining" -> Some Ksm_draining
+  | "Stable" -> Some Ksm_stable
+  | _ -> None
+
 let turn_phase_to_string = function
-  | `Idle -> "idle"
-  | `Prompting -> "prompting"
-  | `Executing -> "executing"
-  | `Compacting -> "compacting"
-  | `Finalizing -> "finalizing"
+  | Turn_idle -> "idle"
+  | Turn_prompting -> "prompting"
+  | Turn_executing -> "executing"
+  | Turn_compacting -> "compacting"
+  | Turn_finalizing -> "finalizing"
+
+let turn_phase_of_string = function
+  | "idle" -> Some Turn_idle
+  | "prompting" -> Some Turn_prompting
+  | "executing" -> Some Turn_executing
+  | "compacting" -> Some Turn_compacting
+  | "finalizing" -> Some Turn_finalizing
+  | _ -> None
 
 let decision_stage_to_string = function
-  | `Undecided -> "undecided"
-  | `Guard_ok -> "guard_ok"
-  | `Gate_rejected -> "gate_rejected"
-  | `Tool_policy_selected -> "tool_policy_selected"
+  | Decision_undecided -> "undecided"
+  | Decision_guard_ok -> "guard_ok"
+  | Decision_gate_rejected -> "gate_rejected"
+  | Decision_tool_policy_selected -> "tool_policy_selected"
+
+let decision_stage_of_string = function
+  | "undecided" -> Some Decision_undecided
+  | "guard_ok" -> Some Decision_guard_ok
+  | "gate_rejected" -> Some Decision_gate_rejected
+  | "tool_policy_selected" -> Some Decision_tool_policy_selected
+  | _ -> None
 
 let cascade_state_to_string = function
-  | `Idle -> "idle"
-  | `Selecting -> "selecting"
-  | `Trying -> "trying"
-  | `Done -> "done"
-  | `Exhausted -> "exhausted"
+  | Cascade_idle -> "idle"
+  | Cascade_selecting -> "selecting"
+  | Cascade_trying -> "trying"
+  | Cascade_done -> "done"
+  | Cascade_exhausted -> "exhausted"
+
+let cascade_state_of_string = function
+  | "idle" -> Some Cascade_idle
+  | "selecting" -> Some Cascade_selecting
+  | "trying" -> Some Cascade_trying
+  | "done" -> Some Cascade_done
+  | "exhausted" -> Some Cascade_exhausted
+  | _ -> None
 
 let compaction_stage_to_string = function
-  | `Accumulating -> "accumulating"
-  | `Compacting -> "compacting"
-  | `Done -> "done"
+  | Compaction_accumulating -> "accumulating"
+  | Compaction_compacting -> "compacting"
+  | Compaction_done -> "done"
+
+let compaction_stage_of_string = function
+  | "accumulating" -> Some Compaction_accumulating
+  | "compacting" -> Some Compaction_compacting
+  | "done" -> Some Compaction_done
+  | _ -> None
 
 (* ================================================================ *)
 (* Derivation from registry entry                                   *)
@@ -96,23 +187,45 @@ let compaction_stage_to_string = function
    [mark_turn_finished]. Finer-grained breakdown
    ([Prompting]/[ToolCall]) requires Event_bus subscription and is
    tracked as Phase 2 of #7122. *)
+(* KSM projection rule from KeeperCompositeLifecycle.tla Comment A.
+
+   The observer cares only about parent phases that materially affect
+   cross-FSM ordering. Turn-external or terminal phases collapse to
+   [Ksm_stable]; [Overflowed] remains explicit because it is a distinct
+   pre-compaction lifecycle edge in both the OCaml FSM and the TLA+
+   projection. *)
+let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
+  match phase with
+  | Keeper_state_machine.Running -> Ksm_running
+  | Keeper_state_machine.Failing -> Ksm_failing
+  | Keeper_state_machine.Overflowed -> Ksm_overflowed
+  | Keeper_state_machine.Compacting -> Ksm_compacting
+  | Keeper_state_machine.HandingOff -> Ksm_handing_off
+  | Keeper_state_machine.Draining -> Ksm_draining
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Paused
+  | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Crashed
+  | Keeper_state_machine.Restarting
+  | Keeper_state_machine.Dead -> Ksm_stable
+
 let derive_turn_phase
-    (entry : Keeper_registry.registry_entry)
+    ~(ksm_phase : ksm_phase)
     ~(is_live : bool)
     : turn_phase =
-  match entry.phase with
-  | Keeper_state_machine.Compacting -> `Compacting
-  | Keeper_state_machine.HandingOff
-  | Keeper_state_machine.Draining -> `Finalizing
-  | _ -> if is_live then `Executing else `Idle
+  match ksm_phase with
+  | Ksm_compacting -> Turn_compacting
+  | Ksm_handing_off
+  | Ksm_draining -> Turn_finalizing
+  | _ -> if is_live then Turn_executing else Turn_idle
 
 (* Compaction sub-FSM: compaction_active is the authoritative condition.
    Phase [Compacting] MUST coincide with this condition under the
    [PhaseTurnAlignment] invariant; any drift is a safety signal. *)
 let derive_compaction_stage (conds : Keeper_state_machine.conditions)
     : compaction_stage =
-  if conds.compaction_active then `Compacting
-  else `Accumulating
+  if conds.compaction_active then Compaction_compacting
+  else Compaction_accumulating
 
 (* Decision pipeline stage.
 
@@ -133,9 +246,9 @@ let derive_decision_stage
     (conds : Keeper_state_machine.conditions)
     ~(is_live : bool)
     : decision_stage =
-  if conds.guardrail_triggered then `Gate_rejected
-  else if is_live then `Guard_ok
-  else `Undecided
+  if conds.guardrail_triggered then Decision_gate_rejected
+  else if is_live then Decision_guard_ok
+  else Decision_undecided
 
 (* Cascade state.
 
@@ -154,27 +267,27 @@ let derive_decision_stage
    [`Done`]) remains a Phase 2 follow-up (#7122) requiring Event_bus
    subscription. *)
 let derive_cascade_state ~(is_live : bool) : cascade_state =
-  if is_live then `Trying else `Idle
+  if is_live then Cascade_trying else Cascade_idle
 
 (* ================================================================ *)
 (* Invariants                                                       *)
 (* ================================================================ *)
 
 let check_phase_turn_alignment
-    (phase : Keeper_state_machine.phase)
+    (phase : ksm_phase)
     (turn_phase : turn_phase)
     : bool =
   match phase, turn_phase with
-  | Keeper_state_machine.Compacting, `Compacting -> true
-  | Keeper_state_machine.Compacting, _ -> false
-  | _, `Compacting -> false
+  | Ksm_compacting, Turn_compacting -> true
+  | Ksm_compacting, _ -> false
+  | _, Turn_compacting -> false
   | _ -> true
 
 let check_compaction_atomicity
-    (phase : Keeper_state_machine.phase)
+    (phase : ksm_phase)
     (conds : Keeper_state_machine.conditions)
     : bool =
-  let phase_is_compacting = phase = Keeper_state_machine.Compacting in
+  let phase_is_compacting = phase = Ksm_compacting in
   phase_is_compacting = conds.compaction_active
 
 (* NoCascadeBeforeMeasurement from KeeperCompositeLifecycle.tla:
@@ -191,10 +304,11 @@ let check_no_cascade_before_measurement
     ~(measurement_captured : bool)
     : bool =
   match cascade_state with
-  | `Idle -> true
-  | `Selecting | `Trying | `Done | `Exhausted -> measurement_captured
+  | Cascade_idle -> true
+  | Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted ->
+      measurement_captured
 let compute_invariants
-    ~(phase : Keeper_state_machine.phase)
+    ~(phase : ksm_phase)
     ~(conds : Keeper_state_machine.conditions)
     ~(turn_phase : turn_phase)
     ~(cascade_state : cascade_state)
@@ -245,14 +359,15 @@ let observe
   in
   let conds = entry.conditions in
   let is_live = entry.current_turn_observation <> None in
-  let turn_phase = derive_turn_phase entry ~is_live in
+  let ksm_phase = derive_ksm_phase entry.phase in
+  let turn_phase = derive_turn_phase ~ksm_phase ~is_live in
   let compaction_stage = derive_compaction_stage conds in
   let decision_stage = derive_decision_stage conds ~is_live in
   let cascade_state = derive_cascade_state ~is_live in
   let measurement_captured = entry.last_auto_rules <> None in
   let invariants =
     compute_invariants
-      ~phase:entry.phase
+      ~phase:ksm_phase
       ~conds
       ~turn_phase
       ~cascade_state
@@ -262,7 +377,7 @@ let observe
     correlation_id;
     run_id;
     ts;
-    ksm_phase = entry.phase;
+    ksm_phase;
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
@@ -319,7 +434,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "correlation_id", `String s.correlation_id;
     "run_id", `String s.run_id;
     "ts", `Float s.ts;
-    "phase", `String (Keeper_state_machine.phase_to_string s.ksm_phase);
+    "phase", `String (ksm_phase_to_string s.ksm_phase);
     "turn_phase", `String (turn_phase_to_string s.ktc_turn_phase);
     "decision", `Assoc [
       "stage", `String (decision_stage_to_string s.kdp_decision);

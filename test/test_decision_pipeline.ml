@@ -22,6 +22,84 @@ module Reg = Masc_mcp.Keeper_registry
 module Obs = Masc_mcp.Keeper_composite_observer
 module KTypes = Masc_mcp.Keeper_types
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let buf = Buffer.create 1024 in
+      (try
+         while true do
+           Buffer.add_string buf (input_line ic);
+           Buffer.add_char buf '\n'
+         done
+       with End_of_file -> ());
+      Buffer.contents buf)
+
+let extract_quoted_strings s =
+  let len = String.length s in
+  let rec loop i acc =
+    if i >= len then List.rev acc
+    else if Char.equal s.[i] '"' then
+      match String.index_from_opt s (i + 1) '"' with
+      | None -> List.rev acc
+      | Some j ->
+        let value = String.sub s (i + 1) (j - i - 1) in
+        loop (j + 1) (value :: acc)
+    else
+      loop (i + 1) acc
+  in
+  loop 0 []
+
+let extract_tla_set ~marker content =
+  let marker_len = String.length marker in
+  let rec find_marker start =
+    if start >= String.length content then None
+    else
+      match String.index_from_opt content start marker.[0] with
+      | None -> None
+      | Some i ->
+        if i + marker_len <= String.length content
+           && String.sub content i marker_len = marker
+        then Some i
+        else find_marker (i + 1)
+  in
+  match find_marker 0 with
+  | None -> Alcotest.fail ("missing marker " ^ marker)
+  | Some marker_idx ->
+    let brace_idx =
+      match String.index_from_opt content (marker_idx + marker_len) '{' with
+      | Some idx -> idx
+      | None -> Alcotest.fail ("missing opening brace after " ^ marker)
+    in
+    let close_idx =
+      match String.index_from_opt content brace_idx '}' with
+      | Some idx -> idx
+      | None -> Alcotest.fail ("missing closing brace after " ^ marker)
+    in
+    String.sub content brace_idx (close_idx - brace_idx + 1)
+    |> extract_quoted_strings
+
+let rec find_repo_root dir =
+  let candidate =
+    Filename.concat dir "specs/keeper-state-machine/KeeperCompositeLifecycle.tla"
+  in
+  if Sys.file_exists candidate then dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then
+      Alcotest.fail "could not find repo root for KeeperCompositeLifecycle.tla"
+    else
+      find_repo_root parent
+
+let project_root () =
+  find_repo_root (Sys.getcwd ())
+
+let keeper_composite_lifecycle_tla () =
+  Filename.concat
+    (project_root ())
+    "specs/keeper-state-machine/KeeperCompositeLifecycle.tla"
+
 (* ── E1: NEL Invariant ──────────────────────────────── *)
 
 let test_run_verdict_has_reasons () =
@@ -326,6 +404,32 @@ let test_observer_last_outcome_preserved_across_finish_idempotent () =
   check bool "last_outcome preserved across redundant mark_turn_finished"
     true (lo_first = lo_second)
 
+let test_composite_observer_variants_match_tla_sets () =
+  let tla = read_file (keeper_composite_lifecycle_tla ()) in
+  let check_set label expected actual =
+    check (list string) label expected actual
+  in
+  check_set
+    "PhaseSet matches observer ksm_phase variants"
+    (extract_tla_set ~marker:"PhaseSet" tla)
+    (List.map Obs.ksm_phase_to_string Obs.all_ksm_phases);
+  check_set
+    "TurnPhaseSet matches observer turn_phase variants"
+    (extract_tla_set ~marker:"TurnPhaseSet" tla)
+    (List.map Obs.turn_phase_to_string Obs.all_turn_phases);
+  check_set
+    "DecisionSet matches observer decision variants"
+    (extract_tla_set ~marker:"DecisionSet" tla)
+    (List.map Obs.decision_stage_to_string Obs.all_decision_stages);
+  check_set
+    "CascadeSet matches observer cascade variants"
+    (extract_tla_set ~marker:"CascadeSet" tla)
+    (List.map Obs.cascade_state_to_string Obs.all_cascade_states);
+  check_set
+    "CompactionSet matches observer compaction variants"
+    (extract_tla_set ~marker:"CompactionSet" tla)
+    (List.map Obs.compaction_stage_to_string Obs.all_compaction_stages)
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -372,5 +476,7 @@ let () =
       test_case "is_live = false on idle keeper" `Quick test_observer_is_live_false_when_idle;
       test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
       test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
+      test_case "variant sets match KeeperCompositeLifecycle.tla" `Quick
+        test_composite_observer_variants_match_tla_sets;
     ];
   ]

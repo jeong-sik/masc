@@ -14,11 +14,6 @@ let resolve_glm_model_id = Cascade_model_resolve.resolve_glm_model_id
 let resolve_auto_model_id = Cascade_model_resolve.resolve_auto_model_id
 let parse_custom_model = Cascade_model_resolve.parse_custom_model
 
-(* Throttle — re-exports for future migration consumers. Marked as unused
-   while some callers still depend on the consolidated Cascade_config surface. *)
-let[@warning "-32"] populate_throttle_table = Cascade_throttle.populate
-let[@warning "-32"] lookup_throttle = Cascade_throttle.lookup
-
 (* Config loader *)
 let load_json = Cascade_config_loader.load_json
 let load_profile = Cascade_config_loader.load_profile

@@ -621,41 +621,7 @@ let () = test "dispatch_tool_admin_update_auth_invalid_does_not_mutate" (fun () 
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_tool_admin_update_unit_policy" (fun () ->
-  let ctx = make_test_ctx () in
-  let define_args =
-    `Assoc
-      [
-        ("unit_id", `String "squad-admin-test");
-        ("kind", `String "squad");
-        ("label", `String "Admin Test Squad");
-        ("parent_unit_id", `String "company-runtime");
-      ]
-  in
-  ignore (Command_plane_v2.upsert_unit ctx.config ~actor:ctx.agent_name define_args);
-  let args =
-    `Assoc
-      [
-        ("section", `String "unit_policy");
-        ("unit_id", `String "squad-admin-test");
-        ( "policy",
-          `Assoc
-            [
-              ("tool_allowlist", `List [ `String "masc_board_post" ]);
-              ("model_allowlist", `List [ `String "llama:qwen3.5-35b-a3b-ud-q8-xl" ]);
-              ("approval_class", `String "guarded");
-            ] );
-      ]
-  in
-  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some (success, result) ->
-      assert success;
-      let json = parse_json result in
-      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "unit_policy");
-      let warnings = Yojson.Safe.Util.(json |> member "warnings" |> to_list) in
-      assert (List.length warnings = 2)
-  | None -> failwith "dispatch returned None"
-)
+(* dispatch_tool_admin_update_unit_policy removed (CP purge: Command_plane_v2 deleted) *)
 
 let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
   Eio_main.run @@ fun env ->

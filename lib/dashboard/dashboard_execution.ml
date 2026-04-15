@@ -172,7 +172,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       in
       Eio.Fiber.yield ();
       let command_plane_json =
-        Command_plane_v2.dashboard_projection_json config
+        `Assoc []
       in
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths

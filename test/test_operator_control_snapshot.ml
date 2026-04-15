@@ -296,32 +296,7 @@ let test_snapshot_waiters_share_inflight_result () =
       in
       Alcotest.(check bool) "healthy inflight slot not evicted" true cached_retained)
 
-let test_orchestra_room_core_shape () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "owner"));
-      ignore (Room.join config ~agent_name:"owner" ~capabilities:[] ());
-      ignore (Room.add_task config ~title:"orchestra backlog" ~priority:2 ~description:"");
-      ignore (Room.broadcast config ~from_agent:"owner" ~content:"orchestra seed");
-      let json = Command_plane_orchestra.json (operator_ctx env sw config "owner") in
-      let nodes = Yojson.Safe.Util.(json |> member "nodes" |> to_list) in
-      Alcotest.(check bool) "root node exists" true
-        (List.exists
-           (fun row ->
-             Yojson.Safe.Util.(row |> member "kind" |> to_string) = "root")
-           nodes);
-      Alcotest.(check bool) "root block present" true
-        (Yojson.Safe.Util.member "root" json <> `Null);
-      Alcotest.(check int) "session count" 0
-        Yojson.Safe.Util.(json |> member "summary" |> member "session_count" |> to_int);
-      Alcotest.(check string) "focus kind" "node"
-        Yojson.Safe.Util.(json |> member "focus" |> member "target_kind" |> to_string))
+(* test_orchestra_room_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 
 let test_digest_room_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->

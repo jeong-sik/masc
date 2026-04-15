@@ -96,11 +96,9 @@ type keeper_context = {
 type operation_context = {
   operation_id : string;
   linked_session_id : string option;
-  (** [None] when status field missing or unparseable ("unknown" in source). *)
-  status : Cp_types.operation_status option;
+  status : string option;
   stage : string option;
-  (** [None] when no detachment attached, or detachment status missing. *)
-  detachment_status : Cp_types.detachment_status option;
+  detachment_status : string option;
   objective : string option;
   updated_at : string option;
 }

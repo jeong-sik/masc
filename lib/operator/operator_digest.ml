@@ -77,7 +77,7 @@ let build_room_attention_items ?command_plane_summary config =
   let command_plane_summary =
     match command_plane_summary with
     | Some s -> s
-    | None -> Command_plane_v2.summary_json config
+    | None -> `Assoc []
   in
   let microarch_signals =
     command_plane_summary
@@ -187,11 +187,11 @@ let build_room_attention_items ?command_plane_summary config =
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items @ signal_items @ intent_items)
 
-let room_recommendations ?command_plane_summary config =
+let room_recommendations ?command_plane_summary _config =
   let command_plane_summary =
     match command_plane_summary with
     | Some s -> s
-    | None -> Command_plane_v2.summary_json config
+    | None -> `Assoc []
   in
   let microarch_signals =
     command_plane_summary
@@ -709,7 +709,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     let command_plane_digest_json =
       match command_plane_summary with
       | Some summary -> summary
-      | None -> Command_plane_v2.summary_json config
+      | None -> `Assoc []
     in
     let swarm_status_json =
       match swarm_status with

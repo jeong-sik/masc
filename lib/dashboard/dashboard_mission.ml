@@ -609,7 +609,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "command_projection" actor_name)
       ~ttl:3.0
-      (fun () -> Command_plane_v2.dashboard_projection_json config)
+      (fun () -> `Assoc [])
   in
   let digest_json =
     Dashboard_cache.get_or_compute

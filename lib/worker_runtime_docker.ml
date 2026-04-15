@@ -113,13 +113,13 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
         try Sys.remove stdin_path
         with Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-             Log.Worker.warn "failed to remove stdin tmpfile %s: %s" stdin_path
+             Log.LocalWorker.warn "failed to remove stdin tmpfile %s: %s" stdin_path
                (Printexc.to_string exn))
     | None -> ());
     (try Sys.remove stdout_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Worker.warn "failed to remove stdout tmpfile %s: %s" stdout_path (Printexc.to_string exn));
+      Log.LocalWorker.warn "failed to remove stdout tmpfile %s: %s" stdout_path (Printexc.to_string exn));
     (try Sys.remove stderr_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Worker.warn "failed to remove stderr tmpfile %s: %s" stderr_path (Printexc.to_string exn));
+      Log.LocalWorker.warn "failed to remove stderr tmpfile %s: %s" stderr_path (Printexc.to_string exn));
     { exit_code; stdout; stderr }
   in
   match wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid with
@@ -129,7 +129,7 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
   | `Timeout ->
       (try Unix.kill pid Sys.sigterm with
        | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
-       | exn -> Log.Worker.warn "sigterm pid %d: %s" pid (Printexc.to_string exn));
+       | exn -> Log.LocalWorker.warn "sigterm pid %d: %s" pid (Printexc.to_string exn));
       (match clock_opt with
       | Some clock -> Eio.Time.sleep clock 1.0
       | None -> Time_compat.sleep 1.0);
@@ -137,7 +137,7 @@ let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv 
       | 0, _ ->
           (try Unix.kill pid Sys.sigkill with
            | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
-           | exn -> Log.Worker.warn "sigkill pid %d: %s" pid (Printexc.to_string exn));
+           | exn -> Log.LocalWorker.warn "sigkill pid %d: %s" pid (Printexc.to_string exn));
           ignore (waitpid_nointr [] pid)
       | _, _ -> ());
       finalize 124

@@ -556,11 +556,8 @@ let test_transport_health_contracts () =
   check bool "transport health avoids room message scans" true
     (not
        (file_contains_pattern "lib/transport_metrics.ml"
-          {|Room.get_messages_raw_in_room|}));
-  check bool "transport health avoids command plane topology reads" true
-    (not
-       (file_contains_pattern "lib/transport_metrics.ml"
-          {|Command_plane_v2.topology_summary_json|}))
+          {|Room.get_messages_raw_in_room|}))
+  (* command plane topology reads guard removed (CP purge: Command_plane_v2 deleted) *)
 
 let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true

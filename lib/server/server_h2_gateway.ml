@@ -696,8 +696,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups
          ═══════════════════════════════════════════════════════════════════════ *)
-      | _ when Server_h2_gateway_routes_cp.dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path httpun_meth -> ()
-
       | _ when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request ~cors ~path httpun_meth -> ()
 
       (* ─────────────────────────────────────────────────────────────────────

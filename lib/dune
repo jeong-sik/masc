@@ -43,26 +43,6 @@
   channel_gate_imessage_state
    gate_protocol
    gate_keeper_backend
-   command_plane_v2
-   command_plane_orchestra
-   cp_orchestra_helpers
-   cp_orchestra_nodes
-   cp_types
-   cp_paths
-   cp_serde
-   cp_io
-   cp_tree_index
-   cp_unit
-   cp_unit_projection
-   cp_snapshot
-   cp_snapshot_section_cache
-   cp_snapshot_core
-   cp_snapshot_summaries
-   cp_cleanup
-   cp_lifecycle
-   cp_lifecycle_search
-   cp_lifecycle_intents
-   cp_lifecycle_policy
    config
    config_doctor
    config_dir_resolver
@@ -137,7 +117,6 @@
    server_h2_gateway
    server_h2_gateway_helpers
    server_h2_gateway_routes_extra
-   server_h2_gateway_routes_cp
    server_bootstrap_http
    server_bootstrap_loops
    server_base_path_diagnostics
@@ -160,8 +139,6 @@
    server_openai_compat
    web_dashboard
    credits_dashboard
-   cp_microarch_summary
-   cp_search_fabric
    repo_synthesis_benchmark
 
    inference_utils
@@ -551,9 +528,6 @@
  dashboard_http_tool_quality
  board_core
  board_votes
- cp_snapshot_core
- cp_snapshot_summaries
- cp_unit_projection
  dashboard_execution_helpers
  dashboard_execution_fixture
  dashboard_execution_sessions
@@ -566,8 +540,6 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_support
- cp_lifecycle_search
- cp_lifecycle_intents
  server_dashboard_http_cache
  dashboard_http_helpers
  dashboard_http_monitoring
@@ -693,9 +665,7 @@
   ;; godsplit-board-core: board_core decomposition
   board_core_classify
   board_core_payload
-  ;; godsplit-cp-orchestra: command_plane_orchestra decomposition
-  cp_orchestra_helpers
-  cp_orchestra_nodes)
+  )
  (libraries
    mcp_protocol
    mcp_protocol.eio

@@ -48,12 +48,7 @@ let handle_gc ctx args =
   if days_raw < 1 then
     Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
   let gc_result = Room.gc ctx.config ~days () in
-  let expired =
-    try Cp_lifecycle.check_expired_decisions ctx.config
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Misc.warn "check_expired_decisions failed: %s" (Printexc.to_string exn);
-      0
-  in
+  let expired = 0 in
   let decision_note =
     if expired > 0 then Printf.sprintf "\n⏰ Expired %d pending decision(s) past TTL" expired
     else ""

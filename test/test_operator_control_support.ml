@@ -49,15 +49,7 @@ let dispatch_keeper_exn ctx ~name ~args =
   | Some result -> result
   | None -> failwith ("keeper dispatch missing: " ^ name)
 
-let unit_update_exn config ~actor args =
-  match Command_plane_v2.unit_update_json config ~actor args with
-  | Ok _ -> ()
-  | Error message -> failwith message
-
-let start_operation_exn config ~actor args =
-  match Command_plane_v2.start_operation config ~actor args with
-  | Ok operation -> operation
-  | Error message -> failwith message
+(* unit_update_exn / start_operation_exn removed (CP purge: Command_plane_v2 deleted) *)
 
 let iso_of_unix unix_ts =
   let tm = Unix.gmtime unix_ts in
@@ -76,46 +68,4 @@ let record_operator_judgment config ~surface ~target_type ~target_id ~summary
        ~fresh_until_unix:(now_unix +. fresh_for_sec)
        ~keeper_name:"operator-judge" ())
 
-let setup_swarm_run_env config ~owner ~worker_one ~worker_two ~run_id =
-  ignore (Room.init config ~agent_name:(Some "owner"));
-  ignore (Room.join config ~agent_name:owner ~capabilities:[] ());
-  ignore (Room.join config ~agent_name:worker_one ~capabilities:[] ());
-  ignore (Room.join config ~agent_name:worker_two ~capabilities:[] ());
-  unit_update_exn config ~actor:owner
-    (`Assoc
-      [
-        ("unit_id", `String "company-main");
-        ("kind", `String "company");
-        ("label", `String "Main Company");
-        ("leader_id", `String owner);
-        ("roster", `List [ `String owner; `String worker_one; `String worker_two ]);
-      ]);
-  unit_update_exn config ~actor:owner
-    (`Assoc
-      [
-        ("unit_id", `String "platoon-alpha");
-        ("kind", `String "platoon");
-        ("label", `String "Alpha Platoon");
-        ("parent_unit_id", `String "company-main");
-        ("leader_id", `String worker_one);
-        ("roster", `List [ `String worker_one; `String worker_two ]);
-      ]);
-  let operation =
-    start_operation_exn config ~actor:owner
-      (`Assoc
-        [
-          ("assigned_unit_id", `String "company-main");
-          ("objective", `String "Operator swarm resolution test");
-          ("note", `String (Printf.sprintf "run_id=%s" run_id));
-          ("policy_class", `String "guarded");
-          ("budget_class", `String "standard");
-        ])
-  in
-  ignore
-    (match
-       Command_plane_v2.dispatch_tick_json config ~actor:owner
-         (`Assoc [ ("operation_id", `String operation.operation_id) ])
-     with
-    | Ok _ -> ()
-    | Error message -> failwith message);
-  operation
+(* setup_swarm_run_env removed (CP purge: Command_plane_v2 deleted) *)

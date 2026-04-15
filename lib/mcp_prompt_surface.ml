@@ -158,7 +158,7 @@ let execution_session_proof_text ~config:_ ~session_id ~operation_id:_ =
       Printf.sprintf "Session: %s" session_id;
     ]
 
-let command_truth_text ~config ?operation_id ?run_id () =
+let command_truth_text ~config:_ ?operation_id ?run_id () =
   let summary_json =
     match run_id with
     | Some value ->
@@ -169,10 +169,11 @@ let command_truth_text ~config ?operation_id ?run_id () =
             ("operation_id", Json_util.string_opt_to_json operation_id);
             ("traces_filtered", `Bool true);
           ]
-    | None -> Cp_snapshot.summary_json config
+    | None -> `Assoc []
   in
   let summary = summary_json |> Yojson.Safe.pretty_to_string in
-  let traces_json = Cp_snapshot.list_traces_json config ?operation_id ~limit:20 () in
+  let _ = operation_id in
+  let traces_json = `Assoc [("events", `List [])] in
   let traces =
     (match run_id with
     | Some value -> filter_traces_json_by_run_id value traces_json

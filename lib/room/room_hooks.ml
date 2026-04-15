@@ -17,24 +17,6 @@ open Types
     to avoid dependency on Activity_graph from room sub-modules. *)
 type activity_entity = { kind: string; id: string }
 
-(** CP cleanup result — mirrors Cp_cleanup.cleanup_result without
-    introducing a dependency on Cp_cleanup (which depends on Room). *)
-type cp_cleanup_result = {
-  dead_units_removed : int;
-  orphaned_units_removed : int;
-  operations_archived : int;
-  detachments_removed : int;
-  intents_removed : int;
-}
-
-let empty_cp_result = {
-  dead_units_removed = 0;
-  orphaned_units_removed = 0;
-  operations_archived = 0;
-  detachments_removed = 0;
-  intents_removed = 0;
-}
-
 (* ============================================ *)
 (* Callback refs (migrated from room_gc.ml)     *)
 (* ============================================ *)
@@ -44,13 +26,6 @@ let force_release_task_fn
   : (Room_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) ref
   = ref (fun _config ~agent_name:_ ~task_id:_ () ->
       Error (Types.TaskInvalidState "Room_hooks: force_release_task_fn not connected"))
-
-(** CP cleanup callback — avoids Room_gc → Cp_cleanup circular dep. *)
-let cp_cleanup_connected = ref false
-
-let cp_cleanup_fn
-  : (Room_utils_backend_setup.config -> cp_cleanup_result) ref
-  = ref (fun _config -> empty_cp_result)
 
 (* ============================================ *)
 (* New callback refs (Phase 4A)                 *)

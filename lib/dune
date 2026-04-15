@@ -476,6 +476,7 @@
    keeper_agent_run
    keeper_world_observation
    keeper_decision_audit
+   keeper_decision_pipeline_contract
    keeper_turn_cycle_contract
    keeper_composite_observer
    keeper_unified_prompt

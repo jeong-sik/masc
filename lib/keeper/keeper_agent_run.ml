@@ -1215,6 +1215,9 @@ let run_turn
                          | provider :: _ -> Some provider
                          | [] -> None
                        in
+                       let defaults =
+                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+                       in
                        let config_path = Oas_worker.default_config_path () in
                        (* Resolve cascade → first healthy provider. OAS 0.144.0+
                           no longer owns cascade orchestration — MASC picks one

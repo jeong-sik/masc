@@ -19,6 +19,7 @@ module DA = Masc_mcp.Keeper_decision_audit
 module TS = Masc_mcp.Tool_shard
 module KTP = Masc_mcp.Keeper_tool_policy
 module Reg = Masc_mcp.Keeper_registry
+module KDP = Masc_mcp.Keeper_decision_pipeline_contract
 module Obs = Masc_mcp.Keeper_composite_observer
 module KTC = Masc_mcp.Keeper_turn_cycle_contract
 module KTypes = Masc_mcp.Keeper_types
@@ -108,6 +109,11 @@ let keeper_turn_cycle_tla () =
   Filename.concat
     (project_root ())
     "specs/keeper-state-machine/KeeperTurnCycle.tla"
+
+let keeper_decision_pipeline_tla () =
+  Filename.concat
+    (project_root ())
+    "specs/keeper-state-machine/KeeperDecisionPipeline.tla"
 
 (* ── E1: NEL Invariant ──────────────────────────────── *)
 
@@ -376,6 +382,21 @@ let test_observer_no_stale_after_turn_end () =
     check string "post-turn keeper reverts to Idle (no stale Executing)"
       "idle" (Obs.turn_phase_to_string snap.ktc_turn_phase)
 
+let test_observer_gate_rejected_finalizes_turn () =
+  Eio_main.run @@ fun _env ->
+  let name = "obs-gate-rejected" in
+  let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
+  Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.mark_turn_gate_rejected_by_name name;
+  match Reg.get ~base_path:test_obs_bp name with
+  | None -> Alcotest.fail "entry missing after gate rejection"
+  | Some entry ->
+    let snap = Obs.observe entry in
+    check string "gate rejection moves turn to finalizing"
+      "finalizing" (Obs.turn_phase_to_string snap.ktc_turn_phase);
+    check string "gate rejection records decision stage"
+      "gate_rejected" (Obs.decision_stage_to_string snap.kdp_decision)
+
 let test_observer_finished_idempotent () =
   Eio_main.run @@ fun _env ->
   let name = "obs-idempotent" in
@@ -602,6 +623,24 @@ let test_keeper_turn_cycle_named_sets_match_tla_sets () =
     (extract_tla_set ~marker:"InvariantSet" tla)
     (List.map KTC.invariant_key_to_string KTC.all_invariant_keys)
 
+let test_keeper_decision_pipeline_named_sets_match_tla_sets () =
+  let tla = read_file (keeper_decision_pipeline_tla ()) in
+  let check_set label expected actual =
+    check (list string) label expected actual
+  in
+  check_set
+    "DecisionSet matches KDP decision variants"
+    (extract_tla_set ~marker:"DecisionSet" tla)
+    (List.map Obs.decision_stage_to_string Obs.all_decision_stages);
+  check_set
+    "ActionSet matches KDP action variants"
+    (extract_tla_set ~marker:"ActionSet" tla)
+    (List.map KDP.tla_action_to_string KDP.all_tla_actions);
+  check_set
+    "InvariantSet matches KDP invariant variants"
+    (extract_tla_set ~marker:"InvariantSet" tla)
+    (List.map KDP.invariant_key_to_string KDP.all_invariant_keys)
+
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -642,6 +681,8 @@ let () =
       test_case "Prompting at turn start" `Quick test_observer_prompting_at_turn_start;
       test_case "Executing during turn" `Quick test_observer_executing_during_turn;
       test_case "no stale Executing after turn end" `Quick test_observer_no_stale_after_turn_end;
+      test_case "gate rejection finalizes the turn" `Quick
+        test_observer_gate_rejected_finalizes_turn;
       test_case "mark_turn_finished is idempotent" `Quick test_observer_finished_idempotent;
     ];
     "composite_observer_phase_2", [
@@ -661,5 +702,7 @@ let () =
         test_composite_observer_named_sets_match_tla_sets;
       test_case "named sets match KeeperTurnCycle.tla" `Quick
         test_keeper_turn_cycle_named_sets_match_tla_sets;
+      test_case "named sets match KeeperDecisionPipeline.tla" `Quick
+        test_keeper_decision_pipeline_named_sets_match_tla_sets;
     ];
   ]

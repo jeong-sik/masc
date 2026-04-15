@@ -261,6 +261,12 @@ let repair_orphan_tool_result_messages
               | Some previous -> tool_use_ids_of_message previous
               | None -> []
             in
+            (* Anthropic validates ToolResult blocks against ToolUse blocks
+               in the immediately previous message. If checkpoint capping
+               drops that predecessor, the resumed history becomes invalid.
+               Downgrade only the orphaned structured result blocks to
+               plain text so the semantic output survives without replaying
+               provider-specific tool metadata. *)
             let has_orphan =
               List.exists
                 (function

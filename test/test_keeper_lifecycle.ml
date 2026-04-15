@@ -1068,6 +1068,58 @@ let test_load_context_repairs_orphaned_tool_result_after_cap () =
                  tool_output text
            | _ -> fail "expected downgraded text message after load cap"))
 
+let test_deserialize_context_repairs_orphan_tool_result () =
+  let ctx =
+    KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+    |> fun ctx ->
+    KEC.append ctx
+      {
+        Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+        content =
+          [
+            Agent_sdk.Types.ToolResult
+              {
+                tool_use_id = "call-orphan-json";
+                content = "";
+                is_error = false;
+                json = Some (`Assoc [ ("path", `String "README.md") ]);
+              };
+          ];
+        name = None;
+        tool_call_id = None;
+      }
+  in
+  let ctx =
+    KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
+  in
+  check (option string) "deserialized orphan tool result downgraded" None
+    (tool_result_content_for_id ~tool_use_id:"call-orphan-json" ctx.messages);
+  match List.hd ctx.messages with
+  | { Agent_sdk.Types.content = [ Agent_sdk.Types.Text text ]; _ } ->
+      check string "deserialized orphan falls back to marker when payload metadata is absent"
+        "[tool result call-orphan-json]" text
+  | _ -> fail "expected orphan tool result to degrade to text on deserialize"
+
+let test_deserialize_context_preserves_valid_tool_pair () =
+  let tool_id = "call-valid-pair" in
+  let ctx =
+    KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+    |> fun ctx ->
+    KEC.append_many ctx
+      [
+        Agent_sdk.Types.user_msg "read the file";
+        tool_use_message ~tool_use_id:tool_id ();
+        tool_result_message ~tool_use_id:tool_id "paired output";
+        Agent_sdk.Types.assistant_msg "done";
+      ]
+  in
+  let roundtrip =
+    KCC.deserialize_context (KEC.serialize_context ctx) ~max_tokens:4096
+  in
+  check (option string) "paired tool result stays structured"
+    (Some "paired output")
+    (tool_result_content_for_id ~tool_use_id:tool_id roundtrip.messages)
+
 let test_save_oas_checkpoint_strips_summarized_world_state () =
   let base_dir = temp_dir "keeper_lifecycle_save_summary_strip" in
   Fun.protect
@@ -1520,6 +1572,10 @@ let () =
             test_load_context_migrates_summarized_world_state_checkpoint;
           test_case "load repairs orphaned tool result after cap" `Quick
             test_load_context_repairs_orphaned_tool_result_after_cap;
+          test_case "deserialize repairs orphaned tool result" `Quick
+            test_deserialize_context_repairs_orphan_tool_result;
+          test_case "deserialize preserves valid tool pair" `Quick
+            test_deserialize_context_preserves_valid_tool_pair;
         ] );
       ( "compact_policy",
         [

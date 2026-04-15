@@ -8,7 +8,7 @@ open Tool_args
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -16,19 +16,19 @@ type context = {
 
 let handle_pause ctx args =
   let reason = get_string args "reason" "Manual pause" in
-  Room.pause ctx.config ~by:ctx.agent_name ~reason;
+  Coord.pause ctx.config ~by:ctx.agent_name ~reason;
   (true, Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 
 let handle_resume ctx _args =
-  match Room.resume ctx.config ~by:ctx.agent_name with
+  match Coord.resume ctx.config ~by:ctx.agent_name with
   | `Resumed -> (true, Printf.sprintf "Resumed by %s" ctx.agent_name)
   | `Already_running -> (true, "Default project scope is not paused")
 
 let handle_pause_status ctx _args =
   let pause_state =
-    if not (Room.is_initialized ctx.config) then `Initializing
+    if not (Coord.is_initialized ctx.config) then `Initializing
     else
-      let state = Room.read_state ctx.config in
+      let state = Coord.read_state ctx.config in
       if state.paused then
         `Paused (state.paused_by, state.pause_reason, state.paused_at)
       else

@@ -28,34 +28,22 @@
    bounded
    cache_eio
    cascade_inference
+   cascade_config
+   cascade_config_loader
+   cascade_fsm
+   cascade_health_filter
+   cascade_health_tracker
+   cascade_model_resolve
+   cascade_throttle
    cancellation
    channel_gate
    channel_gate_connector
    channel_gate_metrics
+   channel_gate_discord_names
    channel_gate_discord_state
   channel_gate_imessage_state
    gate_protocol
    gate_keeper_backend
-   command_plane_v2
-   command_plane_orchestra
-   cp_orchestra_helpers
-   cp_orchestra_nodes
-   cp_types
-   cp_paths
-   cp_serde
-   cp_io
-   cp_tree_index
-   cp_unit
-   cp_unit_projection
-   cp_snapshot
-   cp_snapshot_section_cache
-   cp_snapshot_core
-   cp_snapshot_summaries
-   cp_cleanup
-   cp_lifecycle
-   cp_lifecycle_search
-   cp_lifecycle_intents
-   cp_lifecycle_policy
    config
    config_doctor
    config_dir_resolver
@@ -123,8 +111,6 @@
    server_routes_http_routes_frontend
    server_routes_http_routes_room
    server_routes_http_routes_dashboard
-   server_routes_http_routes_command_plane_read
-   server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
    server_routes_http_routes_cascade
    server_routes_http_routes_activity
@@ -132,17 +118,12 @@
    server_h2_gateway
    server_h2_gateway_helpers
    server_h2_gateway_routes_extra
-   server_h2_gateway_routes_cp
    server_bootstrap_http
    server_bootstrap_loops
    server_base_path_diagnostics
    server_runtime_bootstrap
    server_startup_state
    server_startup_takeover
-   server_command_plane_http
-   server_command_plane_http_support
-   server_command_plane_http_mutations
-   server_command_plane_http_help
    server_activity_http
    server_mcp_transport_http
    server_mcp_transport_http_conn
@@ -159,8 +140,6 @@
    server_openai_compat
    web_dashboard
    credits_dashboard
-   cp_microarch_summary
-   cp_search_fabric
    repo_synthesis_benchmark
 
    inference_utils
@@ -265,7 +244,7 @@
    convergence
    swarm
    swarm_goal_loop
-   room
+   coord
    run_eio
    team_context
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
@@ -302,7 +281,7 @@
    tool_task
    tool_task_schemas
    task_dispatch
-   tool_room
+   tool_coord
    workflow_guide
    tool_control
    tool_misc
@@ -315,13 +294,6 @@
    tool_local_runtime_status
    tool_local_runtime_probe
    tool_board
-   tool_command_plane
-   tool_command_plane_support
-   tool_command_plane_mutations
-   tool_command_plane_operations
-   tool_command_plane_dispatch
-   tool_command_plane_schemas_01
-   tool_command_plane_schemas_02
    tool_library
    tool_deep_review
    tool_catalog
@@ -342,7 +314,7 @@
    tool_usage_log
    keeper_tool_call_log
    tool_inline_dispatch_types
-   tool_inline_dispatch_room
+   tool_inline_dispatch_coord
    tool_inline_dispatch_comm
    tool_inline_dispatch
    tool_inline_dispatch_extra
@@ -387,6 +359,10 @@
    ;; Keeper contract
    keeper_schema
    keeper_execution_scope
+   keeper_social_model_types
+   keeper_social_model_protocol
+   keeper_social_model_bdi_speech_v1
+   keeper_social_model_registry
    keeper_social_model
    keeper_cascade_profile
    keeper_cascade_routing
@@ -470,6 +446,7 @@
    keeper_world_observation
    keeper_decision_audit
    keeper_composite_observer
+   keeper_campaign_fsm
    keeper_unified_prompt
    keeper_unified_turn
 
@@ -557,9 +534,6 @@
  dashboard_http_tool_quality
  board_core
  board_votes
- cp_snapshot_core
- cp_snapshot_summaries
- cp_unit_projection
  dashboard_execution_helpers
  dashboard_execution_fixture
  dashboard_execution_sessions
@@ -572,8 +546,6 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_support
- cp_lifecycle_search
- cp_lifecycle_intents
  server_dashboard_http_cache
  dashboard_http_helpers
  dashboard_http_monitoring
@@ -588,8 +560,6 @@
  server_routes_http_routes_frontend
  server_routes_http_routes_room
  server_routes_http_routes_dashboard
- server_routes_http_routes_command_plane_read
- server_routes_http_routes_command_plane_write
  server_routes_http_routes_activity
  swarm_status_inputs
  server_mcp_transport_http_types
@@ -599,15 +569,6 @@
  server_mcp_transport_http_conn
  server_mcp_transport_http_respond
  server_mcp_transport_http_agui
- server_command_plane_http_support
- server_command_plane_http_mutations
- server_command_plane_http_help
- tool_command_plane_support
- tool_command_plane_mutations
- tool_command_plane_operations
- tool_command_plane_dispatch
- tool_command_plane_schemas_01
- tool_command_plane_schemas_02
   keeper_tool_registry
   keeper_tool_policy_config
   keeper_tool_policy
@@ -684,7 +645,7 @@
   tool_local_runtime_probe
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
-  tool_inline_dispatch_room
+  tool_inline_dispatch_coord
   tool_inline_dispatch_comm
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
@@ -710,9 +671,7 @@
   ;; godsplit-board-core: board_core decomposition
   board_core_classify
   board_core_payload
-  ;; godsplit-cp-orchestra: command_plane_orchestra decomposition
-  cp_orchestra_helpers
-  cp_orchestra_nodes)
+  )
  (libraries
    mcp_protocol
    mcp_protocol.eio
@@ -809,7 +768,7 @@
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
    ;; Room coordination (extracted sub-library)
-   masc_room
+   masc_coord
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    ;; Dashboard utilities (extracted sub-library)

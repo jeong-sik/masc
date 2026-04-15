@@ -8,6 +8,7 @@ import {
 import { fetchGateKeepers } from '../api/gate'
 import { keepers } from '../store'
 import { compositeTick } from '../composite-signals'
+import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { EmptyState } from './common/empty-state'
 
 import {
@@ -60,6 +61,7 @@ export {
   deriveTimeAxisTicks,
   deriveSwimlaneSegments,
   laneTransitionCount,
+  inferTransitionReason,
 } from './fsm-hub-derivations'
 
 export { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
@@ -138,10 +140,79 @@ export function FsmHub() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
+  const [refreshFlash, setRefreshFlash] = useState(false)
+  const flashTimeoutRef = useRef<number | null>(null)
+  const refreshNow = () => {
+    setPollTick(t => t + 1)
+    setRefreshFlash(true)
+    if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
+    flashTimeoutRef.current = window.setTimeout(() => {
+      setRefreshFlash(false)
+      flashTimeoutRef.current = null
+    }, 800)
+  }
+
+  useEffect(() => () => {
+    if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === 'r') {
+        ev.preventDefault()
+        refreshNow()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
   const [paused, setPaused] = useState(() =>
     typeof document !== 'undefined' && document.visibilityState === 'hidden',
   )
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const shortcutsOpenRef = useRef(false)
+  const [density, setDensity] = useState<'comfortable' | 'compact'>(() => {
+    if (typeof window === 'undefined') return 'comfortable'
+    const stored = window.localStorage.getItem('fsm-hub:density')
+    return stored === 'compact' ? 'compact' : 'comfortable'
+  })
   const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    shortcutsOpenRef.current = shortcutsOpen
+  }, [shortcutsOpen])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('fsm-hub:density', density)
+  }, [density])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === 'd') {
+        ev.preventDefault()
+        setDensity(d => d === 'comfortable' ? 'compact' : 'comfortable')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
@@ -154,6 +225,27 @@ export function FsmHub() {
     }
     document.addEventListener('visibilitychange', handler)
     return () => document.removeEventListener('visibilitychange', handler)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === '?') {
+        ev.preventDefault()
+        setShortcutsOpen(o => !o)
+      } else if (ev.key === 'Escape' && shortcutsOpenRef.current) {
+        setShortcutsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [])
 
   // Primary source: store signal (from dashboard/shell polling).
@@ -196,7 +288,7 @@ export function FsmHub() {
     if (paused) return undefined
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [paused])
+  }, [paused, pollTick])
 
   useEffect(() => {
     if (paused) return undefined
@@ -234,26 +326,20 @@ export function FsmHub() {
     })()
   }, [activeSelected, shouldRefetchForTick, pollTick])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined
-    const handler = (ev: KeyboardEvent) => {
-      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
-      const target = ev.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-        if (target.isContentEditable) return
-      }
-      if (ev.key < '1' || ev.key > '9') return
+  useGlobalShortcut(
+    (ev) => ev.key >= '1' && ev.key <= '9',
+    (ev) => {
       const idx = ev.key.charCodeAt(0) - '1'.charCodeAt(0)
-      const target_name = keeperNames[idx]
-      if (!target_name) return
-      ev.preventDefault()
-      setSelected(target_name)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [keeperNames])
+      const name = keeperNames[idx]
+      if (name) setSelected(name)
+    },
+    [keeperNames],
+  )
+
+  useGlobalShortcut(
+    (ev) => ev.key === 'g',
+    () => setGraphOpen(o => !o),
+  )
 
   const view = useMemo(
     () =>
@@ -287,18 +373,23 @@ export function FsmHub() {
   )
   const { snapshot, loading, error, lastFetchAt } = view
 
+  const rootGap = density === 'compact' ? 'gap-1.5' : 'gap-3'
   return html`
-    <div class="flex flex-col gap-3">
+    <div class=${`flex flex-col ${rootGap}`} data-density=${density}>
       ${/* ── Zone 1: Status Bar ── */ ''}
       <${StatusBar}
         snapshot=${snapshot}
         now=${now}
         lastFetchAt=${lastFetchAt}
+        density=${density}
+        onDensityToggle=${() => setDensity(d => d === 'comfortable' ? 'compact' : 'comfortable')}
         keeperNames=${keeperNames}
         selected=${activeSelected}
         onSelect=${setSelected}
         loading=${loading}
         paused=${paused}
+        onRefresh=${refreshNow}
+        refreshFlash=${refreshFlash}
         transitionCount=${history.length}
         observationCount=${view.observations.length}
       />
@@ -382,6 +473,62 @@ export function FsmHub() {
           </div>
         </details>
       ` : null}
+      <${ShortcutsOverlay} open=${shortcutsOpen} onClose=${() => setShortcutsOpen(false)} />
+    </div>
+  `
+}
+
+function ShortcutsOverlay({
+  open,
+  onClose,
+}: {
+  open: boolean
+  onClose: () => void
+}) {
+  if (!open) return null
+  const rows: Array<{ keys: string; desc: string }> = [
+    { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
+    { keys: 'r', desc: '강제 새로고침' },
+    { keys: 'g', desc: 'Compound Graph 토글' },
+    { keys: 'd', desc: '밀도 토글 (여유 / 조밀)' },
+    { keys: '? ', desc: '단축키 목록 토글' },
+    { keys: 'Esc', desc: '오버레이 닫기' },
+    { keys: '← →', desc: '키퍼 탭 이동 (탭 포커스 시)' },
+    { keys: 'Home / End', desc: '첫 / 마지막 키퍼 (탭 포커스 시)' },
+  ]
+  return html`
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick=${onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="키보드 단축키"
+    >
+      <div
+        class="rounded-xl border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-2xl"
+        onClick=${(e: MouseEvent) => e.stopPropagation()}
+      >
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">
+            키보드 단축키
+          </div>
+          <button
+            class="text-[10px] text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
+            onClick=${onClose}
+            aria-label="닫기"
+          >Esc</button>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          ${rows.map(r => html`
+            <div class="flex items-center gap-3 text-[11px]">
+              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-body)] min-w-[64px] text-center">
+                ${r.keys}
+              </kbd>
+              <span class="text-[var(--text-body)]">${r.desc}</span>
+            </div>
+          `)}
+        </div>
+      </div>
     </div>
   `
 }
@@ -392,22 +539,30 @@ function StatusBar({
   snapshot,
   now,
   lastFetchAt,
+  density,
+  onDensityToggle,
   keeperNames,
   selected,
   onSelect,
   loading,
   paused,
+  onRefresh,
+  refreshFlash,
   transitionCount,
   observationCount,
 }: {
   snapshot: KeeperCompositeSnapshot | null
   now: number
   lastFetchAt: number
+  density: 'comfortable' | 'compact'
+  onDensityToggle: () => void
   keeperNames: string[]
   selected: string | null
   onSelect: (n: string) => void
   loading: boolean
   paused: boolean
+  onRefresh: () => void
+  refreshFlash: boolean
   transitionCount: number
   observationCount: number
 }) {
@@ -424,11 +579,51 @@ function StatusBar({
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
+  const brokenInvariants = snapshot
+    ? Object.entries(snapshot.invariants)
+        .filter(([_, ok]) => !ok)
+        .map(([k]) => k)
+    : []
+  const recoveryDrift = snapshot != null
+    && (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition)
+  const hasAnomaly = brokenInvariants.length > 0 || recoveryDrift
+  const anomalyTitle = hasAnomaly
+    ? [
+        brokenInvariants.length > 0 ? `깨진 invariant: ${brokenInvariants.join(', ')}` : '',
+        recoveryDrift ? 'recovery 양 store 불일치' : '',
+      ].filter(Boolean).join(' · ')
+    : ''
+
+  const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class="sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md px-4 py-2.5 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
+    <div class=${`sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md shadow-[0_4px_12px_rgba(0,0,0,0.25)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
+          <kbd
+            class="hidden md:inline-flex items-center font-mono text-[9px] px-1 py-0 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]"
+            title="단축키 목록 (?)"
+          >?</kbd>
+          <button
+            class=${`text-[10px] font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
+              refreshFlash
+                ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)]'
+                : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
+            }`}
+            onClick=${onRefresh}
+            aria-label="강제 새로고침"
+            aria-keyshortcuts="r"
+          >
+            ${refreshFlash ? '✓' : '↻'}
+          </button>
+          <button
+            class="text-[9px] font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
+            onClick=${onDensityToggle}
+            title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
+            aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
+          >
+            ${density === 'compact' ? '▣ 조밀' : '▢ 여유'}
+          </button>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
           ${paused ? html`
@@ -479,7 +674,9 @@ function StatusBar({
                   }
                 }}
               >
-                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}
+                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}${active && hasAnomaly ? html`
+                  <span class="ml-1 text-[#f87171]" title=${anomalyTitle} aria-label="이상 신호">⚠</span>
+                ` : null}
               </button>
             `
           })}

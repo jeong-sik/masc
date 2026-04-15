@@ -19,7 +19,7 @@ val is_enabled : unit -> bool
     services. Exposed for tests and local transport wiring checks. *)
 val create_server :
   port:int ->
-  room_config:Room_utils_backend_setup.config ->
+  room_config:Coord_utils_backend_setup.config ->
   tool_dispatcher:(string -> string -> (string, string) result) ->
   Grpc_eio.Server.t
 
@@ -34,6 +34,6 @@ val create_server :
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
-  room_config:Room_utils_backend_setup.config ->
+  room_config:Coord_utils_backend_setup.config ->
   tool_dispatcher:(string -> string -> (string, string) result) ->
   unit

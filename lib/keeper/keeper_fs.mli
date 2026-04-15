@@ -31,10 +31,10 @@ val save_json_atomic : string -> Yojson.Safe.t -> unit
 (** {1 Standard Keeper Paths} *)
 
 (** [.masc/keepers/] directory. *)
-val keeper_dir : Room.config -> string
+val keeper_dir : Coord.config -> string
 
 (** [.masc/traces/] directory. *)
-val session_base_dir : Room.config -> string
+val session_base_dir : Coord.config -> string
 
 (** [.masc/traces/<trace_id>/] directory. *)
-val keeper_session_dir : Room.config -> string -> string
+val keeper_session_dir : Coord.config -> string -> string

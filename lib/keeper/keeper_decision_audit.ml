@@ -190,7 +190,7 @@ let flush_if_needed ~base_path ~keeper_name =
 let decision_pipeline_to_mermaid
     ?(guard_penalty_total : int option)
     ?(tool_policy_mode : [`Preset of string | `Custom] option)
-    ?(turn_outcome : [`Ok | `Failed | `Blocked] option)
+    ?(turn_outcome : [`Ok | `Failed] option)
     ~(phase : Keeper_state_machine.phase)
     ~(thompson_alpha : float)
     ~(thompson_beta : float)
@@ -248,7 +248,6 @@ let decision_pipeline_to_mermaid
   let outcome_str = match turn_outcome with
     | Some `Ok -> "ok"
     | Some `Failed -> "failed"
-    | Some `Blocked -> "blocked"
     | None -> "n/a"
   in
   p "    note right of Running\n";

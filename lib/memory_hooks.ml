@@ -29,7 +29,7 @@
     Pure: no side effects, no OAS state mutation. *)
 let render_memory_context
     ~(agent_name : string)
-    ~(config : Room_utils.config)
+    ~(config : Coord_utils.config)
     ~(episode_limit : int)
     ~(procedure_limit : int)
     () : string option =
@@ -47,7 +47,7 @@ let render_memory_context
 (** Create OAS hooks for hook-first memory injection.
 
     @param agent_name Keeper agent name (for procedure/episode lookup)
-    @param config Room configuration (for institution loading)
+    @param config Coord configuration (for institution loading)
     @param memory OAS Memory.t instance (for AfterTurn flush)
     @param episode_limit Max episodes to inject (default 30)
     @param procedure_limit Max procedures to inject (default 10)
@@ -63,7 +63,7 @@ let render_memory_context
     ]} *)
 let make
     ~(agent_name : string)
-    ~(config : Room_utils.config)
+    ~(config : Coord_utils.config)
     ~(memory : Agent_sdk.Memory.t)
     ?(episode_limit = 30)
     ?(procedure_limit = 10)

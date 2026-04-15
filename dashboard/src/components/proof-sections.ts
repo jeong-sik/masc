@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { RouteLink } from './common/route-link'
 import { toolCategory } from './tool-call-shared'
 import type { DashboardProofWorkerRunEvidence } from '../types'
-import { relativeTime } from './command/helpers'
+import { relativeTime } from '../lib/format-time'
 import {
   workerRunEvidenceLabel,
   workerRunEvidenceMeta,

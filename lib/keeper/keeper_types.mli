@@ -114,6 +114,9 @@ type agent_runtime_state = {
   noop_turn_count: int;
   consecutive_noop_count: int;
   last_speech_act: string;
+  last_social_transition_reason: string;
+  last_active_desire: string;
+  last_current_intention: string;
   last_blocker: string;
   last_need: string;
 }
@@ -208,8 +211,8 @@ val reject_legacy_model_args :
 
 (** {1 Runtime meta write sync hook} *)
 
-val runtime_meta_write_sync_hook : (Room.config -> keeper_meta -> unit) ref
-val register_runtime_meta_write_sync : (Room.config -> keeper_meta -> unit) -> unit
+val runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref
+val register_runtime_meta_write_sync : (Coord.config -> keeper_meta -> unit) -> unit
 
 (** {1 JSON field scrubbing} *)
 
@@ -226,23 +229,23 @@ val meta_of_json : Yojson.Safe.t -> (keeper_meta, string) result
 (** {1 Meta file I/O} *)
 
 val read_meta_file_path : string -> (keeper_meta option, string) result
-val persisted_keeper_names : Room.config -> string list
-val configured_keeper_names : Room.config -> string list
-val keeper_names : Room.config -> string list
-val keepalive_keeper_names : Room.config -> string list
-val persistent_agent_names : Room.config -> string list
-val fresher_meta : Room.config -> keeper_meta -> keeper_meta
-val write_meta : ?force:bool -> Room.config -> keeper_meta -> (unit, string) result
+val persisted_keeper_names : Coord.config -> string list
+val configured_keeper_names : Coord.config -> string list
+val keeper_names : Coord.config -> string list
+val keepalive_keeper_names : Coord.config -> string list
+val persistent_agent_names : Coord.config -> string list
+val fresher_meta : Coord.config -> keeper_meta -> keeper_meta
+val write_meta : ?force:bool -> Coord.config -> keeper_meta -> (unit, string) result
 val keeper_name_from_agent_name : string -> string option
 val read_meta_resolved :
-  Room.config -> string -> ((string * keeper_meta) option, string) result
-val read_meta : Room.config -> string -> (keeper_meta option, string) result
+  Coord.config -> string -> ((string * keeper_meta) option, string) result
+val read_meta : Coord.config -> string -> (keeper_meta option, string) result
 
 (** Read keeper meta only if the file's mtime changed since [last_mtime].
     Returns [Some (meta, new_mtime)] on change, [None] when unchanged.
     Avoids JSON parsing on every heartbeat when no operator modified the file. *)
 val read_meta_if_changed :
-  Room.config -> string -> last_mtime:float ->
+  Coord.config -> string -> last_mtime:float ->
   (keeper_meta * float) option
 
 (** {1 Re-exports from Keeper_types_support} *)

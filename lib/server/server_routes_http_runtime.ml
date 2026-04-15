@@ -87,7 +87,7 @@ let health_path_diagnostics () =
         ?input_base_path:(Env_config_core.base_path_raw_opt ())
         ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
         ~effective_base_path:state.room_config.base_path
-        ~effective_masc_root:(Room.masc_root_dir state.room_config)
+        ~effective_masc_root:(Coord.masc_root_dir state.room_config)
         ()
   | None ->
       let effective_base_path = default_base_path () in

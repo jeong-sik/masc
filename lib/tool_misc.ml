@@ -14,7 +14,7 @@ open Tool_args
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -47,13 +47,8 @@ let handle_gc ctx args =
   let days = max 1 days_raw in
   if days_raw < 1 then
     Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
-  let gc_result = Room.gc ctx.config ~days () in
-  let expired =
-    try Cp_lifecycle.check_expired_decisions ctx.config
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Misc.warn "check_expired_decisions failed: %s" (Printexc.to_string exn);
-      0
-  in
+  let gc_result = Coord.gc ctx.config ~days () in
+  let expired = 0 in
   let decision_note =
     if expired > 0 then Printf.sprintf "\n⏰ Expired %d pending decision(s) past TTL" expired
     else ""
@@ -61,7 +56,7 @@ let handle_gc ctx args =
   (true, gc_result ^ decision_note)
 
 let handle_cleanup_zombies ctx _args =
-  (true, Room.cleanup_zombies ctx.config)
+  (true, Coord.cleanup_zombies ctx.config)
 
 let handle_tool_stats _ctx args =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in

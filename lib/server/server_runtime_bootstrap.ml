@@ -216,7 +216,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       ?input_base_path
       ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
       ~effective_base_path:state.room_config.base_path
-      ~effective_masc_root:(Room.masc_root_dir state.room_config)
+      ~effective_masc_root:(Coord.masc_root_dir state.room_config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
@@ -229,15 +229,15 @@ let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) 
     ?input_base_path
     ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
     ~effective_base_path:state.room_config.base_path
-    ~effective_masc_root:(Room.masc_root_dir state.room_config)
+    ~effective_masc_root:(Coord.masc_root_dir state.room_config)
     ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
-    ~agents_path:(Room.agents_dir state.room_config)
+    ~agents_path:(Coord.agents_dir state.room_config)
 
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Prometheus.reconcile_active_agents_gauge (Room.masc_dir state.room_config)
+  Prometheus.reconcile_active_agents_gauge (Coord.masc_dir state.room_config)
 
 (** Migrate legacy directory names: perpetual->traces, resident-keepers->keepers.
     Moves contents via recursive merge. Conflicting files go to _quarantine/,
@@ -258,7 +258,7 @@ let should_promote_legacy_keeper_meta ~legacy_path ~current_path =
   | _ -> false
 
 let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
-  let masc_root = Room.masc_root_dir state.room_config in
+  let masc_root = Coord.masc_root_dir state.room_config in
   let quarantine_rel_path ~source_name ~rel_path =
     if rel_path = "" then source_name else Filename.concat source_name rel_path
   in
@@ -363,7 +363,7 @@ let legacy_room_candidates rooms_dir =
                  room_id;
                None
              end else
-               match Room.validate_room_id room_id with
+               match Coord.validate_room_id room_id with
                | Ok valid_room_id -> Some valid_room_id
                | Error msg ->
                  Log.Misc.warn
@@ -404,7 +404,7 @@ let load_current_room_or_default masc_root rooms_dir =
           path msg;
         infer_current_room_from_legacy_dirs rooms_dir
     | Ok raw -> (
-        match Room.validate_room_id (String.trim raw) with
+        match Coord.validate_room_id (String.trim raw) with
         | Ok room_id -> Some room_id
         | Error msg ->
             Log.Misc.warn
@@ -413,7 +413,7 @@ let load_current_room_or_default masc_root rooms_dir =
             infer_current_room_from_legacy_dirs rooms_dir)
 
 let migrate_room_to_flat (state : Mcp_server.server_state) =
-  let masc_root = Room.masc_root_dir state.room_config in
+  let masc_root = Coord.masc_root_dir state.room_config in
   let rooms_dir = Filename.concat masc_root "rooms" in
   if not (Sys.file_exists rooms_dir) then ()
   else begin
@@ -437,7 +437,7 @@ let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]
 
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
-  (* Promote legacy room/keeper state before Room.init seeds fresh root files.
+  (* Promote legacy room/keeper state before Coord.init seeds fresh root files.
      Otherwise state.json/backlog.json can be created in the destination first
      and valid legacy data gets quarantined as a conflict on upgrade. *)
   migrate_room_to_flat state;
@@ -445,7 +445,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      Keeper autoboot and other bootstrap readers should see the canonical paths
      on their first pass, not rely on a later lazy migration task. *)
   migrate_legacy_keeper_dirs_blocking state;
-  let (_init_msg : string) = Room.init state.room_config ~agent_name:None in
+  let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
@@ -507,7 +507,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
      let days =
        Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
      in
-     let masc = Room.masc_dir state.room_config in
+     let masc = Coord.masc_dir state.room_config in
      let prune_dir dir =
        if Sys.file_exists dir then
          Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
@@ -544,7 +544,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
 let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
   (try
      let traces_dir =
-       Filename.concat (Room.masc_root_dir state.room_config) "traces"
+       Filename.concat (Coord.masc_root_dir state.room_config) "traces"
      in
      if Sys.file_exists traces_dir then begin
        let total = ref 0 in
@@ -582,7 +582,7 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =
-       Filename.concat (Room.masc_root_dir state.room_config) "traces"
+       Filename.concat (Coord.masc_root_dir state.room_config) "traces"
      in
      if Sys.file_exists traces_dir then begin
        let moved_total = ref 0 in
@@ -736,7 +736,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           Server_startup_state.fail_lazy_task ~task:task_name ~error
     in
     let start_lazy_startup state =
-      let masc_root = Room.masc_root_dir state.Mcp_server.room_config in
+      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
       let has_legacy_traces =
         Sys.file_exists (Filename.concat masc_root "perpetual")
       in
@@ -776,7 +776,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       let task_names = List.map fst tasks in
       Server_startup_state.activate_lazy
-        ~backend_mode:(Room.backend_name state.room_config)
+        ~backend_mode:(Coord.backend_name state.room_config)
         ~tasks:task_names;
       Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task tasks)
     in
@@ -785,7 +785,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let state, path_diagnostics = init_state_blocking () in
       server_state := Some state;
       Server_startup_state.mark_state_ready
-        ~backend_mode:(Room.backend_name state.room_config);
+        ~backend_mode:(Coord.backend_name state.room_config);
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -931,28 +931,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Cold-start warm-cache stagger is handled by warm_delay_s in each
          Proactive_refresh config. Heavy surfaces delay their initial warm
          compute to avoid concurrent CPU/PG contention.  Lightweight surfaces
-         (cp-summary, execution, transport_health) start immediately. *)
-      (* MASC_CP_SUMMARY_REFRESH_DISABLED=1: skip the cp-summary warm cache
-         loop. Used as an escape hatch when Command_plane_v2.summary_json or
-         Swarm_status.build_json_from_snapshot trips an OCaml Stack overflow
-         on a specific dataset and CPU-pins the Eio scheduler (issue #6633).
-         The dashboard /command-plane/summary endpoint will return the empty
-         initial ref in that mode, which is preferable to a server hang. *)
-      let cp_summary_refresh_disabled =
-        match Sys.getenv_opt "MASC_CP_SUMMARY_REFRESH_DISABLED" with
-        | Some v ->
-          let v = String.trim v in
-          v = "1" || String.lowercase_ascii v = "true"
-        | None -> false
-      in
-      if cp_summary_refresh_disabled then
-        Log.Dashboard.warn
-          "cp-summary refresh loop DISABLED via MASC_CP_SUMMARY_REFRESH_DISABLED \
-           — /command-plane/summary will return empty cached ref"
-      else begin
-        Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
-        Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock
-      end;
+         (execution, transport_health) start immediately. *)
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;

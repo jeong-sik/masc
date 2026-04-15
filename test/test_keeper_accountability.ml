@@ -62,8 +62,8 @@ let with_room ?(agent_name = "keeper-sangsu-agent") f =
        | None -> Unix.putenv "SB_PG_URL" "");
       cleanup_dir dir)
     (fun () ->
-      let config = Room.default_config dir in
-      ignore (Room.init config ~agent_name:(Some agent_name));
+      let config = Coord.default_config dir in
+      ignore (Coord.init config ~agent_name:(Some agent_name));
       f config)
 
 let append_jsonl path json =
@@ -183,7 +183,7 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
              ("evidence_refs", `List []);
              ("synthetic", `Bool false);
            ]);
-      ignore (Room.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
+      ignore (Coord.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
       let result =
         Keeper_exec_tools.execute_keeper_tool_call
           ~config ~meta ~ctx_work:(make_ctx_work ())

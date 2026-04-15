@@ -165,10 +165,10 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     in
     let compact_sessions = take 3 (List.map Briefing_compactors.compact_session_json sessions) in
     let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
-    let agents_json = Room.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
+    let agents_json = Coord.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
     let compact_agents = take 5 agents_json in
     let messages_json =
-      Room.get_messages_raw config ~since_seq:0 ~limit:4
+      Coord.get_messages_raw config ~since_seq:0 ~limit:4
       |> List.map (fun (message : Types.message) ->
              `Assoc
                [

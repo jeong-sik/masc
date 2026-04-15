@@ -1,6 +1,12 @@
 // MASC Dashboard — Keeper messaging (direct, operator-mediated, SSE streaming)
 
-import { isRecord } from '../components/common/normalize'
+import {
+  asBoolean,
+  asNullableString,
+  asNumber,
+  asString,
+  isRecord,
+} from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
@@ -447,6 +453,101 @@ export interface KeeperCompositeSnapshot {
   last_outcome: KeeperLastOutcome | null
 }
 
+const DEFAULT_KEEPER_COMPOSITE_RECOVERY = {
+  data_record: false,
+  fsm_condition: false,
+} as const
+
+const DEFAULT_KEEPER_COMPOSITE_INVARIANTS = {
+  phase_turn_alignment: true,
+  no_cascade_before_measurement: true,
+  compaction_atomicity: true,
+  event_priority_monotone: true,
+} as const satisfies Omit<KeeperCompositeInvariants, 'recovery_two_store_sync'>
+
+export function normalizeKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {
+  if (!isRecord(data)) {
+    throw new Error('composite fetch failed: malformed payload')
+  }
+
+  const decision = isRecord(data.decision) ? data.decision : null
+  const cascade = isRecord(data.cascade) ? data.cascade : null
+  const compaction = isRecord(data.compaction) ? data.compaction : null
+  const measurement = isRecord(data.measurement) ? data.measurement : null
+  const autoRules = isRecord(measurement?.auto_rules) ? measurement.auto_rules : null
+  const recovery = isRecord(data.recovery) ? data.recovery : null
+  const dataRecord = asBoolean(recovery?.data_record, DEFAULT_KEEPER_COMPOSITE_RECOVERY.data_record)
+  const fsmCondition = asBoolean(recovery?.fsm_condition, DEFAULT_KEEPER_COMPOSITE_RECOVERY.fsm_condition)
+  const invariants = isRecord(data.invariants) ? data.invariants : null
+  const lastOutcome = isRecord(data.last_outcome) ? data.last_outcome : null
+
+  return {
+    correlation_id: asString(data.correlation_id, ''),
+    run_id: asString(data.run_id, ''),
+    ts: asNumber(data.ts, 0),
+    phase: asString(data.phase, 'Offline'),
+    turn_phase: asString(data.turn_phase, 'idle'),
+    decision: {
+      stage: asString(decision?.stage, 'undecided'),
+    },
+    cascade: {
+      state: asString(cascade?.state, 'idle'),
+    },
+    compaction: {
+      stage: asString(compaction?.stage, 'accumulating'),
+    },
+    measurement: autoRules
+      ? {
+          captured: asBoolean(measurement?.captured, true),
+          auto_rules: {
+            reflect: asBoolean(autoRules.reflect, false),
+            plan: asBoolean(autoRules.plan, false),
+            compact: asBoolean(autoRules.compact, false),
+            handoff: asBoolean(autoRules.handoff, false),
+            guardrail_stop: asBoolean(autoRules.guardrail_stop, false),
+            guardrail_reason: asNullableString(autoRules.guardrail_reason),
+            goal_drift: asNumber(autoRules.goal_drift, 0),
+          },
+        }
+      : {
+          captured: asBoolean(measurement?.captured, false),
+        },
+    recovery: {
+      data_record: dataRecord,
+      fsm_condition: fsmCondition,
+    },
+    invariants: {
+      phase_turn_alignment: asBoolean(
+        invariants?.phase_turn_alignment,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.phase_turn_alignment,
+      ),
+      no_cascade_before_measurement: asBoolean(
+        invariants?.no_cascade_before_measurement,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.no_cascade_before_measurement,
+      ),
+      compaction_atomicity: asBoolean(
+        invariants?.compaction_atomicity,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.compaction_atomicity,
+      ),
+      event_priority_monotone: asBoolean(
+        invariants?.event_priority_monotone,
+        DEFAULT_KEEPER_COMPOSITE_INVARIANTS.event_priority_monotone,
+      ),
+      recovery_two_store_sync: asBoolean(
+        invariants?.recovery_two_store_sync,
+        dataRecord === fsmCondition,
+      ),
+    },
+    is_live: asBoolean(data.is_live, false),
+    last_outcome: lastOutcome
+      ? {
+          turn_id: asNumber(lastOutcome.turn_id, 0),
+          ended_at: asNumber(lastOutcome.ended_at, 0),
+        }
+      : null,
+  }
+}
+
 export async function fetchKeeperComposite(name: string): Promise<KeeperCompositeSnapshot> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
@@ -454,7 +555,7 @@ export async function fetchKeeperComposite(name: string): Promise<KeeperComposit
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperCompositeSnapshot>
+  return normalizeKeeperCompositeSnapshot(await resp.json())
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---

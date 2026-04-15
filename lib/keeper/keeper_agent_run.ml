@@ -392,7 +392,7 @@ let tool_index_entry_of_tool
     message, builds OAS tools + hooks, and delegates to
     [Oas_worker.run_named] which internally calls Agent.run().
 
-    @param config Room configuration
+    @param config Coord configuration
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
@@ -411,7 +411,7 @@ let tool_index_entry_of_tool
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
@@ -631,7 +631,7 @@ let run_turn
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
   if affinity_k > 0
   then (
-    let masc_root = Room.masc_root_dir config in
+    let masc_root = Coord.masc_root_dir config in
     let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
@@ -1054,14 +1054,12 @@ let run_turn
      the LLM and triggering tool_not_allowed errors. *)
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let allowed_exec_set =
-    let set = Keeper_tool_policy.tool_name_set allowed_exec_names in
+    let base = Keeper_tool_policy.tool_name_set allowed_exec_names in
     (* Core always-tools bypass candidate_set in can_execute, so they
        may be absent from keeper_allowed_tool_names.  Add them back to
        prevent the preset filter from dropping survival-critical tools. *)
-    List.iter
-      (fun name -> Hashtbl.replace set name ())
-      Keeper_tool_registry.core_always_tools;
-    set
+    Keeper_tool_policy.StringSet.union base
+      (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
   in
   let max_tools_per_turn =
     if is_retry
@@ -1180,7 +1178,7 @@ let run_turn
                   selection_mode =
                 let core =
                   Keeper_exec_tools.effective_core_tools ()
-                  |> List.filter (fun name -> Hashtbl.mem allowed_exec_set name)
+                  |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
                 in
                 let discovered =
                   Keeper_discovered_tools.active_names !discovered_ref ~turn
@@ -1203,37 +1201,37 @@ let run_turn
                 let llm_selected =
                   if llm_rerank_enabled then
                     (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-                     | Some sw, Some net ->
-                       let rerank_cascade =
-                         Keeper_config.keeper_llm_rerank_cascade ()
-                       in
-                       let defaults =
-                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
-                       in
-                       let config_path = Oas_worker.default_config_path () in
-                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
-                          no longer owns cascade orchestration — MASC picks one
+	                     | Some sw, Some net ->
+	                       let rerank_cascade =
+	                         Keeper_config.keeper_llm_rerank_cascade ()
+	                       in
+	                       let defaults =
+	                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+	                       in
+	                       let config_path = Oas_worker.default_config_path () in
+	                       (* Resolve cascade → first healthy provider. OAS 0.144.0+
+	                          no longer owns cascade orchestration — MASC picks one
                           provider from the cascade and passes it to the
                           single-provider rerank API. Graceful degradation via
                           BM25 fallback lives inside [default_rerank_fn]. *)
                        let model_strings =
-                         Llm_provider.Cascade_config.resolve_model_strings
+                         Cascade_config.resolve_model_strings
                            ?config_path ~name:rerank_cascade ~defaults ()
-                         |> Llm_provider.Cascade_config.expand_model_strings_for_execution
+                         |> Cascade_config.expand_model_strings_for_execution
                        in
                        let providers =
-                         Llm_provider.Cascade_config.parse_model_strings model_strings
+                         Cascade_config.parse_model_strings model_strings
                        in
-                       let healthy =
-                         Llm_provider.Cascade_config.filter_healthy ~sw ~net providers
-                       in
-                       (match healthy with
-                        | [] ->
-                          Log.Keeper.warn
-                            "keeper:%s TopK_llm: no healthy provider for cascade \
-                             '%s', falling back to core+prefilter+discovered"
-                            meta.name
-                            rerank_cascade;
+	                       let healthy =
+	                         Cascade_config.filter_healthy ~sw ~net providers
+	                       in
+	                       (match healthy with
+	                        | [] ->
+	                          Log.Keeper.warn
+	                            "keeper:%s TopK_llm: no healthy provider for cascade \
+	                             '%s', falling back to core+prefilter+discovered"
+	                            meta.name
+	                            rerank_cascade;
                           []
                         | first_provider :: _ ->
                           let rerank_fn =
@@ -1275,16 +1273,16 @@ let run_turn
                              selected
                            with
                            | Eio.Cancel.Cancelled _ as e -> raise e
-                           | exn ->
-                             Log.Keeper.warn
-                               "keeper:%s TopK_llm failed (%s), falling back to \
-                                core+prefilter+discovered"
-                               meta.name
-                               (Printexc.to_string exn);
-                             []))
-                     | _ ->
-                       Log.Keeper.warn
-                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
+	                           | exn ->
+	                             Log.Keeper.warn
+	                               "keeper:%s TopK_llm failed (%s), falling back to \
+	                                core+prefilter+discovered"
+	                               meta.name
+	                               (Printexc.to_string exn);
+	                             []))
+	                     | _ ->
+	                       Log.Keeper.warn
+	                         "keeper:%s TopK_llm: Eio context unavailable, falling back \
                           to core+prefilter+discovered"
                          meta.name;
                        [])
@@ -1336,7 +1334,7 @@ let run_turn
                 let validated, dropped_names =
                   List.partition
                     (fun n ->
-                       Hashtbl.mem universe_set n && Hashtbl.mem allowed_exec_set n)
+                       Keeper_tool_policy.StringSet.mem n universe_set && Keeper_tool_policy.StringSet.mem n allowed_exec_set)
                     raw
                 in
                 let dropped = List.length dropped_names in
@@ -1558,7 +1556,7 @@ let run_turn
     }
   in
   let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-  let base_dir = Room.masc_root_dir config in
+  let base_dir = Coord.masc_root_dir config in
   (* RFC-MASC-004 Phase 2: Hook-first is now the only path.
      Create bare memory (no imperative seeding). Memory content is
      injected via BeforeTurnParams hook; flush is incremental via
@@ -1962,8 +1960,8 @@ let run_turn
                  (* Emit activity event so episode flushes appear in
                     the activity graph / telemetry surface. *)
                  (try
-                    !Room_hooks.activity_emit_fn config
-                      ~actor:Room_hooks.{ kind = "keeper"; id = meta.name }
+                    !Coord_hooks.activity_emit_fn config
+                      ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
                       ~kind:"episode.flush"
                       ~payload:(`Assoc [
                         ("keeper", `String meta.name);

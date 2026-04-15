@@ -348,7 +348,7 @@ let append_judgments base_path judgments =
 let should_backoff ~sw ~net =
   try
     let capacity =
-      Llm_provider.Cascade_config.local_capacity_for_selections ~sw ~net
+      Cascade_config.local_capacity_for_selections ~sw ~net
         [ "governance_judge" ]
     in
     capacity.all_discovered && capacity.endpoints_found > 0

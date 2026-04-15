@@ -23,7 +23,7 @@
     "cited_paths": [
       "docs/spec/03-room-coordination.md",
       "docs/MULTI-ROOM-DESIGN.md",
-      "lib/tool_room.ml"
+      "lib/tool_coord.ml"
     ],
     "latency_ms": 910
   },

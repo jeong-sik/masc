@@ -47,10 +47,8 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_config", CanReadState);
     ("masc_add_task", CanAddTask);
     ("masc_claim_next", CanClaimTask);
-    ("masc_done", CanCompleteTask);
     ("masc_update_priority", CanCompleteTask);
     ("masc_transition", CanCompleteTask);
-    ("masc_release", CanCompleteTask);
     ("masc_broadcast", CanBroadcast);
     ("masc_heartbeat", CanBroadcast);
     ("masc_webrtc_offer", CanBroadcast);
@@ -87,7 +85,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_policy_update", CanBroadcast);
     ("masc_cleanup_zombies", CanBroadcast);
     ("masc_autoresearch_start", CanAdmin);
-    ("masc_autoresearch_swarm_start", CanAdmin);
     ("masc_autoresearch_cycle", CanAdmin);
     ("masc_autoresearch_inject", CanAdmin);
     ("masc_autoresearch_stop", CanAdmin);

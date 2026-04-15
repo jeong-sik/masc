@@ -6,7 +6,7 @@ open Keeper_types
 open Keeper_exec_shared
 open Keeper_gh_shared
 let handle_keeper_pr_submit
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

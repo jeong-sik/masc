@@ -62,7 +62,7 @@ needs = "TOML needs"
 desires = "TOML desires"
 instructions = "TOML instructions"
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -116,7 +116,7 @@ goal = "test"
 execution_scope = "observe_only"
 policy_voice_enabled = false
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -165,7 +165,7 @@ allowed_paths = ["workspace/example/project"]
 tool_preset = "social"
 also_allow = ["keeper_bash", "keeper_shell"]
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -228,7 +228,7 @@ goal = "test"
 execution_scope = "workspace"
 allowed_paths = []
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -274,7 +274,7 @@ let test_persona_allowed_paths_is_ignored () =
     "allowed_paths": ["workspace/example/project"]
   }
 }|};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -315,7 +315,7 @@ goal = "test"
 execution_scope = "workspace"
 allowed_paths = ["workspace/example/project"]
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -398,7 +398,7 @@ goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
 execution_scope = "workspace"
 tool_preset = "delivery"
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -468,7 +468,7 @@ let test_none_preserves_runtime () =
     {|[keeper]
 goal = "minimal TOML"
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -524,7 +524,7 @@ work_discovery_enabled = true
 work_discovery_interval_sec = 120
 work_discovery_guidance = "TOML guidance"
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -571,7 +571,7 @@ let test_cascade_defaults_resync () =
 goal = "TOML goal"
 tool_preset = "social"
 |};
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -605,8 +605,8 @@ let test_room_presence_syncs_capabilities () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let keeper_name = "room-presence-sync-test" in
   let agent_name = Keeper_types.keeper_agent_name keeper_name in
-  let config = Room.default_config room_dir in
-  let _ = Room.init config ~agent_name:None in
+  let config = Coord.default_config room_dir in
+  let _ = Coord.init config ~agent_name:None in
   let initial_meta =
     match
       Keeper_types.meta_of_json
@@ -630,10 +630,10 @@ let test_room_presence_syncs_capabilities () =
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
   ignore
-    (Room.join config ~agent_name ~capabilities:[ "keeper"; "preset:minimal" ] ());
+    (Coord.join config ~agent_name ~capabilities:[ "keeper"; "preset:minimal" ] ());
   let _synced = Keeper_exec_context.ensure_keeper_room_presence config initial_meta in
   let agent =
-    Room.get_agents_raw config
+    Coord.get_agents_raw config
     |> List.find_opt (fun (agent : Types.agent) -> String.equal agent.name agent_name)
   in
   match agent with

@@ -51,7 +51,7 @@ let tool_search_fn
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
 let execute_keeper_tool_call
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ?search_fn
@@ -88,12 +88,12 @@ let execute_keeper_tool_call
   if not (can_execute ~lookup name)
   then
     let reason, hint =
-      if not (Hashtbl.mem lookup.candidate_set name)
+      if not (StringSet.mem name lookup.candidate_set)
       then
         ( "tool does not exist or is not available to your preset"
         , Printf.sprintf
             "'%s' is not a recognized tool. Check spelling or use keeper_tools_list to see available tools." name )
-      else if Hashtbl.mem lookup.deny_set name
+      else if StringSet.mem name lookup.deny_set
       then
         ( "denied_by_policy"
         , Printf.sprintf

@@ -1,7 +1,7 @@
 module U = Yojson.Safe.Util
 
 type 'a context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -17,7 +17,7 @@ let option_to_json f = function
 let string_option_to_json = option_to_json (fun value -> `String value)
 
 let operator_dir config =
-  Filename.concat (Room.masc_dir config) "operator"
+  Filename.concat (Coord.masc_dir config) "operator"
 
 let pending_confirms_path config =
   Filename.concat (operator_dir config) "pending_confirms.json"
@@ -52,7 +52,7 @@ let operator_surface_contract_json =
       ("worker_cards", `String "truth");
     ]
 
-let operator_judge_runtime_json (config : Room.config) =
+let operator_judge_runtime_json (config : Coord.config) =
   let runtime = Dashboard_operator_judge.runtime_status config.base_path in
   `Assoc
     [
@@ -162,7 +162,7 @@ let pending_confirm_of_yojson json =
   with U.Type_error (msg, _) | Failure msg -> Error msg
 
 let raw_pending_confirms config : pending_confirm list =
-  match Room_utils.read_json_opt config (pending_confirms_path config) with
+  match Coord_utils.read_json_opt config (pending_confirms_path config) with
   | None -> []
   | Some (`List entries) ->
       List.filter_map
@@ -174,7 +174,7 @@ let raw_pending_confirms config : pending_confirm list =
   | Some _ -> []
 
 let write_pending_confirms config (entries : pending_confirm list) =
-  Room_utils.write_json config (pending_confirms_path config)
+  Coord_utils.write_json config (pending_confirms_path config)
     (`List (List.map pending_confirm_to_yojson entries))
 
 let pending_confirm_expired (entry : pending_confirm) =

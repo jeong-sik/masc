@@ -10,7 +10,7 @@ open Dashboard_http_helpers
     and counts [ToolCall _] actions, partitioned by outcome.
 
     [~now_ts] is injectable for testing; defaults to wall-clock time. *)
-let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Room.config)
+let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.config)
     : Yojson.Safe.t =
   let window_hours = 1.0 in
   let since = now_ts -. (window_hours *. 3600.0) in
@@ -225,7 +225,7 @@ let slot_monitoring_json () : Yojson.Safe.t =
       ("endpoints", `List []);
     ]
 
-let executor_outcomes_json (config : Room.config) : Yojson.Safe.t =
+let executor_outcomes_json (config : Coord.config) : Yojson.Safe.t =
   try
     let since = Time_compat.now () -. Masc_time_constants.day in
     let events = Telemetry_eio.read_events_since config ~since in

@@ -213,11 +213,11 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
 
 let resources : mcp_resource list = [
   make_resource ~uri:"masc://status" ~name:"MASC Status"
-    ~title:"Room Status"
+    ~title:"Coord Status"
     ~description:"Current room status snapshot (same as masc_status)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
-    ~title:"Room Status (JSON)"
+    ~title:"Coord Status (JSON)"
     ~description:"Current room status snapshot as JSON (for data collection)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://tasks" ~name:"Quest Board"
@@ -369,7 +369,7 @@ let int_query_param uri key ~default =
 
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =
-  let events_dir = Filename.concat (Room.masc_dir config) "events" in
+  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
     let month_dirs =
@@ -457,7 +457,7 @@ let schema_markdown =
 
 (** MCP Server state *)
 type server_state = {
-  mutable room_config: Room.config;
+  mutable room_config: Coord.config;
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
@@ -469,7 +469,7 @@ type server_state = {
 }
 
 let create_state ~base_path =
-  let config = Room.default_config base_path in
+  let config = Coord.default_config base_path in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
@@ -487,14 +487,14 @@ let create_state ~base_path =
     net = None;
   } in
   Tool_board.set_agent_lookup (fun name ->
-    try Room.is_agent_joined state.room_config ~agent_name:name
+    try Coord.is_agent_joined state.room_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
 (** Create state with Eio context. *)
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
-    Room.default_config_eio ~sw
+    Coord.default_config_eio ~sw
       ~on_backend_ready:(fun backend ->
         ignore backend;
         Log.Backend.info "Board: JSONL default backend";
@@ -520,7 +520,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   (* Board post kind auto-classification: reads state.room_config so
      room changes via set_room are reflected automatically. *)
   Tool_board.set_agent_lookup (fun name ->
-    try Room.is_agent_joined state.room_config ~agent_name:name
+    try Coord.is_agent_joined state.room_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 

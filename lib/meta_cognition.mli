@@ -1,4 +1,4 @@
-(** Room-level meta-cognition read model.
+(** Coord-level meta-cognition read model.
 
     Derives high-signal beliefs, tensions, desires, and discourse edges
     from existing room artifacts without mutating state. *)
@@ -68,10 +68,10 @@ type digest_ref = {
 }
 
 val snapshot_json :
-  ?hearth:string -> limit:int -> Room.config -> Yojson.Safe.t
+  ?hearth:string -> limit:int -> Coord.config -> Yojson.Safe.t
 
 val summary_json :
-  ?hearth:string -> Room.config -> Yojson.Safe.t
+  ?hearth:string -> Coord.config -> Yojson.Safe.t
 
 val parse_summary : Yojson.Safe.t -> (summary_input, string) result
 val interpret : summary_input -> interpretation

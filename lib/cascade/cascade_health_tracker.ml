@@ -1,0 +1,225 @@
+(** Reactive health tracking for cascade providers.
+
+    Tracks per-provider success/failure rates using a rolling time window.
+    Providers in cooldown (consecutive failures exceed threshold) are
+    temporarily skipped.  Health data feeds into weighted cascade selection
+    via {!effective_weight}.
+
+    Design: LiteLLM cooldown + OpenRouter rolling-window hybrid.
+    See RFC-OAS-006 Phase 2.
+
+    Thread safety: uses [Stdlib.Mutex] (not Eio.Mutex) for cross-fiber
+    safety without Eio dependency in the hot path.  Critical sections are
+    small (record append + list scan).
+
+    @since 0.137.0 *)
+
+(* ── Configuration ────────────────────────────── *)
+
+(** Rolling window duration in seconds.  Events older than this are
+    discarded on read.  Default: 300s (5 minutes), matching OpenRouter. *)
+let window_sec =
+  match Sys.getenv_opt "OAS_CASCADE_HEALTH_WINDOW_SEC" with
+  | Some s -> (try Float.of_string s with _ -> 300.0)
+  | None -> 300.0
+
+(** Number of consecutive failures before cooldown activates.
+    Default: 3, matching LiteLLM's [allowed_fails] concept. *)
+let cooldown_threshold =
+  match Sys.getenv_opt "OAS_CASCADE_COOLDOWN_THRESHOLD" with
+  | Some s -> (try int_of_string s with _ -> 3)
+  | None -> 3
+
+(** Cooldown duration in seconds.  During cooldown, the provider is
+    skipped (not attempted).  Default: 60s. *)
+let cooldown_sec =
+  match Sys.getenv_opt "OAS_CASCADE_COOLDOWN_SEC" with
+  | Some s -> (try Float.of_string s with _ -> 60.0)
+  | None -> 60.0
+
+(* ── Types ────────────────────────────────────── *)
+
+type outcome = Success | Failure
+
+type event = {
+  time: float;  (* Unix timestamp *)
+  outcome: outcome;
+}
+
+type provider_state = {
+  mutable events: event list;  (* newest first *)
+  mutable consecutive_failures: int;
+  mutable cooldown_until: float;  (* 0.0 = not in cooldown *)
+}
+
+type t = {
+  providers: (string, provider_state) Hashtbl.t;
+  mu: Mutex.t;
+}
+
+(* ── Constructor ──────────────────────────────── *)
+
+let create () : t = {
+  providers = Hashtbl.create 8;
+  mu = Mutex.create ();
+}
+
+let with_lock t f =
+  Mutex.lock t.mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock t.mu) f
+
+let get_or_create_state t key =
+  match Hashtbl.find_opt t.providers key with
+  | Some s -> s
+  | None ->
+    let s = {
+      events = [];
+      consecutive_failures = 0;
+      cooldown_until = 0.0;
+    } in
+    Hashtbl.replace t.providers key s;
+    s
+
+(* ── Recording ────────────────────────────────── *)
+
+let prune_old_events now events =
+  let cutoff = now -. window_sec in
+  List.filter (fun e -> e.time >= cutoff) events
+
+let record t ~provider_key ~outcome ~now =
+  with_lock t (fun () ->
+    let state = get_or_create_state t provider_key in
+    let event = { time = now; outcome } in
+    state.events <- event :: prune_old_events now state.events;
+    match outcome with
+    | Success ->
+      state.consecutive_failures <- 0;
+      (* Clear cooldown on success — provider recovered *)
+      state.cooldown_until <- 0.0
+    | Failure ->
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      if state.consecutive_failures >= cooldown_threshold then
+        state.cooldown_until <- now +. cooldown_sec)
+
+let record_success t ~provider_key =
+  record t ~provider_key ~outcome:Success ~now:(Unix.gettimeofday ())
+
+let record_failure t ~provider_key =
+  record t ~provider_key ~outcome:Failure ~now:(Unix.gettimeofday ())
+
+(* ── Queries ──────────────────────────────────── *)
+
+(** Success rate in the rolling window.  Returns 1.0 for unknown
+    providers (optimistic default — no data means no reason to penalize). *)
+let success_rate t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> 1.0
+    | Some state ->
+      let now = Unix.gettimeofday () in
+      let recent = prune_old_events now state.events in
+      match recent with
+      | [] -> 1.0
+      | _ ->
+        let successes = List.length
+            (List.filter (fun e -> e.outcome = Success) recent) in
+        float_of_int successes /. float_of_int (List.length recent))
+
+(** Whether the provider is currently in cooldown.  A cooled-down provider
+    should be skipped in cascade selection.
+
+    @return [true] if in cooldown AND cooldown has not expired *)
+let is_in_cooldown t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> false
+    | Some state ->
+      let now = Unix.gettimeofday () in
+      if state.cooldown_until > now then true
+      else begin
+        (* Expired cooldown — clear it *)
+        if state.cooldown_until > 0.0 then
+          state.cooldown_until <- 0.0;
+        false
+      end)
+
+(** Compute effective weight for a provider.
+
+    [effective_weight = config_weight * success_rate]
+
+    Providers in cooldown get weight 0 (skipped).  Unknown providers
+    get their full config weight (optimistic). *)
+let effective_weight t ~provider_key ~config_weight =
+  if is_in_cooldown t ~provider_key then 0
+  else
+    let rate = success_rate t ~provider_key in
+    max 1 (int_of_float (float_of_int config_weight *. rate))
+
+(** Summary for debugging/telemetry. *)
+let provider_summary t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> Printf.sprintf "%s: no data" provider_key
+    | Some state ->
+      let now = Unix.gettimeofday () in
+      let recent = prune_old_events now state.events in
+      let total = List.length recent in
+      let successes = List.length
+          (List.filter (fun e -> e.outcome = Success) recent) in
+      let in_cd = state.cooldown_until > now in
+      Printf.sprintf "%s: %d/%d ok (%.0f%%) consec_fail=%d cooldown=%b"
+        provider_key successes total
+        (if total > 0 then 100.0 *. float_of_int successes /. float_of_int total else 100.0)
+        state.consecutive_failures in_cd)
+
+(** Structured provider snapshot — shared by [provider_info] and [all_providers].
+    Built inside the mutex so the snapshot is consistent. *)
+type provider_info = {
+  provider_key : string;
+  success_rate : float;
+  consecutive_failures : int;
+  in_cooldown : bool;
+  cooldown_expires_at : float option;
+  events_in_window : int;
+}
+
+let build_info_locked ~now ~key state =
+  let recent = prune_old_events now state.events in
+  let total = List.length recent in
+  let successes = List.length
+      (List.filter (fun e -> e.outcome = Success) recent) in
+  let rate =
+    if total = 0 then 1.0
+    else float_of_int successes /. float_of_int total
+  in
+  let in_cd = state.cooldown_until > now in
+  {
+    provider_key = key;
+    success_rate = rate;
+    consecutive_failures = state.consecutive_failures;
+    in_cooldown = in_cd;
+    cooldown_expires_at = (if in_cd then Some state.cooldown_until else None);
+    events_in_window = total;
+  }
+
+let provider_info t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> None
+    | Some state ->
+      Some (build_info_locked ~now:(Unix.gettimeofday ()) ~key:provider_key state))
+
+let all_providers t =
+  with_lock t (fun () ->
+    let now = Unix.gettimeofday () in
+    Hashtbl.fold
+      (fun key state acc -> build_info_locked ~now ~key state :: acc)
+      t.providers
+      []
+    |> List.sort (fun a b -> String.compare a.provider_key b.provider_key))
+
+(* ── Global singleton ─────────────────────────── *)
+
+(** Global health tracker shared across all cascade calls in this process.
+    Thread-safe via internal Mutex. *)
+let global : t = create ()

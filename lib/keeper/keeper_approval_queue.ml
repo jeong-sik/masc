@@ -33,7 +33,7 @@ let pending : (string, pending_approval) Hashtbl.t = Hashtbl.create 8
 
 (** Dated JSONL audit trail for approval events.
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
-    Independent of Room.config — approval is a global resource. *)
+    Independent of Coord.config — approval is a global resource. *)
 let audit_store_ref : Dated_jsonl.t option ref = ref None
 
 let get_audit_store () =

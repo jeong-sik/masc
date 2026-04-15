@@ -11,7 +11,7 @@ type allowed_input =
 type banned_input_kind =
   | Readme
   | Design_doc
-  | Room_history
+  | Coord_history
   | Task_history
   | Governance_history
 
@@ -139,7 +139,7 @@ let classify_path path =
     || (List.mem "retrospective" basename_tokens && has_history_artifact_extension lower)
   in
   if check_patterns banned_readme_patterns then Some Readme
-  else if has_room_history then Some Room_history
+  else if has_room_history then Some Coord_history
   else if has_task_history then Some Task_history
   else if has_governance_history then Some Governance_history
   else if has_doc_extension lower && (has_doc_dir || has_doc_token) then Some Design_doc

@@ -968,7 +968,7 @@ function StatusBar({
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-4 py-2.5">
+    <div class="sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md px-4 py-2.5 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>

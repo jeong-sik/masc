@@ -650,8 +650,9 @@ let write_heartbeat_snapshot
       match continuity_snapshot with
       | Some s -> keeper_state_snapshot_to_summary_text s
       | None ->
-        let trimmed = String.trim meta_current.continuity_summary in
-        if trimmed = "" then "No continuity snapshot available." else trimmed
+        continuity_fallback_summary_text
+          ~continuity_summary:meta_current.continuity_summary
+          ~last_continuity_update_ts:meta_current.runtime.last_continuity_update_ts
     in
     let repetition_risk =
       repetition_risk_score ~messages:c_messages ~candidate_reply:None

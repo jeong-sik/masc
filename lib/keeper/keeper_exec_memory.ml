@@ -239,8 +239,9 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
   let continuity_summary =
     match continuity with
     | None ->
-      let trimmed = String.trim meta.continuity_summary in
-      if trimmed = "" then "No continuity snapshot available." else trimmed
+      Keeper_memory_policy.continuity_fallback_summary_text
+        ~continuity_summary:meta.continuity_summary
+        ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
     | Some snapshot -> Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
   in
   let ctx_tokens = count_context_tokens ctx_work in
@@ -285,4 +286,3 @@ let keeper_context_status_json ~(meta : keeper_meta) ~(ctx_work : working_contex
 ;;
 
 (* --- Memory bank search (structured notes from [STATE] blocks) --- *)
-

@@ -413,6 +413,7 @@ goal = "test goal"
 let test_profile_full () =
   let input = {|
 [keeper]
+persona_name = "analyst"
 goal = "analyze logs"
 short_goal = "current session"
 mid_goal = "build patterns"
@@ -432,6 +433,7 @@ policy_voice_enabled = false
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
+      check (option string) "persona_name" (Some "analyst") d.persona_name;
       check (option string) "goal" (Some "analyze logs") d.goal;
       check (option string) "will" (Some "detect issues") d.will;
       check int "mention_targets" 2 (List.length d.mention_targets);

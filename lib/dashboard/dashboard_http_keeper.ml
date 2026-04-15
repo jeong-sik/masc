@@ -795,8 +795,10 @@ let keeper_config_json (config : Room.config) (name : string)
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let active_model = Keeper_exec_status.active_model_of_meta m in
+      let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
       let persona_extended =
-        Keeper_types_profile.load_persona_extended m.name
+        Keeper_types_profile.resolved_persona_name ~keeper_name:m.name defaults
+        |> Keeper_types_profile.load_persona_extended
         |> Option.value ~default:""
       in
       let effective_system_prompt =

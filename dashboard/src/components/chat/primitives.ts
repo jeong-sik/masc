@@ -124,12 +124,14 @@ export function ChatMessageBubble({
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
 
-  useEffect(() => {
+  const prevShowMetadataRef = useRef(showMetadata)
+  if (prevShowMetadataRef.current !== showMetadata) {
+    prevShowMetadataRef.current = showMetadata
     if (!showMetadata) {
       setExpanded(false)
       setRawExpanded(false)
     }
-  }, [showMetadata])
+  }
 
   return html`
     <article

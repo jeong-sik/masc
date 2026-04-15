@@ -714,6 +714,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
 export function ConnectorStatusPanel() {
   useEffect(() => {
     void refresh()
+    return () => { connectorStatusResource.cancel() }
   }, [])
 
   useEffect(() => {

@@ -137,7 +137,9 @@ function MissionLoaded({ mission }: { mission: NonNullable<typeof missionSnapsho
   }
 
   useEffect(() => {
-    void refreshMissionSessionDetail(activeSessionId)
+    let cancelled = false
+    void refreshMissionSessionDetail(activeSessionId).then(() => { if (cancelled) return })
+    return () => { cancelled = true }
   }, [activeSessionId])
 
   return html`

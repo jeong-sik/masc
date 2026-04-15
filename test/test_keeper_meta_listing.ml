@@ -87,6 +87,14 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
   | Ok () -> ()
   | Error e -> fail ("write_meta failed: " ^ e)
 
+let register_keeper_offline_exn config ~name =
+  match Keeper_types.read_meta config name with
+  | Ok (Some meta) ->
+      ignore
+        (Keeper_registry.register_offline ~base_path:config.base_path name meta)
+  | Ok None -> fail ("expected keeper meta for " ^ name)
+  | Error e -> fail ("read_meta failed: " ^ e)
+
 let parse_json_exn body =
   try Yojson.Safe.from_string body
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
@@ -195,6 +203,7 @@ let test_keeper_list_normalizes_unknown_social_model () =
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
         ~social_model:"experimental_v99";
+      register_keeper_offline_exn config ~name:"sangsu";
       let ctx = keeper_ctx env sw config "operator" in
       let ok, body =
         match

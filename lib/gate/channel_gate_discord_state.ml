@@ -8,6 +8,7 @@ type binding = {
 type audit_event = {
   timestamp : string;
   action : string;
+  guild_id : string;
   channel_id : string;
   keeper_name : string;
   actor_id : string;
@@ -15,63 +16,48 @@ type audit_event = {
   previous_keeper : string;
 }
 
-let connector_id = "imessage"
-let display_name = "iMessage"
-let channel = "imessage"
+module Names = Channel_gate_discord_names
 
-let default_status_path = ".masc/connectors/imessage/status.json"
-let default_binding_store_path = ".masc/connectors/imessage/bindings.json"
-let default_binding_audit_path = ".masc/connectors/imessage/binding_audit.jsonl"
+let connector_id = "discord"
+let display_name = "Discord"
+let channel = "discord"
+
+
+let default_status_path = ".masc/connectors/discord/status.json"
+let default_binding_store_path = ".masc/connectors/discord/bindings.json"
+let default_binding_audit_path = ".masc/connectors/discord/binding_audit.jsonl"
+
+let legacy_status_path = "sidecars/discord-bot/.gate/discord_status.json"
+let legacy_binding_store_path = "sidecars/discord-bot/.gate/discord_bindings.json"
+let legacy_binding_audit_path =
+  "sidecars/discord-bot/.gate/discord_binding_audit.jsonl"
 
 let stale_after_sec () =
-  Env_config_core.get_int ~default:30 "MASC_IMESSAGE_STATUS_STALE_SEC"
-
-let resolve_path raw_path =
-  if Filename.is_relative raw_path then
-    Filename.concat (Env_config_core.base_path ()) raw_path
-  else
-    raw_path
-
-let redact_chat_guid raw =
-  let value = String.trim raw in
-  if value = "" then ""
-  else
-    match List.rev (String.split_on_char ';' value) with
-    | _target :: rev_prefix when rev_prefix <> [] ->
-        String.concat ";" (List.rev rev_prefix) ^ ";[redacted]"
-    | _ -> "[redacted]"
-
-let configured_write_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None -> resolve_path default
-
-let configured_read_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None -> resolve_path default
+  Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"
 
 let status_path () =
-  configured_read_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
+  Names.configured_read_path "MASC_DISCORD_STATUS_PATH"
+    ~default:default_status_path ~legacy:legacy_status_path
 
 let status_write_path () =
-  configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
+  Names.configured_write_path "MASC_DISCORD_STATUS_PATH"
+    ~default:default_status_path
 
 let binding_store_path () =
-  configured_write_path "MASC_IMESSAGE_BINDING_STORE_PATH"
+  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_store_read_path () =
-  configured_read_path "MASC_IMESSAGE_BINDING_STORE_PATH"
-    ~default:default_binding_store_path
+  Names.configured_read_path "MASC_DISCORD_BINDING_STORE_PATH"
+    ~default:default_binding_store_path ~legacy:legacy_binding_store_path
 
 let binding_audit_path () =
-  configured_write_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
+  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
 let binding_audit_read_path () =
-  configured_read_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path
+  Names.configured_read_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+    ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
 
 let read_json_file_opt path =
   if not (Sys.file_exists path) then
@@ -136,6 +122,7 @@ let audit_event_json event =
     [
       ("timestamp", `String event.timestamp);
       ("action", `String event.action);
+      ("guild_id", `String event.guild_id);
       ("channel_id", `String event.channel_id);
       ("keeper_name", `String event.keeper_name);
       ("actor_id", `String event.actor_id);
@@ -220,8 +207,11 @@ let status_json ?(audit_limit = 10) () =
   let live_status = read_json_file_opt status_path in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
+  let names_path = Names.names_read_path () in
+  let name_map = Names.read () in
   let configured_bindings = read_bindings () in
   let recent_audit = read_recent_audit ~limit:audit_limit in
+  let channel = "discord" in
   let available = Option.is_some live_status in
   let updated_at =
     match live_status with
@@ -252,17 +242,17 @@ let status_json ?(audit_limit = 10) () =
       ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
+      ("names_path", `String names_path);
+      ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
-      ("reply_mode", `String (status_field "reply_mode" string_member ""));
-      ( "self_chat_guid",
-        `String
-          (redact_chat_guid (status_field "self_chat_guid" string_member "")) );
-      ("last_message_at", `String (status_field "last_message_at" string_member ""));
-      ("messages_processed", `Int (status_field "messages_processed" int_member 0));
-      ("messages_failed", `Int (status_field "messages_failed" int_member 0));
-      ("cursor_rowid", `Int (status_field "cursor_rowid" int_member 0));
-      ("poll_interval_sec", `Float (status_field "poll_interval_sec" (fun j k -> j |> U.member k |> U.to_float_option |> Option.value ~default:2.0) 2.0));
-      ("gate_base_url", `String (status_field "gate_base_url" string_member ""));
+      ( "last_ready_at",
+        `String (status_field "last_ready_at" string_member "") );
+      ( "bot_user_name",
+        `String (status_field "bot_user_name" string_member "") );
+      ("bot_user_id", `String (status_field "bot_user_id" string_member ""));
+      ("guild_count", `Int (status_field "guild_count" int_member 0));
+      ( "gate_base_url",
+        `String (status_field "gate_base_url" string_member "") );
       ( "gate_healthy",
         Option.value ~default:`Null
           (Option.map (fun value -> `Bool value)
@@ -271,8 +261,13 @@ let status_json ?(audit_limit = 10) () =
               | None -> None)) );
       ( "gate_health_checked_at",
         `String (status_field "gate_health_checked_at" string_member "") );
+      ( "binding_source",
+        `String (status_field "binding_source" string_member "") );
+      ( "runtime_bindings_count",
+        `Int (status_field "runtime_bindings_count" int_member 0) );
       ("pid", `Int (status_field "pid" int_member 0));
-      ("configured_bindings", `List (List.map binding_json configured_bindings));
+      ( "configured_bindings",
+        `List (List.map binding_json configured_bindings) );
       ("recent_audit", `List recent_audit);
     ]
 
@@ -302,11 +297,58 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
         match list_assoc_field "channels" json with
         | Some channels -> (
             match
-              find_assoc_by_string_field ~field:"channel" ~value:channel channels
+              find_assoc_by_string_field ~field:"channel" ~value:channel
+                channels
             with
             | Some row -> row
             | None -> `Null)
         | None -> `Null)
+  in
+  let storage_paths =
+    `Assoc
+      [
+        ("status_path", `String (string_member status "status_path"));
+        ( "binding_store_path",
+          `String (string_member status "binding_store_path") );
+        ("audit_path", `String (string_member status "audit_path"));
+        ("names_path", `String (string_member status "names_path"));
+      ]
+  in
+  let runtime_summary =
+    `Assoc
+      [
+        ("available", `Bool (bool_member status "available"));
+        ("connected", `Bool (bool_member status "connected"));
+        ("stale", `Bool (bool_member status "stale"));
+        ("stale_after_sec", `Int (int_member status "stale_after_sec"));
+        ("status", `String (string_member status "status"));
+        ("error", `String (string_member status "error"));
+        ("updated_at", `String (string_member status "updated_at"));
+        ("last_ready_at", `String (string_member status "last_ready_at"));
+        ("bot_user_name", `String (string_member status "bot_user_name"));
+        ("bot_user_id", `String (string_member status "bot_user_id"));
+        ("guild_count", `Int (int_member status "guild_count"));
+        ("gate_base_url", `String (string_member status "gate_base_url"));
+        ( "gate_healthy",
+          Option.value ~default:`Null
+            (Option.map (fun value -> `Bool value)
+               (bool_option_member status "gate_healthy")) );
+        ( "gate_health_checked_at",
+          `String (string_member status "gate_health_checked_at") );
+        ("pid", `Int (int_member status "pid"));
+      ]
+  in
+  let binding_summary =
+    `Assoc
+      [
+        ("binding_source", `String (string_member status "binding_source"));
+        ( "runtime_bindings_count",
+          `Int (int_member status "runtime_bindings_count") );
+        ( "configured_bindings_count",
+          `Int
+            (status |> U.member "configured_bindings" |> U.to_list |> List.length)
+        );
+      ]
   in
   `Assoc
     [
@@ -320,14 +362,16 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("stale", `Bool (bool_member status "stale"));
       ("stale_after_sec", `Int (int_member status "stale_after_sec"));
       ("error", `String (string_member status "error"));
+      ("status_path", `String (string_member status "status_path"));
+      ("binding_store_path", `String (string_member status "binding_store_path"));
+      ("audit_path", `String (string_member status "audit_path"));
+      ("names_path", `String (string_member status "names_path"));
+      ("names", status |> U.member "names");
       ("updated_at", `String (string_member status "updated_at"));
-      ("reply_mode", `String (string_member status "reply_mode"));
-      ("self_chat_guid", `String (string_member status "self_chat_guid"));
-      ("last_message_at", `String (string_member status "last_message_at"));
-      ("messages_processed", `Int (int_member status "messages_processed"));
-      ("messages_failed", `Int (int_member status "messages_failed"));
-      ("cursor_rowid", `Int (int_member status "cursor_rowid"));
-      ("poll_interval_sec", status |> U.member "poll_interval_sec");
+      ("last_ready_at", `String (string_member status "last_ready_at"));
+      ("bot_user_name", `String (string_member status "bot_user_name"));
+      ("bot_user_id", `String (string_member status "bot_user_id"));
+      ("guild_count", `Int (int_member status "guild_count"));
       ("gate_base_url", `String (string_member status "gate_base_url"));
       ( "gate_healthy",
         Option.value ~default:`Null
@@ -335,9 +379,14 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
              (bool_option_member status "gate_healthy")) );
       ( "gate_health_checked_at",
         `String (string_member status "gate_health_checked_at") );
+      ("binding_source", `String (string_member status "binding_source"));
+      ("runtime_bindings_count", `Int (int_member status "runtime_bindings_count"));
       ("pid", `Int (int_member status "pid"));
       ("configured_bindings", status |> U.member "configured_bindings");
       ("recent_audit", status |> U.member "recent_audit");
+      ("storage_paths", storage_paths);
+      ("runtime_summary", runtime_summary);
+      ("binding_summary", binding_summary);
       ("observed_channel", observed_channel);
     ]
 
@@ -374,10 +423,14 @@ let bind ~channel_id ~keeper_name ~actor_name =
     in
     try
       save_bindings updated_bindings;
+      let guild_id =
+        Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
+      in
       append_audit_event
         {
-          timestamp = Server_utils.iso8601_of_unix (Unix.gettimeofday ());
+          timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
           action = "bind";
+          guild_id;
           channel_id;
           keeper_name;
           actor_id = actor_name;
@@ -411,10 +464,14 @@ let unbind ~channel_id ~actor_name =
         in
         try
           save_bindings updated_bindings;
+          let guild_id =
+            Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
+          in
           append_audit_event
             {
-              timestamp = Server_utils.iso8601_of_unix (Unix.gettimeofday ());
+              timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
+              guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;

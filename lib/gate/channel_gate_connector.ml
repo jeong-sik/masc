@@ -58,5 +58,5 @@ let connectors_json ?gate_status_json ?(audit_limit = 10) () =
       ("total", `Int (List.length connectors));
       ("active_count", `Int active_count);
       ("generated_at",
-       `String (Server_utils.iso8601_of_unix (Unix.gettimeofday ())));
+       `String (Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())));
     ]

@@ -1,6 +1,6 @@
 open Alcotest
 
-module IMessage_state = Masc_mcp.Channel_gate_imessage_state
+module IMessage_state = Channel_gate_imessage_state
 module U = Yojson.Safe.Util
 
 let with_env name value f =

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Metrics = Masc_mcp.Channel_gate_metrics
+module Metrics = Channel_gate_metrics
 module Gate_routes = Masc_mcp.Server_routes_http_routes_channel_gate
 module U = Yojson.Safe.Util
 

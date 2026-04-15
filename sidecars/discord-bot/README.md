@@ -77,10 +77,10 @@ connector falls back to same-origin auth headers against `127.0.0.1`/`localhost`
 
 By default the bot writes runtime files under:
 
-- `.masc/connectors/discord/bindings.json`
-- `.masc/connectors/discord/binding_audit.jsonl`
-- `.masc/connectors/discord/status.json`
-- `.masc/connectors/discord/names.json` (guild + channel id-to-name humanization)
+- `.gate/runtime/discord/bindings.json`
+- `.gate/runtime/discord/binding_audit.jsonl`
+- `.gate/runtime/discord/status.json`
+- `.gate/runtime/discord/names.json` (guild + channel id-to-name humanization)
 
 Relative paths resolve from `MASC_BASE_PATH` when it is set; otherwise they
 resolve from the bot's current working directory.
@@ -191,7 +191,7 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
 
 `/keeper-bind` and `/keeper-unbind` now persist the effective channel map to
 `DISCORD_BINDING_STORE_PATH` (default:
-`.masc/connectors/discord/bindings.json`).
+`.gate/runtime/discord/bindings.json`).
 
 - If the store file does not exist, the bot starts from `DISCORD_KEEPER_MAP`
 - Once an operator persists a runtime bind/unbind, the store file becomes the
@@ -199,9 +199,9 @@ Use the `/keeper-ask` slash command to talk to any keeper from any channel.
 - `/keeper-map` shows the active binding source and store path for operators
 - successful bind/unbind operations also append an audit record to
   `DISCORD_BINDING_AUDIT_PATH` (default:
-  `.masc/connectors/discord/binding_audit.jsonl`)
+  `.gate/runtime/discord/binding_audit.jsonl`)
 - the bot also writes a direct runtime snapshot to `DISCORD_STATUS_PATH`
-  (default: `.masc/connectors/discord/status.json`) every `STATUS_HEARTBEAT_SEC`
+  (default: `.gate/runtime/discord/status.json`) every `STATUS_HEARTBEAT_SEC`
   seconds so the dashboard can show live Discord connection state
 - runtime binding changes written by the dashboard are hot-reloaded by the bot
   without a process restart
@@ -241,7 +241,7 @@ Useful checks:
 
 ```bash
 curl -sfS http://127.0.0.1:8935/api/v1/gate/discord/status
-ls -la "${MASC_BASE_PATH:-$(pwd)}/.masc/connectors/discord"
+ls -la "${MASC_BASE_PATH:-$(pwd)}/.gate/runtime/discord"
 ```
 
 ### Messages are ignored in a channel

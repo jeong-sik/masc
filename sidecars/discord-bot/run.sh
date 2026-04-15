@@ -29,7 +29,7 @@ export MASC_BASE_PATH="$BASE_PATH"
 
 LOG_DIR="$BASE_PATH/.masc/logs"
 LOG_FILE="$LOG_DIR/discord-sidecar-$(date +%Y%m%d).log"
-STATUS_FILE="$BASE_PATH/.masc/connectors/discord/status.json"
+STATUS_FILE="$BASE_PATH/.gate/runtime/discord/status.json"
 
 cmd="${1:-start}"
 case "$cmd" in

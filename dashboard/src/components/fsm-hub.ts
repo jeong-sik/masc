@@ -1041,6 +1041,18 @@ const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
   error: 'text-[#ef4444] border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)]',
 }
 
+/** Panel-level accent — border + subtle tinted overlay — so that the
+    overall tone of the current operator insight is visible from the
+    peripheral visual field. Neutral tones (ok/info) keep the default
+    muted panel frame; warn/error lift the full panel so urgent state
+    does not require reading the small top-right badge. */
+const INSIGHT_PANEL_CLS: Record<InsightTone, string> = {
+  ok: 'border-[var(--white-8)] bg-[var(--white-2)]',
+  info: 'border-[var(--white-8)] bg-[var(--white-2)]',
+  warn: 'border-[rgba(245,158,11,0.45)] bg-[rgba(245,158,11,0.04)] shadow-[0_0_0_1px_rgba(245,158,11,0.15)_inset]',
+  error: 'border-[rgba(239,68,68,0.55)] bg-[rgba(239,68,68,0.05)] shadow-[0_0_0_1px_rgba(239,68,68,0.2)_inset]',
+}
+
 function OperationalMeaningPanel({
   snapshot,
   observations,
@@ -1052,9 +1064,15 @@ function OperationalMeaningPanel({
 }) {
   const insight = deriveOperationalInsight(snapshot, observations, now)
   const lanes = deriveObservedLaneSummaries(snapshot, observations, now)
+  const panelCls = INSIGHT_PANEL_CLS[insight.tone]
+  const isAlarm = insight.tone === 'warn' || insight.tone === 'error'
 
   return html`
-    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-4">
+    <div
+      class=${`rounded-xl border p-4 transition-colors duration-300 ${panelCls}`}
+      role=${isAlarm ? 'alert' : undefined}
+      aria-live=${isAlarm ? 'polite' : undefined}
+    >
       <div class="flex items-start justify-between gap-3 flex-wrap">
         <div class="min-w-0">
           <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">Operator Meaning</div>

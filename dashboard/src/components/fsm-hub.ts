@@ -6,6 +6,7 @@ import {
   type KeeperCompositeSnapshot,
   type KeeperCompositeInvariants,
 } from '../api/keeper'
+import { fetchGateKeepers } from '../api/gate'
 import { keepers } from '../store'
 import { compositeTick } from '../composite-signals'
 import { EmptyState } from './common/empty-state'
@@ -785,13 +786,35 @@ export function FsmHub() {
   const [now, setNow] = useState(() => Date.now() / 1000)
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
+  const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
   const requestIdRef = useRef(0)
 
-  const keeperList = keepers.value
-  const keeperNames = useMemo(
-    () => keeperList.map(k => k.name).sort(),
-    [keeperList],
+  // Primary source: store signal (from dashboard/shell polling).
+  // Fallback: direct gate fetch — the shell endpoint omits keeper
+  // details (only sends configured_keepers count), so without this
+  // fallback the FsmHub sees zero keepers and renders empty state.
+  const storeKeeperList = keepers.value
+  const storeNames = useMemo(
+    () => storeKeeperList.map(k => k.name).sort(),
+    [storeKeeperList],
   )
+  useEffect(() => {
+    if (storeNames.length > 0) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const data = await fetchGateKeepers()
+        if (!cancelled) {
+          setGateKeeperNames(data.keepers.map(k => k.name).sort())
+        }
+      } catch {
+        // gate endpoint may require auth — silent fallback
+      }
+    })()
+    return () => { cancelled = true }
+  }, [storeNames.length, pollTick])
+
+  const keeperNames = storeNames.length > 0 ? storeNames : gateKeeperNames
   const activeSelected = useMemo(() => {
     if (selected && keeperNames.includes(selected)) return selected
     return keeperNames[0] ?? null

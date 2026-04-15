@@ -250,6 +250,17 @@ let test_default_model_strings_unknown () =
   let models = Oas_worker.default_model_strings ~cascade_name:"nonexistent_cascade_xyz" in
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 
+let test_default_model_strings_local_only () =
+  let models = Oas_worker.default_model_strings ~cascade_name:"local_only" in
+  let is_local label =
+    match Oas_model_resolve.provider_name_of_label label with
+    | Some pname -> Provider_adapter.is_local_provider pname
+    | None -> false
+  in
+  Alcotest.(check bool) "local_only has models" true (models <> []);
+  Alcotest.(check bool) "local_only stays local" true
+    (List.for_all is_local models)
+
 (** Test default_config_path with a controlled fixture so the result
     is deterministic regardless of CWD or inherited env.
     Creates a temp directory with .masc/config/cascade.json, sets MASC_BASE_PATH
@@ -1790,6 +1801,8 @@ let () =
         test_default_model_strings_keeper;
       Alcotest.test_case "heartbeat default models" `Quick
         test_default_model_strings_heartbeat;
+      Alcotest.test_case "local_only defaults stay local" `Quick
+        test_default_model_strings_local_only;
       Alcotest.test_case "unknown cascade fallback" `Quick
         test_default_model_strings_unknown;
       Alcotest.test_case "default_config_path" `Quick

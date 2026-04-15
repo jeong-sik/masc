@@ -43,7 +43,7 @@ let standard_profiles = [
 ]
 
 let profile_json ~config_path name =
-  let defaults = Oas_worker.default_model_strings ~cascade_name:name in
+  let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in
   let (_models, trace) =
     CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
   in
@@ -61,7 +61,7 @@ let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t
   ]
 
 let config_json () =
-  let config_path = Oas_worker.default_config_path () in
+  let config_path = Cascade_runtime.cascade_config_path () in
   let seen = Hashtbl.create 16 in
   let add_profile acc name =
     let canonical = Keeper_cascade_profile.canonicalize name in

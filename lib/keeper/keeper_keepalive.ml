@@ -557,7 +557,7 @@ let write_heartbeat_snapshot
   =
   let metrics_store = keeper_metrics_store ctx.config meta_current.name in
   let cascade_models =
-    Oas_model_resolve.models_of_cascade_name meta_current.cascade_name
+    Cascade_runtime.models_of_cascade_name meta_current.cascade_name
   in
   let max_cascade_context =
     let min_keeper_context = Keeper_config.min_keeper_context_tokens in
@@ -565,9 +565,9 @@ let write_heartbeat_snapshot
       | Some v -> v
       | None ->
           let resolved =
-            Oas_model_resolve.resolve_max_cascade_context cascade_models
+            Cascade_runtime.resolve_max_cascade_context cascade_models
           in
-          Oas_model_resolve.clamp_context_for_pure_local_labels
+          Cascade_runtime.clamp_context_for_pure_local_labels
             ~labels:cascade_models ~max_context:resolved
     in
     max min_keeper_context raw

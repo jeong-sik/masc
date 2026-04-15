@@ -194,7 +194,7 @@ let finalize_runtime_breakdown json =
   | _ -> json
 
 let default_local_model_id () =
-  let _label, model_id = Oas_model_resolve.default_local_model_label_and_id () in
+  let _label, model_id = Cascade_runtime.default_local_model_label_and_id () in
   model_id
 
 let is_oas_managed_runtime_pool = function

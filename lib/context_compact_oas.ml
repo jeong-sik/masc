@@ -356,7 +356,7 @@ let resolve_strategies
           (* Fallback: minimal observation when none provided. *)
           { context_ratio = 0.5; active_agent_count = 1;
             unclaimed_task_count = 0; is_single_focused_task = true;
-            context_window = Oas_model_resolve.fallback_context_window;
+            context_window = Cascade_runtime.fallback_context_window;
             is_local_model = false }
       in
       (* Resolve once — no recursive Dynamic *)

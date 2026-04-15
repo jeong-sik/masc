@@ -453,16 +453,16 @@ let resolved_max_context_for_turn
     | None ->
         let primary =
           let resolved =
-            Oas_model_resolve.resolve_primary_max_context model_labels
+            Cascade_runtime.resolve_primary_max_context model_labels
           in
-          Oas_model_resolve.clamp_context_for_pure_local_labels
+          Cascade_runtime.clamp_context_for_pure_local_labels
             ~labels:model_labels ~max_context:resolved
         in
         let cascade_max =
           let resolved =
-            Oas_model_resolve.resolve_max_cascade_context model_labels
+            Cascade_runtime.resolve_max_cascade_context model_labels
           in
-          Oas_model_resolve.clamp_context_for_pure_local_labels
+          Cascade_runtime.clamp_context_for_pure_local_labels
             ~labels:model_labels ~max_context:resolved
         in
         if primary < cascade_max then begin
@@ -1434,7 +1434,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       match ensure_api_keys_for_labels model_labels with
       | Error e -> Error (Oas.Error.Internal e)
       | Ok () ->
-      ignore (Oas_model_resolve.refresh_local_discovery_if_possible model_labels);
+      ignore (Cascade_runtime.refresh_local_discovery_if_possible model_labels);
       let max_context =
         resolved_max_context_for_turn ~meta model_labels
       in

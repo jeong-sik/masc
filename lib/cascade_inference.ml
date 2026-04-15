@@ -1,4 +1,4 @@
-(** Per-cascade inference parameters — thin delegation to OAS Cascade_config.
+(** Per-cascade inference parameters — thin delegation to MASC Cascade_config.
 
     Previously (v2.128.0-v2.148.0) this module maintained its own JSON cache
     and field extraction. Since OAS v0.89.1 exposes [Cascade_config.load_json]
@@ -9,7 +9,7 @@
     - [for_cascade], [for_json] (used in tests)
 
     @since v2.128.0
-    @since v2.149.0 — delegated to OAS Cascade_config *)
+    @since v2.149.0 — delegated to MASC Cascade_config *)
 
 (** Inference parameters resolved from cascade config. *)
 type t = {
@@ -48,11 +48,11 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
   { temperature; max_tokens }
 
 (** Load inference parameters for a named cascade profile.
-    Delegates to OAS Cascade_config.resolve_inference_params.
+    Delegates to MASC [Cascade_config.resolve_inference_params].
     Returns [empty] on any error (malformed config, read failure). *)
 let for_cascade ~(name : string) : t =
   let name = Keeper_cascade_profile.canonicalize name in
-  match Oas_worker.default_config_path () with
+  match Cascade_runtime.cascade_config_path () with
   | None -> empty
   | Some config_path ->
       (try of_oas (Cascade_config.resolve_inference_params ~config_path ~name)

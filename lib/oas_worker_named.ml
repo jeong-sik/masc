@@ -1,6 +1,7 @@
-(** Oas_worker_named — Named cascade and model-label execution entry points.
+(** Oas_worker_named — MASC named-cascade and model-label execution entry points.
 
-    Public API for running OAS agents with cascade fallback ([run_named])
+    Public API for running OAS agents through MASC-managed named cascade
+    profiles ([run_named])
     or explicit model label ([run_model_by_label]), with optional MASC
     tool bridging variants.
 
@@ -10,51 +11,8 @@
 (* Cascade profile defaults (moved from Cascade module)              *)
 (* ================================================================ *)
 
-let default_config_path () : string option =
-  Config_dir_resolver.log_warnings ~context:"OasWorker" ();
-  Config_dir_resolver.cascade_path_opt ()
-
-(** True when cascade_name implies local-only routing (e.g. "local_only").
-    Convention: any name containing "local" restricts defaults to
-    self-hosted providers so that cloud models never leak in via fallback. *)
-let is_local_only_cascade name =
-  let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
-  let pattern = "local" in
-  let plen = String.length pattern in
-  let slen = String.length lc in
-  let rec loop i =
-    if i > slen - plen then false
-    else if String.sub lc i plen = pattern then true
-    else loop (i + 1)
-  in
-  loop 0
-
-let is_local_label label =
-  match Oas_model_resolve.provider_name_of_label label with
-  | Some pname -> Provider_adapter.is_local_provider pname
-  | None -> false
-
-(** Hardcoded fallback defaults — used only when cascade.json is missing
-    and the cascade name has no "{name}_models" entry.
-    When cascade_name contains "local", only self-hosted providers are
-    returned to prevent cloud models from leaking into local-only cascades.
-    All profiles are now in config/cascade.json (hot-reloadable). *)
-let default_model_strings ~cascade_name =
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let all_labels =
-    match Provider_adapter.explicit_llama_model_label_result () with
-    | Ok label -> [ label ]
-    | Error _ -> (
-        match Provider_adapter.preferred_execution_model_labels () with
-        | [] -> [ Provider_adapter.default_local_fallback_label () ]
-        | labels -> labels)
-  in
-  if is_local_only_cascade cascade_name then
-    match List.filter is_local_label all_labels with
-    | [] -> [ Provider_adapter.default_local_fallback_label () ]
-    | local -> local
-  else
-    all_labels
+let default_config_path = Cascade_runtime.cascade_config_path
+let default_model_strings = Cascade_runtime.default_model_strings
 
 (* ================================================================ *)
 (* Named model execution                                            *)
@@ -83,35 +41,16 @@ let admission_wait_timeout_error
   Log.Misc.warn "%s" msg;
   Error (Oas.Error.Internal msg)
 
-(** Resolve cascade provider configs via OAS Cascade_config.
-    Returns OAS Provider_config.t list directly, bypassing the old Model_spec facade. *)
-let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t list =
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let defaults = default_model_strings ~cascade_name in
-  let config_path = default_config_path () in
-  let configured =
-    Cascade_config.resolve_model_strings
-      ?config_path ~name:cascade_name ~defaults ()
-  in
-  let specs = Cascade_config.parse_model_strings configured in
-  if specs <> [] then specs
-  else if configured = defaults then (
-      Log.Misc.warn "cascade %s: no callable models from built-in defaults" cascade_name;
-      [])
-    else (
-      Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
-      Cascade_config.parse_model_strings defaults)
+(** Resolve cascade provider configs via MASC Cascade_config.
+    Returns Provider_config.t list for the downstream OAS runtime,
+    bypassing the old Model_spec facade. *)
+let resolve_cascade_providers = Cascade_runtime.resolve_named_providers
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
-    MASC passes strings through without interpretation — OAS parses them. *)
-let resolve_providers_from_model_strings (model_strings : string list)
-    : Llm_provider.Provider_config.t list =
-  let specs = Cascade_config.parse_model_strings model_strings in
-  if specs <> [] then specs
-  else (
-    Log.Misc.warn "direct model strings: no callable models from %d entries"
-      (List.length model_strings);
-    [])
+    MASC parses the strings via its local [Cascade_config] and passes the
+    resulting provider configs into OAS execution. *)
+let resolve_providers_from_model_strings =
+  Cascade_runtime.resolve_providers_from_model_strings
 
 let config_for_label
     ~(name : string)
@@ -136,7 +75,7 @@ let config_for_label
     ~(description : string option)
     () : Oas_worker_exec.config =
   let provider = Oas_worker_exec.resolve_provider_of_label model_label in
-  let model_id = match Oas_model_resolve.provider_name_of_label model_label with
+  let model_id = match Cascade_runtime.provider_name_of_label model_label with
     | Some _ ->
       (match String.index_opt model_label ':' with
        | Some idx -> String.sub model_label (idx + 1) (String.length model_label - idx - 1) |> String.trim
@@ -268,7 +207,6 @@ let run_named
   | Error e -> Error (Oas.Error.Internal e)
   | Ok (sw, net) ->
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
-  let config_path = default_config_path () in
   let configured_labels, candidate_cfgs =
     match model_strings with
     | Some ms when ms <> [] ->
@@ -276,12 +214,7 @@ let run_named
          MASC passes these strings through without interpretation. *)
       (ms, resolve_providers_from_model_strings ms)
     | _ ->
-      (* Legacy path: resolve from cascade.json by name *)
-      let defaults = default_model_strings ~cascade_name in
-      let labels =
-        Cascade_config.resolve_model_strings
-          ?config_path ~name:cascade_name ~defaults ()
-      in
+      let labels = Cascade_runtime.models_of_cascade_name cascade_name in
       (labels, resolve_cascade_providers ~cascade_name)
   in
   let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in

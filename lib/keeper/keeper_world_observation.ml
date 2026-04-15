@@ -320,10 +320,10 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
         match meta.max_context_override with
         | Some value -> value
         | None ->
-            let resolved =
-              Oas_model_resolve.resolve_max_cascade_context cascade_models
-            in
-            Oas_model_resolve.clamp_context_for_pure_local_labels
+              let resolved =
+                Cascade_runtime.resolve_max_cascade_context cascade_models
+              in
+            Cascade_runtime.clamp_context_for_pure_local_labels
               ~labels:cascade_models ~max_context:resolved
       in
       max min_keeper_context raw
@@ -355,10 +355,10 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
         match meta.max_context_override with
         | Some value -> value
         | None ->
-            let resolved =
-              Oas_model_resolve.resolve_max_cascade_context cascade_models
-            in
-            Oas_model_resolve.clamp_context_for_pure_local_labels
+              let resolved =
+                Cascade_runtime.resolve_max_cascade_context cascade_models
+              in
+            Cascade_runtime.clamp_context_for_pure_local_labels
               ~labels:cascade_models ~max_context:resolved
       in
       max min_keeper_context raw

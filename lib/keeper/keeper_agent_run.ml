@@ -1206,9 +1206,9 @@ let run_turn
                          Keeper_config.keeper_llm_rerank_cascade ()
                        in
                        let defaults =
-                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+                         Cascade_runtime.default_model_strings ~cascade_name:rerank_cascade
                        in
-                       let config_path = Oas_worker.default_config_path () in
+                       let config_path = Cascade_runtime.cascade_config_path () in
                        (* Resolve cascade → first healthy provider. OAS 0.144.0+
                           no longer owns cascade orchestration — MASC picks one
                           provider from the cascade and passes it to the

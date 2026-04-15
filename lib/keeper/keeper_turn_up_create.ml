@@ -179,17 +179,17 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         ~fallback_token:env_token_gate
     in
     let cascade_models =
-      Oas_model_resolve.models_of_cascade_name Keeper_config.default_cascade_name
+      Cascade_runtime.models_of_cascade_name Keeper_config.default_cascade_name
     in
-    ignore (Oas_model_resolve.refresh_local_discovery_if_possible cascade_models);
+    ignore (Cascade_runtime.refresh_local_discovery_if_possible cascade_models);
     let primary_max_context =
       match p.max_context_override_opt with
       | Some v -> v
       | None ->
           let resolved =
-            Oas_model_resolve.resolve_max_cascade_context cascade_models
+            Cascade_runtime.resolve_max_cascade_context cascade_models
           in
-          Oas_model_resolve.clamp_context_for_pure_local_labels
+          Cascade_runtime.clamp_context_for_pure_local_labels
             ~labels:cascade_models ~max_context:resolved
     in
     Progress.Tracker.step tracker ~message:"Initializing session directory" ();
@@ -246,7 +246,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             (* Fallback: read default_models from cascade config (user-declared
                JSON), not from an OCaml literal. MASC is a config interpreter —
                it does not know what models exist. *)
-            Oas_model_resolve.default_model_strings_from_config ());
+            Cascade_runtime.default_model_strings_from_config ());
         will;
         needs;
         desires;

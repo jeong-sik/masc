@@ -1,7 +1,7 @@
-(** Per-cascade inference parameters — thin delegation to OAS Cascade_config.
+(** Per-cascade inference parameters — thin delegation to MASC Cascade_config.
 
-    Delegates to OAS [Cascade_config.resolve_inference_params] (since v0.89.1).
-    JSON caching and field extraction are handled by OAS.
+    Delegates to MASC [Cascade_config.resolve_inference_params].
+    JSON caching and field extraction are handled by the local cascade module.
 
     Resolution order:
     1. cascade.json "{name}_temperature" / "{name}_max_tokens"
@@ -9,7 +9,7 @@
     3. Caller-provided fallback
 
     @since v2.128.0
-    @since v2.149.0 — delegated to OAS Cascade_config *)
+    @since v2.149.0 — delegated to MASC Cascade_config *)
 
 (** Inference parameters resolved from cascade config. *)
 type t = {
@@ -21,7 +21,7 @@ type t = {
 val empty : t
 
 (** Load inference parameters for a named cascade profile.
-    Delegates to OAS [Cascade_config.resolve_inference_params]. *)
+    Delegates to MASC [Cascade_config.resolve_inference_params]. *)
 val for_cascade : name:string -> t
 
 (** Extract inference parameters from a parsed JSON value.

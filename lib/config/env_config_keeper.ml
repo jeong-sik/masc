@@ -512,11 +512,11 @@ end
 
 (** {1 Cascade Runtime Overrides}
 
-    Runtime-only narrowing of the OAS cascade provider set. The underlying
+    Runtime-only narrowing of the MASC cascade provider set. The underlying
     cascade profile (loaded from [cascade.json]) is unchanged; this filter is
-    applied by OAS [complete_named] via [~provider_filter] on every keeper turn,
-    so switching between full cascade and a single-provider fallback is a pure
-    env-var change with no file or code edit.
+    applied by the named-cascade execution path via [~provider_filter] on every
+    keeper turn, so switching between full cascade and a single-provider
+    fallback is a pure env-var change with no file or code edit.
 
     Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
     hard mode, or A/B testing a single provider. *)
@@ -527,8 +527,8 @@ module KeeperCascade = struct
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Oas_worker.run_named], which forwards it to OAS
-      [Cascade_config.complete_named]. OAS keeps only matching providers from
+      into [Oas_worker.run_named], which applies it during MASC cascade
+      provider resolution. The runtime keeps only matching providers from
       the resolved profile; if the filter leaves zero providers, OAS falls back
       to the unfiltered profile (see [apply_provider_filter] safety net).
 

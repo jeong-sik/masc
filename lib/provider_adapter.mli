@@ -268,7 +268,8 @@ val cascade_prefix_of_adapter : adapter -> string
 (** Endpoint URL from adapter record. *)
 val endpoint_url_of_adapter : adapter -> string option
 
-(** Best-effort mapping from OAS provider_kind to cascade prefix. *)
+(** Best-effort mapping from Provider_registry/OAS [provider_kind] to a
+    MASC cascade prefix. *)
 val cascade_prefix_of_provider_kind :
   Llm_provider.Provider_config.provider_kind -> string
 

@@ -1,6 +1,6 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
-    Callers either pass a [cascade_name] string for configured fallback
+    Callers either pass a MASC-managed [cascade_name] string for configured fallback
     selection or a [model_label] string for {!run_model_by_label}.
     All public APIs accept string model labels; no [Model_spec.model_spec]
     type is exposed.
@@ -13,7 +13,7 @@
     @since Phase 4 — public API restricted to named cascade functions
     @since Phase 5 — run_model_by_label added (string-based API)
     @since Phase 6 — Model_spec.model_spec type fully eliminated from API
-    @since Phase 8 — Cascade module deleted, defaults moved here
+    @since Phase 8 — legacy cascade wrapper deleted, MASC-owned defaults moved here
     @since Phase 9 — gRPC transport option added (#2381) *)
 
 type cascade_attempt = {
@@ -70,7 +70,7 @@ val cascade_metrics_json : unit -> Yojson.Safe.t
 val cascade_observation_to_json : cascade_observation -> Yojson.Safe.t
 
 (** Locate config/cascade.json via the resolved config root.
-    Delegates to {!Model_spec.cascade_config_path}. *)
+    Delegates to {!Cascade_runtime.cascade_config_path}. *)
 val default_config_path : unit -> string option
 
 (** Return the default model string list for a given cascade name. *)

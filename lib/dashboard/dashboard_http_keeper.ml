@@ -154,7 +154,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
           let cascade_models =
-            Oas_model_resolve.models_of_cascade_name m.cascade_name
+            Cascade_runtime.models_of_cascade_name m.cascade_name
           in
           let primary_model =
             match cascade_models with
@@ -402,7 +402,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 ]
             | None ->
                 (let effective_models =
-                   Oas_model_resolve.models_of_cascade_name m.cascade_name
+                   Cascade_runtime.models_of_cascade_name m.cascade_name
                  in
                  let cfgs = Cascade_config.parse_model_strings effective_models in
                  match cfgs with
@@ -410,7 +410,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                      `Assoc [("has_checkpoint", `Bool false)]
                  | _ ->
                      let primary_max_context =
-                       Oas_model_resolve.resolve_primary_max_context effective_models
+                       Cascade_runtime.resolve_primary_max_context effective_models
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -838,7 +838,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           ( "models",
             `List
               (List.map (fun s -> `String s)
-                 (Oas_model_resolve.models_of_cascade_name m.cascade_name)) );
+                 (Cascade_runtime.models_of_cascade_name m.cascade_name)) );
           ("active_model", `String active_model);
           ("verify", `Bool false);
         ]

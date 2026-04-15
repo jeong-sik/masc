@@ -141,7 +141,13 @@ export function FsmHub() {
   const [paused, setPaused] = useState(() =>
     typeof document !== 'undefined' && document.visibilityState === 'hidden',
   )
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const shortcutsOpenRef = useRef(false)
   const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    shortcutsOpenRef.current = shortcutsOpen
+  }, [shortcutsOpen])
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
@@ -154,6 +160,27 @@ export function FsmHub() {
     }
     document.addEventListener('visibilitychange', handler)
     return () => document.removeEventListener('visibilitychange', handler)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === '?') {
+        ev.preventDefault()
+        setShortcutsOpen(o => !o)
+      } else if (ev.key === 'Escape' && shortcutsOpenRef.current) {
+        setShortcutsOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [])
 
   // Primary source: store signal (from dashboard/shell polling).
@@ -382,6 +409,59 @@ export function FsmHub() {
           </div>
         </details>
       ` : null}
+      <${ShortcutsOverlay} open=${shortcutsOpen} onClose=${() => setShortcutsOpen(false)} />
+    </div>
+  `
+}
+
+function ShortcutsOverlay({
+  open,
+  onClose,
+}: {
+  open: boolean
+  onClose: () => void
+}) {
+  if (!open) return null
+  const rows: Array<{ keys: string; desc: string }> = [
+    { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
+    { keys: '? ', desc: '단축키 목록 토글' },
+    { keys: 'Esc', desc: '오버레이 닫기' },
+    { keys: '← →', desc: '키퍼 탭 이동 (탭 포커스 시)' },
+    { keys: 'Home / End', desc: '첫 / 마지막 키퍼 (탭 포커스 시)' },
+  ]
+  return html`
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick=${onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="키보드 단축키"
+    >
+      <div
+        class="rounded-xl border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-[280px] shadow-2xl"
+        onClick=${(e: MouseEvent) => e.stopPropagation()}
+      >
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">
+            키보드 단축키
+          </div>
+          <button
+            class="text-[10px] text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
+            onClick=${onClose}
+            aria-label="닫기"
+          >Esc</button>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          ${rows.map(r => html`
+            <div class="flex items-center gap-3 text-[11px]">
+              <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-body)] min-w-[64px] text-center">
+                ${r.keys}
+              </kbd>
+              <span class="text-[var(--text-body)]">${r.desc}</span>
+            </div>
+          `)}
+        </div>
+      </div>
     </div>
   `
 }
@@ -429,6 +509,10 @@ function StatusBar({
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
+          <kbd
+            class="hidden md:inline-flex items-center font-mono text-[9px] px-1 py-0 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]"
+            title="단축키 목록 (?)"
+          >?</kbd>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
           ${paused ? html`

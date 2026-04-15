@@ -45,9 +45,22 @@ class SlackGateBot:
         self._messages_failed = 0
 
     def _load_bindings(self) -> None:
+        """Load channel-to-keeper bindings.
+
+        Read priority: new default (binding_store_path) > legacy
+        (legacy_binding_store_path) > empty. Next _save_bindings always
+        writes to the new default, so the migration is transparent after
+        the .gate/runtime/ rollout (see #7468, #7471).
+        """
         path = Path(self.cfg.binding_store_path)
+        source = "default"
         if not path.exists():
-            return
+            legacy_path = Path(self.cfg.legacy_binding_store_path)
+            if legacy_path.exists():
+                path = legacy_path
+                source = "legacy"
+            else:
+                return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
@@ -56,9 +69,17 @@ class SlackGateBot:
                     for k, v in data.items()
                     if isinstance(v, str)
                 }
-                logger.info("Loaded %d binding(s)", len(self._bindings))
+                if source == "legacy":
+                    logger.info(
+                        "Loaded %d binding(s) from legacy store %s; next write goes to %s",
+                        len(self._bindings),
+                        path,
+                        self.cfg.binding_store_path,
+                    )
+                else:
+                    logger.info("Loaded %d binding(s)", len(self._bindings))
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load bindings: %s", e)
+            logger.warning("Failed to load bindings from %s: %s", path, e)
 
     def _save_bindings(self) -> None:
         path = Path(self.cfg.binding_store_path)

@@ -1923,6 +1923,41 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                Log.Keeper.error
                  "write metrics snapshot failed after unified turn: %s"
                  (Printexc.to_string exn));
+          (* Emit turn-completed event to Activity Graph for timeline token visibility *)
+          (try
+            ignore (Activity_graph.emit config
+              ~actor:{ kind = "agent"; id = updated_meta.agent_name }
+              ~kind:"keeper.turn_completed"
+              ~payload:(`Assoc
+                ([
+                  ("keeper_name", `String updated_meta.name);
+                  ("input_tokens", `Int result.usage.input_tokens);
+                  ("output_tokens", `Int result.usage.output_tokens);
+                  ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
+                  ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
+                  ("cost_usd", `Float turn_cost);
+                  ("latency_ms", `Int latency_ms);
+                  ("model_used", `String (Keeper_agent_run.surface_model_used result));
+                  ("work_kind", `String (work_kind_of_selected_mode (selected_mode_of_result result)));
+                  ("context_ratio", `Float lifecycle.context_ratio);
+                  ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+                ]
+                @ (match result.inference_telemetry with
+                   | Some t ->
+                     (match t.reasoning_tokens with Some n -> [("reasoning_tokens", `Int n)] | None -> [])
+                     @ (match t.timings with
+                        | Some ti ->
+                          (match ti.predicted_per_second with Some v -> [("tokens_per_second", `Float v)] | None -> [])
+                        | None -> [])
+                   | None -> [])))
+              ~tags:["keeper"; "turn"; "metrics"]
+              ())
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Keeper.warn
+                "activity graph turn_completed emit failed: %s"
+                (Printexc.to_string exn));
           broadcast_lifecycle_events ~name:updated_meta.name
             ~turn_generation:lifecycle.turn_generation
             ~compaction:lifecycle.compaction

@@ -20,12 +20,13 @@ import {
 import {
   observeSnapshot,
   appendCompositeObservation,
+  deriveTopTransitions,
   deriveTransitionHistory,
   derivePhaseLog,
   deriveStateEntries,
 } from './fsm-hub-derivations'
 import { OperationalMeaningPanel, HeroPhase, TurnPipelineStrip, CompositeGraphPanel } from './fsm-hub-pipeline-panels'
-import { SwimlaneTimeline, TransitionTrail } from './fsm-hub-timeline-panels'
+import { SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
 import { MeasurementCard, InvariantsPanel, RecoveryStatePanel } from './fsm-hub-health-panels'
 
 // ── Backward-compatible re-exports ─────────────────────
@@ -40,6 +41,7 @@ export type {
   StateEntries,
   TimeAxisTick,
   SwimlaneSegment,
+  TopTransition,
 } from './fsm-hub-types'
 
 export { displayState } from './fsm-hub-types'
@@ -47,6 +49,7 @@ export { displayState } from './fsm-hub-types'
 export {
   appendCompositeObservation,
   deriveTransitionHistory,
+  deriveTopTransitions,
   derivePhaseLog,
   deriveStateEntries,
   deriveTimeAxisTicks,
@@ -215,6 +218,10 @@ export function FsmHub() {
     () => deriveTransitionHistory(view.observations),
     [view.observations],
   )
+  const topTransitions = useMemo(
+    () => deriveTopTransitions(view.observations),
+    [view.observations],
+  )
   const phaseLog = useMemo(
     () => derivePhaseLog(view.observations),
     [view.observations],
@@ -258,9 +265,12 @@ export function FsmHub() {
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
         <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
-        ${/* ── Zone 2b: Transition History Trail (collapsible) ── */ ''}
+        ${/* ── Zone 2b: Transition History Trail + Top Transitions (collapsible) ── */ ''}
         <${CollapsibleZone} id="transition-trail" title="전환 이력" defaultOpen=${true}>
-          <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
+          <div class="flex flex-col gap-2">
+            <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
+            <${TopTransitionsPanel} transitions=${topTransitions} hoveredSegment=${hoveredSegment} />
+          </div>
         <//>
 
         ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}

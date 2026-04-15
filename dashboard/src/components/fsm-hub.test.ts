@@ -9,6 +9,7 @@ import {
   deriveStateEntries,
   deriveSwimlaneSegments,
   deriveTimeAxisTicks,
+  deriveTopTransitions,
   deriveTransitionHistory,
   flagTooltip,
   invariantDescription,
@@ -109,6 +110,45 @@ describe('fsm-hub derived state', () => {
       { ts: 2, from: 'idle', to: 'running', field: 'KTC' },
       { ts: 2, from: 'Running', to: 'Compacting', field: 'KSM' },
     ])
+  })
+
+  it('counts the most frequent (from → to) transitions per lane', () => {
+    const observations = [
+      observation({ ts: 1, turn: 'idle' }),
+      observation({ ts: 2, turn: 'prompting' }),
+      observation({ ts: 3, turn: 'idle' }),
+      observation({ ts: 4, turn: 'prompting' }),
+      observation({ ts: 5, turn: 'executing' }),
+      observation({ ts: 6, phase: 'Compacting', turn: 'compacting' }),
+    ]
+
+    const top = deriveTopTransitions(observations, 5)
+
+    expect(top[0]).toEqual({
+      field: 'KTC',
+      from: 'idle',
+      to: 'prompting',
+      count: 2,
+    })
+    expect(top.find((t) => t.from === 'Running' && t.to === 'Compacting'))
+      .toEqual({ field: 'KSM', from: 'Running', to: 'Compacting', count: 1 })
+    expect(top.length).toBeLessThanOrEqual(5)
+  })
+
+  it('returns an empty list when no transitions occurred', () => {
+    expect(deriveTopTransitions([observation()])).toEqual([])
+    expect(deriveTopTransitions([])).toEqual([])
+  })
+
+  it('respects the limit parameter and breaks ties by lane order then alpha', () => {
+    const observations = [
+      observation({ ts: 1, phase: 'Running', turn: 'idle', decision: 'undecided' }),
+      observation({ ts: 2, phase: 'Compacting', turn: 'prompting', decision: 'guard_ok' }),
+    ]
+
+    const limited = deriveTopTransitions(observations, 2)
+    expect(limited).toHaveLength(2)
+    expect(limited.map((t) => t.field)).toEqual(['KSM', 'KTC'])
   })
 
   it('keeps only distinct consecutive phases in the phase log', () => {

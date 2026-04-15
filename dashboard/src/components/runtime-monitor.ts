@@ -163,7 +163,7 @@ export function RuntimeMonitor() {
           <${StatCell}
             label="Local Models"
             value=${providers?.summary?.local_models ?? 0}
-            detail=${`Cloud ${providers?.summary?.cloud_models ?? 0}`}
+            detail=${`Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}`}
           />
         </div>
         <div class="flex flex-col gap-3">

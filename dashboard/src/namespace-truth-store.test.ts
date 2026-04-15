@@ -19,7 +19,7 @@ describe('refreshNamespaceTruth', () => {
   it('hydrates build identity into serverStatus from namespace truth', async () => {
     apiMocks.fetchDashboardNamespaceTruth.mockResolvedValue({
       generated_at: '2026-03-25T08:16:21Z',
-      namespace: {
+      root: {
         status: {
           project: 'default',
           version: '2.148.0',
@@ -45,7 +45,7 @@ describe('refreshNamespaceTruth', () => {
 
     await namespaceTruthStore.refreshNamespaceTruth({ force: true })
 
-    const roomStatus = namespaceTruthStore.namespaceTruth.value?.namespace.status as
+    const roomStatus = namespaceTruthStore.namespaceTruth.value?.root.status as
       | { build?: { commit?: string | null } }
       | undefined
     const mergedBuild = store.serverStatus.value as
@@ -70,7 +70,7 @@ describe('refreshNamespaceTruth', () => {
   it('normalizes latest meta-cognition digest from namespace truth', async () => {
     apiMocks.fetchDashboardNamespaceTruth.mockResolvedValue({
       generated_at: '2026-03-25T08:16:21Z',
-      namespace: {
+      root: {
         status: {
           project: 'default',
           version: '2.148.0',

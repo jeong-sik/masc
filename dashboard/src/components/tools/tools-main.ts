@@ -53,8 +53,8 @@ export function Tools() {
         <div class="mb-4">
           <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">
             ${showFullInventory.value
-              ? 'hidden/deprecated 포함 전체 도구 surface를 봅니다.'
-              : '필수 도구와 사용 현황 요약입니다.'}
+              ? 'hidden/deprecated 포함 inventory를 surface/visibility/direct-call 축으로 정리해 봅니다.'
+              : '도구 인벤토리의 핵심 surface와 노출 정책을 요약합니다.'}
           </p>
           <${ActionButton}
             variant="ghost"

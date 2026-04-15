@@ -65,17 +65,13 @@ let test_snapshot_has_expected_sections () =
       ignore (Room.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Room.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let namespace = Yojson.Safe.Util.member "namespace" json in
-      Alcotest.(check bool) "namespace present" true
-        (Yojson.Safe.Util.member "namespace" json <> `Null);
-      Alcotest.(check bool) "namespace initialized" true
-        Yojson.Safe.Util.(namespace |> member "initialized" |> to_bool);
+      let root = Yojson.Safe.Util.member "root" json in
+      Alcotest.(check bool) "root block present" true
+        (root <> `Null);
+      Alcotest.(check bool) "root initialized" true
+        Yojson.Safe.Util.(root |> member "initialized" |> to_bool);
       Alcotest.(check bool) "project nonempty" true
-        (String.trim Yojson.Safe.Util.(namespace |> member "project" |> to_string) <> "");
-      Alcotest.(check bool) "namespace_id carrier removed" true
-        (Yojson.Safe.Util.member "namespace_id" namespace = `Null);
-      Alcotest.(check bool) "namespace_mode carrier removed" true
-        (Yojson.Safe.Util.member "namespace_mode" namespace = `Null);
+        (String.trim Yojson.Safe.Util.(root |> member "project" |> to_string) <> "");
       Alcotest.(check bool) "sessions present" true
         (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true

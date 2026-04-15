@@ -7,6 +7,10 @@ This document answers four operator questions:
 - Where live state, logs, and audit artifacts land on disk.
 - What the current host is actually using right now.
 
+For day-to-day active-root and init diagnosis, prefer
+[`CONFIG-DOCTOR.md`](./CONFIG-DOCTOR.md). This document is the deeper inventory
+behind that operator flow.
+
 Scope:
 
 - Canonical behavior in this document is derived from code.
@@ -40,19 +44,20 @@ modules.
 
 ### 1.2 Config root resolution
 
-Canonical config-root precedence is:
+Low-level resolver precedence is:
 
 1. `MASC_CONFIG_DIR`
 2. `<MASC_BASE_PATH>/.masc/config`
 3. `~/.masc/config`
-4. `cwd/config`
-5. executable-relative `config/`
-6. legacy repo `config/`
+4. `cwd/config` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
+5. executable-relative `config/` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
 
 Important boot behavior:
 
 - If `MASC_CONFIG_DIR` is unset, bootstrap initializes `<MASC_BASE_PATH>/.masc/config`.
 - Bootstrap copies only missing files from the versioned `config/` tree; it does not overwrite an existing file.
+- Supported launchers and `main_eio.exe doctor` should be read with a simpler operator contract:
+  active config is `MASC_CONFIG_DIR` when set, otherwise `<MASC_BASE_PATH>/.masc/config`.
 - This means a passive base-path config root can exist on disk even when it is not the active config root.
 
 ### 1.3 Personas root resolution
@@ -66,22 +71,24 @@ Keeper bootstrap may also source keeper defaults from `CONFIG_ROOT/keepers/<name
 
 ### 1.4 What the config root contains
 
-The versioned config tree currently contains:
+The checked-in versioned seed config tree currently contains:
 
 | Path | Purpose |
 | --- | --- |
 | `config/cascade.json` | Provider/model cascade and routing defaults. |
 | `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
-| `config/keeper_runtime.toml` | Per-base-path startup keeper env seeding. See section 1.3 and [`TOML-RELOAD-MATRIX.md`](./TOML-RELOAD-MATRIX.md). |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
 
+`keeper_runtime.toml` is not checked into the repo seed tree. It is an optional
+active-root file at `<active config root>/keeper_runtime.toml`.
+
 ### 1.3 keeper_runtime.toml — per-base-path startup keeper env seeding
 
 All `MASC_KEEPER_*` environment variables can be set declaratively in
-`<config_root>/keeper_runtime.toml`. The TOML file is loaded at server
+`<active config root>/keeper_runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
 vars initializes.

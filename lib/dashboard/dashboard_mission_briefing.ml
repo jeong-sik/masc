@@ -145,7 +145,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~lightweight_summary:true ctx
     in
     let scope_json =
-      match snapshot_json |> member_assoc "namespace" with
+      match snapshot_json |> member_assoc "root" with
       | `Assoc _ as value -> value
       | _ -> snapshot_json |> member_assoc "room"
     in
@@ -222,9 +222,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
           ( "basis",
             `Assoc
               [
-                ( "namespace",
+                ( "project",
                   member_assoc "summary" mission_json
-                  |> member_assoc "namespace" );
+                  |> member_assoc "project" );
                 ("crew_count", `Int (List.length sessions));
                 ("agent_count", `Int (List.length agents_json));
                 ("keeper_count", `Int (List.length keepers));

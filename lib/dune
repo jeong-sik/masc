@@ -57,6 +57,7 @@
    cp_lifecycle_intents
    cp_lifecycle_policy
    config
+   config_doctor
    config_dir_resolver
    dashboard
    failure_envelope

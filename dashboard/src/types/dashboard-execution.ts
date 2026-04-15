@@ -152,7 +152,7 @@ export interface DashboardNamespaceTruthFocus {
 
 export interface DashboardNamespaceTruthResponse {
   generated_at?: string
-  namespace: {
+  root: {
     status?: ServerStatus | null
     counts?: DashboardShellResponse['counts']
     configured_keepers?: number

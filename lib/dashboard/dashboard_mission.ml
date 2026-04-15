@@ -633,7 +633,7 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
               ])
   in
   let namespace_json =
-    match member_assoc "namespace" snapshot_json with
+    match member_assoc "root" snapshot_json with
     | `Assoc _ as value -> value
     | _ -> member_assoc "room" snapshot_json
   in

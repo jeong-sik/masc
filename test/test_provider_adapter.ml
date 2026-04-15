@@ -22,6 +22,16 @@ let test_resolve_direct_aliases () =
   let codex = Option.get (Adapter.resolve_direct_adapter "openai") in
   check string "codex-api alias" "codex-api" codex.canonical_name
 
+let test_resolve_cli_canonical_names () =
+  let claude = Option.get (Adapter.resolve_direct_adapter "claude") in
+  check string "claude canonical" "claude" claude.canonical_name;
+  check string "claude runtime" "cli_agent"
+    (Adapter.string_of_runtime_kind claude.runtime_kind);
+  let gemini = Option.get (Adapter.resolve_direct_adapter "gemini") in
+  check string "gemini canonical" "gemini" gemini.canonical_name;
+  let codex = Option.get (Adapter.resolve_direct_adapter "codex") in
+  check string "codex canonical" "codex" codex.canonical_name
+
 let test_gemini_direct_auth_vertex_adc () =
   with_env "GOOGLE_CLOUD_PROJECT" (Some "demo-project") (fun () ->
       with_env "GOOGLE_CLOUD_LOCATION" (Some "asia-northeast3") (fun () ->
@@ -212,6 +222,7 @@ let () =
       ( "registry",
         [
           test_case "resolve direct aliases" `Quick test_resolve_direct_aliases;
+          test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names;
           test_case "gemini vertex adc" `Quick test_gemini_direct_auth_vertex_adc;
           test_case "gemini api key fallback" `Quick
             test_gemini_direct_auth_api_key_fallback;

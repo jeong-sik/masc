@@ -960,7 +960,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
          ("provenance_summary", operator_surface_contract_json);
-         ("namespace", room_json config);
+         ("root", room_json config);
        ]
       @ (
          (* Parallelize independent I/O: sessions, keepers, persistent_agents,

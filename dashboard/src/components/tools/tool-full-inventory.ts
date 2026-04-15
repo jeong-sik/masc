@@ -13,13 +13,13 @@ import {
   type SurfaceFilter,
   searchQuery,
   categoryFilter,
-  enabledOnly,
   directOnly,
   showHidden,
   showDeprecated,
   surfaceFilter,
   SURFACE_MAP,
   SURFACE_LABELS,
+  hasSurface,
   loadTools,
   toolMatchesQuery,
   surfaceCountForFilter,
@@ -65,7 +65,6 @@ export function FullInventoryView({
   const filtered = inventory.filter(item => {
     if (!toolMatchesQuery(item, searchQuery.value)) return false
     if (categoryFilter.value !== 'all' && item.category !== categoryFilter.value) return false
-    if (enabledOnly.value && !item.enabled_in_current_mode) return false
     if (directOnly.value && !item.direct_call_allowed) return false
     if (!showHidden.value && item.visibility === 'hidden') return false
     if (!showDeprecated.value && item.lifecycle === 'deprecated') return false
@@ -77,7 +76,7 @@ export function FullInventoryView({
   })
 
   const totalCount = inventory.length
-  const enabledCount = inventory.filter(item => item.enabled_in_current_mode).length
+  const publicCount = inventory.filter(item => hasSurface(item, 'public_mcp')).length
   const hiddenCount = inventory.filter(item => item.visibility === 'hidden').length
   const deprecatedCount = inventory.filter(item => item.lifecycle === 'deprecated').length
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
@@ -90,8 +89,8 @@ export function FullInventoryView({
           <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
         </div>
         <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${enabledCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">활성화됨</span>
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${publicCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">MCP 공개</span>
         </div>
         <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${hiddenCount}</span>
@@ -109,6 +108,10 @@ export function FullInventoryView({
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${filtered.length}</span>
           <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">필터 결과</span>
         </div>
+      </div>
+
+      <div class="text-[12px] text-[var(--text-muted)] mb-4">
+        카드 숫자는 서로 다른 축이다. MCP 공개는 surface, 숨김은 visibility, 직접 호출은 hidden direct-call policy 기준이다.
       </div>
 
       <div class="flex flex-wrap gap-2 mb-4">
@@ -145,18 +148,10 @@ export function FullInventoryView({
           }}
         >
           <option value="all">전체 카테고리</option>
-          ${categories.map(category => html`<option value=${category}>${category}</option>`)}
+          ${categories.map(category => html`
+            <option value=${category}>${category === 'uncategorized' ? '미분류' : category}</option>
+          `)}
         </select>
-        <label class="inline-flex items-center gap-2 text-[12px] text-[var(--text-body)]">
-          <input
-            type="checkbox"
-            checked=${enabledOnly.value}
-            onChange=${(e: Event) => {
-              enabledOnly.value = (e.target as HTMLInputElement).checked
-            }}
-          />
-          <span>활성화만</span>
-        </label>
         <label class="inline-flex items-center gap-2 text-[12px] text-[var(--text-body)]">
           <input
             type="checkbox"

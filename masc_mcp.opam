@@ -63,6 +63,7 @@ depends: [
   "neo4j_bolt_eio" {>= "0.4"}
   "opentelemetry" {>= "0.13"}
   "ambient-context-eio" {>= "0.2"}
+  "crunch" {build & >= "4.0"}
   "odoc" {with-doc}
 ]
 build: [

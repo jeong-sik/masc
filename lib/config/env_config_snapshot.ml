@@ -154,7 +154,7 @@ let keeper_entries =
   [
     entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
       "Enable keeper auto-bootstrap";
-    entry ~default:"3" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE"
+    entry ~default:"10000" "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
       "Max concurrent active keepers";
     entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"
       "Keeper keepalive snapshot interval";

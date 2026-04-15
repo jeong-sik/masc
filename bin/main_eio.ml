@@ -29,6 +29,7 @@ module Dashboard_mission = Masc_mcp.Dashboard_mission
 (* module Dashboard_proof removed *)
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Build_identity = Masc_mcp.Build_identity
+module Config_doctor = Masc_mcp.Config_doctor
 module Graphql_api = Masc_mcp.Graphql_api
 module Types = Types
 module Tempo = Masc_mcp.Tempo
@@ -297,6 +298,10 @@ let host =
 let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+
+let doctor_json =
+  let doc = "Emit machine-readable JSON instead of text output" in
+  Arg.(value & flag & info ["json"] ~doc)
 
 (** Graceful shutdown exception *)
 (* Shutdown exception removed: graceful shutdown returns normally from
@@ -573,9 +578,82 @@ let run_cmd host port base_path =
   try_start 0;
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let cmd =
-  let doc = "MASC MCP Server" in
-  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
-  Cmd.v info Term.(const run_cmd $ host $ port $ base_path)
+let run_cmd_exit host port base_path =
+  run_cmd host port base_path;
+  Cmd.Exit.ok
 
-let () = exit (Cmd.eval cmd)
+let doctor_cmd_exit base_path as_json =
+  let report =
+    Config_doctor.analyze
+      ~base_path_input:base_path
+      ~default_base_path:(default_base_path ())
+      ()
+  in
+  let output =
+    if as_json then
+      Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
+    else
+      Config_doctor.render_text report
+  in
+  print_endline output;
+  Config_doctor.exit_code report
+
+let doctor_cmd =
+  let doc =
+    "Diagnose config initialization, active config roots, and base-path shadowing"
+  in
+  let info = Cmd.info "doctor" ~doc in
+  Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
+
+let init_force =
+  let doc = "Overwrite existing config files instead of skipping them" in
+  Arg.(value & flag & info ["force"] ~doc)
+
+type init_tally = { written : int; skipped : int; failed : int }
+
+let seed_one ~target_root ~force tally rel =
+  match Embedded_config.read rel with
+  | None ->
+    Printf.eprintf "init: missing embedded asset: %s\n" rel;
+    { tally with failed = tally.failed + 1 }
+  | Some content ->
+    let dest = Filename.concat target_root rel in
+    Fs_compat.mkdir_p (Filename.dirname dest);
+    if Fs_compat.file_exists dest && not force then begin
+      Printf.printf "skip   %s (exists, --force to overwrite)\n" dest;
+      { tally with skipped = tally.skipped + 1 }
+    end else
+      try
+        Fs_compat.save_file dest content;
+        Printf.printf "wrote  %s (%d bytes)\n" dest (String.length content);
+        { tally with written = tally.written + 1 }
+      with Sys_error msg ->
+        Printf.eprintf "init: %s: %s\n" dest msg;
+        { tally with failed = tally.failed + 1 }
+
+let init_cmd_exit base_path force =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let target_root = Config_doctor.local_base_config_root ~base_path in
+  Fs_compat.mkdir_p target_root;
+  let result =
+    List.fold_left
+      (seed_one ~target_root ~force)
+      { written = 0; skipped = 0; failed = 0 }
+      Embedded_config.file_list
+  in
+  Printf.printf "init: %d written, %d skipped, %d failed (root=%s)\n"
+    result.written result.skipped result.failed target_root;
+  if result.failed > 0 then 1 else 0
+
+let init_cmd =
+  let doc = "Seed default .masc/config/ from binary-embedded assets" in
+  let info = Cmd.info "init" ~doc in
+  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
+
+let cmd =
+  let doc = "MASC MCP Server and operator diagnostics" in
+  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
+  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
+    info [ doctor_cmd; init_cmd ]
+
+let () = exit (Cmd.eval' cmd)

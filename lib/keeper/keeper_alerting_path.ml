@@ -202,33 +202,6 @@ let resolve_keeper_target_path ~(config : Room.config)
              "path_not_in_allowed_paths: %s (allowed: [%s])"
              raw (String.concat ", " allowed_norms))
 
-(** Workspace-scoped state dirs that remain writable outside the playground.
-    These are keeper-private metadata / trace surfaces under [.masc]. *)
-let workspace_state_defaults (safe_name : string) : string list =
-  [ Printf.sprintf ".masc/keepers/%s/" safe_name;
-    ".masc/traces/" ]
-
-(** Additional workspace-scoped read-only repo roots. Keepers may read these
-    when operating in workspace scope, but write containment should stay inside
-    the playground unless the operator explicitly adds extra allowlist entries. *)
-let workspace_repo_read_defaults : string list =
-  [ "lib/";
-    "test/";
-    "config/";
-    "bin/";
-    "scripts/";
-    "docs/" ]
-
-(** Compute effective read allowed_paths from keeper meta.
-    Always prepends the keeper's playground path and, for workspace scope,
-    the workspace read defaults:
-    - `.masc/keepers/<name>/`
-    - `.masc/traces/`
-    - `lib/`, `test/`, `config/`, `bin/`, `scripts/`, `docs/`
-    (project root `.` is no longer included by default; set
-     [`allowed_paths`] explicitly if needed.)
-    - [`*`] → [] (full access, explicit opt-in bypasses path checks)
-    - other  → playground :: workspace_defaults @ explicit *)
 (* Playground path SSOT lives in [Playground_paths] (masc_config). These
    names preserve the historical keeper-facing API. Do not re-implement
    the literal ".masc/playground" layout here — edit [Playground_paths]
@@ -245,50 +218,29 @@ let ensure_playground_bundle ~(config : Room.config) ~(name : string) : string l
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 
+(** Compute effective read allowed_paths from keeper meta.
+    Returns the playground bundle paths plus any explicit [allowed_paths]
+    entries. [["*"]] means full-access opt-in: the resulting empty list is
+    interpreted by the OAS worker builder as "skip path restriction".
+    Workspace/local scope no longer grants extra hardcoded paths; every
+    additional path must be listed explicitly in [allowed_paths]. *)
 let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let playground_paths = playground_bundle_paths meta.name in
-  let workspace_defaults =
-    match String.lowercase_ascii meta.execution_scope with
-    | "workspace" ->
-      let safe_name = sanitize_keeper_name meta.name in
-      (* NOTE (#6527 iter 4): `.worktrees/` was previously included
-         here so keepers could read and write worktrees created at the
-         server repository root by the old `worktree_create_r`
-         fallback. That fallback was removed in PR #6542 (iter 2), so
-         new worktrees always land at
-         `.masc/playground/<keeper>/repos/<clone>/.worktrees/<name>/`,
-         which is already inside `playground_paths`. Keeping
-         `.worktrees/` as a workspace default would allow any keeper
-         with workspace scope to read and write into another keeper's
-         server-root worktree or into the MASC repo's own worktrees —
-         exactly the containment leak #6527 is closing. Remove it.
-         Keepers that genuinely need access to a specific worktree can
-         still add it via explicit `allowed_paths` on their keeper
-         meta. *)
-      workspace_state_defaults safe_name @ workspace_repo_read_defaults
-    | _ -> []
-  in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground_paths @ workspace_defaults @ explicit
+  | explicit -> playground_paths @ explicit
 
 (** Compute effective write allowed_paths from keeper meta.
-    This keeps the default write sandbox inside the keeper playground plus
-    keeper-private [.masc] state directories. Workspace repo roots remain
-    read-only by default; operators must opt in explicitly via [allowed_paths]
-    or [`*`] to allow writes there. *)
+    Returns the playground bundle paths plus any explicit [allowed_paths]
+    entries. [["*"]] means full-access opt-in (empty allowlist signals
+    "skip path restriction" to the OAS worker builder). Workspace/local
+    scope no longer grants extra hardcoded paths; every additional path
+    must be listed explicitly in [allowed_paths]. *)
 let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
   let playground_paths = playground_bundle_paths meta.name in
-  let workspace_defaults =
-    match String.lowercase_ascii meta.execution_scope with
-    | "workspace" ->
-      let safe_name = sanitize_keeper_name meta.name in
-      workspace_state_defaults safe_name
-    | _ -> []
-  in
   match meta.allowed_paths with
   | ["*"] -> []
-  | explicit -> playground_paths @ workspace_defaults @ explicit
+  | explicit -> playground_paths @ explicit
 
 (** Resolve a path for read-only access within the keeper's effective
     allowlist. The allowlist is usually the keeper playground bundle

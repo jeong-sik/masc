@@ -77,19 +77,13 @@ let now () = Time_compat.now ()
     Reduced from 10x to 3x — the 10x factor was masking slow compute
     by holding stale data for 22 minutes. With O(n+ops) tree index and
     adaptive refresh intervals, compute is faster so shorter grace is safe. *)
-let stale_factor =
-  Dashboard_http_helpers.float_of_env_default
-    "MASC_DASHBOARD_STALE_FACTOR"
-    ~default:3.0 ~min_v:1.0 ~max_v:10.0
+let stale_factor = 3.0
 
 (** Backoff multiplier for stale_grace on bg-revalidation failure.
     Extends the stale window to reduce retry pressure when compute
-    repeatedly fails.  Default 2.0 means the second attempt waits
-    twice the normal stale_grace before retrying.  #5402 *)
-let bg_revalidate_backoff_factor =
-  Dashboard_http_helpers.float_of_env_default
-    "MASC_DASHBOARD_BG_REVALIDATE_BACKOFF"
-    ~default:2.0 ~min_v:1.0 ~max_v:10.0
+    repeatedly fails.  2.0 means the second attempt waits twice the
+    normal stale_grace before retrying.  #5402 *)
+let bg_revalidate_backoff_factor = 2.0
 
 exception Compute_timeout of string * bool
 

@@ -53,18 +53,8 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         let command_ref = ref (`Assoc []) in
         (* Single env var for namespace-truth fiber timeouts.
            Cold start uses higher defaults to allow shell/namespace reads to warm up. *)
-        let warm_timeout_s =
-          float_of_env_default_with_legacy
-            ~canonical:"MASC_DASHBOARD_NAMESPACE_TRUTH_TIMEOUT_S"
-            ~legacy:"MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S"
-            ~default:8.0 ~min_v:2.0 ~max_v:25.0
-        in
-        let cold_timeout_s =
-          float_of_env_default_with_legacy
-            ~canonical:"MASC_DASHBOARD_NAMESPACE_TRUTH_COLD_TIMEOUT_S"
-            ~legacy:"MASC_DASHBOARD_ROOM_TRUTH_COLD_TIMEOUT_S"
-            ~default:15.0 ~min_v:5.0 ~max_v:60.0
-        in
+        let warm_timeout_s = 8.0 in
+        let cold_timeout_s = 15.0 in
         let is_cold =
           not (cached_surface_has_success Execution_surfaces._execution_cache)
         in
@@ -88,10 +78,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
            (dashboard_shell_timeout_s, default 8s) to avoid the double-timeout
            race where the inner cache returns timeout-error JSON while the outer
            fiber also fires, discarding even stale data.  Fixes #5090. *)
-        let shell_fiber_timeout_s =
-          float_of_env_default "MASC_DASHBOARD_SHELL_FIBER_TIMEOUT_S"
-            ~default:12.0 ~min_v:5.0 ~max_v:30.0
-        in
+        let shell_fiber_timeout_s = 12.0 in
         let shell_timeout_s =
           if !(Execution_surfaces._shell_warmed) then shell_fiber_timeout_s
           else Float.max cold_timeout_s (shell_fiber_timeout_s +. 4.0)

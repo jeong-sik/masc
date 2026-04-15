@@ -328,10 +328,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
         mark_cached_surface_error _transport_health_cache exn;
         raise exn
   in
-  let interval_s =
-    float_of_env_default "MASC_DASHBOARD_TRANSPORT_HEALTH_INTERVAL_S"
-      ~default:30.0 ~min_v:5.0 ~max_v:120.0
-  in
+  let interval_s = 30.0 in
   Proactive_refresh.start ~sw ~clock
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s)

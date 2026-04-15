@@ -237,15 +237,15 @@ let test_dashboard_warm_hydration_contracts () =
   check bool "namespace truth advertises initializing while execution warms" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        {|("status", `String "initializing")|});
-  check bool "execution render timeout is env-configurable" true
+  check bool "execution render timeout is a named constant" true
     (file_contains_pattern "lib/dashboard/dashboard_execution.ml"
-       "MASC_DASHBOARD_EXECUTION_RENDER_TIMEOUT_S");
+       "let render_timeout_s");
   check bool "execution proactive refresh timeout is extended" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S");
   check bool "mission proactive refresh timeout is extended" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "MASC_DASHBOARD_MISSION_REFRESH_TIMEOUT_S")
+       "let mission_refresh_timeout_s")
 
 let test_http_read_surface_contracts () =
   check bool "room status route now requires read auth" true
@@ -642,12 +642,12 @@ let test_namespace_truth_adaptive_timeout_contracts () =
   check bool "shell fiber uses adaptive timeout" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        "shell_timeout_s");
-  check bool "namespace-truth timeout configurable via canonical env var" true
+  check bool "namespace-truth warm timeout is a named constant" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
-       "MASC_DASHBOARD_NAMESPACE_TRUTH_TIMEOUT_S");
-  check bool "namespace-truth timeout still honors legacy env fallback" true
+       "let warm_timeout_s");
+  check bool "namespace-truth cold timeout is a named constant" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
-       "MASC_DASHBOARD_ROOM_TRUTH_TIMEOUT_S");
+       "let cold_timeout_s");
   check bool "shell_warmed tracking exists" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "_shell_warmed")

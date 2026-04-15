@@ -6,6 +6,7 @@ import {
   type StateEntries,
   type SwimlaneSegment,
   type TimeAxisTick,
+  type TopTransition,
   MAX_OBSERVATIONS,
   MAX_TRANSITION_HISTORY,
   TRANSITION_FIELDS,
@@ -67,6 +68,52 @@ export function deriveTransitionHistory(
     }
   }
   return entries.slice(-Math.max(1, maxEntries)).reverse()
+}
+
+/** Aggregate the most frequent (from → to) transitions per lane across the
+    full observation buffer. Unlike [deriveTransitionHistory], which slices
+    to the last N events for the recency log, this counts every adjacent
+    (prev, next) pair in [observations] so the ranking reflects the full
+    window. Ties broken by lane order (TRANSITION_FIELDS), then alphabetical. */
+export function deriveTopTransitions(
+  observations: CompositeObservation[],
+  limit = 5,
+): TopTransition[] {
+  const counts = new Map<string, TopTransition>()
+  for (let index = 1; index < observations.length; index += 1) {
+    const prev = observations[index - 1]
+    const next = observations[index]
+    if (!prev || !next) continue
+    for (const { field, key } of TRANSITION_FIELDS) {
+      if (prev[key] === next[key]) continue
+      const cacheKey = `${field}|${prev[key]}|${next[key]}`
+      const existing = counts.get(cacheKey)
+      if (existing) {
+        existing.count += 1
+      } else {
+        counts.set(cacheKey, {
+          field,
+          from: prev[key],
+          to: next[key],
+          count: 1,
+        })
+      }
+    }
+  }
+  const fieldOrder = new Map(
+    TRANSITION_FIELDS.map(({ field }, idx) => [field, idx]),
+  )
+  return Array.from(counts.values())
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count
+      const fa = fieldOrder.get(a.field) ?? 99
+      const fb = fieldOrder.get(b.field) ?? 99
+      if (fa !== fb) return fa - fb
+      const fromCmp = a.from.localeCompare(b.from)
+      if (fromCmp !== 0) return fromCmp
+      return a.to.localeCompare(b.to)
+    })
+    .slice(0, Math.max(0, limit))
 }
 
 export function derivePhaseLog(

@@ -2266,7 +2266,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           (* 8. Handle stop reason *)
           (match result.stop_reason with
            | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
-             Log.Keeper.warn
+             (* INFO, not WARN: mirrors MutationBoundaryReached below.
+                The keeper made progress and saved a checkpoint; this is
+                a normal pause-and-resume signal, not a failure. *)
+             Log.Keeper.info
                "keeper:%s turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
                updated_meta.name turns_used limit;
              (* Do NOT increment turn_failures — this is not a crash.

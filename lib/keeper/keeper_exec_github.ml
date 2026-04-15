@@ -4,16 +4,139 @@ open Keeper_exec_shared
 (* GH credential isolation — SSOT in Keeper_gh_env. *)
 let with_keeper_gh_env = Keeper_gh_env.with_env
 
+(* ================================================================ *)
+(* GH entity cache (inlined from former keeper_gh_cache.ml).         *)
+(* In-memory cache of valid PR/issue numbers per repo, populated     *)
+(* lazily via [gh api repos/{slug}/pulls|issues?state=all] (REST,    *)
+(* not GraphQL -- GraphQL has known false negatives, see board post  *)
+(* p-10f3f0914beeb9e0d22f80e0b0e107a8).                              *)
+(*                                                                   *)
+(* Used below by [handle_keeper_github] to reject hallucinated       *)
+(* PR/issue numbers BEFORE invoking gh, returning the valid number   *)
+(* list as alternatives. Thread-safe via Eio.Mutex, fail-open on     *)
+(* fetch errors (returns [`Unknown] -> caller proceeds normally).    *)
+(* ================================================================ *)
+
+type entity_kind = PR | Issue
+
+type validation_result =
+  [ `Valid
+  | `Invalid of int list
+  | `Unknown
+  ]
+
+type cache_entry = {
+  numbers : int list;
+  fetched_at : float;
+  populated : bool;
+}
+
+let kind_path = function PR -> "pulls" | Issue -> "issues"
+
+let cache : (string * entity_kind, cache_entry) Hashtbl.t = Hashtbl.create 8
+let cache_lock = Eio.Mutex.create ()
+
+let counter_hits = Atomic.make 0
+let counter_misses = Atomic.make 0
+let counter_bypasses = Atomic.make 0
+let counter_fetch_errors = Atomic.make 0
+
+let parse_numbers_from_jq_output (out : string) : int list =
+  out
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+         let s = String.trim line in
+         if s = "" then None
+         else
+           match int_of_string_opt s with
+           | Some n when n > 0 -> Some n
+           | _ -> None)
+
+let jq_filter = function
+  | PR -> ".[] | .number"
+  | Issue -> ".[] | select(.pull_request == null) | .number"
+
+let fetch_entity_numbers ~(config : Room.config) ~(repo_slug : string) ~(kind : entity_kind)
+    : int list option
+  =
+  let endpoint =
+    Printf.sprintf "repos/%s/%s?state=all&per_page=%d"
+      repo_slug (kind_path kind) (Keeper_tool_policy.gh_cache_fetch_page_size ())
+  in
+  let raw =
+    Printf.sprintf "gh api %s --jq %s"
+      (Filename.quote endpoint)
+      (Filename.quote (jq_filter kind))
+  in
+  let scoped = Keeper_gh_env.with_env config raw in
+  let shell = Printf.sprintf "%s 2>/dev/null" scoped in
+  match
+    Process_eio.run_argv_with_status
+      ~timeout_sec:(Keeper_tool_policy.gh_cache_fetch_timeout_sec ())
+      [ "/bin/zsh"; "-lc"; shell ]
+  with
+  | Unix.WEXITED 0, out -> Some (parse_numbers_from_jq_output out)
+  | _ ->
+    Atomic.incr counter_fetch_errors;
+    None
+
+let now () = Unix.gettimeofday ()
+
+let entry_is_fresh entry =
+  entry.populated && now () -. entry.fetched_at < Keeper_tool_policy.gh_cache_ttl_sec ()
+
+let get_or_populate_entry ~config ~repo_slug ~kind : cache_entry =
+  Eio.Mutex.use_rw ~protect:true cache_lock (fun () ->
+    let key = (repo_slug, kind) in
+    match Hashtbl.find_opt cache key with
+    | Some entry when entry_is_fresh entry -> entry
+    | _ ->
+      let entry =
+        match fetch_entity_numbers ~config ~repo_slug ~kind with
+        | Some numbers ->
+          { numbers; fetched_at = now (); populated = true }
+        | None ->
+          { numbers = []; fetched_at = now (); populated = false }
+      in
+      Hashtbl.replace cache key entry;
+      entry)
+
+let validate_number ~config ~repo_slug ~kind ~number : validation_result =
+  if number <= 0 then `Unknown
+  else if repo_slug = "" then `Unknown
+  else
+    let entry = get_or_populate_entry ~config ~repo_slug ~kind in
+    if not entry.populated then begin
+      Atomic.incr counter_bypasses;
+      `Unknown
+    end
+    else if List.mem number entry.numbers then begin
+      Atomic.incr counter_hits;
+      `Valid
+    end
+    else begin
+      Atomic.incr counter_misses;
+      `Invalid entry.numbers
+    end
+
+let invalidate_cache ~repo_slug ~kind =
+  Eio.Mutex.use_rw ~protect:true cache_lock (fun () ->
+    Hashtbl.remove cache (repo_slug, kind))
+
+let cache_metrics () : (string * int) list =
+  [ "hits", Atomic.get counter_hits
+  ; "misses", Atomic.get counter_misses
+  ; "bypasses", Atomic.get counter_bypasses
+  ; "fetch_errors", Atomic.get counter_fetch_errors
+  ]
+
 (* ------------------------------------------------------------------ *)
 (* Rejection history: tracks per-(repo, kind, number) rejection count  *)
 (* locally in this module so that the gate can escalate its response   *)
 (* on repeated hallucinations of the same number. #7199.               *)
-(*                                                                     *)
-(* Lives here (not in Keeper_gh_cache) because adding functions to     *)
-(* private_modules with .mli triggers dune interface-mismatch errors.  *)
 (* ------------------------------------------------------------------ *)
 
-let _rejection_history : (string * Keeper_gh_cache.entity_kind * int, int) Hashtbl.t =
+let _rejection_history : (string * entity_kind * int, int) Hashtbl.t =
   Hashtbl.create 16
 
 let record_rejection ~repo_slug ~kind ~number : int =
@@ -50,7 +173,7 @@ let gh_not_found_hint ~(st : Unix.process_status) ~(out : string) =
 
 (** gh subcommands that take a numeric PR/issue target as their first
     positional argument. We pre-validate the number against the
-    Keeper_gh_cache before dispatching the subprocess.
+    the inlined gh entity cache before dispatching the subprocess.
 
     [view] is intentionally excluded from the cache check -- list-style
     [pr view] (with no number) is valid and we don't want to reject it. *)
@@ -92,7 +215,7 @@ let gh_issue_number_subcmds =
       "pr list --state open"    -> None
       "pr create --title foo"   -> None *)
 let extract_gh_target_number (cmd : string)
-    : (Keeper_gh_cache.entity_kind * int) option
+    : (entity_kind * int) option
   =
   let parts =
     String.split_on_char ' ' (String.trim cmd)
@@ -106,10 +229,10 @@ let extract_gh_target_number (cmd : string)
   match parts with
   | "pr" :: sub :: num_str :: _
     when List.mem (String.lowercase_ascii sub) gh_pr_number_subcmds ->
-    Option.map (fun n -> Keeper_gh_cache.PR, n) (positive_int num_str)
+    Option.map (fun n -> PR, n) (positive_int num_str)
   | "issue" :: sub :: num_str :: _
     when List.mem (String.lowercase_ascii sub) gh_issue_number_subcmds ->
-    Option.map (fun n -> Keeper_gh_cache.Issue, n) (positive_int num_str)
+    Option.map (fun n -> Issue, n) (positive_int num_str)
   | _ -> None
 
 (** Return the kind whose cached number list should be invalidated after
@@ -117,7 +240,7 @@ let extract_gh_target_number (cmd : string)
     state transitions that close/reopen (membership changes under
     [state=all] is unchanged, but we still invalidate to resync state
     filters used elsewhere), and merges. *)
-let gh_mutates_entity (cmd : string) : Keeper_gh_cache.entity_kind option =
+let gh_mutates_entity (cmd : string) : entity_kind option =
   let parts =
     String.split_on_char ' ' (String.trim cmd)
     |> List.filter (fun s -> s <> "")
@@ -126,10 +249,10 @@ let gh_mutates_entity (cmd : string) : Keeper_gh_cache.entity_kind option =
   match parts with
   | "pr" :: sub :: _
     when List.mem sub [ "create"; "close"; "reopen"; "merge"; "ready"; "edit" ] ->
-    Some Keeper_gh_cache.PR
+    Some PR
   | "issue" :: sub :: _
     when List.mem sub [ "create"; "close"; "reopen"; "edit"; "transfer"; "delete" ] ->
-    Some Keeper_gh_cache.Issue
+    Some Issue
   | _ -> None
 
 (** Truncate gh output to prevent context explosion.
@@ -354,7 +477,7 @@ let handle_keeper_github
             | None -> Option.value ~default:"" (project_repo_slug ())
           in
           (match
-             Keeper_gh_cache.validate_number ~config ~repo_slug:slug ~kind ~number
+             validate_number ~config ~repo_slug:slug ~kind ~number
            with
            | `Valid | `Unknown -> None
            | `Invalid valids ->
@@ -364,7 +487,7 @@ let handle_keeper_github
       (match invalid_number with
        | Some (kind, number, valids, rejection_count, slug) ->
          let kind_label =
-           match kind with Keeper_gh_cache.PR -> "PR" | Issue -> "issue"
+           match kind with PR -> "PR" | Issue -> "issue"
          in
          let shown =
            let rec take n = function
@@ -378,7 +501,7 @@ let handle_keeper_github
            shown |> List.map string_of_int |> String.concat ", "
          in
          let sub_label =
-           match kind with Keeper_gh_cache.PR -> "pr" | Issue -> "issue"
+           match kind with PR -> "pr" | Issue -> "issue"
          in
          let suggested =
            match shown with
@@ -536,7 +659,7 @@ let handle_keeper_github
                  | Some s -> s
                  | None -> Option.value ~default:"" (project_repo_slug ())
                in
-               if slug <> "" then Keeper_gh_cache.invalidate ~repo_slug:slug ~kind);
+               if slug <> "" then invalidate_cache ~repo_slug:slug ~kind);
           Yojson.Safe.to_string
             (`Assoc
                 ([ "ok", `Bool (st = Unix.WEXITED 0)
@@ -560,7 +683,7 @@ let handle_keeper_github
                | Some s -> s
                | None -> Option.value ~default:"" (project_repo_slug ())
              in
-             if slug <> "" then Keeper_gh_cache.invalidate ~repo_slug:slug ~kind);
+             if slug <> "" then invalidate_cache ~repo_slug:slug ~kind);
         Yojson.Safe.to_string
           (`Assoc
               ([ "ok", `Bool (st = Unix.WEXITED 0)
@@ -1168,7 +1291,7 @@ let handle_keeper_pr_submit
         if !step_ok then begin
           let slug = Option.value ~default:"" (project_repo_slug ()) in
           if slug <> "" then
-            Keeper_gh_cache.invalidate ~repo_slug:slug ~kind:Keeper_gh_cache.PR
+            invalidate_cache ~repo_slug:slug ~kind:PR
         end;
         (* Record PR in playground history (best-effort, JSONL append) *)
         if !step_ok && !pr_url <> "" then begin

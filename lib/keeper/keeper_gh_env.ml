@@ -1,12 +1,12 @@
 (** Keeper-scoped GH credential isolation.
 
-    SSOT for [GH_CONFIG_DIR] handling. Used by [Keeper_gh_cache] and
+    SSOT for [GH_CONFIG_DIR] handling. Used by the inlined GH cache in [Keeper_exec_github] and
     [Keeper_exec_github] to scope [gh] subprocess invocations to the
     keeper identity (e.g. [anyang-keepers]) instead of the operator's
     personal [~/.config/gh] credentials.
 
     Extracted to its own module to avoid circular dependencies
-    (keeper_gh_cache cannot depend on keeper_exec_github) and to keep
+    (keeper_gh_env is a shared SSOT for GH credential handling) and to keep
     keeper_exec_shared's interface stable (adding functions to it
     causes dune interface mismatch errors in the test suite). *)
 

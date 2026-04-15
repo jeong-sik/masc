@@ -106,7 +106,7 @@ shell_write_presets = ["coding", "delivery", "full"]
 # ── GitHub Cache ───────────────────────────────────────────────────
 # Pre-execution hallucination gate: validates PR/issue numbers
 # against a cached list before executing gh CLI commands.
-# See lib/keeper/keeper_gh_cache.ml for implementation.
+# See lib/keeper/keeper_exec_github.ml for implementation.
 
 [gh_cache]
 # Time-to-live for cached PR/issue number lists (seconds).

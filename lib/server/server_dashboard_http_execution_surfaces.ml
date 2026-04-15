@@ -5,15 +5,16 @@ open Server_utils
 open Server_dashboard_http_core
 
 (** Track whether shell cache has been populated at least once.
-    Used for adaptive timeout in namespace-truth: cold path gets more time. *)
-let _shell_warmed = ref false
+    Atomic.t for cross-domain visibility: read from executor pool
+    worker domain via [namespace_truth_snapshot_from_caches].
+    Monotonic false→true; stale false just picks the cold timeout. *)
+let _shell_warmed : bool Atomic.t = Atomic.make false
 
 (** Last-known-good shell result for graceful degradation on timeout.
-    When the shell fiber times out (I/O contention), returning the stale
-    shell JSON is strictly better than returning empty [`Assoc []] which
-    zeros out namespace counts and focus data. Updated on every successful
-    shell fetch. *)
-let _last_good_shell : Yojson.Safe.t ref = ref (`Assoc [])
+    Atomic.t for cross-domain visibility (same reason as [_shell_warmed]).
+    Each update swaps a fully-constructed Yojson.Safe.t value;
+    readers always see a complete snapshot. *)
+let _last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 
 let warm_shell_cache (state : Mcp_server.server_state) =
   let t0 = Time_compat.now () in
@@ -22,8 +23,8 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        dashboard_shell_http_json ?clock:state.Mcp_server.clock
          state.Mcp_server.room_config
      in
-     _shell_warmed := true;
-     _last_good_shell := result;
+     Atomic.set _shell_warmed true;
+     Atomic.set _last_good_shell result;
      Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
        ((Time_compat.now () -. t0) *. 1000.0)
    with

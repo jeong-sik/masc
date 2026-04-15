@@ -28,7 +28,7 @@ type t = {
   sessions: (string, session) Hashtbl.t;  (* agent_id -> session *)
   config_path: string;
   session_dir: string;
-  sessions_mu: Stdlib.Mutex.t;
+  sessions_mu: Eio.Mutex.t;
   (** Serialises every read/write on [sessions] and every mutation of
       the [mutable] fields of a [session] value.  Keeper fibers call
       start_session / heartbeat / end_session / cleanup_zombies from
@@ -36,8 +36,8 @@ type t = {
       races on TOCTOU ([find_opt] + [add]) and the session record's
       mutable [turn_count]/[last_activity]/[status] are non-atomic.
 
-      Stdlib.Mutex so callers on Executor_pool worker domains can
-      still take the lock (Eio.Mutex is single-domain). *)
+      Eio.Mutex via [Eio_guard.with_mutex] so contending fibers
+      suspend instead of blocking the whole domain during file I/O. *)
 }
 
 (** {1 Utilities} *)
@@ -94,14 +94,11 @@ let create ~config_path =
     sessions = Hashtbl.create 16;
     config_path;
     session_dir;
-    sessions_mu = Stdlib.Mutex.create ();
+    sessions_mu = Eio.Mutex.create ();
   }
 
 let with_lock t f =
-  Stdlib.Mutex.lock t.sessions_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock t.sessions_mu)
-    f
+  Eio_guard.with_mutex t.sessions_mu f
 
 (** {1 Internal Helpers} *)
 

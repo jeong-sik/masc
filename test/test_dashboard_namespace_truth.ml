@@ -570,7 +570,7 @@ let test_last_good_shell_fallback_preserves_counts () =
       warm_execution_cache ();
       (* Warm the shell cache so _last_good_shell gets populated. *)
       Lib.Server_dashboard_http.warm_shell_cache state;
-      let last_good = !(Lib.Server_dashboard_http._last_good_shell) in
+      let last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
       check bool "last good shell is non-empty after warm"
         true
         (last_good <> `Assoc []);
@@ -582,7 +582,7 @@ let test_last_good_shell_fallback_preserves_counts () =
         (counts <> `Null);
       (* Verify namespace-truth snapshot_from_caches uses the stale shell data
          even when the warmed flag is false (cold path, simulating timeout). *)
-      Lib.Server_dashboard_http._shell_warmed := false;
+      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
       let snapshot =
         match Lib.Server_dashboard_http.namespace_truth_snapshot_from_caches state with
         | Some json -> json
@@ -595,7 +595,7 @@ let test_last_good_shell_fallback_preserves_counts () =
         true
         (ns_counts <> `Null);
       (* Restore warmed state for subsequent tests. *)
-      Lib.Server_dashboard_http._shell_warmed := true)
+      Atomic.set Lib.Server_dashboard_http._shell_warmed true)
 
 let test_namespace_truth_snapshot_hash_ignores_generated_at () =
   Fun.protect

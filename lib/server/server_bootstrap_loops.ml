@@ -453,6 +453,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
               sse_guards_reaped http_guards_reaped sessions_reaped;
           let ext_reaped = Sse.reap_dead_external_subscribers () in
+          Transport_metrics.set_grpc_subscribers
+            (Sse.external_subscriber_count_with_prefix "grpc-subscribe-");
           if ext_reaped > 0 then
             Log.Server.info "reaped %d dead external subscribers" ext_reaped;
           if Server_webrtc_transport.is_enabled () then begin

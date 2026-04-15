@@ -382,5 +382,17 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
         ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
 
-let dashboard_transport_health_http_json ~state:_ =
-  cached_surface_json _transport_health_cache
+let transport_health_cache_diagnostics () =
+  match cached_surface_json _transport_health_cache with
+  | `Assoc fields -> (
+      match List.assoc_opt "projection_diagnostics" fields with
+      | Some (`Assoc diagnostics) -> diagnostics
+      | _ -> [])
+  | _ -> []
+
+let dashboard_transport_health_http_json ~state =
+  let live_json =
+    Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config
+  in
+  extend_projection_diagnostics live_json
+    (("source", `String "live_metrics") :: transport_health_cache_diagnostics ())

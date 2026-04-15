@@ -198,6 +198,34 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('prod / namespace default')
   })
 
+  it('renders live-vs-cache truth line when projection diagnostics exist', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
+      sampleResponse({
+        projection_diagnostics: {
+          source: 'live_metrics',
+          cache_state: 'fresh',
+          last_success_at: '2026-04-15T10:00:00Z',
+          last_attempt_at: '2026-04-15T10:00:01Z',
+          last_error_at: null,
+          stale_reason: null,
+          stale_age_ms: null,
+        },
+      }),
+    )
+
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('live_metrics')
+    expect(container.textContent).toContain('cache fresh')
+    expect(container.textContent).toContain('last ok 2026-04-15T10:00:00Z')
+  })
+
   it('debounces SSE-driven transport refreshes through FetchScheduler', async () => {
     const lastEvent = signal<unknown>(null)
     const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleResponse())

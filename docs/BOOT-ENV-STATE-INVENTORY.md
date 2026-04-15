@@ -146,6 +146,8 @@ max_tools_per_turn = 64
 llm_rerank = true
 ```
 
+`tool_cost_max_usd = 0` means unlimited and disables the keeper cost gate.
+
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values
 are recorded in a process-local boot override store so existing

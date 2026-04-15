@@ -1455,7 +1455,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~history_assistant_source:"internal_assistant"
               ~temperature ~max_tokens
               ~oas_timeout_s
-              ~max_cost_usd
+              ?max_cost_usd
               ~is_retry
               ?shared_context
               ?event_bus:(Keeper_event_bus.get ())

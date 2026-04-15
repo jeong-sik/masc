@@ -58,6 +58,16 @@ let test_missing_file_returns_zero () =
   | Ok n -> failf "expected 0 overrides, got %d" n
   | Error msg -> failf "unexpected error: %s" msg
 
+let test_missing_file_keeps_cost_gate_disabled_by_default () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" msg
+  | Ok _ ->
+    check (option (float 0.0001)) "cost gate disabled by default"
+      None
+      (Keeper_config.keeper_tool_cost_max_usd ())
+
 let test_applies_autonomous_max_turns () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
   let count, overrides =
@@ -189,6 +199,21 @@ let test_load_and_apply_records_turn_cost_override () =
       (Some "1.25")
       (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD")
 
+let test_load_and_apply_records_disabled_turn_cost_override () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\ntool_cost_max_usd = 0\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" msg
+  | Ok n ->
+    check int "applied count" 1 n;
+    check (option string) "boot override stored"
+      (Some "0")
+      (Config_boot_overrides.get_opt "MASC_KEEPER_TOOL_COST_MAX_USD");
+    check (option (float 0.0001)) "cost gate disabled"
+      None
+      (Keeper_config.keeper_tool_cost_max_usd ())
+
 let test_float_value_round_trip () =
   let doc = parse_or_fail
     "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
@@ -204,6 +229,7 @@ let () =
   run "keeper_runtime_toml"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
+        ; test_case "missing file keeps cost gate disabled by default" `Quick test_missing_file_keeps_cost_gate_disabled_by_default
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
@@ -212,6 +238,7 @@ let () =
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "load_and_apply records turn cost override" `Quick test_load_and_apply_records_turn_cost_override
+        ; test_case "load_and_apply records disabled turn cost override" `Quick test_load_and_apply_records_disabled_turn_cost_override
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ] )
     ]

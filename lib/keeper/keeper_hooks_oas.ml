@@ -100,11 +100,13 @@ let emit_cost_event
     known set. The LLM (non-deterministic) decides which to use. *)
 let suggest_alternatives ~(allowed_tools : string list)
     ~(repeated_tools : string list) ~(max_suggestions : int) : string list =
-  let repeated_set = Hashtbl.create (List.length repeated_tools) in
-  List.iter (fun t -> Hashtbl.replace repeated_set t ()) repeated_tools;
+  let module SS = Set.Make (String) in
+  let repeated_set =
+    List.fold_left (fun acc t -> SS.add t acc) SS.empty repeated_tools
+  in
   allowed_tools
   |> List.filter (fun t ->
-       not (Hashtbl.mem repeated_set t)
+       not (SS.mem t repeated_set)
        && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in

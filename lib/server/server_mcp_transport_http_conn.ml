@@ -85,16 +85,23 @@ let close_sse_conn info =
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
-let stop_sse_session session_id =
+let stop_sse_session_impl ~clear_guard session_id =
   let info_opt = Eio.Mutex.use_rw ~protect:true sse_registry_mutex (fun () ->
     match Hashtbl.find_opt sse_conn_by_session session_id with
     | None -> None
     | Some info ->
         Hashtbl.remove sse_conn_by_session session_id;
+        if clear_guard then Hashtbl.remove sse_connect_guard_by_session session_id;
         Some info) in
   match info_opt with
   | None -> ()
   | Some info -> close_sse_conn info
+
+let stop_sse_session session_id =
+  stop_sse_session_impl ~clear_guard:true session_id
+
+let stop_sse_session_preserve_guard session_id =
+  stop_sse_session_impl ~clear_guard:false session_id
 
 let is_active_sse_session session_id =
   Eio.Mutex.use_ro sse_registry_mutex (fun () ->

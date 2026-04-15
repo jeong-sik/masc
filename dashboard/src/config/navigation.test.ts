@@ -43,7 +43,7 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('fleet-health')).toBe('Fleet 건강')
+    expect(labelFor('fleet-health')).toBe('Keeper 현황')
     expect(labelFor('runtime')).toBe('런타임')
     expect(labelFor('agents')).toBe('에이전트 & 키퍼')
   })

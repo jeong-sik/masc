@@ -422,7 +422,7 @@ let operations_summary_json_from_state (state : snapshot_state) =
                    {
                      Cp_microarch_summary.strategy = operation.search_strategy;
                      readiness = "blocked";
-                     status = string_of_operation_status operation.status;
+                     status = operation.status;
                      candidate_count = 0;
                      best_score = None;
                      workload_profile = operation_workload_profile operation;
@@ -438,7 +438,7 @@ let operations_summary_json_from_state (state : snapshot_state) =
                    {
                      Cp_microarch_summary.strategy = operation.search_strategy;
                      readiness = "blocked";
-                     status = string_of_operation_status operation.status;
+                     status = operation.status;
                      candidate_count = 0;
                      best_score = None;
                      workload_profile = operation_workload_profile operation;
@@ -464,7 +464,7 @@ let operations_summary_json_from_state (state : snapshot_state) =
         {
           Cp_microarch_summary.strategy = operation.search_strategy;
           readiness = readiness_of_operation operation;
-          status = string_of_operation_status operation.status;
+          status = operation.status;
           candidate_count =
             (match operation_search_strategy operation with
             | Cp_search_fabric.Best_first_v1 -> 1

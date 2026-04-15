@@ -10,7 +10,7 @@ let spec_commit_warn = 0.5
 type search_row = {
   strategy : string;
   readiness : string;
-  status : string;
+  status : Cp_types.operation_status;
   candidate_count : int;
   best_score : float option;
   workload_profile : string;
@@ -106,7 +106,9 @@ let search_fabric_json (rows : search_row list) =
     |> List.filter (fun row ->
            match row.stage with
            | Some ("verify" | "review") ->
-               List.mem row.status [ "failed"; "cancelled" ]
+               (match row.status with
+                | Cp_types.Failed | Cancelled -> true
+                | Active | Planned | Paused | Completed -> false)
            | _ -> false)
     |> List.length
   in

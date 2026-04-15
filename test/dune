@@ -234,8 +234,8 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        test_command_plane_help
         ; test_dashboard_proof removed (team session cleanup)
+        ; test_command_plane_help removed (CP purge)
 
         test_dashboard_cache
         test_dashboard_execution
@@ -284,10 +284,7 @@
         test_resilience
         test_common
         test_room_messages_raw
-        test_cp_cleanup
-        test_cp_search_fabric
-        test_cp_section_cache
-        test_cp_jsonl_tail
+        ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
         ; test_swarm_persistence removed (team session cleanup)
         test_local_runtime_pool
         test_keeper_tools_oas
@@ -333,7 +330,7 @@
         test_tool_board_coverage
         ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
-        test_tree_index
+        ; test_tree_index removed (CP purge)
         test_tool_registry
         test_tool_dispatch
         test_tool_spec
@@ -383,8 +380,8 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        test_command_plane_help
         ; test_dashboard_proof removed (team session cleanup)
+        ; test_command_plane_help removed (CP purge)
 
         test_dashboard_cache
         test_dashboard_execution
@@ -433,10 +430,7 @@
         test_resilience
         test_common
         test_room_messages_raw
-        test_cp_cleanup
-        test_cp_search_fabric
-        test_cp_section_cache
-        test_cp_jsonl_tail
+        ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
         ; test_swarm_persistence removed (team session cleanup)
         test_local_runtime_pool
         test_keeper_tools_oas
@@ -482,7 +476,7 @@
         test_tool_board_coverage
         ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
-        test_tree_index
+        ; test_tree_index removed (CP purge)
         test_tool_registry
         test_tool_dispatch
         test_tool_spec
@@ -655,24 +649,9 @@
 ; Special: Multi-module test suites
 ; ============================================================
 
-; Command Plane v2 (8 modules)
-(test
- (name test_command_plane_v2)
- (modules test_command_plane_v2
-          test_command_plane_v2_support
-          test_command_plane_v2_policy_inputs
-          test_command_plane_v2_traces
-          test_command_plane_v2_summary
-          test_command_plane_v2_scheduler_core_a
-          test_command_plane_v2_scheduler_core_b
-          test_command_plane_v2_scheduler_policy
-          test_command_plane_v2_search)
- (libraries masc_test_deps))
+; test_command_plane_v2 removed (CP purge)
 
-; Cp_unit.descendant_ids depth guard regression (#6633)
-(test
- (name test_cp_unit_descendant_ids)
- (libraries masc_test_deps))
+; test_cp_unit_descendant_ids removed (CP purge)
 
 ; RFC-MASC-001 Phase 1: structured working_context in Checkpoint.
 ; Round-trip, envelope, patch_checkpoint, dual-source read.
@@ -714,11 +693,7 @@
  (modules test_normalized_actor)
  (libraries masc_test_deps))
 
-; Failover leader deterministic selection
-(test
- (name test_failover_leader)
- (modules test_failover_leader)
- (libraries masc_test_deps))
+; test_failover_leader removed (CP purge)
 
 ; MCP Tool Matrix (2 modules + generated names + runner dep)
 (test
@@ -897,10 +872,7 @@
 ; Executables (benchmarks, distributed tests, tools)
 ; ============================================================
 
-(executable
- (name test_cp_search_fabric_benchmark)
- (modules test_cp_search_fabric_benchmark)
- (libraries masc_test_deps))
+; test_cp_search_fabric_benchmark removed (CP purge)
 
 (executable
  (name test_repo_synthesis_benchmark)

@@ -3,6 +3,13 @@ open Alcotest
 module U = Yojson.Safe.Util
 module M = Masc_mcp
 
+(* Local ISO formatter (previously Command_plane_v2.iso_of_unix; CP purged). *)
+let iso_of_unix unix_ts =
+  let tm = Unix.gmtime unix_ts in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
@@ -83,7 +90,7 @@ let test_managed_trace_only_does_not_make_lane_present () =
 
 let test_active_managed_operation_keeps_lane_present () =
   let now = Time_compat.now () in
-  let now_iso = M.Command_plane_v2.iso_of_unix now in
+  let now_iso = iso_of_unix now in
   let operation : M.Swarm_status.operation_info =
     {
       operation_id = "op-running";
@@ -110,7 +117,7 @@ let test_active_managed_operation_keeps_lane_present () =
 
 let test_managed_alert_only_keeps_lane_present () =
   let now = Time_compat.now () in
-  let now_iso = M.Command_plane_v2.iso_of_unix now in
+  let now_iso = iso_of_unix now in
   let alert : M.Swarm_status.alert_info =
     {
       alert_id = "alert-unit-frozen";
@@ -134,7 +141,7 @@ let test_managed_alert_only_keeps_lane_present () =
 
 let test_supervised_session_keeps_lane_present () =
   let now = Time_compat.now () in
-  let now_iso = M.Command_plane_v2.iso_of_unix now in
+  let now_iso = iso_of_unix now in
   let session : M.Swarm_status.session_info =
     {
       session_id = "sess-1";
@@ -166,7 +173,7 @@ let test_supervised_session_keeps_lane_present () =
     (json |> U.member "narrative" |> U.member "active_work" |> U.to_string <> "")
 
 let test_stale_supervised_session_keeps_stale_flag () =
-  let stale_iso = M.Command_plane_v2.iso_of_unix (Time_compat.now () -. 1200.) in
+  let stale_iso = iso_of_unix (Time_compat.now () -. 1200.) in
   let session : M.Swarm_status.session_info =
     {
       session_id = "sess-stale";
@@ -212,10 +219,10 @@ let test_stale_supervised_session_keeps_stale_flag () =
 
 let test_recommendation_lane_drives_narrative_lane_and_start_event () =
   let now = Time_compat.now () in
-  let current_iso = M.Command_plane_v2.iso_of_unix now in
-  let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 1200.) in
-  let old_iso = M.Command_plane_v2.iso_of_unix (now -. 90.) in
-  let recent_iso = M.Command_plane_v2.iso_of_unix (now -. 30.) in
+  let current_iso = iso_of_unix now in
+  let stale_iso = iso_of_unix (now -. 1200.) in
+  let old_iso = iso_of_unix (now -. 90.) in
+  let recent_iso = iso_of_unix (now -. 30.) in
   let operation : M.Swarm_status.operation_info =
     {
       operation_id = "op-managed";
@@ -285,7 +292,7 @@ let test_recommendation_lane_drives_narrative_lane_and_start_event () =
 let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present ()
     =
   let now = Time_compat.now () in
-  let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 3600.) in
+  let stale_iso = iso_of_unix (now -. 3600.) in
   let operation : M.Swarm_status.operation_info =
     {
       operation_id = "detachment-ts-old";
@@ -350,7 +357,7 @@ let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_presen
 
 let test_terminal_managed_artifacts_do_not_keep_managed_lane_present () =
   let now = Time_compat.now () in
-  let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 3600.) in
+  let stale_iso = iso_of_unix (now -. 3600.) in
   let operation : M.Swarm_status.operation_info =
     {
       operation_id = "op-old";

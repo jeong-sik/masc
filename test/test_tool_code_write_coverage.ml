@@ -177,6 +177,32 @@ let test_mixed_case_org () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
 
+(* ── validate_code_shell_command ─────────────────────────────────── *)
+
+let test_validate_code_shell_command_rejects_pipe () =
+  match
+    Tool_code_write.validate_code_shell_command
+      "dune build 2>&1 | tail -5"
+  with
+  | Error reason ->
+      check bool "reason mentions pipe restriction" true
+        (String.starts_with ~prefix:"Pipes are not allowed" reason)
+  | Ok () -> fail "expected piped command to be rejected"
+
+let test_validate_code_shell_command_allows_direct_build () =
+  check (result unit string) "direct build allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "dune build 2>&1")
+
+let test_validate_code_shell_command_rejects_semicolon () =
+  match
+    Tool_code_write.validate_code_shell_command
+      "dune build; tail -5"
+  with
+  | Error reason ->
+      check bool "reason mentions shell injection" true
+        (String.starts_with ~prefix:"Shell injection syntax" reason)
+  | Ok () -> fail "expected semicolon chaining to be rejected"
+
 (* ── Per-agent containment (#6527 iter 6) ───────────────────────────
    Regression tests for PR #6610 — verify that validate_writable_path
    and validate_clone_cwd refuse cross-agent playground writes even
@@ -353,6 +379,14 @@ let () =
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
+    ]);
+    ("validate_code_shell_command", [
+      test_case "rejects pipe" `Quick
+        test_validate_code_shell_command_rejects_pipe;
+      test_case "allows direct build" `Quick
+        test_validate_code_shell_command_allows_direct_build;
+      test_case "rejects semicolon" `Quick
+        test_validate_code_shell_command_rejects_semicolon;
     ]);
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick

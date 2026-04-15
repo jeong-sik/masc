@@ -3,6 +3,145 @@ type preflight_subject = {
   model_label : string;
 }
 
+type process_result = {
+  exit_code : int;
+  stdout : string;
+  stderr : string;
+}
+
+let tail_display_max_chars = 4000
+
+let tail_text ?(max_chars = tail_display_max_chars) text =
+  let len = String.length text in
+  if len <= max_chars then text
+  else String.sub text (len - max_chars) max_chars
+
+let close_fd_quietly fd =
+  try Unix.close fd with
+  | Unix.Unix_error _ -> ()
+
+let remove_path_quietly path =
+  try Sys.remove path with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> ()
+
+let rec waitpid_nointr flags pid =
+  try Unix.waitpid flags pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr flags pid
+
+let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
+  let start = Unix.gettimeofday () in
+  let rec loop () =
+    match waitpid_nointr [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+        if Unix.gettimeofday () -. start >= float_of_int timeout_sec then
+          `Timeout
+        else (
+          (match clock_opt with
+          | Some clock -> Eio.Time.sleep clock 0.2
+          | None -> Time_compat.sleep 0.2);
+          loop ())
+    | _, status -> `Exited status
+  in
+  loop ()
+
+let run_process_with_timeout ?stdin_content ~clock_opt ~timeout_sec ~prog ~argv ~env () =
+  let stdin_path_opt = ref None in
+  let stdin_fd_opt = ref None in
+  let stdout_fd_opt = ref None in
+  let stderr_fd_opt = ref None in
+  let stdout_path = Filename.temp_file "masc_docker_stdout_" ".log" in
+  let stderr_path = Filename.temp_file "masc_docker_stderr_" ".log" in
+  let cleanup_setup () =
+    Option.iter close_fd_quietly !stdin_fd_opt;
+    stdin_fd_opt := None;
+    Option.iter close_fd_quietly !stdout_fd_opt;
+    stdout_fd_opt := None;
+    Option.iter close_fd_quietly !stderr_fd_opt;
+    stderr_fd_opt := None;
+    Option.iter remove_path_quietly !stdin_path_opt;
+    stdin_path_opt := None;
+    remove_path_quietly stdout_path;
+    remove_path_quietly stderr_path
+  in
+  let pid =
+    try
+      let stdin_fd =
+        match stdin_content with
+        | None -> Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0
+        | Some content ->
+            let stdin_path, oc =
+              Filename.open_temp_file ~mode:[ Open_wronly; Open_creat; Open_trunc; Open_binary ]
+                ~perms:0o600 "masc_docker_stdin_" ".log"
+            in
+            stdin_path_opt := Some stdin_path;
+            Out_channel.output_string oc content;
+            close_out oc;
+            Unix.openfile stdin_path [ Unix.O_RDONLY ] 0
+      in
+      stdin_fd_opt := Some stdin_fd;
+      let stdout_fd =
+        Unix.openfile stdout_path
+          [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+      in
+      stdout_fd_opt := Some stdout_fd;
+      let stderr_fd =
+        Unix.openfile stderr_path
+          [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+      in
+      stderr_fd_opt := Some stderr_fd;
+      let pid =
+        Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd
+          stderr_fd
+      in
+      close_fd_quietly stdin_fd;
+      stdin_fd_opt := None;
+      close_fd_quietly stdout_fd;
+      stdout_fd_opt := None;
+      close_fd_quietly stderr_fd;
+      stderr_fd_opt := None;
+      pid
+    with exn ->
+      cleanup_setup ();
+      raise exn
+  in
+  let finalize exit_code =
+    let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
+    let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in
+    (match !stdin_path_opt with
+    | Some stdin_path -> (
+        try Sys.remove stdin_path
+        with Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.LocalWorker.warn "failed to remove stdin tmpfile %s: %s" stdin_path
+               (Printexc.to_string exn))
+    | None -> ());
+    (try Sys.remove stdout_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      Log.LocalWorker.warn "failed to remove stdout tmpfile %s: %s" stdout_path (Printexc.to_string exn));
+    (try Sys.remove stderr_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      Log.LocalWorker.warn "failed to remove stderr tmpfile %s: %s" stderr_path (Printexc.to_string exn));
+    { exit_code; stdout; stderr }
+  in
+  match wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid with
+  | `Exited (Unix.WEXITED code) -> finalize code
+  | `Exited (Unix.WSIGNALED code) -> finalize (128 + code)
+  | `Exited (Unix.WSTOPPED code) -> finalize (256 + code)
+  | `Timeout ->
+      (try Unix.kill pid Sys.sigterm with
+       | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+       | exn -> Log.LocalWorker.warn "sigterm pid %d: %s" pid (Printexc.to_string exn));
+      (match clock_opt with
+      | Some clock -> Eio.Time.sleep clock 1.0
+      | None -> Time_compat.sleep 1.0);
+      (match waitpid_nointr [ Unix.WNOHANG ] pid with
+      | 0, _ ->
+          (try Unix.kill pid Sys.sigkill with
+           | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+           | exn -> Log.LocalWorker.warn "sigkill pid %d: %s" pid (Printexc.to_string exn));
+          ignore (waitpid_nointr [] pid)
+      | _, _ -> ());
+      finalize 124
+
 let helper_binary = "masc-worker-run"
 let docker_host_alias = "host.docker.internal"
 let container_counter = Atomic.make 0
@@ -140,7 +279,7 @@ let persist_stderr_artifact (spec : Worker_execution_spec.t) stderr =
 
 let best_effort_remove_container ?clock_opt name =
   ignore
-    (Tool_command_plane_support.run_process_with_timeout ~clock_opt
+    (run_process_with_timeout ~clock_opt
        ~timeout_sec:10 ~prog:"docker"
        ~argv:[ "docker"; "rm"; "-f"; name ]
        ~env:(Unix.environment ()) ())
@@ -181,7 +320,7 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
     Error "worker runtime Docker image is not configured"
   else
       let info_result =
-        Tool_command_plane_support.run_process_with_timeout ~clock_opt
+        run_process_with_timeout ~clock_opt
           ~timeout_sec:20 ~prog:"docker"
           ~argv:[ "docker"; "info" ]
           ~env:(Unix.environment ()) ()
@@ -189,10 +328,10 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
     if info_result.exit_code <> 0 then
       Error
         (Printf.sprintf "docker info failed: %s"
-           (Tool_command_plane_support.tail_text info_result.stderr))
+           (tail_text info_result.stderr))
     else
         let image_result =
-          Tool_command_plane_support.run_process_with_timeout ~clock_opt
+          run_process_with_timeout ~clock_opt
             ~timeout_sec:20 ~prog:"docker"
             ~argv:[ "docker"; "image"; "inspect"; image ]
             ~env:(Unix.environment ()) ()
@@ -200,7 +339,7 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
       if image_result.exit_code <> 0 then
         Error
           (Printf.sprintf "docker image inspect failed for %s: %s" image
-             (Tool_command_plane_support.tail_text image_result.stderr))
+             (tail_text image_result.stderr))
       else
         let rec check_auth = function
           | [] -> Ok ()
@@ -276,7 +415,7 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
         Worker_execution_spec.to_yojson spec |> Yojson.Safe.to_string
       in
       let result =
-        Tool_command_plane_support.run_process_with_timeout ~clock_opt
+        run_process_with_timeout ~clock_opt
           ~stdin_content ~timeout_sec:effective_timeout_sec
           ~prog:"docker" ~argv:(docker_argv ~container_name:name spec)
           ~env:(Unix.environment ()) ()
@@ -300,7 +439,7 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
                    (if String.trim result.stderr = "" then ""
                     else
                       "\n[stderr]\n"
-                      ^ Tool_command_plane_support.tail_text result.stderr)))
+                      ^ tail_text result.stderr)))
       | 124 ->
           Error
             (Printf.sprintf "Docker worker timed out after %ds%s"
@@ -308,13 +447,13 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t) :
                (if String.trim result.stderr = "" then ""
                 else
                   "\n[stderr]\n"
-                  ^ Tool_command_plane_support.tail_text result.stderr))
+                  ^ tail_text result.stderr))
       | _ ->
           let stderr_tail =
             if String.trim result.stderr = "" then ""
             else
               "\n[stderr]\n"
-              ^ Tool_command_plane_support.tail_text result.stderr
+              ^ tail_text result.stderr
           in
           (match Worker_runtime_helper_protocol.parse_stdout result.stdout with
           | Ok (Ok _run_result) ->

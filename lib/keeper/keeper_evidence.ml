@@ -90,7 +90,7 @@ let capture_turn_evidence
   let files_changed = List.length status_lines in
   (* Collision detection *)
   let collision_warnings =
-    if files_changed > 0 then
+    if delta_detected && files_changed > 0 then
       Keeper_file_tracker.record_turn_files ~keeper_name ~files:status_lines
     else []
   in

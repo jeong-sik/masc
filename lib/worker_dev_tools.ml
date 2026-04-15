@@ -221,10 +221,10 @@ let validate_command_with_allowlist ~allowed_commands cmd =
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 
-(** Relaxed command validation for Coding/Full preset keepers.
-    Allows pipes and redirects; validates every command in the pipeline
-    against [dev_allowed_commands]. *)
-let validate_command_coding cmd =
+let validate_command_coding_with_allowlist
+    ?(allow_pipes = true)
+    ~(allowed_commands : string list)
+    cmd =
   let trimmed = String.trim cmd in
   if trimmed = "" then Error "command must not be empty"
   else if contains_forbidden_shell_chars_coding trimmed then
@@ -237,12 +237,15 @@ let validate_command_coding cmd =
     match split_pipeline_segments trimmed with
     | Error _ as err -> err
     | Ok segments ->
+      if (not allow_pipes) && List.length segments > 1 then
+        Error "Pipes are not allowed. Run one command per call."
+      else
       let rec validate_segments = function
         | [] -> Ok ()
         | segment :: rest -> (
             match extract_command_name segment with
             | None -> Error "command must not be empty"
-            | Some name when List.mem name dev_allowed_commands ->
+            | Some name when List.mem name allowed_commands ->
               validate_segments rest
             | Some name ->
               Error
@@ -251,6 +254,15 @@ let validate_command_coding cmd =
                    name))
       in
       validate_segments segments
+
+(** Relaxed command validation for Coding/Full preset keepers.
+    Allows pipes and redirects; validates every command in the pipeline
+    against [dev_allowed_commands]. *)
+let validate_command_coding cmd =
+  validate_command_coding_with_allowlist
+    ~allow_pipes:true
+    ~allowed_commands:dev_allowed_commands
+    cmd
 
 let strip_wrapping_quotes token =
   let len = String.length token in

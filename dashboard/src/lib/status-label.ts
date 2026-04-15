@@ -99,7 +99,7 @@ export function statusLabel(value?: string | null): string {
   }
 }
 
-/** Short display status — fewer cases, used in command plane contexts. */
+/** Short display status — fewer cases, used in operator contexts. */
 export function displayStatus(status?: string | null): string {
   const normalized = (status ?? '').trim().toLowerCase()
   if (!normalized) return '확인 필요'

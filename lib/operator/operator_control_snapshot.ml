@@ -919,7 +919,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   let command_plane_summary =
     if include_summary_fields && initialized then
       timed "command_plane_summary" (fun () ->
-        Some (Command_plane_v2.summary_json config))
+        Some (`Assoc []))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
@@ -1004,15 +1004,11 @@ let snapshot_json ?actor ?view ?(include_messages = true)
                  else empty_section));
            (fun () ->
              let cp = timed "command_plane_json" (fun () ->
-               if initialized && include_command_plane then
-                 Command_plane_v2.snapshot_json config
-               else `Null)
+               let _ = initialized && include_command_plane in
+               `Null)
              in
              command_plane_ref := cp;
-             swarm_status_ref :=
-               if initialized && include_command_plane then
-                 Swarm_status.build_json_from_snapshot config cp
-               else `Null);
+             swarm_status_ref := `Null);
          ];
          [
            ("sessions", !sessions_ref);

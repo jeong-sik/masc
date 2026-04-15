@@ -177,12 +177,6 @@ let dispatch
         Printf.sprintf
           "tool '%s' is an internal context tool (use MCP client)" name)
 
-  (* ── Tier E: Hybrid (option fields degrade gracefully) ─────── *)
-
-  | Mod_command_plane ->
-      Some (false,
-        Printf.sprintf
-          "tool '%s' belongs to the removed command-plane compatibility surface; keeper runtime stays on OAS Agent.run" name)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

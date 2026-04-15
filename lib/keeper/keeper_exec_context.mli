@@ -124,6 +124,7 @@ val maybe_rollover_oas_handoff :
   meta:keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
+  current_turn_overflow_blocker:string option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   handoff_rollover
 
@@ -150,6 +151,8 @@ val classify_rollover_gate :
   handoff_threshold:float ->
   last_outcome:proactive_cycle_outcome ->
   last_blocker:string ->
+  ?current_turn_overflow_blocker:string option ->
+  unit ->
   rollover_gate_decision
 
 (** {1 Checkpoint Loading and Saving} *)
@@ -196,6 +199,7 @@ val apply_post_turn_lifecycle :
   meta:keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
+  current_turn_overflow_blocker:string option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 

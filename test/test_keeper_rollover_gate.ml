@@ -61,6 +61,7 @@ let gate_skips_when_auto_handoff_disabled () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_error
       ~last_blocker:"Prompt exceeds max length"
+      ()
   in
   check decision_testable "disabled → Skip"
     (KR.Skip "auto_handoff_disabled") decision
@@ -74,6 +75,7 @@ let gate_skips_when_cooldown_active () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_error
       ~last_blocker:"Prompt exceeds max length"
+      ()
   in
   check decision_testable "cooldown → Skip" (KR.Skip "cooldown") decision
 
@@ -86,6 +88,7 @@ let gate_fires_on_ratio () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_silent
       ~last_blocker:""
+      ()
   in
   check decision_testable "ratio gate" (KR.Go "ratio") decision
 
@@ -102,6 +105,7 @@ let gate_fires_on_persistent_overflow_despite_low_ratio () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_error
       ~last_blocker:"Invalid request: Prompt exceeds max length"
+      ()
   in
   check decision_testable "signal gate fires despite low ratio"
     (KR.Go "persistent_overflow_blocker") decision
@@ -115,6 +119,7 @@ let gate_reports_both_when_both_conditions_true () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_error
       ~last_blocker:"context_length_exceeded"
+      ()
   in
   check decision_testable "both → ratio+signal"
     (KR.Go "ratio+signal") decision
@@ -130,6 +135,7 @@ let gate_requires_error_outcome_for_signal_trigger () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_text_response
       ~last_blocker:"Prompt exceeds max length (stale)"
+      ()
   in
   check decision_testable "stale blocker without error → Skip"
     (KR.Skip "below_thresholds") decision
@@ -143,9 +149,25 @@ let gate_skips_below_all_thresholds () =
       ~handoff_threshold:0.85
       ~last_outcome:KT.Proactive_silent
       ~last_blocker:""
+      ()
   in
   check decision_testable "all quiet → Skip"
     (KR.Skip "below_thresholds") decision
+
+let gate_fires_on_current_turn_overflow_signal () =
+  let decision =
+    KR.classify_rollover_gate
+      ~auto_handoff:true
+      ~cooldown_elapsed:true
+      ~ratio:0.10
+      ~handoff_threshold:0.85
+      ~last_outcome:KT.Proactive_text_response
+      ~last_blocker:""
+      ~current_turn_overflow_blocker:(Some "Invalid request: Prompt exceeds max length")
+      ()
+  in
+  check decision_testable "current-turn overflow signal fires"
+    (KR.Go "persistent_overflow_blocker") decision
 
 let () =
   run "Keeper_rollover.gate" [
@@ -166,6 +188,8 @@ let () =
         gate_fires_on_persistent_overflow_despite_low_ratio;
       test_case "reports ratio+signal when both true" `Quick
         gate_reports_both_when_both_conditions_true;
+      test_case "fires on current-turn overflow signal" `Quick
+        gate_fires_on_current_turn_overflow_signal;
       test_case "requires error outcome for signal trigger" `Quick
         gate_requires_error_outcome_for_signal_trigger;
       test_case "skip below all thresholds" `Quick

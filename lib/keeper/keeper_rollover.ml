@@ -60,14 +60,22 @@ let classify_rollover_gate
     ~(auto_handoff : bool) ~(cooldown_elapsed : bool)
     ~(ratio : float) ~(handoff_threshold : float)
     ~(last_outcome : proactive_cycle_outcome)
-    ~(last_blocker : string) : rollover_gate_decision =
+    ~(last_blocker : string)
+    ?(current_turn_overflow_blocker : string option = None)
+    () : rollover_gate_decision =
   if not auto_handoff then Skip "auto_handoff_disabled"
   else if not cooldown_elapsed then Skip "cooldown"
   else
     let ratio_gate = ratio >= handoff_threshold in
+    let current_turn_signal =
+      match current_turn_overflow_blocker with
+      | Some blocker -> blocker_indicates_overflow blocker
+      | None -> false
+    in
     let signal_gate =
-      last_outcome = Proactive_error
-      && blocker_indicates_overflow last_blocker
+      current_turn_signal
+      || (last_outcome = Proactive_error
+          && blocker_indicates_overflow last_blocker)
     in
     match ratio_gate, signal_gate with
     | true, true -> Go "ratio+signal"
@@ -81,6 +89,7 @@ let maybe_rollover_oas_handoff
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int)
+    ~(current_turn_overflow_blocker : string option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : handoff_rollover =
   match checkpoint with
   | None ->
@@ -123,6 +132,8 @@ let maybe_rollover_oas_handoff
           ~handoff_threshold:base_meta.handoff_threshold
           ~last_outcome:base_meta.runtime.proactive_rt.last_outcome
           ~last_blocker:base_meta.runtime.last_blocker
+          ~current_turn_overflow_blocker
+          ()
       in
       let rollover_base =
         {

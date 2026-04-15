@@ -1499,6 +1499,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let mutating_tools_committed = ref [] in
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
+      let current_turn_overflow_blocker = ref None in
       let side_effect_observer ~keeper_name ~tool_name ~input ~success =
         if success
            && String.equal keeper_name meta.name
@@ -1758,6 +1759,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         Keeper_registry.set_turn_phase
                           ~base_path:config.base_path meta.name
                           Keeper_registry.Turn_compacting;
+                        current_turn_overflow_blocker :=
+                          Some (Oas.Error.to_string err);
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name
@@ -2095,6 +2098,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~meta
               ~model:result.model_used
               ~primary_model_max_tokens:max_context
+              ~current_turn_overflow_blocker:!current_turn_overflow_blocker
               ~checkpoint:result.checkpoint
           in
           dispatch_post_turn_lifecycle_events

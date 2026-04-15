@@ -823,12 +823,23 @@ type tool_exec_observer =
 
 (* --- Tool implementations --- *)
 
+(** [file_read] byte cap. Reads longer than this are truncated to prevent
+    context overflow. SSOT for the limit, its display label, and the
+    tool description shown to agents. *)
+let file_read_max_bytes = 100_000
+let file_read_max_label = "100KB"
+
+let file_read_description =
+  Printf.sprintf
+    "Read file contents by absolute path. Returns file text. \
+     Use shell_exec with 'ls' instead if you need directory listing. \
+     Maximum %s per read to prevent context overflow."
+    file_read_max_label
+
 let make_file_read ?workdir ?on_exec () =
   Agent_sdk.Tool.create
     ~name:"file_read"
-    ~description:"Read file contents by absolute path. Returns file text. \
-      Use shell_exec with 'ls' instead if you need directory listing. \
-      Maximum 100KB per read to prevent context overflow."
+    ~description:file_read_description
     ~parameters:[
       { name = "path";
         description = "Absolute file path to read";
@@ -861,9 +872,10 @@ let make_file_read ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
                on_exec;
-             if String.length content > 100_000 then
+             if String.length content > file_read_max_bytes then
                Ok { Agent_sdk.Types.content =
-                 String.sub content 0 100_000 ^ "\n[TRUNCATED at 100KB]" }
+                 String.sub content 0 file_read_max_bytes
+                 ^ Printf.sprintf "\n[TRUNCATED at %s]" file_read_max_label }
              else Ok { Agent_sdk.Types.content = content }
            with Sys_error msg ->
              let duration_ms =

@@ -95,6 +95,11 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
       }
     case 'fetch_succeeded': {
       const observation = observeSnapshot(action.snapshot, action.fetchedAt)
+      const inv = action.snapshot.invariants
+      const violations = { ...current.invariantViolations }
+      for (const key of Object.keys(violations) as Array<keyof typeof violations>) {
+        if (!inv[key]) violations[key] += 1
+      }
       return {
         keeperName: action.keeperName,
         snapshot: action.snapshot,
@@ -102,6 +107,8 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
         error: null,
         lastFetchAt: action.fetchedAt,
         observations: appendCompositeObservation(current.observations, observation),
+        invariantSampleCount: current.invariantSampleCount + 1,
+        invariantViolations: violations,
       }
     }
     case 'fetch_failed':
@@ -304,7 +311,11 @@ export function FsmHub() {
         <${CollapsibleZone} id="health-grid" title="상태 격자" defaultOpen=${true}>
           <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             <${MeasurementCard} snapshot=${snapshot} />
-            <${InvariantsPanel} snapshot=${snapshot} />
+            <${InvariantsPanel}
+              snapshot=${snapshot}
+              violationCounts=${view.invariantViolations}
+              sampleCount=${view.invariantSampleCount}
+            />
             <${RecoveryStatePanel}
               dataRecord=${snapshot.recovery.data_record}
               fsmCondition=${snapshot.recovery.fsm_condition}

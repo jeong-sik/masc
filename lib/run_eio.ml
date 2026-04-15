@@ -65,7 +65,7 @@ let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
     None
 
 let runs_dir (config : config) =
-  Filename.concat config.base_path ".masc/runs"
+  Filename.concat (masc_dir config) "runs"
 
 let run_dir (config : config) task_id =
   Filename.concat (runs_dir config) task_id

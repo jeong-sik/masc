@@ -4,7 +4,7 @@
     decision so keepers can stay silent, inform, or ask for help without
     relying on repetitive free-form fallback text. *)
 
-type speech_act =
+type speech_act = Keeper_social_model_types.speech_act =
   | Stay_silent
   | Inform
   | Request_help
@@ -14,7 +14,7 @@ type speech_act =
   | Broadcast
   | Defer
 
-type delivery_surface =
+type delivery_surface = Keeper_social_model_types.delivery_surface =
   | Silent
   | Visible_reply
   | Board_post
@@ -22,7 +22,10 @@ type delivery_surface =
   | Task_claim_surface
   | Broadcast_surface
 
-type social_state = {
+type model_id = Keeper_social_model_types.model_id =
+  | Bdi_speech_v1
+
+type social_state = Keeper_social_model_types.social_state = {
   social_model : string;
   belief_summary : string;
   active_desire : string option;
@@ -41,6 +44,9 @@ type accountability_claim = {
 
 val speech_act_to_string : speech_act -> string
 val delivery_surface_to_string : delivery_surface -> string
+val model_id_to_string : model_id -> string
+val model_id_of_string : string -> model_id option
+val normalize_social_model : string -> string
 val extract_accountability_claim :
   Keeper_agent_run.run_result -> accountability_claim option
 

@@ -67,6 +67,7 @@
         test_autonomy_liberation
         test_keeper_unified
         test_decision_pipeline
+        test_decision_pipeline_observer
         test_keeper_telemetry_feedback
         test_keeper_toml
         test_keeper_runtime_toml
@@ -150,6 +151,7 @@
           test_autonomy_liberation
           test_keeper_unified
           test_decision_pipeline
+          test_decision_pipeline_observer
           test_keeper_telemetry_feedback
           test_keeper_toml
           test_keeper_runtime_toml

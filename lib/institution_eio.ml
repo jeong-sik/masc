@@ -324,7 +324,7 @@ and institution_of_json json =
 (** {1 Persistence (Eio Native)} *)
 
 let institution_file (config : config) =
-  Filename.concat config.base_path ".masc/institution.json"
+  Filename.concat (Room_utils.masc_dir config) "institution.json"
 
 let load_institution ~fs (config : config) : institution option =
   let file = institution_file config in

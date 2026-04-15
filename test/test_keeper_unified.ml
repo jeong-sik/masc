@@ -931,6 +931,16 @@ let test_meta_defaults_social_model () =
   check string "default social model" "bdi_speech_v1"
     minimal_meta.social_model
 
+let test_social_model_registry_round_trip () =
+  check (option string) "known model id resolves"
+    (Some "bdi_speech_v1")
+    (KSM.model_id_of_string "bdi_speech_v1"
+    |> Option.map KSM.model_id_to_string);
+  check bool "unknown model id rejected" true
+    (Option.is_none (KSM.model_id_of_string "experimental_v99"));
+  check string "unknown model normalized to baseline" "bdi_speech_v1"
+    (KSM.normalize_social_model "experimental_v99")
+
 (* ---------- Metrics observation tests ---------- *)
 
 let sample_prompt_metrics ?(system_prompt = "You are a keeper.")
@@ -2430,6 +2440,36 @@ let test_social_model_silences_skip_only_turn () =
       check string "visible response suppressed" "" routed.response_text;
       check (list string) "no synthetic tools" [] routed.tools_used)
 
+let test_social_model_unknown_meta_falls_back_to_baseline () =
+  let meta = { minimal_meta with social_model = "experimental_v99" } in
+  let result =
+    make_run_result ~text:"I can respond normally." ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta ~observation:base_observation result
+  in
+  check string "unknown meta model falls back to baseline"
+    "bdi_speech_v1" state.social_model;
+  check string "visible response preserved"
+    "I can respond normally." routed.response_text
+
+let test_social_model_unknown_header_falls_back_to_baseline () =
+  let result =
+    make_run_result
+      ~text:
+        "SOCIAL_MODEL: experimental_v99\nBELIEF_SUMMARY: quiet_room\nACTIVE_DESIRE: maintain_quiet_readiness\nCURRENT_INTENTION: stay_available_without_noise\nBLOCKER: none\nNEED: none\nSPEECH_ACT: stay_silent\nDELIVERY_SURFACE: silent"
+      ~tools:[]
+      ~model:"test-model" ~input_tok:20 ~output_tok:5 ()
+  in
+  let routed, state =
+    KSM.apply_to_result ~meta:minimal_meta
+      ~observation:base_observation result
+  in
+  check string "unknown header model falls back to baseline"
+    "bdi_speech_v1" state.social_model;
+  check string "visible response suppressed" "" routed.response_text
+
 let test_social_model_infers_visible_reply_without_headers () =
   let result =
     make_run_result ~text:"I think I should ask for help." ~tools:[]
@@ -2936,8 +2976,14 @@ let () =
             test_tool_query_text_of_user_message_strips_continuity_noise;
           test_case "tool query keeps counted headers" `Quick
             test_tool_query_text_of_user_message_keeps_counted_headers;
+          test_case "social model registry round trip" `Quick
+            test_social_model_registry_round_trip;
           test_case "social model silences skip-only turn" `Quick
             test_social_model_silences_skip_only_turn;
+          test_case "social model unknown meta falls back to baseline" `Quick
+            test_social_model_unknown_meta_falls_back_to_baseline;
+          test_case "social model unknown header falls back to baseline" `Quick
+            test_social_model_unknown_header_falls_back_to_baseline;
           test_case "social model infers visible reply without headers" `Quick
             test_social_model_infers_visible_reply_without_headers;
           test_case "social model empty text without headers stays silent" `Quick

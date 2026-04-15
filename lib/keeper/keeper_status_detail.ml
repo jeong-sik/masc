@@ -989,7 +989,8 @@ let handle_keeper_status ctx args : tool_result =
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
            ("social", `Assoc [
-             ("model", `String m.social_model);
+             ("model",
+               `String (Keeper_social_model.normalize_social_model m.social_model));
              ("last_speech_act",
                if String.trim m.runtime.last_speech_act = ""
                then `Null

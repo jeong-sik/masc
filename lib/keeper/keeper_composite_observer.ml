@@ -10,15 +10,7 @@ type ksm_phase =
   | Ksm_stable
 
 let all_ksm_phases =
-  [
-    Ksm_running;
-    Ksm_failing;
-    Ksm_overflowed;
-    Ksm_compacting;
-    Ksm_handing_off;
-    Ksm_draining;
-    Ksm_stable;
-  ]
+  [ Ksm_running; Ksm_failing; Ksm_overflowed; Ksm_compacting; Ksm_handing_off; Ksm_draining; Ksm_stable ]
 
 type turn_phase = Keeper_registry.turn_phase =
   | Turn_idle
@@ -37,12 +29,7 @@ type decision_stage = Keeper_registry.decision_stage =
   | Decision_tool_policy_selected
 
 let all_decision_stages =
-  [
-    Decision_undecided;
-    Decision_guard_ok;
-    Decision_gate_rejected;
-    Decision_tool_policy_selected;
-  ]
+  [ Decision_undecided; Decision_guard_ok; Decision_gate_rejected; Decision_tool_policy_selected ]
 
 type cascade_state = Keeper_registry.cascade_state =
   | Cascade_idle
@@ -52,13 +39,7 @@ type cascade_state = Keeper_registry.cascade_state =
   | Cascade_exhausted
 
 let all_cascade_states =
-  [
-    Cascade_idle;
-    Cascade_selecting;
-    Cascade_trying;
-    Cascade_done;
-    Cascade_exhausted;
-  ]
+  [ Cascade_idle; Cascade_selecting; Cascade_trying; Cascade_done; Cascade_exhausted ]
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
@@ -88,22 +69,10 @@ type tla_action =
 
 let all_tla_actions =
   [
-    Action_start_turn;
-    Action_measurement_broadcast;
-    Action_decide_guard;
-    Action_select_tool_policy;
-    Action_start_cascade_selection;
-    Action_select_cascade;
-    Action_gate_rejected;
-    Action_cascade_done;
-    Action_cascade_exhausted;
-    Action_finish_turn;
-    Action_start_compaction;
-    Action_finish_compaction;
-    Action_enter_failing;
-    Action_clear_failing;
-    Action_enter_overflowed;
-    Action_overflowed_auto_compact;
+    Action_start_turn; Action_measurement_broadcast; Action_decide_guard; Action_select_tool_policy;
+    Action_start_cascade_selection; Action_select_cascade; Action_gate_rejected; Action_cascade_done;
+    Action_cascade_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
+    Action_enter_failing; Action_clear_failing; Action_enter_overflowed; Action_overflowed_auto_compact;
   ]
 
 type invariant_key =
@@ -114,10 +83,8 @@ type invariant_key =
 
 let all_invariant_keys =
   [
-    Invariant_phase_turn_alignment;
-    Invariant_no_cascade_before_measurement;
-    Invariant_compaction_atomicity;
-    Invariant_event_priority_monotone;
+    Invariant_phase_turn_alignment; Invariant_no_cascade_before_measurement;
+    Invariant_compaction_atomicity; Invariant_event_priority_monotone;
   ]
 
 type invariants_check = {
@@ -273,9 +240,7 @@ let invariant_key_of_string = function
   | "EventPriorityMonotone" -> Some Invariant_event_priority_monotone
   | _ -> None
 
-(* ================================================================ *)
-(* Derivation from registry entry                                   *)
-(* ================================================================ *)
+(* Derivation from registry entry *)
 
 let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
   match phase with
@@ -317,9 +282,7 @@ let live_measurement (entry : Keeper_registry.registry_entry) =
   | Some { measurement = Some measurement; _ } -> Some measurement.tm_auto_rules
   | _ -> None
 
-(* ================================================================ *)
-(* Invariants                                                       *)
-(* ================================================================ *)
+(* Invariants *)
 
 let check_phase_turn_alignment
     (phase : ksm_phase)
@@ -353,9 +316,7 @@ let check_event_priority_monotone
   | None -> true
   | Some obs ->
       obs.measurement_bind_count <= 1
-      && not
-           (Option.is_some obs.measurement
-            && Option.is_some entry.pending_turn_measurement)
+      && not (Option.is_some obs.measurement && Option.is_some entry.pending_turn_measurement)
 
 let compute_invariants
     (entry : Keeper_registry.registry_entry)
@@ -375,9 +336,7 @@ let compute_invariants
     event_priority_monotone = check_event_priority_monotone entry;
   }
 
-(* ================================================================ *)
-(* Public API                                                       *)
-(* ================================================================ *)
+(* Public API *)
 
 let stable_correlation_id (entry : Keeper_registry.registry_entry) : string =
   Printf.sprintf "keeper:%s:%d" entry.name entry.transition_seq
@@ -447,31 +406,28 @@ let observe
        | None -> None);
   }
 
-(* ================================================================ *)
-(* JSON serialisation (RFC-0003 §7)                                *)
-(* ================================================================ *)
+(* JSON serialisation (RFC-0003 §7) *)
 
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
-  `Assoc [
-    "phase_turn_alignment", `Bool inv.phase_turn_alignment;
-    "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
-    "compaction_atomicity", `Bool inv.compaction_atomicity;
-    "event_priority_monotone", `Bool inv.event_priority_monotone;
-  ]
+  `Assoc
+    [
+      "phase_turn_alignment", `Bool inv.phase_turn_alignment;
+      "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
+      "compaction_atomicity", `Bool inv.compaction_atomicity;
+      "event_priority_monotone", `Bool inv.event_priority_monotone;
+    ]
 
-let measurement_to_json (m : Keeper_state_machine.auto_rule_summary)
-    : Yojson.Safe.t =
-  `Assoc [
-    "reflect", `Bool m.reflect;
-    "plan", `Bool m.plan;
-    "compact", `Bool m.compact;
-    "handoff", `Bool m.handoff;
-    "guardrail_stop", `Bool m.guardrail_stop;
-    "guardrail_reason", (match m.guardrail_reason with
-      | Some s -> `String s
-      | None -> `Null);
-    "goal_drift", `Float m.goal_drift;
-  ]
+let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Safe.t =
+  `Assoc
+    [
+      "reflect", `Bool m.reflect;
+      "plan", `Bool m.plan;
+      "compact", `Bool m.compact;
+      "handoff", `Bool m.handoff;
+      "guardrail_stop", `Bool m.guardrail_stop;
+      "guardrail_reason", (match m.guardrail_reason with Some s -> `String s | None -> `Null);
+      "goal_drift", `Float m.goal_drift;
+    ]
 
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
   `Assoc [

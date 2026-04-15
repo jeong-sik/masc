@@ -123,29 +123,27 @@ let runtime_blocker_surface_of_reason (reason : string) =
     None
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
   then
-    Some ("autonomous_slot_wait_timeout", trimmed, false)
+    Some ("autonomous_slot_wait_timeout", trimmed)
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then
-    Some ("admission_queue_wait_timeout", trimmed, false)
+    Some ("admission_queue_wait_timeout", trimmed)
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
           && String_util.contains_substring_ci trimmed "semaphore_wait_ms="
   then
-    Some ("turn_timeout_after_queue_wait", trimmed, false)
+    Some ("turn_timeout_after_queue_wait", trimmed)
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then
-    Some ("turn_timeout", trimmed, false)
+    Some ("turn_timeout", trimmed)
   else if String_util.contains_substring_ci trimmed "completion contract"
           || String_util.contains_substring_ci trimmed "completion_contract"
   then
-    Some ("completion_contract_violation", trimmed, false)
+    Some ("completion_contract_violation", trimmed)
   else
     None
 
 let runtime_blocker_fields_json
     (_config : Room_utils.config)
     (meta : keeper_meta) =
-  (* Manual_reconcile reading removed — runtime blockers now derive
-     solely from transient failure reasons, not sticky reconcile state. *)
   let derived =
     match runtime_blocker_surface_of_reason meta.runtime.last_blocker with
     | Some blocker -> Some blocker
@@ -154,17 +152,15 @@ let runtime_blocker_fields_json
           meta.runtime.proactive_rt.last_reason
   in
   match derived with
-  | Some (blocker_class, summary, manual_reconcile) ->
+  | Some (blocker_class, summary) ->
       [
         ("runtime_blocker_class", `String blocker_class);
         ("runtime_blocker_summary", `String summary);
-        ("runtime_blocker_manual_reconcile", `Bool manual_reconcile);
       ]
   | None ->
       [
         ("runtime_blocker_class", `Null);
         ("runtime_blocker_summary", `Null);
-        ("runtime_blocker_manual_reconcile", `Null);
       ]
 
 let runtime_surface_json config (meta : keeper_meta) =

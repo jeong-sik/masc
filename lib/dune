@@ -410,7 +410,6 @@
    keeper_types_support
    keeper_types
    keeper_memory
-   keeper_manual_reconcile
    keeper_accountability
    keeper_memory_policy
    keeper_memory_bank
@@ -663,7 +662,6 @@
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_recall
-  keeper_manual_reconcile
   ;; godsplit-phase1: file split sub-modules
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules

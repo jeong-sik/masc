@@ -55,28 +55,6 @@ let failure_reason_to_string = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 
-let ambiguous_partial_commit_tool_names (detail : string) : string list =
-  match String.index_opt detail '[' with
-  | None -> []
-  | Some start_idx ->
-      (match String.index_from_opt detail (start_idx + 1) ']' with
-       | None -> []
-       | Some end_idx ->
-           String.sub detail (start_idx + 1) (end_idx - start_idx - 1)
-           |> String.split_on_char ','
-           |> List.map String.trim
-           |> List.filter (fun name -> name <> ""))
-
-let failure_reason_requires_manual_reconcile = function
-  | Ambiguous_partial_commit { detail; _ } ->
-      let committed_tools = ambiguous_partial_commit_tool_names detail in
-      committed_tools = []
-      || not (Keeper_tool_registry.all_tools_reconcile_safe committed_tools)
-  | Heartbeat_consecutive_failures _
-  | Turn_consecutive_failures _
-  | Fiber_unresolved
-  | Exception _ -> false
-
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
     [set_failure_reason] before raising. *)

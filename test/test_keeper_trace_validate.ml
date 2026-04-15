@@ -7,32 +7,28 @@ module IC = Masc_mcp.Keeper_invariant_check
 (* ── Helpers ───────────────────────────────────────────── *)
 
 let make_step_json ~seq ~phase ~fiber_alive ~heartbeat_healthy ~turn_healthy
-    ~manual_reconcile_required
     ~stop_requested ~drain_complete ~restart_budget_remaining
     ~restart_count =
   Printf.sprintf
-    {|{"seq":%d,"ts_unix":1000.0,"event":"test","prev_phase":"running","new_phase":"%s","conditions_after":{"fiber_alive":%b,"heartbeat_healthy":%b,"turn_healthy":%b,"manual_reconcile_required":%b,"context_within_budget":true,"context_handoff_needed":false,"compaction_active":false,"handoff_active":false,"operator_paused":false,"stop_requested":%b,"restart_budget_remaining":%b,"backoff_elapsed":false,"guardrail_triggered":false,"drain_complete":%b},"restart_count":%d}|}
-    seq phase fiber_alive heartbeat_healthy turn_healthy manual_reconcile_required
+    {|{"seq":%d,"ts_unix":1000.0,"event":"test","prev_phase":"running","new_phase":"%s","conditions_after":{"fiber_alive":%b,"heartbeat_healthy":%b,"turn_healthy":%b,"context_within_budget":true,"context_handoff_needed":false,"compaction_active":false,"handoff_active":false,"operator_paused":false,"stop_requested":%b,"restart_budget_remaining":%b,"backoff_elapsed":false,"guardrail_triggered":false,"drain_complete":%b},"restart_count":%d}|}
+    seq phase fiber_alive heartbeat_healthy turn_healthy
     stop_requested restart_budget_remaining drain_complete restart_count
 
 let running_step seq =
   make_step_json ~seq ~phase:"running" ~fiber_alive:true
     ~heartbeat_healthy:true ~turn_healthy:true
-    ~manual_reconcile_required:false
     ~stop_requested:false ~drain_complete:false
     ~restart_budget_remaining:true ~restart_count:0
 
 let failing_step seq =
   make_step_json ~seq ~phase:"failing" ~fiber_alive:true
     ~heartbeat_healthy:false ~turn_healthy:true
-    ~manual_reconcile_required:false
     ~stop_requested:false ~drain_complete:false
     ~restart_budget_remaining:true ~restart_count:0
 
 let stopped_step seq =
   make_step_json ~seq ~phase:"stopped" ~fiber_alive:true
     ~heartbeat_healthy:true ~turn_healthy:true
-    ~manual_reconcile_required:false
     ~stop_requested:true ~drain_complete:true
     ~restart_budget_remaining:true ~restart_count:0
 
@@ -61,7 +57,6 @@ let test_valid_trace () =
 let test_dead_is_forever_violation () =
   let dead_step = make_step_json ~seq:2 ~phase:"dead"
       ~fiber_alive:false ~heartbeat_healthy:true ~turn_healthy:true
-      ~manual_reconcile_required:false
       ~stop_requested:false ~drain_complete:false
       ~restart_budget_remaining:false ~restart_count:0 in
   let trace = String.concat "\n" [
@@ -88,12 +83,10 @@ let test_dead_is_forever_violation () =
 let test_restart_count_monotonic_violation () =
   let step1 = make_step_json ~seq:1 ~phase:"running"
       ~fiber_alive:true ~heartbeat_healthy:true ~turn_healthy:true
-      ~manual_reconcile_required:false
       ~stop_requested:false ~drain_complete:false
       ~restart_budget_remaining:true ~restart_count:3 in
   let step2 = make_step_json ~seq:2 ~phase:"running"
       ~fiber_alive:true ~heartbeat_healthy:true ~turn_healthy:true
-      ~manual_reconcile_required:false
       ~stop_requested:false ~drain_complete:false
       ~restart_budget_remaining:true ~restart_count:1 in
   let trace = String.concat "\n" [ step1; step2 ] in
@@ -116,7 +109,6 @@ let test_restart_count_monotonic_violation () =
 let test_running_requires_fiber_violation () =
   let bad_step = make_step_json ~seq:2 ~phase:"running"
       ~fiber_alive:false ~heartbeat_healthy:true ~turn_healthy:true
-      ~manual_reconcile_required:false
       ~stop_requested:false ~drain_complete:false
       ~restart_budget_remaining:true ~restart_count:0 in
   let trace = String.concat "\n" [

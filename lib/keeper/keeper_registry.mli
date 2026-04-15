@@ -33,7 +33,6 @@ val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string
 
 val failure_reason_to_string : failure_reason -> string
-val failure_reason_requires_manual_reconcile : failure_reason -> bool
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

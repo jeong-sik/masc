@@ -30,7 +30,6 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
-  recovery_two_store_sync : bool;
 }
 
 type last_outcome = {
@@ -48,8 +47,6 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  reconcile_data : bool;
-  reconcile_fsm : bool;
   invariants : invariants_check;
   is_live : bool;
   last_outcome : last_outcome option;
@@ -159,23 +156,6 @@ let derive_decision_stage
 let derive_cascade_state ~(is_live : bool) : cascade_state =
   if is_live then `Trying else `Idle
 
-(* Two-store reconcile pair (RFC-0003 §8, absorbed from P4).
-   - [reconcile_data]: a prior turn left an ambiguous side-effect record
-     that still requires operator resolution. Sourced from
-     [last_failure_reason] when the reason is classified as requiring
-     manual reconcile.
-   - [reconcile_fsm]: the keeper's own state machine still carries
-     [manual_reconcile_required] as an observable condition. *)
-let derive_reconcile (entry : Keeper_registry.registry_entry) : bool * bool =
-  let reconcile_data =
-    match entry.last_failure_reason with
-    | None -> false
-    | Some reason ->
-      Keeper_registry.failure_reason_requires_manual_reconcile reason
-  in
-  let reconcile_fsm = entry.conditions.manual_reconcile_required in
-  (reconcile_data, reconcile_fsm)
-
 (* ================================================================ *)
 (* Invariants                                                       *)
 (* ================================================================ *)
@@ -197,19 +177,6 @@ let check_compaction_atomicity
   let phase_is_compacting = phase = Keeper_state_machine.Compacting in
   phase_is_compacting = conds.compaction_active
 
-(* RecoveryTwoStoreSync from KeeperCompositeLifecycle.tla:
-   the dangerous ordering is [reconcile_data cleared /\ reconcile_fsm still set],
-   which indicates a prior clear raced ahead of the FSM condition update.
-   The normal [(T,T) → (F,T) → (F,F)] path passes through [(F,T)] but only
-   as a transient; if observed, it may just be an in-flight reconcile.
-   For the snapshot-level check we flag only the reverse-order anomaly:
-   [reconcile_fsm cleared while reconcile_data still set]. *)
-let check_recovery_two_store_sync
-    ~(reconcile_data : bool)
-    ~(reconcile_fsm : bool)
-    : bool =
-  not (reconcile_data && not reconcile_fsm)
-
 (* NoCascadeBeforeMeasurement from KeeperCompositeLifecycle.tla:
    when the cascade sub-FSM is active, a measurement snapshot must
    already have been captured. Cascade work pulled through a provider
@@ -226,15 +193,12 @@ let check_no_cascade_before_measurement
   match cascade_state with
   | `Idle -> true
   | `Selecting | `Trying | `Done | `Exhausted -> measurement_captured
-
 let compute_invariants
     ~(phase : Keeper_state_machine.phase)
     ~(conds : Keeper_state_machine.conditions)
     ~(turn_phase : turn_phase)
     ~(cascade_state : cascade_state)
     ~(measurement_captured : bool)
-    ~(reconcile_data : bool)
-    ~(reconcile_fsm : bool)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
@@ -247,8 +211,6 @@ let compute_invariants
     (* per-snapshot view cannot witness event ordering; this invariant
        becomes checkable when the event-bus broadcast carries priority
        annotations (follow-up to #7122). *)
-    recovery_two_store_sync =
-      check_recovery_two_store_sync ~reconcile_data ~reconcile_fsm;
   }
 
 (* ================================================================ *)
@@ -287,7 +249,6 @@ let observe
   let compaction_stage = derive_compaction_stage conds in
   let decision_stage = derive_decision_stage conds ~is_live in
   let cascade_state = derive_cascade_state ~is_live in
-  let (reconcile_data, reconcile_fsm) = derive_reconcile entry in
   let measurement_captured = entry.last_auto_rules <> None in
   let invariants =
     compute_invariants
@@ -296,8 +257,6 @@ let observe
       ~turn_phase
       ~cascade_state
       ~measurement_captured
-      ~reconcile_data
-      ~reconcile_fsm
   in
   {
     correlation_id;
@@ -317,8 +276,6 @@ let observe
        because the snapshot's [ts] field already carries it; if callers
        ever need the original measurement timestamp, extend the snapshot
        type rather than widening [shared_measurement]. *)
-    reconcile_data;
-    reconcile_fsm;
     invariants;
     is_live;
     last_outcome =
@@ -341,7 +298,6 @@ let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
     "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
     "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
-    "recovery_two_store_sync", `Bool inv.recovery_two_store_sync;
   ]
 
 let measurement_to_json (m : Keeper_state_machine.auto_rule_summary)
@@ -382,10 +338,6 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       | None -> `Assoc [
           "captured", `Bool false;
         ]);
-    "recovery", `Assoc [
-      "data_record", `Bool s.reconcile_data;
-      "fsm_condition", `Bool s.reconcile_fsm;
-    ];
     "invariants", invariants_to_json s.invariants;
     "is_live", `Bool s.is_live;
     "last_outcome", (match s.last_outcome with

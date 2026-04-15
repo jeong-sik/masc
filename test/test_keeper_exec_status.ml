@@ -1,7 +1,6 @@
 open Alcotest
 
 module ES = Masc_mcp.Keeper_exec_status
-module KMR = Masc_mcp.Keeper_manual_reconcile
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
@@ -251,55 +250,6 @@ let test_diagnostic_ignores_stale_error_when_live_signal_is_newer () =
     "healthy"
     (diagnostic |> member "health_state" |> to_string)
 
-let test_runtime_surface_exposes_post_commit_timeout_blocker () =
-  KR.clear ();
-  let meta = make_meta ~name:"runtime-blocker-test" () in
-  let config = Room.default_config "/tmp/test-keeper-exec-status-runtime" in
-  ignore (KR.register ~base_path:config.base_path meta.name meta);
-  ignore
-    (KMR.open_pending
-       config
-       ~keeper_name:meta.name
-       ~blocker_class:"ambiguous_post_commit_timeout"
-       ~summary:"Mutating tools [keeper_fs_edit] committed before the turn timed out."
-       ~failure_reason:
-         (Some
-            "ambiguous_partial_commit(post_commit_timeout:Mutating tools [keeper_fs_edit] committed before the turn timed out.)")
-       ~trace_id:(Some "trace-runtime-blocker-test")
-       ~generation:(Some 1)
-       ~committed_tools:[ "keeper_fs_edit" ]);
-  let runtime = KSB.runtime_surface_json config meta in
-  let open Yojson.Safe.Util in
-  check string "runtime blocker class"
-    "ambiguous_post_commit_timeout"
-    (runtime |> member "runtime_blocker_class" |> to_string);
-  check bool "manual reconcile required" true
-    (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool);
-  check string "runtime blocker summary"
-    "Mutating tools [keeper_fs_edit] committed before the turn timed out."
-    (runtime |> member "runtime_blocker_summary" |> to_string)
-
-let test_runtime_surface_ignores_fileless_reconcile_safe_failure_reason () =
-  KR.clear ();
-  let meta = make_meta ~name:"runtime-reconcile-safe-test" () in
-  let config = Room.default_config "/tmp/test-keeper-exec-status-reconcile-safe" in
-  ignore (KR.register ~base_path:config.base_path meta.name meta);
-  KR.set_failure_reason ~base_path:config.base_path meta.name
-    (Some
-       (KR.Ambiguous_partial_commit
-          {
-            kind = KR.Post_commit_failure;
-            detail =
-              "Mutating tools [keeper_board_comment, keeper_board_vote] committed before the turn failed; retry stayed disabled and manual reconcile is required.";
-          }));
-  let runtime = KSB.runtime_surface_json config meta in
-  check bool "runtime blocker class null" true
-    Yojson.Safe.Util.(runtime |> member "runtime_blocker_class" = `Null);
-  check bool "manual reconcile null" true
-    Yojson.Safe.Util.(runtime |> member "runtime_blocker_manual_reconcile" = `Null);
-  check bool "runtime blocker summary null" true
-    Yojson.Safe.Util.(runtime |> member "runtime_blocker_summary" = `Null)
-
 let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
   KR.clear ();
   let base = make_meta ~name:"runtime-slot-timeout-test" () in
@@ -323,8 +273,6 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
   check string "runtime blocker class"
     "autonomous_slot_wait_timeout"
     (runtime |> member "runtime_blocker_class" |> to_string);
-  check bool "manual reconcile not required" false
-    (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool);
   check string "runtime blocker summary"
     reason
     (runtime |> member "runtime_blocker_summary" |> to_string)
@@ -367,10 +315,6 @@ let () =
             test_keeper_surface_status_maps_zombie_to_inactive;
           test_case "maps dead to inactive" `Quick
             test_keeper_surface_status_maps_dead_to_inactive;
-          test_case "runtime surface exposes post-commit blocker" `Quick
-            test_runtime_surface_exposes_post_commit_timeout_blocker;
-          test_case "runtime surface ignores file-less reconcile-safe failure reason" `Quick
-            test_runtime_surface_ignores_fileless_reconcile_safe_failure_reason;
           test_case "runtime surface derives slot wait timeout blocker" `Quick
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
         ] );

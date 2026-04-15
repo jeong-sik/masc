@@ -1174,9 +1174,6 @@ let run_keepalive_unified_turn
                  meta_after_observe.name e;
                meta_after_observe)
           | Ok updated ->
-            (* Clear manual_reconcile trap after successful turn *)
-            dispatch_keepalive_event ~ctx ~keeper_name:updated.name
-              Keeper_state_machine.Manual_reconcile_cleared;
             updated))
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe

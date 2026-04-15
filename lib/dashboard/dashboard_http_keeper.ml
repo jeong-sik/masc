@@ -914,8 +914,6 @@ let keeper_config_json (config : Room.config) (name : string)
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
             Some `Failed
-          | Some entry when entry.conditions.manual_reconcile_required ->
-            Some `Blocked
           | Some _ -> Some `Ok
           | None -> None
         in

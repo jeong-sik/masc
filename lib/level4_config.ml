@@ -106,7 +106,7 @@ end
 
 module Foraging = struct
   (** Default exploration rate (epsilon for epsilon-greedy) *)
-  let exploration_rate () = get_env_float "MASC_FORAGE_EXPLORATION" 0.3
+  let exploration_rate () = 0.3
 end
 
 (** {1 Stigmergy Configuration} *)

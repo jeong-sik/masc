@@ -93,19 +93,9 @@ type ring = {
 
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 8
 
-let flush_interval_sec_cached =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    Env_config_core.get_float ~default:60.0
-      "MASC_DECISION_AUDIT_FLUSH_INTERVAL_SEC")
+let flush_interval_sec () = 60.0
 
-let flush_interval_sec () = Eio.Lazy.force flush_interval_sec_cached
-
-let flush_batch_size_cached =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    Env_config_core.get_int ~default:10
-      "MASC_DECISION_AUDIT_FLUSH_BATCH_SIZE")
-
-let flush_batch_size () = Eio.Lazy.force flush_batch_size_cached
+let flush_batch_size () = 10
 
 let get_or_create_ring name =
   match Hashtbl.find_opt rings name with

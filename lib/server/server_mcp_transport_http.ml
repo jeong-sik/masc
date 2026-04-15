@@ -23,18 +23,13 @@ include Server_mcp_transport_http_conn
 include Server_mcp_transport_http_respond
 include Server_mcp_transport_http_agui
 
-let env_float_or = Server_mcp_transport_http_conn.env_float_or
-
 let body_jsonrpc_method = Server_mcp_transport_http_headers.body_jsonrpc_method
 
 let sse_prime_event = Server_mcp_transport_http_headers.sse_prime_event
 
 let sse_ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
-let post_sse_keepalive_interval_s =
-  env_float_or ~name:"MASC_POST_SSE_KEEPALIVE_SEC"
-    ~default:sse_ping_interval_s
-  |> Float.max 0.1
+let post_sse_keepalive_interval_s = Float.max 0.1 sse_ping_interval_s
 
 let get_last_event_id = Server_mcp_transport_http_headers.get_last_event_id
 

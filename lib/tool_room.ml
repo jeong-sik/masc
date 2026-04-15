@@ -40,8 +40,7 @@ let cache_ttl_seconds env_var ~default =
       | _ -> default)
   | None -> default
 
-let status_cache_ttl_s () =
-  cache_ttl_seconds "MASC_STATUS_CACHE_TTL_S" ~default:2.0
+let status_cache_ttl_s () = 2.0
 
 let invalidate_status_cache () =
   _status_cache.key <- None;

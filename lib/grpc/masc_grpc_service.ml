@@ -31,6 +31,21 @@ let safe_filename name =
     then c
     else '_') name
 
+let task_assignee_of_status = function
+  | Types.Claimed { assignee; _ }
+  | Types.InProgress { assignee; _ }
+  | Types.Done { assignee; _ } -> assignee
+  | Types.Todo | Types.Cancelled _ -> ""
+
+let task_info_of_task (task : Types.task) : T.task_info =
+  {
+    T.id = task.id;
+    title = task.title;
+    status = Types.string_of_task_status task.task_status;
+    assigned_to = task_assignee_of_status task.task_status;
+    priority = task.priority;
+  }
+
 (** {1 Unary Handlers} *)
 
 (** Join handler: agent joins the coordination room. *)
@@ -162,27 +177,7 @@ let handle_get_status (room_config : Room_utils_backend_setup.config) (_bytes : 
           None)
     else []
   in
-  let tasks =
-    let tasks_dir = Filename.concat masc_dir "tasks" in
-    if Sys.file_exists tasks_dir && Sys.is_directory tasks_dir then
-      Sys.readdir tasks_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-        let path = Filename.concat tasks_dir f in
-        try
-          let json = Yojson.Safe.from_string (read_file_safe path) in
-          let open Yojson.Safe.Util in
-          Some ({
-            T.id = json |> member "id" |> to_string_option |> Option.value ~default:"";
-            title = json |> member "title" |> to_string_option |> Option.value ~default:"";
-            status = json |> member "status" |> to_string_option |> Option.value ~default:"";
-            assigned_to = json |> member "assigned_to" |> to_string_option |> Option.value ~default:"";
-            priority = (try json |> member "priority" |> to_int with Yojson.Safe.Util.Type_error _ -> 0);
-          } : T.task_info)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Transport.debug "task parse skip: %s" (Printexc.to_string exn); None)
-    else []
-  in
+  let tasks = Room.get_tasks_safe room_config |> List.map task_info_of_task in
   T.StatusResponse.(to_bytes {
     agents;
     tasks;
@@ -249,27 +244,13 @@ let compute_directives
           "compute_directives: failed to parse agent file %s: %s"
           agent_file (Printexc.to_string exn));
   (* 2. Task assignment: find first unclaimed task for idle agent *)
-  let tasks_dir = Filename.concat masc_dir "tasks" in
-  (if Sys.file_exists tasks_dir then
+  (if Room.root_is_initialized room_config then
     let unclaimed =
-      Sys.readdir tasks_dir
-      |> Array.to_list
-      |> List.filter_map (fun f ->
-          if Filename.check_suffix f ".json" then
-            try
-              let path = Filename.concat tasks_dir f in
-              let task_json = Yojson.Safe.from_string (read_file_safe path) in
-              (match Yojson.Safe.Util.member "status" task_json with
-               | `String "todo" -> Some (Filename.chop_suffix f ".json")
-               | _ -> None)
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Transport.debug
-                  "compute_directives: task parse skip %s: %s"
-                  f (Printexc.to_string exn);
-                None
-          else None)
+      Room.get_tasks_safe room_config
+      |> List.filter_map (fun (task : Types.task) ->
+           match task.task_status with
+           | Types.Todo -> Some task.id
+           | _ -> None)
     in
     match unclaimed with
     | task_id :: _ -> directives := ("claim:" ^ task_id) :: !directives
@@ -400,6 +381,23 @@ let handle_subscribe
   Atomic.incr active_subscribe_streams;
   Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);
   let events_count = ref 0 in
+  let stream_closed = Atomic.make false in
+  let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld"
+    req.agent_name (now_ms ()) in
+  let cleanup_subscriber ?exn () =
+    if Atomic.compare_and_set stream_closed false true then begin
+      Sse.unsubscribe_external sub_id;
+      Atomic.decr active_subscribe_streams;
+      Transport_metrics.set_grpc_subscribers
+        (Atomic.get active_subscribe_streams);
+      Option.iter
+        (fun err ->
+          Log.Misc.warn "gRPC subscriber %s failed: %s" sub_id
+            (Printexc.to_string err))
+        exn;
+      Log.Misc.info "gRPC subscriber %s cleaned up" sub_id
+    end
+  in
   (* Send initial event confirming subscription *)
   let init_event = T.Event.{
     seq = 0L;
@@ -453,10 +451,7 @@ let handle_subscribe
      so it MUST NOT block. We use Grpc_eio.Stream.length to check
      capacity before adding. If the stream is full or closed, the event
      is dropped and the subscriber auto-unregisters. *)
-  let sub_id = Printf.sprintf "grpc-subscribe-%s-%Ld"
-    req.agent_name (now_ms ()) in
   let seq_counter = Atomic.make (Int64.to_int req.since_seq + 1) in
-  let stream_closed = Atomic.make false in
   let max_buffer = 48 in (* stream capacity is 64; leave headroom *)
   Sse.subscribe_external ~id:sub_id
     ~is_alive:(fun () ->
@@ -464,11 +459,7 @@ let handle_subscribe
     ~callback:(fun sse_event ->
     if Atomic.get stream_closed || Grpc_eio.Stream.is_closed stream then begin
       (* Stream already gone — auto-cleanup *)
-      if not (Atomic.get stream_closed) then begin
-        Atomic.set stream_closed true;
-        Sse.unsubscribe_external sub_id;
-        Log.Misc.info "gRPC subscriber %s auto-cleaned (stream closed)" sub_id
-      end
+      cleanup_subscriber ()
     end else if Grpc_eio.Stream.length stream >= max_buffer then
       (* Stream buffer near-full — drop event to avoid blocking broadcast *)
       Log.Misc.warn "gRPC subscriber %s: buffer full (%d), dropping event"
@@ -485,14 +476,10 @@ let handle_subscribe
       try Grpc_eio.Stream.add stream (T.Event.to_bytes event)
       with
       | Eio.Cancel.Cancelled _ as e ->
-        Atomic.set stream_closed true;
-        Sse.unsubscribe_external sub_id;
+        cleanup_subscriber ();
         raise e
       | exn ->
-        Atomic.set stream_closed true;
-        Sse.unsubscribe_external sub_id;
-        Log.Misc.warn "gRPC subscriber %s failed: %s" sub_id
-          (Printexc.to_string exn)
+        cleanup_subscriber ~exn ()
     end
   ) ();
   (* Stream stays open; will be closed when the gRPC connection drops

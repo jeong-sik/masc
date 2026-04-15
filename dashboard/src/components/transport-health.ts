@@ -196,6 +196,21 @@ function formatMetricValue(value: number | null): string | number {
   return value === null ? 'n/a' : value
 }
 
+function transportTruthLine(data: TransportHealthData): string | null {
+  const diagnostics = data.projection_diagnostics
+  if (!diagnostics) return null
+  const parts = [
+    diagnostics.source,
+    `cache ${diagnostics.cache_state}`,
+  ]
+  if (diagnostics.stale_age_ms !== null) {
+    parts.push(`stale ${diagnostics.stale_age_ms}ms`)
+  } else if (diagnostics.last_success_at) {
+    parts.push(`last ok ${diagnostics.last_success_at}`)
+  }
+  return parts.join(' · ')
+}
+
 function MetricRow({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return html`
     <div class="flex items-center justify-between gap-3 py-1.5">
@@ -317,6 +332,7 @@ export function TransportHealthPanel() {
     data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
       ? `${data.cluster.cluster} / namespace ${data.cluster.room_id}`
       : `namespace ${data.cluster.room_id}`
+  const truthLine = transportTruthLine(data)
 
   return html`
     <div class="space-y-4">
@@ -330,6 +346,9 @@ export function TransportHealthPanel() {
             primary path: <span class="font-mono text-text-strong">${data.summary.primary_path}</span>
             <span class=${`ml-2 text-[11px] uppercase tracking-wider ${toneClass(sseStatus)}`}>${data.summary.queue_pressure}</span>
           </div>
+          ${truthLine
+            ? html`<div class="mt-1 text-[11px] text-text-muted">${truthLine}</div>`
+            : null}
         </div>
         <button
           class="text-[10px] text-text-muted hover:text-text-body transition-colors"

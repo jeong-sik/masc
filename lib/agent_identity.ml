@@ -215,35 +215,35 @@ module Registry = struct
   (** Register or update identity *)
   let register reg identity =
     with_lock reg (fun () ->
-      reg.identities <- StringMap.add identity.session_key identity !reg.identities;
-      reg.by_agent_name <- StringMap.add identity.agent_name identity.session_key !reg.by_agent_name;
+      reg.identities := StringMap.add identity.session_key identity !(reg.identities);
+      reg.by_agent_name := StringMap.add identity.agent_name identity.session_key !(reg.by_agent_name);
       identity
     )
 
   (** Find by session key *)
   let find_by_session reg session_key =
     with_lock reg (fun () ->
-      StringMap.find_opt session_key !reg.identities
+      StringMap.find_opt session_key !(reg.identities)
     )
 
   (** Find by agent name *)
   let find_by_name reg agent_name =
     with_lock reg (fun () ->
-      match StringMap.find_opt agent_name !reg.by_agent_name with
-      | Some session_key -> StringMap.find_opt session_key !reg.identities
+      match StringMap.find_opt agent_name !(reg.by_agent_name) with
+      | Some session_key -> StringMap.find_opt session_key !(reg.identities)
       | None -> None
     )
 
   (** Update last_seen and optionally room *)
   let touch reg session_key ?room_id () =
     with_lock reg (fun () ->
-      match StringMap.find_opt session_key !reg.identities with
+      match StringMap.find_opt session_key !(reg.identities) with
       | Some identity ->
           identity.last_seen <- Time_compat.now ();
           (match room_id with
            | Some rid -> 
                let updated = { identity with room_id = Some rid } in
-               reg.identities <- StringMap.add session_key updated !reg.identities
+               reg.identities := StringMap.add session_key updated !(reg.identities)
            | None -> ())
       | None -> ()
     )
@@ -251,10 +251,10 @@ module Registry = struct
   (** Remove identity *)
   let unregister reg session_key =
     with_lock reg (fun () ->
-      match StringMap.find_opt session_key !reg.identities with
+      match StringMap.find_opt session_key !(reg.identities) with
       | Some identity ->
-          reg.identities <- StringMap.remove session_key !reg.identities;
-          reg.by_agent_name <- StringMap.remove identity.agent_name !reg.by_agent_name
+          reg.identities := StringMap.remove session_key !(reg.identities);
+          reg.by_agent_name := StringMap.remove identity.agent_name !(reg.by_agent_name)
       | None -> ()
     )
 
@@ -262,7 +262,7 @@ module Registry = struct
   let list_active reg ~within_seconds =
     with_lock reg (fun () ->
       let cutoff = Time_compat.now () -. within_seconds in
-      !reg.identities
+      !(reg.identities)
       |> StringMap.bindings
       |> List.filter_map (fun (_, id) ->
         if id.last_seen > cutoff then Some id else None)
@@ -271,7 +271,7 @@ module Registry = struct
   (** Get identity count *)
   let count reg =
     with_lock reg (fun () ->
-      StringMap.cardinal !reg.identities
+      StringMap.cardinal !(reg.identities)
     )
 end
 

@@ -842,20 +842,12 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let surface_model_used = Keeper_agent_run.surface_model_used result in
-  let used_model_id =
-    let strip_latest s =
-      if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
-      then String.sub s 0 (String.length s - 7) else s
-    in
-    let used = strip_latest result.model_used in
-    let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
-    let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
-    match List.find_opt (fun (c : Llm_provider.Provider_config.t) ->
-      c.model_id = result.model_used || c.model_id = used
-    ) cfgs with
-    | Some c -> c.model_id
-    | None -> used  (* Use actual API response model, not stale cascade label *)
-  in
+  (* Use cascade_observation.selected_model (canonical, no :latest suffix)
+     instead of parsing model strings and stripping :latest manually.
+     surface_model_used already extracts this from cascade_observation.
+     Removes L3 (Cascade_config.parse_model_strings direct call) and
+     L6 (strip_latest model ID parsing) boundary violations. See #5626. *)
+  let used_model_id = surface_model_used in
   let turn_cost =
     let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
     Llm_provider.Pricing.estimate_cost ~pricing
@@ -1873,33 +1865,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
             Social.apply_to_result ~meta ~observation result
           in
           let used_model_id =
-            let strip_latest s =
-              if
-                String.length s > 7
-                && String.sub s (String.length s - 7) 7 = ":latest"
-              then String.sub s 0 (String.length s - 7)
-              else s
-            in
-            let used = strip_latest result.model_used in
-            let cascade_models =
-              match dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models) with
-              | _ :: _ as explicit -> explicit
-              | [] -> Oas_model_resolve.models_of_cascade_name effective_cascade_name
-            in
-            let cfgs =
-              Llm_provider.Cascade_config.parse_model_strings cascade_models
-            in
-            match
-              List.find_opt
-                (fun (c : Llm_provider.Provider_config.t) ->
-                  c.model_id = result.model_used || c.model_id = used)
-                cfgs
-            with
-            | Some c -> c.model_id
-            | None ->
-                (match cfgs with
-                | c :: _ -> c.model_id
-                | [] -> result.model_used)
+            Keeper_agent_run.surface_model_used result
           in
           let turn_cost =
             let pricing =

@@ -47,7 +47,10 @@ let portal_open_r config ~agent_name ~target_agent ~initial_message : string mas
     mkdir_p (portals_dir config);
     mkdir_p (a2a_tasks_dir config);
     let portal_path = Filename.concat (portals_dir config) (safe_filename agent_name ^ ".json") in
-    with_file_lock config portal_path (fun () ->
+    let target_portal_path =
+      Filename.concat (portals_dir config) (safe_filename target_agent ^ ".json")
+    in
+    with_two_file_locks config portal_path target_portal_path (fun () ->
       match read_json_opt config portal_path with
       | Some json ->
           (match portal_of_yojson json with
@@ -63,22 +66,16 @@ let portal_open_r config ~agent_name ~target_agent ~initial_message : string mas
             task_count = 0;
           } in
           write_json config portal_path (portal_to_yojson portal);
-          (* Create reverse portal for target agent.
-             Both locks held in lexicographic order to prevent deadlock
-             with concurrent portal_open_r or portal_close calls. *)
-          let target_portal_path = Filename.concat (portals_dir config) (target_agent ^ ".json") in
-          with_two_file_locks config portal_path target_portal_path (fun () ->
-            if not (Sys.file_exists target_portal_path) then begin
-              let reverse_portal = {
-                portal_from = target_agent;
-                portal_target = agent_name;
-                portal_opened_at = now;
-                portal_status = PortalOpen;
-                task_count = 0;
-              } in
-              write_json config target_portal_path (portal_to_yojson reverse_portal)
-            end
-          );
+          if not (Sys.file_exists target_portal_path) then begin
+            let reverse_portal = {
+              portal_from = target_agent;
+              portal_target = agent_name;
+              portal_opened_at = now;
+              portal_status = PortalOpen;
+              task_count = 0;
+            } in
+            write_json config target_portal_path (portal_to_yojson reverse_portal)
+          end;
           (* Send initial message if provided *)
           match initial_message with
           | Some msg ->
@@ -165,28 +162,56 @@ let portal_close config ~agent_name =
 
   let portal_path = Filename.concat (portals_dir config) (safe_filename agent_name ^ ".json") in
 
-  (* Use file lock to prevent race conditions *)
-  with_file_lock config portal_path (fun () ->
-    match read_json_opt config portal_path with
-    | None -> Printf.sprintf "⚠ No portal open for %s" agent_name
-    | Some json ->
-        match portal_of_yojson json with
-        | Ok portal ->
-            (* Also close reverse portal — hold both locks in lexicographic
-               order to prevent deadlock with concurrent portal_open_r. *)
-            let target_portal_path = Filename.concat (portals_dir config) (portal.portal_target ^ ".json") in
-            with_two_file_locks config portal_path target_portal_path (fun () ->
-              (* Re-check both files still exist under the two-lock scope *)
-              if Sys.file_exists portal_path then Sys.remove portal_path;
-              if Sys.file_exists target_portal_path then
-                Sys.remove target_portal_path;
-            );
-            Printf.sprintf "🌀 Portal closed: %s ↔ %s (%d tasks sent)"
-              agent_name portal.portal_target portal.task_count
-        | Error _ ->
-            Sys.remove portal_path;
-            Printf.sprintf "🌀 Portal closed (cleanup)"
-  )
+  let rec close_locked target_portal_path =
+    match
+      with_two_file_locks config portal_path target_portal_path (fun () ->
+        match read_json_opt config portal_path with
+        | None -> `Missing
+        | Some json ->
+            match portal_of_yojson json with
+            | Error _ ->
+                if Sys.file_exists portal_path then Sys.remove portal_path;
+                `Cleanup
+            | Ok portal ->
+                let current_target_path =
+                  Filename.concat
+                    (portals_dir config)
+                    (safe_filename portal.portal_target ^ ".json")
+                in
+                if not (String.equal current_target_path target_portal_path) then
+                  `Retry current_target_path
+                else begin
+                  if Sys.file_exists portal_path then Sys.remove portal_path;
+                  if Sys.file_exists target_portal_path then Sys.remove target_portal_path;
+                  `Closed (portal.portal_target, portal.task_count)
+                end)
+    with
+    | `Missing -> Printf.sprintf "⚠ No portal open for %s" agent_name
+    | `Cleanup -> Printf.sprintf "🌀 Portal closed (cleanup)"
+    | `Closed (target_agent, task_count) ->
+        Printf.sprintf "🌀 Portal closed: %s ↔ %s (%d tasks sent)"
+          agent_name target_agent task_count
+    | `Retry next_target_path -> close_locked next_target_path
+  in
+  match
+    with_file_lock config portal_path (fun () ->
+      match read_json_opt config portal_path with
+      | None -> `Missing
+      | Some json ->
+          match portal_of_yojson json with
+          | Error _ -> `Invalid
+          | Ok portal ->
+              `Target
+                (Filename.concat
+                   (portals_dir config)
+                   (safe_filename portal.portal_target ^ ".json")))
+  with
+  | `Missing -> Printf.sprintf "⚠ No portal open for %s" agent_name
+  | `Invalid ->
+      with_file_lock config portal_path (fun () ->
+        if Sys.file_exists portal_path then Sys.remove portal_path);
+      Printf.sprintf "🌀 Portal closed (cleanup)"
+  | `Target target_portal_path -> close_locked target_portal_path
 
 (** Get portal status
 

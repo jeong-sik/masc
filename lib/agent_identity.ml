@@ -3,7 +3,7 @@
     OpenClaw-inspired session tracking for multi-agent environments.
     Provides consistent agent identification across:
     - MCP tool calls
-    - Room coordination
+    - Coord coordination
     - Task assignments
     - Federation/portal messages
 

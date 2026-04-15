@@ -1,14 +1,14 @@
-(** Room_eio -- OCaml 5.x Eio-native Room implementation.
+(** Coord_eio -- OCaml 5.x Eio-native Coord implementation.
 
     Direct-style async I/O using Eio for multi-agent coordination:
     agent registration/heartbeat, file locking, message broadcasting,
     task management, and persistent event logging.
 
-    Migration path: Room -> Room_eio. *)
+    Migration path: Coord -> Coord_eio. *)
 
 (** {1 Types} *)
 
-(** Room configuration for the Eio file-system backend. *)
+(** Coord configuration for the Eio file-system backend. *)
 type config = {
   base_path: string;
   lock_expiry_minutes: int;
@@ -24,7 +24,7 @@ type agent_state = {
   status: string;
 }
 
-(** Room-level state (protocol version, active agents, pause, etc.). *)
+(** Coord-level state (protocol version, active agents, pause, etc.). *)
 type room_state = {
   protocol_version: string;
   started_at: float;

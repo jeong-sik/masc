@@ -292,7 +292,7 @@ let write_memory_bank_rows
     Error (Printf.sprintf "failed to rewrite memory bank: %s" (Printexc.to_string exn))
 
 let compact_memory_bank_if_needed
-    (config : Room.config)
+    (config : Coord.config)
     (meta : keeper_meta) : memory_bank_compaction =
   let target_notes = memory_compaction_target_notes () in
   let path = keeper_memory_bank_path config meta.name in
@@ -450,7 +450,7 @@ let compact_memory_bank_if_needed
                     }
 
 let append_memory_notes_from_reply
-    (config : Room.config)
+    (config : Coord.config)
     (meta : keeper_meta)
     ~(turn : int)
     ~(reply : string) : (int * string list) =

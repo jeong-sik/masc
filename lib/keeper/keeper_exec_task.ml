@@ -9,7 +9,7 @@ let keeper_task_result_json = function
 ;;
 
 let handle_keeper_task_tool
-      ~(config : Room.config)
+      ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
@@ -19,7 +19,7 @@ let handle_keeper_task_tool
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    let result = Room.list_tasks ?status:status_filter ~include_done config in
+    let result = Coord.list_tasks ?status:status_filter ~include_done config in
     (match Yojson.Safe.from_string result with
      | `List items ->
        Yojson.Safe.to_string (`List (List.filteri (fun i _ -> i < limit) items))
@@ -29,7 +29,7 @@ let handle_keeper_task_tool
        String.concat "\n" (List.filteri (fun i _ -> i < limit + 2) lines))
   | "keeper_tasks_audit" ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
-    let orphans = Room.audit_orphan_tasks config in
+    let orphans = Coord.audit_orphan_tasks config in
     let orphans = List.filteri (fun i _ -> i < limit) orphans in
     let items =
       List.map
@@ -61,7 +61,7 @@ let handle_keeper_task_tool
     else (
       let agent = keeper_agent_sender ~meta in
       let _ =
-        Room.broadcast
+        Coord.broadcast
           config
           ~from_agent:agent
           ~content:
@@ -71,7 +71,7 @@ let handle_keeper_task_tool
                (if reason = "" then "no reason given" else reason))
       in
       keeper_task_result_json
-        (Room.force_release_task_r config ~agent_name:agent ~task_id ()))
+        (Coord.force_release_task_r config ~agent_name:agent ~task_id ()))
   | "keeper_task_force_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args in
@@ -79,7 +79,7 @@ let handle_keeper_task_tool
     then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
     else
       keeper_task_result_json
-        (Room.force_done_task_r
+        (Coord.force_done_task_r
            config
            ~agent_name:(keeper_agent_sender ~meta)
            ~task_id
@@ -91,7 +91,7 @@ let handle_keeper_task_tool
     then error_json "message is required. Good: message='Build complete, all tests pass.'."
     else (
       let _ =
-        Room.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
+        Coord.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "broadcast", `String message ]))
   | "keeper_task_create" ->
@@ -104,7 +104,7 @@ let handle_keeper_task_tool
     then error_json "description is required. Explain what needs to be done and why."
     else (
       let result =
-        Room_task.add_task config ~title ~priority ~description
+        Coord_task.add_task config ~title ~priority ~description
       in
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "result", `String result ]))
   | "keeper_task_claim" ->
@@ -119,7 +119,7 @@ let handle_keeper_task_tool
       | Some required, Some preset ->
         Keeper_tool_policy.preset_can_satisfy ~agent_preset:preset ~required_preset:required
     in
-    let result = Room.claim_next_r config ~agent_name:meta.agent_name ~task_filter () in
+    let result = Coord.claim_next_r config ~agent_name:meta.agent_name ~task_filter () in
     let accountability_warning =
       if
         Keeper_accountability.accountability_risk_is_high config
@@ -131,13 +131,13 @@ let handle_keeper_task_tool
         None
     in
     let message = match result with
-      | Room.Claim_next_claimed { message; _ } -> message
-      | Room.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-      | Room.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
+      | Coord.Claim_next_claimed { message; _ } -> message
+      | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Coord.Claim_next_no_eligible { preset_filtered; _ } when preset_filtered > 0 ->
         Printf.sprintf "📋 No eligible tasks (preset mismatch: %d tasks require different preset, you have '%s')"
           preset_filtered (Option.value ~default:"unknown" preset_name)
-      | Room.Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-      | Room.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+      | Coord.Claim_next_no_eligible _ -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
     in
     Yojson.Safe.to_string
       (`Assoc
@@ -155,7 +155,7 @@ let handle_keeper_task_tool
     then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
     else
       keeper_task_result_json
-        (Room.force_done_task_r
+        (Coord.force_done_task_r
            config
            ~agent_name:(keeper_agent_sender ~meta)
            ~task_id

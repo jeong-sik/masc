@@ -1,4 +1,4 @@
-(** Coverage tests for Tool_room *)
+(** Coverage tests for Tool_coord *)
 
 open Masc_mcp
 
@@ -58,29 +58,29 @@ let make_test_ctx () =
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-room-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  { Tool_room.config; agent_name = "test-agent" }
+  let config = Coord.default_config tmp in
+  { Tool_coord.config; agent_name = "test-agent" }
 
 (* Test dispatch returns None for unknown tool *)
 let () = test "dispatch_unknown_tool" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
-  assert (Tool_room.dispatch ctx ~name:"unknown_tool" ~args = None)
+  assert (Tool_coord.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
 
 (* Test dispatch init — masc_init was pruned from registry; dispatch returns None. *)
 let () = test "dispatch_init" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("agent_name", `String "init-agent")] in
-  assert (Tool_room.dispatch ctx ~name:"masc_init" ~args = None)
+  assert (Tool_coord.dispatch ctx ~name:"masc_init" ~args = None)
 )
 
 (* Test dispatch status *)
 let () = test "dispatch_status" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_status" ~args with
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, result) ->
       assert success;
       assert (str_contains result "⚡ Snapshot:");
@@ -92,12 +92,12 @@ let () = test "dispatch_status" (fun () ->
 (* Test status summary and active task cap *)
 let () = test "dispatch_status_summary_and_cap" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   for i = 1 to 35 do
-    ignore (Room.add_task ctx.config ~title:(Printf.sprintf "Task %d" i) ~priority:3 ~description:"")
+    ignore (Coord.add_task ctx.config ~title:(Printf.sprintf "Task %d" i) ~priority:3 ~description:"")
   done;
   let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_status" ~args with
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, result) ->
       assert success;
       assert (str_contains result "tasks active=35 todo=35 claimed=0 in_progress=0");
@@ -111,12 +111,12 @@ let () = test "dispatch_status_summary_and_cap" (fun () ->
 (* Test done task aggregation in summary *)
 let () = test "dispatch_status_done_summary" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
-  let _ = Room.add_task ctx.config ~title:"Done Task" ~priority:2 ~description:"" in
-  ignore (Room.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-  ignore (Room.complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok");
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.add_task ctx.config ~title:"Done Task" ~priority:2 ~description:"" in
+  ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
+  ignore (Coord.complete_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~notes:"ok");
   let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_status" ~args with
+  match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
   | Some (success, result) ->
       assert success;
       assert (str_contains result "owned=-");
@@ -129,9 +129,9 @@ let () = test "dispatch_status_done_summary" (fun () ->
 (* Test dispatch reset without confirm *)
 let () = test "dispatch_reset_no_confirm" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let args = `Assoc [] in
-  match Tool_room.dispatch ctx ~name:"masc_reset" ~args with
+  match Tool_coord.dispatch ctx ~name:"masc_reset" ~args with
   | Some (success, _result) -> assert (not success) (* Should fail without confirm *)
   | None -> failwith "dispatch returned None"
 )
@@ -139,9 +139,9 @@ let () = test "dispatch_reset_no_confirm" (fun () ->
 (* Test dispatch reset with confirm *)
 let () = test "dispatch_reset_with_confirm" (fun () ->
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let args = `Assoc [("confirm", `Bool true)] in
-  match Tool_room.dispatch ctx ~name:"masc_reset" ~args with
+  match Tool_coord.dispatch ctx ~name:"masc_reset" ~args with
   | Some (success, _result) -> assert success
   | None -> failwith "dispatch returned None"
 )
@@ -149,9 +149,9 @@ let () = test "dispatch_reset_with_confirm" (fun () ->
 let () = test "dispatch_removed_named_room_tools" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
-  assert (Tool_room.dispatch ctx ~name:"masc_rooms_list" ~args = None);
-  assert (Tool_room.dispatch ctx ~name:"masc_room_create" ~args = None);
-  assert (Tool_room.dispatch ctx ~name:"masc_room_enter" ~args = None)
+  assert (Tool_coord.dispatch ctx ~name:"masc_rooms_list" ~args = None);
+  assert (Tool_coord.dispatch ctx ~name:"masc_room_create" ~args = None);
+  assert (Tool_coord.dispatch ctx ~name:"masc_room_enter" ~args = None)
 )
 
 let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
@@ -159,7 +159,7 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let task_ctx =
     { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
   in
@@ -171,7 +171,7 @@ let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
     Tool_task.handle_transition task_ctx
       (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
   in
-  match Tool_room.dispatch ctx ~name:"masc_check"
+  match Tool_coord.dispatch ctx ~name:"masc_check"
           ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
   | Some (success, result) ->
       assert success;
@@ -189,7 +189,7 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
-  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
   let task_ctx =
     { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
   in
@@ -198,7 +198,7 @@ let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
       (`Assoc [("title", `String "Check claim next")])
   in
   let (_success, _result) = Tool_task.handle_claim_next task_ctx (`Assoc []) in
-  match Tool_room.dispatch ctx ~name:"masc_check"
+  match Tool_coord.dispatch ctx ~name:"masc_check"
           ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
   | Some (success, result) ->
       assert success;
@@ -234,7 +234,7 @@ let () = test "get_bool_missing" (fun () ->
 )
 
 let () =
-  Alcotest.run "Tool_room"
+  Alcotest.run "Tool_coord"
     [
       ( "coverage",
         List.rev !test_cases

@@ -4,7 +4,7 @@ open Tool_args
 
 (* Context required by worktree tools *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -51,7 +51,7 @@ let handle_worktree_create ctx args =
   let base_branch = get_string args "base_branch" "develop" in
   (* repo_name comes straight from MCP tool args. Reject anything that
      isn't a single safe directory component so it cannot escape
-     [.masc/playground/<keeper>/repos/]. Room.worktree_create_r also
+     [.masc/playground/<keeper>/repos/]. Coord.worktree_create_r also
      re-validates defensively, but rejecting here gives a clearer
      error message back to the caller. *)
   let is_safe_repo_name s =
@@ -91,7 +91,7 @@ let handle_worktree_create ctx args =
     |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
     |> String.of_seq
   in
-  match Room.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
+  match Coord.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
@@ -100,12 +100,12 @@ let handle_worktree_remove ctx args =
   if task_id = "" then
     (false, "task_id is required. Use the same task_id you passed to masc_worktree_create.")
   else
-  match Room.worktree_remove_r ctx.config ~agent_name:ctx.agent_name ~task_id with
+  match Coord.worktree_remove_r ctx.config ~agent_name:ctx.agent_name ~task_id with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
 let handle_worktree_list ctx _args =
-  let json = Room.worktree_list ctx.config in
+  let json = Coord.worktree_list ctx.config in
   (true, Yojson.Safe.to_string json)
 
 (* Dispatch function - returns None if tool not handled *)

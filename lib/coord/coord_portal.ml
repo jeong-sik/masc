@@ -1,4 +1,4 @@
-(** Room Portal - A2A Protocol Implementation
+(** Coord Portal - A2A Protocol Implementation
 
     Agent-to-Agent (A2A) direct communication channel.
     Extracted from room.ml for modularity.
@@ -14,7 +14,7 @@
 *)
 
 open Types
-open Room_utils
+open Coord_utils
 
 (** Directory paths for portal data *)
 let portals_dir config = Filename.concat (masc_dir config) "portals"

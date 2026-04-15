@@ -1,7 +1,7 @@
 (** Worktree tools - Git worktree management for task isolation *)
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 

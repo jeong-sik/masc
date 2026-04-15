@@ -1,11 +1,12 @@
-(** Room Init - Room initialization, reset, pause, and resume.
+(** Coord Init - Coord initialization, reset, pause, and resume.
 
-    Extracted from Room module. Handles room directory bootstrapping,
+    Extracted from Coord module. Handles room directory bootstrapping,
     state creation, and pause/resume lifecycle. *)
 
 open Types
-open Room_utils
-open Room_state
+open Coord_utils
+open Coord_state
+open Coord_broadcast
 
 (** Initialize MASC room *)
 let init config ~agent_name =
@@ -46,7 +47,7 @@ let init config ~agent_name =
     let root_json = read_json_root config (root_state_path config) in
     (try write_json_local (root_state_path config) root_json
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Room.warn "init: local sync of root state failed: %s" (Printexc.to_string exn))
+       Log.Coord.warn "init: local sync of root state failed: %s" (Printexc.to_string exn))
   end;
   if not (path_exists_root config root_backlog_path) then begin
     let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
@@ -55,7 +56,7 @@ let init config ~agent_name =
     let root_backlog_json = read_json_root config root_backlog_path in
     (try write_json_local root_backlog_path root_backlog_json
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Room.warn "init: local sync of root backlog failed: %s" (Printexc.to_string exn))
+       Log.Coord.warn "init: local sync of root backlog failed: %s" (Printexc.to_string exn))
   end;
 
   if is_initialized config then begin
@@ -63,7 +64,7 @@ let init config ~agent_name =
     let scoped_json = read_json config (state_path config) in
     (try write_json_local (state_path config) scoped_json
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Room.warn "init: local sync of scoped state failed: %s" (Printexc.to_string exn));
+       Log.Coord.warn "init: local sync of scoped state failed: %s" (Printexc.to_string exn));
     "MASC already initialized."
   end
   else begin
@@ -100,7 +101,7 @@ let init config ~agent_name =
 
     let result = "✅ MASC room created!" in
 
-    (* Auto-join if agent specified — uses Room_lifecycle.join via the caller *)
+    (* Auto-join if agent specified — uses Coord_lifecycle.join via the caller *)
     match agent_name with
     | Some _name -> result  (* Caller is responsible for joining after init *)
     | None -> result
@@ -117,7 +118,7 @@ let pause config ~by ~reason =
   }) in
   (* Broadcast pause notification *)
   let _ = broadcast config ~from_agent:"system"
-    ~content:(Printf.sprintf "⏸️ Room PAUSED by %s: %s" by reason) in
+    ~content:(Printf.sprintf "⏸️ Coord PAUSED by %s: %s" by reason) in
   ()
 
 (** Resume the room *)
@@ -135,7 +136,7 @@ let resume config ~by =
     }) in
     (* Broadcast resume notification *)
     let _ = broadcast config ~from_agent:"system"
-      ~content:(Printf.sprintf "▶️ Room RESUMED by %s" by) in
+      ~content:(Printf.sprintf "▶️ Coord RESUMED by %s" by) in
     `Resumed
   end
 
@@ -148,7 +149,7 @@ let reset config =
     let rec rm_rf path =
       if Sys.is_directory path then begin
         Sys.readdir path |> Array.iter (fun name ->
-          Room_query.safe_yield ();
+          Coord_query.safe_yield ();
           rm_rf (Filename.concat path name)
         );
         Unix.rmdir path

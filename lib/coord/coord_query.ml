@@ -1,11 +1,11 @@
-(** Room_query -- Task/agent/message query and listing functions.
+(** Coord_query -- Task/agent/message query and listing functions.
 
     Read-only operations on room state: raw list retrieval, orphan auditing,
     message collection, agent-joined checks, and formatted listing. *)
 
 open Types
-include Room_utils
-include Room_state
+include Coord_utils
+include Coord_state
 
 let update_priority config ~task_id ~priority =
   ensure_initialized config;
@@ -37,7 +37,7 @@ let update_priority config ~task_id ~priority =
           log_event config (Printf.sprintf
             "{\"type\":\"priority_change\",\"task\":\"%s\",\"old\":%d,\"new\":%d,\"ts\":\"%s\"}"
             task_id old_priority priority (now_iso ()));
-          !Room_hooks.on_task_mutation_fn ();
+          !Coord_hooks.on_task_mutation_fn ();
 
           Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority
     with
@@ -237,7 +237,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
                  | _ -> loop remaining acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                Log.legacy_traceln ~level:Log.Warn ~module_name:"Coord"
                   (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
                      name (Printexc.to_string e));
                 loop remaining acc rest
@@ -276,7 +276,7 @@ let get_all_messages_raw config ~since_seq =
                  | _ -> loop acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Room"
+                Log.legacy_traceln ~level:Log.Warn ~module_name:"Coord"
                   (Printf.sprintf
                      "[WARN] Failed to read room message %s: %s"
                      name (Printexc.to_string e));

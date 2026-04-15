@@ -36,8 +36,8 @@ let with_room f =
         rm dir
       with _ -> ()))
     (fun () ->
-      let config = Room.default_config dir in
-      let _msg = Room.init config ~agent_name:(Some "test-keeper") in
+      let config = Coord.default_config dir in
+      let _msg = Coord.init config ~agent_name:(Some "test-keeper") in
       f config)
 
 let dispatch config name =

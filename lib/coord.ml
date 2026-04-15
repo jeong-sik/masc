@@ -1,51 +1,52 @@
-(** MASC Room - Core coordination hub.
+(** MASC Coord - Core coordination hub.
 
-    This module ties together all Room sub-modules and provides
+    This module ties together all Coord sub-modules and provides
     cross-cutting functions that depend on multiple sub-modules. *)
 
 (* Foundation: utilities and state management *)
-include Room_utils
-include Room_state
+include Coord_utils
+include Coord_state
+include Coord_broadcast
 
 (* Agent join/leave lifecycle *)
-include Room_lifecycle
+include Coord_lifecycle
 
-(* Room initialization, reset, pause, resume (without auto-join) *)
-include Room_init
+(* Coord initialization, reset, pause, resume (without auto-join) *)
+include Coord_init
 
 (** Initialize MASC room with optional auto-join.
-    Wraps [Room_init.init] and calls [join] when [agent_name] is provided. *)
+    Wraps [Coord_init.init] and calls [join] when [agent_name] is provided. *)
 let init config ~agent_name =
-  let result = Room_init.init config ~agent_name in
+  let result = Coord_init.init config ~agent_name in
   if result = "MASC already initialized." then result
   else
     match agent_name with
     | Some name -> result ^ "\n" ^ (join config ~agent_name:name ~capabilities:[] ())
     | None -> result
 
-(* Room status display *)
-include Room_status
+(* Coord status display *)
+include Coord_status
 
 (* Task lifecycle: add, claim, transition, complete, cancel *)
-include Room_task
+include Coord_task
 
 (* Task scheduling: claim_next, release_stale_claims *)
-include Room_task_schedule
+include Coord_task_schedule
 
 (* Task/agent/message query and listing *)
-include Room_query
+include Coord_query
 
 (* Portal / A2A Protocol *)
-include Room_portal
+include Coord_portal
 
 (* Git Worktree *)
-include Room_worktree
+include Coord_worktree
 
 (* Heartbeat & GC *)
-include Room_gc
+include Coord_gc
 
 (* ============================================ *)
-(* Wire Room_hooks callbacks                    *)
+(* Wire Coord_hooks callbacks                    *)
 (* ============================================ *)
 
 let telemetry_enabled () = Env_config_core.telemetry_enabled ()
@@ -85,7 +86,7 @@ let observe_agent_lifecycle config ~agent_id ~event_kind ~details =
     | "leave" -> Printf.sprintf "agent left: %s" agent_id
     | _ -> Printf.sprintf "agent joined: %s" agent_id
   in
-  Log.emit level ~module_name:"Room" ~details message;
+  Log.emit level ~module_name:"Coord" ~details message;
   (match event_kind with
    | "leave" -> Prometheus.dec_gauge "masc_active_agents" ()
    | "join" | "rejoin" -> Prometheus.inc_gauge "masc_active_agents" ()
@@ -156,25 +157,25 @@ let observe_task_transition_event config ~agent_name ~task_id
   with Stdlib.Effect.Unhandled _ -> ())
 
 (* force_release_task — zombie cleanup needs task management logic *)
-let () = Room_hooks.force_release_task_fn :=
+let () = Coord_hooks.force_release_task_fn :=
   (fun config ~agent_name ~task_id () ->
     force_release_task_r config ~agent_name ~task_id ())
 
 (* Activity graph emit — wraps Activity_graph for room sub-modules *)
-let () = Room_hooks.activity_emit_fn :=
+let () = Coord_hooks.activity_emit_fn :=
   (fun config ~actor ?subject ~kind ~payload ~tags () ->
     (try
       ignore (Activity_graph.emit config
-        ~actor:(Activity_graph.entity ~kind:actor.Room_hooks.kind actor.id)
-        ?subject:(Option.map (fun (s : Room_hooks.activity_entity) ->
+        ~actor:(Activity_graph.entity ~kind:actor.Coord_hooks.kind actor.id)
+        ?subject:(Option.map (fun (s : Coord_hooks.activity_entity) ->
           Activity_graph.entity ~kind:s.kind s.id) subject)
         ~kind ~payload ~tags ())
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn -> Log.Room.warn "activity_graph emit failed: %s" (Printexc.to_string exn)))
+     | exn -> Log.Coord.warn "activity_graph emit failed: %s" (Printexc.to_string exn)))
 
 (* Agent economy earn — wraps Agent_economy for task completion credits *)
-let () = Room_hooks.agent_economy_earn_fn :=
+let () = Coord_hooks.agent_economy_earn_fn :=
   (fun ~base_path ~agent_name ~reason ->
     match Agent_economy.earn ~base_path ~agent_name
       ~kind:Earn_task_done ~reason () with
@@ -182,25 +183,25 @@ let () = Room_hooks.agent_economy_earn_fn :=
     | Error msg -> Log.Misc.error "task earn failed: %s" msg)
 
 (* Relation materializer — agent leave *)
-let () = Room_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
+let () = Coord_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
 
 (* Relation materializer — task done *)
-let () = Room_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
+let () = Coord_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
 
 (* Hebbian learning — strengthen on task completion.
    Also emits activity events so strengthens appear in the
    activity graph / telemetry surface alongside task events. *)
-let () = Room_hooks.hebbian_on_task_done_fn :=
+let () = Coord_hooks.hebbian_on_task_done_fn :=
   (fun config ~assignee ~active_agents ->
     List.iter (fun peer ->
       if peer <> assignee then begin
         (try Hebbian_eio.strengthen config ~from_agent:assignee ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Room.warn "hebbian strengthen failed: %s" (Printexc.to_string exn));
+           Log.Coord.warn "hebbian strengthen failed: %s" (Printexc.to_string exn));
         (try
-           !Room_hooks.activity_emit_fn config
-             ~actor:Room_hooks.{ kind = "agent"; id = assignee }
-             ~subject:Room_hooks.{ kind = "agent"; id = peer }
+           !Coord_hooks.activity_emit_fn config
+             ~actor:Coord_hooks.{ kind = "agent"; id = assignee }
+             ~subject:Coord_hooks.{ kind = "agent"; id = peer }
              ~kind:"hebbian.strengthen"
              ~payload:(`Assoc [
                ("from_agent", `String assignee);
@@ -213,17 +214,17 @@ let () = Room_hooks.hebbian_on_task_done_fn :=
     ) active_agents)
 
 (* Hebbian learning — weaken on task cancellation. *)
-let () = Room_hooks.hebbian_on_task_cancelled_fn :=
+let () = Coord_hooks.hebbian_on_task_cancelled_fn :=
   (fun config ~agent_name ~active_agents ->
     List.iter (fun peer ->
       if peer <> agent_name then begin
         (try Hebbian_eio.weaken config ~from_agent:agent_name ~to_agent:peer ()
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Room.warn "hebbian weaken failed: %s" (Printexc.to_string exn));
+           Log.Coord.warn "hebbian weaken failed: %s" (Printexc.to_string exn));
         (try
-           !Room_hooks.activity_emit_fn config
-             ~actor:Room_hooks.{ kind = "agent"; id = agent_name }
-             ~subject:Room_hooks.{ kind = "agent"; id = peer }
+           !Coord_hooks.activity_emit_fn config
+             ~actor:Coord_hooks.{ kind = "agent"; id = agent_name }
+             ~subject:Coord_hooks.{ kind = "agent"; id = peer }
              ~kind:"hebbian.weaken"
              ~payload:(`Assoc [
                ("from_agent", `String agent_name);
@@ -235,18 +236,18 @@ let () = Room_hooks.hebbian_on_task_cancelled_fn :=
       end
     ) active_agents)
 
-let () = Room_hooks.observe_agent_lifecycle_fn :=
+let () = Coord_hooks.observe_agent_lifecycle_fn :=
   (fun config ~agent_id ~event_kind ~details ->
     observe_agent_lifecycle config ~agent_id ~event_kind ~details)
 
-let () = Room_hooks.observe_task_transition_fn :=
+let () = Coord_hooks.observe_task_transition_fn :=
   (fun config ~agent_name ~task_id ~transition ~details ->
-    !Room_hooks.on_task_mutation_fn ();
+    !Coord_hooks.on_task_mutation_fn ();
     observe_task_transition_event config ~agent_name ~task_id
       ~transition ~details)
 
 (* Board artifact cleanup — wraps Board_dispatch for GC *)
-let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
+let () = Coord_hooks.cleanup_board_artifacts_fn := (fun () ->
   let stale_system_daily_sec = 12.0 *. 3600.0 in
   let board_artifact_title title =
     let title = String.lowercase_ascii (String.trim title) in
@@ -276,12 +277,12 @@ let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
        0)
 
 (* Subscription auto-subscribe on join — wraps Subscriptions for room_eio *)
-let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->
+let () = Coord_hooks.subscribe_messages_fn := (fun ~subscriber ->
   let _ = Subscriptions.SubscriptionStore.subscribe
     ~subscriber ~resource:Subscriptions.Messages () in ())
 
 (* Agent status, capability registration, discovery *)
-include Room_agent
+include Coord_agent
 
-(* Room_multi removed — operational namespace is always "default" *)
-(* Room_vote, Room_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
+(* Coord_multi removed — operational namespace is always "default" *)
+(* Coord_vote, Coord_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)

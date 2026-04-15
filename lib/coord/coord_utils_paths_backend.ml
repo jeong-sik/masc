@@ -1,9 +1,9 @@
-open Room_utils_backend_setup
+open Coord_utils_backend_setup
 
 (** Pure helper: compute the masc_root directory from primitives.
 
     Use this when a caller has a [base_path] string (e.g. from
-    [Env_config_core.base_path]) but no [Room.config] value. Semantics
+    [Env_config_core.base_path]) but no [Coord.config] value. Semantics
     match [masc_root_dir] exactly: default cluster -> [<base>/.masc/],
     non-default -> [<base>/.masc/clusters/<sanitized>/]. *)
 let masc_root_dir_from ~base_path ~cluster_name =

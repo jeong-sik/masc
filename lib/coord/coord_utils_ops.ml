@@ -1,6 +1,6 @@
 open Types
-open Room_utils_backend_setup
-open Room_utils_paths_backend
+open Coord_utils_backend_setup
+open Coord_utils_paths_backend
 
 let contains_substring = String_util.contains_substring
 
@@ -14,15 +14,15 @@ let validate_task_id id =
 
 let validate_room_id room_id =
   let room_id = String.trim room_id in
-  if room_id = "" then Error "Room id cannot be empty"
-  else if String.length room_id > 128 then Error "Room id too long (max 128 chars)"
-  else if room_id = "." || room_id = ".." then Error "Room id cannot be '.' or '..'"
+  if room_id = "" then Error "Coord id cannot be empty"
+  else if String.length room_id > 128 then Error "Coord id too long (max 128 chars)"
+  else if room_id = "." || room_id = ".." then Error "Coord id cannot be '.' or '..'"
   else if contains_substring room_id "/" || contains_substring room_id "\\" then
-    Error "Room id cannot contain path separators"
+    Error "Coord id cannot contain path separators"
   else if contains_substring room_id ".." then
-    Error "Room id cannot contain traversal segments"
+    Error "Coord id cannot contain traversal segments"
   else if not (Re.execp (Re.compile (Re.(whole_string (rep1 (alt [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '.'; char '_'; char '-']))))) room_id) then
-    Error "Room id may only contain letters, digits, dot, underscore, and hyphen"
+    Error "Coord id may only contain letters, digits, dot, underscore, and hyphen"
   else Ok room_id
 
 let validate_file_path path =
@@ -357,7 +357,7 @@ let read_agent_with_repair config path =
   match Types.agent_of_yojson json with
   | Ok agent as ok ->
       if agent_json_needs_repair json then (
-        Log.Room.warn
+        Log.Coord.warn
           "agent state repair: repaired agent JSON and rewrote canonical state for %s"
           path;
         write_json config path (Types.agent_to_yojson agent));
@@ -397,7 +397,7 @@ let with_distributed_lock ?clock config _path key f =
               | IOError s | BackendNotSupported s | InvalidKey s
               | AlreadyExists s -> s
             in
-            Log.Room.warn "lock release failed for %s: %s" key msg)
+            Log.Coord.warn "lock release failed for %s: %s" key msg)
       f
   else
     invalid_arg
@@ -429,7 +429,7 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
               | IOError s | BackendNotSupported s | InvalidKey s
               | AlreadyExists s -> s
             in
-            Log.Room.warn "lock release failed for %s: %s" key msg)
+            Log.Coord.warn "lock release failed for %s: %s" key msg)
       (fun () -> Ok (f ()))
   else
     Error

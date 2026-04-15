@@ -1,11 +1,11 @@
-(** Room_task -- Task lifecycle: add, claim, transition, complete, cancel.
+(** Coord_task -- Task lifecycle: add, claim, transition, complete, cancel.
 
-    This module is [include]d by {!Room}; all bindings are part of
-    the public Room interface.  Re-exports {!Room_utils} and
-    {!Room_state}. *)
+    This module is [include]d by {!Coord}; all bindings are part of
+    the public Coord interface.  Re-exports {!Coord_utils} and
+    {!Coord_state}. *)
 
-include module type of Room_utils
-include module type of Room_state
+include module type of Coord_utils
+include module type of Coord_state
 
 (** {1 Task activity helpers} *)
 
@@ -19,13 +19,13 @@ val update_local_agent_state :
     parse failures with the agent name for diagnostic context.
 
     Callers that hold an outer lock on a different file (e.g. the
-    backlog in [Room_task_schedule.claim_next_r]) must nest this
+    backlog in [Coord_task_schedule.claim_next_r]) must nest this
     call inside the outer lock; lock acquisition order is always
     {b outer path → agent file} across every call site to keep the
     graph acyclic.
 
-    @since PR #6634 — previously inline at six sites in [Room_task]
-    task transitions; exposed here so [Room_task_schedule] can reuse
+    @since PR #6634 — previously inline at six sites in [Coord_task]
+    task transitions; exposed here so [Coord_task_schedule] can reuse
     the same discipline for its own agent-state writes. *)
 
 val emit_task_activity :

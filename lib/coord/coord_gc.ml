@@ -1,15 +1,15 @@
-(** Room GC - Heartbeat, Zombie Cleanup, and Garbage Collection.
+(** Coord GC - Heartbeat, Zombie Cleanup, and Garbage Collection.
 
     Extracted from room.ml for modularity.
     Contains: heartbeat, cleanup_zombies, gc. *)
 
 open Types
-open Room_utils
-open Room_state
+open Coord_utils
+open Coord_state
 
-(* Callback refs and types are now in Room_hooks. *)
+(* Callback refs and types are now in Coord_hooks. *)
 
-(* Board artifact cleanup is wired via Room_hooks callbacks at startup. *)
+(* Board artifact cleanup is wired via Coord_hooks callbacks at startup. *)
 
 
 (* heartbeat_in_room removed — rooms are flattened (#4638). Use heartbeat. *)
@@ -27,7 +27,7 @@ let heartbeat config ~agent_name =
           write_json config agent_file (agent_to_yojson updated);
           Printf.sprintf "💓 %s heartbeat updated" actual_name
       | Error e ->
-          Log.Room.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
+          Log.Coord.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
           Printf.sprintf "⚠ Invalid agent file for %s" actual_name
     )
   end else
@@ -54,7 +54,7 @@ let cleanup_zombies
     let zombie_entries = ref [] in (* (name, path) list *)
     List.iter (fun agents_path ->
       Sys.readdir agents_path |> Array.iter (fun name ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
         if Filename.check_suffix name ".json" then begin
           let path = Filename.concat agents_path name in
           match read_agent_with_repair config path with
@@ -104,7 +104,7 @@ let cleanup_zombies
         (* Stop keeper fiber via hook to prevent zombie tool calls.
            Without this, the keeper fiber continues running (fiber_stop stays
            false) and makes tool calls indefinitely after cleanup. *)
-        (try !Room_hooks.stop_keeper_fn name
+        (try !Coord_hooks.stop_keeper_fn name
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn -> Log.Gc.warn "gc stop_keeper_fn error for %s: %s" name (Printexc.to_string exn));
@@ -120,7 +120,7 @@ let cleanup_zombies
         | Types.Claimed { assignee; _ }
         | Types.InProgress { assignee; _ }
           when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match !Room_hooks.force_release_task_fn config ~agent_name:"keeper-gc" ~task_id:task.id () with
+            (match !Coord_hooks.force_release_task_fn config ~agent_name:"keeper-gc" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then
@@ -246,7 +246,7 @@ let gc config ?(days=7) () =
 
   if Sys.file_exists messages_path then begin
     Sys.readdir messages_path |> Array.iter (fun name ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat messages_path name in
         let json = read_json config path in
@@ -358,7 +358,7 @@ let gc config ?(days=7) () =
     let archive_ts_dir = Filename.concat
       (Filename.concat (Filename.concat config.base_path ".masc") "archive") "team-sessions" in
     Sys.readdir ts_root |> Array.iter (fun session_id ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
       let sdir = Filename.concat ts_root session_id in
       if Sys.is_directory sdir then begin
         let sjson = Filename.concat sdir "session.json" in
@@ -390,7 +390,7 @@ let gc config ?(days=7) () =
     results := "✅ No team sessions to archive" :: !results;
 
   (* 7. Hard-delete board artifacts (via hooks) *)
-  let board_artifact_count = !Room_hooks.cleanup_board_artifacts_fn () in
+  let board_artifact_count = !Coord_hooks.cleanup_board_artifacts_fn () in
   if board_artifact_count > 0 then
     results :=
       Printf.sprintf "🧽 Removed %d board artifact post(s)"
@@ -400,7 +400,7 @@ let gc config ?(days=7) () =
     results := "✅ No board artifacts" :: !results;
 
   let cp_json = "null" in
-  (* 9. Room archival removed — rooms are flattened (#4638).
+  (* 9. Coord archival removed — rooms are flattened (#4638).
      Startup migration (migrate_room_to_flat) moves active room to root. *)
   results := "✅ Rooms flattened (no room archival needed)" :: !results;
 

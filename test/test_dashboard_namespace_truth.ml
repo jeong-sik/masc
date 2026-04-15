@@ -220,9 +220,9 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -262,15 +262,15 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
+      ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"codex-test-agent"
            ~agent_type_override:(Some "codex")
            ~capabilities:["typescript"]
            ());
       ignore
-        (Lib.Room.join config
+        (Lib.Coord.join config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -336,8 +336,8 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -397,8 +397,8 @@ let test_dashboard_namespace_truth_exposes_latest_meta_digest () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -461,8 +461,8 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let config = state.Mcp_server.room_config in
-      ignore (Lib.Room.init config ~agent_name:None);
-      let masc_dir = Lib.Room.masc_dir config in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      let masc_dir = Lib.Coord.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -566,7 +566,7 @@ let test_last_good_shell_fallback_preserves_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      ignore (Lib.Room.init state.Lib.Mcp_server.room_config ~agent_name:None);
+      ignore (Lib.Coord.init state.Lib.Mcp_server.room_config ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so _last_good_shell gets populated. *)
       Lib.Server_dashboard_http.warm_shell_cache state;

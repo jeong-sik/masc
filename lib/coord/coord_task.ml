@@ -1,8 +1,9 @@
-(** Room_task — Task lifecycle: add, claim, transition, complete, cancel, claim_next. *)
+(** Coord_task — Task lifecycle: add, claim, transition, complete, cancel, claim_next. *)
 
 open Types
-include Room_utils
-include Room_state
+include Coord_utils
+include Coord_state
+include Coord_broadcast
 
 (* activity_room_id removed — namespace retired (#unify-namespace). *)
 
@@ -32,7 +33,7 @@ let read_backlog_or_raise config =
     Falls back to active_agents if the backlog cannot be read. *)
 let working_agents config =
   match read_backlog_r config with
-  | Error _ -> (Room_state.read_state config).active_agents
+  | Error _ -> (Coord_state.read_state config).active_agents
   | Ok backlog ->
     List.filter_map (fun (t : task) ->
       match t.task_status with
@@ -49,7 +50,7 @@ let working_agents config =
     module did the read→modify→write inline without holding any lock
     on that file — the enclosing [with_file_lock config backlog_path]
     only serializes backlog writers, not agent-state writers.  Sibling
-    writers in [Room_agent.update_agent_r] correctly take
+    writers in [Coord_agent.update_agent_r] correctly take
     [with_file_lock_r config agent_file], so concurrent
     [update_agent_r] or concurrent room_task transitions can race and
     lose each other's updates.
@@ -141,9 +142,9 @@ let merge_execution_links (existing : Types.task_execution_links) ?session_id
 
 let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
   try
-    !Room_hooks.activity_emit_fn config
-      ~actor:Room_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
-      ~subject:Room_hooks.{ kind = "task"; id = task_id }
+    !Coord_hooks.activity_emit_fn config
+      ~actor:Coord_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
+      ~subject:Coord_hooks.{ kind = "task"; id = task_id }
       ~kind
       ~payload
       ~tags:[ "task"; kind ]
@@ -190,7 +191,7 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
         (Option.map (fun value -> `Int value) duration_ms))
 
 let observe_task_transition config ~agent_name ~task_id ~transition ~details =
-  !Room_hooks.observe_task_transition_fn config ~agent_name
+  !Coord_hooks.observe_task_transition_fn config ~agent_name
     ~task_id ~transition ~details
 
 (** Normalize title for deduplication: lowercase, keep only alphanumeric+space.
@@ -271,7 +272,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
                   | None -> false) );
             ]);
 
-      !Room_hooks.on_task_mutation_fn ();
+      !Coord_hooks.on_task_mutation_fn ();
       let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
       Printf.sprintf "✅ Added %s: %s" task_id title))
   with
@@ -395,7 +396,7 @@ let batch_add_tasks_internal config tasks =
                 ]))
         added_tasks;
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
-      !Room_hooks.on_task_mutation_fn ();
+      !Coord_hooks.on_task_mutation_fn ();
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
@@ -820,12 +821,12 @@ let transition_task_r config ~agent_name ~task_id ~action
         (match action with
          | Types.Done_action ->
            (try
-              let active = (Room_state.read_state config).active_agents in
-              !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+              let active = (Coord_state.read_state config).active_agents in
+              !Coord_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
               (* Hebbian: strengthen only against agents with active tasks,
                  not the full room. See working_agents doc for rationale. *)
               let workers = working_agents config in
-              !Room_hooks.hebbian_on_task_done_fn config
+              !Coord_hooks.hebbian_on_task_done_fn config
                 ~assignee:agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition relation/hebbian done hook: %s"
@@ -833,7 +834,7 @@ let transition_task_r config ~agent_name ~task_id ~action
          | Types.Cancel ->
            (try
               let workers = working_agents config in
-              !Room_hooks.hebbian_on_task_cancelled_fn config
+              !Coord_hooks.hebbian_on_task_cancelled_fn config
                 ~agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition hebbian cancel hook: %s"
@@ -944,11 +945,11 @@ let complete_task config ~agent_name ~task_id ~notes =
                    ());
             (* Record task collaboration via hook (async, non-blocking) *)
             (try
-               let active = (Room_state.read_state config).active_agents in
-               !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+               let active = (Coord_state.read_state config).active_agents in
+               !Coord_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
                (* Hebbian: strengthen only against agents with active tasks *)
                let workers = working_agents config in
-               !Room_hooks.hebbian_on_task_done_fn config
+               !Coord_hooks.hebbian_on_task_done_fn config
                  ~assignee:agent_name ~active_agents:workers
              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.RoomTask.error "relation/hebbian task hook error: %s"
@@ -1044,7 +1045,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                              *. 1000.0)))
                      ());
               (* Agent Economy: earn credits via hook *)
-              !Room_hooks.agent_economy_earn_fn
+              !Coord_hooks.agent_economy_earn_fn
                 ~base_path:config.base_path ~agent_name
                 ~reason:(Printf.sprintf "completed %s" task_id);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
@@ -1140,7 +1141,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               (* Hebbian: weaken only against agents with active tasks *)
               (try
                  let workers = working_agents config in
-                 !Room_hooks.hebbian_on_task_cancelled_fn config
+                 !Coord_hooks.hebbian_on_task_cancelled_fn config
                    ~agent_name ~active_agents:workers
                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                  Log.RoomTask.error "hebbian task_cancelled hook error: %s"
@@ -1152,7 +1153,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
       | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
-(* Scheduling functions are in Room_task_schedule.
+(* Scheduling functions are in Coord_task_schedule.
    Re-export claim_next_result from Types for backward compatibility. *)
 type claim_next_result = Types.claim_next_result =
   | Claim_next_claimed of {

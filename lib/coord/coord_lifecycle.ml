@@ -1,11 +1,12 @@
-(** Room Lifecycle - Agent join/leave operations.
+(** Coord Lifecycle - Agent join/leave operations.
 
-    Extracted from Room module. Handles agent entry, re-entry, and departure
+    Extracted from Coord module. Handles agent entry, re-entry, and departure
     including nickname resolution, dedup, metadata, and relation materialization. *)
 
 open Types
-open Room_utils
-open Room_state
+open Coord_utils
+open Coord_state
+open Coord_broadcast
 
 (* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
    All coordination scoped by cluster basepath only. *)
@@ -88,7 +89,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          log_event config (Printf.sprintf
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
-         !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+         !Coord_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
            ~event_kind:"rejoin"
            ~details:
              (`Assoc
@@ -99,7 +100,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
                ]);
        end
      | Error e ->
-         Log.Room.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
+         Log.Coord.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
     Printf.sprintf "✅ %s already in the namespace (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
@@ -146,7 +147,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     session_id
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
-  !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+  !Coord_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
     ~event_kind:"join"
     ~details:
       (`Assoc
@@ -184,7 +185,7 @@ let leave config ~agent_name =
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
        write_json config agent_file (agent_to_yojson updated)
      | Error e ->
-         Log.Room.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
+         Log.Coord.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
 
     (* Capture active agents before removal for relationship materialization *)
     let peers_before_leave = (read_state config).active_agents in
@@ -199,15 +200,15 @@ let leave config ~agent_name =
     log_event config (Printf.sprintf
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
-    !Room_hooks.observe_agent_lifecycle_fn config ~agent_id:actual_name
+    !Coord_hooks.observe_agent_lifecycle_fn config ~agent_id:actual_name
       ~event_kind:"leave"
       ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)
-    (try !Room_hooks.relation_on_leave_fn
+    (try !Coord_hooks.relation_on_leave_fn
            ~leaving_agent:actual_name ~active_agents:peers_before_leave
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Room.error "relation-materializer leave hook error: %s"
+       Log.Coord.error "relation-materializer leave hook error: %s"
          (Printexc.to_string exn));
 
     Printf.sprintf "✅ %s left the namespace" actual_name

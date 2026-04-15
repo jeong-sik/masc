@@ -8,7 +8,7 @@
     - log.jsonl (append-only)
 *)
 
-open Room_utils
+open Coord_utils
 
 (** Run metadata *)
 type run_record = {

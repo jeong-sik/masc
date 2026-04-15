@@ -1,4 +1,4 @@
-(** Room_eio: OCaml 5.x Eio-native Room implementation
+(** Coord_eio: OCaml 5.x Eio-native Coord implementation
 
     Direct-style async I/O using Eio.
 
@@ -8,12 +8,12 @@
     - Message broadcasting
     - Task management
 
-    Migration path: Room -> Room_eio
+    Migration path: Coord -> Coord_eio
 *)
 
 (** {1 Types} *)
 
-(** Room configuration for Eio backend *)
+(** Coord configuration for Eio backend *)
 type config = {
   base_path: string;
   lock_expiry_minutes: int;
@@ -29,7 +29,7 @@ type agent_state = {
   status: string;
 }
 
-(** Room state *)
+(** Coord state *)
 type room_state = {
   protocol_version: string;
   started_at: float;
@@ -181,7 +181,7 @@ let log_event config ~event_type ~agent ~payload =
          | Backend.IOError m -> m | Backend.NotFound k -> "not found: " ^ k
          | Backend.AlreadyExists k -> "already exists: " ^ k | Backend.InvalidKey k -> "invalid key: " ^ k
          | Backend.ConnectionFailed m -> "connection failed: " ^ m | Backend.BackendNotSupported m -> "not supported: " ^ m in
-       Log.Room.warn "append_event set failed for seq %d: %s" seq msg);
+       Log.Coord.warn "append_event set failed for seq %d: %s" seq msg);
   event
 
 (** Get event by sequence *)
@@ -197,7 +197,7 @@ let get_recent_events config ~limit =
     | Ok n -> n
     | Error (Backend.NotFound _) -> 0
     | Error e ->
-        Log.Room.debug "get_recent_events: event seq read failed: %s"
+        Log.Coord.debug "get_recent_events: event seq read failed: %s"
           (match e with Backend.IOError m -> m
            | _ -> "unexpected backend error");
         0
@@ -305,7 +305,7 @@ let atomic_update_state config ~f =
             match room_state_of_json json with
             | Ok s -> s
             | Error e ->
-                Log.Room.warn "update_state: state deserialization failed, resetting: %s" e;
+                Log.Coord.warn "update_state: state deserialization failed, resetting: %s" e;
                 default_room_state ()
           with Eio.Io _ | Yojson.Json_error _ -> default_room_state ())
     in
@@ -382,10 +382,10 @@ let register_agent config ~name ?(capabilities=[]) () =
         { state with active_agents }
       ) with
       | Ok _ -> ()
-      | Error msg -> Log.Room.warn "join_agent: state update failed for %s: %s" name msg);
+      | Error msg -> Log.Coord.warn "join_agent: state update failed for %s: %s" name msg);
 
       (* Auto-subscribe to Messages for A2A communication (via hook) *)
-      !Room_hooks.subscribe_messages_fn ~subscriber:name;
+      !Coord_hooks.subscribe_messages_fn ~subscriber:name;
 
       (* Log join event only for new agents, skip for re-joins *)
       if not already_active then begin
@@ -429,7 +429,7 @@ let remove_agent config ~name =
         { state with active_agents }
       ) with
       | Ok _ -> ()
-      | Error msg -> Log.Room.warn "remove_agent: state update failed for %s: %s" name msg);
+      | Error msg -> Log.Coord.warn "remove_agent: state update failed for %s: %s" name msg);
 
       (* Log leave event *)
       let _event = log_event config
@@ -605,7 +605,7 @@ let broadcast config ~from_agent ~content =
         { state with message_seq = seq }
       ) with
       | Ok _ -> ()
-      | Error msg -> Log.Room.warn "broadcast: state update failed for seq %d: %s" seq msg);
+      | Error msg -> Log.Coord.warn "broadcast: state update failed for seq %d: %s" seq msg);
 
       (* Log broadcast event *)
       let _event = log_event config
@@ -620,7 +620,7 @@ let broadcast config ~from_agent ~content =
       (* Notify keepers about the mention *)
       (try !on_broadcast_mention msg.mention
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Log.Room.warn "on_broadcast_mention callback failed: %s"
+         Log.Coord.warn "on_broadcast_mention callback failed: %s"
            (Printexc.to_string exn));
       Ok msg
   | Error e ->
@@ -653,7 +653,7 @@ let health_check config =
         | Backend.IOError msg -> msg
         | _ -> "Health check failed")
 
-(** {1 Room Status} *)
+(** {1 Coord Status} *)
 
 let status config =
   match read_state config with

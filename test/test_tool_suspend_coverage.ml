@@ -15,20 +15,20 @@ module Tool_args = Masc_mcp.Tool_args
 open Alcotest
 
 module Tool_suspend = Masc_mcp.Tool_suspend
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 (* ============================================================
    Test Helpers
    ============================================================ *)
 
-(** Create a temporary Room.config for isolated tests.
-    Must create directory + .masc/ subdirectory for Room operations. *)
+(** Create a temporary Coord.config for isolated tests.
+    Must create directory + .masc/ subdirectory for Coord operations. *)
 let make_config () =
   let tmp = Printf.sprintf "/tmp/test-suspend-%d" (Random.bits ()) in
   (try Unix.mkdir tmp 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   (try Unix.mkdir (Filename.concat tmp ".masc") 0o755
    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  Room.default_config tmp
+  Coord.default_config tmp
 
 (** Create a Tool_suspend.context with optional caller *)
 let make_ctx ?caller () : Tool_suspend.context =

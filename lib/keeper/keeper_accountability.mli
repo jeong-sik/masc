@@ -10,7 +10,7 @@ type claim_status =
   | Partial
 
 val record_task_transition :
-  Room_query.config ->
+  Coord_query.config ->
   agent_name:string ->
   task_id:string ->
   transition:string ->
@@ -18,7 +18,7 @@ val record_task_transition :
   unit
 
 val record_completion_claim :
-  Room_query.config ->
+  Coord_query.config ->
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
@@ -33,13 +33,13 @@ val record_completion_claim :
   unit
 
 val accountability_summary_json :
-  Room_query.config ->
+  Coord_query.config ->
   keeper_name:string ->
   agent_name:string ->
   Yojson.Safe.t
 
 val accountability_risk_is_high :
-  Room_query.config ->
+  Coord_query.config ->
   keeper_name:string ->
   agent_name:string ->
   bool

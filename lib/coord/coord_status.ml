@@ -1,11 +1,11 @@
-(** Room Status - Room status display.
+(** Coord Status - Coord status display.
 
-    Extracted from Room module. Renders the full room status view
+    Extracted from Coord module. Renders the full room status view
     including agents, tasks, and message summary. *)
 
 open Types
-open Room_utils
-open Room_state
+open Coord_utils
+open Coord_state
 
 (** Get room status *)
 let status config =

@@ -42,7 +42,7 @@
    ;; masc_mcp.team_session_types removed (Epic #6107)
    (re_export masc_mcp.tool_schemas)
    (re_export masc_process)
-   (re_export masc_room)
+   (re_export masc_coord)
    (re_export masc_types)
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)

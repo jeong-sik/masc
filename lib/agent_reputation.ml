@@ -68,13 +68,13 @@ let load_jsonl_safe (path : string) : Yojson.Safe.t list =
           try Some (Yojson.Safe.from_string line)
           with Yojson.Json_error _ -> None)
 
-(** {1 Task Counting from Room State} *)
+(** {1 Task Counting from Coord State} *)
 
 (** Count tasks claimed and completed by an agent from the room's task list.
     Reads task JSON files from `.masc/tasks/`. *)
-let count_tasks_from_room (config : Room.config) ~(agent_name : string)
+let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
     : int * int =
-  let tasks_dir = Filename.concat (Room.masc_dir config) "tasks" in
+  let tasks_dir = Filename.concat (Coord.masc_dir config) "tasks" in
   if not (Sys.file_exists tasks_dir) || not (Sys.is_directory tasks_dir) then
     (0, 0)
   else
@@ -105,9 +105,9 @@ let count_tasks_from_room (config : Room.config) ~(agent_name : string)
 (** {1 Board Counting} *)
 
 (** Count board posts and comments authored by an agent from JSONL files. *)
-let count_board_activity (config : Room.config) ~(agent_name : string)
+let count_board_activity (config : Coord.config) ~(agent_name : string)
     : int * int =
-  let board_dir = Room.masc_dir config in
+  let board_dir = Coord.masc_dir config in
   (* Board posts JSONL *)
   let posts_path = Filename.concat board_dir "board_posts.jsonl" in
   let posts_rows = load_jsonl_safe posts_path in
@@ -132,7 +132,7 @@ let count_board_activity (config : Room.config) ~(agent_name : string)
 
 (** {1 Mention Counting} *)
 
-let count_mention_activity (config : Room.config) ~(agent_name : string)
+let count_mention_activity (config : Coord.config) ~(agent_name : string)
     : int * int =
   let all = Mention_inbox.read_mentions config ~target_agent:agent_name ~limit:10000 in
   let received = List.length all in
@@ -167,7 +167,7 @@ let compute_overall_score ~completion_rate ~response_rate
 
 (** {1 Main Computation} *)
 
-let compute_reputation (config : Room.config) ~(agent_name : string)
+let compute_reputation (config : Coord.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
     count_tasks_from_room config ~agent_name

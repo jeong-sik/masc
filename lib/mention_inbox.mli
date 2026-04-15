@@ -27,17 +27,17 @@ val mention_record_to_json : mention_record -> Yojson.Safe.t
 val mention_record_of_json : Yojson.Safe.t -> mention_record option
 (** Deserialize a mention record from JSON. Returns None on parse failure. *)
 
-val inbox_path : Room.config -> string
+val inbox_path : Coord.config -> string
 (** Returns the path to `.masc/mention_inbox.jsonl`. *)
 
-val append_mention : Room.config -> mention_record -> unit
+val append_mention : Coord.config -> mention_record -> unit
 (** Append a mention record to the JSONL file. *)
 
-val read_mentions : Room.config -> target_agent:string -> limit:int -> mention_record list
+val read_mentions : Coord.config -> target_agent:string -> limit:int -> mention_record list
 (** Read mentions for a target agent, newest first, up to [limit] items. *)
 
-val unread_count : Room.config -> target_agent:string -> int
+val unread_count : Coord.config -> target_agent:string -> int
 (** Count unread mentions (where read_at = 0.0) for a target agent. *)
 
-val mark_read : Room.config -> mention_id:string -> unit
+val mark_read : Coord.config -> mention_id:string -> unit
 (** Set read_at to current time for the given mention ID. *)

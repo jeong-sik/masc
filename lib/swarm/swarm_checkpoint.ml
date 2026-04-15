@@ -66,7 +66,7 @@ type swarm_snapshot = {
 
 let checkpoint_filename = "swarm-checkpoint.json"
 
-let checkpoint_path (config : Room.config) =
+let checkpoint_path (config : Coord.config) =
   Filename.concat config.base_path
     (Filename.concat ".masc" checkpoint_filename)
 
@@ -92,10 +92,10 @@ let task_to_snapshot (task : Types.task) : task_snapshot =
     priority = task.priority;
   }
 
-let build_snapshot (config : Room.config) : swarm_snapshot =
+let build_snapshot (config : Coord.config) : swarm_snapshot =
   let room_id = "default" in
-  let agents = Room.get_agents_raw config in
-  let backlog = Room.read_backlog config in
+  let agents = Coord.get_agents_raw config in
+  let backlog = Coord.read_backlog config in
   let tasks = backlog.tasks in
   let agent_snapshots = List.map agent_to_snapshot agents in
   let task_snapshots = List.map task_to_snapshot tasks in
@@ -135,7 +135,7 @@ let save config =
   let snapshot = build_snapshot config in
   let json = swarm_snapshot_to_yojson snapshot in
   let path = checkpoint_path config in
-  Room_utils.write_json_local path json;
+  Coord_utils.write_json_local path json;
   Ok snapshot
 
 let restore config : (swarm_snapshot, string) result =
@@ -160,7 +160,7 @@ let periodic_save_daemon ~sw ~clock config ~interval_sec =
       Eio.Time.sleep clock (Float.of_int interval_sec);
       (match save config with
        | Ok snap ->
-           Log.Room.info "Swarm checkpoint saved: %d agents, %d/%d tasks done"
+           Log.Coord.info "Swarm checkpoint saved: %d agents, %d/%d tasks done"
              snap.active_agents snap.done_tasks snap.total_tasks
        | Error e ->
            Log.Swarm.error "save error: %s" e);

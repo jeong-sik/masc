@@ -30,14 +30,14 @@ let worker () =
   Printf.printf "[%s] Starting worker...\n%!" !worker_id;
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
-  let config = Room_eio.create_config ~fs !shared_dir in
+  let config = Coord_eio.create_config ~fs !shared_dir in
 
   (* Ensure directory exists *)
   (try Unix.mkdir !shared_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
 
   (* Register *)
   let agent_name = Printf.sprintf "agent-%s" !worker_id in
-  (match Room_eio.register_agent config ~name:agent_name ~capabilities:["concurrent"] () with
+  (match Coord_eio.register_agent config ~name:agent_name ~capabilities:["concurrent"] () with
    | Ok _ -> Printf.printf "[%s] Registered as %s\n%!" !worker_id agent_name
    | Error e -> Printf.printf "[%s] Registration failed: %s\n%!" !worker_id e);
 
@@ -45,7 +45,7 @@ let worker () =
   let seqs = ref [] in
   for i = 1 to !num_messages do
     let content = Printf.sprintf "Worker %s message %d at %f" !worker_id i (Unix.gettimeofday ()) in
-    match Room_eio.broadcast config ~from_agent:agent_name ~content with
+    match Coord_eio.broadcast config ~from_agent:agent_name ~content with
     | Ok msg ->
         seqs := msg.seq :: !seqs;
         Printf.printf "[%s] msg %d -> seq %d\n%!" !worker_id i msg.seq
@@ -59,20 +59,20 @@ let worker () =
     (String.concat ", " (List.map string_of_int seqs_sorted));
 
   (* Remove agent *)
-  let _ = Room_eio.remove_agent config ~name:agent_name in
+  let _ = Coord_eio.remove_agent config ~name:agent_name in
   ()
 
 let verify () =
   Printf.printf "\n=== VERIFICATION ===\n%!";
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
-  let config = Room_eio.create_config ~fs !shared_dir in
+  let config = Coord_eio.create_config ~fs !shared_dir in
 
   (* Read all messages and check for collisions *)
   let messages = Hashtbl.create 100 in
   let rec scan seq max_empty =
     if max_empty <= 0 then ()
-    else match Room_eio.get_message config ~seq with
+    else match Coord_eio.get_message config ~seq with
     | Ok msg ->
         if Hashtbl.mem messages seq then begin
           Printf.printf "❌ COLLISION at seq %d!\n%!" seq;

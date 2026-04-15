@@ -1,13 +1,13 @@
-(** Room_query -- Task/agent/message query and listing functions.
+(** Coord_query -- Task/agent/message query and listing functions.
 
     Read-only operations on room state: raw list retrieval, orphan
     auditing, message collection, agent-joined checks, and formatted
     listing.
 
-    Inherits types and helpers from {!Room_utils} and {!Room_state}. *)
+    Inherits types and helpers from {!Coord_utils} and {!Coord_state}. *)
 
-include module type of Room_utils
-include module type of Room_state
+include module type of Coord_utils
+include module type of Coord_state
 
 (** {1 Task Priority} *)
 

@@ -1,11 +1,11 @@
-(** Room Utilities - Shared helpers for Room module *)
+(** Coord Utilities - Shared helpers for Coord module *)
 
 (** Storage backend type - unified interface (Backend only) *)
 type storage_backend =
   | Memory of Backend.Memory.t
   | FileSystem of Backend.FileSystem.t
 
-(** Room configuration *)
+(** Coord configuration *)
 type config = {
   base_path: string;
   workspace_path: string;
@@ -111,7 +111,7 @@ let sync_test_base_path_env resolved_path =
     | _ ->
         Unix.putenv "MASC_BASE_PATH" resolved_path;
         Unix.putenv "MASC_TEST_SYNCED_BASE_PATH" resolved_path;
-        Log.Room.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
+        Log.Coord.info "Synchronized MASC_BASE_PATH=%s for test executable %s"
           resolved_path (Filename.basename Sys.executable_name)
 
 (** Dedupe MASC-base-path log lines across back-to-back identical resolutions.
@@ -141,7 +141,7 @@ let log_once_info fmt =
       else begin Hashtbl.add logged_lines msg (); true end
     in
     Mutex.unlock logged_lines_mutex;
-    if fresh then Log.Room.info "%s" msg) fmt
+    if fresh then Log.Coord.info "%s" msg) fmt
 
 let resolve_requested_base_path path =
   let requested = normalize_base_path path in
@@ -354,7 +354,7 @@ let default_config base_path =
 
 (** Create config with Eio context.
     [on_backend_ready] is called after backend creation, allowing callers
-    to initialize dependent systems (e.g., Board) without Room depending on them. *)
+    to initialize dependent systems (e.g., Board) without Coord depending on them. *)
 let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;

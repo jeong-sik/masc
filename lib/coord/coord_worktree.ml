@@ -1,4 +1,4 @@
-(** Room Worktree - Git Worktree Integration for Agent Isolation
+(** Coord Worktree - Git Worktree Integration for Agent Isolation
 
     MASC v2 feature: Each agent works in isolated git worktrees
     to prevent file conflicts during parallel work.
@@ -7,7 +7,7 @@
 *)
 
 open Types
-open Room_utils
+open Coord_utils
 
 (** Run argv and get lines (Eio-native, no shell) *)
 let run_argv_lines argv =
@@ -22,9 +22,9 @@ let run_argv_exit argv =
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
 
-(** Check if directory is a git repository - delegates to Room_git *)
+(** Check if directory is a git repository - delegates to Coord_git *)
 let is_git_repo config =
-  Room_git.is_git_repo ~base_path:config.base_path
+  Coord_git.is_git_repo ~base_path:config.base_path
 
 (** Resolve the project root from config.base_path.
     If base_path ends with ".masc", use its parent; otherwise use base_path.
@@ -257,7 +257,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             (* Fetch origin first *)
             let _ = run_argv_exit ["git"; "-C"; root; "fetch"; "origin"] in
 
-            match Room_git.resolve_base_branch root base_branch with
+            match Coord_git.resolve_base_branch root base_branch with
             | Error e -> Error e
             | Ok (resolved_base, fallback_from) ->
                 let note = match fallback_from with
@@ -400,4 +400,4 @@ let worktree_list config =
   if not (is_initialized config) then
     `Assoc [("error", `String "MASC not initialized")]
   else
-    Room_git.list ~base_path:config.base_path
+    Coord_git.list ~base_path:config.base_path

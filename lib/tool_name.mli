@@ -63,7 +63,6 @@ module Masc : sig
     | Add_task
     | Agent_card
     | Agent_fitness
-    | Agent_timeline
     | Agent_update
     | Agents
     | Autoresearch_cycle
@@ -90,7 +89,6 @@ module Masc : sig
     | Claim_next
     | Claim_task
     | Cleanup_zombies
-    | Config
     | Code_delete
     | Code_edit
     | Code_git
@@ -105,21 +103,12 @@ module Masc : sig
     | Dispatch_assign
     | Dispatch_plan
     | Find_by_capability
-    | Gc
-    | Get_metrics
     | Governance_feed
     | Governance_status
     | Heartbeat
     | Join
-    | Keeper_msg_result
     | Leave
-    | Library_add
-    | Library_list
-    | Library_promote
-    | Library_read
-    | Library_search
     | List_tasks
-    | Mcp_session
     | Messages
     | Note_add
     | Operation_checkpoint
@@ -133,8 +122,6 @@ module Masc : sig
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
-    | Pause
-    | Persona_list
     | Plan_clear_task
     | Plan_get
     | Plan_get_task
@@ -144,34 +131,18 @@ module Masc : sig
     | Register_capabilities
     | Release_task
     | Reset
-    | Resume
-    | Room_status
-    | Runtime_ollama_probe
-    | Run_deliverable
-    | Run_get
-    | Run_init
-    | Run_list
-    | Run_log
-    | Run_plan
+    | Coord_status
     | Set_current_task
-    | Spawn
-    | Start
     | Status
-    | Surface_audit
     | Task_history
     | Tasks
-    | Tool_admin_snapshot
-    | Tool_admin_update
     | Tool_grant
     | Tool_help
     | Tool_list
     | Tool_revoke
-    | Tool_stats
     | Transition
     | Update_priority
     | Web_search
-    | Webrtc_answer
-    | Webrtc_offer
     | Who
     | Workflow_guide
     | Worktree_create

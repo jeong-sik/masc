@@ -5,7 +5,7 @@
     [keeper_exec_tools]. *)
 
 val handle_keeper_pr_workflow :
-  config:Room.config ->
+  config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string

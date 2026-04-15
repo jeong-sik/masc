@@ -1,6 +1,6 @@
 (** Task_dispatch - Runtime backend selection for MASC Tasks
 
-    Uses JSONL (Room.* functions) only.
+    Uses JSONL (Coord.* functions) only.
 
     @since 0.7.0
 *)
@@ -29,7 +29,7 @@ let init_jsonl () =
     Log.Task.warn "WARNING: already initialized, ignoring init_jsonl"
   else begin
     backend_state := Active Jsonl;
-    Log.Task.info "JSONL backend initialized (using Room.* functions)."
+    Log.Task.info "JSONL backend initialized (using Coord.* functions)."
   end
 
 (** Reset for testing *)
@@ -42,31 +42,31 @@ let backend () =
   | Active backend -> backend
   | Uninitialized ->
       backend_state := Active Jsonl;
-      Log.Task.info "JSONL backend initialized (using Room.* functions).";
+      Log.Task.info "JSONL backend initialized (using Coord.* functions).";
       Jsonl
 
 (** {1 Dispatch Functions} *)
 
 (** Add a new task.
-    Delegates to Room.add_task. *)
+    Delegates to Coord.add_task. *)
 let add_task config ~title ~priority ~description =
   match backend () with
   | Jsonl ->
-      (* Use existing Room.add_task *)
-      Ok (Room.add_task config ~title ~priority ~description)
+      (* Use existing Coord.add_task *)
+      Ok (Coord.add_task config ~title ~priority ~description)
 
 (** Get a task by ID *)
 let get_task config ~task_id =
   match backend () with
   | Jsonl ->
-      let backlog = Room.read_backlog config in
+      let backlog = Coord.read_backlog config in
       Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks)
 
 (** List tasks *)
 let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
   match backend () with
   | Jsonl ->
-      let backlog = Room.read_backlog config in
+      let backlog = Coord.read_backlog config in
       let tasks = List.filter (fun (t : task) ->
         let dominated = match t.task_status with
           | Done _ -> not include_done
@@ -91,7 +91,7 @@ let validate_transition ~(current : task_status) ~(next : task_status) ~task_id 
 let update_status config ~task_id ~status =
   match backend () with
   | Jsonl ->
-      let backlog = Room.read_backlog config in
+      let backlog = Coord.read_backlog config in
       let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
       (match task_opt with
        | None -> Error (TaskNotFound task_id)
@@ -107,20 +107,20 @@ let update_status config ~task_id ~status =
               last_updated = now_iso ();
               version = backlog.version + 1;
             } in
-            Room.write_backlog config new_backlog;
+            Coord.write_backlog config new_backlog;
             Ok ())
 
 (** Delete a task *)
 let delete_task config ~task_id =
   match backend () with
   | Jsonl ->
-      let backlog = Room.read_backlog config in
+      let backlog = Coord.read_backlog config in
       let new_tasks = List.filter (fun (t : task) -> t.id <> task_id) backlog.tasks in
       let new_backlog = {
         tasks = new_tasks;
         last_updated = now_iso ();
         version = backlog.version + 1;
       } in
-      Room.write_backlog config new_backlog;
+      Coord.write_backlog config new_backlog;
       Ok ()
 

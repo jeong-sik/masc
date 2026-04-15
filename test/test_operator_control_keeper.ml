@@ -22,8 +22,8 @@ let test_snapshot_exposes_keeper_and_social_actions () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
       let ctx = operator_ctx env sw config "dashboard" in
       let available_actions =
         Operator_control.snapshot_json ~actor:"dashboard" ctx
@@ -87,8 +87,8 @@ let test_keeper_status_exposes_summary_and_recoverable () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -170,8 +170,8 @@ let test_keeper_status_defaults_name_to_caller () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some keeper_name));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some keeper_name));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -217,8 +217,8 @@ let test_keeper_status_accepts_agent_name_alias () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -263,8 +263,8 @@ let test_keeper_status_exposes_model_observability () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -393,8 +393,8 @@ let test_keeper_down_accepts_agent_name_alias () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -445,8 +445,8 @@ let test_operator_keeper_probe_accepts_agent_name_alias () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -510,8 +510,8 @@ let test_operator_keeper_recover_accepts_agent_name_alias () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -585,10 +585,10 @@ let test_keeper_list_scoped_to_current_base_path () =
       cleanup_dir base_dir_a;
       cleanup_dir base_dir_b)
     (fun () ->
-      let config_a = Room.default_config base_dir_a in
-      let config_b = Room.default_config base_dir_b in
-      ignore (Room.init config_a ~agent_name:(Some "operator-a"));
-      ignore (Room.init config_b ~agent_name:(Some "operator-b"));
+      let config_a = Coord.default_config base_dir_a in
+      let config_b = Coord.default_config base_dir_b in
+      ignore (Coord.init config_a ~agent_name:(Some "operator-a"));
+      ignore (Coord.init config_b ~agent_name:(Some "operator-b"));
       let keeper_ctx_a : _ Tool_keeper.context =
         {
           config = config_a;
@@ -667,10 +667,10 @@ let test_keeper_status_does_not_cross_base_path () =
       cleanup_dir base_dir_a;
       cleanup_dir base_dir_b)
     (fun () ->
-      let config_a = Room.default_config base_dir_a in
-      let config_b = Room.default_config base_dir_b in
-      ignore (Room.init config_a ~agent_name:(Some "operator-a"));
-      ignore (Room.init config_b ~agent_name:(Some "operator-b"));
+      let config_a = Coord.default_config base_dir_a in
+      let config_b = Coord.default_config base_dir_b in
+      ignore (Coord.init config_a ~agent_name:(Some "operator-a"));
+      ignore (Coord.init config_b ~agent_name:(Some "operator-b"));
       let keeper_ctx_a : _ Tool_keeper.context =
         {
           config = config_a;
@@ -730,10 +730,10 @@ let test_keeper_down_only_pauses_current_base_path () =
       cleanup_dir base_dir_a;
       cleanup_dir base_dir_b)
     (fun () ->
-      let config_a = Room.default_config base_dir_a in
-      let config_b = Room.default_config base_dir_b in
-      ignore (Room.init config_a ~agent_name:(Some "operator-a"));
-      ignore (Room.init config_b ~agent_name:(Some "operator-b"));
+      let config_a = Coord.default_config base_dir_a in
+      let config_b = Coord.default_config base_dir_b in
+      ignore (Coord.init config_a ~agent_name:(Some "operator-a"));
+      ignore (Coord.init config_b ~agent_name:(Some "operator-b"));
       let keeper_ctx_a : _ Tool_keeper.context =
         {
           config = config_a;
@@ -850,8 +850,8 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
 goal = "Defaults goal"
 proactive_enabled = true
 |};
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -973,8 +973,8 @@ let test_snapshot_keeper_tool_audit_fallback () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1058,8 +1058,8 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1157,8 +1157,8 @@ let test_keeper_msg_auto_execution_session_bridge () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1299,8 +1299,8 @@ let test_operator_keeper_message_rejects_legacy_model_args () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       match
         Operator_control.action_json ctx

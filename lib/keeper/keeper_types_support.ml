@@ -14,12 +14,12 @@ let ensure_dir_ = Keeper_fs.ensure_dir
     Used by external callers via [Keeper_types.mkdir_p]. *)
 let mkdir_p path = ignore (Keeper_fs.ensure_dir path)
 
-let keeper_dir_ (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "keepers" in
+let keeper_dir_ (config : Coord.config) =
+  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
   ensure_dir_ d
 
-let session_base_dir_ (config : Room.config) =
-  let d = Filename.concat (Room.masc_root_dir config) "traces" in
+let session_base_dir_ (config : Coord.config) =
+  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
   ensure_dir_ d
 
 (** Check API key availability using model label strings.

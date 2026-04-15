@@ -251,7 +251,7 @@ let handoff_event_json (event : handoff_event) =
       ("to_model", Json_util.string_opt_to_json event.to_model);
     ]
 
-let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name =
+let read_keeper_metric_records ?since ?until (config : Coord.config) keeper_name =
   let store = Keeper_types.keeper_metrics_store config keeper_name in
   match (since, until) with
   | Some _, _ | _, Some _ ->
@@ -261,7 +261,7 @@ let read_keeper_metric_records ?since ?until (config : Room.config) keeper_name 
       Dated_jsonl.read_range store ~since:start_date ~until:end_date
   | None, None -> Dated_jsonl.read_recent store max_signal_scan
 
-let read_handoff_events ?since ?until (config : Room.config) =
+let read_handoff_events ?since ?until (config : Coord.config) =
   let events =
     Keeper_types.keeper_names config
     |> List.concat_map (fun keeper_name ->
@@ -273,7 +273,7 @@ let read_handoff_events ?since ?until (config : Room.config) =
       Float.compare right.timestamp left.timestamp)
     events
 
-let has_any_handoff_events (config : Room.config) =
+let has_any_handoff_events (config : Coord.config) =
   Keeper_types.keeper_names config
   |> List.exists (fun keeper_name ->
          read_keeper_metric_records config keeper_name
@@ -458,7 +458,7 @@ let recent_handoffs_json ?since ?until ~has_any
       ("total_recent", `Int (List.length events));
     ]
 
-let json ~(config : Room.config) ?since ?until () =
+let json ~(config : Coord.config) ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
   let has_window = Option.is_some since || Option.is_some until in

@@ -163,10 +163,10 @@ let test_config_reasonable_timeout () =
     (cfg.agent_timeout_s >= 1 && cfg.agent_timeout_s <= 3600)
 
 (* ============================================================
-   should_orchestrate Tests (requires MASC Room)
+   should_orchestrate Tests (requires MASC Coord)
    ============================================================ *)
 
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -188,12 +188,12 @@ let with_initialized_room f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = make_test_dir () in
-  let config = Room.default_config tmp_dir in
-  let _ = Room.init config ~agent_name:None in
+  let config = Coord.default_config tmp_dir in
+  let _ = Coord.init config ~agent_name:None in
   Fun.protect
     ~finally:(fun () ->
       try
-        let _ = Room.reset config in
+        let _ = Coord.reset config in
         rm_rf tmp_dir
       with _ -> ())
     (fun () -> f config)
@@ -207,7 +207,7 @@ let test_should_orchestrate_empty_room () =
 let test_should_orchestrate_with_task_no_agent () =
   with_initialized_room @@ fun config ->
   (* Add a high priority task *)
-  let _ = Room.add_task config ~title:"Important Task" ~priority:1 ~description:"Test" in
+  let _ = Coord.add_task config ~title:"Important Task" ~priority:1 ~description:"Test" in
   (* No active agents → should return true *)
   let result = Orchestrator.should_orchestrate config in
   check bool "orchestration needed" true result
@@ -215,8 +215,8 @@ let test_should_orchestrate_with_task_no_agent () =
 let test_should_orchestrate_with_task_and_agent () =
   with_initialized_room @@ fun config ->
   (* Add task and join as agent *)
-  let _ = Room.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
-  let _ = Room.join config ~agent_name:"active-agent" ~capabilities:[] () in
+  let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
+  let _ = Coord.join config ~agent_name:"active-agent" ~capabilities:[] () in
   (* Active agent exists → should return false *)
   let result = Orchestrator.should_orchestrate config in
   check bool "no orchestration with active agent" false result
@@ -224,9 +224,9 @@ let test_should_orchestrate_with_task_and_agent () =
 let test_should_orchestrate_paused_room () =
   with_initialized_room @@ fun config ->
   (* Add task *)
-  let _ = Room.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
+  let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
   (* Pause the room *)
-  let _ = Room.pause config ~by:"test" ~reason:"Testing" in
+  let _ = Coord.pause config ~by:"test" ~reason:"Testing" in
   (* Paused room should return false *)
   let result = Orchestrator.should_orchestrate config in
   check bool "no orchestration when paused" false result
@@ -234,7 +234,7 @@ let test_should_orchestrate_paused_room () =
 let test_should_orchestrate_low_priority_task () =
   with_initialized_room @@ fun config ->
   (* Add low priority task (priority 5 > threshold 2) *)
-  let _ = Room.add_task config ~title:"Low Priority" ~priority:5 ~description:"Test" in
+  let _ = Coord.add_task config ~title:"Low Priority" ~priority:5 ~description:"Test" in
   (* Low priority tasks don't trigger orchestration *)
   let result = Orchestrator.should_orchestrate config in
   check bool "no orchestration for low priority" false result

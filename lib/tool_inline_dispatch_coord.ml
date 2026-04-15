@@ -1,4 +1,4 @@
-(** Tool_inline_dispatch_room — room lifecycle tool handlers.
+(** Tool_inline_dispatch_coord — room lifecycle tool handlers.
 
     Handles: masc_start, masc_join, masc_leave.
 
@@ -26,7 +26,7 @@ let handle_start (ctx : context) : tool_result option =
   (* Step 1: set project root *)
   let room_result =
     if path = "" then begin
-      if Room.is_initialized state.Mcp_server.room_config then
+      if Coord.is_initialized state.Mcp_server.room_config then
         Ok config
       else
         Error "path is required when no project scope is set. Provide the project directory path."
@@ -45,12 +45,12 @@ let handle_start (ctx : context) : tool_result option =
       if not (Sys.file_exists expanded && Sys.is_directory expanded) then
         Error (Printf.sprintf "Directory not found: %s" expanded)
       else begin
-        let cfg = Room.default_config expanded in
-        if Room.is_initialized cfg then begin
+        let cfg = Coord.default_config expanded in
+        if Coord.is_initialized cfg then begin
           state.Mcp_server.room_config <- cfg;
           Ok cfg
         end else begin
-          let _msg = Room.init cfg ~agent_name:None in
+          let _msg = Coord.init cfg ~agent_name:None in
           state.Mcp_server.room_config <- cfg;
           Ok cfg
         end
@@ -66,7 +66,7 @@ let handle_start (ctx : context) : tool_result option =
     (* Step 2: join (idempotent — skip if already joined) *)
     let join_result =
       try
-        let _msg = Room.join active_config ~agent_name ~capabilities:[] () in
+        let _msg = Coord.join active_config ~agent_name ~capabilities:[] () in
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg = Printexc.to_string exn in
@@ -83,7 +83,7 @@ let handle_start (ctx : context) : tool_result option =
              "masc_start complete (project scope set + joined as %s). No task created — use masc_add_task to create one."
              agent_name)
       else begin
-        let add_result = Room_task.add_task active_config ~title:task_title ~priority:3 ~description:"" in
+        let add_result = Coord_task.add_task active_config ~title:task_title ~priority:3 ~description:"" in
         (* Extract task ID from result like "Added task-001: title" *)
         let task_id =
           try
@@ -105,7 +105,7 @@ let handle_start (ctx : context) : tool_result option =
                "masc_start partial: joined as %s, but task creation failed: %s"
                agent_name add_result)
         else begin
-          let _claim_msg = Room_task.claim_task active_config ~agent_name ~task_id in
+          let _claim_msg = Coord_task.claim_task active_config ~agent_name ~task_id in
           Planning_eio.set_current_task active_config ~task_id;
           Some
             (true,
@@ -124,9 +124,9 @@ let handle_join (ctx : context) : tool_result option =
   let mcp_session_id = ctx.mcp_session_id in
   let sid = Option.value ~default:"-" mcp_session_id in
   let caps = arg_get_string_list ctx "capabilities" in
-  let result = Room.join config ~agent_name ~capabilities:caps () in
+  let result = Coord.join config ~agent_name ~capabilities:caps () in
   (* GC: reap zombie agents on join. Best-effort. *)
-  (try ignore (Room.cleanup_zombies config)
+  (try ignore (Coord.cleanup_zombies config)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Printexc.to_string exn));
   (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
@@ -197,7 +197,7 @@ let handle_leave (ctx : context) : tool_result option =
   ] in
   let _pushed = Session.push_notification_to_active_agents registry ~event:leave_event in
   Mcp_server.sse_broadcast state leave_event;
-  let result = Room.leave config ~agent_name in
+  let result = Coord.leave config ~agent_name in
   Session.unregister registry ~agent_name;
   if Option.is_none mcp_session_id then begin
     let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in

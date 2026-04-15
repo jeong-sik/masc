@@ -46,8 +46,8 @@ let with_room f =
         rm dir
       with _ -> ()))
     (fun () ->
-      let config = Room.default_config dir in
-      let _msg = Room.init config ~agent_name:(Some "test-keeper") in
+      let config = Coord.default_config dir in
+      let _msg = Coord.init config ~agent_name:(Some "test-keeper") in
       f config)
 
 let call_tool config meta name input =
@@ -69,7 +69,7 @@ let parse_json s =
 let test_claim_returns_result () =
   with_room (fun config ->
     let meta = make_test_meta () in
-    let _ = Room.add_task config ~title:"Test task" ~priority:1 ~description:"desc" in
+    let _ = Coord.add_task config ~title:"Test task" ~priority:1 ~description:"desc" in
     let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let json = parse_json result in
     match Yojson.Safe.Util.member "result" json with
@@ -121,7 +121,7 @@ let test_done_with_nonexistent_id () =
 let test_done_after_claim () =
   with_room (fun config ->
     let meta = make_test_meta () in
-    let _ = Room.add_task config ~title:"Done task" ~priority:1 ~description:"desc" in
+    let _ = Coord.add_task config ~title:"Done task" ~priority:1 ~description:"desc" in
     let claim_result = call_tool config meta "keeper_task_claim" (`Assoc []) in
     let claim_json = parse_json claim_result in
     let result_str = Yojson.Safe.Util.(member "result" claim_json |> to_string) in

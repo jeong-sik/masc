@@ -1,11 +1,11 @@
-(** Room_agent -- Agent status, capability registration, and discovery.
+(** Coord_agent -- Agent status, capability registration, and discovery.
 
     Read/write operations on agent state: status listing, capability
     broadcasting, agent metadata updates, and capability-based search. *)
 
 open Types
-include Room_utils
-include Room_state
+include Coord_utils
+include Coord_state
 
 let get_agents_status config =
   ensure_initialized config;
@@ -16,7 +16,7 @@ let get_agents_status config =
   else begin
     let agents = ref [] in
     Sys.readdir agents_path |> Array.iter (fun name ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat agents_path name in
         match read_agent_with_repair config path with
@@ -156,7 +156,7 @@ let find_agents_by_capability config ~capability =
   else begin
     let matching = ref [] in
     Sys.readdir agents_path |> Array.iter (fun name ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
       if Filename.check_suffix name ".json" then begin
         let path = Filename.concat agents_path name in
         match read_agent_with_repair config path with

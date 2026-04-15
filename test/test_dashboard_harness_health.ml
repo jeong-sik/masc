@@ -3,7 +3,7 @@ open Alcotest
 module Harness = Masc_mcp.Dashboard_harness_health
 module Cal = Masc_mcp.Eval_calibration
 module AR = Masc_mcp.Anti_rationalization
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 module Keeper_types = Masc_mcp.Keeper_types
 
 let test_counter = ref 0
@@ -27,8 +27,8 @@ let with_test_stores f =
   let base_dir = tmpdir "harness_room" in
   let verdict_dir = tmpdir "harness_verdicts" in
   let pre_dir = tmpdir "harness_pre" in
-  let config = Room.default_config base_dir in
-  ignore (Room.init config ~agent_name:None);
+  let config = Coord.default_config base_dir in
+  ignore (Coord.init config ~agent_name:None);
   Cal.set_store_for_testing ~base_dir:verdict_dir;
   Harness.set_pre_compact_store_for_testing ~base_dir:pre_dir;
   Fun.protect

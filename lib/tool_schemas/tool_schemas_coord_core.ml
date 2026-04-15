@@ -1,6 +1,6 @@
 (** MCP tool schemas for room management operations (core).
 
-    Only schemas dispatched by Tool_room remain here.
+    Only schemas dispatched by Tool_coord remain here.
     Other schemas have been moved to their owning modules:
     - Tool_task, Tool_control, Tool_suspend, Tool_plan, Tool_portal,
       Tool_inline_dispatch (via Tool_schemas_inline) *)

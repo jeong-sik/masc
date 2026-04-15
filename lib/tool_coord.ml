@@ -1,4 +1,4 @@
-(** Tool_room - Room management operations
+(** Tool_coord - Coord management operations
 
     Handles: status, reset, init, workflow_guide, check
 
@@ -8,7 +8,7 @@
 type tool_result = bool * string
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -60,7 +60,7 @@ let cached_text_by_key cache ~key ~ttl_s compute =
       cache.expires_at <- now +. ttl_s;
       value
 
-let effective_cluster_name (config : Room.config) =
+let effective_cluster_name (config : Coord.config) =
   match String.trim config.backend_config.Backend_types.cluster_name with
   | "" -> Env_config_core.cluster_name ()
   | name -> name
@@ -81,18 +81,18 @@ let status_worktree_active (ctx : context) =
   with
   | Sys_error _ -> false
   | exn ->
-      Log.Room.warn "worktree_active check failed: %s" (Printexc.to_string exn);
+      Log.Coord.warn "worktree_active check failed: %s" (Printexc.to_string exn);
       false
 
 let safe_resolve_agent_name (ctx : context) ~joined =
   if not joined then
     ctx.agent_name
   else
-    try Room.resolve_agent_name ctx.config ctx.agent_name
+    try Coord.resolve_agent_name ctx.config ctx.agent_name
     with
     | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
     | exn ->
-        Log.Room.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+        Log.Coord.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
           (Printexc.to_string exn);
         ctx.agent_name
 
@@ -104,24 +104,24 @@ let safe_current_task (ctx : context) ~joined =
     with
     | Sys_error _ | Yojson.Json_error _ -> None
     | exn ->
-        Log.Room.warn "get_current_task failed for %s: %s" ctx.agent_name
+        Log.Coord.warn "get_current_task failed for %s: %s" ctx.agent_name
           (Printexc.to_string exn);
         None
 
 let safe_get_agents (ctx : context) =
-  try Room.get_agents_raw ctx.config
+  try Coord.get_agents_raw ctx.config
   with
   | Sys_error _ | Yojson.Json_error _ -> []
   | exn ->
-      Log.Room.warn "get_agents_raw failed: %s" (Printexc.to_string exn);
+      Log.Coord.warn "get_agents_raw failed: %s" (Printexc.to_string exn);
       []
 
 let safe_is_zombie_agent ~agent_name last_seen =
-  try Room.is_zombie_agent ~agent_name last_seen
+  try Coord.is_zombie_agent ~agent_name last_seen
   with
   | Sys_error _ | Yojson.Json_error _ -> false
   | exn ->
-      Log.Room.warn "is_zombie_agent failed for %s: %s" agent_name
+      Log.Coord.warn "is_zombie_agent failed for %s: %s" agent_name
         (Printexc.to_string exn);
       false
 
@@ -153,14 +153,14 @@ let agent_focus_label ~is_zombie (agent : Types.agent) =
     | task -> task
 
 let status_summary_string (ctx : context) =
-  Room.ensure_initialized ctx.config;
-  let state = Room.read_state ctx.config in
+  Coord.ensure_initialized ctx.config;
+  let state = Coord.read_state ctx.config in
   let current_room = "default" in
-  let backlog = Room.read_backlog ctx.config in
+  let backlog = Coord.read_backlog ctx.config in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
   let joined =
-    try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
+    try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name
     with Sys_error _ | Yojson.Json_error _ -> false
   in
   let actual_name = safe_resolve_agent_name ctx ~joined in
@@ -178,7 +178,7 @@ let status_summary_string (ctx : context) =
   let agents_with_state =
     List.map
       (fun (agent : Types.agent) ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
         let is_zombie =
           safe_is_zombie_agent ~agent_name:agent.name agent.last_seen
         in
@@ -198,7 +198,7 @@ let status_summary_string (ctx : context) =
       (fun
          (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
          (task : Types.task) ->
-        Room_query.safe_yield ();
+        Coord_query.safe_yield ();
         match task.task_status with
         | Types.Todo ->
             (task :: active, todo_cnt + 1, claimed_cnt, in_progress_cnt,
@@ -303,7 +303,7 @@ let status_summary_string (ctx : context) =
   | _ ->
       List.iter
         (fun ((agent : Types.agent), is_zombie) ->
-          Room_query.safe_yield ();
+          Coord_query.safe_yield ();
           let icon = agent_status_icon ~is_zombie agent.status in
           let you_marker =
             if String.equal agent.name actual_name then " (you)" else ""
@@ -320,7 +320,7 @@ let status_summary_string (ctx : context) =
   Buffer.add_string buf "\n📋 Quest Board:\n";
   List.iter
     (fun (task : Types.task) ->
-      Room_query.safe_yield ();
+      Coord_query.safe_yield ();
       let (status_icon, status_label) = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
       Buffer.add_string buf
@@ -359,7 +359,7 @@ let handle_reset ctx args =
     (false, "⚠️ This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed.")
   else begin
     invalidate_status_cache ();
-    (true, Room.reset ctx.config)
+    (true, Coord.reset ctx.config)
   end
 
 (* ── State inspection (shared by workflow_guide and check) ──────── *)
@@ -373,17 +373,17 @@ type agent_state = {
 }
 
 let inspect_state ctx =
-  let room_set = Room.is_initialized ctx.config in
+  let room_set = Coord.is_initialized ctx.config in
   let joined =
     if room_set then
-      (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name
+      (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name
        with Sys_error _ | Yojson.Json_error _ -> false)
     else false
   in
   let task_claimed =
     if joined then
-      let actual_name = Room.resolve_agent_name ctx.config ctx.agent_name in
-      Room.get_tasks_raw ctx.config
+      let actual_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
+      Coord.get_tasks_raw ctx.config
       |> List.exists (fun (task : Types.task) ->
              match task.task_status with
              | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
@@ -496,8 +496,8 @@ let handle_check ctx args =
 
 (* Dispatch function *)
 let handle_heartbeat ctx _args =
-  let result = Room.heartbeat ctx.config ~agent_name:ctx.agent_name in
-  (* Room.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
+  let result = Coord.heartbeat ctx.config ~agent_name:ctx.agent_name in
+  (* Coord.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
   let success = not (String.length result >= 3
     && Char.code result.[0] = 0xe2
     && Char.code result.[1] = 0x9a
@@ -513,7 +513,7 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_check" -> Some (handle_check ctx args)
   | _ -> None
 
-let schemas = Tool_schemas_room.schemas
+let schemas = Tool_schemas_coord.schemas
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

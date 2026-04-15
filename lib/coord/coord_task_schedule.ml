@@ -1,11 +1,11 @@
-(** Room_task_schedule — Scheduling: claim_next, release_stale_claims.
+(** Coord_task_schedule — Scheduling: claim_next, release_stale_claims.
 
-    Extracted from Room_task to separate scheduling logic (priority queue,
+    Extracted from Coord_task to separate scheduling logic (priority queue,
     stale detection, auto-release) from task CRUD and state transitions. *)
 
 open Types
-include Room_utils
-include Room_state
+include Coord_utils
+include Coord_state
 
 let agent_current_task_matches_backlog backlog ~agent_name task_id =
   match
@@ -88,10 +88,10 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
       let observe_auto_release () =
         match previous_claim with
         | Some prev ->
-            Room_task.observe_task_transition config ~agent_name ~task_id:prev.id
+            Coord_task.observe_task_transition config ~agent_name ~task_id:prev.id
               ~transition:"release"
               ~details:
-                (Room_task.task_transition_details ~from_status:prev.task_status
+                (Coord_task.task_transition_details ~from_status:prev.task_status
                    ~to_status:Types.Todo
                    ~reason:"auto_release_before_claim_next" ())
         | None -> ()
@@ -155,13 +155,13 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
 
       (* Helper: clear agent current_task and reset status after auto-release
          when no replacement task can be claimed.  Delegates to
-         [Room_task.update_local_agent_state] so the agent-file write
+         [Coord_task.update_local_agent_state] so the agent-file write
          holds [with_file_lock] on the agent file itself, matching the
-         discipline used by [Room_task] transitions (PR #6634). *)
+         discipline used by [Coord_task] transitions (PR #6634). *)
       let clear_agent_state_after_release () =
         match released_task_id with
         | Some _ ->
-            Room_task.update_local_agent_state config ~agent_name (fun agent ->
+            Coord_task.update_local_agent_state config ~agent_name (fun agent ->
               { agent with status = Active; current_task = None })
         | None -> ()
       in
@@ -215,22 +215,22 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
           write_backlog config new_backlog;
 
           (* Update agent status — takes [with_file_lock] on the
-             agent file via [Room_task.update_local_agent_state] to
+             agent file via [Coord_task.update_local_agent_state] to
              keep the record consistent with concurrent
-             [Room_agent.update_agent_r] or other task transitions
+             [Coord_agent.update_agent_r] or other task transitions
              that hold the agent-file lock (PR #6634). *)
-          Room_task.update_local_agent_state config ~agent_name (fun agent ->
+          Coord_task.update_local_agent_state config ~agent_name (fun agent ->
             { agent with status = Busy; current_task = Some task.id });
 
           (* No broadcast — log_event + emit_task_activity below are sufficient. *)
           (match released_task_id with
            | Some rid ->
-               Room_task.emit_task_activity config ~agent_name ~task_id:rid
+               Coord_task.emit_task_activity config ~agent_name ~task_id:rid
                  ~kind:"task.released"
                  ~payload:(`Assoc [ ("task_id", `String rid) ]);
                observe_auto_release ()
            | None -> ());
-          Room_task.emit_task_activity config ~agent_name ~task_id:task.id
+          Coord_task.emit_task_activity config ~agent_name ~task_id:task.id
             ~kind:"task.claimed"
             ~payload:
               (`Assoc
@@ -243,10 +243,10 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
           log_event config (Printf.sprintf
             "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
             agent_name task.id task.priority (now_iso ()));
-          Room_task.observe_task_transition config ~agent_name ~task_id:task.id
+          Coord_task.observe_task_transition config ~agent_name ~task_id:task.id
             ~transition:"claim"
             ~details:
-              (Room_task.task_transition_details ~from_status:Types.Todo
+              (Coord_task.task_transition_details ~from_status:Types.Todo
                  ~to_status:
                    (Types.Claimed
                       { assignee = agent_name; claimed_at = now_iso () })

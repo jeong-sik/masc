@@ -3,7 +3,7 @@
     Module retained for dispatch interface compatibility. *)
 
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 

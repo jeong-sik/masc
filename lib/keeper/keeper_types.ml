@@ -496,7 +496,7 @@ let map_scheduled_autonomous_rt =
 let now_iso () = Types.now_iso ()
 let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 
-let runtime_meta_write_sync_hook : (Room.config -> keeper_meta -> unit) ref =
+let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
 ;;
 

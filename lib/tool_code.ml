@@ -14,7 +14,7 @@ open Tool_args
 
 (* Context required by code tools *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
   agent_name: string;
 }
 
@@ -65,12 +65,12 @@ let validate_path config path =
     if String.contains path '\x00' then
       Error (IoError "Path contains null byte")
     else
-    match Room_git.git_root ~base_path:config.Room.base_path with
+    match Coord_git.git_root ~base_path:config.Coord.base_path with
     | None -> Error (IoError "Not in a git repository")
     | Some git_root ->
     let absolute_path =
       if Filename.is_relative path then
-        Filename.concat config.Room.base_path path
+        Filename.concat config.Coord.base_path path
       else
         path
     in
@@ -104,7 +104,7 @@ let validate_path config path =
 
    Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
 let validate_read_path ~agent_name config path =
-  let base_path = config.Room.base_path in
+  let base_path = config.Coord.base_path in
   match validate_path config path with
   | Error e -> Error e
   | Ok canonical_string ->

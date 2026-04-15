@@ -30,7 +30,7 @@ let handle_broadcast (ctx : context) : tool_result option =
     Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
   else begin
     let trace_context = Otel_trace_context.from_ambient () in
-    let result = Room.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
+    let result = Coord.broadcast ?trace_context config ~from_agent:agent_name ~content:message in
     let mention = Mention.extract message in
     let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
     let notification_fields = [
@@ -72,7 +72,7 @@ let handle_messages (ctx : context) : tool_result option =
   let config = ctx.config in
   let since_seq = arg_get_int ctx "since_seq" 0 in
   let limit = arg_get_int ctx "limit" 10 in
-  Some (true, Room.get_messages config ~since_seq ~limit)
+  Some (true, Coord.get_messages config ~since_seq ~limit)
 
 (** masc_who — list agents currently in the room *)
 let handle_who (ctx : context) : tool_result option =

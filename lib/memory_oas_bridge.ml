@@ -55,9 +55,9 @@ let generate_session_id () =
 
     Preference order:
     1. Explicit [base_dir]
-    2. Room-scoped [.masc] under [config.base_path]
+    2. Coord-scoped [.masc] under [config.base_path]
     3. Process-scoped [.masc] under [MASC_BASE_PATH] (or cwd fallback) *)
-let resolve_base_dir ?(base_dir : string option) ?(config : Room_utils.config option) () =
+let resolve_base_dir ?(base_dir : string option) ?(config : Coord_utils.config option) () =
   match base_dir, config with
   | Some dir, _ -> dir
   | None, Some cfg -> Filename.concat cfg.base_path ".masc"
@@ -262,7 +262,7 @@ let create_memory ~(agent_name : string) ?(base_dir : string option)
 
 (** Load and return the institution welcome text, or [None] when empty.
     Used by [load_institution_text]. *)
-let read_institution_welcome (config : Room_utils.config) : string option =
+let read_institution_welcome (config : Coord_utils.config) : string option =
   let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
   if welcome = "" then None else Some welcome
 
@@ -676,7 +676,7 @@ let load_procedures_text ~(agent_name : string) ~(limit : int) : string option =
     Pure read: does not touch OAS [Memory.t].
 
     @since v2.265.0 (RFC-MASC-004 Phase 1) *)
-let load_institution_text ~(config : Room_utils.config) : string option =
+let load_institution_text ~(config : Coord_utils.config) : string option =
   Option.map
     (fun w -> Printf.sprintf "[institutional memory]\n%s" w)
     (read_institution_welcome config)

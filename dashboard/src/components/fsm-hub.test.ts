@@ -13,6 +13,7 @@ import {
   flagTooltip,
   invariantDescription,
   isTransitionInSegment,
+  recoveryStateDescription,
   laneTransitionCount,
   type CompositeObservation,
   type HoveredSegment,
@@ -463,5 +464,25 @@ describe('invariantDescription', () => {
 
   it('falls back to generic text for unknown keys', () => {
     expect(invariantDescription('mystery_invariant')).toMatch(/^Invariant defined by/)
+  })
+})
+
+describe('recoveryStateDescription', () => {
+  it('returns prose for all four recovery states', () => {
+    const states = ['clean', 'reconcile_pending', 'drift: data↑ fsm↓', 'drift: fsm↑ data↓']
+    for (const state of states) {
+      const desc = recoveryStateDescription(state)
+      expect(desc.length).toBeGreaterThan(30)
+      expect(desc).not.toMatch(/^Recovery state defined by/)
+    }
+  })
+
+  it('mentions restart consequence for drift states', () => {
+    expect(recoveryStateDescription('drift: data↑ fsm↓')).toMatch(/restart|replay|duplicate/i)
+    expect(recoveryStateDescription('drift: fsm↑ data↓')).toMatch(/restart|lose|re-derive/i)
+  })
+
+  it('falls back for unknown states', () => {
+    expect(recoveryStateDescription('unknown')).toMatch(/^Recovery state defined by/)
   })
 })

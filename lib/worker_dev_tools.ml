@@ -596,19 +596,149 @@ let gh_allowed_commands =
     "workflow";
   ]
 
-(** Specific (command, subcommand) pairs that are always blocked
-    regardless of allowlist. These are irreversible or catastrophic.
-    Parity with the legacy [gh_dangerous_prefixes] check in
-    [keeper_exec_shell.ml] op=gh, which is being retired in favor of
-    calling [validate_gh_command] as the single source of truth. *)
-let gh_blocked_operations =
+(** Reversibility classification for gh commands.
+    Based on Thariq (Anthropic) Agent SDK workshop principle:
+    "Tools for atomic/irreversible actions; bash for reversible work."
+    + Anthropic Claude Code auto mode pattern:
+    "Safe-tool allowlist = tools that cannot modify state; everything
+    else goes to classifier; irreversible requires approval."
+
+    - [R0_Read]: no state mutation. gh view/list, api GET, status,
+      search. Free to run; only org allowlist gate.
+    - [R1_Reversible]: mutates state but recoverable via inverse op.
+      pr create/close/reopen/merge/ready/comment/edit, issue
+      create/close/reopen, label create/delete, run cancel. Allowed
+      + caller is expected to emit an audit event.
+    - [R2_Irreversible]: cannot be undone via a gh inverse op.
+      repo delete/archive/transfer/rename, release delete, secret
+      delete, auth logout/token, ssh-key delete, workflow disable,
+      api --method DELETE, graphql mutation delete*/remove*/transfer*.
+      Must route through a structured keeper tool (keeper_pr_submit,
+      etc.) that carries operator-approval semantics. *)
+type gh_reversibility =
+  | R0_Read
+  | R1_Reversible
+  | R2_Irreversible
+
+(** (command, subcommand) pairs classified as R2 irreversible.
+    Conservative: when an operation *could* leak/destroy state that
+    gh itself cannot restore, we mark it R2 even if a manual recovery
+    path exists. Examples: repo archive is technically reversible via
+    unarchive but disrupts downstream PRs; ssh-key delete is
+    re-registrable but signing/deploy keys mid-CI break. *)
+let gh_irreversible_ops =
   [
-    ("repo", "delete");
-    ("repo", "archive");
-    ("repo", "transfer");
-    ("gist", "delete");
-    ("workflow", "disable");
+    ("repo",     ["delete"; "archive"; "transfer"; "rename"]);
+    ("release",  ["delete"]);
+    ("secret",   ["delete"; "remove"]);
+    ("ssh-key",  ["delete"]);
+    ("workflow", ["disable"]);
+    ("auth",     ["logout"; "token"]);
+    ("gist",     ["delete"]);
+    ("ruleset",  ["delete"]);
   ]
+
+(** (command, subcommand) pairs classified as R1 reversible mutation.
+    The inverse operation is also a gh subcommand (pr close ↔ reopen,
+    label create ↔ delete, run cancel is always followed by rerun).
+    Allowed via op=gh but callers should audit. *)
+let gh_reversible_mutations =
+  [
+    ("pr",      ["create"; "close"; "reopen"; "merge"; "ready";
+                 "edit"; "comment"; "review"; "lock"; "unlock"]);
+    ("issue",   ["create"; "close"; "reopen"; "edit"; "comment";
+                 "lock"; "unlock"; "develop"; "pin"; "unpin"]);
+    ("label",   ["create"; "edit"; "delete"; "clone"]);
+    ("release", ["create"; "edit"; "upload"; "download"]);
+    ("run",     ["cancel"; "rerun"; "watch"]);
+    ("cache",   ["delete"]);
+    ("gist",    ["create"; "edit"; "clone"; "rename"]);
+    ("repo",    ["create"; "clone"; "fork"; "edit"; "sync"; "set-default"]);
+    ("project", ["create"; "edit"; "close"; "copy"; "link"; "unlink";
+                 "field-create"; "field-delete"; "item-add";
+                 "item-archive"; "item-delete"; "item-edit"]);
+    ("workflow", ["enable"; "run"]);
+    ("ruleset", ["create"; "edit"]);
+  ]
+
+(** Extract the HTTP method from a [gh api] invocation.
+    Returns uppercase method ("GET", "POST", "DELETE", ...) or "GET"
+    as the gh default when no --method flag is present.
+    Recognizes [-X], [--method], [-X=M], [--method=M]. *)
+let extract_gh_api_method cmd =
+  let tokens =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+  in
+  let rec find = function
+    | [] -> "GET"
+    | "-X" :: m :: _ | "--method" :: m :: _ -> String.uppercase_ascii m
+    | tok :: _ when String.length tok > 9
+                    && String.sub tok 0 9 = "--method=" ->
+      String.uppercase_ascii (String.sub tok 9 (String.length tok - 9))
+    | tok :: _ when String.length tok > 3
+                    && String.sub tok 0 3 = "-X=" ->
+      String.uppercase_ascii (String.sub tok 3 (String.length tok - 3))
+    | _ :: rest -> find rest
+  in
+  find tokens
+
+(** Detect [gh api graphql] invocations that carry a destructive
+    mutation name. Uses substring match on the query body (passed via
+    -f query=... or --raw-field query=...). Conservative: unknown
+    mutation names default to R1 because GraphQL mutation semantics
+    are wide; only the destructive-verb-prefix set is R2. *)
+let gh_api_graphql_is_destructive cmd =
+  let lower = String.lowercase_ascii cmd in
+  let contains needle =
+    let nl = String.length needle in
+    let sl = String.length lower in
+    let rec scan i =
+      if i + nl > sl then false
+      else if String.sub lower i nl = needle then true
+      else scan (i + 1)
+    in
+    nl > 0 && scan 0
+  in
+  contains "graphql"
+  && (contains "deletepullrequest"
+      || contains "deleteissue"
+      || contains "deletebranch"
+      || contains "deleteref"
+      || contains "deleteproject"
+      || contains "deletebranchprotectionrule"
+      || contains "removeouterfromorganization"
+      || contains "transferrepository"
+      || contains "archiverepository")
+
+(** Classify a gh command string by state reversibility.
+    The command is the portion after "gh " — a normalized form
+    without the leading "gh" literal.
+
+    Precedence (first match wins):
+      1. top command + subcommand in [gh_irreversible_ops] → R2
+      2. [api] with [--method DELETE] or a destructive graphql
+         mutation → R2
+      3. top command + subcommand in [gh_reversible_mutations] → R1
+      4. [api] with --method POST/PUT/PATCH (or -f field flags that
+         imply non-GET) → R1
+      5. anything else → R0 (read-only default) *)
+(* [classify_gh_reversibility] is defined after [has_mutating_http_method]
+   below so we can reuse its -f/-F/--field → implicit-POST detection.
+   The forward declaration pattern keeps this section free of an
+   [let rec] cluster that would pull unrelated functions into the same
+   recursive binding. *)
+
+(** Legacy alias: kept so pre-classifier call sites still compile.
+    Equivalent to [classify_gh_reversibility cmd = R2_Irreversible]
+    for the pairs we used to block. *)
+let gh_blocked_operations =
+  List.concat_map
+    (fun (c, subs) -> List.map (fun s -> (c, s)) subs)
+    gh_irreversible_ops
+
+(* [structured_tool_hint_for_r2] is defined after [extract_gh_command_pair]
+   below (see the classifier block near the bottom of this file). *)
 
 (** Extract owner from a [--repo OWNER/NAME], [--repo=OWNER/NAME], or
     [-R OWNER/NAME] flag in a gh command string. Returns [None] if no
@@ -759,6 +889,72 @@ let has_mutating_http_method parts =
         else check rest
   in
   check parts
+
+(** Classify a gh command string by state reversibility.
+    The command is the portion after "gh " — a normalized form
+    without the leading "gh" literal.
+
+    Precedence (first match wins):
+      1. top command + subcommand in [gh_irreversible_ops] → R2
+      2. [api] with [--method DELETE] or a destructive graphql
+         mutation → R2
+      3. [api] with --method POST/PUT/PATCH, or implicit POST via
+         [-f]/[-F]/[--field]/[--raw-field] (gh auto-converts field
+         flags to POST) → R1
+      4. top command + subcommand in [gh_reversible_mutations] → R1
+      5. anything else → R0 (read-only default) *)
+let classify_gh_reversibility cmd =
+  match extract_gh_command_pair cmd with
+  | (None, _) -> R0_Read
+  | (Some command, subcmd_opt) ->
+    let command = String.lowercase_ascii command in
+    let sub =
+      Option.value ~default:"" subcmd_opt |> String.lowercase_ascii
+    in
+    let in_table table =
+      List.exists
+        (fun (c, subs) -> c = command && List.mem sub subs)
+        table
+    in
+    if in_table gh_irreversible_ops then R2_Irreversible
+    else if command = "api" then begin
+      let method_ = extract_gh_api_method cmd in
+      let parts =
+        String.split_on_char ' ' (String.trim cmd)
+        |> List.filter (fun s -> s <> "")
+      in
+      if method_ = "DELETE" then R2_Irreversible
+      else if gh_api_graphql_is_destructive cmd then R2_Irreversible
+      else if List.mem method_ ["POST"; "PUT"; "PATCH"] then R1_Reversible
+      else if has_mutating_http_method parts then R1_Reversible
+      else R0_Read
+    end
+    else if in_table gh_reversible_mutations then R1_Reversible
+    else R0_Read
+
+(** Suggested next-action hint for a rejected R2 command.
+    Returned in the gate response so small LLMs can self-recover
+    without a second operator turn. Conservative: only returns a hint
+    when the mapping is obvious; otherwise None → caller falls back
+    to a generic message. *)
+let structured_tool_hint_for_r2 cmd =
+  match extract_gh_command_pair cmd with
+  | (Some "repo", Some ("delete" | "archive" | "transfer" | "rename")) ->
+    Some "Use an operator-approved path: open a board post describing \
+          the intent and wait for operator action. No keeper tool \
+          performs repo-level destructive ops."
+  | (Some "release", Some "delete") ->
+    Some "Open a board post with release tag + reason. Release deletion \
+          requires operator approval."
+  | (Some "secret", _) | (Some "ssh-key", _) | (Some "auth", _) ->
+    Some "Credential operations are operator-only. Do not attempt via \
+          any keeper tool."
+  | (Some "api", _) ->
+    Some "Destructive gh api calls (DELETE or graphql mutation \
+          delete*/remove*/transfer*) are blocked. Use pr/issue \
+          subcommands for R1 mutations, or open a board post."
+  | _ ->
+    None
 
 (** Filter out flag-like tokens, keeping only positional args.
     Handles boolean flag bypass (e.g. "workflow -q delete"). *)

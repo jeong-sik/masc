@@ -763,4 +763,138 @@ let () =
         Alcotest.(check (option string)) "no slash" None
           (Worker_dev_tools.extract_gh_repo_owner "pr view --repo malformed"));
     ];
+    "classify_gh_reversibility", [
+      (* R0 — read-only *)
+      Alcotest.test_case "R0: pr list" `Quick (fun () ->
+        Alcotest.(check bool) "R0" true
+          (Worker_dev_tools.classify_gh_reversibility "pr list --state open"
+           = Worker_dev_tools.R0_Read));
+      Alcotest.test_case "R0: pr view 123" `Quick (fun () ->
+        Alcotest.(check bool) "R0" true
+          (Worker_dev_tools.classify_gh_reversibility "pr view 123"
+           = Worker_dev_tools.R0_Read));
+      Alcotest.test_case "R0: issue list" `Quick (fun () ->
+        Alcotest.(check bool) "R0" true
+          (Worker_dev_tools.classify_gh_reversibility "issue list --state all"
+           = Worker_dev_tools.R0_Read));
+      Alcotest.test_case "R0: api GET (default)" `Quick (fun () ->
+        Alcotest.(check bool) "R0" true
+          (Worker_dev_tools.classify_gh_reversibility "api repos/jeong-sik/foo"
+           = Worker_dev_tools.R0_Read));
+      Alcotest.test_case "R0: status" `Quick (fun () ->
+        Alcotest.(check bool) "R0" true
+          (Worker_dev_tools.classify_gh_reversibility "status"
+           = Worker_dev_tools.R0_Read));
+      Alcotest.test_case "R0: search issues" `Quick (fun () ->
+        Alcotest.(check bool) "R0" true
+          (Worker_dev_tools.classify_gh_reversibility "search issues --sort created"
+           = Worker_dev_tools.R0_Read));
+
+      (* R1 — reversible mutation *)
+      Alcotest.test_case "R1: pr create" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "pr create --title foo --body bar"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: pr merge" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility "pr merge 123 --squash"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: issue close" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility "issue close 456"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: api --method POST" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "api --method POST repos/jeong-sik/foo/issues"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: api with -f field (implicit POST)" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "api repos/jeong-sik/foo/issues -f title=test"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: label create" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility "label create bug --color red"
+           = Worker_dev_tools.R1_Reversible));
+      Alcotest.test_case "R1: run cancel" `Quick (fun () ->
+        Alcotest.(check bool) "R1" true
+          (Worker_dev_tools.classify_gh_reversibility "run cancel 42"
+           = Worker_dev_tools.R1_Reversible));
+
+      (* R2 — irreversible *)
+      Alcotest.test_case "R2: repo delete" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "repo delete jeong-sik/foo"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: repo archive" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "repo archive jeong-sik/foo"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: repo transfer" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "repo transfer jeong-sik/foo x"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: release delete" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "release delete v1.0"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: secret delete" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "secret delete MY_TOKEN"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: ssh-key delete" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "ssh-key delete 42"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: workflow disable" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "workflow disable ci.yml"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: auth logout" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility "auth logout"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: api --method DELETE" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "api --method DELETE repos/jeong-sik/foo/issues/1"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: graphql mutation deletePullRequest" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "api graphql -f query=mutation{deletePullRequest(input:{pullRequestId:abc}){clientMutationId}}"
+           = Worker_dev_tools.R2_Irreversible));
+      Alcotest.test_case "R2: graphql mutation transferRepository" `Quick (fun () ->
+        Alcotest.(check bool) "R2" true
+          (Worker_dev_tools.classify_gh_reversibility
+             "api graphql -f query=mutation{transferRepository(input:{}){clientMutationId}}"
+           = Worker_dev_tools.R2_Irreversible));
+    ];
+    "structured_tool_hint_for_r2", [
+      Alcotest.test_case "repo delete → board-post hint" `Quick (fun () ->
+        match Worker_dev_tools.structured_tool_hint_for_r2 "repo delete x/y" with
+        | Some msg ->
+          Alcotest.(check bool) "mentions operator" true
+            (contains_substring msg "operator")
+        | None -> Alcotest.fail "expected Some hint");
+      Alcotest.test_case "credential op → operator-only hint" `Quick (fun () ->
+        match Worker_dev_tools.structured_tool_hint_for_r2 "secret delete TOK" with
+        | Some msg ->
+          Alcotest.(check bool) "mentions operator-only" true
+            (contains_substring msg "operator-only")
+        | None -> Alcotest.fail "expected Some hint");
+      Alcotest.test_case "api R2 → generic hint" `Quick (fun () ->
+        match Worker_dev_tools.structured_tool_hint_for_r2
+                "api --method DELETE repos/x/y/releases/1" with
+        | Some msg ->
+          Alcotest.(check bool) "mentions gh api" true
+            (contains_substring msg "gh api")
+        | None -> Alcotest.fail "expected Some hint");
+      Alcotest.test_case "no hint for unmapped R2" `Quick (fun () ->
+        Alcotest.(check (option string)) "none"
+          None
+          (Worker_dev_tools.structured_tool_hint_for_r2 "workflow disable x.yml"));
+    ];
   ]

@@ -334,6 +334,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Progress.stop_tracking turn_task_id;
               (false, Printf.sprintf "❌ Agent.run failed: %s" e_str)
             | Ok result ->
+              let explicit_accountability_claim =
+                Keeper_social_model.extract_accountability_claim result
+              in
               (try ignore (Trajectory.finalize trajectory_acc
                  Trajectory.Completed)
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
@@ -413,6 +416,63 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     (Printexc.to_string exn);
                   None
               in
+              (match explicit_accountability_claim with
+              | Some claim ->
+                  let trace_id =
+                    Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
+                  in
+                  let strong_evidence =
+                    let substantive_tools =
+                      result.tools_used
+                      |> List.exists (fun tool_name ->
+                             let trimmed = String.trim tool_name in
+                             trimmed <> ""
+                             && not (String.equal trimmed "keeper_stay_silent"))
+                    in
+                    substantive_tools
+                    ||
+                    match evidence with
+                    | Some (`Assoc fields) -> (
+                        match List.assoc_opt "delta_detected" fields with
+                        | Some (`Bool true) -> true
+                        | _ -> false)
+                    | _ -> false
+                  in
+                  let tool_refs =
+                    result.tools_used
+                    |> List.filter_map (fun tool_name ->
+                           let trimmed = String.trim tool_name in
+                           if trimmed = ""
+                              || String.equal trimmed "keeper_stay_silent"
+                           then None
+                           else Some ("tool:" ^ trimmed))
+                  in
+                  let turn_refs =
+                    let base =
+                      [ Printf.sprintf "turn:%s:%d" trace_id
+                          updated_meta.runtime.usage.total_turns ]
+                    in
+                    match evidence with
+                    | Some (`Assoc fields) -> (
+                        match List.assoc_opt "after_hash" fields with
+                        | Some (`String hash) when String.trim hash <> "" ->
+                            ("git:" ^ String.trim hash) :: base
+                        | _ -> base)
+                    | _ -> base
+                  in
+                  Keeper_accountability.record_completion_claim ctx.config
+                    ~keeper_name:updated_meta.name
+                    ~agent_name:updated_meta.agent_name
+                    ~trace_id
+                    ~turn_number:updated_meta.runtime.usage.total_turns
+                    ~subject:claim.subject
+                    ?task_id:claim.task_id
+                    ~evidence_refs:claim.evidence_refs
+                    ~surface:"keeper_msg"
+                    ~strong_evidence
+                    ~strong_evidence_refs:(tool_refs @ turn_refs)
+                    ()
+              | None -> ());
               start_keepalive ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();

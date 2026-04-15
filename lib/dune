@@ -417,6 +417,7 @@
    keeper_types
    keeper_memory
    keeper_manual_reconcile
+   keeper_accountability
    keeper_memory_policy
    keeper_memory_bank
    keeper_memory_recall

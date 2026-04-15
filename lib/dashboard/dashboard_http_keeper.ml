@@ -508,8 +508,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                     ) all_events in
                     `List (List.filteri (fun i _ -> i < 10) keeper_events)
                   in
+                  let accountability =
+                    Keeper_exec_status_metrics.accountability_summary_json config
+                      ~keeper_name:m.name ~agent_name:m.agent_name
+                  in
                   `Assoc [
                     ("reputation", reputation);
+                    ("accountability", accountability);
                     ("thompson", thompson);
                     ("stress_recent", stress);
                   ]

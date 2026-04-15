@@ -6,6 +6,30 @@
 
 (** {1 Types} *)
 
+(** Node status variant. Replaces stringly-typed status.
+    @since 7182 *)
+type node_status =
+  | Active | Offline | Spawned | Retired | Compacting | Handoff
+  | Autonomy | Guardrail
+  | Todo | Claimed | In_progress | Done | Cancelled
+  | Posted | Discussed
+  | Open | Resolved
+  | Approved | Denied
+  | Running | Paused | Stopped | Finalized
+  | Observed | Room | Unset
+
+val node_status_to_string : node_status -> string
+val node_status_of_string : string -> node_status
+
+(** Span status variant (separate lifecycle from node status).
+    @since 7182 *)
+type span_status =
+  | Span_open | Span_completed | Span_released | Span_cancelled
+  | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
+
+val span_status_to_string : span_status -> string
+val span_status_of_string : string -> span_status
+
 type entity_ref = {
   kind : string;
   id : string;
@@ -27,7 +51,7 @@ type graph_node = {
   id : string;
   kind : string;
   label : string;
-  status : string;
+  status : node_status;
   weight : int;
   semantic_weight : float;
   last_event_at : string;
@@ -131,7 +155,7 @@ type agent_span = {
   end_ms : int;
   span_kind : string;
   label : string;
-  span_status : string;
+  span_status : span_status;
 }
 
 val agent_span_to_yojson : agent_span -> Yojson.Safe.t

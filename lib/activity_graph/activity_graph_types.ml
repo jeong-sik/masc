@@ -1,5 +1,73 @@
 (** Activity_graph_types — type definitions and JSON serde for activity graph. *)
 
+(** Node status: type-safe variant replacing stringly-typed status.
+    Flat variant — node [kind] field already carries the category.
+    @since 7182 *)
+type node_status =
+  (* Agent lifecycle *)
+  | Active | Offline | Spawned | Retired | Compacting | Handoff
+  | Autonomy | Guardrail
+  (* Task lifecycle *)
+  | Todo | Claimed | In_progress | Done | Cancelled
+  (* Board *)
+  | Posted | Discussed
+  (* Decision *)
+  | Open | Resolved
+  (* Policy *)
+  | Approved | Denied
+  (* Operation lifecycle *)
+  | Running | Paused | Stopped | Finalized
+  (* Generic / fallback *)
+  | Observed | Room | Unset
+
+let node_status_to_string = function
+  | Active -> "active" | Offline -> "offline" | Spawned -> "spawned"
+  | Retired -> "retired" | Compacting -> "compacting" | Handoff -> "handoff"
+  | Autonomy -> "autonomy" | Guardrail -> "guardrail"
+  | Todo -> "todo" | Claimed -> "claimed" | In_progress -> "in_progress"
+  | Done -> "done" | Cancelled -> "cancelled"
+  | Posted -> "posted" | Discussed -> "discussed"
+  | Open -> "open" | Resolved -> "resolved"
+  | Approved -> "approved" | Denied -> "denied"
+  | Running -> "running" | Paused -> "paused"
+  | Stopped -> "stopped" | Finalized -> "finalized"
+  | Observed -> "observed" | Room -> "room" | Unset -> ""
+
+let node_status_of_string = function
+  | "active" -> Active | "offline" -> Offline | "spawned" -> Spawned
+  | "retired" -> Retired | "compacting" -> Compacting | "handoff" -> Handoff
+  | "autonomy" -> Autonomy | "guardrail" -> Guardrail
+  | "todo" -> Todo | "claimed" -> Claimed | "in_progress" -> In_progress
+  | "done" -> Done | "cancelled" -> Cancelled
+  | "posted" -> Posted | "discussed" -> Discussed
+  | "open" -> Open | "resolved" -> Resolved
+  | "approved" -> Approved | "denied" -> Denied
+  | "running" -> Running | "paused" -> Paused
+  | "stopped" -> Stopped | "finalized" -> Finalized
+  | "observed" -> Observed | "room" -> Room
+  | "" -> Unset
+  | _ -> Observed  (* fail-open: unknown status treated as generic *)
+
+(** Span status: separate from node_status (different lifecycle).
+    @since 7182 *)
+type span_status =
+  | Span_open | Span_completed | Span_released | Span_cancelled
+  | Span_left | Span_retired | Span_finalized | Span_stopped | Span_ended
+
+let span_status_to_string = function
+  | Span_open -> "open" | Span_completed -> "completed"
+  | Span_released -> "released" | Span_cancelled -> "cancelled"
+  | Span_left -> "left" | Span_retired -> "retired"
+  | Span_finalized -> "finalized" | Span_stopped -> "stopped"
+  | Span_ended -> "ended"
+
+let span_status_of_string = function
+  | "open" -> Span_open | "completed" -> Span_completed
+  | "released" -> Span_released | "cancelled" -> Span_cancelled
+  | "left" -> Span_left | "retired" -> Span_retired
+  | "finalized" -> Span_finalized | "stopped" -> Span_stopped
+  | _ -> Span_ended
+
 type entity_ref = {
   kind : string;
   id : string;
@@ -21,7 +89,7 @@ type graph_node = {
   id : string;
   kind : string;
   label : string;
-  status : string;
+  status : node_status;
   weight : int;
   semantic_weight : float;
   last_event_at : string;
@@ -45,7 +113,7 @@ type agent_span = {
   end_ms : int;
   span_kind : string;
   label : string;
-  span_status : string;
+  span_status : span_status;
 }
 
 let entity ~kind id = { kind; id }
@@ -101,7 +169,7 @@ let graph_node_to_yojson (value : graph_node) =
       ("id", `String value.id);
       ("kind", `String value.kind);
       ("label", `String value.label);
-      ("status", `String value.status);
+      ("status", `String (node_status_to_string value.status));
       ("weight", `Int value.weight);
       ("semantic_weight", `Float value.semantic_weight);
       ("last_event_at", `String value.last_event_at);
@@ -128,7 +196,7 @@ let agent_span_to_yojson (s : agent_span) =
     ("end_ms", `Int s.end_ms);
     ("kind", `String s.span_kind);
     ("label", `String s.label);
-    ("status", `String s.span_status);
+    ("status", `String (span_status_to_string s.span_status));
   ]
 
 let now_ts_ms () = int_of_float (Time_compat.now () *. 1000.0)

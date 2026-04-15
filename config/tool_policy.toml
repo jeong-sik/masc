@@ -103,6 +103,28 @@ tools = ["masc_code_search", "masc_code_symbols", "masc_code_read", "masc_worktr
 workflow_presets = ["coding", "delivery", "full"]
 shell_write_presets = ["coding", "delivery", "full"]
 
+# ── GitHub Cache ───────────────────────────────────────────────────
+# Pre-execution hallucination gate: validates PR/issue numbers
+# against a cached list before executing gh CLI commands.
+# See lib/keeper/keeper_gh_cache.ml for implementation.
+
+[gh_cache]
+# Time-to-live for cached PR/issue number lists (seconds).
+# 120s keeps entries fresh enough that newly-created PRs appear within
+# ~2 minutes, while avoiding a subprocess per validation call.
+cache_ttl_sec = 120
+# Page size for the gh API REST call (pulls?per_page=N).
+# Repos with >N open PRs will miss older numbers — those fall to
+# Unknown (fail-open), which is safer than a hard rejection.
+fetch_page_size = 100
+# Subprocess timeout for the gh API fetch call (seconds).
+fetch_timeout_sec = 10
+# Maximum number of valid alternatives shown in rejection response.
+max_alternatives = 20
+# Maximum gh output size in bytes. Responses exceeding this are
+# truncated to prevent context window overflow (65KB observed).
+max_output_bytes = 8192
+
 # ── Git Clone Policy ────────────────────────────────────────────────
 # GitHub org names allowed for masc_code_git clone action.
 # URLs not matching any org here are rejected.

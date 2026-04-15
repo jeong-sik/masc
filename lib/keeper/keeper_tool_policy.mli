@@ -45,6 +45,14 @@ val clone_timeout_sec : unit -> float
 val push_timeout_sec : unit -> float
 val pr_create_timeout_sec : unit -> float
 
+(** {1 GH Cache Config} *)
+
+val gh_cache_ttl_sec : unit -> float
+val gh_cache_fetch_page_size : unit -> int
+val gh_cache_fetch_timeout_sec : unit -> float
+val gh_cache_max_alternatives : unit -> int
+val gh_cache_max_output_bytes : unit -> int
+
 (** {1 MASC Schema Injection} *)
 
 (** Filter and inject MASC schemas for keeper tool selection.

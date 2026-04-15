@@ -210,6 +210,13 @@ let test_metrics_initial () =
   check bool "has bypasses" true (List.mem_assoc "bypasses" m);
   check bool "has fetch_errors" true (List.mem_assoc "fetch_errors" m)
 
+(* record_rejection lives in keeper_exec_github (private_module) and
+   cannot be exposed in its .mli without triggering dune interface-mismatch.
+   The logic is a trivial Hashtbl increment — tested indirectly via
+   integration tests (server + keeper_github calls with hallucinated numbers).
+   If record_rejection is extracted to its own non-private module in the
+   future, unit tests should be added here. *)
+
 (* ====================================================================== *)
 (* Test runner                                                              *)
 (* ====================================================================== *)

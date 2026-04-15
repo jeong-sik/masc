@@ -133,12 +133,15 @@ let gh_mutates_entity (cmd : string) : Keeper_gh_cache.entity_kind option =
   | _ -> None
 
 (** Truncate gh output to prevent context explosion.
-    65KB responses were observed causing 300s timeout via token overflow. *)
+    65KB responses were observed causing 300s timeout via token overflow.
+    Retained for .mli backward compatibility; runtime limit comes from
+    [gh_cache.max_output_bytes] in tool_policy.toml. *)
 let max_gh_output_bytes = 8192
 
 let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
+  let max_bytes = Keeper_tool_policy.gh_cache_max_output_bytes () in
   let len = String.length out in
-  if len <= max_gh_output_bytes then out, []
+  if len <= max_bytes then out, []
   else
     let banner shown_bytes =
       Printf.sprintf
@@ -153,15 +156,15 @@ let truncate_gh_output (out : string) : string * (string * Yojson.Safe.t) list =
     let rec fit budget =
       let prefix = Keeper_config.utf8_safe_prefix_bytes out ~max_bytes:budget in
       let rendered, shown_bytes, banner_len = render prefix in
-      if String.length rendered <= max_gh_output_bytes || budget = 0
+      if String.length rendered <= max_bytes || budget = 0
       then rendered, shown_bytes
       else
-        let next_budget = max 0 (max_gh_output_bytes - banner_len) in
+        let next_budget = max 0 (max_bytes - banner_len) in
         if next_budget >= budget
         then rendered, shown_bytes
         else fit next_budget
     in
-    let rendered, shown_bytes = fit max_gh_output_bytes in
+    let rendered, shown_bytes = fit max_bytes in
     rendered,
     [ "truncated", `Bool true;
       "original_bytes", `Int len;
@@ -369,7 +372,7 @@ let handle_keeper_github
              | _ when n <= 0 -> []
              | x :: rest -> x :: take (n - 1) rest
            in
-           take 20 valids
+           take (Keeper_tool_policy.gh_cache_max_alternatives ()) valids
          in
          let valid_str =
            shown |> List.map string_of_int |> String.concat ", "

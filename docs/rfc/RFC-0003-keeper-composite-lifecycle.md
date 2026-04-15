@@ -5,6 +5,14 @@
 **Scope**: `masc-mcp` cross-spec joint invariants + dashboard observer contract
 **One sentence**: Decision/Cascade/Memory/Compaction의 turn 단위 상호작용을 1급으로 관찰하기 위한 composition observer를 도입하고, runtime projection과 TLA state set을 1:1로 고정한다.
 
+> Runtime note (2026-04-16)
+> Legacy `manual_reconcile` two-store runtime ownership was removed in `#7334`.
+> The current OCaml observer keeps the `recovery` / `recovery_two_store_sync`
+> payload only as a compatibility-clean projection so the dashboard/API shape
+> remains stable. Any `reconcile_data` / `reconcile_fsm` discussion below is
+> historical audit/spec context, not current runtime truth, until a new
+> recovery contract is defined.
+
 ## Related Documents
 
 - `RFC-0001-det-nondet-boundary-harness.md` — Det/NonDet 경계 원칙

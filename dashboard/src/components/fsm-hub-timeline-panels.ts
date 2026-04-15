@@ -54,6 +54,7 @@ const ALARM_VALUES = new Set([
 function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[rgba(239,68,68,0.5)]'
   if (IDLE_LIKE_VALUES.has(value)) return 'bg-[rgba(255,255,255,0.07)]'
+  if (value === 'Overflowed') return 'bg-[rgba(245,158,11,0.45)]'
   if (value === 'Compacting' || value === 'compacting') return 'bg-[rgba(245,158,11,0.45)]'
   if (value === 'HandingOff') return 'bg-[rgba(167,139,250,0.5)]'
   return 'bg-[rgba(129,140,248,0.45)]'

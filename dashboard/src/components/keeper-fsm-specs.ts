@@ -22,7 +22,14 @@ const PHASE_NODES: Array<{ id: string; label: string }> = [
   { id: 'Dead', label: 'Dead' },
 ]
 
-const BUFFER_PHASES = new Set(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
+const BUFFER_PHASES = new Set([
+  'Failing',
+  'Overflowed',
+  'Compacting',
+  'HandingOff',
+  'Draining',
+  'Restarting',
+])
 const TERMINAL_PHASES = new Set(['Stopped', 'Dead', 'Crashed'])
 
 const PHASE_EDGES: FsmEdge[] = [

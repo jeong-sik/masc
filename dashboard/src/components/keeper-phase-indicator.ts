@@ -1,4 +1,4 @@
-// Keeper phase indicator — shows the 11-state lifecycle phase
+// Keeper phase indicator — shows the 12-state lifecycle phase
 // as a color-coded badge with Korean label.
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 
@@ -18,7 +18,7 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Offline:    { label: '오프라인',   color: '#6b7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.18)', glow: 'none',                             icon: '○' },
   Running:    { label: '실행중',     color: '#34d399', bg: 'rgba(52,211,153,0.08)',  border: 'rgba(52,211,153,0.22)',  glow: '0 0 8px rgba(52,211,153,0.25)',    icon: '●' },
   Failing:    { label: '오류중',     color: '#f97316', bg: 'rgba(249,115,22,0.08)',  border: 'rgba(249,115,22,0.22)',  glow: '0 0 8px rgba(249,115,22,0.25)',    icon: '▲' },
-  Overflowed: { label: '오버플로우', color: '#fb923c', bg: 'rgba(251,146,60,0.08)',  border: 'rgba(251,146,60,0.22)',  glow: '0 0 8px rgba(251,146,60,0.20)',    icon: '⬢' },
+  Overflowed: { label: '컨텍스트초과', color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.24)', glow: '0 0 8px rgba(245,158,11,0.24)',    icon: '⚠' },
   Compacting: { label: '압축중',     color: '#a855f7', bg: 'rgba(168,85,247,0.08)',  border: 'rgba(168,85,247,0.22)',  glow: '0 0 8px rgba(168,85,247,0.20)',    icon: '◆' },
   HandingOff: { label: '승계중',     color: '#f472b6', bg: 'rgba(244,114,182,0.08)', border: 'rgba(244,114,182,0.22)', glow: '0 0 8px rgba(244,114,182,0.20)',   icon: '⟳' },
   Draining:   { label: '종료중',     color: '#fb923c', bg: 'rgba(251,146,60,0.08)',  border: 'rgba(251,146,60,0.22)',  glow: '0 0 8px rgba(251,146,60,0.20)',    icon: '▽' },
@@ -36,7 +36,7 @@ function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseSty
   return PHASE_STYLES[phase as KeeperPhase] ?? PHASE_STYLES.Offline
 }
 
-/** Phase badge — color-coded pill showing 11-state lifecycle phase. */
+/** Phase badge — color-coded pill showing 12-state lifecycle phase. */
 export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | string | null; compact?: boolean }) {
   const style = getPhaseStyle(phase)
   const isBuffer = BUFFER_PHASES.has(phase ?? '')

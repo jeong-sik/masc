@@ -20,6 +20,16 @@
 \*   Related audit: docs/tla-audit/state-fsm-gap-2026-04-13.md (proposals
 \*   P1, P3, P4 — this spec absorbs P4 and encodes P3's clearing property).
 \*
+\* Runtime note (2026-04-16)
+\*   The legacy manual_reconcile two-store runtime was retired in #7334.
+\*   The live OCaml composite observer currently exports the recovery payload
+\*   as a compatibility-clean projection (data_record=FALSE,
+\*   fsm_condition=FALSE, recovery_two_store_sync=TRUE) so the dashboard/API
+\*   wire contract remains total. The reconcile_data / reconcile_fsm clauses
+\*   in this TLA+ module should therefore be read as historical audit model
+\*   state, not current runtime-owned variables, until a new recovery
+\*   contract is defined.
+\*
 \* Design intent
 \*   1. shared_measurement is the coordination hub (Context_measured event,
 \*      Keeper_state_machine.mli:131-136, auto_rules_summary).

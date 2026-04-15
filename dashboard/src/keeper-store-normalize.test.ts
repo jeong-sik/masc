@@ -48,6 +48,13 @@ describe('normalizeKeepers phase field', () => {
     expect(keeper?.phase).toBe('HandingOff')
   })
 
+  it('normalizes overflowed to Overflowed', () => {
+    const [keeper] = normalizeKeepers([
+      { name: 'overflow-test', status: 'active', phase: 'overflowed' },
+    ])
+    expect(keeper?.phase).toBe('Overflowed')
+  })
+
   it('returns null for unknown phase', () => {
     const [keeper] = normalizeKeepers([
       { name: 'unknown-test', status: 'active', phase: 'bogus' },

@@ -85,7 +85,7 @@ let running_keeper_count (config : Room.config) : int =
        0
 
 let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
-  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
+  let include_goals = false in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in

@@ -17,12 +17,10 @@ module Inference = struct
     max 5
       (get_int ~default:timeout_seconds_int "MASC_OPERATOR_JUDGE_TIMEOUT_SEC")
 
-  (** Dashboard governance judge timeout.
-      Falls back to the global inference timeout unless explicitly overridden. *)
+  (** Dashboard governance judge timeout: falls back to the global
+      inference timeout (timeout_seconds_int), floored at 5 seconds. *)
   let dashboard_governance_judge_timeout_seconds =
-    max 5
-      (get_int ~default:timeout_seconds_int
-         "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC")
+    max 5 timeout_seconds_int
 
   (** Enable inference response cache (L1+L2). *)
   let cache_enabled =

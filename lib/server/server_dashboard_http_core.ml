@@ -41,9 +41,7 @@ include Dashboard_http_helpers
 include Dashboard_http_monitoring
 include Dashboard_http_keeper
 
-let _dashboard_request_timeout_s =
-  float_of_env_default "MASC_DASHBOARD_REQUEST_TIMEOUT_S"
-    ~default:30.0 ~min_v:5.0 ~max_v:120.0
+let _dashboard_request_timeout_s = 30.0
 
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
@@ -64,9 +62,7 @@ let room_scoped_cache_key (config : Room.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (room_scope_cache_segment config) suffix
 
-let _dashboard_mission_timeout_s =
-  float_of_env_default "MASC_DASHBOARD_MISSION_TIMEOUT_S"
-    ~default:25.0 ~min_v:10.0 ~max_v:120.0
+let _dashboard_mission_timeout_s = 25.0
 
 let _session_list_timeout_s =
   dashboard_session_list_timeout_s ()
@@ -126,41 +122,11 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     governance_monitoring_json ~now_ts ~base_path:config.base_path
   in
 
-  let proactive_fallback_warn =
-    float_of_env_default
-      "MASC_DASHBOARD_PROACTIVE_FALLBACK_WARN"
-      ~default:0.20
-      ~min_v:0.0
-      ~max_v:1.0
-  in
-  let proactive_fallback_bad =
-    float_of_env_default
-      "MASC_DASHBOARD_PROACTIVE_FALLBACK_BAD"
-      ~default:0.40
-      ~min_v:0.0
-      ~max_v:1.0
-  in
-  let proactive_similarity_warn =
-    float_of_env_default
-      "MASC_DASHBOARD_PROACTIVE_SIMILARITY_WARN"
-      ~default:0.90
-      ~min_v:0.0
-      ~max_v:1.0
-  in
-  let proactive_similarity_bad =
-    float_of_env_default
-      "MASC_DASHBOARD_PROACTIVE_SIMILARITY_BAD"
-      ~default:0.97
-      ~min_v:0.0
-      ~max_v:1.0
-  in
-  let alert_toast_cooldown_sec =
-    int_of_env_default
-      "MASC_DASHBOARD_ALERT_TOAST_COOLDOWN_SEC"
-      ~default:300
-      ~min_v:10
-      ~max_v:Masc_time_constants.day_int
-  in
+  let proactive_fallback_warn = 0.20 in
+  let proactive_fallback_bad = 0.40 in
+  let proactive_similarity_warn = 0.90 in
+  let proactive_similarity_bad = 0.97 in
+  let alert_toast_cooldown_sec = 300 in
   let cluster = Env_config_core.cluster_name () in
   let status_json =
     `Assoc [
@@ -374,10 +340,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_snapshot"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s =
-                     float_of_env_default
-                       "MASC_DASHBOARD_OPERATOR_SNAPSHOT_TIMEOUT_S"
-                       ~default:45.0 ~min_v:10.0 ~max_v:120.0;
+              with timeout_s = 45.0;
                    warm_delay_s =
                      float_of_env_default
                        "MASC_WARM_DELAY_OPERATOR_SNAPSHOT_S"
@@ -430,10 +393,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~config:{ (Proactive_refresh.default_config
                  ~label:"operator_digest"
                  ~interval_s:_operator_refresh_interval_s)
-              with timeout_s =
-                     float_of_env_default
-                       "MASC_DASHBOARD_OPERATOR_DIGEST_TIMEOUT_S"
-                       ~default:45.0 ~min_v:10.0 ~max_v:120.0;
+              with timeout_s = 45.0;
                    warm_delay_s =
                      float_of_env_default
                        "MASC_WARM_DELAY_OPERATOR_DIGEST_S"
@@ -625,10 +585,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
-  let mission_refresh_timeout_s =
-    float_of_env_default "MASC_DASHBOARD_MISSION_REFRESH_TIMEOUT_S"
-      ~default:60.0 ~min_v:30.0 ~max_v:300.0
-  in
+  let mission_refresh_timeout_s = 60.0 in
   let compute () =
     mark_cached_surface_attempt _mission_cache;
     let t0_mission = Unix.gettimeofday () in
@@ -856,9 +813,7 @@ let dashboard_general_agent_count agents =
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
-let dashboard_shell_timeout_s =
-  float_of_env_default "MASC_DASHBOARD_SHELL_TIMEOUT_S"
-    ~default:8.0 ~min_v:2.0 ~max_v:30.0
+let dashboard_shell_timeout_s = 8.0
 
 let dashboard_shell_paths_json (config : Room.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect

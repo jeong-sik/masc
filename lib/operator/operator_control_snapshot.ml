@@ -250,10 +250,7 @@ let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
 (* Concurrency cap for parallel keeper snapshot fibers.
    Prevents memory bursts when many keepers are processed simultaneously.
    Each keeper fiber does filesystem I/O + heavy JSON construction (~50 fields). *)
-let _keeper_snapshot_max_concurrency =
-  Dashboard_http_helpers.int_of_env_default
-    "MASC_DASHBOARD_KEEPER_SNAPSHOT_MAX_CONCURRENCY"
-    ~default:4 ~min_v:1 ~max_v:32
+let _keeper_snapshot_max_concurrency = 4
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
@@ -669,9 +666,7 @@ let _snapshot_ttl_s = Env_config.Operator.cache_ttl_sec
 (* Maximum snapshot cache entries.  Each entry holds a full JSON snapshot
    tree which can be several MB.  Unbounded growth caused OOM when the
    dashboard was connected for extended periods (#4795). *)
-let _snapshot_max_entries =
-  Dashboard_http_helpers.int_of_env_default
-    "MASC_DASHBOARD_SNAPSHOT_CACHE_MAX_ENTRIES" ~default:16 ~min_v:4 ~max_v:64
+let _snapshot_max_entries = 16
 
 (* Evict one expired or oldest entry when table reaches _snapshot_max_entries.
    Called inside _snapshot_mu when Eio is ready; pre-Eio callers are

@@ -127,7 +127,6 @@ let apply_post_turn_lifecycle
   | Some cp ->
       let ctx =
         context_of_oas_checkpoint
-          ~repair_orphans:false
           ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           cp
           ~primary_model_max_tokens
@@ -293,7 +292,7 @@ let recover_latest_checkpoint_for_overflow_retry
     Result.to_option oas_result
     |> Option.map (fun checkpoint ->
       let sanitized, stats =
-        sanitize_oas_checkpoint ~repair_orphans:false checkpoint
+        sanitize_oas_checkpoint checkpoint
       in
       if checkpoint_sanitize_changed stats then begin
         Log.Keeper.warn
@@ -336,7 +335,6 @@ let recover_latest_checkpoint_for_overflow_retry
         in
         Some
           ( context_of_oas_checkpoint
-              ~repair_orphans:false
               ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
               checkpoint
               ~primary_model_max_tokens,
@@ -361,7 +359,6 @@ let recover_latest_checkpoint_for_overflow_retry
                   in
                   Some
                     ( context_of_oas_checkpoint
-                        ~repair_orphans:false
                         ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
                         checkpoint
                         ~primary_model_max_tokens,

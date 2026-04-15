@@ -39,6 +39,21 @@ let counter_misses = Atomic.make 0
 let counter_bypasses = Atomic.make 0
 let counter_fetch_errors = Atomic.make 0
 
+let normalize_gh_command (cmd : string) : string =
+  let tokens =
+    cmd
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.map String.trim
+    |> List.filter (fun token -> token <> "")
+  in
+  let rec drop_leading_gh = function
+    | token :: rest when String.lowercase_ascii token = "gh" ->
+        drop_leading_gh rest
+    | remaining -> remaining
+  in
+  String.concat " " (drop_leading_gh tokens)
+
 let parse_numbers_from_jq_output (out : string) : int list =
   out
   |> String.split_on_char '\n'
@@ -215,6 +230,7 @@ let gh_issue_number_subcmds =
 let extract_gh_target_number (cmd : string)
     : (entity_kind * int) option
   =
+  let cmd = normalize_gh_command cmd in
   let parts =
     String.split_on_char ' ' (String.trim cmd)
     |> List.filter (fun s -> s <> "")
@@ -239,6 +255,7 @@ let extract_gh_target_number (cmd : string)
     [state=all] is unchanged, but we still invalidate to resync state
     filters used elsewhere), and merges. *)
 let gh_mutates_entity (cmd : string) : entity_kind option =
+  let cmd = normalize_gh_command cmd in
   let parts =
     String.split_on_char ' ' (String.trim cmd)
     |> List.filter (fun s -> s <> "")
@@ -388,4 +405,3 @@ let correct_repo_flag ~(correct_slug : string) (cmd : string) : string * bool =
     in
     (corrected, corrected <> cmd)
   else (cmd, false)
-

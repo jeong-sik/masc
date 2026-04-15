@@ -588,6 +588,153 @@ let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_
           fail
             "expected overflow retry recovery to keep message history within budget even with a large checkpoint system prompt")
 
+let test_recover_latest_checkpoint_for_overflow_retry_repairs_orphan_tool_result () =
+  let base_dir = temp_dir "keeper_lifecycle_overflow_retry_orphan" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let trace_id = "trace-overflow-retry-orphan" in
+      let meta = make_keeper_meta ~trace_id () in
+      let orphan_id = "call-overflow-orphan" in
+      let dense_ctx =
+        build_dense_context ~turns:22 ~max_tokens:4096
+          ~state_reply:
+            "done\n\n[STATE]\nGoal: repair orphan on overflow retry\nProgress: ready\n[/STATE]"
+      in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:dense_ctx in
+      let checkpoint =
+        { checkpoint with
+          messages =
+            {
+              Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+              content =
+                [
+                  Agent_sdk.Types.ToolResult
+                    {
+                      tool_use_id = orphan_id;
+                      content = "";
+                      is_error = false;
+                      json = Some (`Assoc [ ("path", `String "README.md") ]);
+                    };
+                ];
+              name = None;
+              tool_call_id = None;
+            }
+            :: checkpoint.messages;
+        }
+      in
+      let session = KEC.create_session ~session_id:trace_id ~base_dir in
+      (match
+         Masc_mcp.Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir checkpoint
+       with
+       | Ok () -> ()
+       | Error _ -> Alcotest.fail "save_oas raw orphan checkpoint failed");
+      match
+        KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
+          ~model:"llama:auto" ~primary_model_max_tokens:256
+      with
+      | Some recovery ->
+          check (option string)
+            "overflow retry drops structured orphan tool result" None
+            (tool_result_content_for_id ~tool_use_id:orphan_id
+               recovery.checkpoint.messages)
+      | None -> fail "expected overflow retry recovery from orphan checkpoint")
+
+let test_rollover_repairs_orphan_tool_result () =
+  let base_dir = temp_dir "keeper_lifecycle_rollover_orphan" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let trace_id = "trace-rollover-orphan" in
+      let meta =
+        {
+          (make_keeper_meta ~trace_id ()) with
+          auto_handoff = true;
+          handoff_threshold = 0.0;
+          handoff_cooldown_sec = 0;
+        }
+      in
+      let orphan_id = "call-rollover-orphan" in
+      let checkpoint =
+        {
+          Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+          session_id = trace_id;
+          agent_name = "patch-test";
+          model = "test-model";
+          system_prompt = None;
+          messages =
+            [
+              {
+                Agent_sdk.Types.role = Agent_sdk.Types.Tool;
+                content =
+                  [
+                    Agent_sdk.Types.ToolResult
+                      {
+                        tool_use_id = orphan_id;
+                        content = "";
+                        is_error = false;
+                        json = Some (`Assoc [ ("path", `String "lib/keeper.ml") ]);
+                      };
+                  ];
+                name = None;
+                tool_call_id = None;
+              };
+              Agent_sdk.Types.assistant_msg
+                "done\n\n[STATE]\nGoal: rollover orphan repair\nProgress: ready\n[/STATE]";
+            ];
+          usage = Agent_sdk.Types.empty_usage;
+          turn_count = 2;
+          created_at = 0.0;
+          tools = [];
+          tool_choice = None;
+          disable_parallel_tool_use = false;
+          temperature = None;
+          top_p = None;
+          top_k = None;
+          min_p = None;
+          enable_thinking = None;
+          response_format_json = false;
+          thinking_budget = None;
+          cache_system_prompt = false;
+          max_input_tokens = None;
+          max_total_tokens = Some 4096;
+          context = Agent_sdk.Context.create ();
+          mcp_sessions = [];
+          working_context = None;
+        }
+      in
+      let rollover =
+        KEC.maybe_rollover_oas_handoff
+          ~on_started:(fun () -> ())
+          ~base_dir
+          ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:256
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "rollover attempted" true rollover.attempted;
+      let next_trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id
+      in
+      let next_session = KEC.create_session ~session_id:next_trace_id ~base_dir in
+      match
+        Masc_mcp.Keeper_checkpoint_store.load_oas
+          ~session_dir:next_session.session_dir
+          ~session_id:next_trace_id
+      with
+      | Ok saved ->
+          check (option string)
+            "rollover drops structured orphan tool result" None
+            (tool_result_content_for_id ~tool_use_id:orphan_id saved.messages)
+      | Error _ -> Alcotest.fail "load_oas rollover checkpoint failed")
+
 (* --- patch_checkpoint_last_assistant tests (#5431) --- *)
 
 let make_test_checkpoint ?(session_id = "old-session")
@@ -1526,6 +1673,10 @@ let () =
             "overflow retry history budget ignores checkpoint system prompt"
             `Quick
             test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_prompt_in_history_budget;
+          test_case "overflow retry repairs orphan tool result" `Quick
+            test_recover_latest_checkpoint_for_overflow_retry_repairs_orphan_tool_result;
+          test_case "rollover repairs orphan tool result" `Quick
+            test_rollover_repairs_orphan_tool_result;
         ] );
       ( "checkpoint_patch",
         [

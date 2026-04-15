@@ -602,15 +602,20 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 
 Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 `docs/spec/14-configuration.md` Section 12와 reload 계약은
-`docs/TOML-RELOAD-MATRIX.md`를 참조.
+`docs/TOML-RELOAD-MATRIX.md`를 참조. 파일 모델과 각 경로의 required/optional
+필드는 [KEEPER-FILE-MODEL.md](./KEEPER-FILE-MODEL.md)를 참조.
 
 | 소스 | 경로 | 역할 |
 |------|------|------|
-| TOML declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | Persona 없이 선언적 정의 |
-| Persona profile fallback | `<PERSONAS_ROOT>/<name>/profile.json` | TOML이 없거나 깨졌을 때 keeper 기본값 fallback |
-| Persistent meta | `.masc/keepers/<name>.json` | 런타임 상태 (turn 카운트, context ratio 등) |
+| Persona identity | `<PERSONAS_ROOT>/<name>/profile.json` | keeper의 정체성 / 기본 의도 |
+| Keeper declaration | `<CONFIG_ROOT>/keepers/<name>.toml` | basepath별 배치 선언 / 예외적 override |
+| Persistent runtime state | `.masc/keepers/<name>.json` | durable runtime save-state |
+| Runtime artifacts | `.masc/keepers/<name>/...` | metrics / decisions / trajectory 등 상세 기록 |
 
-별도 keepalive 등록 레지스트리는 없다. keeper의 선언과 런타임 상태는 `.masc/keepers/<name>.json`에 함께 저장되고, keeper는 durable always-on으로 취급된다. 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
+별도 keepalive 등록 레지스트리는 없다. keeper는 durable always-on으로 취급되며,
+멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
+현재 구현에는 compatibility 이유로 authored 필드가 `.masc/keepers/<name>.json`에
+materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.toml`이다.
 
 운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. 헷갈리면 `main_eio.exe doctor --base-path ...`를 먼저 사용한다. low-level resolver에는 추가 fallback이 있지만, 운영 진단 기준은 `docs/CONFIG-DOCTOR.md`를 따른다.
 

@@ -38,9 +38,14 @@ let env_int_or ~name ~default =
   | Some raw -> (
       Option.value ~default:default (int_of_string_opt raw))
 
-let sse_reconnect_min_interval_s = 1.0
-let sse_connect_window_s = 60.0
-let sse_connect_max_in_window = 10
+let sse_reconnect_min_interval_s =
+  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:1.0
+
+let sse_connect_window_s =
+  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:60.0
+
+let sse_connect_max_in_window =
+  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:10
 
 (** Register an SSE connection under [sse_registry_mutex].
     All call sites must use this instead of direct [Hashtbl.replace]. *)

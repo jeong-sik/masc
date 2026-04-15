@@ -291,8 +291,8 @@ let make_keeper_meta_json ?(name = "route-shadow-demo") () =
 ;;
 
 let seed_auth_and_keeper ~base_path ~keeper_name =
-  let config = Masc_mcp.Room.default_config base_path in
-  ignore (Masc_mcp.Room.init config ~agent_name:(Some "bootstrap-admin"));
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
   Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
   write_file
     (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
@@ -460,8 +460,8 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-  let config = Masc_mcp.Room.default_config base_path in
-  ignore (Masc_mcp.Room.init config ~agent_name:(Some "bootstrap-admin"));
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
   let trace_id = "trace-route-shadow-demo-seed" in
   let internal_history_path =
     Masc_mcp.Keeper_types.keeper_internal_history_path config trace_id

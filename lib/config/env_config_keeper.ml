@@ -180,7 +180,7 @@ let keepalive_interval_sec_ =
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
-  (** Master switch. When true, successful Room.heartbeat after a
+  (** Master switch. When true, successful Coord.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_room_presence call. *)
   let enabled =

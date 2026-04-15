@@ -18,7 +18,7 @@ let default () = default_state
 let set_executor_pool pool = Executor_pool_ref.set pool
 
 let run_dashboard_compute state ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
-    ~(config : Room.config) compute =
+    ~(config : Coord.config) compute =
   let _ = state, runtime, clock in
   let fallback () = compute ~config ~sw in
   let run_in_pool pool_sw =

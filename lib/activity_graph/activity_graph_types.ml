@@ -18,7 +18,7 @@ type node_status =
   (* Operation lifecycle *)
   | Running | Paused | Stopped | Finalized
   (* Generic / fallback *)
-  | Observed | Room | Unset
+  | Observed | Coord | Unset
 
 let node_status_to_string = function
   | Active -> "active" | Offline -> "offline" | Spawned -> "spawned"
@@ -31,7 +31,7 @@ let node_status_to_string = function
   | Approved -> "approved" | Denied -> "denied"
   | Running -> "running" | Paused -> "paused"
   | Stopped -> "stopped" | Finalized -> "finalized"
-  | Observed -> "observed" | Room -> "room" | Unset -> ""
+  | Observed -> "observed" | Coord -> "room" | Unset -> ""
 
 let node_status_of_string = function
   | "active" -> Active | "offline" -> Offline | "spawned" -> Spawned
@@ -44,7 +44,7 @@ let node_status_of_string = function
   | "approved" -> Approved | "denied" -> Denied
   | "running" -> Running | "paused" -> Paused
   | "stopped" -> Stopped | "finalized" -> Finalized
-  | "observed" -> Observed | "room" -> Room
+  | "observed" -> Observed | "room" -> Coord
   | "" -> Unset
   | _ -> Observed  (* fail-open: unknown status treated as generic *)
 

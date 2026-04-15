@@ -74,12 +74,12 @@ val normalize_team_health : string -> string
 
 val build_room_attention_items :
   ?command_plane_summary:Yojson.Safe.t ->
-  Room.config ->
+  Coord.config ->
   attention_item list
 
 val room_recommendations :
   ?command_plane_summary:Yojson.Safe.t ->
-  Room.config ->
+  Coord.config ->
   recommended_action list
 
 val normalize_digest_target_type :

@@ -45,8 +45,8 @@ let make_test_ctx_with_agent agent_name =
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-task-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
-  let config = Room.default_config tmp in
-  let _ = Room.init config ~agent_name:(Some agent_name) in
+  let config = Coord.default_config tmp in
+  let _ = Coord.init config ~agent_name:(Some agent_name) in
   { Tool_task.config; agent_name; sw = None }
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
@@ -233,7 +233,7 @@ let () = test "handle_add_task_persists_contract" (fun () ->
         ])
   in
   if not success then failwith result;
-  match Room.get_tasks_raw ctx.config with
+  match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
       | Some contract ->
@@ -314,7 +314,7 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
         ])
   in
   if not success_release then failwith result_release;
-  match Room.get_tasks_raw ctx.config with
+  match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
       | Some handoff_context ->
@@ -340,7 +340,7 @@ let () = test "handle_claim_appends_preset_warning_only_on_success" (fun () ->
   let base_path = Masc_test_deps.find_project_root () in
   ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
   (match
-     Room.update_agent_r ctx.config ~agent_name
+     Coord.update_agent_r ctx.config ~agent_name
        ~capabilities:[ "preset:minimal" ] ()
    with
   | Ok _ -> ()
@@ -366,7 +366,7 @@ let () = test "handle_claim_skips_preset_warning_on_failed_claim" (fun () ->
   let base_path = Masc_test_deps.find_project_root () in
   ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
   (match
-     Room.update_agent_r ctx.config ~agent_name
+     Coord.update_agent_r ctx.config ~agent_name
        ~capabilities:[ "preset:minimal" ] ()
    with
   | Ok _ -> ()
@@ -379,8 +379,8 @@ let () = test "handle_claim_skips_preset_warning_on_failed_claim" (fun () ->
           ("required_preset", `String "social");
         ])
   in
-  let _ = Room.join ctx.config ~agent_name:"other-agent" ~capabilities:[] () in
-  (match Room.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () with
+  let _ = Coord.join ctx.config ~agent_name:"other-agent" ~capabilities:[] () in
+  (match Coord.claim_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" () with
   | Ok _ -> ()
   | Error e -> failwith (Types.masc_error_to_string e));
   let success, result =
@@ -427,7 +427,7 @@ let () = test "handle_claim_next_prefers_live_keeper_preset" (fun () ->
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
   (match
-     Room.update_agent_r ctx.config ~agent_name
+     Coord.update_agent_r ctx.config ~agent_name
        ~capabilities:[ "keeper"; "preset:minimal" ] ()
    with
   | Ok _ -> ()
@@ -442,7 +442,7 @@ let () = test "handle_claim_next_prefers_live_keeper_preset" (fun () ->
   in
   let success, result = Tool_task.handle_claim_next ctx (`Assoc []) in
   assert success;
-  match Room.get_tasks_raw ctx.config with
+  match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
       | Types.Claimed { assignee; _ } -> assert (assignee = agent_name)
@@ -465,7 +465,7 @@ let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Room.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let success, result =
     Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
@@ -488,8 +488,8 @@ let () = test "handle_done_todo_guidance" (fun () ->
 let () = test "handle_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Room.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
-  let _ = Room.complete_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" ~notes:"done" in
+  let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Coord.complete_task_r ctx.config ~agent_name:"other-agent" ~task_id:"task-001" ~notes:"done" in
   let success, result =
     Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
@@ -501,7 +501,7 @@ let () = test "handle_done_already_done_guidance" (fun () ->
 let () = test "handle_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Cancelled test")]) in
-  let _ = Room.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
+  let _ = Coord.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
   let success, result =
     Tool_task.handle_done ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in

@@ -37,11 +37,6 @@ import type {
   KeeperApprovalQueueItem,
   GovernanceTimelineEvent,
   PendingConfirmation,
-  CommandPlaneHelpResponse,
-  CommandPlaneChainRunResponse,
-  CommandPlaneChainSummary,
-  CommandPlaneSnapshot,
-  CommandPlaneSummarySnapshot,
 } from '../types'
 
 // --- Dashboard projections ---
@@ -1288,34 +1283,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       compaction_count: asInt(metrics.compaction_count) ?? 0,
     },
   }
-}
-
-// --- Command Plane ---
-
-export function fetchCommandPlaneSnapshot(): Promise<CommandPlaneSnapshot> {
-  return get('/api/v1/command-plane')
-}
-
-export function fetchCommandPlaneSummary(): Promise<CommandPlaneSummarySnapshot> {
-  return get('/api/v1/command-plane/summary')
-}
-
-export function fetchChainSummary(): Promise<CommandPlaneChainSummary> {
-  return get('/api/v1/chains/summary')
-}
-
-export function fetchChainRun(runId: string): Promise<CommandPlaneChainRunResponse> {
-  return get(`/api/v1/chains/runs/${encodeURIComponent(runId)}`)
-}
-export function fetchCommandPlaneHelp(): Promise<CommandPlaneHelpResponse> {
-  return get('/api/v1/command-plane/help')
-}
-
-export function runCommandPlaneAction(
-  path: string,
-  body: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  return post(path, body)
 }
 
 // --- Keeper config (structured read-only view) ---

@@ -376,7 +376,7 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
 
 (** Check if a model label is runnable (has provider config + auth). *)
 let is_label_runnable (label : string) : bool =
-  match Llm_provider.Cascade_config.parse_model_string label with
+  match Cascade_config.parse_model_string label with
   | None -> false
   | Some _cfg ->
     (* Extract provider prefix from label and check auth detail *)
@@ -401,7 +401,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
         "single-agent run resolved run_id=%s provider=%s requested_model=%s model_label=%s"
         run_id provider model label;
       (* Validate label parses *)
-      match Llm_provider.Cascade_config.parse_model_string label with
+      match Cascade_config.parse_model_string label with
       | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
       | Some _cfg ->
         if not (is_label_runnable label) then

@@ -1,7 +1,7 @@
 (** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
 
 type context = {
-  config : Room.config;
+  config : Coord.config;
   agent_name : string;
 }
 

@@ -8,7 +8,7 @@ include Swarm_status_lanes
 include Swarm_status_build
 
 let build_json_from_snapshot ?(timeline_limit_override = timeline_limit)
-    (config : Room_utils.config) snapshot =
+    (config : Coord_utils.config) snapshot =
   build_json_from_inputs
     ~timeline_limit_override
     ~now:(Time_compat.now ())
@@ -20,7 +20,7 @@ let build_json_from_snapshot ?(timeline_limit_override = timeline_limit)
     ~sessions:(read_session_infos config)
 
 let build_json ?(timeline_limit_override = timeline_limit)
-    (config : Room_utils.config) =
+    (config : Coord_utils.config) =
   build_json_from_inputs
     ~timeline_limit_override
     ~now:(Time_compat.now ())

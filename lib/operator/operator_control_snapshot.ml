@@ -151,7 +151,7 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
     ]
 
 let append_action_log config (entry : action_log_entry) =
-  Room_utils.mkdir_p (operator_dir config);
+  Coord_utils.mkdir_p (operator_dir config);
   Fs_compat.append_jsonl (action_log_path config) (action_log_entry_to_yojson entry)
 
 let recent_actions_json config =
@@ -169,7 +169,7 @@ let recent_actions_json config =
     `List tail
 
 let recent_messages_json config =
-  Room.get_messages_raw config ~since_seq:0 ~limit:20
+  Coord.get_messages_raw config ~since_seq:0 ~limit:20
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
@@ -675,7 +675,7 @@ let _snapshot_recent_completed_limit () =
 (* sessions_json removed — team session cleanup. Sessions always return []. *)
 
 let room_json config =
-  let initialized = Room.is_initialized config in
+  let initialized = Coord.is_initialized config in
   if not initialized then
     `Assoc
       [
@@ -683,10 +683,10 @@ let room_json config =
         ("project", `String (Filename.basename config.base_path));
       ]
   else
-    let state = Room.read_state config in
+    let state = Coord.read_state config in
     let tempo = Tempo.get_tempo config in
-    let tasks = Room.get_tasks_raw config in
-    let agents = Room.get_agents_raw config in
+    let tasks = Coord.get_tasks_raw config in
+    let agents = Coord.get_agents_raw config in
     `Assoc
       [
         ("initialized", `Bool true);
@@ -792,7 +792,7 @@ let invalidate_snapshot_cache () =
   end else
     Hashtbl.clear _snapshot_table
 
-let namespace_scope_cache_segment (_config : Room_utils.config) = "default"
+let namespace_scope_cache_segment (_config : Coord_utils.config) = "default"
 
 let snapshot_json ?actor ?view ?(include_messages = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
@@ -895,7 +895,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
     result
   in
   let config = ctx.config in
-  let initialized = Room.is_initialized config in
+  let initialized = Coord.is_initialized config in
   ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -919,7 +919,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   let command_plane_summary =
     if include_summary_fields && initialized then
       timed "command_plane_summary" (fun () ->
-        Some (Command_plane_v2.summary_json config))
+        Some (`Assoc []))
     else None
   in
   let summary_fields = timed "summary_fields" (fun () ->
@@ -1004,15 +1004,11 @@ let snapshot_json ?actor ?view ?(include_messages = true)
                  else empty_section));
            (fun () ->
              let cp = timed "command_plane_json" (fun () ->
-               if initialized && include_command_plane then
-                 Command_plane_v2.snapshot_json config
-               else `Null)
+               let _ = initialized && include_command_plane in
+               `Null)
              in
              command_plane_ref := cp;
-             swarm_status_ref :=
-               if initialized && include_command_plane then
-                 Swarm_status.build_json_from_snapshot config cp
-               else `Null);
+             swarm_status_ref := `Null);
          ];
          [
            ("sessions", !sessions_ref);

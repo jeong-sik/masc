@@ -19,7 +19,7 @@ type swarm_lane_summary = {
   hard_flags: Swarm_status_types.flag_code list;
 }
 
-(** Room snapshot — shared between Dashboard and Dashboard_attention *)
+(** Coord snapshot — shared between Dashboard and Dashboard_attention *)
 type room_snapshot = {
   room_id: string;
   is_current: bool;

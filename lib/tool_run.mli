@@ -6,7 +6,7 @@
 
 (** Tool handler context *)
 type context = {
-  config: Room.config;
+  config: Coord.config;
 }
 
 (** Tool result type *)

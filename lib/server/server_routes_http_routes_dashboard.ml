@@ -41,7 +41,7 @@ let available_cascade_profiles () : string list =
        ["default"])
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
-    relay via Room.broadcast.  Error responses are encoded through Yojson so
+    relay via Coord.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
 let handle_broadcast state agent_name reqd body_str =
   let reply ok error_opt =
@@ -57,7 +57,7 @@ let handle_broadcast state agent_name reqd body_str =
     match Yojson.Safe.Util.member "message" json with
     | `String message ->
         let config = state.Mcp_server.room_config in
-        let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
+        let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
         reply true None
     | `Null -> reply false (Some "missing required field: message")
     | _ -> reply false (Some "field 'message' must be a string")
@@ -436,7 +436,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let base_path = config.base_path in
-         let masc_root = Room.masc_root_dir config in
+         let masc_root = Coord.masc_root_dir config in
          let float_query_param req key =
            match Server_utils.query_param req key with
            | None -> None
@@ -488,7 +488,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let base_path = config.base_path in
-         let masc_root = Room.masc_root_dir config in
+         let masc_root = Coord.masc_root_dir config in
          let json = Telemetry_unified.summary_json ~base_path ~masc_root () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd

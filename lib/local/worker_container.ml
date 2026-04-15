@@ -388,7 +388,7 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
     Returns Error when the label cannot be parsed. *)
 let oas_provider_of_label (label : string) :
     (Oas.Provider.config, string) result =
-  match Llm_provider.Cascade_config.parse_model_string label with
+  match Cascade_config.parse_model_string label with
   | Some pc -> Ok (Oas.Provider.config_of_provider_config pc)
   | None ->
     let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
@@ -399,7 +399,7 @@ let oas_provider_of_label (label : string) :
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
     (Oas.Provider.config * string, string) result =
-  match Llm_provider.Cascade_config.parse_model_string label with
+  match Cascade_config.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
   | Some pc ->
     Ok

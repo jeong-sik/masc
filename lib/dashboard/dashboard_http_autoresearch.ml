@@ -38,6 +38,8 @@ let loop_summary_json (base_path : string)
       ("baseline", `Float state.baseline);
       ("best_score", `Float state.best_score);
       ("best_cycle", `Int state.best_cycle);
+      ("target_score", Json_util.float_opt_to_json state.target_score);
+      ("target_reached", `Bool (Autoresearch.target_reached state));
       ("total_keeps", `Int state.total_keeps);
       ("total_discards", `Int state.total_discards);
       ("elapsed_s", `Float (Time_compat.now () -. state.start_time));
@@ -83,6 +85,14 @@ let persisted_to_loop_summary_json (base_path : string)
       ("baseline", `Float p.baseline);
       ("best_score", `Float p.best_score);
       ("best_cycle", `Int p.best_cycle);
+      ("target_score", Json_util.float_opt_to_json p.target_score);
+      ( "target_reached",
+        `Bool
+          (match p.target_score with
+           | None -> false
+           | Some target ->
+               if p.lower_is_better then p.best_score <= target
+               else p.best_score >= target) );
       ("total_keeps", `Int p.total_keeps);
       ("total_discards", `Int p.total_discards);
       ("elapsed_s", `Float p.elapsed_s);
@@ -284,6 +294,7 @@ let rehydrate_persisted_loop (persisted : Autoresearch_types.persisted_summary) 
     metric_fn = persisted.metric_fn;
     model_model = persisted.model_model;
     target_file = persisted.target_file;
+    target_score = persisted.target_score;
     status = persisted.status;
     error_message = persisted.error_message;
     current_cycle = persisted.current_cycle;

@@ -14,7 +14,7 @@
 *)
 
 (** Config type alias *)
-type config = Room_utils.config
+type config = Coord_utils.config
 
 (** Synapse between two agents *)
 type synapse = {
@@ -76,7 +76,7 @@ let default_params () = {
 
 (** Get synapses file path *)
 let synapses_file (config : config) =
-  Filename.concat config.Room_utils.base_path ".masc/synapses/graph.json"
+  Filename.concat config.Coord_utils.base_path ".masc/synapses/graph.json"
 
 (** Get lock file path *)
 let synapses_lock_file (config : config) =
@@ -84,7 +84,7 @@ let synapses_lock_file (config : config) =
 
 (** Ensure synapses directory exists *)
 let ensure_synapses_dir config =
-  let synapses_dir = Filename.concat (Filename.concat config.Room_utils.base_path ".masc") "synapses" in
+  let synapses_dir = Filename.concat (Filename.concat config.Coord_utils.base_path ".masc") "synapses" in
   Fs_compat.mkdir_p synapses_dir
 
 (** Lock contention metrics *)

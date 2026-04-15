@@ -9,11 +9,11 @@ let test_digest_room_prefers_fresh_operator_judgment () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      ignore (Room.join config ~agent_name:"operator" ~capabilities:[] ());
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      ignore (Coord.join config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
-        ~target_type:Operator_judgment.Room ~target_id:None
+        ~target_type:Operator_judgment.Coord ~target_id:None
         ~summary:"Pause the namespace before taking any destructive action."
         ~recommended_action:
           (`Assoc
@@ -30,7 +30,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
         (List.length (Operator_judgment.load_all config));
       (match
          Operator_judgment.latest_active config ~surface:"command.namespace"
-           ~target_type:Operator_judgment.Room ~target_id:None
+           ~target_type:Operator_judgment.Coord ~target_id:None
        with
       | Some _ -> ()
       | None ->
@@ -66,11 +66,11 @@ let test_digest_room_ignores_stale_operator_judgment () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      ignore (Room.join config ~agent_name:"operator" ~capabilities:[] ());
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      ignore (Coord.join config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
-        ~target_type:Operator_judgment.Room ~target_id:None
+        ~target_type:Operator_judgment.Coord ~target_id:None
         ~summary:"This judgment is stale." ~fresh_for_sec:(-5.0) ();
       let ctx = operator_ctx env sw config "operator" in
       let digest =
@@ -96,8 +96,8 @@ let test_operator_judgment_write_and_latest_roundtrip () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator-judge"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator-judge"));
       let ctx = operator_ctx env sw config "operator-judge" in
       let written =
         match
@@ -139,11 +139,11 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
-      let pending_dir = Filename.concat (Room.masc_dir config) "operator" in
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let pending_dir = Filename.concat (Coord.masc_dir config) "operator" in
       let path = Filename.concat pending_dir "pending_confirms.json" in
-      Room_utils.mkdir_p pending_dir;
+      Coord_utils.mkdir_p pending_dir;
       let token = "retry-token" in
       let entry_json =
         `Assoc
@@ -160,7 +160,7 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
             ("expires_at", `Null);
           ]
       in
-      Room_utils.write_json config path (`List [ entry_json ]);
+      Coord_utils.write_json config path (`List [ entry_json ]);
       let ctx = operator_ctx env sw config "operator" in
       (match
          Operator_control.confirm_json ctx

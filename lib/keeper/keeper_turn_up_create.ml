@@ -342,6 +342,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           noop_turn_count = 0;
           consecutive_noop_count = 0;
           last_speech_act = "";
+          last_social_transition_reason = "";
+          last_active_desire = "";
+          last_current_intention = "";
           last_blocker = "";
           last_need = "";
         };

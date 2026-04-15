@@ -31,7 +31,7 @@ val activity_item_of_json : Yojson.Safe.t -> activity_item option
     or when [id] is empty. *)
 
 val recent_activity :
-  Room.config -> ?agent_name:string -> limit:int -> unit -> activity_item list
+  Coord.config -> ?agent_name:string -> limit:int -> unit -> activity_item list
 (** Fetch a unified activity timeline.
 
     Reads from tasks, board posts, board comments, mention inbox, and debates.

@@ -18,7 +18,7 @@ let all_schema_names =
 let test_workflow_guide_tools_exist () =
   let guide_tools = [
     "masc_start"; "masc_join"; "masc_status";
-    "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
+    "masc_claim"; "masc_claim_next"; "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
     "masc_plan_set_task"; "masc_set_current_task";
     "masc_heartbeat"; "masc_broadcast";
@@ -142,13 +142,14 @@ let test_docs_do_not_reintroduce_ghost_claim_surface () =
              name)
 
 let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
+  (* CP purge: dashboard/src/components/command/ directory deleted with the
+     command plane; guided-panel.ts is no longer a front-door surface. *)
   let paths =
     [
       "llms.txt";
       "llms-full.txt";
       "examples/BEST-PRACTICES.md";
       "benchmarks/benchmark.sh";
-      "dashboard/src/components/command/guided-panel.ts";
     ]
   in
   List.iter

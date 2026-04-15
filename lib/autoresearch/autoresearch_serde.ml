@@ -132,6 +132,13 @@ let optional_float_field json field =
         (Printf.sprintf "%s: expected float or null, got %s" field
            (yojson_type_name value))
 
+let loop_target_reached (state : loop_state) =
+  match state.target_score with
+  | None -> false
+  | Some target ->
+      if state.lower_is_better then state.best_score <= target
+      else state.best_score >= target
+
 let cycle_to_yojson (r : cycle_record) : Yojson.Safe.t =
   `Assoc [
     ("cycle", `Int r.cycle);
@@ -191,6 +198,8 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("metric_fn", `String s.metric_fn);
     ("model_model", `String s.model_model);
     ("target_file", `String s.target_file);
+    ("target_score", Json_util.float_opt_to_json s.target_score);
+    ("target_reached", `Bool (loop_target_reached s));
     ("status", `String (status_to_string s.status));
     ("current_cycle", `Int s.current_cycle);
     ("baseline", `Float s.baseline);
@@ -238,6 +247,7 @@ let state_of_yojson_result (json : Yojson.Safe.t) : (persisted_summary, string) 
   let* metric_fn = required_string_field kind json "metric_fn" in
   let* model_model = required_string_field kind json "model_model" in
   let* target_file = required_string_field kind json "target_file" in
+  let* target_score = optional_float_field json "target_score" in
   let* workdir = required_string_field kind json "workdir" in
   let* cycle_timeout_s = required_float_field kind json "cycle_timeout_s" in
   let* max_cycles = required_int_field kind json "max_cycles" in
@@ -307,6 +317,7 @@ let state_of_yojson_result (json : Yojson.Safe.t) : (persisted_summary, string) 
       metric_fn;
       model_model;
       target_file;
+      target_score;
       workdir;
       cycle_timeout_s;
       max_cycles;

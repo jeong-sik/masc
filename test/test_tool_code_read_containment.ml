@@ -44,7 +44,7 @@ let sh cmd =
 
 let git_init_base base_path =
   (* [Tool_code.validate_path] requires the tmp dir to be a real git
-     repo so [Room_git.git_root] can resolve it. Initialise + one
+     repo so [Coord_git.git_root] can resolve it. Initialise + one
      commit so the repo is in a valid state. *)
   sh (Printf.sprintf "cd %s && git init -q -b main" base_path);
   sh (Printf.sprintf "cd %s && git config user.email test@example.com" base_path);
@@ -67,8 +67,8 @@ let touch path =
   let oc = open_out path in
   close_out oc
 
-let make_config base_path : Room.config =
-  { (Room.default_config base_path) with base_path }
+let make_config base_path : Coord.config =
+  { (Coord.default_config base_path) with base_path }
 
 (* Test registry — each [test] call appends; final [let ()] dispatches
    via Alcotest.run. *)

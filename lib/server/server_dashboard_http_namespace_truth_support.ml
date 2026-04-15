@@ -214,7 +214,7 @@ let derived_meta_attention_item ~meta_cognition_json
                  ] );
            ])
 
-let derived_operator_digest_json (config : Room.config) _execution_json
+let derived_operator_digest_json (config : Coord.config) _execution_json
     meta_cognition_json meta_interpretation =
   let meta_attention =
     Option.bind meta_interpretation
@@ -339,7 +339,7 @@ let namespace_truth_command_summary_json command_summary_json =
       ("provenance", `String "truth");
     ]
 
-let compose_namespace_truth_snapshot ~(config : Room.config) ~initialized ~shell_json
+let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
   let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in
   let meta_summary_input, meta_interpretation =

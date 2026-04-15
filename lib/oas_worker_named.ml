@@ -90,23 +90,23 @@ let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t lis
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in
   let configured =
-    Llm_provider.Cascade_config.resolve_model_strings
+    Cascade_config.resolve_model_strings
       ?config_path ~name:cascade_name ~defaults ()
   in
-  let specs = Llm_provider.Cascade_config.parse_model_strings configured in
+  let specs = Cascade_config.parse_model_strings configured in
   if specs <> [] then specs
   else if configured = defaults then (
       Log.Misc.warn "cascade %s: no callable models from built-in defaults" cascade_name;
       [])
     else (
       Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
-      Llm_provider.Cascade_config.parse_model_strings defaults)
+      Cascade_config.parse_model_strings defaults)
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
     MASC passes strings through without interpretation — OAS parses them. *)
 let resolve_providers_from_model_strings (model_strings : string list)
     : Llm_provider.Provider_config.t list =
-  let specs = Llm_provider.Cascade_config.parse_model_strings model_strings in
+  let specs = Cascade_config.parse_model_strings model_strings in
   if specs <> [] then specs
   else (
     Log.Misc.warn "direct model strings: no callable models from %d entries"
@@ -170,7 +170,7 @@ let config_for_label
     cascadeable (a different provider may succeed).  Structural agent
     errors (budget, idle, exit) are not — they would recur on any model. *)
 let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
-    : Llm_provider.Cascade_fsm.provider_outcome option =
+    : Cascade_fsm.provider_outcome option =
   match err with
   | Oas.Error.Api api_err ->
     let http_err = match api_err with
@@ -190,17 +190,17 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
       | Llm_provider.Retry.Timeout { message } ->
         Llm_provider.Http_client.NetworkError { message }
     in
-    Some (Llm_provider.Cascade_fsm.Call_err http_err)
+    Some (Cascade_fsm.Call_err http_err)
   (* Model-capability errors: the next provider may handle these.
      CompletionContractViolation: model returned text when tool_use was
      required — a different model with better tool calling may succeed.
      UnrecognizedStopReason: model returned a non-standard stop reason
      that this provider does not map — another provider may not. *)
   | Oas.Error.Agent (Oas.Error.CompletionContractViolation { reason; _ }) ->
-    Some (Llm_provider.Cascade_fsm.Call_err
+    Some (Cascade_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
   | Oas.Error.Agent (Oas.Error.UnrecognizedStopReason { reason }) ->
-    Some (Llm_provider.Cascade_fsm.Call_err
+    Some (Cascade_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
   | _ -> None
 
@@ -279,7 +279,7 @@ let run_named
       (* Legacy path: resolve from cascade.json by name *)
       let defaults = default_model_strings ~cascade_name in
       let labels =
-        Llm_provider.Cascade_config.resolve_model_strings
+        Cascade_config.resolve_model_strings
           ?config_path ~name:cascade_name ~defaults ()
       in
       (labels, resolve_cascade_providers ~cascade_name)
@@ -402,10 +402,10 @@ let run_named
       | Ok result ->
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
-        let outcome = Llm_provider.Cascade_fsm.Accept_rejected
+        let outcome = Cascade_fsm.Accept_rejected
           { response = result.response; reason } in
-        (match Llm_provider.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
-         | Llm_provider.Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+        (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+         | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
            let observation =
              Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some response.model) ~capture
@@ -413,11 +413,11 @@ let run_named
            let result = { result with cascade_observation = Some observation } in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
            Ok result
-         | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
+         | Cascade_fsm.Try_next { last_err = new_err } ->
            Log.Misc.warn "cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
            metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
            try_cascade ?resume_checkpoint:next_resume rest new_err
-         | Llm_provider.Cascade_fsm.Exhausted _ ->
+         | Cascade_fsm.Exhausted _ ->
            let observation =
              Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
@@ -425,7 +425,7 @@ let run_named
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
            Error (Oas.Error.Internal
              (Printf.sprintf "cascade %s: %s" cascade_name reason))
-         | Llm_provider.Cascade_fsm.Accept resp ->
+         | Cascade_fsm.Accept resp ->
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
            let observation =
@@ -439,13 +439,13 @@ let run_named
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->
-           (match Llm_provider.Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
-            | Llm_provider.Cascade_fsm.Try_next { last_err = new_err } ->
+           (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+            | Cascade_fsm.Try_next { last_err = new_err } ->
               Log.Misc.warn "cascade %s: %s failed (%s), trying next" cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
               metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(Oas.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err
-            | Llm_provider.Cascade_fsm.Exhausted _ ->
+            | Cascade_fsm.Exhausted _ ->
               let observation =
                 Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
                   ~candidate_cfgs ~selected_model_raw:None ~capture
@@ -500,7 +500,7 @@ let run_model_by_label
     ?net
     ()
   : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
-  (match Llm_provider.Cascade_config.parse_model_string model_label with
+  (match Cascade_config.parse_model_string model_label with
   | None ->
     Error (Oas.Error.Internal
       (Printf.sprintf "Cannot parse model label: %s" model_label))

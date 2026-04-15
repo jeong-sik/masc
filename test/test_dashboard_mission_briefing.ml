@@ -2,7 +2,7 @@ open Alcotest
 
 module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
 module Briefing = Masc_mcp.Dashboard_mission_briefing.For_test
-module Room = Masc_mcp.Room
+module Coord = Masc_mcp.Coord
 
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_mission_briefing_" "" in
@@ -87,8 +87,8 @@ let test_briefing_cold_call_returns_pending () =
        | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
       Briefing.reset_cache ();
-      let config = Room.default_config base_path in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_path in
+      ignore (Coord.init config ~agent_name:None);
       let json =
         Dashboard_mission_briefing.json
           ~config ~sw ~clock ~proc_mgr:None ()
@@ -112,8 +112,8 @@ let test_force_refresh_without_cache_returns_pending () =
       cleanup_dir base_path)
     (fun () ->
       Briefing.reset_cache ();
-      let config = Room.default_config base_path in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_path in
+      ignore (Coord.init config ~agent_name:None);
       let json =
         Dashboard_mission_briefing.json
           ~force:true ~config ~sw ~clock ~proc_mgr:None ()
@@ -136,8 +136,8 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       cleanup_dir base_path)
     (fun () ->
       Briefing.reset_cache ();
-      let config = Room.default_config base_path in
-      ignore (Room.init config ~agent_name:None);
+      let config = Coord.default_config base_path in
+      ignore (Coord.init config ~agent_name:None);
       Briefing.seed_cache
         ~cached_at:(Unix.gettimeofday ())
         (`Assoc

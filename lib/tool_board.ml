@@ -117,7 +117,7 @@ let visibility_of_string = function
   | _ -> None
 
 (** Agent lookup callback — set once at server startup with the real
-    Room.is_agent_joined check so that board posts are auto-classified
+    Coord.is_agent_joined check so that board posts are auto-classified
     without requiring callers to pass config or post_kind. *)
 let agent_lookup_hook : (string -> bool) option Atomic.t = Atomic.make None
 
@@ -127,7 +127,7 @@ let set_agent_lookup_none () = Atomic.set agent_lookup_hook None
 
 
 (** Check whether [name] is a registered agent.  Uses the registry
-    lookup (Room.is_agent_joined) when available via [agent_lookup_hook];
+    lookup (Coord.is_agent_joined) when available via [agent_lookup_hook];
     returns [false] when no hook is installed. *)
 let is_agent name =
   match Atomic.get agent_lookup_hook with

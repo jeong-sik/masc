@@ -58,11 +58,6 @@ export function registerGovernanceRefresh(fn: () => void): void {
   _refreshGovernanceFn = fn
 }
 
-let _refreshCommandPlaneFn: (() => void) | null = null
-export function registerCommandPlaneRefresh(fn: () => void): void {
-  _refreshCommandPlaneFn = fn
-}
-
 let _refreshOperatorFn: (() => void) | null = null
 export function registerOperatorRefresh(fn: () => void): void {
   _refreshOperatorFn = fn
@@ -249,7 +244,6 @@ async function refreshActiveRoute(): Promise<void> {
     refreshForRoute(route.value)
   } catch (err) {
     console.debug('[SSE] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
-    _refreshCommandPlaneFn?.()
     _refreshOperatorFn?.()
     _refreshMissionFn?.()
   }

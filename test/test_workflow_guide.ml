@@ -18,7 +18,7 @@ let check_has_tool steps tool_name =
 let check_not_empty msg steps =
   check bool msg true (List.length steps > 0)
 
-(* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
+(* ── Golden Path 1: Coord/Task Hygiene ────────────────────────────── *)
 
 let test_start_success () =
   let g = WG.next_steps ~tool_name:"masc_start" ~success:true in
@@ -50,10 +50,7 @@ let test_plan_set_task_success () =
   let g = WG.next_steps ~tool_name:"masc_plan_set_task" ~success:true in
   check_has_tool g.next_steps "masc_worktree_create"
 
-let test_done_success () =
-  let g = WG.next_steps ~tool_name:"masc_done" ~success:true in
-  check_has_tool g.next_steps "masc_status";
-  check_has_tool g.next_steps "masc_transition"
+(* test_done_success removed: masc_done superseded by masc_transition(action=done). *)
 
 (* ── Retired Compatibility Paths ─────────────────────────────────── *)
 
@@ -212,7 +209,7 @@ let test_next_steps_reference_real_tools () =
   let tools_to_check = [
     "masc_start"; "masc_join"; "masc_status";
     "masc_claim"; "masc_claim_next";
-    "masc_done"; "masc_transition";
+    "masc_transition";
     "masc_add_task"; "masc_batch_add_tasks";
     "masc_plan_set_task"; "masc_set_current_task";
     "masc_heartbeat"; "masc_broadcast";
@@ -237,7 +234,6 @@ let () =
       test_case "join failure" `Quick test_join_failure;
       test_case "claim success" `Quick test_claim_success;
       test_case "plan_set_task success" `Quick test_plan_set_task_success;
-      test_case "done success" `Quick test_done_success;
       test_case "set_current_task alias matches canonical" `Quick
         test_set_current_task_alias_matches_canonical;
     ];

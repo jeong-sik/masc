@@ -143,7 +143,7 @@ val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
     Guards against double "keeper-" prefix. See #5104. *)
 
 val execute_keeper_tool_call :
-  config:Room.config ->
+  config:Coord.config ->
   meta:keeper_meta ->
   ctx_work:working_context ->
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->

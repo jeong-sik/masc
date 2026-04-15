@@ -14,8 +14,8 @@ module Http = Masc_mcp.Http_server_eio
 module Http_h2 = Masc_mcp.Http_server_h2
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Room = Masc_mcp.Room
-module Room_utils = Room_utils
+module Coord = Masc_mcp.Coord
+module Coord_utils = Coord_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_memory = Masc_mcp.Keeper_memory
@@ -23,7 +23,6 @@ module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_runtime = Masc_mcp.Keeper_runtime
 module Tool_operator = Masc_mcp.Tool_operator
 module Operator_control = Masc_mcp.Operator_control
-module Command_plane_v2 = Masc_mcp.Command_plane_v2
 module Dashboard_execution = Masc_mcp.Dashboard_execution
 module Dashboard_mission = Masc_mcp.Dashboard_mission
 (* module Dashboard_proof removed *)
@@ -42,7 +41,6 @@ module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
 module Safe_ops = Safe_ops
 module Tool_board = Masc_mcp.Tool_board
-module Server_command_plane_http = Masc_mcp.Server_command_plane_http
 module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http
 
 

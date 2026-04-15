@@ -1,6 +1,6 @@
 (** Task_sandbox — Worktree-based per-task filesystem isolation.
 
-    Wraps [Room_worktree] to provide a higher-level sandbox lifecycle:
+    Wraps [Coord_worktree] to provide a higher-level sandbox lifecycle:
     create sandbox, run work, collect diff, cleanup.
 
     A sandbox consists of:
@@ -31,7 +31,7 @@ let git_exit ~cwd args =
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
 
-(** Extract absolute worktree path from [Room_worktree.worktree_create_r]
+(** Extract absolute worktree path from [Coord_worktree.worktree_create_r]
     success message. Tries "Path: <absolute>" first, then falls back to
     constructing from a relative [.worktrees/...] segment. *)
 let extract_worktree_path ~base_path msg =
@@ -68,8 +68,8 @@ let symlink_masc ~repo_root ~worktree_path =
 
 let create ~config ~task_id ?(scope = Worker_types.Limited_code_change)
     ?(base_branch = "main") ~agent_name () =
-  (* Delegate worktree creation to Room_worktree via the Room facade *)
-  match Room_worktree.worktree_create_r ~link_task:true config
+  (* Delegate worktree creation to Coord_worktree via the Coord facade *)
+  match Coord_worktree.worktree_create_r ~link_task:true config
           ~agent_name ~task_id ~base_branch with
   | Error e ->
     Error (Printf.sprintf "worktree creation failed: %s"
@@ -87,7 +87,7 @@ let create ~config ~task_id ?(scope = Worker_types.Limited_code_change)
       in
       (* Resolve git root for symlink *)
       let repo_root =
-        match Room_git.git_root ~base_path with
+        match Coord_git.git_root ~base_path with
         | Some r -> r
         | None -> base_path
       in
@@ -127,8 +127,8 @@ let cleanup ~config ~agent_name sandbox =
     (files @ committed_files)
     |> List.sort_uniq String.compare
   in
-  (* Remove worktree via Room_worktree *)
-  match Room_worktree.worktree_remove_r config ~agent_name ~task_id:sandbox.task_id with
+  (* Remove worktree via Coord_worktree *)
+  match Coord_worktree.worktree_remove_r config ~agent_name ~task_id:sandbox.task_id with
   | Ok _msg -> Ok all_files
   | Error e ->
     (* If removal fails, still return the files we found *)
@@ -146,7 +146,7 @@ let cleanup ~config ~agent_name sandbox =
       | Some root -> root
       | None ->
           let base_path = config.base_path in
-          match Room_git.git_root ~base_path with
+          match Coord_git.git_root ~base_path with
           | Some r -> r
           | None -> base_path
     in

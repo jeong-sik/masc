@@ -20,7 +20,7 @@ val cost_usd_of_usage :
 val read_file_tail_lines : string -> max_bytes:int -> max_lines:int -> string list
 
 val read_keeper_memory_summary :
-  Room.config ->
+  Coord.config ->
   name:string ->
   max_bytes:int ->
   max_lines:int ->

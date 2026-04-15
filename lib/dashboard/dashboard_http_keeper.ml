@@ -69,13 +69,13 @@ let tokens_per_sec_json ~tokens ~latency_ms =
   if tokens <= 0 || latency_ms <= 0 then `Null
   else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
 
-let keeper_names (config : Room.config) =
+let keeper_names (config : Coord.config) =
   Keeper_types.keeper_names config
 
-let keeper_count (config : Room.config) : int =
+let keeper_count (config : Coord.config) : int =
   List.length (keeper_names config)
 
-let running_keeper_count (config : Room.config) : int =
+let running_keeper_count (config : Coord.config) : int =
   keeper_names config
   |> List.fold_left
        (fun count name ->
@@ -84,7 +84,7 @@ let running_keeper_count (config : Room.config) : int =
          | _ -> count)
        0
 
-let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
+let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
   let include_goals = false in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
@@ -96,7 +96,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
   in
   let keepers_dir =
-    Filename.concat (Room.masc_root_dir config) "keepers"
+    Filename.concat (Coord.masc_root_dir config) "keepers"
   in
   let shared_sp_events =
     try
@@ -404,7 +404,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 (let effective_models =
                    Oas_model_resolve.models_of_cascade_name m.cascade_name
                  in
-                 let cfgs = Llm_provider.Cascade_config.parse_model_strings effective_models in
+                 let cfgs = Cascade_config.parse_model_strings effective_models in
                  match cfgs with
                  | [] when effective_models <> [] ->
                      `Assoc [("has_checkpoint", `Bool false)]
@@ -576,7 +576,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   let all_goals = Goal_store.list_goals config () in
                   let linked = List.filter (fun (g : Goal_store.goal) ->
                     List.mem g.id m.active_goal_ids) all_goals in
-                  let tasks = Room.get_tasks_safe config in
+                  let tasks = Coord.get_tasks_safe config in
                   let forest = Dashboard_goals.build_forest ~goals:linked ~tasks in
                   `Assoc [
                     ("count", `Int (List.length linked));
@@ -639,7 +639,8 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
-              ("social_model", `String m.social_model);
+              ("social_model",
+                `String (Keeper_social_model.normalize_social_model m.social_model));
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
@@ -665,6 +666,10 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                 if String.trim m.runtime.last_speech_act = ""
                 then `Null
                 else `String m.runtime.last_speech_act);
+              ("last_social_transition_reason",
+                if String.trim m.runtime.last_social_transition_reason = ""
+                then `Null
+                else `String m.runtime.last_social_transition_reason);
               ("last_blocker",
                 if String.trim m.runtime.last_blocker = ""
                 then `Null
@@ -783,7 +788,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
-let keeper_config_json (config : Room.config) (name : string)
+let keeper_config_json (config : Coord.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   match Keeper_types.read_meta config name with
   | Error msg ->
@@ -912,7 +917,7 @@ let keeper_config_json (config : Room.config) (name : string)
                Some (`Preset (Keeper_types.tool_preset_to_string preset))
              | None -> None)
         in
-        let turn_outcome : [`Ok | `Failed | `Blocked] option =
+        let turn_outcome : [`Ok | `Failed] option =
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
             Some `Failed

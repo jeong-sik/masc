@@ -63,7 +63,7 @@ goal = "Test denylist resync"
 tool_denylist = ["toml-tool-x", "toml-tool-y"]
 |};
   (* 2. Write keeper meta with a stale denylist *)
-  let config = Room.default_config room_dir in
+  let config = Coord.default_config room_dir in
   let initial_meta =
     match
       Keeper_types.meta_of_json

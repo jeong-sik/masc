@@ -34,7 +34,7 @@ let test_get_string_base_branch_default () =
 let test_context_creation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Room.default_config "/tmp/test" in
+  let config = Masc_mcp.Coord.default_config "/tmp/test" in
   let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
   check string "agent_name" "test-agent" ctx.agent_name
 
@@ -45,7 +45,7 @@ let test_context_creation () =
 let make_ctx () : Tool_worktree.context =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Room.default_config "/tmp/test-worktree" in
+  let config = Masc_mcp.Coord.default_config "/tmp/test-worktree" in
   ({ config; agent_name = "test-agent" } : Tool_worktree.context)
 
 let test_dispatch_worktree_create () =
@@ -125,7 +125,7 @@ let test_dispatch_worktree_create_spoofed_agent_blocked () =
 
 let test_dispatch_worktree_create_matching_agent_passes_check () =
   (* When the arg matches ctx.agent_name, the spoof gate must not
-     fire. The downstream Room.worktree_create_r call may still fail
+     fire. The downstream Coord.worktree_create_r call may still fail
      because the fixture base_path is not a real git repository, so
      we only assert that any error returned is NOT the spoof error. *)
   let ctx = make_ctx () in

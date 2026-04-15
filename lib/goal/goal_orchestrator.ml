@@ -169,7 +169,7 @@ let needs_decomposition complexity =
 (** Check if a task with the same title prefix already exists in backlog.
     Prevents duplicate task creation when execute_plan is called multiple times. *)
 let task_exists_in_backlog config ~title_prefix =
-  let backlog = Room.read_backlog config in
+  let backlog = Coord.read_backlog config in
   List.exists (fun (t : Types.task) ->
     let tlen = String.length title_prefix in
     String.length t.title >= tlen && String.sub t.title 0 tlen = title_prefix
@@ -183,7 +183,7 @@ let add_task_safe config ~title ~description =
     Ok (Printf.sprintf "(skipped, already exists) %s" (String.sub title 0 (min 60 (String.length title))))
   else
     try
-      let response = Room.add_task config ~title ~priority:3 ~description in
+      let response = Coord.add_task config ~title ~priority:3 ~description in
       Ok response
     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 

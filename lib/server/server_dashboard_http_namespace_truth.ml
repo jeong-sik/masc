@@ -93,9 +93,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
             (fun () -> dashboard_shell_http_json ~clock config)
             shell_fallback;
         execution_ref := cached_surface_json Execution_surfaces._execution_cache;
-        (* command_plane_summary_http_json reads from a proactive cache ref. *)
-        command_ref :=
-          Server_command_plane_http.command_plane_summary_http_json ~state;
+        command_ref := `Assoc [];
         let shell_json = !shell_ref in
         (* Update last-known-good shell on success. *)
         if shell_json <> `Assoc [] && shell_json <> shell_fallback then
@@ -114,7 +112,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
           |> json_string_field_opt "cache_state"
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
-          ~initialized:(Room.is_initialized config) ~shell_json ~execution_json
+          ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
           ~command_summary_json
         |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
              ~extra:
@@ -147,12 +145,10 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
       else Atomic.get Execution_surfaces._last_good_shell
     in
     let execution_json = cached_surface_json Execution_surfaces._execution_cache in
-    let command_summary_json =
-      Server_command_plane_http.command_plane_summary_http_json ~state
-    in
+    let command_summary_json = `Assoc [] in
     Some
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config
-         ~initialized:(Room.is_initialized config) ~shell_json ~execution_json
+         ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
          ~command_summary_json)
 
 let _last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =

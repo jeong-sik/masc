@@ -56,17 +56,9 @@ type dispatch_fn =
 
 (* ── Configuration ──────────────────────────────────────────── *)
 
-let default_max_content_length = 4000
+let max_content_length () = 4000
 
-let max_content_length () =
-  match Sys.getenv_opt "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH" with
-  | Some s -> (try max 100 (min 16000 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default_max_content_length)
-  | None -> default_max_content_length
-
-let dedup_ttl_sec () =
-  match Sys.getenv_opt "MASC_CHANNEL_GATE_DEDUP_TTL_SEC" with
-  | Some s -> (try max 10.0 (min 3600.0 (float_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 300.0)
-  | None -> 300.0
+let dedup_ttl_sec () = 300.0
 
 (* ── Deduplication (TTL hashtable, Eio-guarded mutex) ───────── *)
 
@@ -74,10 +66,7 @@ let dedup_table : (string, float) Hashtbl.t = Hashtbl.create 256
 
 let dedup_mutex = Eio.Mutex.create ()
 
-let dedup_max_entries =
-  match Sys.getenv_opt "MASC_CHANNEL_GATE_DEDUP_MAX_ENTRIES" with
-  | Some s -> (try max 100 (min 100_000 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 10_000)
-  | None -> 10_000
+let dedup_max_entries = 10_000
 
 let with_dedup_lock f = Eio_guard.with_mutex dedup_mutex f
 

@@ -41,7 +41,6 @@ import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
-const OBSERVATORY_EVENT_LIMIT = 5000
 
 // --- Observatory state ---
 
@@ -165,7 +164,6 @@ export function Observatory() {
         keeper,
         since_ms: windowStart,
         until_ms: windowEnd,
-        n: OBSERVATORY_EVENT_LIMIT,
         signal: controller.signal,
       }),
       fetchToolQuality({ n: 2000, signal: controller.signal }),

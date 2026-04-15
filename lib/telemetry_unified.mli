@@ -52,7 +52,7 @@ val read_unified :
     reads entries from [sources] (default: all six), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
     window. Returns at most [n] entries (default 100) sorted by timestamp
-    descending (newest first).
+    descending (newest first).  When [n <= 0], no truncation is applied.
 
     [masc_root] is the cluster-aware .masc directory (use
     [Room.masc_root_dir config] to obtain it).  [base_path] is the

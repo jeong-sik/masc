@@ -268,7 +268,8 @@ let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
     ?(n = 100) () : read_result =
-  let per_source = max n (n * 2) in
+  let limited = n > 0 in
+  let per_source = if limited then max n (n * 2) else 0 in
   let all_entries =
     List.concat_map (fun source ->
       match source with
@@ -306,10 +307,10 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   ) filtered in
   let total_matching_entries = List.length sorted in
   let entries =
-    if total_matching_entries <= n then sorted
+    if not limited || total_matching_entries <= n then sorted
     else List.filteri (fun i _ -> i < n) sorted
   in
-  { entries; total_matching_entries; truncated = total_matching_entries > n }
+  { entries; total_matching_entries; truncated = limited && total_matching_entries > n }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n () :

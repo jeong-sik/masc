@@ -11,8 +11,8 @@ import { signal, type Signal } from '@preact/signals'
 import type { TelemetryEntry } from '../../api/dashboard'
 
 export type DetailSelection =
-  | { kind: 'event'; entry: TelemetryEntry; ts: number }
-  | { kind: 'tool_call'; entry: TelemetryEntry; ts: number }
+  | { kind: 'event'; entry: TelemetryEntry; ts: number; bucketCount: number }
+  | { kind: 'tool_call'; entry: TelemetryEntry; ts: number; bucketCount: number }
 
 export const detailSelection: Signal<DetailSelection | null> = signal(null)
 

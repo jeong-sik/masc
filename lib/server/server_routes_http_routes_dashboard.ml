@@ -442,10 +442,6 @@ let rec add_routes ~sw ~clock router =
            | None -> None
            | Some raw -> float_of_string_opt raw
          in
-         let n =
-           Server_utils.int_query_param req "n" ~default:100
-           |> max 1 |> min 5000
-         in
          let keeper_name = Server_utils.query_param req "keeper" in
          let session_id = Server_utils.query_param req "session_id" in
          let operation_id = Server_utils.query_param req "operation_id" in
@@ -455,6 +451,15 @@ let rec add_routes ~sw ~clock router =
          in
          let until_ts = Option.map (fun ms -> ms /. 1000.0)
              (float_query_param req "until_ms")
+         in
+         let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
+         let n =
+           match Server_utils.query_param req "n" with
+           | Some raw ->
+             Option.value ~default:(if has_time_window then 0 else 100)
+               (int_of_string_opt raw)
+             |> max 0
+           | None -> if has_time_window then 0 else 100
          in
          let sources =
            match Server_utils.query_param req "source" with

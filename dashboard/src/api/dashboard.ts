@@ -1711,7 +1711,7 @@ export function fetchTelemetry(opts?: {
   if (opts?.worker_run_id) params.set('worker_run_id', opts.worker_run_id)
   if (typeof opts?.since_ms === 'number') params.set('since_ms', String(opts.since_ms))
   if (typeof opts?.until_ms === 'number') params.set('until_ms', String(opts.until_ms))
-  if (opts?.n) params.set('n', String(opts.n))
+  if (typeof opts?.n === 'number') params.set('n', String(opts.n))
   const qs = params.toString()
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
     .then((raw) => {

@@ -288,6 +288,27 @@ let test_time_window_reads_matching_day_files () =
   Alcotest.(check (list string)) "range spans multiple day files"
     ["today"; "yesterday"] events
 
+let test_time_window_n_zero_disables_truncation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_window_unbounded" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let now = Unix.gettimeofday () in
+  write_jsonl telemetry_dir [
+    `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
+    `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
+    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
+  ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
+      ~sources:[Telemetry_unified.Agent_event]
+      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:0 ()
+  in
+  Alcotest.(check int) "returns every matching entry" 3 (List.length result.entries);
+  Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
+  Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
+
 (* ── Summary with data ───────────────────────────── *)
 
 let test_summary_with_data () =
@@ -440,6 +461,8 @@ let () =
             test_time_window_reports_total_before_limit;
           Alcotest.test_case "time window reads matching day files" `Quick
             test_time_window_reads_matching_day_files;
+          Alcotest.test_case "time window n=0 disables truncation" `Quick
+            test_time_window_n_zero_disables_truncation;
         ] );
       ( "summary",
         [

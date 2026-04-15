@@ -9,7 +9,7 @@ import type { TelemetryEntry } from '../../api/dashboard'
 import { setCursorFromEvent, clearCursor } from './cursor-store'
 import { CursorLine } from './cursor-line'
 import { selectEntity, detailSelection } from './detail-selection-store'
-import { entryTimestampMs } from './observatory-utils'
+import { bucketTelemetryEntries, entryTimestampMs, useTrackBucketCount } from './observatory-utils'
 
 function sourceColor(source: string | undefined): string {
   switch (source) {
@@ -36,19 +36,21 @@ interface Props {
 
 export function EventTrack({ events, windowStart, windowEnd }: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null)
+  const bucketCount = useTrackBucketCount(trackRef)
   const span = windowEnd - windowStart
   if (span <= 0) return null
 
-  const markers = events
+  const windowedEvents = events
     .map(entry => ({ entry, ts: entryTimestampMs(entry) }))
     .filter((m): m is { entry: TelemetryEntry; ts: number } =>
       m.ts !== null && m.ts >= windowStart && m.ts <= windowEnd,
     )
+  const markers = bucketTelemetryEntries(events, windowStart, windowEnd, bucketCount)
 
   return html`
     <div class="flex items-center gap-3">
       <div class="w-24 shrink-0 text-[11px] font-semibold text-text-muted">
-        이벤트 (${markers.length})
+        이벤트 (${windowedEvents.length})
       </div>
       <div
         ref=${trackRef}
@@ -60,7 +62,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
       >
         ${markers.length === 0
           ? html`<div class="absolute inset-0 flex items-center justify-center text-[10px] text-text-dim">이 시간 범위에 이벤트 없음</div>`
-          : markers.map(({ entry, ts }) => {
+          : markers.map(({ entry, ts, count }) => {
               const pct = ((ts - windowStart) / span) * 100
               const color = sourceColor(typeof entry.source === 'string' ? entry.source : undefined)
               const label = eventLabel(entry)
@@ -73,12 +75,16 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
                 <span
                   class="absolute top-1 bottom-1 w-[2px] ${color} hover:w-1 transition-all cursor-pointer ${ringClass}"
                   style="left: ${pct}%;"
-                  title=${`${new Date(ts).toLocaleTimeString()} · ${label}`}
+                  title=${`${new Date(ts).toLocaleTimeString()} · ${label}${count > 1 ? ` · ${count} events` : ''}`}
                   onClick=${(e: MouseEvent) => {
                     e.stopPropagation()
-                    selectEntity({ kind: 'event', entry, ts })
+                    selectEntity({ kind: 'event', entry, ts, bucketCount: count })
                   }}
-                ></span>
+                >${count > 1 ? html`
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-[8px] font-mono text-text-dim">
+                    ${count}
+                  </span>
+                ` : null}</span>
               `
             })
         }

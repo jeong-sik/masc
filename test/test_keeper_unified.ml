@@ -506,7 +506,7 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
          List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
      | WO.Skip _ -> false)
 
-let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
+let test_verdict_reasons_to_strings_uses_structured_run_tags () =
   let verdict =
     WO.Run
       {
@@ -520,17 +520,15 @@ let test_verdict_reasons_to_strings_preserves_legacy_run_tokens () =
             ] );
       }
   in
-  check (list string) "legacy run tokens preserved"
+  check (list string) "structured run tags"
     [ "scheduled_autonomous_turn";
-      "idle_gate_elapsed";
+      "idle_cooldown_elapsed";
       "cooldown_elapsed";
-      "actionable_backlog";
-      "unclaimed_tasks";
-      "failed_tasks";
+      "task_backlog";
       "task_reactive_cooldown_elapsed" ]
     (WO.verdict_reasons_to_strings verdict)
 
-let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =
+let test_verdict_reasons_to_strings_uses_structured_skip_tags () =
   let idle_gate_verdict =
     WO.Skip
       {
@@ -545,11 +543,11 @@ let test_verdict_reasons_to_strings_preserves_legacy_skip_tokens () =
           ( WO.Cooldown_pending { remaining_sec = 60 }, [] );
       }
   in
-  check (list string) "legacy idle-gate skip tokens preserved"
-    [ "scheduled_autonomous_turn"; "idle_gate_wait" ]
+  check (list string) "structured idle-gate skip tags"
+    [ "idle_gate_pending" ]
     (WO.verdict_reasons_to_strings idle_gate_verdict);
-  check (list string) "legacy cooldown skip tokens preserved"
-    [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
+  check (list string) "structured cooldown skip tags"
+    [ "cooldown_pending" ]
     (WO.verdict_reasons_to_strings cooldown_verdict)
 
 let test_task_reactive_cooldown_floor_never_hits_zero () =
@@ -2744,10 +2742,10 @@ let () =
             test_idle_decay_triggers_turn;
           test_case "scheduled decision uses backlog acceleration" `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration;
-          test_case "verdict reasons preserve legacy run tokens" `Quick
-            test_verdict_reasons_to_strings_preserves_legacy_run_tokens;
-          test_case "verdict reasons preserve legacy skip tokens" `Quick
-            test_verdict_reasons_to_strings_preserves_legacy_skip_tokens;
+          test_case "verdict reasons use structured run tags" `Quick
+            test_verdict_reasons_to_strings_uses_structured_run_tags;
+          test_case "verdict reasons use structured skip tags" `Quick
+            test_verdict_reasons_to_strings_uses_structured_skip_tags;
           test_case "task reactive cooldown floor never hits zero" `Quick
             test_task_reactive_cooldown_floor_never_hits_zero;
           test_case "with goals" `Quick test_observation_with_goals;

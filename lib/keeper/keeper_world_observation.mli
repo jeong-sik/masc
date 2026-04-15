@@ -115,26 +115,21 @@ type turn_verdict =
   | Skip of { reasons : skip_reason * skip_reason list }
 
 (** Convert a single turn reason to a flat string tag.
-    Encoding is compatibility-oriented: variant payloads
-    (idle_sec, cooldown, unclaimed, failed, remaining_sec) are
-    not included in the output. Returns the same fixed tag
-    regardless of parameter values. *)
+    The tag is a stable snake_case form of the typed variant.
+    Variant payloads are intentionally omitted. *)
 val turn_reason_to_string : turn_reason -> string
 
 (** Convert a single skip reason to a flat string tag.
-    Encoding is compatibility-oriented: variant payloads
-    (remaining_sec) are not included in the output. *)
+    The tag is a stable snake_case form of the typed variant.
+    Variant payloads are intentionally omitted. *)
 val skip_reason_to_string : skip_reason -> string
 
 (** Convert channel to string tag. *)
 val channel_to_string : unified_turn_channel -> string
 
 (** Extract all reasons as flat string tags from a verdict.
-    Tags are compatibility-oriented and do not include variant payloads.
-    Scheduled-autonomous run verdicts preserve the legacy flat tokens
-    that downstream logs and prompts previously consumed, including the
-    synthetic ["scheduled_autonomous_turn"], ["cooldown_elapsed"],
-    ["unclaimed_tasks"], and ["failed_tasks"] tags. *)
+    Tags map 1:1 to the typed reasons carried by the verdict and do not
+    include variant payloads. *)
 val verdict_reasons_to_strings : turn_verdict -> string list
 
 type unified_turn_decision = {

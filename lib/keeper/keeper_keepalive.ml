@@ -1194,6 +1194,10 @@ let run_keepalive_unified_turn
           meta_after_triage
           obs.message_cursor_updates
       in
+      let format_opt_int = function
+        | Some value -> string_of_int value
+        | None -> "-"
+      in
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
       let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
       if manual_reconcile_pending && turn_decision.should_run then (
@@ -1215,14 +1219,16 @@ let run_keepalive_unified_turn
           | _ -> Log.Keeper.info
         in
         log_not_scheduled
-          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] since_last=%s idle_gate=%s"
+          "keepalive turn not scheduled for %s: should_run=%b channel=%s reasons=[%s] idle=%ds since_last=%s idle_gate=%s cooldown=%s task_cooldown=%s"
           meta_after_triage.name
           turn_decision.should_run channel_str
           (String.concat "," verdict_strs)
+          obs.idle_seconds
           (format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)
-          (match turn_decision.idle_gate_sec with
-           | Some s -> string_of_int s | None -> "-"));
+          (format_opt_int turn_decision.idle_gate_sec)
+          (format_opt_int turn_decision.effective_cooldown)
+          (format_opt_int turn_decision.task_reactive_cooldown));
       if should_run_turn then
         Log.Keeper.info
           "keepalive turn scheduled for %s: channel=%s reasons=%s"

@@ -802,7 +802,7 @@ let dashboard_shell_timeout_s = 16.0
    path does not block on it every refresh cycle. *)
 let meta_cognition_summary_ttl = 120.0
 
-let meta_cognition_summary_cached (config : Room.config) : Yojson.Safe.t =
+let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
   let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
   Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl (fun () ->
     Meta_cognition.summary_json config)

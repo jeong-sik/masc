@@ -236,8 +236,8 @@ let test_keeper_list_exposes_last_social_transition_reason () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Room.default_config base_dir in
-      ignore (Room.init config ~agent_name:(Some "operator"));
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_toml_exn config ~name:"sangsu";
       write_keeper_meta_exn config ~name:"sangsu" ~trace_id:"trace-sangsu"
         ~last_social_transition_reason:"tool_only:visible_reply";

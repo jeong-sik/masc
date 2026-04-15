@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,47 @@ class StatusStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.path.with_name(f".{self.path.name}.tmp")
         payload = json.dumps(asdict(status), indent=2, sort_keys=True)
+        try:
+            tmp_path.write_text(f"{payload}\n", encoding="utf-8")
+            os.replace(tmp_path, self.path)
+        except OSError:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+
+@dataclass(frozen=True, slots=True)
+class NamesSnapshot:
+    """Guild and channel id-to-name maps for dashboard humanization.
+
+    The maps use plain dicts for JSON serialization. Callers MUST treat
+    these as read-only — NamesStore.write accepts a snapshot and never
+    mutates it. Produce a new NamesSnapshot to change contents.
+    """
+
+    updated_at: str
+    guild_names: dict[str, str] = field(default_factory=dict)
+    channel_names: dict[str, str] = field(default_factory=dict)
+    channel_to_guild: dict[str, str] = field(default_factory=dict)
+
+
+class NamesStore:
+    """Persist the id-to-name side-map atomically.
+
+    Separate from StatusStore because guild/channel names are cosmetic
+    and mutate on Discord-side renames; bindings and status should not
+    be rewritten when a channel is renamed.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def write(self, snapshot: NamesSnapshot) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.path.with_name(f".{self.path.name}.tmp")
+        payload = json.dumps(asdict(snapshot), indent=2, sort_keys=True)
         try:
             tmp_path.write_text(f"{payload}\n", encoding="utf-8")
             os.replace(tmp_path, self.path)

@@ -210,12 +210,18 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
   in
   match backend () with
   | Jsonl store ->
+      let needs_full_scan =
+        Option.is_some author_filter
+        ||
+        match sort_by with
+        | Hot -> false
+        | Trending | Recent | Updated | Discussed -> true
+      in
       let fetch_limit =
-        if Option.is_some author_filter then Board.Limits.max_posts
-        else max limit 200
+        if needs_full_scan then Board.Limits.max_posts else max limit 200
       in
       let posts =
-        if Option.is_some author_filter then
+        if needs_full_scan then
           Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
         else
           Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()

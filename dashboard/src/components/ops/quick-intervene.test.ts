@@ -61,7 +61,7 @@ describe('QuickIntervene', () => {
     quickMessage.value = ''
     quickTarget.value = 'namespace'
     operatorSnapshot.value = {
-      namespace: { paused: false, namespace: 'default' },
+      root: { paused: false, namespace: 'default' },
       sessions: [{ session_id: 'session-a', status: 'active' }],
       keepers: [{ name: 'keeper-a', status: 'online' }],
       recent_messages: [],

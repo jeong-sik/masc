@@ -1008,10 +1008,7 @@ let snapshot_json ?actor ?view ?(include_messages = true)
                `Null)
              in
              command_plane_ref := cp;
-             swarm_status_ref :=
-               if initialized && include_command_plane then
-                 Swarm_status.build_json_from_snapshot config cp
-               else `Null);
+             swarm_status_ref := `Null);
          ];
          [
            ("sessions", !sessions_ref);

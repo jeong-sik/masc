@@ -80,15 +80,9 @@ let test_contract_harness_and_execution_session_authz_contracts () =
        "| extract_text)")
 
 let test_route_auth_contracts () =
-  check bool "http command-plane units use tool auth" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
-       {|with_tool_auth ~tool_name:"masc_unit_define"|});
-  check bool "http command-plane dispatch tick use tool auth" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
-       {|with_tool_auth ~tool_name:"masc_dispatch_tick"|});
-  check bool "http command-plane policy approve use tool auth" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
-       {|with_tool_auth ~tool_name:"masc_policy_approve"|});
+  (* CP purge (phases 1-5): command-plane HTTP/H2 route modules deleted.
+     Assertions on server_routes_http_routes_command_plane_*.ml and
+     server_h2_gateway_routes_cp.ml removed with the source files. *)
   check bool "http keeper chat stream uses keeper tool auth" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
@@ -98,28 +92,6 @@ let test_route_auth_contracts () =
   check bool "http keeper chat stream forces direct reply mode" true
     (file_contains_pattern "lib/server/server_routes_http_keeper_stream.ml"
        {|("direct_reply", `Bool true)|});
-  check bool "h2 gateway units use tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_unit_define"|});
-  check bool "h2 gateway dispatch tick uses tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
-  check bool "h2 gateway operator action uses tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_operator_action"|});
-  check bool "h2 gateway operator confirm uses tool auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|});
-  check bool "h2 gateway operator snapshot read route honors read auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator" ->
-          let state = get_server_state () in
-          (match h2_authorize_read_if_needed state with|});
-  check bool "h2 gateway operator digest read route honors read auth" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator/digest" ->
-          let state = get_server_state () in
-          (match h2_authorize_read_if_needed state with|});
   check bool "channel gate message route uses tool auth" true
     (file_contains_pattern
        "lib/server/server_routes_http_routes_channel_gate.ml"
@@ -270,31 +242,9 @@ let test_http_read_surface_contracts () =
        with_read_auth|})
 
 let test_operator_surface_route_contracts () =
-  check bool "http router registers command-plane read routes" true
-    (file_contains_pattern "lib/server/server_routes_http.ml"
-       "Server_routes_http_routes_command_plane_read.add_routes");
-  check bool "http router registers command-plane write routes" true
-    (file_contains_pattern "lib/server/server_routes_http.ml"
-       "Server_routes_http_routes_command_plane_write.add_routes ~sw ~clock");
-  check bool "h2 cp routes expose operator snapshot" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator" ->|});
-  check bool "h2 cp routes expose operator digest" true
-    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
-       {|`GET, "/api/v1/operator/digest" ->|});
-  check bool "h2 gateway no longer removes operator read surface" true
-    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|`GET, "/api/v1/operator"
-      | `GET, "/api/v1/operator/digest" ->
-          h2_respond_removed_surface|});
-  check bool "h2 gateway no longer removes operator write surface" true
-    (file_not_contains_pattern "lib/server/server_h2_gateway.ml"
-       {|`POST, "/api/v1/operator/action"
-      | `POST, "/api/v1/operator/confirm" ->
-          h2_respond_removed_surface|});
-  check bool "h2 gateway still delegates command-plane and operator routes" true
-    (file_contains_pattern "lib/server/server_h2_gateway.ml"
-       "Server_h2_gateway_routes_cp.dispatch ~sw ~clock ~h2_reqd ~httpun_request ~cors ~path httpun_meth")
+  (* CP purge (phases 1-5): operator/command-plane HTTP+H2 surfaces deleted.
+     All assertions in this test referenced source files that no longer exist. *)
+  ()
 
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)
@@ -650,13 +600,9 @@ let test_namespace_truth_adaptive_timeout_contracts () =
        "_shell_warmed")
 
 let test_mermaid_xss_contracts () =
-  check bool "mermaid securityLevel is strict (not loose)" true
-    (file_contains_pattern "dashboard/src/components/command/helpers.ts"
-       "securityLevel: 'strict'");
-  check bool "mermaid securityLevel loose is absent" true
-    (not
-       (file_contains_pattern "dashboard/src/components/command/helpers.ts"
-          "securityLevel: 'loose'"))
+  (* CP purge: dashboard/src/components/command/helpers.ts deleted with the
+     command plane; mermaid renderer no longer lives there. *)
+  ()
 
 let test_http_client_fd_safety_contracts () =
   check bool "masc http client forbids direct Cohttp client construction in docs" true

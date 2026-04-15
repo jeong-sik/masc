@@ -142,13 +142,14 @@ let test_docs_do_not_reintroduce_ghost_claim_surface () =
              name)
 
 let test_front_door_surfaces_do_not_reintroduce_claim_alias () =
+  (* CP purge: dashboard/src/components/command/ directory deleted with the
+     command plane; guided-panel.ts is no longer a front-door surface. *)
   let paths =
     [
       "llms.txt";
       "llms-full.txt";
       "examples/BEST-PRACTICES.md";
       "benchmarks/benchmark.sh";
-      "dashboard/src/components/command/guided-panel.ts";
     ]
   in
   List.iter

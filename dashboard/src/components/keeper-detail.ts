@@ -401,10 +401,9 @@ export function KeeperDetailOverlay() {
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
   const [diagOpen, setDiagOpen] = useState(shouldOpenDiagnostics)
-
   useEffect(() => {
-    setDiagOpen(keeperNeedsDiagnosticAttention(keeper))
-  }, [keeper.name])
+    setDiagOpen(shouldOpenDiagnostics)
+  }, [keeper.name, shouldOpenDiagnostics])
 
   return html`
     <${DialogOverlay}

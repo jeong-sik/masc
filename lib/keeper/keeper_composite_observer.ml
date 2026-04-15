@@ -99,15 +99,15 @@ let compaction_stage_to_string = function
    [mark_turn_finished]. Finer-grained breakdown
    ([Prompting]/[ToolCall]) requires Event_bus subscription and is
    tracked as Phase 2 of #7122. *)
-let derive_turn_phase (entry : Keeper_registry.registry_entry) : turn_phase =
+let derive_turn_phase
+    (entry : Keeper_registry.registry_entry)
+    ~(is_live : bool)
+    : turn_phase =
   match entry.phase with
   | Keeper_state_machine.Compacting -> `Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining -> `Finalizing
-  | _ ->
-    (match entry.current_turn_observation with
-     | Some _ -> `Executing
-     | None -> `Idle)
+  | _ -> if is_live then `Executing else `Idle
 
 (* Compaction sub-FSM: compaction_active is the authoritative condition.
    Phase [Compacting] MUST coincide with this condition under the
@@ -156,10 +156,8 @@ let derive_decision_stage
    Finer-grained live cascade state ([`Selecting`] vs [`Trying`] vs
    [`Done`]) remains a Phase 2 follow-up (#7122) requiring Event_bus
    subscription. *)
-let derive_cascade_state (entry : Keeper_registry.registry_entry)
-    : cascade_state =
-  if entry.current_turn_observation <> None then `Trying
-  else `Idle
+let derive_cascade_state ~(is_live : bool) : cascade_state =
+  if is_live then `Trying else `Idle
 
 (* Two-store reconcile pair (RFC-0003 §8, absorbed from P4).
    - [reconcile_data]: a prior turn left an ambiguous side-effect record
@@ -285,10 +283,10 @@ let observe
   in
   let conds = entry.conditions in
   let is_live = entry.current_turn_observation <> None in
-  let turn_phase = derive_turn_phase entry in
+  let turn_phase = derive_turn_phase entry ~is_live in
   let compaction_stage = derive_compaction_stage conds in
   let decision_stage = derive_decision_stage conds ~is_live in
-  let cascade_state = derive_cascade_state entry in
+  let cascade_state = derive_cascade_state ~is_live in
   let (reconcile_data, reconcile_fsm) = derive_reconcile entry in
   let measurement_captured = entry.last_auto_rules <> None in
   let invariants =

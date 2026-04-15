@@ -29,9 +29,9 @@ let by_id rows key_field =
 let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   let config = ctx.config in
   let actor = ctx.agent_name in
-  let namespace = namespace_json config in
-  let namespace_id =
-    "namespace:" ^ (string_opt namespace "namespace" |> Option.value ~default:"default")
+  let root = root_json config in
+  let root_id =
+    "root:" ^ (string_opt root "project" |> Option.value ~default:"default")
   in
   let operator_snapshot = Operator_control.snapshot_json ~actor ctx in
   let pending_summary =
@@ -115,7 +115,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   let ghost_worker_nodes = [] in
   let keeper_nodes = List.map keeper_node keepers in
   let nodes =
-    namespace_node namespace (List.length sessions) (List.length active_operation_rows)
+    root_node root (List.length sessions) (List.length active_operation_rows)
       (List.length actual_worker_nodes + List.length ghost_worker_nodes)
       (List.length keeper_nodes) (List.length alerts)
       (int_opt pending_summary "total_count" |> Option.value ~default:0)
@@ -150,7 +150,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
                match string_opt (assoc_or_empty swarm_json "operation") "operation_id" with
                | Some operation_id when List.mem_assoc operation_id operation_rows_by_id ->
                    "operation:" ^ operation_id
-               | _ -> namespace_id)
+               | _ -> root_id)
          in
          (worker_lanes
          |> List.map (fun (lane_name, _rows) ->
@@ -188,19 +188,19 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
              match string_opt keeper_json "id" with
              | Some keeper_id ->
                  Some
-                   (edge ~id:("edge:namespace-keeper:" ^ keeper_id)
-                      ~source:namespace_id ~target:keeper_id ~kind:"continuity"
+                   (edge ~id:("edge:root-keeper:" ^ keeper_id)
+                      ~source:root_id ~target:keeper_id ~kind:"continuity"
                       ~label:"keeper" ~provenance:"truth" ())
              | None -> None))
   in
   let signals =
     List.filter_map Fun.id
       [
-        signal_for_pending_confirms pending_summary namespace_id;
-        signal_for_runtime_blocker swarm_json namespace_id;
-        signal_for_hot_proof summary_json namespace_id;
+        signal_for_pending_confirms pending_summary root_id;
+        signal_for_runtime_blocker swarm_json root_id;
+        signal_for_hot_proof summary_json root_id;
       ]
-    @ signals_for_alerts alerts namespace_id
+    @ signals_for_alerts alerts root_id
   in
   let focus =
     match List.find_opt (fun signal_json -> string_opt signal_json "tone" = Some "bad") signals with
@@ -239,7 +239,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
                 ( "target_id",
                   `String
                     (string_opt node_json "id"
-                    |> Option.value ~default:namespace_id) );
+                    |> Option.value ~default:root_id) );
                 ("label", `String (string_opt node_json "label" |> Option.value ~default:"session"));
                 ("reason", `String "A session needs supervision or is not fully healthy.");
                 ("suggested_surface", `String "intervene");
@@ -249,13 +249,13 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
             `Assoc
               [
                 ("target_kind", `String "node");
-                ("target_id", `String namespace_id);
+                ("target_id", `String root_id);
                 ( "label",
                   `String
-                    (string_opt namespace "namespace" |> Option.value ~default:"default") );
+                    (string_opt root "project" |> Option.value ~default:"default") );
                 ( "reason",
                   `String
-                    "Namespace-wide view is healthy enough; start from the command overview."
+                    "Root view is healthy enough; start from the command overview."
                 );
                 ("suggested_surface", `String "summary");
                 ("suggested_params", `Assoc []);
@@ -265,7 +265,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
     [
       ("version", `String "orchestra.v1");
       ("generated_at", `String (Types.now_iso ()));
-      ("namespace", namespace);
+      ("root", root);
       ( "summary",
         `Assoc
           [
@@ -289,7 +289,7 @@ let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
         `List
           [
             `String
-              "namespace-wide orchestra map is composed from command-plane truth, swarm live state, and operator read models.";
+              "root-wide orchestra map is composed from command-plane truth, swarm live state, and operator read models.";
             `String
               "provenance marks whether a node or signal is truth, derived, or fallback.";
           ] );

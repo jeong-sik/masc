@@ -1,19 +1,16 @@
 (** Cp_orchestra_nodes — Entity node renderers for CP orchestra graph.
 
-    Each function renders a specific CP entity (namespace, session, operation,
+    Each function renders a specific CP entity (root, session, operation,
     worker, keeper, etc.) as a graph node with facts and edges.
 
     @since God file decomposition — extracted from command_plane_orchestra.ml *)
 
 open Cp_orchestra_helpers
 
-let namespace_json config =
+let root_json config =
   if not (Room.is_initialized config) then
     `Assoc
       [
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("project", `String (Filename.basename config.base_path));
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
@@ -28,9 +25,6 @@ let namespace_json config =
     let tasks = Room.get_tasks_raw config in
     `Assoc
       [
-        ("namespace_id", `String "default");
-        ("namespace", `String "default");
-        ("namespace_mode", `String "flattened");
         ("project", `String state.project);
         ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
@@ -40,25 +34,22 @@ let namespace_json config =
         ("message_count", `Int state.message_seq);
       ]
 
-let namespace_node namespace_json session_count operation_count worker_count keeper_count
+let root_node root_json session_count operation_count worker_count keeper_count
     alert_count pending_confirm_count =
-  let namespace_id =
-    first_some (string_opt namespace_json "namespace_id")
-      (string_opt namespace_json "namespace")
-    |> Option.value ~default:"default"
+  let label =
+    string_opt root_json "project" |> Option.value ~default:"root"
   in
-  let paused = bool_opt namespace_json "paused" |> Option.value ~default:false in
+  let paused = bool_opt root_json "paused" |> Option.value ~default:false in
   let tone = if paused || pending_confirm_count > 0 || alert_count > 0 then "warn" else "ok" in
-  node ~id:("namespace:" ^ namespace_id) ~kind:"namespace" ~label:namespace_id
-    ?subtitle:(string_opt namespace_json "project")
-    ~tone ~provenance:"truth" ~visual_class:"namespace-core" ~glyph:"◎"
+  node ~id:("root:" ^ label) ~kind:"root" ~label
+    ?subtitle:(string_opt root_json "project")
+    ~tone ~provenance:"truth" ~visual_class:"root-core" ~glyph:"◎"
     ?pulse:(pulse_of_tone tone)
     ~facts:
       [
-        fact "project"
-          (string_opt namespace_json "project" |> Option.value ~default:"n/a");
+        fact "project" label;
         fact "cluster"
-          (string_opt namespace_json "cluster" |> Option.value ~default:"default");
+          (string_opt root_json "cluster" |> Option.value ~default:"default");
         fact "sessions" (string_of_int session_count);
         fact "operations" (string_of_int operation_count);
         fact "workers" (string_of_int worker_count);

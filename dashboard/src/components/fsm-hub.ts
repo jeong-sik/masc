@@ -877,7 +877,9 @@ export function FsmHub() {
       />
 
       ${activeSelected == null ? html`
-        <${EmptyState} message="관찰할 키퍼를 선택하세요" />
+        <${EmptyState} message=${keeperNames.length > 0
+          ? `위 탭에서 키퍼를 선택하면 composite FSM 스냅샷을 표시합니다 (${keeperNames.length}개 사용 가능)`
+          : '등록된 키퍼가 없습니다 — MASC에 키퍼를 기동하면 자동으로 표시됩니다'} />
       ` : loading && !snapshot ? html`
         <div class="flex items-center justify-center gap-2 py-10 text-[11px] text-[var(--text-dim)]">
           <span class="inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>
@@ -1406,7 +1408,7 @@ function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
           ` : null}
         </div>
       ` : html`
-        <div class="text-[10px] text-[var(--text-dim)]">관측 대기</div>
+        <div class="text-[10px] text-[var(--text-dim)]">키퍼가 첫 턴을 완료하면 auto-rules가 여기 표시됩니다</div>
       `}
     </div>
   `
@@ -1706,7 +1708,7 @@ function SwimlaneTimeline({
   if (observations.length === 0) {
     return html`
       <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
-        관측 타임라인 대기 — 관측이 쌓이면 레인별 세그먼트로 표시됩니다
+        30초 폴링 사이클에서 관측을 수집중 — 2회 이상 스냅샷이 쌓이면 5개 레인의 시간 흐름이 표시됩니다
       </div>
     `
   }
@@ -1878,7 +1880,7 @@ function TransitionTrail({
   if (history.length === 0) {
     return html`
       <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
-        관찰 시작 이후 상태 전이 없음 — 전이가 발생하면 여기에 기록됩니다
+        아직 상태 전이가 관측되지 않았습니다 — 키퍼가 턴을 시작하거나 phase가 변경되면 자동으로 기록됩니다
       </div>
     `
   }

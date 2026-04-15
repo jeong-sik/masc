@@ -120,6 +120,57 @@ let test_inbound_of_json_invalid () =
   | Error _ -> ()
   | Ok _ -> fail "expected parse error"
 
+let test_inbound_of_json_accepts_destination_id () =
+  let json =
+    `Assoc [
+      ("channel", `String "discord");
+      ("channel_user_id", `String "u1");
+      ("channel_user_name", `String "alice");
+      ("channel_room_id", `String "r1");
+      ("destination_id", `String "luna");
+      ("content", `String "hi");
+      ("idempotency_key", `String "k-dest");
+    ]
+  in
+  match Gate_protocol.inbound_of_json json with
+  | Ok msg -> check string "destination_id maps to keeper_name" "luna" msg.keeper_name
+  | Error e -> fail e
+
+let test_inbound_of_json_destination_id_wins_over_keeper_name () =
+  let json =
+    `Assoc [
+      ("channel", `String "discord");
+      ("channel_user_id", `String "u1");
+      ("channel_user_name", `String "alice");
+      ("channel_room_id", `String "r1");
+      ("destination_id", `String "new-name");
+      ("keeper_name", `String "legacy-name");
+      ("content", `String "hi");
+      ("idempotency_key", `String "k-both");
+    ]
+  in
+  match Gate_protocol.inbound_of_json json with
+  | Ok msg ->
+      check string "destination_id takes precedence" "new-name" msg.keeper_name
+  | Error e -> fail e
+
+let test_inbound_of_json_keeper_name_still_works () =
+  let json =
+    `Assoc [
+      ("channel", `String "discord");
+      ("channel_user_id", `String "u1");
+      ("channel_user_name", `String "alice");
+      ("channel_room_id", `String "r1");
+      ("keeper_name", `String "legacy-only");
+      ("content", `String "hi");
+      ("idempotency_key", `String "k-legacy");
+    ]
+  in
+  match Gate_protocol.inbound_of_json json with
+  | Ok msg ->
+      check string "keeper_name alone still routes" "legacy-only" msg.keeper_name
+  | Error e -> fail e
+
 let test_outbound_to_json_roundtrip () =
   let out : Gate_protocol.outbound_message = {
     keeper_name = "luna";
@@ -179,6 +230,9 @@ let () =
           test_case "inbound normalizes case" `Quick test_inbound_of_json_normalizes_case;
           test_case "inbound with metadata" `Quick test_inbound_of_json_with_metadata;
           test_case "inbound invalid" `Quick test_inbound_of_json_invalid;
+          test_case "inbound accepts destination_id" `Quick test_inbound_of_json_accepts_destination_id;
+          test_case "destination_id wins over keeper_name" `Quick test_inbound_of_json_destination_id_wins_over_keeper_name;
+          test_case "inbound keeper_name still works" `Quick test_inbound_of_json_keeper_name_still_works;
           test_case "outbound roundtrip" `Quick test_outbound_to_json_roundtrip;
           test_case "error_json" `Quick test_error_json;
         ] );

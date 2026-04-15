@@ -10,7 +10,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_status";
-    description = "Get current project namespace/cluster status: active agents, task queue, recent broadcasts, and cluster info. \
+    description = "Get current project status: active agents, task queue, recent broadcasts, and cluster info. \
 Use when you need a snapshot of who is online and what tasks are available. \
 Call after masc_join to orient yourself. Pair with masc_tasks for detailed backlog.";
     input_schema = `Assoc [
@@ -20,7 +20,7 @@ Call after masc_join to orient yourself. Pair with masc_tasks for detailed backl
   };
   {
     name = "masc_reset";
-    description = "DESTRUCTIVE: Reset the active MASC project namespace completely. Deletes ALL data in .masc/ folder. \
+    description = "DESTRUCTIVE: Reset the active MASC project completely. Deletes ALL data in .masc/ folder. \
 Removes: tasks, messages, agents, locks, cache, telemetry. Cannot be undone. \
 Use only for: fresh start, corrupted state recovery, testing. \
 Requires confirm=true to execute. Example: masc_reset({confirm: true})";
@@ -62,7 +62,7 @@ Pair with masc_workflow_guide for next-step recommendations.";
               `String "current_task_set"; `String "worktree_active";
             ]);
           ]);
-          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Historical key 'room_set' now means project namespace configured.");
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Historical key 'room_set' means project scope configured.");
         ]);
       ]);
       ("required", `List [`String "assertions"]);

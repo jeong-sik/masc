@@ -17,6 +17,9 @@
    incorrect.  Guard the shared state with an [Eio.Mutex] and route
    every RNG access through [with_identity_rng].  Same discipline
    used by [Lib.A2a_tools] ([a2a_rng] / [a2a_rng_mutex]). *)
+
+module StringMap = Map.Make (String)
+
 let identity_rng = Random.State.make_self_init ()
 let identity_rng_mutex = Eio.Mutex.create ()
 let with_identity_rng f =
@@ -195,14 +198,14 @@ let anonymous () =
 
 module Registry = struct
   type registry = {
-    identities : (string, t) Hashtbl.t;  (** session_key -> identity *)
-    by_agent_name : (string, string) Hashtbl.t;  (** agent_name -> session_key *)
+    identities : t StringMap.t ref;  (** session_key -> identity *)
+    by_agent_name : string StringMap.t ref;  (** agent_name -> session_key *)
     lock : Eio.Mutex.t;
   }
 
   let create () = {
-    identities = Hashtbl.create 64;
-    by_agent_name = Hashtbl.create 64;
+    identities = ref StringMap.empty;
+    by_agent_name = ref StringMap.empty;
     lock = Eio.Mutex.create ();
   }
 
@@ -212,35 +215,35 @@ module Registry = struct
   (** Register or update identity *)
   let register reg identity =
     with_lock reg (fun () ->
-      Hashtbl.replace reg.identities identity.session_key identity;
-      Hashtbl.replace reg.by_agent_name identity.agent_name identity.session_key;
+      reg.identities <- StringMap.add identity.session_key identity !reg.identities;
+      reg.by_agent_name <- StringMap.add identity.agent_name identity.session_key !reg.by_agent_name;
       identity
     )
 
   (** Find by session key *)
   let find_by_session reg session_key =
     with_lock reg (fun () ->
-      Hashtbl.find_opt reg.identities session_key
+      StringMap.find_opt session_key !reg.identities
     )
 
   (** Find by agent name *)
   let find_by_name reg agent_name =
     with_lock reg (fun () ->
-      match Hashtbl.find_opt reg.by_agent_name agent_name with
-      | Some session_key -> Hashtbl.find_opt reg.identities session_key
+      match StringMap.find_opt agent_name !reg.by_agent_name with
+      | Some session_key -> StringMap.find_opt session_key !reg.identities
       | None -> None
     )
 
   (** Update last_seen and optionally room *)
   let touch reg session_key ?room_id () =
     with_lock reg (fun () ->
-      match Hashtbl.find_opt reg.identities session_key with
+      match StringMap.find_opt session_key !reg.identities with
       | Some identity ->
           identity.last_seen <- Time_compat.now ();
           (match room_id with
            | Some rid -> 
                let updated = { identity with room_id = Some rid } in
-               Hashtbl.replace reg.identities session_key updated
+               reg.identities <- StringMap.add session_key updated !reg.identities
            | None -> ())
       | None -> ()
     )
@@ -248,10 +251,10 @@ module Registry = struct
   (** Remove identity *)
   let unregister reg session_key =
     with_lock reg (fun () ->
-      match Hashtbl.find_opt reg.identities session_key with
+      match StringMap.find_opt session_key !reg.identities with
       | Some identity ->
-          Hashtbl.remove reg.identities session_key;
-          Hashtbl.remove reg.by_agent_name identity.agent_name
+          reg.identities <- StringMap.remove session_key !reg.identities;
+          reg.by_agent_name <- StringMap.remove identity.agent_name !reg.by_agent_name
       | None -> ()
     )
 
@@ -259,15 +262,16 @@ module Registry = struct
   let list_active reg ~within_seconds =
     with_lock reg (fun () ->
       let cutoff = Time_compat.now () -. within_seconds in
-      Hashtbl.to_seq_values reg.identities
-      |> Seq.filter (fun id -> id.last_seen > cutoff)
-      |> List.of_seq
+      !reg.identities
+      |> StringMap.bindings
+      |> List.filter_map (fun (_, id) ->
+        if id.last_seen > cutoff then Some id else None)
     )
 
   (** Get identity count *)
   let count reg =
     with_lock reg (fun () ->
-      Hashtbl.length reg.identities
+      StringMap.cardinal !reg.identities
     )
 end
 

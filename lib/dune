@@ -100,6 +100,7 @@
    dashboard_goals
    dashboard_feature_health
    dashboard_provider_runs
+   dashboard_cascade
    proactive_refresh
    server_dashboard_http_runtime_support
    server_dashboard_http_runtime_info
@@ -125,6 +126,7 @@
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
+   server_routes_http_routes_cascade
    server_routes_http_routes_activity
    server_routes_http_routes_channel_gate
    server_h2_gateway

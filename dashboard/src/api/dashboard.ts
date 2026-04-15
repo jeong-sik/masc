@@ -1811,3 +1811,57 @@ export function fetchCascadeProfiles(): Promise<{ profiles: string[] }> {
 export function updateKeeperCascade(keeper: string, cascade_name: string): Promise<{ ok: boolean }> {
   return post<{ ok: boolean }>('/api/v1/keeper/cascade', { keeper, cascade_name })
 }
+
+// ── Cascade config + health (observability) ─────────────
+
+export interface CascadeCandidate {
+  model: string
+  config_weight: number
+  effective_weight: number
+  success_rate: number
+  in_cooldown: boolean
+}
+
+export interface CascadeProfile {
+  name: string
+  source: 'named' | 'default_fallback' | 'hardcoded_defaults'
+  candidates: CascadeCandidate[]
+}
+
+export interface CascadeKeeperProfile {
+  keeper: string
+  cascade_name: string
+  canonical: string
+}
+
+export interface CascadeConfigResponse {
+  updated_at: string
+  config_path: string | null
+  profiles: CascadeProfile[]
+  keeper_profiles: CascadeKeeperProfile[]
+}
+
+export interface CascadeHealthProvider {
+  provider_key: string
+  success_rate: number
+  consecutive_failures: number
+  in_cooldown: boolean
+  cooldown_expires_at: number | null
+  events_in_window: number
+}
+
+export interface CascadeHealthResponse {
+  updated_at: string
+  window_sec: number
+  cooldown_threshold: number
+  cooldown_sec: number
+  providers: CascadeHealthProvider[]
+}
+
+export function fetchCascadeConfig(opts?: AbortableRequestOptions): Promise<CascadeConfigResponse> {
+  return get<CascadeConfigResponse>('/api/v1/cascade/config', { signal: opts?.signal })
+}
+
+export function fetchCascadeHealth(opts?: AbortableRequestOptions): Promise<CascadeHealthResponse> {
+  return get<CascadeHealthResponse>('/api/v1/cascade/health', { signal: opts?.signal })
+}

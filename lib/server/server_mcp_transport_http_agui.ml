@@ -45,7 +45,7 @@ let handle_ag_ui_events ~deps request reqd =
       respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
         ~reason ~retry_after_s reqd
   | Ok () ->
-      stop_sse_session session_id;
+      stop_sse_session_preserve_guard session_id;
       let headers =
         Httpun.Headers.of_list
           (sse_stream_headers ~deps session_id protocol_version origin)
@@ -103,7 +103,7 @@ let handle_ag_ui_events ~deps request reqd =
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Server.error "ag-ui drain write error: %s"
                     (Printexc.to_string exn);
-                  stop_sse_session info.session_id);
+                  stop_sse_session_preserve_guard info.session_id);
                 if not !(info.stop) then drain ()
               in
               try drain ()
@@ -120,19 +120,19 @@ let handle_ag_ui_events ~deps request reqd =
                       | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
                   (try
                      if info.closed then
-                       stop_sse_session info.session_id
+                       stop_sse_session_preserve_guard info.session_id
                      else if not !(info.stop) then
                        ignore (send_raw info ": ping\n\n")
                    with Eio.Cancel.Cancelled _ as exn -> raise exn
                       | exn ->
                           Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
-                          stop_sse_session info.session_id);
+                          stop_sse_session_preserve_guard info.session_id);
                   loop ())
               in
               try loop () with Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->
                     Log.Server.error "SSE ping loop exited for session %s: %s" info.session_id (Printexc.to_string exn);
-                    stop_sse_session info.session_id)
+                    stop_sse_session_preserve_guard info.session_id)
       | Error msg ->
           Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
             session_id msg)

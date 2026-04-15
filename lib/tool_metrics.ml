@@ -1,3 +1,5 @@
+module StringMap = Map.Make (String)
+
 (** Per-tool timing metrics *)
 
 type tool_stats = {
@@ -11,19 +13,21 @@ type tool_stats = {
   mean_ms : float;
 }
 
-(** Per-tool accumulator: we store all durations for percentile calc. *)
+(** Per-tool accumulator: we store all durations for percentile calc.
+    Immutable record — updated by creating a new value and storing it
+    in the StringMap ref under the lock. *)
 type accumulator = {
-  mutable successes : int;
-  mutable failures : int;
-  mutable durations : float list;  (* newest first *)
+  successes : int;
+  failures : int;
+  durations : float list;  (* newest first *)
 }
 
 (** [metrics] is updated from the tool_dispatch post-hook which runs on
     whichever fiber executed the tool.  Concurrent tool calls would
-    otherwise race on the Hashtbl add and on the mutable accumulator
-    fields (successes/failures/durations).  Stdlib.Mutex because HTTP
-    stats endpoints may run on a different domain. *)
-let metrics : (string, accumulator) Hashtbl.t = Hashtbl.create 32
+    otherwise race on the StringMap ref swap and on the accumulator
+    update.  Stdlib.Mutex because HTTP stats endpoints may run on a
+    different domain. *)
+let metrics : accumulator StringMap.t ref = ref StringMap.empty
 let metrics_mu = Stdlib.Mutex.create ()
 
 let with_lock f =
@@ -34,16 +38,17 @@ let with_lock f =
 
 let record (result : Tool_result.t) =
   with_lock (fun () ->
-    let acc = match Hashtbl.find_opt metrics result.tool_name with
+    let acc = match StringMap.find_opt result.tool_name !metrics with
       | Some a -> a
-      | None ->
-        let a = { successes = 0; failures = 0; durations = [] } in
-        Hashtbl.replace metrics result.tool_name a;
-        a
+      | None -> { successes = 0; failures = 0; durations = [] }
     in
-    if result.success then acc.successes <- acc.successes + 1
-    else acc.failures <- acc.failures + 1;
-    acc.durations <- result.duration_ms :: acc.durations)
+    let acc =
+      if result.success
+      then { acc with successes = acc.successes + 1 }
+      else { acc with failures = acc.failures + 1 }
+    in
+    let acc = { acc with durations = result.duration_ms :: acc.durations } in
+    metrics := StringMap.add result.tool_name acc !metrics)
 
 let percentile sorted_arr p =
   let n = Array.length sorted_arr in
@@ -71,16 +76,16 @@ let compute_stats tool_name acc =
 
 let stats_for tool_name =
   with_lock (fun () ->
-    match Hashtbl.find_opt metrics tool_name with
+    match StringMap.find_opt tool_name !metrics with
     | Some acc -> Some (compute_stats tool_name acc)
     | None -> None)
 
 let all_stats () =
   let all =
     with_lock (fun () ->
-      Hashtbl.fold (fun name acc lst ->
+      StringMap.fold (fun name acc lst ->
         compute_stats name acc :: lst
-      ) metrics [])
+      ) !metrics [])
   in
   List.sort (fun a b -> Int.compare b.call_count a.call_count) all
 
@@ -99,7 +104,7 @@ let to_json s =
 let all_to_json () =
   `List (List.map to_json (all_stats ()))
 
-let clear () = with_lock (fun () -> Hashtbl.clear metrics)
+let clear () = with_lock (fun () -> metrics := StringMap.empty)
 
 let install () =
   Tool_dispatch.register_post_hook (fun result ->

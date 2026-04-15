@@ -31,24 +31,24 @@ export function KeeperMemoryTierPanel({
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
     setLoading(true)
     setError(null)
 
-    fetchKeeperStateDiagram(keeperName)
+    fetchKeeperStateDiagram(keeperName, { signal: controller.signal })
       .then(data => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         setUsage(data.memory_kind_usage ?? [])
         setSubmachineMermaid(data.compaction_submachine_mermaid ?? null)
         setLoading(false)
       })
       .catch(err => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'memory tier fetch failed')
         setLoading(false)
       })
 
-    return () => { cancelled = true }
+    return () => { controller.abort() }
   }, [keeperName])
 
   if (loading) {

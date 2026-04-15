@@ -138,9 +138,15 @@ let outbound_to_json out =
           ("tokens_used", `Int s.tokens_used);
         ]
   in
+  (* B2 Phase 2: emit both [keeper_name] and [destination_id]. Consumers
+     migrating to the new vocabulary can begin reading [destination_id];
+     legacy consumers keep reading [keeper_name]. Phase 3 will drop
+     [keeper_name] from emit (inbound parse will still accept it for one
+     more release cycle). *)
   let base = [
     ("ok", `Bool true);
     ("keeper_name", `String out.keeper_name);
+    ("destination_id", `String out.keeper_name);
     ("reply", `String out.content);
     ("turn_stats", stats_json);
   ] in

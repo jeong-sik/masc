@@ -171,6 +171,18 @@ let test_inbound_of_json_keeper_name_still_works () =
       check string "keeper_name alone still routes" "legacy-only" msg.keeper_name
   | Error e -> fail e
 
+let test_outbound_emits_destination_id () =
+  let out : Gate_protocol.outbound_message = {
+    keeper_name = "luna";
+    content = "hi";
+    structured = None;
+    turn_stats = None;
+  } in
+  let json = Gate_protocol.outbound_to_json out in
+  let open Yojson.Safe.Util in
+  check string "keeper_name still emitted" "luna" (json |> member "keeper_name" |> to_string);
+  check string "destination_id mirrors keeper_name" "luna" (json |> member "destination_id" |> to_string)
+
 let test_outbound_to_json_roundtrip () =
   let out : Gate_protocol.outbound_message = {
     keeper_name = "luna";
@@ -233,6 +245,7 @@ let () =
           test_case "inbound accepts destination_id" `Quick test_inbound_of_json_accepts_destination_id;
           test_case "destination_id wins over keeper_name" `Quick test_inbound_of_json_destination_id_wins_over_keeper_name;
           test_case "inbound keeper_name still works" `Quick test_inbound_of_json_keeper_name_still_works;
+          test_case "outbound emits destination_id" `Quick test_outbound_emits_destination_id;
           test_case "outbound roundtrip" `Quick test_outbound_to_json_roundtrip;
           test_case "error_json" `Quick test_error_json;
         ] );

@@ -100,7 +100,7 @@ export function OperationalMeaningPanel({
 
 const PHASE_BAR_FILL: Record<string, string> = {
   Running: '#22c55e',
-  Overflowed: '#fb923c',
+  Overflowed: '#f59e0b',
   Compacting: '#f59e0b',
   HandingOff: '#a78bfa',
   Failing: '#ef4444',
@@ -186,7 +186,7 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   accumulating: 'Collecting messages; context not yet full',
   // KSM (Phase) — used in Hero
   Running: 'Keeper is actively running turns',
-  Overflowed: 'Prompt context exceeded the current budget before compaction resolved it',
+  Overflowed: 'Prompt overflowed the provider context window; recovery is pending',
   Compacting: 'Compacting context to reclaim token budget',
   HandingOff: 'Transferring state to the next generation',
   Failing: 'Experiencing errors, will retry or recover',
@@ -220,7 +220,7 @@ export function HeroPhase({
 
   const phaseColor: Record<string, string> = {
     Running: 'text-emerald-400',
-    Overflowed: 'text-orange-400',
+    Overflowed: 'text-amber-400',
     Compacting: 'text-amber-400',
     HandingOff: 'text-violet-400',
     Failing: 'text-red-400',

@@ -109,6 +109,12 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
+  recovery_two_store_sync : bool;
+}
+
+type recovery_state = {
+  data_record : bool;
+  fsm_condition : bool;
 }
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -133,6 +139,7 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
+  recovery : recovery_state;
   invariants : invariants_check;
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is

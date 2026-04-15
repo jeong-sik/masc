@@ -639,8 +639,6 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
-              ("social_model",
-                `String (Keeper_social_model.normalize_social_model m.social_model));
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
@@ -662,26 +660,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 if String.trim m.runtime.proactive_rt.last_reason = ""
                 then `Null
                 else `String m.runtime.proactive_rt.last_reason);
-              ("last_speech_act",
-                if String.trim m.runtime.last_speech_act = ""
-                then `Null
-                else `String m.runtime.last_speech_act);
-              ("last_social_transition_reason",
-                if String.trim m.runtime.last_social_transition_reason = ""
-                then `Null
-                else `String m.runtime.last_social_transition_reason);
-              ("last_blocker",
-                if String.trim m.runtime.last_blocker = ""
-                then `Null
-                else `String m.runtime.last_blocker);
-              ("last_need",
-                if String.trim m.runtime.last_need = ""
-                then `Null
-                else `String m.runtime.last_need);
 	              ("last_proactive_preview",
 	                if String.trim m.runtime.proactive_rt.last_preview = ""
 	                then `Null
 	                else `String m.runtime.proactive_rt.last_preview);
+            ]
+            @ Keeper_status_bridge.social_runtime_fields_json m
+            @ [
 	              ("skill_primary",
 	                match last_skill_primary with
 	                | Some s -> `String s

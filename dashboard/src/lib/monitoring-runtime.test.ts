@@ -142,6 +142,25 @@ describe('summarizeKeeperMonitoring', () => {
     )
   })
 
+  it('treats unknown social models as attention and exposes the fallback path', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'busy',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        social_model: 'bdi_speech_v1',
+        configured_social_model: 'experimental_v99',
+        social_model_recognized: false,
+        social_model_fallback: 'bdi_speech_v1',
+      }),
+    )
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toBe(
+      '소셜 모델 experimental_v99 미인식 · bdi_speech_v1로 대체 중입니다.',
+    )
+  })
+
   it('surfaces autonomous slot wait timeouts as attention', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({

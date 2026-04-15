@@ -309,6 +309,52 @@ let test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit 
     true
     (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool)
 
+let test_runtime_surface_exposes_social_model_resolution_fields () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-social-model-test" () in
+  let meta =
+    {
+      base with
+      social_model = "experimental_v99";
+      runtime =
+        {
+          base.runtime with
+          last_speech_act =
+            Masc_mcp.Keeper_social_model.speech_act_to_string
+              Masc_mcp.Keeper_social_model.Stay_silent;
+          last_social_transition_reason = "tool_only:stay_silent";
+          last_blocker = "waiting_for_delta";
+          last_need = "";
+        };
+    }
+  in
+  let config = Coord.default_config "/tmp/test-keeper-exec-status-social-model" in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "normalized social model"
+    "bdi_speech_v1"
+    (runtime |> member "social_model" |> to_string);
+  check string "configured social model preserved"
+    "experimental_v99"
+    (runtime |> member "configured_social_model" |> to_string);
+  check bool "recognized flag" false
+    (runtime |> member "social_model_recognized" |> to_bool);
+  check string "fallback social model"
+    "bdi_speech_v1"
+    (runtime |> member "social_model_fallback" |> to_string);
+  check string "last speech act"
+    "stay_silent"
+    (runtime |> member "last_speech_act" |> to_string);
+  check string "transition reason"
+    "tool_only:stay_silent"
+    (runtime |> member "last_social_transition_reason" |> to_string);
+  check string "last blocker"
+    "waiting_for_delta"
+    (runtime |> member "last_blocker" |> to_string);
+  check (option string) "blank last_need omitted" None
+    (runtime |> member "last_need" |> to_string_option)
+
 let () =
   run "keeper_exec_status"
     [
@@ -351,5 +397,7 @@ let () =
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives manual reconcile blocker" `Quick
             test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit;
+          test_case "runtime surface exposes social model fields" `Quick
+            test_runtime_surface_exposes_social_model_resolution_fields;
         ] );
     ]

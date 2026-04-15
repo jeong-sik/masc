@@ -996,6 +996,11 @@ let test_social_model_registry_round_trip () =
     |> Option.map KSM.model_id_to_string);
   check bool "unknown model id rejected" true
     (Option.is_none (KSM.model_id_of_string "experimental_v99"));
+  check bool "unknown model flagged as unrecognized" false
+    (KSM.is_known_social_model "experimental_v99");
+  check (option string) "unknown model exposes explicit fallback"
+    (Some "bdi_speech_v1")
+    (KSM.fallback_social_model "experimental_v99");
   check string "unknown model normalized to baseline" "bdi_speech_v1"
     (KSM.normalize_social_model "experimental_v99")
 
@@ -2849,6 +2854,32 @@ let test_social_model_magentic_ledger_previous_state_of_meta_restores_model ()
       check string "speech act restored" "inform"
         (KSM.speech_act_to_string state.speech_act)
 
+let test_social_model_previous_state_of_meta_falls_back_for_unknown_model () =
+  let meta =
+    {
+      minimal_meta with
+      social_model = "experimental_v99";
+      runtime =
+        {
+          minimal_meta.runtime with
+          last_speech_act = "request_help";
+          last_active_desire = "seek_help";
+          last_current_intention = "recover_tool_route";
+          last_blocker = "tool route unavailable";
+          last_need = "operator guidance";
+        };
+    }
+  in
+  match KSM.previous_state_of_meta meta with
+  | None -> fail "expected fallback previous social state"
+  | Some state ->
+      check string "unknown model falls back to default" "bdi_speech_v1"
+        state.social_model;
+      check string "speech act restored under fallback" "request_help"
+        (KSM.speech_act_to_string state.speech_act);
+      check string "delivery surface inferred under fallback" "board_post"
+        (KSM.delivery_surface_to_string state.delivery_surface)
+
 let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
   let meta = { minimal_meta with social_model = "magentic_ledger_v1" } in
   let previous_state =
@@ -3261,6 +3292,8 @@ let () =
             test_social_model_magentic_ledger_hides_nonvisible_tool_text;
           test_case "magentic ledger restores previous state model" `Quick
             test_social_model_magentic_ledger_previous_state_of_meta_restores_model;
+          test_case "social model previous state falls back for unknown model" `Quick
+            test_social_model_previous_state_of_meta_falls_back_for_unknown_model;
           test_case "magentic ledger stalled state carries until delta" `Quick
             test_social_model_magentic_ledger_stalled_state_carries_until_delta;
           test_case "render_inline deny" `Quick

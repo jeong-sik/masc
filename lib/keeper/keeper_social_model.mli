@@ -64,6 +64,8 @@ val speech_act_to_string : speech_act -> string
 val delivery_surface_to_string : delivery_surface -> string
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
+val is_known_social_model : string -> bool
+val fallback_social_model : string -> string option
 val normalize_social_model : string -> string
 val transition_reason_to_string : transition_reason -> string
 val previous_state_of_meta : Keeper_types.keeper_meta -> social_state option

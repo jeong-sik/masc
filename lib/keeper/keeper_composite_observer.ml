@@ -92,6 +92,12 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
+  recovery_two_store_sync : bool;
+}
+
+type recovery_state = {
+  data_record : bool;
+  fsm_condition : bool;
 }
 
 type last_outcome = {
@@ -112,6 +118,7 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
+  recovery : recovery_state;
   invariants : invariants_check;
   is_live : bool;
   last_outcome : last_outcome option;
@@ -318,6 +325,17 @@ let check_event_priority_monotone
       obs.measurement_bind_count <= 1
       && not (Option.is_some obs.measurement && Option.is_some entry.pending_turn_measurement)
 
+let derive_recovery_state
+    (_entry : Keeper_registry.registry_entry)
+    : recovery_state =
+  (* The legacy manual_reconcile two-store path has been retired from the
+     runtime, but the dashboard still expects the recovery payload shape
+     from RFC-0003. Keep the wire contract total by surfacing the current
+     clean-state projection explicitly instead of omitting the fields. *)
+  {
+    data_record = false;
+    fsm_condition = false;
+  }
 let compute_invariants
     (entry : Keeper_registry.registry_entry)
     ~(phase : ksm_phase)
@@ -325,6 +343,7 @@ let compute_invariants
     ~(cascade_state : cascade_state)
     ~(compaction_stage : compaction_stage)
     ~(measurement_captured : bool)
+    ~(recovery : recovery_state)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
@@ -334,6 +353,8 @@ let compute_invariants
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase compaction_stage;
     event_priority_monotone = check_event_priority_monotone entry;
+    recovery_two_store_sync =
+      recovery.data_record = recovery.fsm_condition;
   }
 
 (* Public API *)
@@ -372,6 +393,7 @@ let observe
   let cascade_state = live_cascade_state entry in
   let measurement = live_measurement entry in
   let measurement_captured = Option.is_some measurement in
+  let recovery = derive_recovery_state entry in
   let invariants =
     compute_invariants
       entry
@@ -380,6 +402,7 @@ let observe
       ~cascade_state
       ~compaction_stage
       ~measurement_captured
+      ~recovery
   in
   {
     correlation_id;
@@ -391,6 +414,7 @@ let observe
     kcl_cascade_state = cascade_state;
     kmc_compaction = compaction_stage;
     shared_measurement = measurement;
+    recovery;
     invariants;
     is_live;
     last_outcome =
@@ -409,13 +433,19 @@ let observe
 (* JSON serialisation (RFC-0003 §7) *)
 
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
-  `Assoc
-    [
-      "phase_turn_alignment", `Bool inv.phase_turn_alignment;
-      "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
-      "compaction_atomicity", `Bool inv.compaction_atomicity;
-      "event_priority_monotone", `Bool inv.event_priority_monotone;
-    ]
+  `Assoc [
+    "phase_turn_alignment", `Bool inv.phase_turn_alignment;
+    "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
+    "compaction_atomicity", `Bool inv.compaction_atomicity;
+    "event_priority_monotone", `Bool inv.event_priority_monotone;
+    "recovery_two_store_sync", `Bool inv.recovery_two_store_sync;
+  ]
+
+let recovery_to_json (recovery : recovery_state) : Yojson.Safe.t =
+  `Assoc [
+    "data_record", `Bool recovery.data_record;
+    "fsm_condition", `Bool recovery.fsm_condition;
+  ]
 
 let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Safe.t =
   `Assoc
@@ -453,6 +483,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       | None -> `Assoc [
           "captured", `Bool false;
         ]);
+    "recovery", recovery_to_json s.recovery;
     "invariants", invariants_to_json s.invariants;
     "is_live", `Bool s.is_live;
     "last_outcome", (match s.last_outcome with

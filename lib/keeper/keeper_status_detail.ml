@@ -1022,6 +1022,15 @@ let handle_keeper_status ctx args : tool_result =
            ("social", `Assoc [
              ("model",
                `String (Keeper_social_model.normalize_social_model m.social_model));
+             ("configured_model",
+               if String.trim m.social_model = ""
+               then `Null
+               else `String (String.trim m.social_model));
+             ("recognized_model", `Bool (Keeper_social_model.is_known_social_model m.social_model));
+             ("fallback_model",
+               match Keeper_social_model.fallback_social_model m.social_model with
+               | Some model -> `String model
+               | None -> `Null);
              ("last_speech_act",
                if String.trim m.runtime.last_speech_act = ""
                then `Null

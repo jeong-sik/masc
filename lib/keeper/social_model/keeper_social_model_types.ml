@@ -108,10 +108,22 @@ let model_id_of_string value =
 
 let default_model_id = Bdi_speech_v1
 
-let normalize_social_model value =
+let is_known_social_model value =
   match model_id_of_string value with
-  | Some model_id -> model_id_to_string model_id
-  | None -> model_id_to_string default_model_id
+  | Some _ -> true
+  | None -> false
+
+let fallback_social_model value =
+  if is_known_social_model value then None
+  else Some (model_id_to_string default_model_id)
+
+let normalize_social_model value =
+  match fallback_social_model value with
+  | Some fallback -> fallback
+  | None ->
+      match model_id_of_string value with
+      | Some model_id -> model_id_to_string model_id
+      | None -> model_id_to_string default_model_id
 
 let transition_reason_to_string = function
   | Tool_only_stay_silent -> "tool_only:stay_silent"

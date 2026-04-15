@@ -162,10 +162,14 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   accumulating: '수집 중',
   // KSM
   Running: '가동 중',
-  Overflowed: '오버플로우',
+  Overflowed: '컨텍스트 초과',
   Compacting: '압축 중',
   HandingOff: '인수인계',
   Failing: '오류 발생',
+  Crashed: '비정상 종료',
+  Offline: '오프라인',
+  Paused: '일시 중지',
+  Stopped: '정지',
   Draining: '종료 준비',
   Stable: '안정',
 }

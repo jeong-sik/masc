@@ -72,45 +72,31 @@ type turn_verdict =
   | Skip of { reasons : skip_reason * skip_reason list }
 
 let turn_reason_to_string = function
-  | Mention_pending -> "pending_mentions"
-  | Board_event_pending -> "pending_board_events"
-  | Scope_message_pending -> "pending_scope_messages"
+  | Mention_pending -> "mention_pending"
+  | Board_event_pending -> "board_event_pending"
+  | Scope_message_pending -> "scope_message_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
-  | Idle_cooldown_elapsed _ -> "idle_gate_elapsed"
+  | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
   | Cooldown_elapsed -> "cooldown_elapsed"
-  | Task_backlog _ -> "actionable_backlog"
+  | Task_backlog _ -> "task_backlog"
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
 
 let skip_reason_to_string = function
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
-  | Idle_gate_pending _ -> "idle_gate_wait"
-  | Cooldown_pending _ -> "cooldown_wait"
+  | Idle_gate_pending _ -> "idle_gate_pending"
+  | Cooldown_pending _ -> "cooldown_pending"
   | No_signal -> "no_signal"
 
 let channel_to_string = function
   | Reactive -> "reactive"
   | Scheduled_autonomous -> "scheduled_autonomous"
 
-let turn_reason_legacy_tokens = function
-  | Task_backlog { unclaimed; failed } ->
-      [ Some "actionable_backlog";
-        (if unclaimed > 0 then Some "unclaimed_tasks" else None);
-        (if failed > 0 then Some "failed_tasks" else None) ]
-      |> List.filter_map Fun.id
-  | reason -> [ turn_reason_to_string reason ]
-
-let skip_reason_legacy_tokens = function
-  | Scheduled_autonomous_disabled -> [ "scheduled_autonomous_disabled" ]
-  | Idle_gate_pending _ -> [ "scheduled_autonomous_turn"; "idle_gate_wait" ]
-  | Cooldown_pending _ -> [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
-  | No_signal -> [ "scheduled_autonomous_turn"; "idle_gate_elapsed" ]
-
 let verdict_reasons_to_strings = function
   | Run { reasons = (first, rest) } ->
-      List.concat_map turn_reason_legacy_tokens (first :: rest)
+      List.map turn_reason_to_string (first :: rest)
   | Skip { reasons = (first, rest) } ->
-      List.concat_map skip_reason_legacy_tokens (first :: rest)
+      List.map skip_reason_to_string (first :: rest)
 type unified_turn_decision = {
   should_run : bool;
   channel : unified_turn_channel;

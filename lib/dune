@@ -130,8 +130,6 @@
    server_routes_http_routes_frontend
    server_routes_http_routes_room
    server_routes_http_routes_dashboard
-   server_routes_http_routes_command_plane_read
-   server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
    server_routes_http_routes_cascade
    server_routes_http_routes_activity
@@ -146,10 +144,6 @@
    server_runtime_bootstrap
    server_startup_state
    server_startup_takeover
-   server_command_plane_http
-   server_command_plane_http_support
-   server_command_plane_http_mutations
-   server_command_plane_http_help
    server_activity_http
    server_mcp_transport_http
    server_mcp_transport_http_conn
@@ -322,13 +316,6 @@
    tool_local_runtime_status
    tool_local_runtime_probe
    tool_board
-   tool_command_plane
-   tool_command_plane_support
-   tool_command_plane_mutations
-   tool_command_plane_operations
-   tool_command_plane_dispatch
-   tool_command_plane_schemas_01
-   tool_command_plane_schemas_02
    tool_library
    tool_deep_review
    tool_catalog
@@ -595,8 +582,6 @@
  server_routes_http_routes_frontend
  server_routes_http_routes_room
  server_routes_http_routes_dashboard
- server_routes_http_routes_command_plane_read
- server_routes_http_routes_command_plane_write
  server_routes_http_routes_activity
  swarm_status_inputs
  server_mcp_transport_http_types
@@ -606,15 +591,6 @@
  server_mcp_transport_http_conn
  server_mcp_transport_http_respond
  server_mcp_transport_http_agui
- server_command_plane_http_support
- server_command_plane_http_mutations
- server_command_plane_http_help
- tool_command_plane_support
- tool_command_plane_mutations
- tool_command_plane_operations
- tool_command_plane_dispatch
- tool_command_plane_schemas_01
- tool_command_plane_schemas_02
   keeper_tool_registry
   keeper_tool_policy_config
   keeper_tool_policy

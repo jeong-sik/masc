@@ -931,28 +931,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Cold-start warm-cache stagger is handled by warm_delay_s in each
          Proactive_refresh config. Heavy surfaces delay their initial warm
          compute to avoid concurrent CPU/PG contention.  Lightweight surfaces
-         (cp-summary, execution, transport_health) start immediately. *)
-      (* MASC_CP_SUMMARY_REFRESH_DISABLED=1: skip the cp-summary warm cache
-         loop. Used as an escape hatch when Command_plane_v2.summary_json or
-         Swarm_status.build_json_from_snapshot trips an OCaml Stack overflow
-         on a specific dataset and CPU-pins the Eio scheduler (issue #6633).
-         The dashboard /command-plane/summary endpoint will return the empty
-         initial ref in that mode, which is preferable to a server hang. *)
-      let cp_summary_refresh_disabled =
-        match Sys.getenv_opt "MASC_CP_SUMMARY_REFRESH_DISABLED" with
-        | Some v ->
-          let v = String.trim v in
-          v = "1" || String.lowercase_ascii v = "true"
-        | None -> false
-      in
-      if cp_summary_refresh_disabled then
-        Log.Dashboard.warn
-          "cp-summary refresh loop DISABLED via MASC_CP_SUMMARY_REFRESH_DISABLED \
-           — /command-plane/summary will return empty cached ref"
-      else begin
-        Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
-        Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock
-      end;
+         (execution, transport_health) start immediately. *)
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;

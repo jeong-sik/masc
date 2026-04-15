@@ -234,8 +234,8 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        test_command_plane_help
         ; test_dashboard_proof removed (team session cleanup)
+        ; test_command_plane_help removed (CP purge)
 
         test_dashboard_cache
         test_dashboard_execution
@@ -383,8 +383,8 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        test_command_plane_help
         ; test_dashboard_proof removed (team session cleanup)
+        ; test_command_plane_help removed (CP purge)
 
         test_dashboard_cache
         test_dashboard_execution

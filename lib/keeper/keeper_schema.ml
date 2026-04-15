@@ -404,42 +404,7 @@ let keeper_schemas : tool_schema list = [
     ];
   };
 
-  {
-    name = "masc_keeper_reconcile";
-    description = "Inspect or clear a keeper manual-reconcile blocker. Use inspect to review the persisted blocker record, then clear with operator evidence once the committed side effects have been reconciled.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle");
-        ]);
-        ("action", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "inspect"; `String "clear"]);
-          ("description", `String "inspect returns the persisted blocker record. clear marks it cleared and re-enables keepalive turns.");
-        ]);
-        ("resolution", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Required for clear. Operator summary of how the ambiguous side effects were reconciled.");
-        ]);
-        ("evidence_refs", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional evidence references (task ids, board posts, logs, notes) that justify the clear.");
-        ]);
-        ("actor", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional operator identity. Defaults to the calling agent_name.");
-        ]);
-        ("idempotency_key", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional idempotency key for repeated clear requests.");
-        ]);
-      ]);
-      ("required", `List [`String "name"; `String "action"]);
-    ];
-  };
+  (* masc_keeper_reconcile removed with manual_reconcile blocker system. *)
 
   {
     name = "masc_keeper_down";

@@ -12,20 +12,6 @@ val get_bus : unit -> Agent_sdk.Event_bus.t option
     each interval, and processes [HeartbeatAck] directives. *)
 val set_grpc_client : ?env:Eio_unix.Stdenv.base -> Masc_grpc_client.t -> unit
 
-(** Throttle predicate for the "keepalive turn skipped: manual
-    reconcile pending" log. Returns [true] iff the caller should emit
-    INFO for [keeper_name] at time [now]; otherwise the caller should
-    demote to DEBUG. The window is 60s per keeper, applied on a
-    module-global in-memory table guarded by a [Stdlib.Mutex].
-    Exposed for regression testing of the throttle semantics — not
-    intended for production callers outside [keeper_keepalive.ml]. *)
-val should_log_manual_reconcile_skip : now:float -> string -> bool
-
-(** Test-only reset for the throttle table. Clears all entries so the
-    next [should_log_manual_reconcile_skip] call emits INFO again.
-    Never call this from production code. *)
-val reset_skip_log_throttle : unit -> unit
-
 (** Process a single directive string from a gRPC HeartbeatAck.
     Supported: "pause", "resume", "wakeup", "claim:<task_id>". *)
 val process_directive : agent_name:string -> string -> unit

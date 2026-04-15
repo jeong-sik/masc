@@ -45,7 +45,7 @@ type compaction_stage =
   | `Compacting
   | `Done ]
 
-(** Five safety invariants from KeeperCompositeLifecycle.tla.
+(** Safety invariants from KeeperCompositeLifecycle.tla.
     Each field is [true] when the invariant holds for the observed
     snapshot. A [false] value signals a composite-level safety violation
     that the dashboard should surface to the operator. *)
@@ -54,7 +54,6 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
-  recovery_two_store_sync : bool;
 }
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -76,8 +75,6 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  reconcile_data : bool;
-  reconcile_fsm : bool;
   invariants : invariants_check;
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is

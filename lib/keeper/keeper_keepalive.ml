@@ -353,56 +353,8 @@ let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   Atomic.set grpc_env_ref env
 ;;
 
-(* Per-keeper throttle for the "keepalive turn skipped: manual reconcile
-   pending" INFO log. Without this, every scheduled keepalive tick
-   emits one line per stuck keeper — 6 stuck keepers × ~30s tick rate
-   flooded /tmp/masc-min-p-restart.log with 266 identical skip lines
-   in 14 minutes on 2026-04-12. The underlying state is a legitimate
-   operator-only recovery point (cleared via the [keeper_manual_reconcile]
-   MCP tool), so we cannot drop the log entirely — operators need
-   periodic confirmation that the keeper is still blocked. We emit
-   INFO at most once per [skip_log_throttle_sec] per keeper; the rest
-   go to DEBUG for deep-investigation scenarios.
-
-   The throttle table is guarded by a [Stdlib.Mutex] even though all
-   production call sites live on a single Eio domain. Reason: the
-   module exposes [should_log_manual_reconcile_skip] in the [.mli] so
-   regression tests can exercise the window semantics — exposing it
-   admits a call path where an unrelated caller on another domain
-   reaches the table, and OCaml 5's Hashtbl is not multi-domain safe.
-   The mutex is cheap relative to Hashtbl ops and avoids reasoning
-   about hypothetical yield points inside Hashtbl internals. *)
-let skip_log_throttle_sec = 60.0
-
-let manual_reconcile_skip_log_mutex = Mutex.create ()
-
-let manual_reconcile_skip_log_last_ts : (string, float) Hashtbl.t =
-  Hashtbl.create 16
-
-let should_log_manual_reconcile_skip ~(now : float) keeper_name =
-  Mutex.lock manual_reconcile_skip_log_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock manual_reconcile_skip_log_mutex)
-    (fun () ->
-      match
-        Hashtbl.find_opt manual_reconcile_skip_log_last_ts keeper_name
-      with
-      | Some last when now -. last < skip_log_throttle_sec -> false
-      | _ ->
-          Hashtbl.replace manual_reconcile_skip_log_last_ts keeper_name now;
-          true)
-;;
-
-(** Test-only reset for the throttle table. Clears every [(keeper, ts)]
-    entry, restoring the "never logged" state used by test setup
-    fixtures. Production code must not call this — doing so would
-    flood the log on the next tick. *)
-let reset_skip_log_throttle () =
-  Mutex.lock manual_reconcile_skip_log_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock manual_reconcile_skip_log_mutex)
-    (fun () -> Hashtbl.clear manual_reconcile_skip_log_last_ts)
-;;
+(* Skip log throttle removed with manual_reconcile blocker — no more
+   sticky reconcile state means no flood of "reconcile pending" skip logs. *)
 
 let format_since_last_scheduled_autonomous = function
   | Some s when s = max_int -> "never"
@@ -936,113 +888,28 @@ let keeper_agent_status (meta : keeper_meta) =
     | None -> Types.Active)
 ;;
 
-let manual_reconcile_blocker_detail (config : Room.config) keeper_name =
-  match Keeper_manual_reconcile.read config keeper_name with
-  | Some ({ status = Keeper_manual_reconcile.Pending; summary; failure_reason; _ } as record)
-    ->
-      let detail =
-        match failure_reason with
-        | Some value when String.trim value <> "" -> value
-        | _ when String.trim summary <> "" -> summary
-        | _ -> record.blocker_class
-      in
-      `Pending detail
-  | Some { status = Keeper_manual_reconcile.Cleared; _ } -> `Cleared
-  | None -> `Absent
-
-let sync_manual_reconcile_condition ~(config : Room.config) ~(keeper_name : string) =
-  match
-    manual_reconcile_blocker_detail config keeper_name,
-    Keeper_registry.get ~base_path:config.base_path keeper_name
-  with
-  | `Pending detail, Some entry
-    when not entry.conditions.manual_reconcile_required ->
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:config.base_path keeper_name
-        (Keeper_state_machine.Manual_reconcile_required { reason = detail }))
-  | (`Cleared | `Absent), Some entry
-    when entry.conditions.manual_reconcile_required ->
-      (* Reverse sync: file removed/cleared but FSM condition still true.
-         Without this, keepers whose reconcile file was deleted externally
-         or cleared by a previous server instance stay in Failing forever. *)
-      Log.Keeper.info
-        "sync_reconcile: clearing stale FSM manual_reconcile_required for %s (no file)"
-        keeper_name;
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:config.base_path keeper_name
-        Keeper_state_machine.Manual_reconcile_cleared)
-  | _ -> ()
-
 (** Reset stale turn failures so the keeper can exit Failing phase.
     Called unconditionally after presence sync (whether I/O was skipped or not).
-    If the underlying issue persists, the next turn will re-fail. *)
+    If the underlying issue persists, the next turn will re-fail.
+    Manual reconcile blocker logic removed — see plan:
+    enchanted-strolling-bonbon. *)
 let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
   let stale_turn_failures =
     Keeper_registry.get_turn_failures
       ~base_path:ctx.config.base_path meta.name
   in
   if stale_turn_failures > 0 then begin
-    sync_manual_reconcile_condition ~config:ctx.config ~keeper_name:meta.name;
-    let blocker_detail = manual_reconcile_blocker_detail ctx.config meta.name in
-    let sticky_manual_reconcile =
-      match blocker_detail with
-      | `Pending _ -> true
-      | `Cleared | `Absent -> false
-    in
-    (* When the system already classified the partial commit as
-       auto-recoverable ("cursors already advanced, re-trigger risk is
-       low"), clear the reconcile blocker too. Retaining a sticky
-       blocker after an auto-recoverable judgment is contradictory and
-       causes all keepers to stall within ~10 minutes of server start.
-       See #6801 for the full failure chain. *)
-    let reason_str =
-      match blocker_detail with
-      | `Pending detail -> detail
-      | `Cleared -> "cleared"
-      | `Absent -> "none"
-    in
-    if sticky_manual_reconcile then
-      Log.Keeper.warn
-        "heartbeat recovery: auto-clearing %d turn failures for %s (reason=%s). Cursors already advanced — clearing reconcile blocker."
-        stale_turn_failures meta.name reason_str;
-    begin
-      Keeper_registry.reset_turn_failures
-        ~base_path:ctx.config.base_path meta.name;
-      ignore (Keeper_registry.dispatch_event
-        ~base_path:ctx.config.base_path meta.name
-        Keeper_state_machine.Heartbeat_ok);
-      (* Always dispatch Turn_succeeded to unblock the keeper.
-         Previously, sticky_manual_reconcile retained the blocker even
-         when auto-recoverable, causing permanent keeper stall. *)
-      if sticky_manual_reconcile then begin
-        ignore (Keeper_manual_reconcile.clear ctx.config
-          ~keeper_name:meta.name
-          ~actor:"heartbeat_recovery"
-          ~resolution:"auto-recoverable partial commit; cursors advanced, re-trigger risk low"
-          ~evidence_refs:[]
-          ~idempotency_key:None);
-        (* Turn_succeeded alone does NOT reset manual_reconcile_required;
-           Manual_reconcile_cleared is still required to exit Failing. *)
-        ignore (Keeper_registry.dispatch_event
-          ~base_path:ctx.config.base_path meta.name
-          Keeper_state_machine.Manual_reconcile_cleared);
-        Log.Keeper.info
-          "heartbeat recovery: cleared reconcile blocker + FSM condition for %s (auto-recoverable, re-trigger risk low)"
-          meta.name
-      end;
-      dispatch_keepalive_event ~ctx ~keeper_name:meta.name
-        Keeper_state_machine.Turn_succeeded;
-      Log.Keeper.info
-        "heartbeat recovery: reset %d stale turn failures for %s"
-        stale_turn_failures meta.name
-    end
+    Keeper_registry.reset_turn_failures
+      ~base_path:ctx.config.base_path meta.name;
+    ignore (Keeper_registry.dispatch_event
+      ~base_path:ctx.config.base_path meta.name
+      Keeper_state_machine.Heartbeat_ok);
+    dispatch_keepalive_event ~ctx ~keeper_name:meta.name
+      Keeper_state_machine.Turn_succeeded;
+    Log.Keeper.info
+      "heartbeat recovery: reset %d stale turn failures for %s"
+      stale_turn_failures meta.name
   end
-
-let keeper_requires_manual_reconcile ~(config : Room.config) ~keeper_name =
-  sync_manual_reconcile_condition ~config ~keeper_name;
-  match manual_reconcile_blocker_detail config keeper_name with
-  | `Pending _ -> true
-  | `Cleared | `Absent -> false
 
 let sync_keeper_presence
       ~(ctx : _ context)
@@ -1179,15 +1046,13 @@ let run_keepalive_unified_turn
           ~meta:meta_after_triage
           obs
       in
-      let manual_reconcile_pending =
-        keeper_requires_manual_reconcile
-          ~config:ctx.config
-          ~keeper_name:meta_after_triage.name
-      in
+      (* Manual reconcile blocker check removed — keepers no longer get
+         stuck behind sticky blockers. Failed turns record evidence via
+         Keeper_registry; recovery is autonomous (next turn's observation)
+         or operator-driven (board/keeper_chat), not blocker-driven. *)
       let should_run_turn =
         (not (Atomic.get stop))
         && turn_decision.should_run
-        && (not manual_reconcile_pending)
       in
       let meta_after_observe =
         Keeper_world_observation.apply_message_cursor_updates
@@ -1200,18 +1065,7 @@ let run_keepalive_unified_turn
       in
       let verdict_strs = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
       let channel_str = Keeper_world_observation.channel_to_string turn_decision.channel in
-      if manual_reconcile_pending && turn_decision.should_run then (
-        let now = Time_compat.now () in
-        let log_fn =
-          if should_log_manual_reconcile_skip ~now meta_after_triage.name
-          then Log.Keeper.info
-          else Log.Keeper.debug
-        in
-        log_fn
-          "keepalive turn skipped for %s: manual reconcile pending channel=%s reasons=%s"
-          meta_after_triage.name channel_str
-          (String.concat "," verdict_strs));
-      if (not should_run_turn) && (not manual_reconcile_pending) then (
+      if not should_run_turn then (
         let log_not_scheduled =
           match turn_decision.verdict with
           | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->
@@ -1320,9 +1174,6 @@ let run_keepalive_unified_turn
                  meta_after_observe.name e;
                meta_after_observe)
           | Ok updated ->
-            (* Clear manual_reconcile trap after successful turn *)
-            dispatch_keepalive_event ~ctx ~keeper_name:updated.name
-              Keeper_state_machine.Manual_reconcile_cleared;
             updated))
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe

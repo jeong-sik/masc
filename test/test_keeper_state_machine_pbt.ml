@@ -29,8 +29,6 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     return SM.Turn_succeeded;
     (let* consecutive = int_range 1 5 in
      return (SM.Turn_failed { consecutive; max_allowed = 3 }));
-    return (SM.Manual_reconcile_required { reason = "pbt_test" });
-    return SM.Manual_reconcile_cleared;
     (let* ratio = float_range 0.0 1.0 in
      let* auto_rules = gen_auto_rules in
      return (SM.Context_measured {
@@ -67,8 +65,6 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 };
         SM.Turn_succeeded;
         SM.Turn_failed { consecutive = 1; max_allowed = 3 };
-        SM.Manual_reconcile_required { reason = "test" };
-        SM.Manual_reconcile_cleared;
         SM.Context_measured {
           context_ratio = 0.5; message_count = 50; token_count = 5000;
           auto_rules = { reflect = false; plan = false; compact = false;
@@ -88,8 +84,6 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
       ]
     | SM.Failing ->
       [ SM.Heartbeat_ok; SM.Turn_succeeded;
-        SM.Manual_reconcile_cleared;
-        SM.Manual_reconcile_required { reason = "test" };
         SM.Fiber_terminated { outcome = "crash" };
         SM.Stop_requested; SM.Operator_pause;
         SM.Context_overflow_detected

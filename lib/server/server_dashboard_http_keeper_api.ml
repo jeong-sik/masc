@@ -712,8 +712,6 @@ let handle_keeper_get_subroutes state req request reqd =
         match Keeper_registry.get ~base_path:state.Mcp_server.room_config.base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
           Some `Failed
-        | Some entry when entry.conditions.manual_reconcile_required ->
-          Some `Blocked
         | Some _ -> Some `Ok
         | None -> None
       in

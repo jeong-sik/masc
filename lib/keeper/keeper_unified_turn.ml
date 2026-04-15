@@ -134,26 +134,20 @@ let summarize_post_commit_failure
   let committed_tools = committed_mutating_tools tool_names in
   let tools = String.concat ", " committed_tools in
   let err_preview = short_preview (Oas.Error.to_string err) in
-  let manual_reconcile_required =
-    not (Keeper_tool_registry.all_tools_reconcile_safe committed_tools)
-  in
+  (* Manual reconcile blocker removed — no "required/not required" branching.
+     Evidence is recorded via Keeper_registry; the next turn's observation
+     signals the failure for autonomous or operator-driven recovery. *)
   match kind with
   | Keeper_registry.Post_commit_timeout ->
       Printf.sprintf
-        "Mutating tools [%s] committed before the turn timed out; retry stayed disabled and %s (error: %s)"
-        tools
-        (if manual_reconcile_required
-         then "manual reconcile is required"
-         else "manual reconcile is not required")
-        err_preview
+        "Mutating tools [%s] committed before the turn timed out; evidence \
+         recorded (error: %s)"
+        tools err_preview
   | Keeper_registry.Post_commit_failure ->
       Printf.sprintf
-        "Mutating tools [%s] committed before the turn failed; retry stayed disabled and %s (error: %s)"
-        tools
-        (if manual_reconcile_required
-         then "manual reconcile is required"
-         else "manual reconcile is not required")
-        err_preview
+        "Mutating tools [%s] committed before the turn failed; evidence \
+         recorded (error: %s)"
+        tools err_preview
 
 let classify_post_commit_failure
     ~(tool_names : string list)
@@ -179,10 +173,6 @@ let classify_post_commit_failure
       ( reclassified,
         Keeper_registry.Ambiguous_partial_commit
           { kind = resolved_kind; detail } )
-
-let blocker_class_of_post_commit_kind = function
-  | Keeper_registry.Post_commit_timeout -> "ambiguous_post_commit_timeout"
-  | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
 
 (** Max transient retries (excluding the initial attempt).  Total attempts
     = 1 initial + max_transient_retries.  OAS internal retry is 3 per
@@ -1764,9 +1754,13 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~is_transient ~social_state ()
           in
           if is_ambiguous_partial then begin
-            (* Reconcile-safe partial commits stay file-less; unsafe ones
-               open a manual_reconcile record immediately so keepalive and
-               status surfaces share one blocker truth source. *)
+            (* Manual reconcile blocker removed. Previously, a partial commit
+               with an unsafe tool would create a sticky blocker that required
+               operator intervention. This caused keeper death spirals (#6801).
+               Now: record the failure reason for audit, log a warning with
+               committed tools, and let the keeper continue. The next turn's
+               world_observation includes failure signals so the keeper (or
+               operator via board/keeper_chat) can decide how to recover. *)
             let failure_reason =
               Option.value
                 ~default:
@@ -1776,53 +1770,18 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
                   })
                 !post_commit_failure_reason
             in
-            let manual_reconcile_required =
-              Keeper_registry.failure_reason_requires_manual_reconcile
-                failure_reason
-            in
             Keeper_registry.set_failure_reason ~base_path:config.base_path
               meta.name
               (Some failure_reason);
-            if manual_reconcile_required then begin
-              let blocker_class =
-                match failure_reason with
-                | Keeper_registry.Ambiguous_partial_commit { kind; _ } ->
-                    blocker_class_of_post_commit_kind kind
-                | _ -> "ambiguous_post_commit_failure"
-              in
-              let committed_tools =
-                committed_mutating_tools !mutating_tools_committed
-              in
-              let summary =
-                match failure_reason with
-                | Keeper_registry.Ambiguous_partial_commit { detail; _ } -> detail
-                | _ -> e_str
-              in
-              ignore
-                (Keeper_manual_reconcile.open_pending
-                   config
-                   ~keeper_name:meta.name
-                   ~blocker_class
-                   ~summary
-                   ~failure_reason:
-                     (Some
-                        (Keeper_registry.failure_reason_to_string failure_reason))
-                   ~trace_id:(Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-                   ~generation:(Some meta.runtime.generation)
-                   ~committed_tools);
-              Log.Keeper.error
-                "%s: ambiguous partial commit retained manual reconcile \
-                 blocker (tools=[%s])"
-                meta.name
-                (String.concat ", "
-                   committed_tools)
-            end else
-              Log.Keeper.warn
-                "%s: auto-recoverable partial commit (tools=[%s]); \
-                 continuing without manual reconcile block"
-                meta.name
-                (String.concat ", "
-                   (committed_mutating_tools !mutating_tools_committed))
+            let committed_tools =
+              committed_mutating_tools !mutating_tools_committed
+            in
+            Log.Keeper.warn
+              "%s: ambiguous partial commit (tools=[%s], reason=%s); \
+               evidence recorded, continuing without blocker"
+              meta.name
+              (String.concat ", " committed_tools)
+              (Keeper_registry.failure_reason_to_string failure_reason)
           end;
           append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms

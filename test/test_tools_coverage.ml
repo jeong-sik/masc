@@ -451,20 +451,6 @@ let test_masc_keeper_repair_schema () =
             (List.mem_assoc "validator_profile" props)
       | None -> Alcotest.fail "masc_keeper_repair missing properties"
 
-let test_masc_keeper_reconcile_schema () =
-  match find_tool "masc_keeper_reconcile" with
-  | None -> Alcotest.fail "masc_keeper_reconcile not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has action" true
-            (List.mem_assoc "action" props);
-          Alcotest.(check bool) "has resolution" true
-            (List.mem_assoc "resolution" props);
-          Alcotest.(check bool) "has evidence_refs" true
-            (List.mem_assoc "evidence_refs" props)
-      | None -> Alcotest.fail "masc_keeper_reconcile missing properties"
-
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
 let test_masc_tool_admin_snapshot_schema () =
@@ -703,8 +689,6 @@ let () =
         test_masc_keeper_msg_schema;
       Alcotest.test_case "keeper-repair" `Quick
         test_masc_keeper_repair_schema;
-      Alcotest.test_case "keeper-reconcile" `Quick
-        test_masc_keeper_reconcile_schema;
     ];
     "runtime_admin_tools", [
       Alcotest.test_case "tool-admin-snapshot" `Quick

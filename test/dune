@@ -104,7 +104,6 @@
         test_tool_prefilter
         test_keeper_state_machine
         test_keeper_overflow_recovery
-        test_keeper_reconcile_tool
         test_telemetry_unified
         test_keeper_topk_llm
         test_warn_root_causes
@@ -187,8 +186,7 @@
           test_tool_prefilter
           test_keeper_state_machine
           test_keeper_overflow_recovery
-          test_keeper_reconcile_tool
-          test_telemetry_unified
+            test_telemetry_unified
           test_keeper_topk_llm
           test_warn_root_causes
           test_memory_hooks
@@ -522,10 +520,11 @@
         test_task_sandbox
         test_governance_yojson_roundtrip
         test_eval_calibration
-        test_goal_janitor
-        test_keeper_pr_workflow
-        test_voice_config)
- (libraries masc_test_deps))
+	        test_goal_janitor
+	        test_keeper_pr_workflow
+	        test_voice_config)
+ (libraries masc_test_deps)
+ (deps ../bin/main_eio.exe))
 
 (test
  (name test_keeper_mutex_coverage)
@@ -678,12 +677,6 @@
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)
 (test
  (name test_keeper_checkpoint_classify)
- (libraries masc_test_deps))
-
-; Keeper_keepalive.should_log_manual_reconcile_skip throttle regression
-; (observed 266-line log flood from 6 stuck keepers on 2026-04-12)
-(test
- (name test_keeper_keepalive_skip_log_throttle)
  (libraries masc_test_deps))
 
 ; Keeper autonomous semaphore fairness cooldown (#6810)

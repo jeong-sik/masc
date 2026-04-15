@@ -131,10 +131,22 @@ let find_main_eio_exe () =
   let shared_root =
     root |> Filename.dirname |> Filename.dirname |> Filename.dirname
   in
+  let build_roots = [ root; Filename.dirname root; shared_root ] in
   let candidates =
     [
+      Filename.concat root "bin/main_eio.exe";
       Filename.concat root "_build/default/bin/main_eio.exe";
       Filename.concat root "_build/default/masc-mcp/bin/main_eio.exe";
+    ]
+    @ List.concat_map
+        (fun base ->
+          [
+            Filename.concat base "bin/main_eio.exe";
+            Filename.concat base "_build/default/bin/main_eio.exe";
+            Filename.concat base "_build/default/masc-mcp/bin/main_eio.exe";
+          ])
+        build_roots
+    @ [
       Filename.concat shared_root "_build/default/bin/main_eio.exe";
       Filename.concat shared_root "_build/default/masc-mcp/bin/main_eio.exe";
     ]

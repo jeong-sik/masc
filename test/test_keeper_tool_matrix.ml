@@ -21,6 +21,12 @@ let quote = Filename.quote
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let log_progress fmt =
+  Printf.ksprintf
+    (fun line ->
+      Printf.eprintf "[keeper_tool_matrix] %s\n%!" line)
+    fmt
+
 let timeout_command () =
   if Sys.command "command -v timeout >/dev/null 2>&1" = 0 then
     Some "timeout"
@@ -214,30 +220,35 @@ let test_keeper_inventory_has_cases () =
     failf "keeper matrix missing contracts:\n%s"
       (missing |> List.map (fun name -> "  - " ^ name) |> String.concat "\n")
 
-let test_full_keeper_tools_call_matrix () =
+let selected_schemas () =
   let requested = requested_tool_names () in
-  let failures = ref [] in
-  let schemas =
-    match requested with
-    | None -> Cases.all_keeper_tool_schemas ()
-    | Some requested ->
-        Cases.all_keeper_tool_schemas ()
-        |> List.filter (fun (schema : Types.tool_schema) ->
-               List.mem schema.name requested)
-  in
-  List.iter
-    (fun (schema : Types.tool_schema) ->
-      match run_tool_case_process schema.name with
-      | Ok () -> ()
-      | Error message -> failures := ("- " ^ message) :: !failures)
-    schemas;
-  match List.rev !failures with
-  | [] -> ()
-  | failures ->
-      failf "keeper tool matrix failures (%d)\n%s" (List.length failures)
-        (String.concat "\n" failures)
+  match requested with
+  | None -> Cases.all_keeper_tool_schemas ()
+  | Some requested ->
+      Cases.all_keeper_tool_schemas ()
+      |> List.filter (fun (schema : Types.tool_schema) ->
+             List.mem schema.name requested)
+
+let run_tool_case_or_fail tool_name () =
+  match run_tool_case_process tool_name with
+  | Ok () -> ()
+  | Error message -> failf "%s" message
+
+let matrix_test_cases () =
+  let schemas = selected_schemas () in
+  let total = List.length schemas in
+  let timeout_sec = tool_case_timeout_sec () in
+  log_progress "registering %d matrix cases, per-case timeout=%ds"
+    total timeout_sec;
+  schemas
+  |> List.mapi (fun index (schema : Types.tool_schema) ->
+         let case_name =
+           Printf.sprintf "%03d_%s" (index + 1) schema.name
+         in
+         test_case case_name `Slow (run_tool_case_or_fail schema.name))
 
 let () =
+  let matrix_cases = matrix_test_cases () in
   run "keeper_tool_matrix"
     [
       ( "inventory",
@@ -247,9 +258,5 @@ let () =
           test_case "keeper inventory has case contracts" `Quick
             test_keeper_inventory_has_cases;
         ] );
-      ( "matrix",
-        [
-          test_case "full keeper tool matrix" `Slow
-            test_full_keeper_tools_call_matrix;
-        ] );
+      ("matrix", matrix_cases);
     ]

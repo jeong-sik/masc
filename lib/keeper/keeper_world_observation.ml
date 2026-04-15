@@ -372,17 +372,19 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
         (match snapshot with
          | Some s -> keeper_state_snapshot_to_summary_text s
          | None ->
-             let trimmed = String.trim meta.continuity_summary in
-             if trimmed = "" then "No continuity snapshot available."
-             else trimmed)
+             continuity_fallback_summary_text
+               ~continuity_summary:meta.continuity_summary
+               ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts)
     | None ->
-        let trimmed = String.trim meta.continuity_summary in
-        if trimmed = "" then "No continuity snapshot available." else trimmed
+        continuity_fallback_summary_text
+          ~continuity_summary:meta.continuity_summary
+          ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ ->
-      let trimmed = String.trim meta.continuity_summary in
-      if trimmed = "" then "No continuity snapshot available." else trimmed
+      continuity_fallback_summary_text
+        ~continuity_summary:meta.continuity_summary
+        ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
 
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec

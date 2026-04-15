@@ -2,9 +2,8 @@
     tuning loaded from [<base_path>/.masc/config/keeper_runtime.toml].
 
     Uses [resolve_overrides] with injected env_lookup to avoid global
-    process env pollution. The load_and_apply integration path (which
-    calls Unix.putenv) is tested via missing-file and parse-error paths
-    only, since those don't depend on env state. *)
+    process env dependence. The load_and_apply integration path records
+    values in the process-local boot override store. *)
 
 open Alcotest
 open Masc_mcp
@@ -43,6 +42,12 @@ let parse_or_fail content =
   match Keeper_toml_loader.parse_toml content with
   | Ok doc -> doc
   | Error msg -> failf "TOML parse failed: %s" msg
+
+let with_clean_boot_overrides f =
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () -> Config_boot_overrides.reset_for_tests ())
+    f
 
 (* --- Tests using resolve_overrides (pure, no env side effects) --- *)
 
@@ -121,6 +126,24 @@ let test_parse_error_returns_error () =
   | Ok _ -> fail "expected parse error"
   | Error _ -> ()
 
+let test_load_and_apply_records_boot_override () =
+  match Sys.getenv_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD" with
+  | Some _ -> ()
+  | None ->
+    with_clean_boot_overrides @@ fun () ->
+    with_base_path @@ fun base_path ->
+    write_toml base_path "[budget]\ndaily_usd = 0.42\n";
+    match Keeper_runtime_config.load_and_apply ~base_path with
+    | Error msg -> failf "unexpected error: %s" msg
+    | Ok n ->
+      check int "applied count" 1 n;
+      check (option string) "boot override stored"
+        (Some "0.42")
+        (Config_boot_overrides.get_opt "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD");
+      check (float 0.0001) "env-backed reader sees boot override"
+        0.42
+        (Env_config_keeper.KeeperRuntime.deliberation_daily_budget_usd ())
+
 let test_float_value_round_trip () =
   let doc = parse_or_fail
     "[autonomous]\nsemaphore_wait_timeout_sec = 120.5\n"
@@ -141,6 +164,7 @@ let () =
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
+        ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ] )
     ]

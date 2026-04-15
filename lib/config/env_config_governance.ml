@@ -139,7 +139,8 @@ end
 
 module Dashboard_config = struct
   (** Whether dashboard fixtures are enabled. Default: false.
-      Runtime-readable (tests change this via putenv). *)
+      Re-readable within the process; this does not imply shell-level
+      hot reload as an operator contract. *)
   let fixtures_enabled () = Feature_flag_registry.get_bool "MASC_DASHBOARD_FIXTURES_ENABLED"
 
   (** Whether the proactive command-plane snapshot cache should run.

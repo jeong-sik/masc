@@ -62,14 +62,14 @@ let () =
     invalid_arg "Keeper_config tool_first_sentence_max_chars must be positive"
 
 let bool_default_true_of_env name =
-  match Sys.getenv_opt name with
+  match Env_config_core.raw_value_opt name with
   | None -> true
   | Some v ->
       let v = String.trim v |> String.lowercase_ascii in
       not (v = "0" || v = "false" || v = "no" || v = "n")
 
 let bool_of_env_default name ~(default : bool) =
-  match Sys.getenv_opt name with
+  match Env_config_core.raw_value_opt name with
   | None -> default
   | Some raw ->
       let v = String.trim raw |> String.lowercase_ascii in
@@ -78,7 +78,7 @@ let bool_of_env_default name ~(default : bool) =
       else default
 
 let bool_of_env_opt name =
-  match Sys.getenv_opt name with
+  match Env_config_core.raw_value_opt name with
   | None -> None
   | Some raw ->
       let v = String.trim raw |> String.lowercase_ascii in
@@ -304,7 +304,7 @@ let clamp_int v ~min_v ~max_v =
   max min_v (min max_v v)
 
 let int_of_env_default name ~default ~min_v ~max_v =
-  match Sys.getenv_opt name with
+  match Env_config_core.raw_value_opt name with
   | None -> default
   | Some raw ->
       let v =
@@ -313,7 +313,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
       clamp_int v ~min_v ~max_v
 
 let float_of_env_default name ~default ~min_v ~max_v =
-  match Sys.getenv_opt name with
+  match Env_config_core.raw_value_opt name with
   | None -> default
   | Some raw ->
       let v =
@@ -627,7 +627,7 @@ let keeper_llm_rerank_enabled () : bool =
 (** Named cascade profile for the LLM reranker.
     Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: "tool_rerank". *)
 let keeper_llm_rerank_cascade () : string =
-  match Sys.getenv_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
+  match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
   | Some v when String.trim v <> "" -> String.trim v
   | _ -> "tool_rerank"
 

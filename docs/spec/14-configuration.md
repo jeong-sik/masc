@@ -13,6 +13,11 @@
 
 설정 시스템은 MASC MCP 서버의 모든 조정 가능한 동작을 12-Factor App 원칙에 따라 환경변수로 외부화한다. 5개 계층(Core, Runtime, Governance, Keeper, Level2/Level4)으로 분류되며, 런타임 오버라이드 + 감사 경로를 제공한다.
 
+운영 reload 계약은 별도 문서로 분리한다:
+
+- [`../ENV-CONTRACT.md`](../ENV-CONTRACT.md)
+- [`../TOML-RELOAD-MATRIX.md`](../TOML-RELOAD-MATRIX.md)
+
 ---
 
 ## 2. 설정 해석 계층

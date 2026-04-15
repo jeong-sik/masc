@@ -3,8 +3,8 @@
     All [MASC_KEEPER_*] env vars in this module can also be set
     declaratively in [<base_path>/.masc/config/keeper_runtime.toml].
     The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs at
-    server startup and populates unset env vars via [Unix.putenv]
-    before this module initializes.
+    server startup and records unset values in the process-local boot
+    override store before this module initializes.
 
     Precedence: process env > TOML > hardcoded default below.
 
@@ -154,7 +154,8 @@ module KeeperRuntime = struct
   let debug = Feature_flag_registry.get_bool "MASC_KEEPER_DEBUG"
 
   (** Daily budget for keeper deliberation (USD). Default: 0.10.
-      Runtime-readable (tests change this via putenv). *)
+      Re-readable within the process. Live operator control should use
+      Runtime_params, not parent-shell env edits. *)
   let deliberation_daily_budget_usd () =
     get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
 
@@ -314,7 +315,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
       Range: [30, turn_timeout_sec]. *)
   let oas_timeout_sec_override =
-    match Sys.getenv_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
+    match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
     | Some raw ->
       Some (Float.max 30.0 (Float.min turn_timeout_sec
         (Option.value ~default:300.0 (Float.of_string_opt (String.trim raw)))))
@@ -535,7 +536,7 @@ module KeeperCascade = struct
 
       Env: [MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST]. Default: unset. *)
   let provider_allowlist () : string list option =
-    match Sys.getenv_opt "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" with
+    match Env_config_core.raw_value_opt "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" with
     | None -> None
     | Some raw ->
       let parts =

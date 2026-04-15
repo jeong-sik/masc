@@ -1,4 +1,4 @@
-(** Keeper_runtime_config — load runtime tuning from
+(** Keeper_runtime_config — load startup keeper env seeding from
     [<base_path>/.masc/config/keeper_runtime.toml].
 
     Per-base-path config for keeper turn budgets, semaphore timeouts, and
@@ -12,13 +12,15 @@
       3. Hardcoded default in [Env_config_keeper.KeeperKeepalive].
 
     The TOML loader runs at server startup, before any module that reads
-    these env vars initializes. It populates the env via [Unix.putenv]
-    so existing call sites in [Env_config_keeper] continue to work.
+    these env vars initializes. It stores boot defaults in a process-local
+    override table so existing config readers can resolve TOML-backed values
+    without mutating the parent environment. This file is startup-only today;
+    there is no hot-reload path.
 
     @since 0.7.1 *)
 
 (** Load TOML from [<base_path>/.masc/config/keeper_runtime.toml] and
-    apply any overrides via [Unix.putenv].
+    record any overrides in the process-local boot override store.
 
     Process-level env vars set by the caller take precedence — the TOML
     value is only applied when the env var is unset. This preserves the
@@ -30,9 +32,9 @@
 val load_and_apply : base_path:string -> (int, string) result
 
 (** Pure resolution: parse TOML and determine which env vars would be
-    overridden, without actually calling [Unix.putenv].
+    overridden, without mutating the process-local boot override store.
 
-    [~env_lookup] defaults to [Sys.getenv_opt]; tests inject a fake env
+    [~env_lookup] defaults to [Env_config_core.raw_value_opt]; tests inject a fake env
     to avoid global process env dependency.
 
     Returns [(count, overrides)] where [overrides] is

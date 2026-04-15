@@ -17,7 +17,7 @@ type t = {
   dual_masc_roots : bool;
   strict_mode_requested : bool;
   startup_rejected : bool;
-  fail_fast_enabled : bool;
+  startup_abort_eligible : bool;
   warning : string option;
 }
 
@@ -60,7 +60,7 @@ let format_legacy_dirs = function
   | [] -> "none"
   | dirs -> String.concat ", " dirs
 
-let fail_fast_env_enabled () =
+let strict_mode_env_enabled () =
   match Sys.getenv_opt "MASC_BASE_PATH_STRICT" with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
@@ -118,9 +118,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   let strict_mode_requested =
     match strict with
     | Some enabled -> enabled
-    | None -> fail_fast_env_enabled ()
+    | None -> strict_mode_env_enabled ()
   in
-  let fail_fast_enabled =
+  let startup_abort_eligible =
     strict_mode_requested || startup_rejected
   in
   let warning =
@@ -164,7 +164,7 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     dual_masc_roots;
     strict_mode_requested;
     startup_rejected;
-    fail_fast_enabled;
+    startup_abort_eligible;
     warning;
   }
 
@@ -175,7 +175,7 @@ let strict_violation (diag : t) =
      tools can flag the stale cwd [.masc] tree, but the runtime must
      not kill itself out from under a CI/test harness or a developer
      who deliberately pointed at a tmp directory. Pairs with the same
-     escape condition used to compute [fail_fast_enabled] above. *)
+     escape condition used to compute [startup_abort_eligible] above. *)
   diag.startup_rejected
 
 let startup_lines (diag : t) =
@@ -252,7 +252,7 @@ let to_yojson (diag : t) =
        ("dual_masc_roots", `Bool diag.dual_masc_roots);
        ("strict_mode_requested", `Bool diag.strict_mode_requested);
        ("startup_rejected", `Bool diag.startup_rejected);
-       ("fail_fast_enabled", `Bool diag.fail_fast_enabled);
+       ("startup_abort_eligible", `Bool diag.startup_abort_eligible);
        ("strict_violation", `Bool (strict_violation diag));
      ]
     @ List.filter_map (fun item -> item)

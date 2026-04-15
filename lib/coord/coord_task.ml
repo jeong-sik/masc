@@ -162,6 +162,21 @@ let task_status_to_string = function
   | Types.Done _ -> "done"
   | Types.Cancelled _ -> "cancelled"
 
+(** Current assignee from the task status, for error messages.
+
+    LLMs that see "Invalid transition: claimed -> release" have no way
+    to tell whether they're trying to release someone else's task vs
+    using the wrong action name. Surfacing the current assignee in the
+    failure lets the LLM see the ownership mismatch and stop retrying.
+
+    Evidence: 2026-04-16 /loop iter 4 — 12+/15 masc_transition failures
+    are "Invalid transition: claimed -> release" from keepers trying to
+    release tasks owned by a different keeper. *)
+let task_assignee_of_status = function
+  | Types.Claimed { assignee; _ } -> Some assignee
+  | Types.InProgress { assignee; _ } -> Some assignee
+  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+
 let task_started_at_unix status =
   let default_time = Time_compat.now () in
   match status with
@@ -678,9 +693,16 @@ let transition_task_r config ~agent_name ~task_id ~action
               started_at = now;
             }, None)
         | _ ->
+            let assignee_hint =
+              match task_assignee_of_status task.task_status with
+              | Some a when a <> agent_name ->
+                Printf.sprintf ", current_assignee=%s" a
+              | _ -> ""
+            in
             Error (Types.TaskInvalidState
-              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s)"
-                (task_status_to_string task.task_status) action_s task_id agent_name))
+              (Printf.sprintf "Invalid transition: %s -> %s (%s, agent=%s%s)"
+                (task_status_to_string task.task_status) action_s task_id agent_name
+                assignee_hint))
       in
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.

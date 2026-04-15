@@ -28,6 +28,13 @@
    bounded
    cache_eio
    cascade_inference
+   cascade_config
+   cascade_config_loader
+   cascade_fsm
+   cascade_health_filter
+   cascade_health_tracker
+   cascade_model_resolve
+   cascade_throttle
    cancellation
    channel_gate
    channel_gate_connector

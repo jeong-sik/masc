@@ -708,7 +708,7 @@ let handle_keeper_get_subroutes state req request reqd =
               | None -> None))
         | _ -> None
       in
-      let turn_outcome : [`Ok | `Failed | `Blocked] option =
+      let turn_outcome : [`Ok | `Failed] option =
         match Keeper_registry.get ~base_path:state.Mcp_server.room_config.base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
           Some `Failed

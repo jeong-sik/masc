@@ -20,9 +20,6 @@ import type {
 function normalizeServerStatus(raw: unknown): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
-    namespace_id: asString(raw.namespace_id),
-    namespace: asString(raw.namespace),
-    namespace_base_path: asString(raw.namespace_base_path),
     coordination_root: asString(raw.coordination_root),
     workspace_path: asString(raw.workspace_path),
     workspace_differs: asBoolean(raw.workspace_differs),

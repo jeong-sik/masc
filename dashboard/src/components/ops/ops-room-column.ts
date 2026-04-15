@@ -228,7 +228,7 @@ export function OpsRoomColumn() {
         <div class="grid grid-cols-2 gap-3 max-[880px]:grid-cols-1">
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>기본 범위</span>
-            <strong>${room.namespace ?? room.namespace_id ?? 'default'}</strong>
+            <strong>${room.project ?? 'default'}</strong>
           </div>
           <div class="ops-stat p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>프로젝트</span>

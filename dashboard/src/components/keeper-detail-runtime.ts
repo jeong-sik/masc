@@ -497,7 +497,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const auditSource = observedAudit.toolAuditSource
   const auditAt = observedAudit.toolAuditAt
   const namespaceName =
-    namespaceStatus.namespace ?? namespaceStatus.namespace_id ?? serverStatus.value?.namespace ?? 'default'
+    namespaceStatus.project ?? serverStatus.value?.project ?? 'default'
   const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
   const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'

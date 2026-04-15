@@ -449,14 +449,14 @@ export async function refreshShell(opts?: RefreshOptions): Promise<void> {
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
 export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-  const previousNamespace = serverStatus.value?.namespace
+  const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
   const roomChanged =
-    previousNamespace != null
-    && normalizedStatus?.namespace != null
-    && previousNamespace !== normalizedStatus.namespace
+    previousProject != null
+    && normalizedStatus?.project != null
+    && previousProject !== normalizedStatus.project
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)

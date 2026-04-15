@@ -16,16 +16,21 @@ from urllib.parse import urlparse
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-DEFAULT_BINDING_STORE_PATH: Final[str] = ".masc/connectors/discord/bindings.json"
-DEFAULT_BINDING_AUDIT_PATH: Final[str] = ".masc/connectors/discord/binding_audit.jsonl"
-DEFAULT_STATUS_PATH: Final[str] = ".masc/connectors/discord/status.json"
-DEFAULT_NAMES_PATH: Final[str] = ".masc/connectors/discord/names.json"
+DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/discord/bindings.json"
+DEFAULT_BINDING_AUDIT_PATH: Final[str] = ".gate/runtime/discord/binding_audit.jsonl"
+DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/discord/status.json"
+DEFAULT_NAMES_PATH: Final[str] = ".gate/runtime/discord/names.json"
 
-LEGACY_BINDING_STORE_PATH: Final[str] = ".gate/discord_bindings.json"
-LEGACY_BINDING_AUDIT_PATH: Final[str] = ".gate/discord_binding_audit.jsonl"
-LEGACY_STATUS_PATH: Final[str] = ".gate/discord_status.json"
-LEGACY_NAMES_PATH: Final[str] = ".gate/discord_names.json"
-LEGACY_BASE_ROOT: Final[Path] = Path("sidecars/discord-bot")
+# Legacy layout from the pre-v0.9.0 release (OCaml side migrated in
+# #7467/#7468 B3a/B3b). On first startup after upgrade, bot.py's 1-tier
+# fallback picks up data from the legacy location and the next write lands
+# at the new default. The even older `sidecars/discord-bot/.gate/discord_*`
+# cwd-relative layout is no longer auto-discovered; deployments still on it
+# must set explicit DISCORD_*_PATH env vars.
+LEGACY_BINDING_STORE_PATH: Final[str] = ".masc/connectors/discord/bindings.json"
+LEGACY_BINDING_AUDIT_PATH: Final[str] = ".masc/connectors/discord/binding_audit.jsonl"
+LEGACY_STATUS_PATH: Final[str] = ".masc/connectors/discord/status.json"
+LEGACY_NAMES_PATH: Final[str] = ".masc/connectors/discord/names.json"
 
 
 def _is_loopback_host(raw_host: str | None) -> bool:
@@ -231,15 +236,6 @@ class BotConfig(BaseSettings):
             return base_root / path
         return Path.cwd() / path
 
-    def _resolve_legacy_storage_path(self, legacy_cwd_path: str) -> Path:
-        path = Path(legacy_cwd_path).expanduser()
-        if path.is_absolute():
-            return path
-        base_root = self.base_path_root()
-        if base_root is not None:
-            return base_root / LEGACY_BASE_ROOT / path
-        return Path.cwd() / path
-
     def binding_store_path(self) -> Path:
         """Return the durable binding store path.
 
@@ -257,17 +253,20 @@ class BotConfig(BaseSettings):
     def names_path(self) -> Path:
         return self._resolve_storage_path(self.discord_names_path)
 
+    # Legacy paths now resolve under the same base as the new defaults
+    # (MASC_BASE_PATH or cwd), not under sidecars/discord-bot/, because the
+    # pre-v0.9.0 layout was already MASC_BASE_PATH-relative.
     def legacy_binding_store_path(self) -> Path:
-        return self._resolve_legacy_storage_path(LEGACY_BINDING_STORE_PATH)
+        return self._resolve_storage_path(LEGACY_BINDING_STORE_PATH)
 
     def legacy_binding_audit_path(self) -> Path:
-        return self._resolve_legacy_storage_path(LEGACY_BINDING_AUDIT_PATH)
+        return self._resolve_storage_path(LEGACY_BINDING_AUDIT_PATH)
 
     def legacy_status_path(self) -> Path:
-        return self._resolve_legacy_storage_path(LEGACY_STATUS_PATH)
+        return self._resolve_storage_path(LEGACY_STATUS_PATH)
 
     def legacy_names_path(self) -> Path:
-        return self._resolve_legacy_storage_path(LEGACY_NAMES_PATH)
+        return self._resolve_storage_path(LEGACY_NAMES_PATH)
 
     def gate_message_url(self) -> str:
         base = self.gate_base_url.rstrip("/")

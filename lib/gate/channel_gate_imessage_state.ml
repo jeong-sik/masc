@@ -19,9 +19,16 @@ let connector_id = "imessage"
 let display_name = "iMessage"
 let channel = "imessage"
 
-let default_status_path = ".masc/connectors/imessage/status.json"
-let default_binding_store_path = ".masc/connectors/imessage/bindings.json"
-let default_binding_audit_path = ".masc/connectors/imessage/binding_audit.jsonl"
+let default_status_path = ".gate/runtime/imessage/status.json"
+let default_binding_store_path = ".gate/runtime/imessage/bindings.json"
+let default_binding_audit_path = ".gate/runtime/imessage/binding_audit.jsonl"
+
+(* Legacy paths from the pre-v0.9.0 layout. Read-fallback picks these up
+   once so operators see a transparent migration on the next write — see
+   configured_read_path below. *)
+let legacy_status_path = ".masc/connectors/imessage/status.json"
+let legacy_binding_store_path = ".masc/connectors/imessage/bindings.json"
+let legacy_binding_audit_path = ".masc/connectors/imessage/binding_audit.jsonl"
 
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_IMESSAGE_STATUS_STALE_SEC"
@@ -46,13 +53,23 @@ let configured_write_path env_name ~default =
   | Some raw -> resolve_path raw
   | None -> resolve_path default
 
-let configured_read_path env_name ~default =
+(* Read priority: env var > new default (if file exists) > legacy (if file
+   exists) > new default (even if absent, so downstream code sees a stable
+   path for later creation). Matches the Discord resolver in
+   Channel_gate_discord_names.configured_read_path. *)
+let configured_read_path env_name ~default ~legacy =
   match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> resolve_path raw
-  | None -> resolve_path default
+  | None ->
+      let default_abs = resolve_path default in
+      if Sys.file_exists default_abs then default_abs
+      else
+        let legacy_abs = resolve_path legacy in
+        if Sys.file_exists legacy_abs then legacy_abs else default_abs
 
 let status_path () =
-  configured_read_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
+  configured_read_path "MASC_IMESSAGE_STATUS_PATH"
+    ~default:default_status_path ~legacy:legacy_status_path
 
 let status_write_path () =
   configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
@@ -63,7 +80,7 @@ let binding_store_path () =
 
 let binding_store_read_path () =
   configured_read_path "MASC_IMESSAGE_BINDING_STORE_PATH"
-    ~default:default_binding_store_path
+    ~default:default_binding_store_path ~legacy:legacy_binding_store_path
 
 let binding_audit_path () =
   configured_write_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
@@ -71,7 +88,7 @@ let binding_audit_path () =
 
 let binding_audit_read_path () =
   configured_read_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path
+    ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
 
 let read_json_file_opt path =
   if not (Sys.file_exists path) then

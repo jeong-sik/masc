@@ -32,6 +32,53 @@ let first_nonempty_line output =
   |> List.map String.trim
   |> List.find_opt (fun s -> s <> "")
 
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0 then true
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let masked_build_pipeline_reason (command : string) : string option =
+  let normalized =
+    command
+    |> String.trim
+    |> String.lowercase_ascii
+  in
+  let starts_with_build_or_test =
+    List.exists
+      (fun prefix -> String.starts_with ~prefix normalized)
+      [
+        "dune build";
+        "dune runtest";
+        "make";
+        "npm test";
+        "npm run test";
+        "npm run build";
+        "pnpm test";
+        "pnpm run test";
+        "pnpm run build";
+        "yarn test";
+        "yarn build";
+        "cargo test";
+        "cargo check";
+        "pytest";
+        "go test";
+        "tsc";
+      ]
+  in
+  if starts_with_build_or_test && contains_substring normalized "|" then
+    Some
+      "Build/test commands must run directly in masc_code_shell. \
+       Do not pipe them through tail/head/grep; this tool already truncates \
+       output, and piping hides progress until EOF which can trigger timeouts."
+  else None
+
 let git_common_root path =
   try
     match
@@ -469,6 +516,10 @@ let handle_code_shell ctx args =
 
   if command = "" then (false, "command parameter required")
   else begin
+    match masked_build_pipeline_reason command with
+    | Some reason -> (false, reason)
+    | None ->
+      begin
     (* Parse first token to check allowlist *)
     let tokens = String.split_on_char ' ' (String.trim command) in
     let executable = match tokens with
@@ -510,6 +561,7 @@ let handle_code_shell ctx args =
         | _, output ->
           (false, Printf.sprintf "Command failed: %s" (truncate_output output))
     end
+  end
   end
 
 (* Handler: masc_code_git — Git operations *)

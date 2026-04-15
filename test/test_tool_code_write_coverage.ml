@@ -177,6 +177,36 @@ let test_mixed_case_org () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
 
+(* ── masked_build_pipeline_reason ─────────────────────────────────── *)
+
+let test_masked_build_pipeline_rejected () =
+  let reason_contains needle haystack =
+    let hlen = String.length haystack in
+    let nlen = String.length needle in
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    if nlen = 0 then true else loop 0
+  in
+  match
+    Tool_code_write.masked_build_pipeline_reason
+      "dune build 2>&1 | tail -5"
+  with
+  | Some reason ->
+      check bool "reason mentions piping" true
+        (reason_contains "Do not pipe" reason)
+  | None -> fail "expected build pipeline to be rejected"
+
+let test_masked_build_pipeline_allows_direct_build () =
+  check (option string) "direct build allowed" None
+    (Tool_code_write.masked_build_pipeline_reason "dune build 2>&1")
+
+let test_masked_build_pipeline_allows_non_build_pipe () =
+  check (option string) "non-build pipe allowed" None
+    (Tool_code_write.masked_build_pipeline_reason "git diff | tail -5")
+
 (* ── Per-agent containment (#6527 iter 6) ───────────────────────────
    Regression tests for PR #6610 — verify that validate_writable_path
    and validate_clone_cwd refuse cross-agent playground writes even
@@ -353,6 +383,14 @@ let () =
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
+    ]);
+    ("masked_build_pipeline_reason", [
+      test_case "rejects build pipeline" `Quick
+        test_masked_build_pipeline_rejected;
+      test_case "allows direct build" `Quick
+        test_masked_build_pipeline_allows_direct_build;
+      test_case "allows non-build pipe" `Quick
+        test_masked_build_pipeline_allows_non_build_pipe;
     ]);
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick

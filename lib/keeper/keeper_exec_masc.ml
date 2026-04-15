@@ -28,9 +28,9 @@ let keeper_masc_path_blocked
       ~(args : Yojson.Safe.t)
   =
   let effective_paths = keeper_effective_write_allowed_paths ~meta in
-  if effective_paths = [] && meta.execution_scope <> "observe_only"
+  if effective_paths = [] && meta.execution_scope <> Keeper_execution_scope.Observe_only
   then None
-  else if meta.execution_scope = "observe_only" && effective_paths = []
+  else if meta.execution_scope = Keeper_execution_scope.Observe_only && effective_paths = []
   then (
     let has_path_arg =
       List.exists

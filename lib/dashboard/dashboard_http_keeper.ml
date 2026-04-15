@@ -966,7 +966,7 @@ let keeper_config_json (config : Room.config) (name : string)
       (`OK,
        `Assoc [
          ("name", `String m.name);
-         ("execution_scope", `String m.execution_scope);
+         ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
          ("effective_allowed_paths",

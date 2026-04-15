@@ -101,7 +101,7 @@ let keeper_schemas : tool_schema list = [
         ("handoff_cooldown_sec", `Assoc [("type", `String "integer")]);
         ("execution_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
+          ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
@@ -235,7 +235,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("execution_scope", `Assoc [
           ("type", `String "string");
-          ("enum", `List [`String "observe_only"; `String "workspace"; `String "local"]);
+          ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
           ("description", `String "Execution scope. 'observe_only' blocks all writes. 'workspace'/'local' enable writes within playground (.masc/playground/<name>/). Extra paths must be listed explicitly in allowed_paths. Default: workspace.");
         ]);
         ("allowed_paths", `Assoc [

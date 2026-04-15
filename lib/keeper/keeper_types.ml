@@ -136,7 +136,7 @@ type keeper_meta =
   ; instructions : string
   ; (* -- Policy -- *)
     policy_voice_enabled : bool
-  ; execution_scope : string
+  ; execution_scope : Keeper_execution_scope.t
   ; allowed_paths : string list
   ; tool_access : tool_access
   ; tool_denylist : string list
@@ -670,7 +670,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "desires", `String m.desires
     ; "instructions", `String m.instructions
     ; "policy_voice_enabled", `Bool m.policy_voice_enabled
-    ; "execution_scope", `String m.execution_scope
+    ; "execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope)
     ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
@@ -777,7 +777,7 @@ type parsed_keeper_identity =
 
 type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
-  ; pp_execution_scope : string
+  ; pp_execution_scope : Keeper_execution_scope.t
   ; pp_allowed_paths : string list
   ; pp_tool_access : tool_access
   ; pp_tool_denylist : string list
@@ -897,7 +897,8 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
     in
     let pp_execution_scope =
-      Safe_ops.json_string ~default:default_execution_scope "execution_scope" json
+      Safe_ops.json_string ~default:(Keeper_execution_scope.to_string default_execution_scope) "execution_scope" json
+      |> Keeper_execution_scope.of_string_lossy
     in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in

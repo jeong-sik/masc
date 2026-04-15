@@ -386,6 +386,7 @@
    eval_calibration
    ;; Keeper contract
    keeper_schema
+   keeper_execution_scope
    keeper_social_model
    keeper_cascade_profile
    keeper_cascade_routing

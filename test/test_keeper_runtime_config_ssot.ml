@@ -113,7 +113,7 @@ let test_policy_resync () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
 {|[keeper]
 goal = "test"
-execution_scope = "playground"
+execution_scope = "observe_only"
 policy_voice_enabled = false
 |};
   let config = Room.default_config room_dir in
@@ -125,7 +125,7 @@ policy_voice_enabled = false
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-policy-resync");
-            ("execution_scope", `String "standard");
+            ("execution_scope", `String "local");
             ("policy_voice_enabled", `Bool true);
           ])
     with
@@ -135,10 +135,15 @@ policy_voice_enabled = false
   (match Keeper_types.write_meta ~force:true config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
+  let execution_scope_testable =
+    Alcotest.testable
+      (fun fmt v -> Format.pp_print_string fmt (Keeper_execution_scope.to_string v))
+      Keeper_execution_scope.equal
+  in
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
-      check string "execution_scope" "playground" updated.Keeper_types.execution_scope;
+      check execution_scope_testable "execution_scope" Keeper_execution_scope.Observe_only updated.Keeper_types.execution_scope;
       check bool "policy_voice_enabled" false updated.policy_voice_enabled
 
 (** Test: TOML tool policy and allowed_paths overwrite stale runtime JSON values. *)
@@ -439,7 +444,7 @@ tool_preset = "delivery"
         updated.mention_targets;
       check string "execution_scope from toml"
         "workspace"
-        updated.execution_scope;
+        (Keeper_execution_scope.to_string updated.execution_scope);
       check
         (option string)
         "tool_preset from toml overlay"
@@ -475,7 +480,7 @@ goal = "minimal TOML"
             ("goal", `String "old goal");
             ("will", `String "runtime will");
             ("instructions", `String "runtime instructions");
-            ("execution_scope", `String "playground");
+            ("execution_scope", `String "local");
           ])
     with
     | Ok meta -> meta
@@ -484,6 +489,11 @@ goal = "minimal TOML"
   (match Keeper_types.write_meta ~force:true config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
+  let execution_scope_testable =
+    Alcotest.testable
+      (fun fmt v -> Format.pp_print_string fmt (Keeper_execution_scope.to_string v))
+      Keeper_execution_scope.equal
+  in
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -494,7 +504,7 @@ goal = "minimal TOML"
       (* instructions was NOT in TOML → preserved from runtime *)
       check string "instructions preserved" "runtime instructions" updated.instructions;
       (* execution_scope was NOT in TOML → preserved from runtime *)
-      check string "execution_scope preserved" "playground" updated.execution_scope
+      check execution_scope_testable "execution_scope preserved" Keeper_execution_scope.Local updated.execution_scope
 
 (** Test: TOML work_discovery fields overwrite stale option-typed meta fields. *)
 let test_discovery_resync () =

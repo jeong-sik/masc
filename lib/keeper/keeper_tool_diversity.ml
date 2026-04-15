@@ -92,15 +92,17 @@ let compute_diversity ~(available_tools : string list)
     |> List.map (fun s -> s.name)
   in
   (* Underused: available tools never called or called < 1% *)
-  let used_set = Hashtbl.create (List.length stats) in
-  List.iter (fun s ->
-    if s.count > 0 then Hashtbl.replace used_set s.name ()
-  ) stats;
+  let module SS = Set.Make (String) in
+  let used_set =
+    List.fold_left (fun acc s ->
+      if s.count > 0 then SS.add s.name acc else acc)
+      SS.empty stats
+  in
   let threshold = max 1 (total_calls / 100) in
   let underused = available_tools
     |> List.filter (fun tool ->
       not (String.equal tool "keeper_stay_silent")
-      && (not (Hashtbl.mem used_set tool)
+      && (not (SS.mem tool used_set)
           || List.exists (fun s -> s.name = tool && s.count < threshold) stats))
   in
   { total_calls; unique_tools; available_tools = n_available;

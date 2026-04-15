@@ -27,13 +27,15 @@ let select_memory_candidates
 (** Filter a list to unique items by a key function.
     Empty keys are skipped (treated as duplicates). *)
 let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
-  let seen : (string, unit) Hashtbl.t = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
+  let module SS = Set.Make (String) in
+  let rec go seen acc = function
+    | [] -> List.rev acc
+    | item :: rest ->
       let key = key_of item in
-      if key = "" || Hashtbl.mem seen key then false
-      else (Hashtbl.add seen key (); true))
-    items
+      if key = "" || SS.mem key seen then go seen acc rest
+      else go (SS.add key seen) (item :: acc) rest
+  in
+  go SS.empty [] items
 
 let dedup_memory_candidates
     (items : (string * string * int) list) : (string * string * int) list =

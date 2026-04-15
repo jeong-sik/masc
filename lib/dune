@@ -37,12 +37,6 @@
    cascade_throttle
    cancellation
    channel_gate
-   channel_gate_connector
-   channel_gate_metrics
-   channel_gate_discord_names
-   channel_gate_discord_state
-  channel_gate_imessage_state
-   gate_protocol
    gate_keeper_backend
    config
    config_doctor
@@ -758,6 +752,8 @@
    masc_types
    ;; Core utilities (extracted sub-library)
    masc_core
+   ;; Channel Gate (extracted sub-library) — pure protocol/state/metrics
+   masc_gate
    ;; Shared compression codec (extracted sub-library)
    masc_compression
    ;; Eio context (extracted sub-library)

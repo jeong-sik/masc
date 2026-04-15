@@ -1,13 +1,23 @@
 open Room_utils_backend_setup
 
-let masc_root_dir config =
-  let masc_root = Filename.concat config.base_path ".masc" in
-  let cluster_name = config.backend_config.Backend_types.cluster_name in
+(** Pure helper: compute the masc_root directory from primitives.
+
+    Use this when a caller has a [base_path] string (e.g. from
+    [Env_config_core.base_path]) but no [Room.config] value. Semantics
+    match [masc_root_dir] exactly: default cluster -> [<base>/.masc/],
+    non-default -> [<base>/.masc/clusters/<sanitized>/]. *)
+let masc_root_dir_from ~base_path ~cluster_name =
+  let masc_root = Filename.concat base_path ".masc" in
   match cluster_name with
   | "" | "default" -> masc_root
   | other ->
       let seg = sanitize_namespace_segment other in
       Filename.concat (Filename.concat masc_root "clusters") seg
+
+let masc_root_dir config =
+  masc_root_dir_from
+    ~base_path:config.base_path
+    ~cluster_name:config.backend_config.Backend_types.cluster_name
 
 (** Legacy room path helpers — retained for room_multi.ml compat shim. *)
 let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"

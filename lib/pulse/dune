@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name masc_pulse)
+ (public_name masc_mcp.pulse)
+ (wrapped false)
+ (modules pulse)
+ (libraries
+   eio
+   eio.unix
+   unix
+   masc_config
+   masc_log))

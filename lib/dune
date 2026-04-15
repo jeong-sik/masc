@@ -228,7 +228,6 @@
    post_verifier
    provider_adapter
    progress
-   pulse
    relay
    goal_store
    goal_guard
@@ -755,6 +754,8 @@
    masc_core
    ;; Channel Gate (extracted sub-library) — pure protocol/state/metrics
    masc_gate
+   ;; Pulse (extracted sub-library) — beat engine for Spaces
+   masc_pulse
    ;; Shared compression codec (extracted sub-library)
    masc_compression
    ;; Eio context (extracted sub-library)

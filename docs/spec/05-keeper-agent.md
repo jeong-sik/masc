@@ -407,7 +407,23 @@ Destructive check 대상 도구: `keeper_bash`, `keeper_fs_edit`, `keeper_edit`,
 
 ### 9.3 Keeper Runtime Spec
 
-keeper 선언과 런타임 상태는 `.masc/keepers/{name}.json`에 영속화된다. keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+Canonical file model:
+
+```text
+<basepath>/.masc/config/personas/{name}/profile.json
+<basepath>/.masc/config/keepers/{name}.toml
+<basepath>/.masc/keepers/{name}.json
+<basepath>/.masc/keepers/{name}/...
+```
+
+- `profile.json`: identity / persona blueprint
+- `keepers/{name}.toml`: deployment declaration for this basepath
+- `.masc/keepers/{name}.json`: durable runtime state
+- `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
+
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+
+Current implementation note: compatibility reasons may still cause some authored fields to be materialized into `.masc/keepers/{name}.json`, but the intended edit surfaces remain persona profile and keeper TOML.
 
 ---
 

@@ -834,16 +834,34 @@ function StatusBar({
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
           ${staleSec > 60 ? html`<span class="text-[9px] font-mono text-amber-400">${fmtDuration(staleSec)} ago</span>` : null}
         </div>
-        <div class="flex items-center gap-1.5 flex-wrap">
-          ${keeperNames.map(name => {
+        <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper selection">
+          ${keeperNames.map((name, i) => {
             const active = name === selected
             const cls = active
               ? 'bg-[var(--accent-10)] border-[var(--accent-30)] text-[var(--accent)]'
               : 'bg-[var(--white-3)] border-[var(--white-8)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
             return html`
               <button
-                class=${`rounded-full border px-2.5 py-0.5 text-[10px] font-mono transition-colors cursor-pointer ${cls}`}
+                role="tab"
+                aria-selected=${active}
+                tabindex=${active ? 0 : -1}
+                class=${`rounded-full border px-2.5 py-0.5 text-[10px] font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
                 onClick=${() => onSelect(name)}
+                onKeyDown=${(e: KeyboardEvent) => {
+                  let next = -1
+                  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % keeperNames.length
+                  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + keeperNames.length) % keeperNames.length
+                  else if (e.key === 'Home') next = 0
+                  else if (e.key === 'End') next = keeperNames.length - 1
+                  if (next >= 0) {
+                    e.preventDefault()
+                    const nextName = keeperNames[next]
+                    if (nextName) {
+                      onSelect(nextName);
+                      (e.currentTarget as HTMLElement)?.parentElement?.querySelectorAll<HTMLElement>('[role=tab]')[next]?.focus()
+                    }
+                  }
+                }}
               >
                 ${name.replace(/^keeper-|-agent$/g, '')}
               </button>
@@ -995,15 +1013,17 @@ function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; 
   const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'
 
   return html`
-    <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
+    <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
+      role="status" aria-live="polite" aria-label=${`Keeper phase: ${snapshot.phase}`}
+    >
       <div class="flex items-baseline justify-between">
         <div>
-          <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">KSM · Keeper Lifecycle</div>
-          <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`}>
+          <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]" id="ksm-label">KSM · Keeper Lifecycle</div>
+          <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${snapshot.phase}
           </div>
         </div>
-        ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono">phase changed</span>` : null}
+        ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">phase changed</span>` : null}
       </div>
       <${PhaseSparkline} log=${phaseLog} />
     </div>
@@ -1052,7 +1072,7 @@ function PipelineStep({
     : 'border-t border-[var(--white-10)]'
 
   return html`
-    <div class="flex items-center gap-0 flex-1 min-w-0">
+    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${shortLabel}: ${value}`}>
       <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls}`}>
         <div class="flex items-center gap-1.5">
           ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
@@ -1074,7 +1094,7 @@ function TurnPipelineStrip({ snapshot }: { snapshot: KeeperCompositeSnapshot }) 
       <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Turn Pipeline
       </div>
-      <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch">
+      <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="Turn pipeline stages">
         <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} />
         <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} />
         <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} />

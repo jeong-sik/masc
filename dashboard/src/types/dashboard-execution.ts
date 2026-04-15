@@ -368,6 +368,10 @@ export interface DashboardMemoryResponse {
   count?: number
   limit?: number
   offset?: number
+  /** true when more posts exist past this page. Use with offset+limit to request the next page. */
+  has_more?: boolean
+  /** Total number of matching posts when the server could determine it; null when has_more=true. */
+  total?: number | null
   sort_by?: string
 }
 

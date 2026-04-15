@@ -34,13 +34,23 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:100 |> clamp ~min_v:1 ~max_v:500 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
   let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
+  (* Fetch one extra beyond the requested page so we can answer has_more
+     without a second query. total is only emitted when the result fits
+     entirely inside the fetched window — otherwise null (unknown). *)
+  let probe_fetch = base_fetch + 1 in
   let posts =
     Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-      ~exclude_automation ?author_filter ~limit:base_fetch ()
+      ~exclude_automation ?author_filter ~limit:probe_fetch ()
   in
   let karma_map = Board_dispatch.get_all_karma () in
   let get_karma author =
     Option.value ~default:0 (List.assoc_opt author karma_map)
+  in
+  let fetched_len = List.length posts in
+  let window_end = offset + limit in
+  let has_more = fetched_len > window_end in
+  let total_json : Yojson.Safe.t =
+    if has_more then `Null else `Int fetched_len
   in
   let paged = posts |> drop offset |> take limit in
   let posts_json =
@@ -65,6 +75,8 @@ let dashboard_memory_http_json request : Yojson.Safe.t =
       ("count", `Int (List.length posts_json));
       ("limit", `Int limit);
       ("offset", `Int offset);
+      ("has_more", `Bool has_more);
+      ("total", total_json);
       ("sort_by", `String (board_sort_label sort_by));
     ]
 

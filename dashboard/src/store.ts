@@ -106,10 +106,22 @@ export const boardExcludeAutomation = signal(false)
 /** Content-category filter: which categories to hide */
 export const boardHiddenCategories = signal<Set<string>>(new Set(['system']))
 export const boardAuthorFilter = signal('')
+/** Number of posts currently loaded — the offset for the next page request. */
+export const boardOffset = signal<number>(0)
+/** true when the server indicates (or we optimistically believe) more posts are available. */
+export const boardHasMore = signal<boolean>(true)
+/** Server-reported total when known; null while has_more=true. */
+export const boardTotal = signal<number | null>(null)
+/** true while a loadMore (append) request is in flight. Distinct from boardLoading (initial/reset). */
+export const boardLoadingMore = signal<boolean>(false)
 
 export function removeBoardPost(postId: string | undefined): void {
   if (!postId) return
-  boardPosts.value = boardPosts.value.filter(p => p.id !== postId)
+  const filtered = boardPosts.value.filter(p => p.id !== postId)
+  if (filtered.length !== boardPosts.value.length) {
+    boardPosts.value = filtered
+    boardOffset.value = filtered.length
+  }
 }
 
 // --- Goals state ---
@@ -562,22 +574,83 @@ export function reconcileBoardPosts(prev: BoardPost[], next: BoardPost[]): Board
   return changed ? merged : prev
 }
 
+/** Append incoming posts to the tail, de-duplicated by id. */
+export function appendBoardPosts(prev: BoardPost[], incoming: BoardPost[]): BoardPost[] {
+  if (incoming.length === 0) return prev
+  if (prev.length === 0) return incoming
+  const existing = new Set(prev.map(p => p.id))
+  const fresh = incoming.filter(p => !existing.has(p.id))
+  if (fresh.length === 0) return prev
+  return prev.concat(fresh)
+}
+
+const BOARD_PAGE_SIZE_DEFAULT = 100
+const BOARD_PAGE_SIZE_FILTERED = 200
+
+function boardPageSize(): number {
+  const hasFilter =
+    boardExcludeAutomation.value
+    || boardExcludeSystem.value
+    || boardAuthorFilter.value.trim() !== ''
+  return hasFilter ? BOARD_PAGE_SIZE_FILTERED : BOARD_PAGE_SIZE_DEFAULT
+}
+
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
+    const limit = boardPageSize()
     const data = await fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
       excludeAutomation: boardExcludeAutomation.value,
       author: boardAuthorFilter.value || undefined,
+      limit,
+      offset: 0,
     })
     const next = data.posts ?? []
     boardPosts.value = reconcileBoardPosts(boardPosts.value, next)
+    boardOffset.value = next.length
+    boardHasMore.value = typeof data.has_more === 'boolean'
+      ? data.has_more
+      : next.length >= limit
+    boardTotal.value = typeof data.total === 'number' ? data.total : null
     lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.warn('[Board] fetch error:', err)
     showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
     boardLoading.value = false
+  }
+}
+
+/** Append the next page of board posts onto boardPosts. Noop if a request is
+ *  already in flight or the server indicated no more pages. */
+export async function loadMoreBoardPosts(): Promise<void> {
+  if (boardLoadingMore.value || boardLoading.value) return
+  if (!boardHasMore.value) return
+  boardLoadingMore.value = true
+  try {
+    const limit = boardPageSize()
+    const offset = boardOffset.value
+    const data = await fetchDashboardMemory(boardSortMode.value, {
+      excludeSystem: boardExcludeSystem.value,
+      excludeAutomation: boardExcludeAutomation.value,
+      author: boardAuthorFilter.value || undefined,
+      limit,
+      offset,
+    })
+    const incoming = data.posts ?? []
+    const merged = appendBoardPosts(boardPosts.value, incoming)
+    boardPosts.value = merged
+    boardOffset.value = merged.length
+    boardHasMore.value = typeof data.has_more === 'boolean'
+      ? data.has_more
+      : incoming.length >= limit
+    boardTotal.value = typeof data.total === 'number' ? data.total : null
+  } catch (err) {
+    console.warn('[Board] loadMore error:', err)
+    showToast('다음 페이지를 불러오지 못했습니다', 'error')
+  } finally {
+    boardLoadingMore.value = false
   }
 }
 

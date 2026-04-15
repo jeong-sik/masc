@@ -92,95 +92,99 @@ type surface =
   | System_internal
 
 let public_mcp_surface_tools =
-  [
-    (* Room lifecycle *)
-    "masc_start"; "masc_join"; "masc_leave"; "masc_status";
-    (* Messaging *)
-    "masc_broadcast"; "masc_messages"; "masc_who";
-    (* Task coordination *)
-    "masc_add_task"; "masc_batch_add_tasks"; "masc_tasks";
-    "masc_claim_next"; "masc_transition";
-    (* Planning *)
-    "masc_plan_init"; "masc_plan_get"; "masc_plan_set_task"; "masc_plan_update";
-    (* Heartbeat *)
-    "masc_heartbeat";
-    (* Keeper interaction *)
-    "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status";
-    "masc_keeper_up"; "masc_keeper_repair"; "masc_keeper_reset";
-    "masc_keeper_down";
-    "masc_persona_list";
-    (* Board *)
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote";
-    (* Agent discovery *)
-    "masc_agents"; "masc_dashboard"; "masc_agent_card";
-    (* Utility *)
-    "masc_tool_help"; "masc_web_search"; "masc_check";
-    (* Board extended *)
-    "masc_board_comment_vote";
-    (* Agent discovery *)
-    "masc_agent_timeline";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      (* Room lifecycle *)
+      Masc Start; Masc Join; Masc Leave; Masc Status;
+      (* Messaging *)
+      Masc Broadcast; Masc Messages; Masc Who;
+      (* Task coordination *)
+      Masc Add_task; Masc Batch_add_tasks; Masc Tasks;
+      Masc Claim_next; Masc Transition;
+      (* Planning *)
+      Masc Plan_init; Masc Plan_get; Masc Plan_set_task; Masc Plan_update;
+      (* Heartbeat *)
+      Masc Heartbeat;
+      (* Keeper interaction — most go through Masc_keeper module;
+         masc_keeper_msg_result is a Masc-level result delivery. *)
+      Masc_keeper Msg; Masc Keeper_msg_result;
+      Masc_keeper List; Masc_keeper Status;
+      Masc_keeper Up; Masc_keeper Repair; Masc_keeper Reset;
+      Masc_keeper Down;
+      Masc Persona_list;
+      (* Board *)
+      Masc Board_post; Masc Board_list; Masc Board_get;
+      Masc Board_comment; Masc Board_vote;
+      (* Agent discovery *)
+      Masc Agents; Masc Dashboard; Masc Agent_card;
+      (* Utility *)
+      Masc Tool_help; Masc Web_search; Masc Check;
+      (* Board extended *)
+      Masc Board_comment_vote;
+      (* Agent discovery *)
+      Masc Agent_timeline;
+    ]
 
 let spawned_agent_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_task_history"; "masc_broadcast"; "masc_join"; "masc_leave";
-    "masc_who"; "masc_agent_update"; "masc_add_task"; "masc_heartbeat";
-    "masc_messages";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_board_list"; "masc_board_post"; "masc_board_comment";
-    "masc_board_vote"; "masc_board_get";
-    "masc_tool_help"; "masc_web_search";
-    "masc_spawn";
-    (* Phase 2: surface SSOT *)
-    "masc_code_delete"; "masc_code_edit"; "masc_code_git";
-    "masc_code_shell"; "masc_code_write";
-    "masc_deliver";
-    "masc_plan_clear_task"; "masc_plan_get_task";
-    "masc_update_priority";
-    "masc_workflow_guide";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status; Masc Tasks; Masc Claim_next; Masc Transition;
+      Masc Task_history; Masc Broadcast; Masc Join; Masc Leave;
+      Masc Who; Masc Agent_update; Masc Add_task; Masc Heartbeat;
+      Masc Messages;
+      Masc Worktree_create; Masc Worktree_remove; Masc Worktree_list;
+      Masc Board_list; Masc Board_post; Masc Board_comment;
+      Masc Board_vote; Masc Board_get;
+      Masc Tool_help; Masc Web_search;
+      Masc Spawn;
+      (* Phase 2: surface SSOT *)
+      Masc Code_delete; Masc Code_edit; Masc Code_git;
+      Masc Code_shell; Masc Code_write;
+      Masc Deliver;
+      Masc Plan_clear_task; Masc Plan_get_task;
+      Masc Update_priority;
+      Masc Workflow_guide;
+    ]
 
 let local_worker_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next"; "masc_transition";
-    "masc_add_task"; "masc_heartbeat";
-    "masc_board_post"; "masc_board_list"; "masc_board_get";
-    "masc_board_comment"; "masc_board_vote"; "masc_board_search";
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
-    "masc_worktree_create"; "masc_worktree_remove"; "masc_worktree_list";
-    "masc_run_init"; "masc_run_plan"; "masc_run_log";
-    "masc_run_deliverable"; "masc_run_get"; "masc_run_list";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status; Masc Tasks; Masc Claim_next; Masc Transition;
+      Masc Add_task; Masc Heartbeat;
+      Masc Board_post; Masc Board_list; Masc Board_get;
+      Masc Board_comment; Masc Board_vote; Masc Board_search;
+      Masc Code_search; Masc Code_symbols; Masc Code_read;
+      Masc Worktree_create; Masc Worktree_remove; Masc Worktree_list;
+      Masc Run_init; Masc Run_plan; Masc Run_log;
+      Masc Run_deliverable; Masc Run_get; Masc Run_list;
+    ]
 
 let session_min_surface_tools =
-  [
-    "masc_status"; "masc_tasks"; "masc_claim_next";
-    "masc_plan_set_task"; "masc_transition"; "masc_add_task";
-    "masc_broadcast"; "masc_heartbeat";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Status; Masc Tasks; Masc Claim_next;
+      Masc Plan_set_task; Masc Transition; Masc Add_task;
+      Masc Broadcast; Masc Heartbeat;
+    ]
 
 let admin_surface_tools =
-  [
-    "masc_autoresearch_cycle"; "masc_autoresearch_inject";
-    "masc_autoresearch_start"; "masc_autoresearch_stop";
-    "masc_tool_admin_update"; "masc_tool_grant"; "masc_tool_revoke";
-    "masc_tool_admin_snapshot";
-    "masc_config";
-    (* Phase 2: surface SSOT *)
-    "masc_keeper_create_from_persona"; "masc_keeper_reset";
-    "masc_pause"; "masc_resume";
-    "masc_runtime_ollama_probe"; "masc_tool_list";
-  ]
+  List.map Tool_name.to_string
+    Tool_name.[
+      Masc Autoresearch_cycle; Masc Autoresearch_inject;
+      Masc Autoresearch_start; Masc Autoresearch_stop;
+      Masc Tool_admin_update; Masc Tool_grant; Masc Tool_revoke;
+      Masc Tool_admin_snapshot;
+      Masc Config;
+      (* Phase 2: surface SSOT *)
+      Masc_keeper Create_from_persona; Masc_keeper Reset;
+      Masc Pause; Masc Resume;
+      Masc Runtime_ollama_probe; Masc Tool_list;
+    ]
 
 let keeper_internal_surface_tools = keeper_internal_tools
 
 let keeper_denied_surface_tools =
-  [
-    "masc_reset";
-    "masc_spawn";
-  ]
+  List.map Tool_name.to_string Tool_name.[ Masc Reset; Masc Spawn ]
 
 let system_internal_surface_tools =
   [

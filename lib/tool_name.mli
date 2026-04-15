@@ -90,6 +90,7 @@ module Masc : sig
     | Claim_next
     | Claim_task
     | Cleanup_zombies
+    | Config
     | Code_delete
     | Code_edit
     | Code_git
@@ -124,6 +125,7 @@ module Masc : sig
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+    | Pause
     | Persona_list
     | Plan_clear_task
     | Plan_get
@@ -134,12 +136,23 @@ module Masc : sig
     | Register_capabilities
     | Release_task
     | Reset
+    | Resume
     | Room_status
+    | Runtime_ollama_probe
+    | Run_deliverable
+    | Run_get
+    | Run_init
+    | Run_list
+    | Run_log
+    | Run_plan
     | Set_current_task
+    | Spawn
     | Start
     | Status
     | Task_history
     | Tasks
+    | Tool_admin_snapshot
+    | Tool_admin_update
     | Tool_grant
     | Tool_help
     | Tool_list

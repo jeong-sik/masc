@@ -186,6 +186,7 @@ module Masc = struct
     | Claim_next
     | Claim_task
     | Cleanup_zombies
+    | Config
     | Code_delete
     | Code_edit
     | Code_git
@@ -220,6 +221,7 @@ module Masc = struct
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+    | Pause
     | Persona_list
     | Plan_clear_task
     | Plan_get
@@ -230,12 +232,23 @@ module Masc = struct
     | Register_capabilities
     | Release_task
     | Reset
+    | Resume
     | Room_status
+    | Runtime_ollama_probe
+    | Run_deliverable
+    | Run_get
+    | Run_init
+    | Run_list
+    | Run_log
+    | Run_plan
     | Set_current_task
+    | Spawn
     | Start
     | Status
     | Task_history
     | Tasks
+    | Tool_admin_snapshot
+    | Tool_admin_update
     | Tool_grant
     | Tool_help
     | Tool_list
@@ -277,6 +290,7 @@ module Masc = struct
     | Claim_next -> "masc_claim_next"
     | Claim_task -> "masc_claim_task"
     | Cleanup_zombies -> "masc_cleanup_zombies"
+    | Config -> "masc_config"
     | Autoresearch_cycle -> "masc_autoresearch_cycle"
     | Autoresearch_inject -> "masc_autoresearch_inject"
     | Autoresearch_start -> "masc_autoresearch_start"
@@ -316,6 +330,7 @@ module Masc = struct
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
     | Operator_snapshot -> "masc_operator_snapshot"
+    | Pause -> "masc_pause"
     | Plan_clear_task -> "masc_plan_clear_task"
     | Plan_get -> "masc_plan_get"
     | Plan_get_task -> "masc_plan_get_task"
@@ -325,13 +340,24 @@ module Masc = struct
     | Register_capabilities -> "masc_register_capabilities"
     | Release_task -> "masc_release_task"
     | Reset -> "masc_reset"
+    | Resume -> "masc_resume"
     | Room_status -> "masc_room_status"
+    | Runtime_ollama_probe -> "masc_runtime_ollama_probe"
+    | Run_deliverable -> "masc_run_deliverable"
+    | Run_get -> "masc_run_get"
+    | Run_init -> "masc_run_init"
+    | Run_list -> "masc_run_list"
+    | Run_log -> "masc_run_log"
+    | Run_plan -> "masc_run_plan"
     | Persona_list -> "masc_persona_list"
     | Set_current_task -> "masc_set_current_task"
+    | Spawn -> "masc_spawn"
     | Start -> "masc_start"
     | Status -> "masc_status"
     | Task_history -> "masc_task_history"
     | Tasks -> "masc_tasks"
+    | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
+    | Tool_admin_update -> "masc_tool_admin_update"
     | Tool_grant -> "masc_tool_grant"
     | Tool_help -> "masc_tool_help"
     | Tool_list -> "masc_tool_list"
@@ -373,6 +399,7 @@ module Masc = struct
     | "masc_claim_next" -> Some Claim_next
     | "masc_claim_task" -> Some Claim_task
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
+    | "masc_config" -> Some Config
     | "masc_autoresearch_cycle" -> Some Autoresearch_cycle
     | "masc_autoresearch_inject" -> Some Autoresearch_inject
     | "masc_autoresearch_start" -> Some Autoresearch_start
@@ -412,6 +439,7 @@ module Masc = struct
     | "masc_operator_confirm" -> Some Operator_confirm
     | "masc_operator_digest" -> Some Operator_digest
     | "masc_operator_snapshot" -> Some Operator_snapshot
+    | "masc_pause" -> Some Pause
     | "masc_plan_clear_task" -> Some Plan_clear_task
     | "masc_plan_get" -> Some Plan_get
     | "masc_plan_get_task" -> Some Plan_get_task
@@ -421,13 +449,24 @@ module Masc = struct
     | "masc_register_capabilities" -> Some Register_capabilities
     | "masc_release_task" -> Some Release_task
     | "masc_reset" -> Some Reset
+    | "masc_resume" -> Some Resume
     | "masc_room_status" -> Some Room_status
+    | "masc_runtime_ollama_probe" -> Some Runtime_ollama_probe
+    | "masc_run_deliverable" -> Some Run_deliverable
+    | "masc_run_get" -> Some Run_get
+    | "masc_run_init" -> Some Run_init
+    | "masc_run_list" -> Some Run_list
+    | "masc_run_log" -> Some Run_log
+    | "masc_run_plan" -> Some Run_plan
     | "masc_persona_list" -> Some Persona_list
     | "masc_set_current_task" -> Some Set_current_task
+    | "masc_spawn" -> Some Spawn
     | "masc_start" -> Some Start
     | "masc_status" -> Some Status
     | "masc_task_history" -> Some Task_history
     | "masc_tasks" -> Some Tasks
+    | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
+    | "masc_tool_admin_update" -> Some Tool_admin_update
     | "masc_tool_grant" -> Some Tool_grant
     | "masc_tool_help" -> Some Tool_help
     | "masc_tool_list" -> Some Tool_list

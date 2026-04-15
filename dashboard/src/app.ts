@@ -92,13 +92,13 @@ export function App() {
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--bg-0)] bg-[radial-gradient(ellipse_at_top,rgba(25,40,70,0.3)_0%,rgba(11,18,32,1)_80%)] text-[var(--text-body)]">
-      <header class="relative z-10 shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.44)] px-4 py-2 backdrop-blur-xl">
+      <header class="relative z-10 shrink-0 border-b border-[rgba(255,255,255,0.06)] bg-[rgba(8,14,26,0.36)] px-4 py-1.5 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(71,184,255,0.15)] to-transparent"></div>
-        <div class="flex w-full items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-stretch">
-          <div class="min-w-0">
-            <div class="flex items-center gap-4">
+        <div class="flex w-full items-center justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
+          <div class="min-w-0 flex items-center gap-3">
+            <div class="flex shrink-0 items-center gap-2">
               <button type="button"
-                class="hidden max-[768px]:flex size-10 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-5)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+                class="hidden max-[768px]:flex size-9 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
                 aria-controls="dashboard-side-rail"
@@ -106,28 +106,29 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[rgba(71,184,255,0.3)] bg-[linear-gradient(135deg,rgba(71,184,255,0.2),rgba(10,28,58,0.8))] text-[15px] font-bold text-[var(--text-strong)]">
+              <div class="flex size-7 shrink-0 items-center justify-center rounded-lg border border-[var(--white-10)] bg-[var(--white-4)] text-[13px] text-[var(--text-strong)]">
                 ${currentView?.icon ?? 'M'}
               </div>
-              <div class="min-w-0 flex flex-col justify-center">
-                <div class="flex flex-wrap items-center gap-2 mb-0.5">
-                  <span class="text-[10px] font-bold uppercase tracking-[0.25em] text-[rgba(154,217,255,0.6)]">MASC Control Deck</span>
-                </div>
-                <h1 class="text-[15px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none flex items-center gap-1.5">
-                  ${currentView?.label ?? 'Multi-Agent Namespace Console'}
-                  ${currentSection && currentSection.label !== currentView?.label
-                    ? html`<span class="text-[13px] font-medium text-[var(--text-muted)]">/</span><span class="text-[15px] font-medium text-[rgba(154,217,255,0.8)]">${currentSection.label}</span>`
-                    : null}
-                </h1>
-              </div>
+            </div>
+
+            <div class="min-w-0 flex flex-col justify-center">
+              ${currentSection && currentSection.label !== currentView?.label
+                ? html`
+                    <div class="mb-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                      <span>${currentView?.label ?? '홈'}</span>
+                      <span>/</span>
+                    </div>
+                  `
+                : null}
+              <h1 class="min-w-0 text-[18px] font-semibold tracking-[-0.02em] text-[var(--text-strong)] leading-none [overflow-wrap:anywhere]">
+                ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
+              </h1>
             </div>
           </div>
 
-          <div class="flex shrink-0 flex-col items-end gap-2">
-            <div class="flex items-center gap-2">
-              <${AuthStatus} />
-              <${ConnectionStatus} />
-            </div>
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <${AuthStatus} />
+            <${ConnectionStatus} />
             <${BuildIdentityBadge} />
           </div>
         </div>

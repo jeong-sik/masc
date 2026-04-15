@@ -52,13 +52,13 @@ export function ConnectionStatus() {
     : `재연결 중...${formatDisconnectDuration()}`
 
   return html`
-    <div class="flex items-center gap-2 text-[length:var(--fs-sm)] whitespace-nowrap ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
-      <span class="size-[9px] rounded-full inline-block ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_9px_rgba(74,222,128,0.8)]' : 'bg-[var(--bad)]'}"></span>
+    <div class="flex items-center gap-1.5 whitespace-nowrap text-[12px] ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
+      <span class="inline-block size-[8px] rounded-full ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_7px_rgba(74,222,128,0.75)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center py-0.5 px-2 min-w-[80px] border border-solid border-[var(--card-border)] bg-[var(--white-4)] tabular-nums rounded-full attention-badge"
+          class="inline-flex items-center justify-center rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
         >주의 ${attentionCount}건<//>
       ` : null}
     </div>
@@ -83,13 +83,15 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="text-[11px] py-[6px] px-[11px] rounded-md border border-solid border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--text-strong)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="cursor-pointer rounded-full border border-[var(--white-10)] bg-[var(--white-4)] px-[10px] py-[5px] text-[10px] text-[var(--text-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
         aria-expanded=${buildIdentityOpen.value}
+        aria-label=${`서버 빌드 정보 ${label}`}
+        title="서버 빌드 정보"
         onClick=${() => {
           buildIdentityOpen.value = !buildIdentityOpen.value
         }}
       >
-        서버 빌드 · ${label}
+        ${label}
       </button>
       ${buildIdentityOpen.value
         ? html`

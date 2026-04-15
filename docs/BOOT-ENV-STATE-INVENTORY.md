@@ -87,7 +87,8 @@ active-root file at `<active config root>/keeper_runtime.toml`.
 
 ### 1.3 keeper_runtime.toml — per-base-path startup keeper env seeding
 
-All `MASC_KEEPER_*` environment variables can be set declaratively in
+All live startup-scoped `MASC_KEEPER_*` keeper runtime variables wired through
+`Env_config_keeper` / `Keeper_config` can be set declaratively in
 `<active config root>/keeper_runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
@@ -107,7 +108,10 @@ Operational contract:
 Missing file is not an error (returns 0 overrides, uses env/defaults).
 Parse errors log a warning and fall back to env defaults.
 
-**Sections** (53 knobs total):
+Legacy compatibility names that are no longer read by the unified turn path
+are intentionally excluded from this TOML surface.
+
+**Sections** (64 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
@@ -115,7 +119,7 @@ Parse errors log a warning and fall back to env defaults.
 | `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
 | `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
 | `[heartbeat]` | 7 | `interval_sec`, `max_silence_sec`, `smart_heartbeat` |
-| `[turn]` | 5 | `timeout_sec`, `oas_timeout_sec`, `admission_wait_timeout_sec` |
+| `[turn]` | 16 | `timeout_sec`, `tool_cost_max_usd`, `max_tools_per_turn`, `temperature` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
@@ -135,6 +139,11 @@ max_turns_per_call = 15
 
 [bootstrap]
 max_active_keepers = 12
+
+[turn]
+tool_cost_max_usd = 1.25
+max_tools_per_turn = 64
+llm_rerank = true
 ```
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a

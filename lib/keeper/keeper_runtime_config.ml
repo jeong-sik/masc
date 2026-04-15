@@ -37,6 +37,17 @@ let key_to_env =
     "turn.admission_wait_timeout_sec",  "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";
     "turn.max_consecutive_turn_failures", "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES";
+    "turn.batch_limit",                 "MASC_KEEPER_BATCH_LIMIT";
+    "turn.tool_cost_max_usd",           "MASC_KEEPER_TOOL_COST_MAX_USD";
+    "turn.max_tools_per_turn",          "MASC_KEEPER_MAX_TOOLS_PER_TURN";
+    "turn.board_event_limit",           "MASC_KEEPER_BOARD_EVENT_LIMIT";
+    "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
+    "turn.llm_rerank_cascade",          "MASC_KEEPER_LLM_RERANK_CASCADE";
+    "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
+    "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
+    "turn.llama_slots",                 "MASC_KEEPER_LLAMA_SLOTS";
+    "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
+    "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     (* [supervisor] *)
     "supervisor.max_restarts",          "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS";
     "supervisor.backoff_base_sec",      "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S";

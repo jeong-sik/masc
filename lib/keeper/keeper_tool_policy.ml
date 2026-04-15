@@ -342,19 +342,19 @@ let tool_policy_of_meta (meta : keeper_meta) =
     deny = Tool_access_policy.Names meta.tool_denylist;
   }
 
+module StringSet = Set.Make (String)
+
 (* ── Access lookup (O(1) per tool) ────────────────────────────── *)
 
 type tool_access_lookup = {
   candidate_names : string list;
-  candidate_set : (string, unit) Hashtbl.t;
-  allow_set : (string, unit) Hashtbl.t;
-  deny_set : (string, unit) Hashtbl.t;
+  candidate_set : StringSet.t;
+  allow_set : StringSet.t;
+  deny_set : StringSet.t;
 }
 
 let tool_name_set names =
-  let tbl = Hashtbl.create (max 16 (List.length names)) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
-  tbl
+  List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty names
 
 let tool_access_lookup_of_meta (meta : keeper_meta) =
   let candidate_names =
@@ -366,7 +366,7 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
     Tool_access_policy.resolve
       ~candidates:candidate_names
       (tool_policy_of_meta meta)
-    |> List.filter (fun name -> Hashtbl.mem candidate_set name)
+    |> List.filter (fun name -> StringSet.mem name candidate_set)
     |> dedupe_tool_names
   in
   {
@@ -377,23 +377,23 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
   }
 
 let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
-  Hashtbl.mem lookup.candidate_set name
-  && Hashtbl.mem lookup.allow_set name
-  && not (Hashtbl.mem lookup.deny_set name)
+  StringSet.mem name lookup.candidate_set
+  && StringSet.mem name lookup.allow_set
+  && not (StringSet.mem name lookup.deny_set)
 
 (** Universe check: candidate minus denied, ignoring policy allowlist.
     Core tools and BM25-discovered tools use this gate at execution time. *)
 let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
-  Hashtbl.mem lookup.candidate_set name
-  && not (Hashtbl.mem lookup.deny_set name)
+  StringSet.mem name lookup.candidate_set
+  && not (StringSet.mem name lookup.deny_set)
 
 (** Execution gate: core tools bypass policy, others require policy allowlist.
     All tools must exist in candidate_set — rejects hallucinated tool names. *)
 let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
   if Keeper_tool_registry.is_core_always_tool name then
     (* Core tools bypass candidate_set — only deny_set blocks them *)
-    not (Hashtbl.mem lookup.deny_set name)
-  else if not (Hashtbl.mem lookup.candidate_set name) then
+    not (StringSet.mem name lookup.deny_set)
+  else if not (StringSet.mem name lookup.candidate_set) then
     false
   else
     filter_by_access ~lookup name
@@ -468,7 +468,7 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
   in
   let from_core =
     Keeper_tool_registry.core_always_tools
-    |> List.filter (fun name -> not (Hashtbl.mem lookup.deny_set name))
+    |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
   in
   dedupe_tool_names (from_candidates @ from_core)
 
@@ -489,12 +489,12 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
   let from_preset =
     preset_tools
     |> List.filter (fun name ->
-         Hashtbl.mem lookup.candidate_set name
-         && not (Hashtbl.mem lookup.deny_set name))
+         StringSet.mem name lookup.candidate_set
+         && not (StringSet.mem name lookup.deny_set))
   in
   let from_core =
     Keeper_tool_registry.core_always_tools
-    |> List.filter (fun name -> not (Hashtbl.mem lookup.deny_set name))
+    |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
   in
   dedupe_tool_names (from_preset @ from_core)
 
@@ -518,7 +518,7 @@ let filter_schemas_by_names (names : string list)
     (schemas : Types.tool_schema list) : Types.tool_schema list =
   let name_set = tool_name_set names in
   schemas
-  |> List.filter (fun (tool : Types.tool_schema) -> Hashtbl.mem name_set tool.name)
+  |> List.filter (fun (tool : Types.tool_schema) -> StringSet.mem tool.name name_set)
   |> dedupe_tool_schemas
 
 (** Preset-scoped model tool schemas for BM25 indexing.

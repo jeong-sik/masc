@@ -18,6 +18,7 @@ type delivery_surface =
 
 type model_id =
   | Bdi_speech_v1
+  | Magentic_ledger_v1
 
 type transition_reason =
   | Tool_only_stay_silent
@@ -26,6 +27,7 @@ type transition_reason =
   | Tool_only_broadcast
   | Tool_only_claim_task
   | Tool_only_visible_reply
+  | Tool_only_progress_ledger
   | Explicit_social_headers
   | Missing_headers_fallback_visible_reply
   | Invalid_headers_fallback_visible_reply

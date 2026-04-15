@@ -54,10 +54,8 @@ export {
   laneTransitionCount,
 } from './fsm-hub-derivations'
 
-export {
-  deriveOperationalInsight,
-  deriveObservedLaneSummaries,
-} from './fsm-hub-diagnostics'
+export { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
+export { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 
 export {
   flagTooltip,

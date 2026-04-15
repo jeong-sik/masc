@@ -10,7 +10,8 @@ import {
   fmtDuration,
   displayState,
 } from './fsm-hub-types'
-import { deriveOperationalInsight, deriveObservedLaneSummaries } from './fsm-hub-diagnostics'
+import { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
+import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 

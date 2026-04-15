@@ -200,7 +200,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
               if String.contains raw ':' then raw else Provider_adapter.make_local_label raw
             in
             (* Validate the label parses without retaining model_spec *)
-            (match Llm_provider.Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
+            (match Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
         | _ ->
             (match Provider_adapter.preferred_execution_model_labels () with _ :: _ -> Ok () | [] -> Error "no execution model")
       in

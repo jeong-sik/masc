@@ -532,7 +532,7 @@ let handle_keeper_status ctx args : tool_result =
          in
 
          let models_resolved = `List (List.filter_map (fun label ->
-           match Llm_provider.Cascade_config.parse_model_string label with
+           match Cascade_config.parse_model_string label with
            | None -> None
            | Some cfg ->
              let pricing = Llm_provider.Pricing.pricing_for_model cfg.model_id in

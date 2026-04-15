@@ -1,7 +1,7 @@
 (** Dashboard projection for cascade configuration and runtime health. *)
 
-module CC = Llm_provider.Cascade_config
-module Health = Llm_provider.Cascade_health_tracker
+module CC = Cascade_config
+module Health = Cascade_health_tracker
 
 (* ── Shared helpers ─────────────────────────────────── *)
 

@@ -211,7 +211,7 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
   let configured_ids =
     try
-      Llm_provider.Cascade_config.parse_model_strings configured
+      Cascade_config.parse_model_strings configured
       |> List.map (fun (c : Llm_provider.Provider_config.t) -> String.trim c.model_id)
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in

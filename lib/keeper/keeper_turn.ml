@@ -35,7 +35,7 @@ let resolved_model_id_for_result ~(meta : keeper_meta)
   let cascade_models =
     Keeper_model_labels.configured_model_labels_of_meta meta
   in
-  let cfgs = Llm_provider.Cascade_config.parse_model_strings cascade_models in
+  let cfgs = Cascade_config.parse_model_strings cascade_models in
   match
     List.find_opt
       (fun (c : Llm_provider.Provider_config.t) ->

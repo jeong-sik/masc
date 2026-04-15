@@ -264,8 +264,6 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
   | "keeper_shell" -> `Assoc [ ("op", `String "git_status") ]
   | "keeper_bash" ->
       `Assoc [ ("cmd", `String "pwd"); ("timeout_sec", `Float 5.0) ]
-  | "keeper_github" ->
-      `Assoc [ ("cmd", `String "status"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->
@@ -354,7 +352,6 @@ let keeper_arguments fixture (schema : Types.tool_schema) =
 
 let keeper_expectation_for_name name =
   match name with
-  | "keeper_github" -> Expect_success_or_guard github_guard_fragments
   | "keeper_voice_listen"
   | "keeper_voice_speak"
   | "keeper_voice_agent" ->

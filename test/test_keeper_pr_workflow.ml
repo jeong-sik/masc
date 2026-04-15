@@ -6,8 +6,7 @@
     3. Branch name sanitization (reject shell metacharacters)
     4. Worktree step failure propagation (no remote → clean error)
 
-    Does NOT test: actual git push / gh pr create (requires real remote).
-    Those are covered by the safety gate in test_keeper_github_safety.ml. *)
+    Does NOT test: actual git push / gh pr create (requires real remote). *)
 
 open Alcotest
 open Masc_mcp

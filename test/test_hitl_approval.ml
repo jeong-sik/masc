@@ -60,23 +60,23 @@ let test_risk_classification_low () =
       (GP.risk_level_to_string actual)
   ) tools
 
-let test_keeper_github_read_only_stays_low () =
+let test_keeper_shell_gh_read_only_stays_low () =
   let actual =
     GP.assess_risk
-      ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr view 123")])
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
   in
-  check "keeper_github pr view → low"
+  check "keeper_shell op=gh pr view → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string actual)
 
-let test_keeper_github_mutation_escalates_high () =
+let test_keeper_shell_gh_mutation_escalates_high () =
   let actual =
     GP.assess_risk
-      ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr comment 123 --body hi")])
+      ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
   in
-  check "keeper_github pr comment → high"
+  check "keeper_shell op=gh pr comment → high"
     (GP.risk_level_to_string GP.High)
     (GP.risk_level_to_string actual)
 
@@ -307,18 +307,18 @@ let test_callback_production_keeper_write_requires_approval () =
   | Some _ -> Alcotest.fail "expected Approve after operator resolution"
   | None -> Alcotest.fail "keeper write callback did not suspend for approval"
 
-let test_callback_production_keeper_github_read_only_auto_approved () =
+let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
   let cb =
     GP.to_oas_approval_callback
       ~governance_level:"production" ~keeper_name:"test" in
   let decision =
-    cb ~tool_name:"keeper_github"
-      ~input:(`Assoc [("cmd", `String "pr view 123")])
+    cb ~tool_name:"keeper_shell"
+      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
   in
   match decision with
   | Agent_sdk.Hooks.Approve -> ()
   | Agent_sdk.Hooks.Reject r ->
-    Alcotest.fail ("expected Approve for read-only keeper_github, got Reject: " ^ r)
+    Alcotest.fail ("expected Approve for read-only keeper_shell op=gh, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
 (* ── Test runner ──────────────────────────────────────────── *)
@@ -329,10 +329,10 @@ let () =
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
       Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
       Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
-      Alcotest.test_case "keeper_github read-only stays low" `Quick
-        test_keeper_github_read_only_stays_low;
-      Alcotest.test_case "keeper_github mutation escalates high" `Quick
-        test_keeper_github_mutation_escalates_high;
+      Alcotest.test_case "keeper_shell op=gh read-only stays low" `Quick
+        test_keeper_shell_gh_read_only_stays_low;
+      Alcotest.test_case "keeper_shell op=gh mutation escalates high" `Quick
+        test_keeper_shell_gh_mutation_escalates_high;
     ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
@@ -351,7 +351,7 @@ let () =
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
       Alcotest.test_case "production keeper write requires approval" `Quick
         test_callback_production_keeper_write_requires_approval;
-      Alcotest.test_case "production keeper_github read-only auto-approved" `Quick
-        test_callback_production_keeper_github_read_only_auto_approved;
+      Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
+        test_callback_production_keeper_shell_gh_read_only_auto_approved;
     ]);
   ]

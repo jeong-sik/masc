@@ -65,7 +65,7 @@ let test_shard_coding_exists () =
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
     let names = List.map (fun (t : Types.tool_schema) -> t.name) s.tools in
     Alcotest.(check bool) "contains keeper_bash" true (List.mem "keeper_bash" names);
-    Alcotest.(check bool) "contains keeper_github" true (List.mem "keeper_github" names);
+    Alcotest.(check bool) "contains keeper_shell" true (List.mem "keeper_shell" names);
     Alcotest.(check bool) "contains worktree_create" true
       (List.mem "masc_worktree_create" names);
     Alcotest.(check bool) "contains code_search" true

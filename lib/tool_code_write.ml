@@ -32,6 +32,20 @@ let first_nonempty_line output =
   |> List.map String.trim
   |> List.find_opt (fun s -> s <> "")
 
+(* Shell command allowlist *)
+let allowed_shell_commands = [
+  "dune"; "make"; "npm"; "npx"; "node";
+  "git"; "ls"; "cat"; "head"; "tail"; "wc";
+  "rg"; "find"; "diff"; "patch"; "mkdir";
+  "opam"; "ocamlfind"; "tsc";
+]
+
+let validate_code_shell_command (command : string) : (unit, string) result =
+  Worker_dev_tools.validate_command_coding_with_allowlist
+    ~allow_pipes:false
+    ~allowed_commands:allowed_shell_commands
+    command
+
 let git_common_root path =
   try
     match
@@ -109,14 +123,6 @@ let validate_writable_path ~(agent_name : string) config path =
         agent_name
         agent_playground_prefix
         canonical_path))
-
-(* Shell command allowlist *)
-let allowed_shell_commands = [
-  "dune"; "make"; "npm"; "npx"; "node";
-  "git"; "ls"; "cat"; "head"; "tail"; "wc";
-  "rg"; "find"; "diff"; "patch"; "mkdir";
-  "opam"; "ocamlfind"; "tsc";
-]
 
 (* Git action allowlist *)
 let allowed_git_actions = [
@@ -468,49 +474,42 @@ let handle_code_shell ctx args =
   let timeout = get_int args "timeout" 30 in
 
   if command = "" then (false, "command parameter required")
-  else begin
-    (* Parse first token to check allowlist *)
-    let tokens = String.split_on_char ' ' (String.trim command) in
-    let executable = match tokens with
-      | [] -> ""
-      | exe :: _ -> Filename.basename exe
-    in
-
-    if not (List.mem executable allowed_shell_commands) then
-      (false, Printf.sprintf "Command '%s' not in allowlist: %s"
-         executable (String.concat ", " allowed_shell_commands))
-    else begin
-      (* Validate cwd if provided *)
-      let cwd_result =
-        if cwd = "" then Ok None
-        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
-          | Ok abs_cwd -> Ok (Some abs_cwd)
-          | Error e -> Error e
-      in
-      match cwd_result with
-      | Error e -> (false, Types.masc_error_to_string e)
-      | Ok cwd_opt ->
-        let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
-        let cmd_parts = ["sh"; "-c"; command] in
-        let full_cmd = match cwd_opt with
-          | None -> cmd_parts
-          | Some dir -> ["sh"; "-c"; Printf.sprintf "cd %s && %s"
-                           (Filename.quote dir) command]
+  else
+    match validate_code_shell_command command with
+    | Error reason -> (false, reason)
+    | Ok () ->
+        (* Validate cwd if provided *)
+        let cwd_result =
+          if cwd = "" then Ok None
+          else
+            match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
+            | Ok abs_cwd -> Ok (Some abs_cwd)
+            | Error e -> Error e
         in
-        match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
-        | Unix.WEXITED code, output ->
-          let response = `Assoc [
-            ("status", `String (if code = 0 then "ok" else "error"));
-            ("exit_code", `Int code);
-            ("output", `String (truncate_output output));
-            ("command", `String command);
-            ("agent", `String ctx.agent_name);
-          ] in
-          (code = 0, Yojson.Safe.pretty_to_string response)
-        | _, output ->
-          (false, Printf.sprintf "Command failed: %s" (truncate_output output))
-    end
-  end
+        (match cwd_result with
+         | Error e -> (false, Types.masc_error_to_string e)
+         | Ok cwd_opt ->
+             let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
+             let cmd_parts = ["sh"; "-c"; command] in
+             let full_cmd =
+               match cwd_opt with
+               | None -> cmd_parts
+               | Some dir ->
+                   [ "sh"; "-c"; Printf.sprintf "cd %s && %s"
+                       (Filename.quote dir) command ]
+             in
+             match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
+             | Unix.WEXITED code, output ->
+                 let response = `Assoc [
+                   ("status", `String (if code = 0 then "ok" else "error"));
+                   ("exit_code", `Int code);
+                   ("output", `String (truncate_output output));
+                   ("command", `String command);
+                   ("agent", `String ctx.agent_name);
+                 ] in
+                 (code = 0, Yojson.Safe.pretty_to_string response)
+             | _, output ->
+                 (false, Printf.sprintf "Command failed: %s" (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let handle_code_git ctx args =
@@ -734,7 +733,7 @@ Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
       ("properties", `Assoc [
         ("command", `Assoc [
           ("type", `String "string");
-          ("description", `String "Shell command to run (first token must be in allowlist)");
+          ("description", `String "Single shell command to run (no pipes/chaining; first token must be in allowlist)");
         ]);
         ("cwd", `Assoc [
           ("type", `String "string");

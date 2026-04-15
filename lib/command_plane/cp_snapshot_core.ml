@@ -475,7 +475,7 @@ let list_alerts_json_from_state _config (state : snapshot_state) =
           ~scope_id:unit.unit_id ~title:(unit.label ^ " has no leader")
           ~detail:"Assign a leader before enabling automatic dispatch.";
       (match unit.leader_id with
-      | Some leader when agent_status_for status_map leader = "offline" ->
+      | Some leader when Cp_unit.leader_is_unavailable (agent_status_for status_map leader) ->
           push_alert ~severity:"bad" ~kind:"leader_offline" ~scope_type:"unit"
             ~scope_id:unit.unit_id ~title:(unit.label ^ " leader is offline")
             ~detail:"Reassign leadership or recall the unit."

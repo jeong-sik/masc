@@ -484,11 +484,12 @@ let policy_deny_json config ~(actor : string) json =
 let detachment_status_detail_json config units agents operations
     (detachment : detachment_record) =
   let now = Time_compat.now () in
-  let leader_status =
+  let leader_presence =
     match detachment.leader_id with
     | Some leader -> agent_status_for (agent_status_map agents) leader
-    | None -> "missing"
+    | None -> Cp_unit.Leader_missing
   in
+  let leader_status = Cp_unit.leader_presence_to_string leader_presence in
   let heartbeat_expired =
     match detachment.heartbeat_deadline with
     | Some deadline -> iso_expired_at now deadline
@@ -525,8 +526,7 @@ let detachment_status_detail_json config units agents operations
       ( "needs_attention",
         `Bool
           (heartbeat_expired
-           || String.equal leader_status "offline"
-           || String.equal leader_status "missing"
+           || Cp_unit.leader_is_unavailable leader_presence
            || detachment.status = Det_stalled
            || detachment.status = Det_awaiting_approval) );
     ]
@@ -696,13 +696,13 @@ let dispatch_tick_json config ~(actor : string) json =
   List.iter
     (fun (detachment : detachment_record) ->
       let is_stalled = stalled_or_quiet_detachment now detachment in
-      let leader_status =
+      let leader_presence =
         match detachment.leader_id with
         | Some leader -> agent_status_for (agent_status_map agents) leader
-        | None -> "missing"
+        | None -> Cp_unit.Leader_missing
       in
       if is_stalled then incr stale_count;
-      if is_stalled || String.equal leader_status "offline" || String.equal leader_status "missing" then
+      if is_stalled || Cp_unit.leader_is_unavailable leader_presence then
         match pick_failover_leader live_agents detachment with
         | Some next_leader ->
             let refreshed =

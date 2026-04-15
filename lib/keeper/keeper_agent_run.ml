@@ -1206,63 +1206,58 @@ let run_turn
                        let rerank_cascade =
                          Keeper_config.keeper_llm_rerank_cascade ()
                        in
-                       (match
-                          Oas_worker_named.resolve_cascade_providers
-                            ~cascade_name:rerank_cascade
+                       let defaults =
+                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+                       in
+                       let config_path = Oas_worker.default_config_path () in
+                       let rerank_fn =
+                         Agent_sdk.Tool_selector.default_rerank_fn
+                           ~sw
+                           ~net
+                           ?config_path
+                           ~cascade_name:rerank_cascade
+                           ~defaults
+                           ~k:selection_limit
+                           ()
+                       in
+                       let strategy =
+                         Agent_sdk.Tool_selector.TopK_llm
+                           { k = selection_limit
+                           ; bm25_prefilter_n =
+                               min
+                                 keeper_selection_bm25_prefilter_n
+                                 (List.length preset_tools)
+                           ; always_include = core
+                           ; confidence_threshold = 0.3
+                           ; rerank_fn
+                           }
+                       in
+                       (try
+                          let selected =
+                            Agent_sdk.Tool_selector.select_names
+                              ~strategy
+                              ~context:query_text
+                              ~tools:preset_tools
+                          in
+                          if Keeper_types_profile.keeper_debug
+                          then
+                            Log.Keeper.info
+                              "keeper:%s TopK_llm selected %d tools (query_len=%d, \
+                               candidates=%d)"
+                              meta.name
+                              (List.length selected)
+                              (String.length query_text)
+                              (List.length preset_tools);
+                          selected
                         with
-                        | provider :: _ ->
-                            let rerank_fn =
-                              Agent_sdk.Tool_selector.default_rerank_fn
-                                ~sw
-                                ~net
-                                ~provider
-                                ~k:selection_limit
-                                ()
-                            in
-                            let strategy =
-                              Agent_sdk.Tool_selector.TopK_llm
-                                { k = selection_limit
-                                ; bm25_prefilter_n =
-                                    min
-                                      keeper_selection_bm25_prefilter_n
-                                      (List.length preset_tools)
-                                ; always_include = core
-                                ; confidence_threshold = 0.3
-                                ; rerank_fn
-                                }
-                            in
-                            (try
-                               let selected =
-                                 Agent_sdk.Tool_selector.select_names
-                                   ~strategy
-                                   ~context:query_text
-                                   ~tools:preset_tools
-                               in
-                               if Keeper_types_profile.keeper_debug
-                               then
-                                 Log.Keeper.info
-                                   "keeper:%s TopK_llm selected %d tools (query_len=%d, \
-                                    candidates=%d)"
-                                   meta.name
-                                   (List.length selected)
-                                   (String.length query_text)
-                                   (List.length preset_tools);
-                               selected
-                             with
-                             | Eio.Cancel.Cancelled _ as e -> raise e
-                             | exn ->
-                               Log.Keeper.warn
-                                 "keeper:%s TopK_llm failed (%s), falling back to \
-                                  core+prefilter+discovered"
-                                 meta.name
-                                 (Printexc.to_string exn);
-                               [])
-                        | [] ->
-                            Log.Keeper.warn
-                              "keeper:%s TopK_llm: no rerank provider resolved, falling back \
-                               to core+prefilter+discovered"
-                              meta.name;
-                            [])
+                        | Eio.Cancel.Cancelled _ as e -> raise e
+                        | exn ->
+                          Log.Keeper.warn
+                            "keeper:%s TopK_llm failed (%s), falling back to \
+                             core+prefilter+discovered"
+                            meta.name
+                            (Printexc.to_string exn);
+                          [])
                      | _ ->
                        Log.Keeper.warn
                          "keeper:%s TopK_llm: Eio context unavailable, falling back \

@@ -31,6 +31,7 @@ val update_metrics_from_result :
       autonomous runtime accounting in the unified loop. *)
   ?update_proactive_rt:bool ->
   ?social_state:Keeper_social_model.social_state ->
+  ?social_transition_reason:string ->
   Keeper_agent_run.run_result ->
   Keeper_types.keeper_meta
 
@@ -41,6 +42,7 @@ val update_metrics_from_failure :
   reason:string ->
   ?is_transient:bool ->
   ?social_state:Keeper_social_model.social_state ->
+  ?social_transition_reason:string ->
   unit ->
   Keeper_types.keeper_meta
 

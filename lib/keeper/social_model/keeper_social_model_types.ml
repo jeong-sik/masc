@@ -19,6 +19,22 @@ type delivery_surface =
 type model_id =
   | Bdi_speech_v1
 
+type transition_reason =
+  | Tool_only_stay_silent
+  | Tool_only_comment_board
+  | Tool_only_post_board
+  | Tool_only_broadcast
+  | Tool_only_claim_task
+  | Tool_only_visible_reply
+  | Explicit_social_headers
+  | Missing_headers_fallback_visible_reply
+  | Invalid_headers_fallback_visible_reply
+  | Inferred_visible_reply
+  | Protocol_violation_missing_social_headers
+  | Protocol_violation_invalid_social_headers
+  | Protocol_violation_no_tools_no_social_headers
+  | Failure_run_error
+
 type social_state = {
   social_model : string;
   belief_summary : string;
@@ -92,3 +108,24 @@ let normalize_social_model value =
   match model_id_of_string value with
   | Some model_id -> model_id_to_string model_id
   | None -> model_id_to_string default_model_id
+
+let transition_reason_to_string = function
+  | Tool_only_stay_silent -> "tool_only:stay_silent"
+  | Tool_only_comment_board -> "tool_only:comment_board"
+  | Tool_only_post_board -> "tool_only:post_board"
+  | Tool_only_broadcast -> "tool_only:broadcast"
+  | Tool_only_claim_task -> "tool_only:claim_task"
+  | Tool_only_visible_reply -> "tool_only:visible_reply"
+  | Explicit_social_headers -> "headers:explicit_social_headers"
+  | Missing_headers_fallback_visible_reply ->
+      "headers_missing:fallback_visible_reply"
+  | Invalid_headers_fallback_visible_reply ->
+      "headers_invalid:fallback_visible_reply"
+  | Inferred_visible_reply -> "text_reply:inferred_visible_reply"
+  | Protocol_violation_missing_social_headers ->
+      "protocol_violation:missing_social_headers"
+  | Protocol_violation_invalid_social_headers ->
+      "protocol_violation:invalid_social_headers"
+  | Protocol_violation_no_tools_no_social_headers ->
+      "protocol_violation:no_tool_calls_and_no_social_headers"
+  | Failure_run_error -> "failure:run_error"

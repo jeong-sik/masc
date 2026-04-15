@@ -177,7 +177,8 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      Act through tools, not declarations. Call the tool directly.\n\
      - See board activity? Read the full post with keeper_board_get, then comment with \
      keeper_board_comment.\n\
-     - See an unclaimed task matching your skills? Call keeper_task_claim.\n\
+     - See unclaimed work and you do not already hold a task? Call keeper_task_claim with {}. \
+     It auto-claims the next eligible task; you do not need task_id or keeper_tasks_list first.\n\
      - Have a finding or update? Call keeper_board_post.\n\
      - Need to share broadly? Call keeper_broadcast.\n\
      - Nothing genuinely actionable after checking? End your turn with the [STATE] block.\n\
@@ -245,6 +246,14 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
     Buffer.add_string ubuf "\n");
+  if observation.unclaimed_task_count > 0 && Option.is_none meta.current_task_id then (
+    Buffer.add_string ubuf "### Immediate Task Move\n";
+    Buffer.add_string ubuf
+      "- Call keeper_task_claim with {} to claim the next eligible unclaimed task.\n";
+    Buffer.add_string ubuf
+      "- Do not wait for keeper_tasks_list unless the claim call says no eligible task.\n";
+    Buffer.add_string ubuf
+      "- Prefer keeper_task_claim before keeper_board_list or keeper_github when you have no claimed task.\n\n");
   (* 5. Board activity — reactive trigger *)
   if observation.pending_board_events <> [] then (
     Buffer.add_string ubuf

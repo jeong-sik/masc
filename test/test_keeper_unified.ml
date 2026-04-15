@@ -835,6 +835,44 @@ let test_prompt_room_state_section () =
        with Not_found -> false
      in found)
 
+let test_prompt_includes_claim_first_guidance () =
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      active_agent_count = 5;
+    }
+  in
+  let sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "system prompt explains auto-claim" true
+    (contains_substring sys "Call keeper_task_claim with {}");
+  check bool "user prompt adds immediate task move section" true
+    (contains_substring user "### Immediate Task Move");
+  check bool "user prompt explains no task_id needed" true
+    (contains_substring user "Do not wait for keeper_tasks_list");
+  check bool "user prompt prefers claim before browsing" true
+    (contains_substring user "Prefer keeper_task_claim before keeper_board_list or keeper_github")
+
+let test_prompt_omits_claim_first_guidance_when_task_claimed () =
+  let current_task_id =
+    match Masc_mcp.Keeper_id.Task_id.of_string "task-123" with
+    | Ok value -> value
+    | Error err -> fail ("task id parse failed: " ^ err)
+  in
+  let meta = { minimal_meta with current_task_id = Some current_task_id } in
+  let obs =
+    { base_observation with
+      unclaimed_task_count = 3;
+      active_agent_count = 5;
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta ~observation:obs ()
+  in
+  check bool "no immediate task move section once task claimed" false
+    (contains_substring user "### Immediate Task Move")
+
 (* ---------- Config tests ---------- *)
 
 let test_unified_turn_runtime_defaults () =
@@ -2744,6 +2782,10 @@ let () =
           test_case "hustle economy" `Quick test_prompt_hustle_economy;
           test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta;
           test_case "room state section" `Quick test_prompt_room_state_section;
+          test_case "claim first guidance" `Quick
+            test_prompt_includes_claim_first_guidance;
+          test_case "claim first guidance omitted when task claimed" `Quick
+            test_prompt_omits_claim_first_guidance_when_task_claimed;
           test_case "prefers silence guidance" `Quick
             test_prompt_prefers_silence_guidance;
           test_case "sanitize_text_utf8 replaces control chars" `Quick

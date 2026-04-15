@@ -127,6 +127,8 @@ export function FsmHub() {
         selected=${selected}
         onSelect=${setSelected}
         loading=${loading}
+        transitionCount=${history.length}
+        observationCount=${phaseLog.length}
       />
 
       ${selected == null ? html`
@@ -185,6 +187,8 @@ function StatusBar({
   selected,
   onSelect,
   loading,
+  transitionCount,
+  observationCount,
 }: {
   snapshot: KeeperCompositeSnapshot | null
   now: number
@@ -193,6 +197,8 @@ function StatusBar({
   selected: string | null
   onSelect: (n: string) => void
   loading: boolean
+  transitionCount: number
+  observationCount: number
 }) {
   const liveBadge = snapshot
     ? snapshot.is_live
@@ -229,10 +235,20 @@ function StatusBar({
         </div>
       </div>
       ${snapshot ? html`
-        <div class="mt-1.5 flex gap-3 text-[9px] font-mono text-[var(--text-dim)] opacity-70">
-          <span>${snapshot.last_outcome ? `turn #${snapshot.last_outcome.turn_id} @ ${new Date(snapshot.last_outcome.ended_at * 1000).toLocaleTimeString()}` : 'no turn yet'}</span>
-          <span>corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>
-          <span>run ${snapshot.run_id?.slice(-8) ?? '?'}</span>
+        <div class="mt-1.5 flex items-center gap-2 text-[9px] font-mono flex-wrap">
+          ${/* KPI micro-metrics */ ''}
+          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-body)]">
+            turn ${snapshot.last_outcome ? `#${snapshot.last_outcome.turn_id}` : '—'}
+          </span>
+          <span class=${`px-1.5 py-0.5 rounded border ${transitionCount > 0 ? 'border-[rgba(129,140,248,0.3)] text-[#818cf8]' : 'border-[var(--white-8)] text-[var(--text-dim)]'}`}>
+            ${transitionCount} transitions
+          </span>
+          <span class="px-1.5 py-0.5 rounded border border-[var(--white-8)] text-[var(--text-dim)]">
+            ${observationCount} obs
+          </span>
+          ${/* Meta IDs */ ''}
+          <span class="text-[var(--text-dim)] opacity-60">corr ${snapshot.correlation_id?.slice(-8) ?? '?'}</span>
+          <span class="text-[var(--text-dim)] opacity-60">run ${snapshot.run_id?.slice(-8) ?? '?'}</span>
         </div>
       ` : null}
     </div>
@@ -317,13 +333,11 @@ function PipelineStep({
   label,
   shortLabel,
   value,
-  tone,
   isLast,
 }: {
   label: string
   shortLabel: string
   value: string
-  tone: string
   isLast?: boolean
 }) {
   const prevRef = useRef(value)
@@ -340,21 +354,33 @@ function PipelineStep({
 
   const isActive = value !== 'idle' && value !== 'undecided' && value !== 'accumulating'
   const borderCls = flash
-    ? 'border-[var(--accent)] shadow-[0_0_6px_rgba(71,184,255,0.3)]'
+    ? 'border-[var(--accent)] shadow-[0_0_8px_rgba(71,184,255,0.35)]'
     : isActive
-      ? `border-[${tone}]`
+      ? 'border-[rgba(129,140,248,0.5)] shadow-[0_0_6px_rgba(129,140,248,0.15)]'
       : 'border-[var(--white-8)]'
+  const bgCls = isActive && !flash
+    ? 'bg-[rgba(129,140,248,0.04)]'
+    : 'bg-[var(--white-2)]'
+  const activePulse = isActive && !flash ? 'animate-pulse' : ''
+
+  // Connector: animated dashes when active, static when idle
+  const connectorCls = isActive
+    ? 'border-t border-dashed border-[rgba(129,140,248,0.5)] animate-[marching-ants_1s_linear_infinite]'
+    : 'border-t border-[var(--white-10)]'
 
   return html`
     <div class="flex items-center gap-0 flex-1 min-w-0">
-      <div class=${`flex-1 rounded-lg border bg-[var(--white-2)] px-3 py-2 transition-all duration-500 ${borderCls}`}>
-        <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</div>
+      <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls}`}>
+        <div class="flex items-center gap-1.5">
+          ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
+          <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</span>
+        </div>
         <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-dim)]'} ${flash ? 'animate-pulse' : ''}`}>
           ${value}
         </div>
         <div class="text-[8px] text-[var(--text-dim)] mt-0.5">${label}</div>
       </div>
-      ${!isLast ? html`<div class="w-4 h-[1px] bg-[var(--white-10)] shrink-0"></div>` : null}
+      ${!isLast ? html`<div class=${`w-5 shrink-0 ${connectorCls}`}></div>` : null}
     </div>
   `
 }
@@ -366,10 +392,10 @@ function TurnPipelineStrip({ snapshot }: { snapshot: KeeperCompositeSnapshot }) 
         Turn Pipeline
       </div>
       <div class="flex gap-0 items-stretch">
-        <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} tone="rgba(129,140,248,0.4)" />
-        <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} tone="rgba(129,140,248,0.4)" />
-        <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} tone="rgba(129,140,248,0.4)" />
-        <${PipelineStep} shortLabel="KMC" label="Compaction" value=${snapshot.compaction.stage} tone="rgba(245,158,11,0.4)" isLast />
+        <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} />
+        <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} />
+        <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} />
+        <${PipelineStep} shortLabel="KMC" label="Compaction" value=${snapshot.compaction.stage} isLast />
       </div>
     </div>
   `

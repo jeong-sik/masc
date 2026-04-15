@@ -29,8 +29,38 @@ let extract_board_post_id (message : string) =
   | Not_found | Invalid_argument _
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
+(** Fill [author] from the caller's agent identity when the arg is absent or
+    blank. Keepers, the HTTP surface, and autonomous callers routinely omit
+    [author] — we used to reject those calls at pre-hook validation, which
+    forced every caller to know about the legacy schema field. Canonical
+    identity lives in [agent_name]; mirror it into the arg object so the
+    downstream [Tool_board.handle_post_create] author check passes. *)
+let ensure_board_post_author ~agent_name arguments =
+  match arguments with
+  | `Assoc fields ->
+    let existing =
+      match List.assoc_opt "author" fields with
+      | Some (`String s) -> String.trim s
+      | _ -> ""
+    in
+    if existing <> "" && existing <> "anonymous" then arguments
+    else
+      let injected = String.trim agent_name in
+      if injected = "" then arguments
+      else
+        let stripped =
+          List.filter (fun (k, _) -> k <> "author") fields
+        in
+        `Assoc (("author", `String injected) :: stripped)
+  | _ -> arguments
+
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name =
-  ignore (config, agent_name, state, sw, clock);
+  ignore (config, state, sw, clock);
+  let arguments =
+    match name with
+    | "masc_board_post" -> ensure_board_post_author ~agent_name arguments
+    | _ -> arguments
+  in
   let arg_get_string key default =
     Safe_ops.json_string ~default key arguments in
   let arg_get_int key default =

@@ -282,6 +282,13 @@ export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
   )
 }
 
+export function resetKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperLifecycle(
+    `/api/v1/keepers/${encodeURIComponent(name)}/reset`,
+    `Failed to reset ${name}`,
+  )
+}
+
 // --- Keeper tool policy editing ---
 
 export interface KeeperToolPolicyInput {

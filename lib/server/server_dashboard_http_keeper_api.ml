@@ -13,6 +13,7 @@ let keeper_suffix_tools = "/tools"
 let keeper_suffix_config = "/config"
 let keeper_suffix_boot = "/boot"
 let keeper_suffix_shutdown = "/shutdown"
+let keeper_suffix_reset = "/reset"
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
@@ -237,6 +238,7 @@ type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_boot
   | Keeper_post_shutdown
+  | Keeper_post_reset
   | Keeper_post_unknown
 
 let classify_keeper_post_route req_path =
@@ -253,6 +255,7 @@ let classify_keeper_post_route req_path =
   else if ends_with keeper_suffix_config then Keeper_post_config
   else if ends_with keeper_suffix_boot then Keeper_post_boot
   else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
+  else if ends_with keeper_suffix_reset then Keeper_post_reset
   else Keeper_post_unknown
 
 let is_valid_keeper_name name =
@@ -370,6 +373,7 @@ let handle_keeper_lifecycle_post ~sw ~clock ~tool_name ~action state agent_name 
     match action with
     | "boot" -> Ok keeper_suffix_boot
     | "shutdown" -> Ok keeper_suffix_shutdown
+    | "reset" -> Ok keeper_suffix_reset
     | unknown ->
         Error (Printf.sprintf "unknown keeper lifecycle action: %s" unknown)
   in

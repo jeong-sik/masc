@@ -31,7 +31,7 @@ const activeView = computed<FleetHealthView>(() => {
 const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
   { key: 'default',      label: '개요' },
   { key: 'event-log',    label: '이벤트 로그' },
-  { key: 'comparison',   label: 'Fleet 비교' },
+  { key: 'comparison',   label: 'Keeper 비교' },
   { key: 'tool-quality', label: '도구 품질' },
   { key: 'governance',   label: '거버넌스' },
 ]
@@ -63,7 +63,7 @@ export function FleetHealthPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-medium text-[var(--text-strong)]">Fleet 건강</h2>
+        <h2 class="text-sm font-medium text-[var(--text-strong)]">Keeper 현황</h2>
       </div>
       <${FilterChips}
         chips=${VIEW_CHIPS}

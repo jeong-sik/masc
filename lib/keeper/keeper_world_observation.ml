@@ -790,7 +790,16 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
           has_actionable_tasks
           && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
-        let should_run = idle_gate_elapsed && (cooldown_elapsed || backlog_elapsed) in
+        (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown
+           has elapsed, skip the idle_gate check. task_reactive_cooldown is
+           already a (shorter) subdivision of idle_gate; requiring idle_gate_elapsed
+           on top defeats its purpose. Without this bypass, keepers ignore
+           unclaimed work for idle_gate seconds even when the backlog signal
+           is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
+        let should_run =
+          backlog_elapsed
+          || (idle_gate_elapsed && cooldown_elapsed)
+        in
         let verdict =
           if should_run then
             let run_reasons =
@@ -819,9 +828,8 @@ let unified_turn_decision ~(meta : keeper_meta) (observation : world_observation
             | first :: rest ->
                 Run { reasons = (first, rest) }
             | [] ->
-                (* Structurally unreachable: idle_gate_elapsed && should_run
-                   and the synthetic Scheduled_autonomous_turn reason
-                   guarantee a non-empty run reason list.
+                (* Structurally unreachable: the synthetic Scheduled_autonomous_turn
+                   tag is always added first, so the list is never empty.
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
                 Log.Keeper.warn

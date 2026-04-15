@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from 'preact/hooks'
 import {
   type CompositeObservation,
   type HoveredSegment,
+  type LaneDwell,
   type LaneKey,
   type TopTransition,
   fmtDuration,
@@ -426,6 +427,79 @@ export function TopTransitionsPanel({
                 </span>
                 <span class="w-[18px] text-right text-[var(--text-dim)]">${entry.count}</span>
               </span>
+            </div>
+          `
+        })}
+      </div>
+    </div>
+  `
+}
+
+const BAR_COLOR: Record<string, string> = {
+  KSM: 'bg-[var(--accent)]',
+  KTC: 'bg-[#818cf8]',
+  KDP: 'bg-[#818cf8]',
+  KCL: 'bg-[#818cf8]',
+  KMC: 'bg-[#f59e0b]',
+}
+
+export function DwellHistogramPanel({
+  histograms,
+  hoveredSegment,
+}: {
+  histograms: LaneDwell[]
+  hoveredSegment: HoveredSegment | null
+}) {
+  if (histograms.length === 0) {
+    return html`
+      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+        관측 데이터가 아직 없습니다 — 키퍼가 상태를 유지하면 체류 시간이 표시됩니다
+      </div>
+    `
+  }
+
+  return html`
+    <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+      <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+        State Dwell Time
+      </div>
+      <div class="flex flex-col gap-2">
+        ${histograms.map((lane) => {
+          const matchesHover = hoveredSegment != null && hoveredSegment.field === lane.field
+          const dimmed = hoveredSegment != null && !matchesHover
+          const color = FIELD_COLOR[lane.field] ?? 'text-[var(--text-body)]'
+          const barColor = BAR_COLOR[lane.field] ?? 'bg-[var(--accent)]'
+          return html`
+            <div class=${`transition-opacity duration-150 ${dimmed ? 'opacity-40' : ''}`}>
+              <div class="flex items-center gap-1.5 mb-0.5">
+                <span class=${`text-[9px] font-semibold ${color}`}>${lane.field}</span>
+                <span class="text-[9px] text-[var(--text-dim)]">${fmtDuration(lane.totalSeconds)}</span>
+              </div>
+              <div class="flex flex-col gap-px">
+                ${lane.entries.map((entry) => {
+                  const highlighted = hoveredSegment != null
+                    && hoveredSegment.field === lane.field
+                    && hoveredSegment.value === entry.value
+                  const rowCls = highlighted
+                    ? 'bg-[rgba(71,184,255,0.1)] ring-1 ring-[rgba(71,184,255,0.3)] rounded px-0.5'
+                    : ''
+                  return html`
+                    <div
+                      class=${`flex items-center gap-1.5 text-[10px] font-mono leading-tight ${rowCls}`}
+                      title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
+                    >
+                      <span class="w-[60px] shrink-0 text-[var(--text-body)] truncate">${displayState(entry.value)}</span>
+                      <span class="flex-1 h-1.5 rounded-full bg-[var(--white-8)] overflow-hidden">
+                        <span
+                          class=${`block h-full ${barColor}`}
+                          style=${`width: ${Math.max(2, entry.pct)}%`}
+                        ></span>
+                      </span>
+                      <span class="w-[36px] shrink-0 text-right text-[9px] text-[var(--text-dim)]">${entry.pct.toFixed(0)}%</span>
+                    </div>
+                  `
+                })}
+              </div>
             </div>
           `
         })}

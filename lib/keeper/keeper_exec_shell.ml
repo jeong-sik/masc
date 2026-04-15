@@ -428,12 +428,23 @@ let handle_keeper_bash
       match validate cmd with
       | Error reason ->
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
+        let lower_cmd = String.lowercase_ascii (String.trim cmd) in
+        let starts_with_gh =
+          String.length lower_cmd >= 2
+          && String.sub lower_cmd 0 2 = "gh"
+          && (String.length lower_cmd = 2 || lower_cmd.[2] = ' ')
+        in
         let hint =
           if String.length reason > 0 &&
              (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
           then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
           else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
           then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+          else if starts_with_gh
+          then "Use keeper_shell op='gh' for GitHub CLI commands. \
+                The keeper_bash allow-list intentionally excludes gh — \
+                the keeper_shell path carries the auth/audit hooks. \
+                Example: keeper_shell(op='gh', cmd='pr list')."
           else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
         in
         Yojson.Safe.to_string

@@ -439,6 +439,7 @@
    keeper_exec_shell
    keeper_gh_env
    keeper_gh_shared
+   keeper_tool_pr_workflow
    keeper_exec_github
    keeper_exec_preflight
    keeper_exec_task
@@ -621,6 +622,7 @@
    keeper_exec_shell
    keeper_gh_env
    keeper_gh_shared
+   keeper_tool_pr_workflow
    keeper_exec_github
    keeper_exec_preflight
    keeper_exec_task

@@ -279,7 +279,7 @@ export function FsmHub() {
         />
 
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
-        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
+        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} observations=${view.observations} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
         ${/* ── Zone 2b: Turn Pipeline Strip (always visible) ── */ ''}
         <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />

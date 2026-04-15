@@ -1,7 +1,10 @@
+import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { describe, expect, it } from 'vitest'
 
 import {
   appendCompositeObservation,
+  deriveObservedLaneSummaries,
+  deriveOperationalInsight,
   derivePhaseLog,
   deriveTransitionHistory,
   type CompositeObservation,
@@ -18,6 +21,61 @@ function observation(
     cascade: 'idle',
     compaction: 'idle',
     ...overrides,
+  }
+}
+
+function snapshot(
+  overrides: Partial<KeeperCompositeSnapshot> = {},
+): KeeperCompositeSnapshot {
+  const base: KeeperCompositeSnapshot = {
+    correlation_id: 'corr',
+    run_id: 'run',
+    ts: 100,
+    phase: 'Running',
+    turn_phase: 'idle',
+    decision: { stage: 'undecided' },
+    cascade: { state: 'idle' },
+    compaction: { stage: 'accumulating' },
+    measurement: { captured: false },
+    recovery: { data_record: false, fsm_condition: false },
+    invariants: {
+      phase_turn_alignment: true,
+      no_cascade_before_measurement: true,
+      compaction_atomicity: true,
+      event_priority_monotone: true,
+      recovery_two_store_sync: true,
+    },
+    is_live: false,
+    last_outcome: null,
+  }
+
+  return {
+    ...base,
+    ...overrides,
+    decision: {
+      ...base.decision,
+      ...(overrides.decision ?? {}),
+    },
+    cascade: {
+      ...base.cascade,
+      ...(overrides.cascade ?? {}),
+    },
+    compaction: {
+      ...base.compaction,
+      ...(overrides.compaction ?? {}),
+    },
+    measurement: {
+      ...base.measurement,
+      ...(overrides.measurement ?? {}),
+    },
+    recovery: {
+      ...base.recovery,
+      ...(overrides.recovery ?? {}),
+    },
+    invariants: {
+      ...base.invariants,
+      ...(overrides.invariants ?? {}),
+    },
   }
 }
 
@@ -56,5 +114,79 @@ describe('fsm-hub derived state', () => {
       'Running',
       'Failing',
     ])
+  })
+
+  it('derives spec-drift insight from broken invariants', () => {
+    const result = deriveOperationalInsight(
+      snapshot({
+        phase: 'Compacting',
+        turn_phase: 'executing',
+        compaction: { stage: 'accumulating' },
+        invariants: {
+          phase_turn_alignment: false,
+          no_cascade_before_measurement: true,
+          compaction_atomicity: true,
+          event_priority_monotone: true,
+          recovery_two_store_sync: true,
+        },
+      }),
+      [observation({ ts: 10, phase: 'Compacting', turn: 'executing' })],
+      20,
+    )
+
+    expect(result.tone).toBe('error')
+    expect(result.headline).toContain('Spec drift')
+    expect(result.detail).toContain('KSM=Compacting')
+  })
+
+  it('interprets idle snapshots as stable placeholders, not live work', () => {
+    const result = deriveOperationalInsight(
+      snapshot({
+        is_live: false,
+        last_outcome: {
+          turn_id: 42,
+          ended_at: 75,
+        },
+      }),
+      [observation({ ts: 75 })],
+      100,
+    )
+
+    expect(result.tone).toBe('ok')
+    expect(result.headline).toContain('Idle snapshot')
+    expect(result.detail).toContain('25s ago')
+  })
+
+  it('marks long-running observed execution as stalled on screen', () => {
+    const lanes = deriveObservedLaneSummaries(
+      snapshot({
+        is_live: true,
+        turn_phase: 'executing',
+      }),
+      [observation({ ts: 10, turn: 'executing' })],
+      80,
+    )
+
+    expect(lanes.find(lane => lane.field === 'KTC')).toMatchObject({
+      tone: 'warn',
+      stalled: true,
+      value: 'executing',
+    })
+  })
+
+  it('keeps active compaction as compaction work before the stall threshold', () => {
+    const result = deriveOperationalInsight(
+      snapshot({
+        is_live: true,
+        phase: 'Compacting',
+        turn_phase: 'compacting',
+        compaction: { stage: 'compacting' },
+      }),
+      [observation({ ts: 10, phase: 'Compacting', turn: 'compacting', compaction: 'compacting' })],
+      20,
+    )
+
+    expect(result.tone).toBe('info')
+    expect(result.headline).toContain('Compaction currently owns the turn')
   })
 })

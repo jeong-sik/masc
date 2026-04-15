@@ -344,7 +344,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     namespaceTruthCounts: namespaceTruth.value?.namespace.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.namespace.configured_keepers,
     shellCounts: shellCounts.value,
+    shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
@@ -457,6 +459,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     : keeperFilter === 'agent-only'
       ? `일반 에이전트 ${expectedScopedCount}개`
       : `에이전트/키퍼 ${expectedScopedCount}개`
+  const configuredKeeperHint =
+    keeperFilter === 'agent-only' || runtimeCounts.configuredKeepers <= 0
+      ? null
+      : `설정된 keeper ${runtimeCounts.configuredKeepers}개`
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -467,8 +473,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     executionError.value
       ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 상세 상태 정보를 아직 가져오지 못했습니다.`
       : executionLoaded.value
-        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.`
-        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다. 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
+        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.${configuredKeeperHint ? ` ${configuredKeeperHint}.` : ''}`
+        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다.${configuredKeeperHint ? ` ${configuredKeeperHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
@@ -524,6 +530,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <p class="m-0 text-[12px] leading-[1.55] text-[var(--text-body)]">${fallbackStateMessage}</p>
                     <div class="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
                       <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">scope ${namespaceName}</span>
+                      ${configuredKeeperHint ? html`<span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
                       ${namespaceBasePath ? html`<code class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px]">${namespaceBasePath}</code>` : null}
                     </div>
                   </div>

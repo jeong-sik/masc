@@ -143,8 +143,10 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
             agents: asNumber(namespaceBlock.counts.agents),
             tasks: asNumber(namespaceBlock.counts.tasks),
             keepers: asNumber(namespaceBlock.counts.keepers),
+            total_runtimes: asNumber(namespaceBlock.counts.total_runtimes),
           }
         : undefined,
+      configured_keepers: asNumber(namespaceBlock.configured_keepers),
       provenance: asString(namespaceBlock.provenance) ?? null,
     },
     execution: {

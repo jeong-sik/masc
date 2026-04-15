@@ -390,7 +390,7 @@ let create_keeper env sw config name =
   | Some (false, err) -> fail err
   | None -> fail "missing masc_keeper_up dispatch"
 
-let test_dashboard_shell_counts_keepers () =
+let test_dashboard_shell_splits_active_and_configured_keepers () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -412,8 +412,10 @@ let test_dashboard_shell_counts_keepers () =
             let json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
             let open Yojson.Safe.Util in
             let counts = json |> member "counts" in
-            check int "shell keeper count from keeper meta" 2
-              (counts |> member "keepers" |> to_int))))
+            check int "shell active keeper count uses runtime" 0
+              (counts |> member "keepers" |> to_int);
+            check int "shell configured keeper inventory stays visible" 2
+              (json |> member "configured_keepers" |> to_int))))
 
 let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
   let dir = test_dir () in
@@ -442,8 +444,10 @@ let test_dashboard_shell_excludes_keeper_agents_from_general_count () =
             let counts = json |> member "counts" in
             check int "keeper-backed room has no general agents" 0
               (counts |> member "agents" |> to_int);
-            check int "keeper still counted" 1
-              (counts |> member "keepers" |> to_int))))
+            check int "stopped keeper is not counted as active" 0
+              (counts |> member "keepers" |> to_int);
+            check int "configured keeper inventory remains visible" 1
+              (json |> member "configured_keepers" |> to_int))))
 
 let test_dashboard_execution_fresh_join_not_marked_stale () =
   let dir = test_dir () in
@@ -593,8 +597,8 @@ let () =
             test_dashboard_shell_surfaces_workspace_when_different;
           Alcotest.test_case "shell includes meta cognition summary" `Quick
             test_dashboard_shell_includes_meta_cognition_summary;
-          Alcotest.test_case "shell counts keepers cheaply" `Quick
-            test_dashboard_shell_counts_keepers;
+          Alcotest.test_case "shell splits active and configured keepers" `Quick
+            test_dashboard_shell_splits_active_and_configured_keepers;
           Alcotest.test_case "shell excludes keeper agents from general count" `Quick
             test_dashboard_shell_excludes_keeper_agents_from_general_count;
           Alcotest.test_case "fresh join is not stale" `Quick

@@ -151,6 +151,12 @@ let test_dashboard_namespace_truth_empty_room () =
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);
+        check int "configured keepers default to zero"
+          0
+          (json |> member "namespace" |> member "configured_keepers" |> to_int);
+        check int "namespace counts expose total runtimes"
+          0
+          (json |> member "namespace" |> member "counts" |> member "total_runtimes" |> to_int);
         check string "focus source"
           "namespace"
           (json |> member "focus" |> member "source" |> to_string);

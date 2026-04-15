@@ -535,6 +535,21 @@ function StatusBar({
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
+  const brokenInvariants = snapshot
+    ? Object.entries(snapshot.invariants)
+        .filter(([_, ok]) => !ok)
+        .map(([k]) => k)
+    : []
+  const recoveryDrift = snapshot != null
+    && (snapshot.recovery.data_record !== snapshot.recovery.fsm_condition)
+  const hasAnomaly = brokenInvariants.length > 0 || recoveryDrift
+  const anomalyTitle = hasAnomaly
+    ? [
+        brokenInvariants.length > 0 ? `깨진 invariant: ${brokenInvariants.join(', ')}` : '',
+        recoveryDrift ? 'recovery 양 store 불일치' : '',
+      ].filter(Boolean).join(' · ')
+    : ''
+
   return html`
     <div class="sticky top-0 z-20 rounded-xl border border-[var(--white-8)] bg-[var(--panel-dark-60)] backdrop-blur-md px-4 py-2.5 shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
       <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -606,7 +621,9 @@ function StatusBar({
                   }
                 }}
               >
-                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}
+                ${i < 9 ? html`<span class="opacity-50 mr-0.5">${i + 1}</span>` : null}${name.replace(/^keeper-|-agent$/g, '')}${active && hasAnomaly ? html`
+                  <span class="ml-1 text-[#f87171]" title=${anomalyTitle} aria-label="이상 신호">⚠</span>
+                ` : null}
               </button>
             `
           })}

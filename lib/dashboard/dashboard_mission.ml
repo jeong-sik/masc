@@ -248,7 +248,7 @@ let _build_session_context session_json _cards =
         created_by = trim_to_option (string_field "created_by" meta);
         origin_kind = session_origin_kind meta;
         namespace =
-          (match trim_to_option (string_field "namespace_id" meta) with
+          (match trim_to_option (string_field "project" meta) with
            | Some _ as value -> value
            | None -> trim_to_option (string_field "room_id" meta));
         status;

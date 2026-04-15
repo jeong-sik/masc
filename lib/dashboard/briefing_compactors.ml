@@ -28,17 +28,17 @@ let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
   let room_matches session_json =
     match trim_to_option (Some current_namespace) with
     | None -> true
-    | Some namespace_id ->
+    | Some project ->
         let status_detail = member_assoc "status" session_json in
         let session_json = member_assoc "session" status_detail in
-        let session_namespace =
-          match trim_to_option (Some (string_field "namespace_id" session_json)) with
+        let session_project =
+          match trim_to_option (Some (string_field "project" session_json)) with
           | Some value -> value
           | None ->
               trim_to_option (Some (string_field "room_id" session_json))
               |> Option.value ~default:""
         in
-        String.equal namespace_id session_namespace
+        String.equal project session_project
   in
   sessions
   |> List.filter (fun session_json ->
@@ -112,10 +112,10 @@ let compact_session_json session_json =
     [
       ("session_id", string_json ~default:"unknown-session" (member_assoc "session_id" session_json));
       ("goal", string_json ~default:"unassigned" ~max_len:160 (member_assoc "goal" session));
-      ( "namespace_id",
-        match member_assoc "namespace_id" session with
-        | `Null -> string_json ~default:"unknown-namespace" (member_assoc "room_id" session)
-        | value -> string_json ~default:"unknown-namespace" value );
+      ( "project",
+        match member_assoc "project" session with
+        | `Null -> string_json ~default:"default" (member_assoc "room_id" session)
+        | value -> string_json ~default:"default" value );
       ("status", string_json ~default:"unknown" (member_assoc "status" session));
       ("agent_names", string_list_json (member_assoc "agent_names" session));
       ("elapsed_sec", int_json (member_assoc "elapsed_sec" summary));

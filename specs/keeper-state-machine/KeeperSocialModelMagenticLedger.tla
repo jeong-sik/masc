@@ -79,25 +79,38 @@ ClassifyTypeOK ==
 StalledNeedsGoalOrFailure ==
     phase = "stalled" => has_active_goals \/ failure_observed
 
+ProgressDominatesAction ==
+    (has_progress_evidence' /\ ~failure_observed') => phase' = "advancing"
+
+ReactiveDominatesIdleTimeoutAction ==
+    (~failure_observed' /\ ~has_progress_evidence' /\ has_reactive_signal')
+    => phase' = "reactive"
+
+StalledStickyWithGoalAction ==
+    (phase = "stalled"
+     /\ ~has_progress_evidence'
+     /\ ~has_reactive_signal'
+     /\ has_active_goals'
+     /\ ~failure_observed')
+    => phase' = "stalled"
+
+QuietWhenNoDriversAction ==
+    (~has_progress_evidence'
+     /\ ~has_reactive_signal'
+     /\ ~has_active_goals'
+     /\ ~failure_observed')
+    => phase' = "quiet"
+
 ProgressDominates ==
-    [](has_progress_evidence' => phase' = "advancing")
+    [][ProgressDominatesAction]_vars
 
 ReactiveDominatesIdleTimeout ==
-    []((~has_progress_evidence' /\ has_reactive_signal') => phase' = "reactive")
+    [][ReactiveDominatesIdleTimeoutAction]_vars
 
 StalledStickyWithGoal ==
-    []((phase = "stalled"
-        /\ ~has_progress_evidence'
-        /\ ~has_reactive_signal'
-        /\ has_active_goals'
-        /\ ~failure_observed')
-       => phase' = "stalled")
+    [][StalledStickyWithGoalAction]_vars
 
 QuietWhenNoDrivers ==
-    []((~has_progress_evidence'
-        /\ ~has_reactive_signal'
-        /\ ~has_active_goals'
-        /\ ~failure_observed')
-       => phase' = "quiet")
+    [][QuietWhenNoDriversAction]_vars
 
 =============================================================================

@@ -170,9 +170,9 @@ let execute_keeper_tool_call
     | "keeper_pr_workflow" -> Keeper_tool_pr_workflow.handle_keeper_pr_workflow ~config ~meta ~args
     | "keeper_pr_submit" -> Keeper_tool_pr_submit.handle_keeper_pr_submit ~config ~meta ~args
     | "keeper_preflight_check" -> Keeper_exec_preflight.handle_keeper_preflight_check ~config ~meta ~args
-    | "keeper_pr_review_read" -> Keeper_exec_github.handle_keeper_pr_review_read ~config ~meta ~args
-    | "keeper_pr_review_comment" -> Keeper_exec_github.handle_keeper_pr_review_comment ~config ~meta ~args
-    | "keeper_pr_review_reply" -> Keeper_exec_github.handle_keeper_pr_review_reply ~config ~meta ~args
+    | "keeper_pr_review_read" -> Keeper_tool_pr_review.handle_keeper_pr_review_read ~config ~meta ~args
+    | "keeper_pr_review_comment" -> Keeper_tool_pr_review.handle_keeper_pr_review_comment ~config ~meta ~args
+    | "keeper_pr_review_reply" -> Keeper_tool_pr_review.handle_keeper_pr_review_reply ~config ~meta ~args
     | "keeper_tasks_list"
     | "keeper_tasks_audit"
     | "keeper_task_force_release"

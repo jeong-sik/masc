@@ -1,9 +1,9 @@
 (** Room State - Foundation state management functions.
 
     Contains: state read/write/update, backlog management, broadcast,
-    agent name resolution, room bootstrap, and zombie detection helpers.
+    agent name resolution, and zombie detection helpers.
 
-    Extracted from room.ml to enable Room_gc, Room_vote, and other
+    Extracted from room.ml to enable Room_gc and other
     sub-modules to access these without circular dependencies. *)
 
 open Types
@@ -13,23 +13,7 @@ open Room_utils
 (* State Read / Write / Update                  *)
 (* ============================================ *)
 
-let default_room_state config = {
-  protocol_version = "0.1.0";
-  project = Filename.basename config.base_path;
-  started_at = now_iso ();
-  message_seq = 0;
-  active_agents = [];
-  paused = false;
-  pause_reason = None;
-  paused_by = None;
-  paused_at = None;
-  search_strategy_default = Some "best_first_v1";
-  speculation_enabled = false;
-  speculation_budget = None;
-}
-
-(* default_namespace_id removed — namespace concept retired (#unify-namespace).
-   All coordination uses a single basepath-scoped identity. *)
+let default_room_state = Room_bootstrap.default_room_state
 
 let non_empty_string_opt = function
   | Some value ->
@@ -392,46 +376,7 @@ let resolve_agent_name config agent_name =
       agent_name
   end
 
-(* ============================================ *)
-(* Room Bootstrap                               *)
-(* ============================================ *)
-
-let ensure_room_bootstrap config =
-  (* 1. Always ensure root infrastructure exists *)
-  let root_dir = masc_root_dir config in
-  let root_agents_dir = Filename.concat root_dir "agents" in
-  let root_keepers_dir = Filename.concat root_dir "keepers" in
-  let root_traces_dir = Filename.concat root_dir "traces" in
-  let root_tasks_dir = Filename.concat root_dir "tasks" in
-  let root_messages_dir = Filename.concat root_dir "messages" in
-  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
-  List.iter mkdir_p
-    [
-      root_agents_dir;
-      root_keepers_dir;
-      root_traces_dir;
-      root_tasks_dir;
-      root_messages_dir;
-    ];
-  if not (path_exists_root config (root_state_path config)) then
-    write_json_root config (root_state_path config)
-      (room_state_to_yojson (default_room_state config));
-  if not (path_exists_root config root_backlog_path) then
-    write_json_root config root_backlog_path
-      (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 });
-
-  (* 2. Bootstrap scoped dirs — single namespace since #4638 *)
-  let scoped_agents = agents_dir config in
-  let scoped_tasks = tasks_dir config in
-  let scoped_messages = messages_dir config in
-  let scoped_state = state_path config in
-  let scoped_backlog = backlog_path config in
-  List.iter mkdir_p [ masc_dir config; scoped_agents; scoped_tasks; scoped_messages ];
-  if not (path_exists config scoped_state) then
-    write_json config scoped_state (room_state_to_yojson (default_room_state config));
-  if not (path_exists config scoped_backlog) then
-    write_json config scoped_backlog
-      (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })
+let ensure_room_bootstrap = Room_bootstrap.ensure_room_bootstrap
 
 let broadcast_channel config =
   Printf.sprintf "broadcast:%s:default" (project_prefix config)

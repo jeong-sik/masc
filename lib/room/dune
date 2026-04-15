@@ -4,7 +4,7 @@
  (public_name masc_mcp.masc_room)
  (wrapped false)
  (modules
-  ;; Original modules (backward compat)
+  room_bootstrap
   room_hooks
   room_utils_backend_setup
   room_utils

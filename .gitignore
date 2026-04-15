@@ -106,4 +106,17 @@ config/personas/uranium666
 /scripts/changelog_unreleased.txt
 /specs/bug-models/*_TTrace_*.bin
 
+# Operator-local scratch (PR/CR dumps, temp edits)
+pr_*.json
+cr_*.txt
+comments_*.txt
+all_comments_*.txt
+tmp_edit/
+
+# Runtime data directories (not source)
+data/economy/
+data/harness-pre-compact/
+data/verdicts/
+memory/
+
 # End of .gitignore

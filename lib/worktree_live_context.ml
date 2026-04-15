@@ -31,56 +31,11 @@ let repo_root_for ~base_path =
       if root = "" then None else Some root
   | _ -> None
 
-(** Paths that pollute cross-keeper evidence with operator-local dirty state.
-    These are never meaningfully "modified by a keeper turn" — they are
-    operator-local artifacts (runtime data dumps, handoff notes, temp
-    scratch, CI build tmp) that sit in the main repo root. Without this
-    filter, every keeper's evidence turn recorded the entire polluted
-    working tree as its own modifications, firing 34+ false-positive
-    cross-keeper collision warnings per evidence capture. *)
-let evidence_excluded_path_substrings =
-  [ ".masc/"
-  ; "data/"
-  ; "memory/"
-  ; "tmp_edit"
-  ; ".ci_"
-  ; "node_modules/"
-  ; "package-lock.json"
-  ]
-
-(** File-name patterns (root-level operator junk) that never belong to a
-    keeper turn: PR/issue dumps, CR snapshot files, comment snapshots. *)
-let evidence_excluded_filename_prefixes =
-  [ "pr_"; "cr_"; "comments_"; "all_comments_" ]
-
-(** Strip the leading `XY ` porcelain status prefix from a status line.
-    `git status --porcelain` emits lines like ` M lib/foo.ml`, `?? data/`,
-    `R  old -> new`. After trimming leading whitespace we still carry
-    e.g. `M sample.ml` or `?? pr_430.json` — the filename starts after
-    the first space in the trimmed line. *)
-let path_after_porcelain_prefix trimmed_line =
-  match String.index_opt trimmed_line ' ' with
-  | Some idx when idx + 1 < String.length trimmed_line ->
-      String.sub trimmed_line (idx + 1) (String.length trimmed_line - idx - 1)
-  | _ -> trimmed_line
-
-let path_is_operator_noise trimmed_line =
-  let path = path_after_porcelain_prefix trimmed_line in
-  let contains_substring text ~substring =
-    String_util.contains_substring text substring
-  in
-  let starts_with_prefix prefix = String.starts_with ~prefix path in
-  List.exists
-    (fun substring -> contains_substring path ~substring)
-    evidence_excluded_path_substrings
-  || List.exists starts_with_prefix evidence_excluded_filename_prefixes
-
 let current_status_lines ~repo_root =
   run_git_capture_lines ~workdir:repo_root [ "status"; "--porcelain" ]
   |> Option.value ~default:[]
   |> List.map String.trim
   |> List.filter (fun line -> line <> "")
-  |> List.filter (fun line -> not (path_is_operator_noise line))
 
 let state_dir ~repo_root =
   Filename.concat (Filename.concat repo_root ".masc") "live-context"

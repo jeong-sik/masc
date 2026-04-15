@@ -157,6 +157,13 @@ let apply_post_turn_lifecycle
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in
+          let compacted_ctx =
+            {
+              compacted_ctx with
+              messages =
+                repair_orphan_tool_result_messages compacted_ctx.messages;
+            }
+          in
           (match save_oas_checkpoint
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                ~session
@@ -292,7 +299,7 @@ let recover_latest_checkpoint_for_overflow_retry
     Result.to_option oas_result
     |> Option.map (fun checkpoint ->
       let sanitized, stats =
-        sanitize_oas_checkpoint checkpoint
+        sanitize_oas_checkpoint ~repair_orphans:false checkpoint
       in
       if checkpoint_sanitize_changed stats then begin
         Log.Keeper.warn
@@ -335,6 +342,7 @@ let recover_latest_checkpoint_for_overflow_retry
         in
         Some
           ( context_of_oas_checkpoint
+              ~repair_orphans:false
               ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
               checkpoint
               ~primary_model_max_tokens,
@@ -359,6 +367,7 @@ let recover_latest_checkpoint_for_overflow_retry
                   in
                   Some
                     ( context_of_oas_checkpoint
+                        ~repair_orphans:false
                         ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
                         checkpoint
                         ~primary_model_max_tokens,
@@ -398,6 +407,13 @@ let recover_latest_checkpoint_for_overflow_retry
             before_tokens;
             after_tokens;
             saved_tokens = max 0 (before_tokens - after_tokens);
+          }
+        in
+        let compacted_ctx =
+          {
+            compacted_ctx with
+            messages =
+              repair_orphan_tool_result_messages compacted_ctx.messages;
           }
         in
         try

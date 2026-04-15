@@ -41,27 +41,10 @@ let allowed_shell_commands = [
 ]
 
 let validate_code_shell_command (command : string) : (unit, string) result =
-  let trimmed = String.trim command in
-  if trimmed = "" then Error "command must not be empty"
-  else if Worker_dev_tools.contains_forbidden_shell_chars_coding trimmed then
-    Error "Shell injection syntax (;, &&, standalone &, `, $) not allowed."
-  else if Worker_dev_tools.has_process_substitution trimmed then
-    Error "Process substitution (<(...) or >(...)) is not allowed."
-  else if Worker_dev_tools.has_unsafe_redirection trimmed then
-    Error "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
-  else
-    match Worker_dev_tools.split_pipeline_segments trimmed with
-    | Error _ as err -> err
-    | Ok [_segment] -> (
-        match Worker_dev_tools.extract_command_name trimmed with
-        | None -> Error "command must not be empty"
-        | Some name when List.mem name allowed_shell_commands -> Ok ()
-        | Some name ->
-            Error
-              (Printf.sprintf "Command '%s' not in allowlist: %s"
-                 name (String.concat ", " allowed_shell_commands)))
-    | Ok _ ->
-        Error "Pipes are not allowed in masc_code_shell. Run one command per call."
+  Worker_dev_tools.validate_command_coding_with_allowlist
+    ~allow_pipes:false
+    ~allowed_commands:allowed_shell_commands
+    command
 
 let git_common_root path =
   try

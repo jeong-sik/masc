@@ -97,6 +97,7 @@ let maybe_rollover_oas_handoff
   | Some cp ->
       let ctx =
         context_of_oas_checkpoint
+          ~repair_orphans:false
           ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           cp
           ~primary_model_max_tokens
@@ -147,11 +148,18 @@ let maybe_rollover_oas_handoff
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir
           in
+          let save_ctx =
+            {
+              ctx with
+              messages =
+                repair_orphan_tool_result_messages ctx.messages;
+            }
+          in
           match save_oas_checkpoint
                   ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                   ~session:new_session
                   ~agent_name:base_meta.agent_name
-                  ~model ~ctx ~generation:next_generation with
+                  ~model ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
               Log.Keeper.error
                 "keeper:%s OAS handoff rollover ABORTED — checkpoint save failed: %s"

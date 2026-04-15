@@ -193,6 +193,9 @@ let test_observer_gate_rejected_finalizes_turn () =
   let name = "obs-gate-rejected" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
   Reg.mark_turn_started ~base_path:test_obs_bp name;
+  Reg.set_turn_decision_stage
+    ~base_path:test_obs_bp name Reg.Decision_tool_policy_selected;
+  Reg.set_turn_cascade_state ~base_path:test_obs_bp name Reg.Cascade_trying;
   Reg.mark_turn_gate_rejected_by_name name;
   match Reg.get ~base_path:test_obs_bp name with
   | None -> Alcotest.fail "entry missing after gate rejection"
@@ -201,7 +204,9 @@ let test_observer_gate_rejected_finalizes_turn () =
       check string "gate rejection moves turn to finalizing"
         "finalizing" (Obs.turn_phase_to_string snap.ktc_turn_phase);
       check string "gate rejection records decision stage"
-        "gate_rejected" (Obs.decision_stage_to_string snap.kdp_decision)
+        "gate_rejected" (Obs.decision_stage_to_string snap.kdp_decision);
+      check string "gate rejection preserves in-flight trying edge"
+        "trying" (Obs.cascade_state_to_string snap.kcl_cascade_state)
 
 let test_observer_finished_idempotent () =
   Eio_main.run @@ fun _env ->

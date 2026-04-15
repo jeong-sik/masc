@@ -11,6 +11,7 @@ type tla_action =
   | Action_bind_measurement
   | Action_guard_ok
   | Action_select_tool_policy
+  | Action_cascade_trying
   | Action_gate_rejected
   | Action_retry_after_compaction
   | Action_finish_turn
@@ -20,7 +21,7 @@ type invariant_key =
   | Inv_idle_requires_undecided
   | Inv_guard_ok_requires_measurement
   | Inv_gate_rejected_requires_finalizing
-  | Inv_non_idle_cascade_requires_tool_policy
+  | Inv_non_idle_cascade_requires_decision_boundary
   | Inv_selecting_requires_prompting
 
 val all_tla_actions : tla_action list

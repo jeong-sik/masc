@@ -3,6 +3,7 @@ type tla_action =
   | Action_bind_measurement
   | Action_guard_ok
   | Action_select_tool_policy
+  | Action_cascade_trying
   | Action_gate_rejected
   | Action_retry_after_compaction
   | Action_finish_turn
@@ -13,6 +14,7 @@ let all_tla_actions =
     Action_bind_measurement;
     Action_guard_ok;
     Action_select_tool_policy;
+    Action_cascade_trying;
     Action_gate_rejected;
     Action_retry_after_compaction;
     Action_finish_turn;
@@ -23,6 +25,7 @@ let tla_action_to_string = function
   | Action_bind_measurement -> "BindMeasurement"
   | Action_guard_ok -> "GuardOk"
   | Action_select_tool_policy -> "SelectToolPolicy"
+  | Action_cascade_trying -> "CascadeTrying"
   | Action_gate_rejected -> "GateRejected"
   | Action_retry_after_compaction -> "RetryAfterCompaction"
   | Action_finish_turn -> "FinishTurn"
@@ -32,6 +35,7 @@ let tla_action_of_string = function
   | "BindMeasurement" -> Some Action_bind_measurement
   | "GuardOk" -> Some Action_guard_ok
   | "SelectToolPolicy" -> Some Action_select_tool_policy
+  | "CascadeTrying" -> Some Action_cascade_trying
   | "GateRejected" -> Some Action_gate_rejected
   | "RetryAfterCompaction" -> Some Action_retry_after_compaction
   | "FinishTurn" -> Some Action_finish_turn
@@ -42,7 +46,7 @@ type invariant_key =
   | Inv_idle_requires_undecided
   | Inv_guard_ok_requires_measurement
   | Inv_gate_rejected_requires_finalizing
-  | Inv_non_idle_cascade_requires_tool_policy
+  | Inv_non_idle_cascade_requires_decision_boundary
   | Inv_selecting_requires_prompting
 
 let all_invariant_keys =
@@ -51,7 +55,7 @@ let all_invariant_keys =
     Inv_idle_requires_undecided;
     Inv_guard_ok_requires_measurement;
     Inv_gate_rejected_requires_finalizing;
-    Inv_non_idle_cascade_requires_tool_policy;
+    Inv_non_idle_cascade_requires_decision_boundary;
     Inv_selecting_requires_prompting;
   ]
 
@@ -60,8 +64,8 @@ let invariant_key_to_string = function
   | Inv_idle_requires_undecided -> "IdleRequiresUndecided"
   | Inv_guard_ok_requires_measurement -> "GuardOkRequiresMeasurement"
   | Inv_gate_rejected_requires_finalizing -> "GateRejectedRequiresFinalizing"
-  | Inv_non_idle_cascade_requires_tool_policy ->
-      "NonIdleCascadeRequiresToolPolicy"
+  | Inv_non_idle_cascade_requires_decision_boundary ->
+      "NonIdleCascadeRequiresDecisionBoundary"
   | Inv_selecting_requires_prompting -> "SelectingRequiresPrompting"
 
 let invariant_key_of_string = function
@@ -70,7 +74,7 @@ let invariant_key_of_string = function
   | "GuardOkRequiresMeasurement" -> Some Inv_guard_ok_requires_measurement
   | "GateRejectedRequiresFinalizing" ->
       Some Inv_gate_rejected_requires_finalizing
-  | "NonIdleCascadeRequiresToolPolicy" ->
-      Some Inv_non_idle_cascade_requires_tool_policy
+  | "NonIdleCascadeRequiresDecisionBoundary" ->
+      Some Inv_non_idle_cascade_requires_decision_boundary
   | "SelectingRequiresPrompting" -> Some Inv_selecting_requires_prompting
   | _ -> None

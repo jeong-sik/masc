@@ -31,6 +31,7 @@ ActionSet    == {
     "BindMeasurement",
     "GuardOk",
     "SelectToolPolicy",
+    "CascadeTrying",
     "GateRejected",
     "RetryAfterCompaction",
     "FinishTurn"
@@ -40,7 +41,7 @@ InvariantSet == {
     "IdleRequiresUndecided",
     "GuardOkRequiresMeasurement",
     "GateRejectedRequiresFinalizing",
-    "NonIdleCascadeRequiresToolPolicy",
+    "NonIdleCascadeRequiresDecisionBoundary",
     "SelectingRequiresPrompting"
 }
 
@@ -69,6 +70,8 @@ StartTurn ==
 BindMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
+    /\ decision_stage = "undecided"
+    /\ cascade_state = "idle"
     /\ ~measurement_bound
     /\ measurement_bound' = TRUE
     /\ UNCHANGED <<turn_live, turn_phase, decision_stage, cascade_state>>
@@ -91,11 +94,23 @@ SelectToolPolicy ==
     /\ cascade_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
 
-\* Guards can short-circuit while the turn is still in prompting.
-GateRejected ==
+\* Entering the provider attempt preserves the decision stage but advances the
+\* cascade lane into the live trying state.
+CascadeTrying ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ decision_stage \in {"undecided", "guard_ok", "tool_policy_selected"}
+    /\ decision_stage = "tool_policy_selected"
+    /\ cascade_state = "selecting"
+    /\ turn_phase' = "executing"
+    /\ cascade_state' = "trying"
+    /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
+
+\* Guards short-circuit during pre_tool_use while the live attempt is trying.
+GateRejected ==
+    /\ turn_live
+    /\ turn_phase = "executing"
+    /\ decision_stage = "tool_policy_selected"
+    /\ cascade_state = "trying"
     /\ turn_phase' = "finalizing"
     /\ decision_stage' = "gate_rejected"
     /\ UNCHANGED <<turn_live, cascade_state, measurement_bound>>
@@ -124,6 +139,7 @@ Next ==
     \/ BindMeasurement
     \/ GuardOk
     \/ SelectToolPolicy
+    \/ CascadeTrying
     \/ GateRejected
     \/ RetryAfterCompaction
     \/ FinishTurn
@@ -153,9 +169,10 @@ GateRejectedRequiresFinalizing ==
         /\ turn_live
         /\ turn_phase = "finalizing"
 
-NonIdleCascadeRequiresToolPolicy ==
+NonIdleCascadeRequiresDecisionBoundary ==
     cascade_state \in {"selecting", "trying", "done", "exhausted"} =>
-        decision_stage = "tool_policy_selected"
+        /\ turn_live
+        /\ decision_stage \in {"tool_policy_selected", "gate_rejected"}
 
 SelectingRequiresPrompting ==
     cascade_state = "selecting" =>
@@ -168,7 +185,7 @@ Safety ==
     /\ IdleRequiresUndecided
     /\ GuardOkRequiresMeasurement
     /\ GateRejectedRequiresFinalizing
-    /\ NonIdleCascadeRequiresToolPolicy
+    /\ NonIdleCascadeRequiresDecisionBoundary
     /\ SelectingRequiresPrompting
 
 DecisionEventuallyClears ==

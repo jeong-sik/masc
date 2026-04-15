@@ -92,6 +92,8 @@ StartTurn ==
 BindMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
+    /\ decision_stage = "undecided"
+    /\ cascade_state = "idle"
     /\ ~measurement_bound
     /\ measurement_bound' = TRUE
     /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
@@ -119,13 +121,14 @@ SelectToolPolicy ==
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound,
                     selected_model_bound>>
 
-\* keeper_guards.ml: override/approval_required short-circuits the turn.
-\* The runtime leaves cascade_state as-is (usually idle or selecting).
+\* keeper_guards.ml: override/approval_required short-circuits during the live
+\* pre_tool_use attempt. The runtime preserves the current trying edge and only
+\* moves the turn into finalizing.
 GateRejected ==
     /\ turn_live
-    /\ turn_phase = "prompting"
-    /\ decision_stage \in {"undecided", "guard_ok", "tool_policy_selected"}
-    /\ cascade_state \in {"idle", "selecting"}
+    /\ turn_phase = "executing"
+    /\ decision_stage = "tool_policy_selected"
+    /\ cascade_state = "trying"
     /\ turn_phase' = "finalizing"
     /\ decision_stage' = "gate_rejected"
     /\ UNCHANGED <<turn_live, cascade_state, measurement_bound,

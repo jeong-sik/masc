@@ -556,6 +556,12 @@
    (run %{test})))
  (libraries masc_test_deps))
 
+; ── Tool_name variant roundtrip + coverage ──────────────
+(test
+ (name test_tool_name)
+ (modules test_tool_name)
+ (libraries masc_test_deps))
+
 ; ── Core Triad: State x Decision x Cascade ──────────────
 (test
  (name test_keeper_cascade_routing)

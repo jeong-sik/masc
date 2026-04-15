@@ -137,7 +137,9 @@ function MissionLoaded({ mission }: { mission: NonNullable<typeof missionSnapsho
   }
 
   useEffect(() => {
-    void refreshMissionSessionDetail(activeSessionId)
+    const controller = new AbortController()
+    void refreshMissionSessionDetail(activeSessionId, { signal: controller.signal })
+    return () => { controller.abort() }
   }, [activeSessionId])
 
   return html`

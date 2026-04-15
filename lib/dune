@@ -361,6 +361,7 @@
    keeper_execution_scope
    keeper_social_model_types
    keeper_social_model_protocol
+   keeper_social_model_magentic_ledger_fsm
    keeper_social_model_bdi_speech_v1
    keeper_social_model_magentic_ledger_v1
    keeper_social_model_registry

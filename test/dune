@@ -107,6 +107,7 @@
         test_tool_prefilter
         test_keeper_state_machine
         test_keeper_campaign_fsm
+        test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_telemetry_unified
         test_keeper_topk_llm
@@ -193,6 +194,7 @@
           test_tool_prefilter
           test_keeper_state_machine
           test_keeper_campaign_fsm
+          test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
             test_telemetry_unified
           test_keeper_topk_llm

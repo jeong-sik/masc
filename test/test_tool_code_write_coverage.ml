@@ -177,35 +177,31 @@ let test_mixed_case_org () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/Jeong-Sik/repo.git")
 
-(* ── masked_build_pipeline_reason ─────────────────────────────────── *)
+(* ── validate_code_shell_command ─────────────────────────────────── *)
 
-let test_masked_build_pipeline_rejected () =
-  let reason_contains needle haystack =
-    let hlen = String.length haystack in
-    let nlen = String.length needle in
-    let rec loop i =
-      if i + nlen > hlen then false
-      else if String.sub haystack i nlen = needle then true
-      else loop (i + 1)
-    in
-    if nlen = 0 then true else loop 0
-  in
+let test_validate_code_shell_command_rejects_pipe () =
   match
-    Tool_code_write.masked_build_pipeline_reason
+    Tool_code_write.validate_code_shell_command
       "dune build 2>&1 | tail -5"
   with
-  | Some reason ->
-      check bool "reason mentions piping" true
-        (reason_contains "Do not pipe" reason)
-  | None -> fail "expected build pipeline to be rejected"
+  | Error reason ->
+      check bool "reason mentions pipe restriction" true
+        (String.starts_with ~prefix:"Pipes are not allowed" reason)
+  | Ok () -> fail "expected piped command to be rejected"
 
-let test_masked_build_pipeline_allows_direct_build () =
-  check (option string) "direct build allowed" None
-    (Tool_code_write.masked_build_pipeline_reason "dune build 2>&1")
+let test_validate_code_shell_command_allows_direct_build () =
+  check (result unit string) "direct build allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "dune build 2>&1")
 
-let test_masked_build_pipeline_allows_non_build_pipe () =
-  check (option string) "non-build pipe allowed" None
-    (Tool_code_write.masked_build_pipeline_reason "git diff | tail -5")
+let test_validate_code_shell_command_rejects_semicolon () =
+  match
+    Tool_code_write.validate_code_shell_command
+      "dune build; tail -5"
+  with
+  | Error reason ->
+      check bool "reason mentions shell injection" true
+        (String.starts_with ~prefix:"Shell injection syntax" reason)
+  | Ok () -> fail "expected semicolon chaining to be rejected"
 
 (* ── Per-agent containment (#6527 iter 6) ───────────────────────────
    Regression tests for PR #6610 — verify that validate_writable_path
@@ -384,13 +380,13 @@ let () =
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
     ]);
-    ("masked_build_pipeline_reason", [
-      test_case "rejects build pipeline" `Quick
-        test_masked_build_pipeline_rejected;
+    ("validate_code_shell_command", [
+      test_case "rejects pipe" `Quick
+        test_validate_code_shell_command_rejects_pipe;
       test_case "allows direct build" `Quick
-        test_masked_build_pipeline_allows_direct_build;
-      test_case "allows non-build pipe" `Quick
-        test_masked_build_pipeline_allows_non_build_pipe;
+        test_validate_code_shell_command_allows_direct_build;
+      test_case "rejects semicolon" `Quick
+        test_validate_code_shell_command_rejects_semicolon;
     ]);
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick

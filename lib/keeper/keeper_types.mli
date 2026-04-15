@@ -135,7 +135,7 @@ type keeper_meta = {
   desires: string;
   instructions: string;
   policy_voice_enabled: bool;
-  execution_scope: string;
+  execution_scope: Keeper_execution_scope.t;
   allowed_paths: string list;
   tool_access: tool_access;
   tool_denylist: string list;

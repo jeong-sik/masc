@@ -91,7 +91,7 @@ let validate_name name =
   let re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile in
   name <> "" && Re.execp re name
 
-let default_execution_scope = "workspace"
+let default_execution_scope = Keeper_execution_scope.Workspace
 let default_proactive_enabled = true
 let default_proactive_idle_sec = 120
 let default_proactive_cooldown_sec = 300

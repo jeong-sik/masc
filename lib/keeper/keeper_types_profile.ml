@@ -139,7 +139,7 @@ type keeper_profile_defaults = {
   room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
-  execution_scope : string option;
+  execution_scope : Keeper_execution_scope.t option;
   tool_preset : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
@@ -310,7 +310,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         allowed_paths =
           if has "allowed_paths" then Some (strs "allowed_paths")
           else None;
-        execution_scope = str "execution_scope";
+        execution_scope =
+          Option.map Keeper_execution_scope.of_string_lossy
+            (str "execution_scope");
         tool_preset =
           (match str "tool_preset" with
            | None -> None
@@ -430,7 +432,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 (* Persona profiles are not allowed to own execution allowlists.
                    Keep these in keeper TOML / runtime config only. *)
                 allowed_paths = None;
-                execution_scope = Safe_ops.json_string_opt "execution_scope" keeper_json;
+                execution_scope =
+                  Option.map Keeper_execution_scope.of_string_lossy
+                    (Safe_ops.json_string_opt "execution_scope" keeper_json);
                 tool_preset =
                   (match Safe_ops.json_string_opt "tool_preset" keeper_json with
                   | None -> None

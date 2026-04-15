@@ -17,7 +17,7 @@ type parsed_args = {
   policy_voice_enabled_opt : bool option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
-  execution_scope_opt : string option;
+  execution_scope_opt : Keeper_execution_scope.t option;
   voice_enabled_opt : bool option;
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
@@ -189,7 +189,15 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let policy_voice_enabled_opt = get_bool_opt args "policy_voice_enabled" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
-    let execution_scope_opt = get_string_opt args "execution_scope" in
+    let execution_scope_opt =
+      get_string_opt args "execution_scope"
+      |> Option.map (fun s ->
+        match Keeper_execution_scope.of_string s with
+        | Ok v -> v
+        | Error (`Unknown_scope raw) ->
+          Log.Keeper.warn "keeper_up: unknown execution_scope %S, using default" raw;
+          Keeper_execution_scope.default)
+    in
     let voice_enabled_opt = get_bool_opt args "voice_enabled" in
     let voice_channel_opt = get_string_opt args "voice_channel" in
     let voice_agent_id_opt = get_string_opt args "voice_agent_id" in

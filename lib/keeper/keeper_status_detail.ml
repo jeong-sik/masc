@@ -1063,7 +1063,7 @@ let handle_keeper_status ctx args : tool_result =
            "execution_context", `Assoc [
              ("playground_path", `String playground_rel);
              ("default_cwd", `String playground_abs);
-             ("execution_scope", `String m.execution_scope);
+             ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
                let cache_path = Filename.concat playground_abs

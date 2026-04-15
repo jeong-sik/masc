@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-16
+
+### Changed
+
+- **B3c Python sidecar migration complete**. All four Python sidecars
+  (`discord-bot`, `imessage-bot`, `slack-bot`, `telegram-bot`) now
+  default to `.gate/runtime/<kind>/*` and share the same 1-tier legacy
+  read-fallback pattern. Pre-v0.9.0 `bindings.json` auto-discovered on
+  first startup; next save writes to the new default (#7477 iMessage,
+  #7478 Slack, #7479 Telegram). Discord already migrated in v0.9.1.
+
+### Fixed
+
+- **Release workflow GitHub Action pinned**. `ocaml/setup-ocaml@v3`
+  floating tag regressed between v0.9.0 (2026-04-15) and v0.9.1
+  (2026-04-16) — opam binary resolution fails on `ubuntu-latest` + `x86_64`.
+  Pinned to `ocaml/setup-ocaml@v3.6.0` (latest release as of 2026-03-30)
+  across `release.yml`, `webrtc-live-interop.yml`, `deploy-railway.yml`.
+  Closes #7475.
+
 ## [0.9.1] - 2026-04-16
 
 ### Changed

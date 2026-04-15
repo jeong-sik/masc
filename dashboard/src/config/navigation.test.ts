@@ -23,21 +23,17 @@ describe('lab navigation', () => {
 })
 
 describe('command navigation', () => {
-  it('includes inspector alongside operations (consolidated) and connectors', () => {
+  it('has only operations section (Phase 6: connectors+inspector absorbed as sub-views)', () => {
     expect(defaultParamsForTab('command')).toEqual({ section: 'operations' })
 
     const commandSections = visibleSectionItemsForTab('command')
 
     expect(commandSections.map(item => item.id)).toEqual([
       'operations',
-      'connectors',
-      'inspector',
     ])
 
     expect(commandSections.map(item => item.label)).toEqual([
       '운영 행동',
-      '커넥터',
-      '운영 인스펙터',
     ])
   })
 })
@@ -225,5 +221,17 @@ describe('consolidation redirects (Phase 1)', () => {
   it('workspace:goals → planning', () => {
     const result = normalizeRouteParams('workspace', { section: 'goals' })
     expect(result.section).toBe('planning')
+  })
+
+  it('command:connectors → operations?view=connectors (Phase 6)', () => {
+    const result = normalizeRouteParams('command', { section: 'connectors' })
+    expect(result.section).toBe('operations')
+    expect(result.view).toBe('connectors')
+  })
+
+  it('command:inspector → operations?view=inspector (Phase 6)', () => {
+    const result = normalizeRouteParams('command', { section: 'inspector' })
+    expect(result.section).toBe('operations')
+    expect(result.view).toBe('inspector')
   })
 })

@@ -70,7 +70,7 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       return ['namespaceTruth', 'missionSnapshot']
     case 'command':
-      if (routeState.params.section === 'inspector') {
+      if (routeState.params.view === 'inspector') {
         return ['inspector']
       }
       return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']

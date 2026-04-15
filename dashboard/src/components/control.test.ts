@@ -51,7 +51,7 @@ describe('Operations control surface', () => {
     vi.doUnmock('./lab-inspector')
   })
 
-  it('renders both Ops and Governance by default when section is not set (falls back to operations)', async () => {
+  it('renders both Ops and Governance by default when section is not set', async () => {
     route.value.params = {}
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)
@@ -62,7 +62,7 @@ describe('Operations control surface', () => {
     expect(container.textContent).not.toContain('Connectors')
   })
 
-  it('renders both Ops and Governance when section is operations (Phase 1 consolidated)', async () => {
+  it('renders both Ops and Governance when section is operations', async () => {
     route.value.params = { section: 'operations' }
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)
@@ -72,8 +72,8 @@ describe('Operations control surface', () => {
     expect(container.textContent).toContain('Governance')
   })
 
-  it('renders ConnectorStatusPanel when section is connectors', async () => {
-    route.value.params = { section: 'connectors' }
+  it('renders ConnectorStatusPanel when view is connectors (Phase 6)', async () => {
+    route.value.params = { section: 'operations', view: 'connectors' }
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)
     await flushUi()
@@ -83,8 +83,8 @@ describe('Operations control surface', () => {
     expect(container.textContent).not.toContain('Governance')
   })
 
-  it('renders LabInspector when section is inspector', async () => {
-    route.value.params = { section: 'inspector' }
+  it('renders LabInspector when view is inspector (Phase 6)', async () => {
+    route.value.params = { section: 'operations', view: 'inspector' }
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)
     await flushUi()
@@ -93,7 +93,7 @@ describe('Operations control surface', () => {
     expect(container.textContent).not.toContain('Ops')
   })
 
-  it('falls back to Ops for unknown section values', async () => {
+  it('falls back to Ops+Governance for unknown section values', async () => {
     route.value.params = { section: 'unknown-section' }
     const { Operations } = await loadOperations()
     render(html`<${Operations} />`, container)

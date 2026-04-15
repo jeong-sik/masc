@@ -105,10 +105,10 @@ describe('refreshPlanForRoute', () => {
     })).toEqual([])
   })
 
-  it('refreshes the inspector shell through server config once', async () => {
+  it('refreshes the inspector shell through server config once (Phase 6: view param)', async () => {
     refreshForRoute({
       tab: 'command',
-      params: { section: 'inspector' },
+      params: { section: 'operations', view: 'inspector' },
     })
 
     await waitFor(() => {

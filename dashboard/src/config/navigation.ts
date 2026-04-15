@@ -10,9 +10,7 @@ export type SurfaceSectionId =
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'memory-subsystems'
   // command
-  | 'operations'     // Phase 1: absorbs intervene + command governance
-  | 'connectors'
-  | 'inspector'
+  | 'operations'     // Phase 1+6: absorbs intervene + governance + connectors + inspector
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
@@ -156,20 +154,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'operations',
       label: '운영 행동',
-      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려를 한 화면에서.',
+      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려, 커넥터, 인스펙터를 한 화면에서.',
       params: { section: 'operations' },
-    },
-    {
-      id: 'connectors',
-      label: '커넥터',
-      description: '외부 채널(Discord 등) 연결 상태, 바인딩 관리, 이벤트 로그.',
-      params: { section: 'connectors' },
-    },
-    {
-      id: 'inspector',
-      label: '운영 인스펙터',
-      description: '피처 플래그와 서버 설정을 한 화면으로 묶은 운영 진단/점검 화면.',
-      params: { section: 'inspector' },
     },
   ],
   workspace: [
@@ -261,9 +247,11 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
   'monitoring:metrics':      { section: 'runtime' },
 
-  // Dashboard consolidation Phase 1: command surface
-  'command:intervene':  { section: 'operations' },
-  'command:governance': { section: 'operations' },
+  // Dashboard consolidation Phase 1+6: command surface
+  'command:intervene':    { section: 'operations' },
+  'command:governance':   { section: 'operations' },
+  'command:connectors':   { section: 'operations', view: 'connectors' },
+  'command:inspector':    { section: 'operations', view: 'inspector' },
 
   // Dashboard consolidation Phase 1: workspace surface
   'workspace:goals': { section: 'planning' },

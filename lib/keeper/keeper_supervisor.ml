@@ -13,6 +13,8 @@
 open Keeper_types
 open Keeper_execution
 
+module StringMap = Map.Make (String)
+
 (* ── Pure helpers ────────────────────────────────────────── *)
 
 let backoff_delay attempt =
@@ -279,14 +281,14 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
      && n_candidates >= sp_min
   then begin
     (* Group by failure_reason ADT variant (not string prefix) *)
-    let cohorts = Hashtbl.create 4 in
-    List.iter (fun ((entry : Keeper_registry.registry_entry), _msg) ->
+    let insert_cohort acc (entry : Keeper_registry.registry_entry) _msg =
       let key = cohort_key_of_reason entry.last_failure_reason in
-      let prev = Option.value ~default:[] (Hashtbl.find_opt cohorts key) in
-      Hashtbl.replace cohorts key ((entry, _msg) :: prev)
-    ) to_restart;
+      let prev = try StringMap.find key acc with Not_found -> [] in
+      StringMap.add key ((entry, _msg) :: prev) acc
+    in
+    let cohorts = List.fold_left (fun acc ((e, m) : _ * string) -> insert_cohort acc e m) StringMap.empty to_restart in
     let dominant_key, dominant_entries =
-      Hashtbl.fold (fun k v (best_k, best_v) ->
+      StringMap.fold (fun k v (best_k, best_v) ->
         if List.length v > List.length best_v then (k, v) else (best_k, best_v)
       ) cohorts ("", [])
     in

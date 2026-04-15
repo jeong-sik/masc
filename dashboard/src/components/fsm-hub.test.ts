@@ -11,6 +11,7 @@ import {
   deriveTimeAxisTicks,
   deriveTransitionHistory,
   flagTooltip,
+  invariantDescription,
   isTransitionInSegment,
   laneTransitionCount,
   type CompositeObservation,
@@ -433,5 +434,34 @@ describe('flagTooltip', () => {
   it('falls back to a generic tooltip for unknown labels', () => {
     expect(flagTooltip('mystery-flag', true)).toBe('mystery-flag: active')
     expect(flagTooltip('mystery-flag', false)).toBe('mystery-flag: inactive')
+  })
+})
+
+describe('invariantDescription', () => {
+  it('returns domain-specific prose for each known invariant key', () => {
+    const keys = [
+      'phase_turn_alignment',
+      'no_cascade_before_measurement',
+      'compaction_atomicity',
+      'event_priority_monotone',
+      'recovery_two_store_sync',
+    ]
+    for (const key of keys) {
+      const desc = invariantDescription(key)
+      expect(desc.length).toBeGreaterThan(40)
+      expect(desc).not.toMatch(/^Invariant defined by/)
+    }
+  })
+
+  it('mentions the specific contract each invariant guards', () => {
+    expect(invariantDescription('phase_turn_alignment')).toMatch(/KSM|KTC|drift/i)
+    expect(invariantDescription('no_cascade_before_measurement')).toMatch(/cascade|measurement/i)
+    expect(invariantDescription('compaction_atomicity')).toMatch(/atomic|half-compacted/i)
+    expect(invariantDescription('event_priority_monotone')).toMatch(/priority|priorit/i)
+    expect(invariantDescription('recovery_two_store_sync')).toMatch(/recovery|checkpoint|store/i)
+  })
+
+  it('falls back to generic text for unknown keys', () => {
+    expect(invariantDescription('mystery_invariant')).toMatch(/^Invariant defined by/)
   })
 })

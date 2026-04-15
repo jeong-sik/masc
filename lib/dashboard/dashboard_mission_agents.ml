@@ -195,19 +195,22 @@ let read_recent_room_event_lines config ~limit =
       month_dirs;
     List.rev !collected
 
+let is_session_concluded (status : string) =
+  match Dashboard_utils.session_lifecycle_of_string status with
+  | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled -> true
+  | SL_active | SL_running | SL_paused | SL_failed | SL_stopped | SL_expired | SL_unknown -> false
+
 let status_of_archived_session (session : session_context option) =
   match session with
   | Some session ->
-      if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
-      then "inactive"
-      else "offline"
+      if is_session_concluded session.status then "inactive" else "offline"
   | None -> "unknown"
 
 let archived_reason_for_session (session : session_context option) =
   match session with
   | Some session ->
       Some
-        (if List.mem session.status [ "completed"; "interrupted"; "cancelled" ]
+        (if is_session_concluded session.status
          then "not in current namespace state"
          else "missing from current namespace state")
   | None -> None

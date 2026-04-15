@@ -213,7 +213,11 @@ let _build_session_context session_json _cards =
         "live=recent_turns · planned=known_members"
     in
     let status = session_status_string session_json in
-    let is_terminal = List.mem status [ "completed"; "interrupted"; "cancelled"; "expired" ] in
+    let status_lc = Dashboard_utils.session_lifecycle_of_string status in
+    let is_terminal = match status_lc with
+      | Dashboard_utils.SL_completed | SL_interrupted | SL_cancelled | SL_expired -> true
+      | SL_active | SL_running | SL_paused | SL_failed | SL_stopped | SL_unknown -> false
+    in
     let blocker_summary =
       if is_terminal then
         (* Terminal sessions cannot be blocked — suppress stale blockers *)

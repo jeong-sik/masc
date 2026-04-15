@@ -179,15 +179,20 @@ let test_mixed_case_org () =
 
 (* ── validate_code_shell_command ─────────────────────────────────── *)
 
-let test_validate_code_shell_command_rejects_pipe () =
+let test_validate_code_shell_command_allows_pipe () =
+  (* Pipes are now allowed: each segment is independently validated
+     against the allowlist; dangerous metacharacters remain blocked. *)
+  check (result unit string) "piped allowlisted commands accepted"
+    (Ok ())
+    (Tool_code_write.validate_code_shell_command "dune build 2>&1 | tail -5")
+
+let test_validate_code_shell_command_rejects_pipe_to_disallowed () =
   match
-    Tool_code_write.validate_code_shell_command
-      "dune build 2>&1 | tail -5"
+    Tool_code_write.validate_code_shell_command "dune build | xargs rm -rf"
   with
-  | Error reason ->
-      check bool "reason mentions pipe restriction" true
-        (String.starts_with ~prefix:"Pipes are not allowed" reason)
-  | Ok () -> fail "expected piped command to be rejected"
+  | Error _ -> ()
+  | Ok () ->
+      fail "expected pipe-to-disallowed-command to be rejected by allowlist"
 
 let test_validate_code_shell_command_allows_direct_build () =
   check (result unit string) "direct build allowed" (Ok ())
@@ -381,8 +386,10 @@ let () =
       test_case "mixed-case org" `Quick test_mixed_case_org;
     ]);
     ("validate_code_shell_command", [
-      test_case "rejects pipe" `Quick
-        test_validate_code_shell_command_rejects_pipe;
+      test_case "allows pipe with allowlisted segments" `Quick
+        test_validate_code_shell_command_allows_pipe;
+      test_case "rejects pipe to disallowed command" `Quick
+        test_validate_code_shell_command_rejects_pipe_to_disallowed;
       test_case "allows direct build" `Quick
         test_validate_code_shell_command_allows_direct_build;
       test_case "rejects semicolon" `Quick

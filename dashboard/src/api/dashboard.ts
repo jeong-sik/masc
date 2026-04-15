@@ -347,14 +347,28 @@ export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
   return get('/api/v1/dashboard/perf')
 }
 
+export interface FetchDashboardMemoryOptions {
+  excludeSystem?: boolean
+  excludeAutomation?: boolean
+  author?: string
+  /** Page size. Defaults to 200 when any filter is active, else 100. */
+  limit?: number
+  /** Number of posts to skip from the start of the sorted list. Defaults to 0. */
+  offset?: number
+}
+
 export function fetchDashboardMemory(
   sortMode: BoardSortMode,
-  opts?: { excludeSystem?: boolean; excludeAutomation?: boolean; author?: string },
+  opts?: FetchDashboardMemoryOptions,
 ): Promise<DashboardMemoryResponse> {
   const params = new URLSearchParams()
   params.set('sort_by', sortMode)
   const hasFilter = opts?.excludeSystem || opts?.excludeAutomation || opts?.author
-  params.set('limit', hasFilter ? '200' : '100')
+  const defaultLimit = hasFilter ? 200 : 100
+  const limit = Math.max(1, Math.min(500, opts?.limit ?? defaultLimit))
+  const offset = Math.max(0, Math.min(5000, opts?.offset ?? 0))
+  params.set('limit', String(limit))
+  if (offset > 0) params.set('offset', String(offset))
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   if (opts?.author) params.set('author', opts.author)

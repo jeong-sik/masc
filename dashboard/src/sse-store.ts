@@ -118,7 +118,10 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
   'masc/board_delete':  { target: 'board' },
-  // Board vote notifications — emitted by lib/server/server_bootstrap_loops.ml
+  // Board notifications — emitted by lib/server/server_bootstrap_loops.ml
+  // via JSON-RPC method="notifications/board" (unwrapped to params.type)
+  post_created:         { target: 'board' },
+  comment_added:        { target: 'board' },
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   // Activity graph

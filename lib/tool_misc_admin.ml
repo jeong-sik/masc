@@ -110,6 +110,10 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
     schemas
     |> List.map (fun (schema : Types.tool_schema) ->
            let help_entry = Tool_help_registry.entry_of_schema schema in
+           let metadata_fields =
+             Tool_catalog.metadata_to_fields schema.name
+             |> List.filter (fun (key, _value) -> not (String.equal key "surfaces"))
+           in
            `Assoc
              ([
                 ("name", `String schema.name);
@@ -125,7 +129,7 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
                    | Some ss -> List.map (fun s -> `String s) (List.rev ss)
                    | None -> []));
               ]
-             @ Tool_catalog.metadata_to_fields schema.name))
+             @ metadata_fields))
   in
   `Assoc
     [

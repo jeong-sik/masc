@@ -1,10 +1,10 @@
-// MASC Dashboard — Work Tab (Phase 1: goals absorbed into planning)
-// board + planning (includes goal pipeline summary + goals deep-link).
+// MASC Dashboard — Work Tab (Phase 7: planning with goal-tree sub-view)
+// board + planning (FilterChips: kanban / goal-tree).
 
 import { html } from 'htm/preact'
 import { route } from '../router'
 import { Memory } from './memory'
-import { Planning } from './goals'
+import { PlanningPanel } from './planning-panel'
 import { ErrorBoundary } from './common/error-boundary'
 
 type WorkSection = 'board' | 'planning'
@@ -23,7 +23,7 @@ export function Work() {
       <div class="transition-opacity duration-300">
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${Memory} />`
-            : html`<${Planning} />`
+            : html`<${PlanningPanel} />`
           }
         </>
       </div>

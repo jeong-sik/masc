@@ -126,8 +126,22 @@ let test_dashboard_tools_projection () =
         |> List.find_opt (fun row ->
                row |> member "name" |> to_string = "masc_status")
       in
+      let spawned_agent_tool =
+        inventory_rows
+        |> List.find_opt (fun row ->
+               row |> member "name" |> to_string = "masc_workflow_guide")
+      in
+      let local_worker_tool =
+        inventory_rows
+        |> List.find_opt (fun row ->
+               row |> member "name" |> to_string = "masc_worktree_create")
+      in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
       check bool "includes public tool" true (Option.is_some public_tool);
+      check bool "includes spawned agent tool" true
+        (Option.is_some spawned_agent_tool);
+      check bool "includes local worker tool" true
+        (Option.is_some local_worker_tool);
       (match public_tool with
       | None -> ()
       | Some row ->
@@ -141,6 +155,22 @@ let test_dashboard_tools_projection () =
           in
           check bool "public tool tagged public_mcp" true (public_surface_count > 0);
           check int "public_mcp not duplicated on public tool" 1 public_surface_count);
+      (match spawned_agent_tool with
+      | None -> ()
+      | Some row ->
+          check bool "spawned agent tool keeps spawned_agent_mcp surface" true
+            (row |> member "surfaces" |> to_list
+             |> List.exists (function
+                  | `String "spawned_agent_mcp" -> true
+                  | _ -> false)));
+      (match local_worker_tool with
+      | None -> ()
+      | Some row ->
+          check bool "local worker tool keeps local_worker surface" true
+            (row |> member "surfaces" |> to_list
+             |> List.exists (function
+                  | `String "local_worker" -> true
+                  | _ -> false)));
       match hidden_tool with
       | None -> ()
       | Some row ->

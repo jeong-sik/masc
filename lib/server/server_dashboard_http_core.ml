@@ -792,7 +792,20 @@ let dashboard_general_agent_count agents =
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
-let dashboard_shell_timeout_s = 8.0
+let dashboard_shell_timeout_s = 16.0
+
+(* Meta_cognition.summary_json does a full board_posts.jsonl scan +
+   belief/tension/desire rule evaluation. On a room with 450+ posts this
+   regularly exceeds 8s, which was the previous shell timeout and caused
+   repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
+   noise in the log. Give it its own cache with a longer TTL so the shell
+   path does not block on it every refresh cycle. *)
+let meta_cognition_summary_ttl = 120.0
+
+let meta_cognition_summary_cached (config : Room.config) : Yojson.Safe.t =
+  let key = Printf.sprintf "meta_cognition_summary:%s" config.base_path in
+  Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl (fun () ->
+    Meta_cognition.summary_json config)
 
 let dashboard_shell_paths_json (config : Room.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
@@ -832,7 +845,7 @@ let dashboard_shell_payload_json (config : Room.config) : Yojson.Safe.t =
     measure_ms (fun () -> keeper_count config)
   in
   let meta_cognition_json, meta_cognition_ms =
-    measure_ms (fun () -> Meta_cognition.summary_json config)
+    measure_ms (fun () -> meta_cognition_summary_cached config)
   in
   let config_resolution_json, config_resolution_ms =
     measure_json_projection "config_resolution" (fun () ->

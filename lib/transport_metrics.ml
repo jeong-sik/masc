@@ -173,7 +173,9 @@ let int_option_json = function
   | Some value -> `Int value
   | None -> `Null
 
-let http_listener_mode () = Env_config.Transport.use_h2 ()
+let http_listener_mode () =
+  Env_config.Transport.use_h2 ()
+  |> Env_config.Transport.h2_mode_to_string
 
 let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
   if webrtc_channels > 0 then "webrtc_datachannel"

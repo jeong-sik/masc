@@ -80,8 +80,8 @@ let reset_for_test () =
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
-  | Some s -> String.lowercase_ascii s = "jsonl"
-  | None -> false
+  | Some Env_config.Board.Jsonl -> true
+  | Some (Env_config.Board.Pg | Env_config.Board.Unknown_backend _) | None -> false
 
 let backend () =
   with_board_rw (fun () ->

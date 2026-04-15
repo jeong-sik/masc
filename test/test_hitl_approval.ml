@@ -128,7 +128,7 @@ let test_approval_queue_submit_and_resolve () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_code_delete"
         ~input:(`Assoc [("path", `String "/dangerous")])
-        ~risk_level:"critical"
+        ~risk_level:AQ.Critical
     in
     result := Some decision
   );
@@ -175,7 +175,7 @@ let test_approval_queue_reject () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_force_reset"
         ~input:(`Assoc [])
-        ~risk_level:"critical"
+        ~risk_level:AQ.Critical
     in
     result := Some decision
   );
@@ -208,7 +208,7 @@ let test_approval_queue_expire_stale () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_dangerous_tool"
         ~input:(`Assoc [])
-        ~risk_level:"critical"
+        ~risk_level:AQ.Critical
     in
     result := Some decision
   );
@@ -243,7 +243,7 @@ let test_approval_queue_cancel_cleans_up () =
            ~keeper_name:"cancel-test"
            ~tool_name:"masc_dangerous"
            ~input:(`Assoc [])
-           ~risk_level:"critical"
+           ~risk_level:AQ.Critical
        in
        ());
      Eio.Fiber.yield ();

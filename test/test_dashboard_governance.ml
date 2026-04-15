@@ -291,7 +291,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~keeper_name:"dashboard-keeper"
             ~tool_name:"masc_code_delete"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
-            ~risk_level:"critical"
+            ~risk_level:Lib.Keeper_approval_queue.Critical
         in
         decision_result := Some decision);
       Eio.Fiber.yield ();

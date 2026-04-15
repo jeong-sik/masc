@@ -12,17 +12,29 @@
 
 (* ── Types ────────────────────────────────────────────────── *)
 
+type risk_level =
+  | Low
+  | Medium
+  | High
+  | Critical
+
 type pending_approval = {
   id : string;
   keeper_name : string;
   tool_name : string;
   input : Yojson.Safe.t;
-  risk_level : string;
+  risk_level : risk_level;
   requested_at : float;
   resolver : Oas.Hooks.approval_decision Eio.Promise.u;
 }
 
 type decision = Oas.Hooks.approval_decision
+
+let risk_level_to_string = function
+  | Low -> "low"
+  | Medium -> "medium"
+  | High -> "high"
+  | Critical -> "critical"
 
 (* ── Global queue (Eio.Mutex-protected) ───────────────────── *)
 
@@ -63,7 +75,7 @@ let audit_approval_event ~event_type ~id ~keeper_name ~tool_name
       ("id", `String id);
       ("keeper", `String keeper_name);
       ("tool", `String tool_name);
-      ("risk", `String risk_level);
+      ("risk", `String (risk_level_to_string risk_level));
       ("decision", `String decision);
     ] in
     (try Dated_jsonl.append store json
@@ -108,7 +120,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     Hashtbl.replace pending id entry);
   Log.Keeper.info
     "HITL_APPROVAL_PENDING: id=%s keeper=%s tool=%s risk=%s"
-    id keeper_name tool_name risk_level;
+    id keeper_name tool_name (risk_level_to_string risk_level);
   audit_approval_event ~event_type:"pending" ~id ~keeper_name
     ~tool_name ~risk_level ();
   (* Broadcast SSE event so dashboard picks it up *)
@@ -120,7 +132,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
              ("id", `String id);
              ("keeper_name", `String keeper_name);
              ("tool_name", `String tool_name);
-             ("risk_level", `String risk_level);
+             ("risk_level", `String (risk_level_to_string risk_level));
              ("requested_at", `Float entry.requested_at);
              ("input_preview", `String (input_preview_of_json input));
            ]);
@@ -187,7 +199,7 @@ let list_pending_json () : Yojson.Safe.t =
         ("id", `String entry.id);
         ("keeper_name", `String entry.keeper_name);
         ("tool_name", `String entry.tool_name);
-        ("risk_level", `String entry.risk_level);
+        ("risk_level", `String (risk_level_to_string entry.risk_level));
         ("requested_at", `Float entry.requested_at);
         ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
       ] :: acc
@@ -201,7 +213,7 @@ let list_pending_dashboard_json () : Yojson.Safe.t =
         ("id", `String entry.id);
         ("keeper_name", `String entry.keeper_name);
         ("tool_name", `String entry.tool_name);
-        ("risk_level", `String entry.risk_level);
+        ("risk_level", `String (risk_level_to_string entry.risk_level));
         ("requested_at", `Float entry.requested_at);
         ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
         ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));

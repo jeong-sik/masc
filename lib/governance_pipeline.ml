@@ -454,6 +454,12 @@ let install ~config ~governance_level =
     Tools below the threshold are auto-approved. *)
 let to_oas_approval_callback
       ~governance_level ~keeper_name : Oas.Hooks.approval_callback =
+  let queue_risk_level = function
+    | Low -> Keeper_approval_queue.Low
+    | Medium -> Keeper_approval_queue.Medium
+    | High -> Keeper_approval_queue.High
+    | Critical -> Keeper_approval_queue.Critical
+  in
   (* B3: Per-decision trifecta. Evaluate on each tool call using current
      shards, not a session-scoped closure capture, so shard grants and
      revocations are reflected immediately in the trifecta state.
@@ -495,6 +501,6 @@ let to_oas_approval_callback
         ~keeper_name
         ~tool_name
         ~input
-        ~risk_level:(risk_level_to_string risk)
+        ~risk_level:(queue_risk_level risk)
     else
       Oas.Hooks.Approve

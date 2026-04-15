@@ -1,3 +1,19 @@
+(** Keeper GitHub primitive — gh CLI wrapper with hallucination gate.
+
+    This is the atomic `keeper_github` tool: executes a validated gh CLI
+    command after running through:
+    1. Pre-execution hallucination gate (PR/issue number cache validation)
+    2. Permission gates (dangerous ops, workflow ops, preset checks)
+    3. Subprocess with GH_CONFIG_DIR isolation (anyang-keepers token)
+    4. Post-execution output truncation + not-found hint detection
+    5. Cache invalidation on successful mutations (pr create, etc.)
+
+    Gate logic and shared helpers live in {!Keeper_gh_shared}.
+
+    This module absorbed the former keeper_exec_github once the per-tool
+    extraction (Steps 1-4) completed and keeper_exec_github became a
+    single-handler shell. *)
+
 open Keeper_types
 open Keeper_exec_shared
 open Keeper_gh_shared

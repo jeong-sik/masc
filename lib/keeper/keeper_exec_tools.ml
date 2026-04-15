@@ -166,7 +166,7 @@ let execute_keeper_tool_call
     | "keeper_voice_sessions"
     | "keeper_voice_session_start"
     | "keeper_voice_session_end" -> Keeper_exec_voice.handle_keeper_voice_tool ~meta ~name ~args
-    | "keeper_github" -> Keeper_exec_github.handle_keeper_github ~config ~meta ~args
+    | "keeper_github" -> Keeper_tool_github.handle_keeper_github ~config ~meta ~args
     | "keeper_pr_workflow" -> Keeper_tool_pr_workflow.handle_keeper_pr_workflow ~config ~meta ~args
     | "keeper_pr_submit" -> Keeper_tool_pr_submit.handle_keeper_pr_submit ~config ~meta ~args
     | "keeper_preflight_check" -> Keeper_exec_preflight.handle_keeper_preflight_check ~config ~meta ~args

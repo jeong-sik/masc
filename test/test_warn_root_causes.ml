@@ -26,17 +26,15 @@ let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
     preset-allowed names + core_always_tools. *)
 let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
   let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let set = Keeper_tool_policy.tool_name_set allowed_names in
-  List.iter
-    (fun name -> Hashtbl.replace set name ())
-    Keeper_tool_registry.core_always_tools;
-  set
+  let base = Keeper_tool_policy.tool_name_set allowed_names in
+  Keeper_tool_policy.StringSet.union base
+    (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
 (** Filter core_discovery_tools by preset (the fix). *)
 let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
   let allowed_set = build_allowed_exec_set meta in
   List.filter
-    (fun name -> Hashtbl.mem allowed_set name)
+    (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
     Keeper_tool_registry.core_discovery_tools
 
 (* Write/VCS tools that require coding/delivery/full presets *)

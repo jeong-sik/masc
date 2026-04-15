@@ -138,6 +138,40 @@ export function FsmHub() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
+  const [refreshFlash, setRefreshFlash] = useState(false)
+  const flashTimeoutRef = useRef<number | null>(null)
+  const refreshNow = () => {
+    setPollTick(t => t + 1)
+    setRefreshFlash(true)
+    if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
+    flashTimeoutRef.current = window.setTimeout(() => {
+      setRefreshFlash(false)
+      flashTimeoutRef.current = null
+    }, 800)
+  }
+
+  useEffect(() => () => {
+    if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return
+      const target = ev.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+        if (target.isContentEditable) return
+      }
+      if (ev.key === 'r') {
+        ev.preventDefault()
+        refreshNow()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
   const [paused, setPaused] = useState(() =>
     typeof document !== 'undefined' && document.visibilityState === 'hidden',
   )
@@ -223,7 +257,7 @@ export function FsmHub() {
     if (paused) return undefined
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [paused])
+  }, [paused, pollTick])
 
   useEffect(() => {
     if (paused) return undefined
@@ -326,6 +360,8 @@ export function FsmHub() {
         onSelect=${setSelected}
         loading=${loading}
         paused=${paused}
+        onRefresh=${refreshNow}
+        refreshFlash=${refreshFlash}
         transitionCount=${history.length}
         observationCount=${view.observations.length}
       />
@@ -424,6 +460,7 @@ function ShortcutsOverlay({
   if (!open) return null
   const rows: Array<{ keys: string; desc: string }> = [
     { keys: '1 – 9', desc: 'N번째 키퍼로 이동' },
+    { keys: 'r', desc: '강제 새로고침' },
     { keys: '? ', desc: '단축키 목록 토글' },
     { keys: 'Esc', desc: '오버레이 닫기' },
     { keys: '← →', desc: '키퍼 탭 이동 (탭 포커스 시)' },
@@ -477,6 +514,8 @@ function StatusBar({
   onSelect,
   loading,
   paused,
+  onRefresh,
+  refreshFlash,
   transitionCount,
   observationCount,
 }: {
@@ -488,6 +527,8 @@ function StatusBar({
   onSelect: (n: string) => void
   loading: boolean
   paused: boolean
+  onRefresh: () => void
+  refreshFlash: boolean
   transitionCount: number
   observationCount: number
 }) {
@@ -513,6 +554,18 @@ function StatusBar({
             class="hidden md:inline-flex items-center font-mono text-[9px] px-1 py-0 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]"
             title="단축키 목록 (?)"
           >?</kbd>
+          <button
+            class=${`text-[10px] font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
+              refreshFlash
+                ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)]'
+                : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'
+            }`}
+            onClick=${onRefresh}
+            aria-label="강제 새로고침"
+            aria-keyshortcuts="r"
+          >
+            ${refreshFlash ? '✓' : '↻'}
+          </button>
           ${liveBadge}
           ${loading ? html`<span class="inline-block h-2.5 w-2.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin"></span>` : null}
           ${paused ? html`

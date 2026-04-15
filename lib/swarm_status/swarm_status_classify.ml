@@ -3,19 +3,19 @@ open Swarm_status_types
 open Swarm_status_json
 
 let operation_active (operation : operation_info) =
-  match String.lowercase_ascii operation.status with
-  | "completed" | "cancelled" | "failed" -> false
-  | _ -> true
+  match operation.status with
+  | SOp_completed | SOp_cancelled | SOp_failed -> false
+  | SOp_active | SOp_planned | SOp_paused -> true
 
 let operation_terminal (operation : operation_info) = not (operation_active operation)
 
 let detachment_active (detachment : detachment_info) =
-  match String.lowercase_ascii detachment.status with
-  | "completed" | "cancelled" | "failed" | "stopped" -> false
-  | _ -> true
+  match detachment.status with
+  | SDet_completed | SDet_cancelled | SDet_failed | SDet_stopped -> false
+  | SDet_active | SDet_awaiting_approval | SDet_stalled -> true
 
 let decision_pending (decision : decision_info) =
-  String.equal (String.lowercase_ascii decision.status) "pending"
+  decision.status = SDec_pending
 
 let session_active (session : session_info) =
   match String.lowercase_ascii session.status with
@@ -122,7 +122,7 @@ let lane_last_movement traces decisions detachments operations sessions =
   in
   let decision_candidates =
     decisions
-    |> List.filter (fun (decision : decision_info) -> String.equal decision.status "pending")
+    |> List.filter (fun (decision : decision_info) -> decision.status = SDec_pending)
     |> List.map (fun (decision : decision_info) ->
            if String.equal decision.source "projected_operator" then
              ("pending_manual_confirmation", decision.created_at)
@@ -326,7 +326,7 @@ let lane_timeline_events kind traces sessions decisions =
   in
   let approval_events =
     decisions
-    |> List.filter (fun (decision : decision_info) -> String.equal decision.status "pending")
+    |> List.filter (fun (decision : decision_info) -> decision.status = SDec_pending)
     |> List.filter_map (fun (decision : decision_info) ->
            match decision.created_at with
            | None -> None

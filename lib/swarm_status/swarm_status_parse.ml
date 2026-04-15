@@ -8,7 +8,8 @@ let operation_of_json row =
     operation_id = get_string_default json "operation_id" "";
     objective = get_string_default json "objective" "";
     source = get_string_default json "source" "managed";
-    status = get_string_default json "status" "active";
+    status = swarm_operation_status_of_string
+      (get_string_default json "status" "active");
     trace_id = get_string_default json "trace_id" "";
     detachment_session_id = get_string_opt json "detachment_session_id";
     note = get_string_opt json "note";
@@ -21,7 +22,8 @@ let detachment_of_json row =
     detachment_id = get_string_default json "detachment_id" "";
     operation_id = get_string_default json "operation_id" "";
     source = get_string_default json "source" "managed";
-    status = get_string_default json "status" "active";
+    status = swarm_detachment_status_of_string
+      (get_string_default json "status" "active");
     runtime_kind = get_string_opt json "runtime_kind";
     session_id = get_string_opt json "session_id";
     roster =
@@ -52,7 +54,8 @@ let decision_of_json json =
   {
     decision_id = get_string_default json "decision_id" "";
     source = get_string_default json "source" "managed";
-    status = get_string_default json "status" "pending";
+    status = swarm_decision_status_of_string
+      (get_string_default json "status" "pending");
     scope_type = get_string_opt json "scope_type";
     scope_id = get_string_opt json "scope_id";
     operation_id = get_string_opt json "operation_id";

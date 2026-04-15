@@ -4,7 +4,7 @@
     Based on CancellationToken pattern.
 
     MCP Spec MAY: Support for client request cancellation
-*)")
+*)
 
 module StringMap = Map.Make (String)
 
@@ -44,7 +44,7 @@ module TokenStore = struct
     let old_tokens = StringMap.fold (fun id t acc ->
       if now -. t.created_at > max_age then id :: acc else acc
     ) !tokens [] in
-    List.iter (fun id -> tokens := StringMap.remove !tokens id) old_tokens;
+    List.iter (fun id -> tokens := StringMap.remove id !tokens) old_tokens;
     List.length old_tokens
 
   (** Auto-cleanup on access if interval elapsed *)

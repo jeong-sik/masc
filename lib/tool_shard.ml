@@ -250,7 +250,7 @@ For multi-file search, use keeper_shell with op=rg.";
       ("type", `String "object");
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
-        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes to return (default: 20000)")]);
+        ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String ("Max bytes to return (default: " ^ Tool_shard_limits.keeper_fs_read_default_max_bytes_string ^ ")"))]);
       ]);
       ("required", `List [`String "path"]);
     ];

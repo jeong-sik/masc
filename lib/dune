@@ -534,6 +534,7 @@
    governance_pipeline
    tool_compact
    tool_shard
+   tool_shard_limits
    tool_keeper
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch

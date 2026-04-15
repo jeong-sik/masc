@@ -1279,8 +1279,8 @@ let run_turn
                              Log.Keeper.warn
                                "keeper:%s TopK_llm failed (%s), falling back to \
                                 core+prefilter+discovered"
-                               meta.name
-                               (Printexc.to_string exn);
+                             meta.name
+                             (Printexc.to_string exn);
                              []))
                      | _ ->
                        Log.Keeper.warn

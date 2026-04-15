@@ -349,11 +349,15 @@ let weighted_shuffle
     if total_weight <= 0 then entries
     else
       let r = rand_int total_weight in
+      let default_selected, default_remaining =
+        match entries with
+        | first :: rest -> (first, rest)
+        | [] -> assert false
+      in
       (* Find the selected entry via cumulative weight *)
       let rec find_selected cumulative = function
         | [] -> (* fallback: first entry *)
-          (List.hd entries,
-           List.tl entries)
+          (default_selected, default_remaining)
         | (e : Cascade_config_loader.weighted_entry) :: rest ->
           let cumulative' = cumulative + e.weight in
           if r < cumulative' then (e, rest)
@@ -632,4 +636,3 @@ let local_capacity_for_selections ~sw ~net ?config_path selections =
         { empty_capacity with all_discovered = true }
         infos
   end
-

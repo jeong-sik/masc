@@ -2,23 +2,75 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-16
+
+### Added
+
+- **Dashboard UX**: density toggle (comfortable/compact) (#7377); Compound Graph
+  toggle bound to `g` (#7398); tab anomaly indicator on selected keeper (#7383);
+  manual refresh button + `r` shortcut (#7378); Watson-pattern inferred reason
+  on transition trail (#7397); time-windowed observatory telemetry (#7390).
+- **Keeper features**: social transition reasons exposed + cross-turn state
+  (#7399, #7395); magentic ledger social model + TLA+ spec (#7426, #7430);
+  campaign FSM harness (#7385); `sangsu` cascade profile — local-first Ollama +
+  GLM fallback (#7404); pipe support in `masc_code_shell` (#7393).
+
 ### Changed
 
-- **OAS pin → v0.144.0** (from 0.141.0). OAS removed cascade orchestration
-  from the single-provider SDK across 3 breaking releases:
-  - 0.142.0: `Judge.judge` takes `~provider:Provider_config.t` (was cascade_name)
-  - 0.143.0: `Tool_selector.default_rerank_fn` takes `~provider` (was cascade_name + defaults)
-  - 0.144.0: `Cascade_executor` module deleted (dead code, 839 lines)
-- **`keeper_agent_run.ml`**: tool_selector rerank now resolves the
-  cascade locally (via `Cascade_config.resolve_model_strings` +
-  `parse_model_strings` + `filter_healthy`), picks the first healthy
-  provider, and passes that single `Provider_config.t` to the
-  single-provider `default_rerank_fn`. On no-healthy-provider, falls
-  back to `core+prefilter+discovered` (same as before).
+- **Discord connector dashboard is now keeper-first** (#7388). Each configured
+  keeper has its own section with inline channel-binding management; bindings
+  that reference a keeper not in the directory are surfaced under `⚠` instead
+  of being silently dropped. Replaces the prior binding-first grouping that
+  users reported as opaque across 5 distinct confusion points.
+- **Gate library extraction**: pure Gate modules (`gate_protocol`,
+  `channel_gate_connector`, `channel_gate_discord_*`, `channel_gate_imessage_*`,
+  `channel_gate_metrics`, `gate_time_util`) moved to `lib/gate/` as the
+  `masc_gate` sub-library (#7407 B1a). `channel_gate` facade joined the same
+  sub-library after Pulse extraction (#7457 B1c). Call sites unchanged thanks
+  to `wrapped false`. Prerequisite for the planned standalone `gate-mcp` repo.
+- **Pulse library extraction** (#7452 B1b): the beat engine moved to
+  `lib/pulse/` as the `masc_pulse` sub-library. Unblocks Gate's dependency on
+  Pulse without routing the arrow back through `masc_mcp`.
+- **OAS pin → v0.148.0** (from v0.141.0) (#7394 + prior pins). Legacy cascade
+  API removed from OAS across v0.142.0–v0.148.0 — `Judge.judge` and
+  `Tool_selector.default_rerank_fn` now take a single `Provider_config.t`, and
+  `Cascade_executor` was deleted (839 LOC). Cascade orchestration is now
+  entirely a MASC concern; `keeper_agent_run` resolves the cascade locally,
+  picks the first healthy provider, and passes a single provider to the
+  single-provider SDK. Falls back to `core+prefilter+discovered` on
+  no-healthy-provider (same as before).
+- **`Room` module retired** (#7355): split into `room_state.ml` + renamed
+  remainder to `Coord`.
+- **Hashtbl → immutable StringMap/StringSet** across 14+ modules: `exec_memory`
+  (#7414 #7416), `memory_bank` (#7429), `memory_recall` (#7421), `hooks_oas`
+  (#7428), `tool_diversity` (#7425), `types_profile` (#7423), `rate_limit`
+  (#7420), `cancellation` (#7419), `supervisor` (#7409 #7410), `context_core`
+  (#7418), `exec_shared` (#7417), `tool_policy` (#7359), `agent_identity`
+  (#7422), `streamable_http session storage` (#7427).
+- Stringly-typed internal variants replaced with typed sums (#7347).
+- `fail_fast_enabled` → `startup_abort_eligible` rename (#7415).
 
-Rationale: cascade is MASC's responsibility. OAS is a single-provider SDK.
-Follow-up PRs migrate `Cascade_config`, `Cascade_fsm`, etc. into MASC's
-own `lib/cascade/` and delete them from OAS entirely.
+### Fixed
+
+- Dashboard: 50-task hard cap removed (#7432); legacy composite payload
+  normalized (#7412); duplicate cache timeout WARN in bg-revalidate (#7446);
+  repeat shell cache timeout on rooms with many board posts (#7402).
+- Keeper: deduplicated tool_use_failure + cycle-failure WARN/ERROR
+  (#7454, #7451); `gh` timeout floor + org allowlist in `validate_gh_command`
+  (#7433); status tails sorted + continuity fallback marker (#7363); real-cause
+  pointer when `rg` exits 2 (#7408).
+- Log: normal keeper/JSON flows no longer WARN (#7444).
+- Board: `masc_board_post` accepts `body` alias + auto-fills author (#7445);
+  duplicate 100-post pagination cap removed (#7396).
+- Checkpoint: malformed checkpoint detection logging in `load_latest` (#7413).
+
+### Removed
+
+- `keeper_pr_submit` tool + hardened `gh`/dashboard flows (#7389).
+- 18 dead permission entries (#7434); dead tool references
+  (`masc_release`, `swarm_start` variants) (#7376).
+- Dead `Blocked` variant from `turn_outcome` (#7346).
+- Dead functions from `keeper_status_bridge` (#7403, #7406).
 
 ## [0.8.0] - 2026-04-15
 

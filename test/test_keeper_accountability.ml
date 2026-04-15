@@ -199,8 +199,10 @@ let test_synthetic_claims_do_not_dilute_unsupported_rate () =
      must NOT be counted in total_completion_claims, otherwise they dilute the
      unsupported_completion_rate and mask genuine risk. *)
   with_room (fun config ->
-      let created_at = iso_of_unix (Unix.gettimeofday () -. 3600.0) in
-      (* 1 real unsupported completion claim *)
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      (* 1 real unsupported completion claim older than the expiry window *)
       append_accountability_event config.base_path ~created_at
         (`Assoc
            [

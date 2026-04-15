@@ -26,13 +26,7 @@ type board_list_cache = {
 let _board_list_cache : board_list_cache =
   { key = None; value = None; expires_at = 0.0 }
 
-let board_list_cache_ttl_s () =
-  match Sys.getenv_opt "MASC_KEEPER_BOARD_LIST_CACHE_TTL_S" with
-  | Some raw ->
-    (match Float.of_string_opt (String.trim raw) with
-     | Some v when v >= 0.0 -> v
-     | _ -> 30.0)
-  | None -> 30.0
+let board_list_cache_ttl_s () = 30.0
 
 let invalidate_board_list_cache () =
   _board_list_cache.key <- None;

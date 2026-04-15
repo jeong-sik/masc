@@ -109,16 +109,7 @@ type stats_acc = {
   binding_order : string Queue.t;
 }
 
-let parse_slow_threshold_ms value =
-  match int_of_string_opt (String.trim value) with Some v -> max 250 (min 120_000 v) | None -> 10_000
-
-let cached_slow_threshold_ms =
-  match Sys.getenv_opt "MASC_CHANNEL_GATE_SLOW_MS" with
-  | Some value -> parse_slow_threshold_ms value
-  | None -> 10_000
-
-let slow_threshold_ms () =
-  cached_slow_threshold_ms
+let slow_threshold_ms () = 10_000
 
 let max_tracked_rooms = 256
 let max_recent_events = 128

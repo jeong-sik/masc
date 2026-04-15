@@ -42,10 +42,7 @@ let max_clients = 200
     (Eio.Stream.create 0 blocks add until a matching take).
     64 events at 3-10s intervals covers 3-10 minutes of buffering.
     A client that falls this far behind should reconnect. *)
-let stream_capacity =
-  match Sys.getenv_opt "MASC_SSE_STREAM_CAPACITY" with
-  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 8 (min 1024 v) | None -> 64)
-  | None -> 64
+let stream_capacity = 64
 
 (** SSE client state.
     [event_stream] is the per-session mailbox.  [broadcast] pushes here;

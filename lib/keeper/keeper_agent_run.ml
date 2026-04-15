@@ -1207,8 +1207,13 @@ let run_turn
                        let rerank_cascade =
                          Keeper_config.keeper_llm_rerank_cascade ()
                        in
-                       let defaults =
-                         Oas_worker.default_model_strings ~cascade_name:rerank_cascade
+                       let rerank_provider =
+                         match
+                           Oas_worker_named.resolve_cascade_providers
+                             ~cascade_name:rerank_cascade
+                         with
+                         | provider :: _ -> Some provider
+                         | [] -> None
                        in
                        let config_path = Oas_worker.default_config_path () in
                        (* Resolve cascade → first healthy provider. OAS 0.144.0+
@@ -1216,6 +1221,7 @@ let run_turn
                           provider from the cascade and passes it to the
                           single-provider rerank API. Graceful degradation via
                           BM25 fallback lives inside [default_rerank_fn]. *)
+                       let _ = rerank_provider in
                        let model_strings =
                          Cascade_config.resolve_model_strings
                            ?config_path ~name:rerank_cascade ~defaults ()

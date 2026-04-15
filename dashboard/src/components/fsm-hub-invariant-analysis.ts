@@ -44,7 +44,7 @@ function invariantDetail(
         : 'More than one measurement event appears to own the same turn.'
     case 'recovery_two_store_sync':
       return ok
-        ? 'Recovery data record and FSM condition agree on whether manual reconcile is required.'
+        ? 'Recovery data record and FSM condition agree on whether recovery sync is required.'
         : `recovery.data_record=${String(snapshot.recovery.data_record)} while recovery.fsm_condition=${String(snapshot.recovery.fsm_condition)}.`
   }
 }
@@ -56,7 +56,7 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
       : 'No turn has completed yet; the first live turn should populate the observer.'
   }
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
-    return 'A healthy provider path or manual reconcile must clear Failing before Running can resume.'
+    return 'A healthy provider path or explicit recovery clearance must clear Failing before Running can resume.'
   }
   if (snapshot.phase === 'Overflowed') {
     return 'Context overflow must resolve through compaction or explicit operator clearance before the lifecycle can settle.'

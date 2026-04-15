@@ -54,6 +54,16 @@ function isHeartbeatAlive(heartbeat: string): boolean {
   return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
 }
 
+function socialModelFallbackHint(keeper: Keeper): string | null {
+  if (keeper.social_model_recognized !== false) return null
+  const configured = keeper.configured_social_model?.trim()
+  const fallback = keeper.social_model_fallback?.trim()
+  if (configured && fallback) return `소셜 모델 ${configured} 미인식 · ${fallback}로 대체 중`
+  if (configured) return `소셜 모델 ${configured} 미인식`
+  if (fallback) return `소셜 모델 fallback · ${fallback}`
+  return '미인식 소셜 모델 설정'
+}
+
 function manualReconcileHint(keeper: Keeper): string {
   const detail = keeper.runtime_blocker_summary?.trim()
   if (detail) return `계속 진행 승인 대기 · ${detail}`
@@ -119,6 +129,8 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
   if (!keeper) return null
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   if (runtimeBlocker) return runtimeBlocker
+  const socialFallback = socialModelFallbackHint(keeper)
+  if (socialFallback) return socialFallback
   const blocker = keeper.last_blocker?.trim()
   if (keeper.paused && blocker) return `일시정지 · ${blocker}`
   if (keeper.paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'

@@ -326,6 +326,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
         runtime_blocker_summary:
           'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
         runtime_blocker_manual_reconcile: true,
+        social_model: 'bdi_speech_v1',
+        configured_social_model: 'experimental_v99',
+        social_model_recognized: false,
+        social_model_fallback: 'bdi_speech_v1',
         last_blocker: 'missing social headers',
         last_speech_act: 'defer',
         last_need: '현재 대화 맥락',
@@ -343,6 +347,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_blocker_summary:
         'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
       runtime_blocker_manual_reconcile: true,
+      social_model: 'bdi_speech_v1',
+      configured_social_model: 'experimental_v99',
+      social_model_recognized: false,
+      social_model_fallback: 'bdi_speech_v1',
       last_blocker: 'missing social headers',
       last_speech_act: 'defer',
       last_need: '현재 대화 맥락',

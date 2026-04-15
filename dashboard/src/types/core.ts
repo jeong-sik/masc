@@ -616,6 +616,10 @@ export interface Keeper {
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
+  social_model?: string | null
+  configured_social_model?: string | null
+  social_model_recognized?: boolean | null
+  social_model_fallback?: string | null
   last_speech_act?: string | null
   last_blocker?: string | null
   last_need?: string | null

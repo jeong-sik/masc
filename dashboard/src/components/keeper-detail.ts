@@ -106,13 +106,18 @@ function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
   const hbStale = hbAgeMs != null && hbAgeMs > 300_000
-  return keeper.paused || Boolean(runtimeBlocker) || Boolean(blocker) || hbStale
+  return keeper.paused
+    || keeper.social_model_recognized === false
+    || Boolean(runtimeBlocker)
+    || Boolean(blocker)
+    || hbStale
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const manualReconcile = keeper.runtime_blocker_manual_reconcile === true
+  const socialFallbackActive = keeper.social_model_recognized === false
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -120,7 +125,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
   if (!needsAttention && !keeper.last_autonomous_action_at) return null
 
-  const toneClass = keeper.paused || runtimeBlocker || blocker || hbStale
+  const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
   const runtimeBlockerLabel = runtimeBlockerClass
@@ -154,6 +159,12 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`
               <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
                 계속 진행 승인 대기
+              </span>
+            `
+          : socialFallbackActive
+          ? html`
+              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
+                Social fallback
               </span>
             `
           : runtimeBlockerClass
@@ -554,6 +565,20 @@ export function KeeperDetailOverlay() {
               ${keeper.last_speech_act
                 ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)] px-2.5 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
                     최근 <span class="font-mono text-[var(--text-body)]">${keeper.last_speech_act}</span>
+                  </span>`
+                : null}
+              ${keeper.social_model_recognized === false
+                ? html`<span class="inline-flex items-center gap-1.5 text-[11px] text-[var(--warn)] px-2.5 py-1 rounded-lg border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]">
+                    소셜 모델
+                    ${keeper.configured_social_model
+                      ? html`<span class="font-mono text-[var(--text-body)]">${keeper.configured_social_model}</span>`
+                      : null}
+                    ${keeper.configured_social_model && keeper.social_model_fallback
+                      ? html`<span>→</span>`
+                      : null}
+                    ${keeper.social_model_fallback
+                      ? html`<span class="font-mono text-[var(--text-body)]">${keeper.social_model_fallback}</span>`
+                      : null}
                   </span>`
                 : null}
               ${(keeper.k2k_count ?? 0) > 0

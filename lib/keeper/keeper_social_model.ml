@@ -78,12 +78,9 @@ let nonempty_opt value =
 let previous_state_of_meta (meta : Keeper_types.keeper_meta) =
   let runtime = meta.runtime in
   let speech_act =
-    match model_id_of_string meta.social_model with
+    match Keeper_social_model_types.speech_act_of_string runtime.last_speech_act with
+    | Some speech_act -> Some speech_act
     | None -> None
-    | Some _ -> (
-        match Keeper_social_model_types.speech_act_of_string runtime.last_speech_act with
-        | Some speech_act -> Some speech_act
-        | None -> None)
   in
   let active_desire = nonempty_opt runtime.last_active_desire in
   let current_intention = nonempty_opt runtime.last_current_intention in

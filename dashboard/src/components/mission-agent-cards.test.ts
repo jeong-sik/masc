@@ -89,4 +89,19 @@ describe('mission keeper runtime helpers', () => {
       '계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
     )
   })
+
+  it('renders social-model fallback hints when the configured model is unknown', () => {
+    const keeper = {
+      name: 'uranium666',
+      status: 'busy',
+      social_model: 'bdi_speech_v1',
+      configured_social_model: 'experimental_v99',
+      social_model_recognized: false,
+      social_model_fallback: 'bdi_speech_v1',
+    } as Keeper
+
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '소셜 모델 experimental_v99 미인식 · bdi_speech_v1로 대체 중',
+    )
+  })
 })

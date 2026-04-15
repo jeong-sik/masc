@@ -2,7 +2,7 @@
 
 Date: 2026-04-09
 <!-- BEGIN GENERATED: oas-pin-audit-header -->
-OAS Pin Snapshot: dependency floor `0.139.0`, runtime pin `main@b7f556ad8b2ce5a493714763e172013c02c24fa2`, declared base version `v0.139.0`
+OAS Pin Snapshot: dependency floor `0.141.0`, runtime pin `main@8c96e65eeeb2921ec5ee0de798335e0f55cd18e6`, declared base version `v0.141.0`
 <!-- END GENERATED: oas-pin-audit-header -->
 Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`; drift is checked against upstream `refs/heads/main`, not GitHub releases
 
@@ -21,7 +21,7 @@ The main remaining problems are no longer “missing migration” at large. They
 ## Pin Policy
 
 <!-- BEGIN GENERATED: oas-pin-audit-policy -->
-`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK declaration in `agent_sdk.opam`. Generated snapshot: runtime pin `main@b7f556ad8b2ce5a493714763e172013c02c24fa2`, declared base version `v0.139.0`, dependency floor `0.139.0`.
+`masc-mcp` keeps the runtime pin ratcheted against upstream `main`, while the dependency floor tracks the pinned SDK declaration in `agent_sdk.opam`. Generated snapshot: runtime pin `main@8c96e65eeeb2921ec5ee0de798335e0f55cd18e6`, declared base version `v0.141.0`, dependency floor `0.141.0`.
 <!-- END GENERATED: oas-pin-audit-policy -->
 
 ## Status by Area

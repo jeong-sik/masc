@@ -260,39 +260,14 @@ let handle_code_search ctx args =
     | Error e -> (false, Types.masc_error_to_string e)
     | Ok search_path ->
 
-    (* Build ripgrep command as list (order is important - prepend in reverse!) *)
-    let rg_args_list = ref [] in
-
-    (* Ripgrep order: rg [OPTIONS] PATTERN PATH *)
-    (* PATH comes LAST, PATTERN second-to-last, so prepend PATH first *)
-    rg_args_list := search_path :: !rg_args_list;
-    rg_args_list := query :: !rg_args_list;
-
-    (* Max results: --max-count VALUE - prepend VALUE first, then FLAG *)
-    rg_args_list := "--max-count" :: string_of_int max_results :: !rg_args_list;
-
-    (* Context lines: -C VALUE - prepend VALUE first, then FLAG *)
-    rg_args_list := "-C" :: "2" :: !rg_args_list;
-
-    (* File pattern if specified: -g PATTERN *)
-    if file_pattern <> "" then
-      rg_args_list := file_pattern :: "-g" :: !rg_args_list;
-
-    (* Fixed-strings mode (default): treat query as literal, not regex *)
-    if not is_regex then
-      rg_args_list := "--fixed-strings" :: !rg_args_list;
-
-    (* Case insensitive flag: -i *)
-    if case_insensitive then
-      rg_args_list := "-i" :: !rg_args_list;
-
-    (* JSON output: --json *)
-    rg_args_list := "--json" :: !rg_args_list;
-
-    (* Executable name: rg - comes FIRST in final command, prepend LAST *)
-    rg_args_list := "rg" :: !rg_args_list;
-
-    let cmd = !rg_args_list in
+    let rg_args =
+      [ "--json" ]
+      @ (if case_insensitive then [ "-i" ] else [])
+      @ (if not is_regex then [ "--fixed-strings" ] else [])
+      @ (if file_pattern <> "" then [ "-g"; file_pattern ] else [])
+      @ [ "-C"; "2"; "--max-count"; string_of_int max_results; query; search_path ]
+    in
+    let cmd = "rg" :: rg_args in
 
     match Process_eio.run_argv_with_status ~timeout_sec:30.0 cmd with
     | Unix.WEXITED 0, output ->

@@ -60,9 +60,35 @@ let test_tools = [
   make_tool "keeper_stay_silent" "Do nothing (no-op tool)";
   make_tool "keeper_tool_search" "Search for tools by keyword";
   make_tool "masc_code_search" "Search code in the repository";
+  make_tool "masc_code_read" "Read code from a source file";
+  make_tool "masc_code_symbols" "List functions and classes from a source file";
   make_tool "masc_code_edit" "Edit code files";
   make_tool "masc_worktree_create" "Create a git worktree";
 ]
+
+let test_search_index () =
+  let tool_entries =
+    List.map
+      (fun (tool : Agent_sdk.Tool.t) ->
+        Agent_sdk.Tool_index.
+          {
+            name = tool.schema.name;
+            description = tool.schema.description;
+            group = None;
+            aliases = [];
+          })
+      test_tools
+  in
+  Agent_sdk.Tool_index.build
+    ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
+    tool_entries
+
+let deterministic_prefilter_for ~query_text ~selection_limit =
+  Keeper_tool_disclosure.deterministic_prefilter_names
+    ~search_index:(test_search_index ())
+    ~query_text
+    ~selection_limit
+    ~core:(Keeper_exec_tools.effective_core_tools ())
 
 (* ── Tests ───────────────────────────────────────────────── *)
 
@@ -288,32 +314,66 @@ let test_selection_boundary_sorts_discovered () =
     merged_ab
 
 let test_deterministic_prefilter_surfaces_code_tools () =
-  let tool_entries =
-    List.map
-      (fun (tool : Agent_sdk.Tool.t) ->
-        Agent_sdk.Tool_index.
-          {
-            name = tool.schema.name;
-            description = tool.schema.description;
-            group = None;
-            aliases = [];
-          })
-      test_tools
-  in
-  let search_index =
-    Agent_sdk.Tool_index.build
-      ~config:{ Agent_sdk.Tool_index.default_config with top_k = 10 }
-      tool_entries
-  in
   let selected =
-    Keeper_tool_disclosure.deterministic_prefilter_names
-      ~search_index
+    deterministic_prefilter_for
       ~query_text:"search code in the repository"
       ~selection_limit:3
-      ~core:(Keeper_exec_tools.effective_core_tools ())
   in
   Alcotest.(check bool) "code search appears without llm rerank"
     true (List.mem "masc_code_search" selected)
+
+let test_deterministic_prefilter_surfaces_code_read_for_explicit_read_intent () =
+  let selected =
+    deterministic_prefilter_for
+      ~query_text:"read source file contents"
+      ~selection_limit:5
+  in
+  Alcotest.(check bool) "code read appears for explicit read intent"
+    true (List.mem "masc_code_read" selected)
+
+let test_deterministic_prefilter_surfaces_code_read_for_code_path_hint () =
+  let selected =
+    deterministic_prefilter_for
+      ~query_text:"open lib/tool_code.ml"
+      ~selection_limit:5
+  in
+  Alcotest.(check bool) "code read appears for code path hint"
+    true (List.mem "masc_code_read" selected)
+
+let test_deterministic_prefilter_surfaces_code_symbols_for_explicit_symbol_intent
+    () =
+  let selected =
+    deterministic_prefilter_for
+      ~query_text:"show function symbols"
+      ~selection_limit:5
+  in
+  Alcotest.(check bool) "code symbols appears for explicit symbol intent"
+    true (List.mem "masc_code_symbols" selected);
+  Alcotest.(check bool) "code read stays out of symbol-only intent"
+    false (List.mem "masc_code_read" selected)
+
+let test_deterministic_prefilter_hides_code_navigation_without_code_intent () =
+  let selected =
+    deterministic_prefilter_for
+      ~query_text:"show me activity overview for the room"
+      ~selection_limit:5
+  in
+  Alcotest.(check bool) "code search stays hidden for non-code query"
+    false (List.mem "masc_code_search" selected);
+  Alcotest.(check bool) "code read stays hidden for non-code query"
+    false (List.mem "masc_code_read" selected);
+  Alcotest.(check bool) "code symbols stays hidden for non-code query"
+    false (List.mem "masc_code_symbols" selected)
+
+let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
+  let selected =
+    deterministic_prefilter_for
+      ~query_text:"read file contents"
+      ~selection_limit:5
+  in
+  Alcotest.(check bool) "code read stays hidden for generic file read"
+    false (List.mem "masc_code_read" selected)
+
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
@@ -350,6 +410,16 @@ let () =
         test_selection_boundary_sorts_discovered;
       Alcotest.test_case "deterministic prefilter surfaces code tools" `Quick
         test_deterministic_prefilter_surfaces_code_tools;
+      Alcotest.test_case "deterministic prefilter surfaces code read" `Quick
+        test_deterministic_prefilter_surfaces_code_read_for_explicit_read_intent;
+      Alcotest.test_case "deterministic prefilter surfaces code read for code path hint" `Quick
+        test_deterministic_prefilter_surfaces_code_read_for_code_path_hint;
+      Alcotest.test_case "deterministic prefilter surfaces code symbols" `Quick
+        test_deterministic_prefilter_surfaces_code_symbols_for_explicit_symbol_intent;
+      Alcotest.test_case "deterministic prefilter hides code navigation without code intent" `Quick
+        test_deterministic_prefilter_hides_code_navigation_without_code_intent;
+      Alcotest.test_case "deterministic prefilter hides code read for generic file read" `Quick
+        test_deterministic_prefilter_hides_code_read_for_generic_file_read;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

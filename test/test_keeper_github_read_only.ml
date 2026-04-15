@@ -177,14 +177,19 @@ let test_api_graphql_is_mutating () =
 (* ================================================================ *)
 
 let test_empty_input_not_read_only () =
+  (* With op=gh but empty cmd, we cannot classify — treat as mutating. *)
   Alcotest.(check bool) "empty cmd"
     false (is_ro ~tool_name:"keeper_shell" ~input:(mk_cmd ""));
   Alcotest.(check bool) "whitespace cmd"
     false (is_ro ~tool_name:"keeper_shell" ~input:(mk_cmd "   "));
   Alcotest.(check bool) "empty args"
     false (is_ro ~tool_name:"keeper_shell" ~input:(mk_args []));
-  Alcotest.(check bool) "no cmd or args"
-    false (is_ro ~tool_name:"keeper_shell" ~input:(`Assoc []))
+  (* Without op=gh (or any op), keeper_shell falls back to its default
+     read-only classification from shard_shell.read_only_tools.
+     Tools calling keeper_shell without an op are malformed but harmless
+     — they get the safe default. *)
+  Alcotest.(check bool) "no op (falls back to default read-only)"
+    true (is_ro ~tool_name:"keeper_shell" ~input:(`Assoc []))
 
 let test_non_gh_tool () =
   (* keeper_bash has_mutating_side_effect=true, so it should not be

@@ -72,14 +72,10 @@ let test_snapshot_has_expected_sections () =
         Yojson.Safe.Util.(namespace |> member "initialized" |> to_bool);
       Alcotest.(check bool) "project nonempty" true
         (String.trim Yojson.Safe.Util.(namespace |> member "project" |> to_string) <> "");
-      Alcotest.(check string) "namespace field flattened default" "default"
-        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
-      Alcotest.(check string) "namespace_id flattened default" "default"
-        Yojson.Safe.Util.(namespace |> member "namespace_id" |> to_string);
-      Alcotest.(check string) "namespace exposed" "default"
-        Yojson.Safe.Util.(namespace |> member "namespace" |> to_string);
-      Alcotest.(check string) "namespace mode flattened" "flattened"
-        Yojson.Safe.Util.(namespace |> member "namespace_mode" |> to_string);
+      Alcotest.(check bool) "namespace_id carrier removed" true
+        (Yojson.Safe.Util.member "namespace_id" namespace = `Null);
+      Alcotest.(check bool) "namespace_mode carrier removed" true
+        (Yojson.Safe.Util.member "namespace_mode" namespace = `Null);
       Alcotest.(check bool) "sessions present" true
         (Yojson.Safe.Util.member "sessions" json <> `Null);
       Alcotest.(check bool) "keepers present" true

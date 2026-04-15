@@ -58,11 +58,11 @@ let with_lock limiter f =
 let check limiter ~key =
   with_lock limiter (fun () ->
     let now = Time_compat.now () in
-    let bucket = match StringMap.find_opt key !limiter.buckets with
+    let bucket = match StringMap.find_opt key !(limiter.buckets) with
       | Some b -> b
       | None ->
           let b = { tokens = float_of_int limiter.burst; last_update = now } in
-          limiter.buckets <- StringMap.add key b !limiter.buckets;
+          limiter.buckets := StringMap.add key b !(limiter.buckets);
           b
     in
     let elapsed = now -. bucket.last_update in
@@ -79,7 +79,7 @@ let check limiter ~key =
 
 let remaining limiter ~key =
   with_lock limiter (fun () ->
-    match StringMap.find_opt key !limiter.buckets with
+    match StringMap.find_opt key !(limiter.buckets) with
     | Some b -> int_of_float b.tokens
     | None -> limiter.burst
   )
@@ -93,8 +93,8 @@ let cleanup limiter ~older_than_seconds =
     let to_remove = StringMap.fold (fun key bucket acc ->
       if bucket.last_update <= threshold then key :: acc
       else acc
-    ) !limiter.buckets [] in
-    limiter.buckets <- List.fold_left (fun m k -> StringMap.remove k m) !limiter.buckets to_remove;
+    ) !(limiter.buckets) [] in
+    limiter.buckets := List.fold_left (fun m k -> StringMap.remove k m) !(limiter.buckets) to_remove;
     List.length to_remove
   )
 

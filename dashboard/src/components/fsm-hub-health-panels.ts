@@ -96,8 +96,6 @@ const INVARIANT_DESCRIPTIONS: Record<string, string> = {
     'Compaction must be atomic — a turn either sees the old context or the new one, never a half-compacted state. A break corrupts message ordering or duplicates content.',
   event_priority_monotone:
     'Event_bus priorities must be monotone (higher priority delivered first). A break means a critical event was delivered after a lower-priority one, which can skew keeper decisions.',
-  recovery_two_store_sync:
-    'Data-record and FSM-condition stores must agree on the same recovery point. A drift here means a restart would replay from an inconsistent checkpoint.',
 }
 
 export function invariantDescription(key: string): string {
@@ -171,61 +169,3 @@ export function InvariantsPanel({
   `
 }
 
-const RECOVERY_STATE_DESCRIPTIONS: Record<string, string> = {
-  clean:
-    'Both data-record and FSM-condition stores agree — no recovery action needed. A restart from this state will resume cleanly.',
-  reconcile_pending:
-    'Both stores recorded recovery state but have not yet reconciled. The keeper will align them on the next heartbeat cycle.',
-  'drift: data↑ fsm↓':
-    'The data-record store advanced past the FSM-condition store. A restart may replay turns that the FSM already completed, causing duplicate tool calls unless journal idempotency is active.',
-  'drift: fsm↑ data↓':
-    'The FSM-condition store advanced past the data-record. A restart may lose checkpoint data, forcing the keeper to re-derive state from scratch.',
-}
-
-export function recoveryStateDescription(state: string): string {
-  return RECOVERY_STATE_DESCRIPTIONS[state] ?? 'Recovery state defined by the keeper two-store sync contract.'
-}
-
-export function RecoveryStatePanel({
-  dataRecord,
-  fsmCondition,
-}: {
-  dataRecord: boolean
-  fsmCondition: boolean
-}) {
-  const state =
-    !dataRecord && !fsmCondition ? 'clean' :
-    dataRecord && fsmCondition ? 'reconcile_pending' :
-    dataRecord && !fsmCondition ? 'drift: data↑ fsm↓' :
-    'drift: fsm↑ data↓'
-  const isClean = state === 'clean'
-  const isDrift = state.startsWith('drift')
-  const toneCls = isClean ? 'text-[#22c55e]' : isDrift ? 'text-[#ef4444]' : 'text-[#f59e0b]'
-  const panelCls = isClean
-    ? 'border-[var(--white-8)] bg-[var(--white-2)]'
-    : isDrift
-      ? 'border-[rgba(239,68,68,0.55)] bg-[rgba(239,68,68,0.05)] shadow-[0_0_0_1px_rgba(239,68,68,0.2)_inset]'
-      : 'border-[rgba(245,158,11,0.45)] bg-[rgba(245,158,11,0.04)] shadow-[0_0_0_1px_rgba(245,158,11,0.15)_inset]'
-
-  return html`
-    <div
-      class=${`rounded-xl border p-3 transition-colors duration-300 ${panelCls}`}
-      role=${isDrift ? 'alert' : undefined}
-      aria-live=${isDrift ? 'polite' : undefined}
-      title=${recoveryStateDescription(state)}
-    >
-      <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
-        Recovery
-      </div>
-      <div class=${`font-mono text-[13px] font-semibold ${toneCls}`}>${state}</div>
-      <div class="mt-1.5 flex gap-3 text-[9px] text-[var(--text-dim)]">
-        <span class="cursor-help" title="data_record: true means the data store has recorded a recovery point that hasn't been reconciled yet.">
-          data <span class="font-mono">${String(dataRecord)}</span>
-        </span>
-        <span class="cursor-help" title="fsm_condition: true means the FSM store has recorded a recovery condition that hasn't been reconciled yet.">
-          fsm <span class="font-mono">${String(fsmCondition)}</span>
-        </span>
-      </div>
-    </div>
-  `
-}

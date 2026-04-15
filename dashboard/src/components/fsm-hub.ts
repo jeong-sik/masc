@@ -185,6 +185,53 @@ function laneChangedAt(
   return observations[0]?.ts ?? last.ts
 }
 
+export type StateEntries = {
+  phase: number
+  turn: number
+  decision: number
+  cascade: number
+  compaction: number
+}
+
+/** Single-pass scan returning the timestamp at which each lane last
+    transitioned into its current value. Falls back to the earliest
+    observation ts if the lane never changed (i.e. has been held since
+    observation began). */
+export function deriveStateEntries(
+  observations: CompositeObservation[],
+): StateEntries | null {
+  const last = observations[observations.length - 1]
+  const first = observations[0]
+  if (!last || !first) return null
+  const result: StateEntries = {
+    phase: first.ts,
+    turn: first.ts,
+    decision: first.ts,
+    cascade: first.ts,
+    compaction: first.ts,
+  }
+  const seen: Record<keyof StateEntries, boolean> = {
+    phase: false,
+    turn: false,
+    decision: false,
+    cascade: false,
+    compaction: false,
+  }
+  for (let index = observations.length - 1; index > 0; index -= 1) {
+    const prev = observations[index - 1]
+    const next = observations[index]
+    if (!prev || !next) continue
+    for (const key of ['phase', 'turn', 'decision', 'cascade', 'compaction'] as const) {
+      if (!seen[key] && prev[key] !== next[key]) {
+        result[key] = next.ts
+        seen[key] = true
+      }
+    }
+    if (seen.phase && seen.turn && seen.decision && seen.cascade && seen.compaction) break
+  }
+  return result
+}
+
 function laneTransitionCount(
   observations: CompositeObservation[],
   key: keyof Omit<CompositeObservation, 'ts'>,
@@ -725,6 +772,10 @@ export function FsmHub() {
     () => derivePhaseLog(view.observations),
     [view.observations],
   )
+  const stateEntries = useMemo(
+    () => deriveStateEntries(view.observations),
+    [view.observations],
+  )
   const { snapshot, loading, error, lastFetchAt } = view
 
   return html`
@@ -759,13 +810,13 @@ export function FsmHub() {
         />
 
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
-        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} />
+        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} phaseSince=${stateEntries?.phase ?? null} now=${now} />
 
         ${/* ── Zone 2b: Transition History Trail ── */ ''}
         <${TransitionTrail} history=${history} now=${now} />
 
         ${/* ── Zone 3: Turn Pipeline Strip ── */ ''}
-        <${TurnPipelineStrip} snapshot=${snapshot} />
+        <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
 
         ${/* ── Zone 4: Health Grid ── */ ''}
         <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -987,7 +1038,17 @@ function PhaseSparkline({ log }: { log: string[] }) {
   `
 }
 
-function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; phaseLog: string[] }) {
+function HeroPhase({
+  snapshot,
+  phaseLog,
+  phaseSince,
+  now,
+}: {
+  snapshot: KeeperCompositeSnapshot
+  phaseLog: string[]
+  phaseSince: number | null
+  now: number
+}) {
   const prevRef = useRef(snapshot.phase)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -1011,10 +1072,11 @@ function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; 
     Stopped: 'text-[var(--text-dim)]',
   }
   const color = phaseColor[snapshot.phase] ?? 'text-[var(--accent)]'
+  const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
 
   return html`
     <div class=${`rounded-xl border p-5 transition-all duration-700 ${flash ? 'border-[var(--accent)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_rgba(71,184,255,0.2)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
-      role="status" aria-live="polite" aria-label=${`Keeper phase: ${snapshot.phase}`}
+      role="status" aria-live="polite" aria-label=${`Keeper phase: ${snapshot.phase}${heldFor ? `, held for ${heldFor}` : ''}`}
       title=${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}
     >
       <div class="flex items-baseline justify-between">
@@ -1023,6 +1085,11 @@ function HeroPhase({ snapshot, phaseLog }: { snapshot: KeeperCompositeSnapshot; 
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${snapshot.phase}
           </div>
+          ${heldFor ? html`
+            <div class="mt-1 text-[10px] font-mono text-[var(--text-dim)]" aria-hidden="true">
+              held for <span class="text-[var(--text-body)]">${heldFor}</span>
+            </div>
+          ` : null}
         </div>
         ${flash ? html`<span class="text-[10px] text-[var(--accent)] animate-pulse font-mono" aria-live="assertive">phase changed</span>` : null}
       </div>
@@ -1073,11 +1140,15 @@ function PipelineStep({
   shortLabel,
   value,
   isLast,
+  sinceTs,
+  now,
 }: {
   label: string
   shortLabel: string
   value: string
   isLast?: boolean
+  sinceTs: number | null
+  now: number
 }) {
   const prevRef = useRef(value)
   const [flash, setFlash] = useState(false)
@@ -1107,14 +1178,29 @@ function PipelineStep({
     ? 'border-t border-dashed border-[rgba(129,140,248,0.5)] animate-[marching-ants_1s_linear_infinite]'
     : 'border-t border-[var(--white-10)]'
 
+  const heldFor = sinceTs != null ? fmtDuration(Math.max(0, now - sinceTs)) : null
+  const stalenessCls = (() => {
+    if (!heldFor || sinceTs == null) return 'text-[var(--text-dim)]'
+    const ageSec = now - sinceTs
+    if (!isActive) return 'text-[var(--text-dim)]'
+    if (ageSec > 60) return 'text-[#f59e0b]'
+    if (ageSec > 20) return 'text-[#facc15]'
+    return 'text-[#818cf8]'
+  })()
+
   return html`
-    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${shortLabel}: ${value}`}
-      title=${`${label} (${shortLabel}): ${value}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
+    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${shortLabel}: ${value}${heldFor ? `, held for ${heldFor}` : ''}`}
+      title=${`${label} (${shortLabel}): ${value}${heldFor ? ` · held ${heldFor}` : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
       <div class=${`flex-1 rounded-lg border px-3 py-2 transition-all duration-500 ${borderCls} ${bgCls}`}>
-        <div class="flex items-center gap-1.5">
-          ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
-          <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</span>
+        <div class="flex items-center justify-between gap-1.5">
+          <div class="flex items-center gap-1.5 min-w-0">
+            ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[#818cf8] ${activePulse} shrink-0"></span>` : null}
+            <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${shortLabel}</span>
+          </div>
+          ${heldFor ? html`
+            <span class=${`text-[9px] font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>
+          ` : null}
         </div>
         <div class=${`mt-0.5 font-mono text-[13px] font-semibold ${isActive ? 'text-[var(--text-strong)]' : 'text-[var(--text-muted)]'} ${flash ? 'animate-pulse' : ''}`}>
           ${value}
@@ -1126,17 +1212,25 @@ function PipelineStep({
   `
 }
 
-function TurnPipelineStrip({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+function TurnPipelineStrip({
+  snapshot,
+  stateEntries,
+  now,
+}: {
+  snapshot: KeeperCompositeSnapshot
+  stateEntries: StateEntries | null
+  now: number
+}) {
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
         Turn Pipeline
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="Turn pipeline stages">
-        <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} />
-        <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} />
-        <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} />
-        <${PipelineStep} shortLabel="KMC" label="Compaction" value=${snapshot.compaction.stage} isLast />
+        <${PipelineStep} shortLabel="KTC" label="Turn cycle" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KDP" label="Decision" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KCL" label="Cascade" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} now=${now} />
+        <${PipelineStep} shortLabel="KMC" label="Compaction" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} now=${now} isLast />
       </div>
     </div>
   `

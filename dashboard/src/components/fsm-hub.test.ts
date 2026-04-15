@@ -6,6 +6,7 @@ import {
   deriveObservedLaneSummaries,
   deriveOperationalInsight,
   derivePhaseLog,
+  deriveStateEntries,
   deriveTransitionHistory,
   type CompositeObservation,
 } from './fsm-hub'
@@ -188,5 +189,49 @@ describe('fsm-hub derived state', () => {
 
     expect(result.tone).toBe('info')
     expect(result.headline).toContain('Compaction currently owns the turn')
+  })
+})
+
+describe('deriveStateEntries', () => {
+  it('returns null for empty observations', () => {
+    expect(deriveStateEntries([])).toBeNull()
+  })
+
+  it('falls back to first observation ts when no transitions', () => {
+    const observations = [
+      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 105, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 110, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
+    ]
+    const entries = deriveStateEntries(observations)
+    expect(entries).toEqual({ phase: 100, turn: 100, decision: 100, cascade: 100, compaction: 100 })
+  })
+
+  it('returns the ts of the latest transition per lane', () => {
+    const observations = [
+      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', cascade: 'selecting', compaction: 'accumulating' }),
+      observation({ ts: 130, phase: 'Compacting', turn: 'executing', decision: 'guard_ok', cascade: 'done', compaction: 'accumulating' }),
+    ]
+    const entries = deriveStateEntries(observations)
+    expect(entries).toEqual({
+      phase: 130,
+      turn: 120,
+      decision: 120,
+      cascade: 130,
+      compaction: 100,
+    })
+  })
+
+  it('uses the most recent transition when a lane flips repeatedly', () => {
+    const observations = [
+      observation({ ts: 100, turn: 'idle' }),
+      observation({ ts: 110, turn: 'prompting' }),
+      observation({ ts: 120, turn: 'idle' }),
+      observation({ ts: 130, turn: 'prompting' }),
+    ]
+    const entries = deriveStateEntries(observations)
+    expect(entries?.turn).toBe(130)
   })
 })

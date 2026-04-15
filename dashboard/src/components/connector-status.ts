@@ -11,6 +11,7 @@ import {
   fetchGateStatus,
   type BindingInfo,
   type ChannelInfo,
+  type ConnectorNames,
   type GateConnectorInfo,
   type GateConnectorsData,
   type GateEventInfo,
@@ -169,6 +170,38 @@ function truncateMiddle(value: string, limit = 18): string {
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 
+function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
+  if (!names) return ''
+  const channelName = names.channel_names[channelId]
+  const guildId = names.channel_to_guild[channelId]
+  const guildName = guildId ? names.guild_names[guildId] : undefined
+  if (!channelName && !guildName) return ''
+  if (channelName && guildName) return `${channelName} in "${guildName}"`
+  return channelName || `in "${guildName}"`
+}
+
+type LivenessState = 'ok' | 'warn' | 'down' | 'unknown'
+
+interface LivenessDot {
+  label: string
+  state: LivenessState
+  detail: string
+  hint: string
+}
+
+function dotClass(state: LivenessState): string {
+  switch (state) {
+    case 'ok':
+      return 'bg-emerald-400'
+    case 'warn':
+      return 'bg-amber-400'
+    case 'down':
+      return 'bg-rose-400'
+    default:
+      return 'bg-[var(--text-dim)]'
+  }
+}
+
 function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>()
   const ordered: string[] = []
@@ -315,8 +348,115 @@ function ConnectorLivePanel({
     gateHealthLabel = 'unhealthy'
   }
 
+  const names = connector?.names
+  const sidecarLogPath = connector?.names_path
+    ? connector.names_path.replace(
+        /\/\.masc\/connectors\/[^/]+\/names\.json$/,
+        `/.masc/logs/${connectorId}-sidecar-YYYYMMDD.log`,
+      )
+    : ''
+
+  const browserDot: LivenessDot = {
+    label: 'Browser → Server',
+    state: connectorError ? 'down' : 'ok',
+    detail: connectorError ? 'gate fetch failed' : 'live',
+    hint: connectorError ? `Check server at ${connector?.gate_base_url || 'localhost:8935'}` : '',
+  }
+  const serverDot: LivenessDot = (() => {
+    if (!connector?.available) {
+      return {
+        label: 'Server → Sidecar',
+        state: 'down',
+        detail: 'no status.json yet',
+        hint: `Run ./run.sh from sidecars/${connectorId}-bot/`,
+      }
+    }
+    if (connector.stale) {
+      return {
+        label: 'Server → Sidecar',
+        state: 'warn',
+        detail: `stale · last heartbeat ${timeAgo(connector.updated_at)}`,
+        hint: 'Sidecar heartbeats stopped — tail its log',
+      }
+    }
+    return {
+      label: 'Server → Sidecar',
+      state: 'ok',
+      detail: `heartbeat ${timeAgo(connector.updated_at)}`,
+      hint: '',
+    }
+  })()
+  const sidecarDot: LivenessDot = (() => {
+    if (!connector?.available) {
+      return {
+        label: `Sidecar → ${connectorName}`,
+        state: 'unknown',
+        detail: 'sidecar offline',
+        hint: '',
+      }
+    }
+    const advertised = connectorStateLabel(connector)
+    if (advertised === 'connected') {
+      return {
+        label: `Sidecar → ${connectorName}`,
+        state: 'ok',
+        detail: connector.bot_user_name ? `as ${connector.bot_user_name}` : 'linked',
+        hint: '',
+      }
+    }
+    if (advertised === 'stale') {
+      return {
+        label: `Sidecar → ${connectorName}`,
+        state: 'warn',
+        detail: 'stale heartbeat',
+        hint: 'Sidecar process may have stopped',
+      }
+    }
+    return {
+      label: `Sidecar → ${connectorName}`,
+      state: 'warn',
+      detail: 'gateway link not yet up',
+      hint: 'Check token and network reachability',
+    }
+  })()
+  const livenessDots: LivenessDot[] = [browserDot, serverDot, sidecarDot]
+
+  const showOnboarding =
+    configuredBindings.length === 0 && !connector?.available && !connectorError
+
   return html`
     <div class="mb-4 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
+      <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2 text-[11px] text-[var(--text-body)]">
+        ${livenessDots.map(dot => html`
+          <div class="flex min-w-0 items-center gap-2" title=${dot.hint}>
+            <span class=${`inline-block h-2 w-2 rounded-full ${dotClass(dot.state)}`}></span>
+            <span class="font-medium">${dot.label}</span>
+            <span class="truncate text-[var(--text-dim)]">${dot.detail}</span>
+            ${dot.hint && (dot.state === 'down' || dot.state === 'warn')
+              ? html`<span class="text-[10px] italic text-[var(--text-dim)]">— ${dot.hint}</span>`
+              : null}
+          </div>
+        `)}
+      </div>
+
+      ${showOnboarding
+        ? html`
+            <div class="mb-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px] text-[var(--text-body)]">
+              <div class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">
+                Connect ${connectorName} in 3 steps
+              </div>
+              <ol class="mb-2 list-decimal pl-5 text-[11px] leading-5 text-[var(--text-dim)]">
+                <li>Start the MASC server (the dashboard you're reading confirms it's running).</li>
+                <li>Start the sidecar: <code class="rounded bg-[var(--white-8)] px-1">cd sidecars/${connectorId}-bot && ./run.sh</code></li>
+                <li>Come back to this panel and bind a channel below.</li>
+              </ol>
+              <div class="text-[10px] text-[var(--text-dim)]">
+                Once the sidecar emits its first heartbeat this card disappears.
+              </div>
+            </div>
+          `
+        : null}
+
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-dim)]">Gate-Advertised Connector</div>
@@ -379,20 +519,33 @@ function ConnectorLivePanel({
               <span>status ${connector.status_path || '-'}</span>
               <span>bindings ${connector.binding_store_path || '-'}</span>
               <span>audit ${connector.audit_path || '-'}</span>
+              <span>names ${connector.names_path || '-'}</span>
+              ${sidecarLogPath
+                ? html`<span>sidecar logs ${sidecarLogPath}</span>`
+                : null}
             </div>
           `
         : null}
 
       <div class="mt-4 grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-4 max-[980px]:grid-cols-1">
-        <div class="space-y-3">
+        <div class="space-y-3 rounded-md border border-dashed border-[var(--white-8)] p-3">
           <div>
-            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Channel ID</div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-body)]">Create / replace binding</div>
+            <div class="mt-1 text-[10px] text-[var(--text-dim)]">
+              Existing bindings are listed on the right. Paste a channel ID and pick a keeper here to add or replace a binding.
+            </div>
+          </div>
+          <div>
+            <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Channel ID (draft)</div>
             <${TextInput}
               value=${channelDraft.value}
-              placeholder=${`${connectorName} channel identifier`}
+              placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
               ariaLabel=${channelInputLabel}
               onInput=${(e: Event) => { channelDraft.value = (e.target as HTMLInputElement).value }}
             />
+            ${channelDraft.value.trim() && humanizeChannel(names, channelDraft.value.trim())
+              ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">resolves to ${humanizeChannel(names, channelDraft.value.trim())}</div>`
+              : null}
           </div>
           <div>
             <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Keeper</div>
@@ -437,15 +590,20 @@ function ConnectorLivePanel({
                 <div>
                   <div class="mb-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">Observed rooms</div>
                   <div class="flex flex-wrap gap-2">
-                    ${observedRooms.slice(0, 8).map(roomId => html`
+                    ${observedRooms.slice(0, 8).map(roomId => {
+                      const humanized = humanizeChannel(names, roomId)
+                      return html`
                       <button
                         type="button"
                         class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-1 text-[10px] text-[var(--text-body)] cursor-pointer hover:bg-[var(--white-8)]"
+                        title=${roomId}
                         onClick=${() => { channelDraft.value = roomId }}
                       >
-                        ${truncateMiddle(roomId, 22)}
+                        ${humanized
+                          ? html`<span>${humanized}</span><span class="ml-1 text-[var(--text-dim)]">· ${truncateMiddle(roomId, 10)}</span>`
+                          : truncateMiddle(roomId, 22)}
                       </button>
-                    `)}
+                    `})}
                   </div>
                 </div>
               `
@@ -480,11 +638,17 @@ function ConnectorLivePanel({
                     ${configuredBindings.map(binding => html`
                       ${(() => {
                         const keeperMeta = keeperByName.get(binding.keeper_name) ?? null
+                        const humanized = humanizeChannel(names, binding.channel_id)
                         return html`
                       <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
                         <div class="flex items-start justify-between gap-3">
                           <div class="min-w-0">
-                            <div class="text-xs font-medium text-[var(--text-body)]">${truncateMiddle(binding.channel_id, 26)}</div>
+                            <div class="text-xs font-medium text-[var(--text-body)]">
+                              <code>${truncateMiddle(binding.channel_id, 26)}</code>
+                              ${humanized
+                                ? html`<span class="ml-2 text-[var(--text-dim)]">— ${humanized}</span>`
+                                : html`<span class="ml-2 text-[var(--text-dim)]">— <span title="sidecar has not sent names yet">names pending</span></span>`}
+                            </div>
                             <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">keeper ${binding.keeper_name}</div>
                             ${keeperMeta
                               ? html`
@@ -521,9 +685,13 @@ function ConnectorLivePanel({
                     ${audit.slice(0, 4).map(entry => html`
                       ${(() => {
                         const keeperMeta = keeperByName.get(entry.keeper_name) ?? null
+                        const humanized = humanizeChannel(names, entry.channel_id)
                         return html`
                       <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2 text-[11px] text-[var(--text-dim)]">
                         <div class="font-medium text-[var(--text-body)]">${entry.action} · ${truncateMiddle(entry.channel_id, 22)} · ${entry.keeper_name}</div>
+                        ${humanized
+                          ? html`<div class="mt-0.5 text-[10px] text-[var(--text-dim)]">${humanized}</div>`
+                          : null}
                         ${keeperMeta && (keeperMeta.status || modelLabelForKeeper(keeperMeta) || runtimeLabelForKeeper(keeperMeta))
                           ? html`
                               <div class="mt-1 text-[10px]">

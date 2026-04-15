@@ -104,6 +104,38 @@ export function keeperFreshnessTs(keeper: Keeper, heartbeats: Map<string, number
     : null
 }
 
+function normalizeTurnBudget(raw: unknown): Keeper['turn_budget'] {
+  if (!isRecord(raw)) return null
+  const readSlot = (v: unknown) => {
+    if (!isRecord(v)) return null
+    const value = asNumber(v.value)
+    if (value == null) return null
+    let source: 'override' | 'env' | 'override_invalid' = 'env'
+    if (v.source === 'override') source = 'override'
+    else if (v.source === 'override_invalid') source = 'override_invalid'
+    const envDefault = asNumber(v.env_default) ?? value
+    const envVar = asString(v.env_var) ?? ''
+    const rawOverride = asNumber(v.raw_override)
+    return {
+      value,
+      source,
+      env_default: envDefault,
+      env_var: envVar,
+      raw_override: rawOverride ?? null,
+    }
+  }
+  const reactive = readSlot(raw.reactive)
+  const scheduled = readSlot(raw.scheduled_autonomous)
+  if (!reactive || !scheduled) return null
+  return {
+    reactive,
+    scheduled_autonomous: scheduled,
+    manifest_path: asString(raw.manifest_path) ?? null,
+    clamp_min: asNumber(raw.clamp_min) ?? 1,
+    clamp_max: asNumber(raw.clamp_max) ?? 50,
+  }
+}
+
 function normalizePromptSegments(
   raw: Record<string, unknown> | null,
   excludedKeys: Set<string>,
@@ -402,6 +434,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         latest_tool_call_count: asNumber(row.latest_tool_call_count) ?? null,
         tool_audit_source: asString(row.tool_audit_source) ?? null,
         tool_audit_at: toIsoTimestamp(row.tool_audit_at) ?? asString(row.tool_audit_at) ?? null,
+        turn_budget: normalizeTurnBudget(row.turn_budget),
         conversation_tail_count: asNumber(row.conversation_tail_count),
         k2k_count: asNumber(row.k2k_count),
         handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),

@@ -344,3 +344,99 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 })
+
+describe('normalizeKeepers turn_budget', () => {
+  it('normalizes override reactive + env autonomous with provenance fields', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'poe',
+        status: 'active',
+        turn_budget: {
+          reactive: {
+            value: 25,
+            source: 'override',
+            env_default: 15,
+            env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL',
+          },
+          scheduled_autonomous: {
+            value: 2,
+            source: 'env',
+            env_default: 2,
+            env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS',
+          },
+          manifest_path: '/abs/config/keepers/poe.toml',
+          clamp_min: 1,
+          clamp_max: 50,
+        },
+      },
+    ])
+    expect(k?.turn_budget).toEqual({
+      reactive: {
+        value: 25,
+        source: 'override',
+        env_default: 15,
+        env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL',
+      },
+      scheduled_autonomous: {
+        value: 2,
+        source: 'env',
+        env_default: 2,
+        env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS',
+      },
+      manifest_path: '/abs/config/keepers/poe.toml',
+      clamp_min: 1,
+      clamp_max: 50,
+    })
+  })
+
+  it('returns null when turn_budget is absent', () => {
+    const [k] = normalizeKeepers([{ name: 'no-budget', status: 'active' }])
+    expect(k?.turn_budget).toBeNull()
+  })
+
+  it('returns null when either slot is missing value', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'partial',
+        status: 'active',
+        turn_budget: {
+          reactive: { value: 15, source: 'env' },
+          // scheduled_autonomous missing — should reject the whole budget
+        },
+      },
+    ])
+    expect(k?.turn_budget).toBeNull()
+  })
+
+  it('defaults env_default to current value and clamp to [1,50] when backend omits them', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'minimal',
+        status: 'active',
+        turn_budget: {
+          reactive: { value: 15, source: 'env' },
+          scheduled_autonomous: { value: 2, source: 'env' },
+        },
+      },
+    ])
+    expect(k?.turn_budget?.reactive.env_default).toBe(15)
+    expect(k?.turn_budget?.clamp_min).toBe(1)
+    expect(k?.turn_budget?.clamp_max).toBe(50)
+    expect(k?.turn_budget?.manifest_path).toBeNull()
+  })
+
+  it('coerces unknown source string to env (safe fallback)', () => {
+    const [k] = normalizeKeepers([
+      {
+        name: 'unknown-source',
+        status: 'active',
+        turn_budget: {
+          reactive: { value: 15, source: 'garbage' },
+          scheduled_autonomous: { value: 2, source: 'override' },
+        },
+      },
+    ])
+    expect(k?.turn_budget?.reactive.source).toBe('env')
+    expect(k?.turn_budget?.scheduled_autonomous.source).toBe('override')
+  })
+})

@@ -654,6 +654,25 @@ export interface Keeper {
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null
   tool_audit_at?: string | null
+  turn_budget?: {
+    reactive: {
+      value: number
+      source: 'override' | 'env' | 'override_invalid'
+      env_default: number
+      env_var: string
+      raw_override: number | null
+    }
+    scheduled_autonomous: {
+      value: number
+      source: 'override' | 'env' | 'override_invalid'
+      env_default: number
+      env_var: string
+      raw_override: number | null
+    }
+    manifest_path: string | null
+    clamp_min: number
+    clamp_max: number
+  } | null
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>

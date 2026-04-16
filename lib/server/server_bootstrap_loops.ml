@@ -267,6 +267,13 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       ());
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
+  fork_subsystem "verification_timeout" (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 60.0;
+      Verification_protocol.check_timeouts ~config:state.room_config;
+      loop ()
+    in
+    loop ());
   (* Auto-boot keepers from keeper meta and start keepalive loops.
      Retries unbooted keepers up to [max_retries] times so transient
      failures (model resolution, discovery timing) don't permanently

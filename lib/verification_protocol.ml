@@ -107,3 +107,47 @@ let on_reject_verification ~(config : Coord.config)
     ("reason", `String reason);
     ("timestamp", `Float (Time_compat.now ()));
   ])
+
+let check_timeouts ~(config : Coord.config) =
+  if not (Env_config_runtime.Verification.fsm_enabled ()) then ()
+  else
+    try
+      let backlog = Coord.read_backlog config in
+      let now = Time_compat.now () in
+      List.iter (fun (task : Types.task) ->
+        match task.task_status with
+        | Types.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
+          (match Types.parse_iso8601_opt dl with
+           | Some deadline_ts when now > deadline_ts ->
+             let _post = Board_dispatch.create_post
+               ~author:"system"
+               ~content:(Printf.sprintf
+                 "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
+                 task.id task.title assignee dl)
+               ~title:(Printf.sprintf "Timeout: %s" task.title)
+               ~post_kind:Board.System_post
+               ~meta_json:(`Assoc [
+                 ("type", `String "verification_timeout");
+                 ("task_id", `String task.id);
+                 ("verification_id", `String verification_id);
+                 ("assignee", `String assignee);
+                 ("deadline", `String dl);
+               ])
+               ~visibility:Board.Internal
+               ~hearth:"verification"
+               () in
+             Subscriptions.push_event_to_sessions (`Assoc [
+               ("type", `String "masc/verification/timeout");
+               ("task_id", `String task.id);
+               ("verification_id", `String verification_id);
+               ("assignee", `String assignee);
+               ("timestamp", `Float now);
+             ])
+           | _ -> ())
+        | _ -> ()
+      ) backlog.tasks
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Task.error "verification timeout check failed: %s"
+        (Printexc.to_string exn)

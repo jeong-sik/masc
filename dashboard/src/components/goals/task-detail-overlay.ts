@@ -41,6 +41,12 @@ function eventBadge(label: string): { icon: any; color: string } {
     case 'completed': return { icon: html`<${Check} size=${14} />`, color: 'text-ok' }
     case 'cancel':
     case 'cancelled': return { icon: html`<${X} size=${14} />`, color: 'text-bad' }
+    case 'submit_for_verification':
+    case 'awaiting_verification': return { icon: html`<${ArrowRight} size=${14} />`, color: 'text-accent' }
+    case 'approve':
+    case 'approved': return { icon: html`<${Check} size=${14} />`, color: 'text-ok' }
+    case 'reject':
+    case 'rejected': return { icon: html`<${X} size=${14} />`, color: 'text-warn' }
     case 'transition': return { icon: html`<${ArrowRight} size=${14} />`, color: 'text-warn' }
     default: return { icon: html`<${Dot} size=${14} />`, color: 'text-text-muted' }
   }

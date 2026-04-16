@@ -1,6 +1,6 @@
 (** test_cdal_judge -- Unit tests for Cdal_judge module.
 
-    Tests 4 active checks and run-level verdict derivation
+    Tests 5 active checks and run-level verdict derivation
     with determinism and findings population verification. *)
 
 module CJ = Masc_mcp.Cdal_judge
@@ -51,13 +51,14 @@ let make_proof
 let make_contract
     ?(requested = Agent_sdk.Execution_mode.Execute)
     ?(risk_class = Agent_sdk.Risk_class.Low)
+    ?review_requirement
     () : Agent_sdk.Risk_contract.t =
   {
     runtime_constraints = {
       requested_execution_mode = requested;
       risk_class;
       allowed_mutations = ["keeper_fs_edit"];
-      review_requirement = None;
+      review_requirement;
     };
     eval_criteria = `Assoc [
       ("success_criteria", `List [`String "tests pass"]);
@@ -71,10 +72,13 @@ let make_bundle
     ?(proof_risk = Agent_sdk.Risk_class.Low)
     ?(contract_requested = Agent_sdk.Execution_mode.Execute)
     ?(contract_risk = Agent_sdk.Risk_class.Low)
+    ?contract_review_requirement
+    ?(proof_raw_evidence_refs = [])
     ?(contract_id_match = true)
     () : CL.loaded_bundle =
   let contract = make_contract ~requested:contract_requested
-      ~risk_class:contract_risk () in
+      ~risk_class:contract_risk
+      ?review_requirement:contract_review_requirement () in
   let recomputed_contract_id =
     Agent_sdk.Risk_contract.contract_id contract in
   let proof_contract_id =
@@ -83,6 +87,7 @@ let make_bundle
   let proof = make_proof ~run_id ~contract_id:proof_contract_id
       ~requested:proof_requested ~effective:proof_effective
       ~risk_class:proof_risk () in
+  let proof = { proof with raw_evidence_refs = proof_raw_evidence_refs } in
   {
     proof;
     manifest_json = `Assoc [];
@@ -101,7 +106,7 @@ let test_all_satisfied () =
   Alcotest.(check string) "status" "satisfied"
     (CT.contract_status_to_string verdict.status);
   Alcotest.(check int) "no findings" 0 (List.length verdict.findings);
-  Alcotest.(check int) "4 check results" 4
+  Alcotest.(check int) "5 check results" 5
     (List.length verdict.check_results);
   List.iter (fun (cr : CT.check_result) ->
     Alcotest.(check string) (cr.check_id ^ " satisfied") "satisfied"
@@ -176,6 +181,38 @@ let test_required_artifact_satisfied () =
   Alcotest.(check string) "status" "satisfied"
     (CT.contract_status_to_string cr.status);
   Alcotest.(check int) "no findings" 0 (List.length cr.findings)
+
+(* ================================================================ *)
+(* test_review_requirement_inconclusive_missing_evidence             *)
+(* ================================================================ *)
+
+let test_review_requirement_inconclusive_missing_evidence () =
+  let bundle = make_bundle
+      ?contract_review_requirement:(Some "human_review") () in
+  let cr = CJ.check_review_requirement bundle in
+  Alcotest.(check string) "status" "inconclusive"
+    (CT.contract_status_to_string cr.status);
+  Alcotest.(check int) "1 completeness gap" 1 (List.length cr.completeness_gaps);
+  let gap = List.hd cr.completeness_gaps in
+  Alcotest.(check string) "gap artifact" "evidence/review_warning.json" gap.artifact;
+  Alcotest.(check string) "gap impact" "blocks_verdict"
+    (CT.completeness_impact_to_string gap.impact)
+
+(* ================================================================ *)
+(* test_review_requirement_inconclusive_warning_only                 *)
+(* ================================================================ *)
+
+let test_review_requirement_inconclusive_warning_only () =
+  let bundle = make_bundle
+      ?contract_review_requirement:(Some "human_review")
+      ~proof_raw_evidence_refs:["proof-store://judge-test-001/evidence/review_warning.json"]
+      () in
+  let cr = CJ.check_review_requirement bundle in
+  Alcotest.(check string) "status" "inconclusive"
+    (CT.contract_status_to_string cr.status);
+  let gap = List.hd cr.completeness_gaps in
+  Alcotest.(check bool) "mentions warning-style evidence" true
+    (Astring.String.is_infix ~affix:"warning-style review evidence" gap.reason)
 
 (* ================================================================ *)
 (* test_verdict_priority_violated_wins                               *)
@@ -280,6 +317,10 @@ let () =
         test_contract_snapshot_violated;
       Alcotest.test_case "required artifact satisfied" `Quick
         test_required_artifact_satisfied;
+      Alcotest.test_case "review requirement missing evidence" `Quick
+        test_review_requirement_inconclusive_missing_evidence;
+      Alcotest.test_case "review requirement warning only" `Quick
+        test_review_requirement_inconclusive_warning_only;
     ]);
     ("verdict", [
       Alcotest.test_case "violated wins" `Quick

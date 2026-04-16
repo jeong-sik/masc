@@ -179,10 +179,10 @@ let test_calibration_baseline () =
   ) results
 
 let test_structural_checks_pass_for_valid_proofs () =
-  (* Verify that structurally valid proofs always get 4/4 satisfied checks *)
+  (* Verify that structurally valid proofs always get 5/5 satisfied checks *)
   let bundle = bundle_of_golden_case (List.hd GS.positive_cases) in
   let verdict = CJ.judge bundle in
-  Alcotest.(check int) "4 check results" 4
+  Alcotest.(check int) "5 check results" 5
     (List.length verdict.check_results);
   List.iter (fun (cr : CT.check_result) ->
     Alcotest.(check string) (cr.check_id ^ " satisfied") "satisfied"

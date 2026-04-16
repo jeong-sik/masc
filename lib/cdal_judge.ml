@@ -1,4 +1,4 @@
-(** Cdal_judge -- Phase 1A contract judge with 4 active checks.
+(** Cdal_judge -- Phase 1A contract judge with 5 active checks.
 
     @since CDAL Phase 1A *)
 
@@ -101,6 +101,40 @@ let check_required_artifact (_b : Cdal_loader.loaded_bundle) : Cdal_types.check_
     completeness_gaps = [] }
 
 (* ================================================================ *)
+(* Check 5: Review requirement                                      *)
+(* ================================================================ *)
+
+let review_warning_artifact = "evidence/review_warning.json"
+
+let has_review_warning_ref (proof : Agent_sdk.Cdal_proof.t) : bool =
+  List.exists
+    (fun ref_ -> String.ends_with ~suffix:review_warning_artifact ref_)
+    proof.raw_evidence_refs
+
+let check_review_requirement (b : Cdal_loader.loaded_bundle) : Cdal_types.check_result =
+  let check_id = "runtime.review_requirement" in
+  match b.contract.runtime_constraints.review_requirement with
+  | None ->
+    { check_id; status = Satisfied; findings = []; completeness_gaps = [] }
+  | Some _ ->
+    let reason =
+      if has_review_warning_ref b.proof then
+        "review_requirement present, but OAS only captured warning-style review evidence; use verification FSM for explicit approval"
+      else
+        "review_requirement present, but no review evidence artifact was captured; use verification FSM for explicit approval"
+    in
+    { check_id;
+      status = Inconclusive;
+      findings = [];
+      completeness_gaps = [
+        {
+          Cdal_types.artifact = review_warning_artifact;
+          reason;
+          impact = Blocks_verdict;
+        };
+      ] }
+
+(* ================================================================ *)
 (* Verdict derivation                                               *)
 (* ================================================================ *)
 
@@ -135,6 +169,7 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
     check_risk_class b;
     check_contract_snapshot b;
     check_required_artifact b;
+    check_review_requirement b;
   ] in
   let status = derive_status checks in
   let findings =

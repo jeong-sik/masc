@@ -90,6 +90,22 @@ let test_inconclusive_blocking_gap_rejects () =
   | CVG.Allow ->
     Alcotest.fail "Inconclusive with blocking gap should Reject"
 
+let test_review_gap_mentions_verification_fsm () =
+  let gap =
+    make_gap
+      ~artifact:"evidence/review_warning.json"
+      ~reason:"review_requirement present but only warning-style review evidence exists"
+      ~impact:CT.Blocks_verdict
+      ()
+  in
+  let v = make_verdict ~status:CT.Inconclusive ~gaps:[gap] () in
+  match CVG.check_verdict v with
+  | CVG.Reject msg ->
+    Alcotest.(check bool) "mentions submit_for_verification" true
+      (Astring.String.is_infix ~affix:"Submit for verification" msg)
+  | CVG.Allow ->
+    Alcotest.fail "Review gap should Reject"
+
 let test_inconclusive_annotation_only_allows () =
   let gap = make_gap ~impact:CT.Annotation_only () in
   let v = make_verdict ~status:CT.Inconclusive ~gaps:[gap] () in
@@ -204,6 +220,7 @@ let () =
       Alcotest.test_case "violated rejects" `Quick test_violated_rejects;
       Alcotest.test_case "violated no findings rejects" `Quick test_violated_no_findings_still_rejects;
       Alcotest.test_case "inconclusive blocking gap rejects" `Quick test_inconclusive_blocking_gap_rejects;
+      Alcotest.test_case "review gap mentions verification fsm" `Quick test_review_gap_mentions_verification_fsm;
       Alcotest.test_case "inconclusive annotation only allows" `Quick test_inconclusive_annotation_only_allows;
       Alcotest.test_case "inconclusive no gaps allows" `Quick test_inconclusive_no_gaps_allows;
       Alcotest.test_case "inconclusive mixed gaps rejects" `Quick test_inconclusive_mixed_gaps_rejects;

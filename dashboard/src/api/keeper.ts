@@ -421,10 +421,13 @@ export async function fetchKeeperStateDiagram(
   return resp.json() as Promise<KeeperStateDiagramResponse>
 }
 
-export async function fetchKeeperComposite(name: string): Promise<KeeperCompositeSnapshot> {
+export async function fetchKeeperComposite(
+  name: string,
+  opts?: { signal?: AbortSignal },
+): Promise<KeeperCompositeSnapshot> {
   const resp = await fetchWithTimeout(
     `/api/v1/keepers/${encodeURIComponent(name)}/composite`,
-    { headers: jsonHeaders() },
+    { headers: jsonHeaders(), signal: opts?.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)

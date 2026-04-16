@@ -314,6 +314,21 @@ let test_evidence_gap_groups () =
     Alcotest.(check string) "gap artifact" "manifest.json" g0.artifact;
     Alcotest.(check string) "gap impact" "blocks_verdict" g0.impact
 
+let test_review_gap_emits_tripwire () =
+  let (store, _tmp) = setup_store () in
+  let proof = make_proof ~run_id:"review-gap-001" () in
+  let gaps : Masc_mcp.Cdal_types.completeness_gap list = [
+    { artifact = "evidence/review_warning.json";
+      reason = "review_requirement present but no review evidence artifact was captured";
+      impact = Blocks_verdict };
+  ] in
+  match CFP.project_single_run ~store ~completeness_gaps:gaps proof with
+  | None -> Alcotest.fail "expected Some (has review gap)"
+  | Some fp ->
+    Alcotest.(check (list string)) "review tripwire"
+      ["review_requirement:submit_for_verification"]
+      fp.review_tripwires
+
 let test_tripwire_fires () =
   let (store, _tmp) = setup_store () in
   let run_id = "tw-test-001" in
@@ -529,6 +544,8 @@ let () =
          test_blocked_tool_counts;
        Alcotest.test_case "evidence gap groups" `Quick
          test_evidence_gap_groups;
+       Alcotest.test_case "review gap emits tripwire" `Quick
+         test_review_gap_emits_tripwire;
        Alcotest.test_case "tripwire fires" `Quick
          test_tripwire_fires;
        Alcotest.test_case "tripwire below threshold" `Quick

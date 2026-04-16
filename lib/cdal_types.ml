@@ -55,7 +55,7 @@ type contract_verdict = {
 (* ================================================================ *)
 
 let claim_scope_phase1 = "phase1_scoped_runtime_audit"
-let loader_semantics_version_phase1 = "phase1a_v1"
+let loader_semantics_version_phase1 = "phase1a_v2"
 let schema_compat_mode_v1 = "proof_bundle_v1"
 
 (* ================================================================ *)

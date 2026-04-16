@@ -40,6 +40,7 @@ type friction_projection = {
 (* ================================================================ *)
 
 let mode_violations_suffix = "evidence/mode_violations.json"
+let review_warning_suffix = "evidence/review_warning.json"
 
 (** Find the first raw_evidence_ref that ends with mode_violations.json. *)
 let find_violations_ref (proof : Agent_sdk.Cdal_proof.t) : string option =
@@ -123,6 +124,18 @@ let compute_tripwires ~threshold (groups : blocked_attempt_group list)
   ) groups
   |> List.sort String.compare
 
+let review_tripwires_of_gaps (gaps : Cdal_types.completeness_gap list)
+    : string list =
+  let has_review_gap =
+    List.exists
+      (fun (g : Cdal_types.completeness_gap) ->
+        g.impact = Cdal_types.Blocks_verdict
+        && String.equal g.artifact review_warning_suffix)
+      gaps
+  in
+  if has_review_gap then [ "review_requirement:submit_for_verification" ]
+  else []
+
 (* ================================================================ *)
 (* Public API                                                        *)
 (* ================================================================ *)
@@ -149,6 +162,11 @@ let project_single_run
           (g, c)
   in
   let gap_groups = compute_gap_groups completeness_gaps in
+  let review_tripwires =
+    List.sort_uniq String.compare
+      (compute_tripwires ~threshold:tripwire_threshold groups
+       @ review_tripwires_of_gaps completeness_gaps)
+  in
   if blocked_attempt_count = 0 && gap_groups = [] then None
   else
     Some {
@@ -159,7 +177,7 @@ let project_single_run
       blocked_tool_counts = compute_tool_counts groups;
       blocked_attempt_groups = groups;
       evidence_gap_groups = gap_groups;
-      review_tripwires = compute_tripwires ~threshold:tripwire_threshold groups;
+      review_tripwires;
     }
 
 (* ================================================================ *)
@@ -271,6 +289,11 @@ let project_window
     let blocked_attempt_count =
       List.fold_left (fun acc (g : blocked_attempt_group) -> acc + g.count) 0 merged in
     let gap_groups = compute_gap_groups completeness_gaps in
+    let review_tripwires =
+      List.sort_uniq String.compare
+        (compute_tripwires ~threshold:tripwire_threshold merged
+         @ review_tripwires_of_gaps completeness_gaps)
+    in
     if blocked_attempt_count = 0 && gap_groups = [] then None
     else
       let run_ids = List.map (fun (p : Agent_sdk.Cdal_proof.t) -> p.run_id) proofs in
@@ -282,7 +305,7 @@ let project_window
         blocked_tool_counts = compute_tool_counts merged;
         blocked_attempt_groups = merged;
         evidence_gap_groups = gap_groups;
-        review_tripwires = compute_tripwires ~threshold:tripwire_threshold merged;
+        review_tripwires;
       }
 
 (* ================================================================ *)

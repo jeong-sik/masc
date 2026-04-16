@@ -33,9 +33,17 @@ let check_verdict (v : Cdal_types.contract_verdict) : gate_result =
       let gap_details = List.map (fun (g : Cdal_types.completeness_gap) ->
         Printf.sprintf "%s: %s" g.artifact g.reason
       ) blocking_gaps in
+      let review_guidance =
+        if List.exists (fun (g : Cdal_types.completeness_gap) ->
+             String.equal g.artifact "evidence/review_warning.json")
+            blocking_gaps
+        then
+          " Submit for verification and approve via the verification FSM before marking done."
+        else ""
+      in
       let msg = Printf.sprintf
-        "CDAL verdict Inconclusive with blocking gaps (run_id=%s). Gaps: %s"
-        v.run_id (String.concat "; " gap_details)
+        "CDAL verdict Inconclusive with blocking gaps (run_id=%s). Gaps: %s%s"
+        v.run_id (String.concat "; " gap_details) review_guidance
       in
       Reject msg
 

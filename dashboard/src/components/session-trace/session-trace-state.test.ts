@@ -186,6 +186,51 @@ describe('buildTraceEvents', () => {
     const kinds = events.map(e => e.kind).sort()
     expect(kinds).toEqual(['broadcast', 'tool_call'])
   })
+
+  it('maps keeper contract verdict activity into lifecycle trace events', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [{
+          type: 'keeper.contract_verdict',
+          ts: '2024-04-06T10:00:00Z',
+          detail: {
+            status: 'inconclusive',
+            blocking_gap_artifacts: ['evidence/review_warning.json'],
+          },
+        }],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('lifecycle')
+    expect(events[0]!.summary).toContain('CDAL inconclusive')
+    expect(events[0]!.summary).toContain('review_warning.json')
+  })
+
+  it('maps keeper friction review tripwires into lifecycle trace events', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [{
+          type: 'keeper.friction',
+          ts: '2024-04-06T10:00:00Z',
+          detail: {
+            review_tripwires: ['review_requirement:submit_for_verification'],
+            evidence_gap_artifacts: ['evidence/review_warning.json'],
+          },
+        }],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
+      },
+      null,
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.kind).toBe('lifecycle')
+    expect(events[0]!.summary).toContain('submit_for_verification')
+  })
 })
 
 describe('getTraceSummary', () => {

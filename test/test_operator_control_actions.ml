@@ -1,6 +1,55 @@
 open Masc_mcp
 open Test_operator_control_support
 
+module CT = Masc_mcp.Cdal_types
+
+let make_review_required_verdict ?(run_id = "review-run-001") () :
+    CT.contract_verdict =
+  let gap : CT.completeness_gap =
+    {
+      artifact = "evidence/review_warning.json";
+      reason =
+        "review_requirement present but only warning-style review evidence exists";
+      impact = CT.Blocks_verdict;
+    }
+  in
+  let basis_input =
+    Printf.sprintf "%s|%s|%s"
+      "md5:review-contract"
+      CT.loader_semantics_version_phase1
+      CT.schema_compat_mode_v1
+  in
+  let basis_hash = "md5:" ^ (Digest.string basis_input |> Digest.to_hex) in
+  let verdict_without_hash : CT.contract_verdict =
+    {
+      run_id;
+      contract_id = "md5:review-contract";
+      claim_scope = CT.claim_scope_phase1;
+      judgment_basis_hash = basis_hash;
+      judgment_hash = "";
+      loader_semantics_version = CT.loader_semantics_version_phase1;
+      schema_compat_mode = CT.schema_compat_mode_v1;
+      status = CT.Inconclusive;
+      findings = [];
+      completeness_gaps = [ gap ];
+      check_results = [];
+    }
+  in
+  let judgment_hash = CT.compute_judgment_hash verdict_without_hash in
+  { verdict_without_hash with judgment_hash }
+
+let claim_and_start config ~agent_name ~task_id =
+  (match
+     Coord.transition_task_r config ~agent_name ~task_id ~action:Types.Claim ()
+   with
+  | Ok _ -> ()
+  | Error err -> Alcotest.fail (Types.show_masc_error err));
+  match
+    Coord.transition_task_r config ~agent_name ~task_id ~action:Types.Start ()
+  with
+  | Ok _ -> ()
+  | Error err -> Alcotest.fail (Types.show_masc_error err)
+
 let test_task_inject_executes_immediately () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -76,6 +125,52 @@ let review_item_from_room_digest ctx =
   match Yojson.Safe.Util.(digest |> member "review_queue" |> to_list) with
   | item :: _ -> item
   | [] -> Alcotest.fail "expected review_queue item"
+
+let test_cdal_review_requirement_appears_in_review_queue () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "dashboard"));
+      ignore (Coord.join config ~agent_name:"worker" ~capabilities:[] ());
+      let ctx = operator_ctx env sw config "dashboard" in
+      let task_id =
+        let _ =
+          Coord.add_task config ~title:"Review required task" ~priority:2
+            ~description:"needs verification routing"
+        in
+        match Coord.read_backlog config |> fun backlog -> backlog.tasks with
+        | task :: _ -> task.id
+        | [] -> Alcotest.fail "expected task"
+      in
+      claim_and_start config ~agent_name:"worker" ~task_id;
+      Cdal_eval_v1.persist
+        ~base_dir:(Filename.concat base_dir "data/cdal_verdicts")
+        ~task_id
+        (make_review_required_verdict ());
+      let item = review_item_from_room_digest ctx in
+      Alcotest.(check string) "kind" "cdal_review_requirement"
+        Yojson.Safe.Util.(item |> member "kind" |> to_string);
+      Alcotest.(check string) "target_type" "task"
+        Yojson.Safe.Util.(item |> member "target_type" |> to_string);
+      Alcotest.(check string) "target_id" task_id
+        Yojson.Safe.Util.(item |> member "target_id" |> to_string);
+      Alcotest.(check string) "severity" "bad"
+        Yojson.Safe.Util.(item |> member "severity" |> to_string);
+      Alcotest.(check bool) "summary mentions submit" true
+        (Astring.String.is_infix
+           ~affix:"검증 제출 필요"
+           Yojson.Safe.Util.(item |> member "summary" |> to_string));
+      Alcotest.(check bool) "friction includes review gap" true
+        (List.mem
+           (`String "evidence/review_warning.json")
+           Yojson.Safe.Util.
+             (item |> member "friction" |> member "cdal"
+              |> member "review_gap_artifacts" |> to_list)))
 
 let test_review_resolve_hides_matching_item () =
   Eio_main.run @@ fun env ->

@@ -74,6 +74,7 @@ Run-level metadata:
 | `runtime.risk_class` | proof faithfully carries the risk class from the contract | `runtime_constraints.risk_class` | `contract_id`, `risk_class` | `contract.json` | load contract snapshot by run convention; require `contract_id` hash match; require `contract.risk_class = proof.risk_class` | Active in v1 | `Violated` on contradiction, `Inconclusive` on missing basis |
 | `proof.contract_snapshot` | the contract snapshot used for replay is the exact immutable input contract referenced by `contract_id` | full contract snapshot | `contract_id` | `contract.json` | load contract snapshot by run convention; recompute content-addressed `contract_id`; require equality with manifest `contract_id` | Active in v1 | `Violated` on hash mismatch, `Inconclusive` on load/parse failure |
 | `proof.required_artifact` | artifacts required by active checks are present and parseable | none directly | `tool_trace_refs`, `raw_evidence_refs`, `checkpoint_ref` | referenced artifacts selected by the active checks | for every artifact selected by phase-1A rules, resolve ref, read file, parse payload; no heuristic fallback | Active in v1 | `Inconclusive` if blocking artifact missing or unreadable |
+| `runtime.review_requirement` | proof bundle v1 does not carry a typed review verdict, so any declared review requirement must route through the verification FSM instead of being silently treated as satisfied | `runtime_constraints.review_requirement` | `raw_evidence_refs` | `evidence/review_warning.json` | if no review requirement is declared, satisfy immediately; if one is declared, emit `Inconclusive` with a blocking gap so downstream uses explicit verification / approval | Active in v1 | `Inconclusive` on any declared review requirement until explicit verification occurs downstream |
 
 ### 4.1 Mode Order Rule
 
@@ -98,7 +99,7 @@ It is limited to the artifacts selected by the active phase-1A checks.
 | `contract.json` | yes | yes | required for contract snapshot integrity and propagation checks |
 | `evidence/mode_violations.json` | no in Phase-1A judge | no | not required by active phase-1A checks; used in Phase-1B friction |
 | `evidence/token_usage.json` | no | no | advisory / annotation only |
-| `evidence/review_warning.json` | no | no | unsupported review semantics in v1 |
+| `evidence/review_warning.json` | conditional | yes when `runtime.review_requirement` is declared | warning-only bridge artifact that routes the run into the verification FSM |
 | `tool_traces/*.jsonl` | no by default | no | only selected when a later active check explicitly consumes them |
 | `checkpoint_ref` target | no by default | no | only selected when a later active check explicitly consumes it |
 
@@ -112,13 +113,18 @@ Rule:
 | check_id | why unsupported in v1 | what is missing | required next step |
 |---|---|---|---|
 | `runtime.allowed_mutations` | OAS enforces it at run time, but proof bundle v1 and evidence v1 do not preserve enough typed post-run evidence to replay it generally | no top-level proof field; no stable typed evidence for mutation class decision; current violation rows do not expose `effect_class` or `decision` | evidence v2 plus mapping update |
-| `runtime.review_requirement` | proof bundle v1 does not encode whether review was satisfied as a typed replayable fact | only ad hoc warning-style evidence exists; no typed review event or verdict input | typed review evidence and check spec expansion |
 
 Rule:
 
 - unsupported checks must not be silently treated as satisfied
 - unsupported checks must not participate in deterministic pass conditions
 - unsupported checks may appear in documentation as contract surface, but not as active phase-1A checks
+
+Note:
+
+- `runtime.review_requirement` is now a bridge check, not a full satisfaction check
+- phase-1A can route declared review requirements into `Inconclusive + blocking gap`
+- phase-1A still cannot prove that review was satisfied from proof bundle v1 alone
 
 ## 6. Blocking vs Annotation Inputs
 

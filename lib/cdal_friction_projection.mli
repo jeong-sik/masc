@@ -45,7 +45,10 @@ type friction_projection = {
     reads [mode_violations.json], parses v1 violation records, groups by
     [(tool_name, violation_kind, effective_mode)], derives tool counts and
     evidence gap groups, and fires review tripwires when any group count
-    exceeds [tripwire_threshold] (default 3).
+    exceeds [tripwire_threshold] (default 3). A blocking
+    [evidence/review_warning.json] gap also emits a
+    [review_requirement:submit_for_verification] tripwire so downstream
+    coordinators can route through their verification FSM.
 
     Returns [None] when no violations and no completeness gaps exist. *)
 val project_single_run :

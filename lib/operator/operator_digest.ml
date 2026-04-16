@@ -148,6 +148,171 @@ let room_state_json config =
         ("pause_reason", string_option_to_json state.pause_reason);
       ]
 
+let cdal_data_root (config : Coord.config) =
+  match Sys.getenv_opt "MASC_DATA_DIR" with
+  | Some dir -> dir
+  | None -> Filename.concat config.base_path "data"
+
+let cdal_verdicts_base_dir config =
+  Filename.concat (cdal_data_root config) "cdal_verdicts"
+
+let recent_cdal_verdicts_by_task (config : Coord.config) =
+  let store = Dated_jsonl.create ~base_dir:(cdal_verdicts_base_dir config) () in
+  let recent =
+    Dated_jsonl.read_recent store (Env_config_runtime.Cdal.verdict_lookup_limit ())
+  in
+  let tbl = Hashtbl.create 32 in
+  List.iter
+    (fun json ->
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "_task_id" fields with
+          | Some (`String tid) when String.trim tid <> "" ->
+              let verdict_fields = List.filter (fun (k, _) -> k <> "_task_id") fields in
+              (match Cdal_types.contract_verdict_of_json (`Assoc verdict_fields) with
+              | Ok verdict -> Hashtbl.replace tbl tid verdict
+              | Error _ -> ())
+          | _ -> ())
+      | _ -> ())
+    recent;
+  tbl
+
+let review_requirement_gaps (verdict : Cdal_types.contract_verdict) =
+  verdict.completeness_gaps
+  |> List.filter (fun (gap : Cdal_types.completeness_gap) ->
+       gap.impact = Cdal_types.Blocks_verdict
+       && String.equal gap.artifact "evidence/review_warning.json")
+
+let task_status_observed_at (task : Types.task) =
+  match task.task_status with
+  | Types.Claimed { claimed_at; _ } -> Some claimed_at
+  | Types.InProgress { started_at; _ } -> Some started_at
+  | Types.AwaitingVerification { submitted_at; _ } -> Some submitted_at
+  | Types.Done { completed_at; _ } -> Some completed_at
+  | Types.Cancelled { cancelled_at; _ } -> Some cancelled_at
+  | Types.Todo -> Some task.created_at
+
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let cdal_review_requirement_item ~now (task : Types.task)
+    (verdict : Cdal_types.contract_verdict) =
+  let review_gaps = review_requirement_gaps verdict in
+  if review_gaps = [] then None
+  else
+    let verify_gate_evidence =
+      match task.contract with
+      | Some contract -> contract.verify_gate_evidence
+      | None -> []
+    in
+    let review_gap_artifacts =
+      review_gaps
+      |> List.map (fun (gap : Cdal_types.completeness_gap) -> gap.artifact)
+      |> List.sort_uniq String.compare
+    in
+    let review_gap_reasons =
+      review_gaps
+      |> List.map (fun (gap : Cdal_types.completeness_gap) -> gap.reason)
+      |> List.sort_uniq String.compare
+    in
+    let stale_sec = stale_sec_of_iso ~now (task_status_observed_at task) in
+    let base_friction route_state status assignee extra_fields =
+      `Assoc
+        ([
+           ("attention_items", `List []);
+           ("risk_digest", `Null);
+           ("pending_confirm", `Null);
+           ( "cdal",
+             `Assoc
+               ([
+                  ("route_state", `String route_state);
+                  ("task_id", `String task.id);
+                  ("task_title", `String task.title);
+                  ("task_status", `String status);
+                  ("assignee", `String assignee);
+                  ("run_id", `String verdict.run_id);
+                  ("contract_id", `String verdict.contract_id);
+                  ("judgment_hash", `String verdict.judgment_hash);
+                  ("review_gap_artifacts", string_list_json review_gap_artifacts);
+                  ("review_gap_reasons", string_list_json review_gap_reasons);
+                  ("verify_gate_evidence", string_list_json verify_gate_evidence);
+                  ("verdict", Cdal_types.contract_verdict_to_json verdict);
+                ]
+                @ extra_fields)) ]
+         : (string * Yojson.Safe.t) list)
+    in
+    match task.task_status with
+    | Types.InProgress { assignee; _ } ->
+        Some
+          {
+            id = "cdal_review_requirement:" ^ task.id;
+            kind = "cdal_review_requirement";
+            target_type = "task";
+            target_id = Some task.id;
+            severity = Sev_bad;
+            urgency = "now";
+            summary = Printf.sprintf "작업 %s 검증 제출 필요" task.title;
+            why_now =
+              "CDAL review_requirement가 발화했고 review_warning 근거만 남아 direct done이 차단되었습니다. verification FSM으로 submit_for_verification 후 승인 경로가 필요합니다.";
+            source = "deterministic";
+            authoritative = true;
+            fingerprint =
+              review_fingerprint
+                [ task.id; verdict.judgment_hash; Types.string_of_task_status task.task_status ];
+            stale_sec;
+            confirm_required = false;
+            recommended_action = None;
+            truth_ref =
+              review_truth_ref_json ~target_type:"task" ~target_id:(Some task.id);
+            friction =
+              base_friction "needs_submit_for_verification" "in_progress" assignee [];
+            advice = review_empty_advice_json;
+          }
+    | Types.AwaitingVerification
+        { assignee; verification_id; required_verifier_role; deadline; _ } ->
+        Some
+          {
+            id = "cdal_review_requirement:" ^ task.id;
+            kind = "cdal_review_requirement";
+            target_type = "task";
+            target_id = Some task.id;
+            severity = Sev_warn;
+            urgency = "soon";
+            summary = Printf.sprintf "작업 %s 검증 승인 대기" task.title;
+            why_now =
+              Printf.sprintf
+                "CDAL review_requirement가 이미 verification FSM으로 라우팅되었고 verification_id=%s 승인을 기다리고 있습니다."
+                verification_id;
+            source = "deterministic";
+            authoritative = true;
+            fingerprint =
+              review_fingerprint
+                [ task.id; verdict.judgment_hash; Types.string_of_task_status task.task_status ];
+            stale_sec;
+            confirm_required = false;
+            recommended_action = None;
+            truth_ref =
+              review_truth_ref_json ~target_type:"task" ~target_id:(Some task.id);
+            friction =
+              base_friction "awaiting_verification" "awaiting_verification" assignee
+                [
+                  ("verification_id", `String verification_id);
+                  ( "required_verifier_role",
+                    `String (Types.role_to_string required_verifier_role) );
+                  ("deadline", string_option_to_json deadline);
+                ];
+            advice = review_empty_advice_json;
+          }
+    | _ -> None
+
+let cdal_review_requirement_items config ~now =
+  let verdicts = recent_cdal_verdicts_by_task config in
+  Coord.get_tasks_safe config
+  |> List.filter_map (fun (task : Types.task) ->
+       match Hashtbl.find_opt verdicts task.id with
+       | Some verdict -> cdal_review_requirement_item ~now task verdict
+       | None -> None)
+
 let keeper_context_ratio (meta : Keeper_types.keeper_meta) =
   let input_tokens = meta.runtime.usage.last_input_tokens in
   if input_tokens = 0 then None
@@ -193,10 +358,12 @@ let urgency_rank = function
 let target_rank value =
   if Operator_digest_types.is_root_alias value then 3
   else match value with
+  | "task" -> 2
   | "keeper" -> 1
   | _ -> 0
 
 let kind_rank = function
+  | "cdal_review_requirement" -> 5
   | "pending_confirm" -> 4
   | "session_risk" -> 3
   | "namespace_gate" -> 2
@@ -552,6 +719,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           @ (match namespace_gate_review_item ~room_json:room_state_json with
             | Some item -> [ item ]
             | None -> [])
+          @ cdal_review_requirement_items config ~now
           @ (keeper_rows |> List.filter_map (keeper_review_item ~now))
         in
         let active_reviews, deferred_reviews =

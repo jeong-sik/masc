@@ -60,6 +60,19 @@ let make_contract () : Agent_sdk.Risk_contract.t =
     ];
   }
 
+let make_contract_with_review_requirement () : Agent_sdk.Risk_contract.t =
+  {
+    runtime_constraints = {
+      requested_execution_mode = Execute;
+      risk_class = Low;
+      allowed_mutations = ["keeper_fs_edit"];
+      review_requirement = Some "human_review";
+    };
+    eval_criteria = `Assoc [
+      ("success_criteria", `List [`String "tests pass"]);
+    ];
+  }
+
 let setup_store () =
   let tmp_dir = Filename.concat
     (Filename.get_temp_dir_name ())
@@ -92,7 +105,7 @@ let test_full_pipeline () =
       CT.loader_semantics_version_phase1 v.loader_semantics_version;
     Alcotest.(check string) "schema_compat_mode"
       CT.schema_compat_mode_v1 v.schema_compat_mode;
-    Alcotest.(check int) "4 check results" 4
+    Alcotest.(check int) "5 check results" 5
       (List.length v.check_results)
   | Load_failure (err, _) ->
     Alcotest.fail
@@ -155,6 +168,34 @@ let test_verdict_of_outcome () =
   Alcotest.(check string) "failure branch status" "inconclusive"
     (CT.contract_status_to_string v2.status)
 
+let test_review_requirement_yields_inconclusive () =
+  let (store, _tmp) = setup_store () in
+  let run_id = "review-gate-001" in
+  let contract = make_contract_with_review_requirement () in
+  let contract_id = Agent_sdk.Risk_contract.contract_id contract in
+  let proof = make_proof ~run_id ~contract_id () in
+  Agent_sdk.Proof_store.init_run store ~run_id;
+  Agent_sdk.Proof_store.write_manifest store ~run_id proof;
+  Agent_sdk.Proof_store.write_contract store ~run_id contract;
+  match CE.evaluate ~store proof with
+  | Verdict (v, Some fp) ->
+    Alcotest.(check string) "status" "inconclusive"
+      (CT.contract_status_to_string v.status);
+    Alcotest.(check bool) "has review gap" true
+      (List.exists
+         (fun (g : CT.completeness_gap) ->
+           String.equal g.artifact "evidence/review_warning.json")
+         v.completeness_gaps);
+    Alcotest.(check (list string)) "review tripwire"
+      ["review_requirement:submit_for_verification"]
+      fp.review_tripwires
+  | Verdict (_, None) ->
+    Alcotest.fail "expected friction projection for review gap"
+  | Load_failure (err, _) ->
+    Alcotest.fail
+      (Printf.sprintf "expected Verdict, got Load_failure: %s"
+         (CL.load_error_to_string err))
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -167,5 +208,7 @@ let () =
         test_load_failure_inconclusive;
       Alcotest.test_case "verdict_of_outcome" `Quick
         test_verdict_of_outcome;
+      Alcotest.test_case "review requirement yields inconclusive" `Quick
+        test_review_requirement_yields_inconclusive;
     ]);
   ]

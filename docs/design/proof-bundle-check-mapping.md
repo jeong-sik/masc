@@ -27,7 +27,7 @@ Without an explicit mapping table, it is easy to write check logic for fields th
 | `runtime_constraints.requested_execution_mode` | `runtime.requested_execution_mode` | direct top-level field | not needed beyond contract snapshot | Active | propagation / integrity only |
 | `runtime_constraints.risk_class` | `runtime.risk_class` | direct top-level field | not needed beyond contract snapshot | Active | propagation / integrity only |
 | `runtime_constraints.allowed_mutations` | `runtime.allowed_mutations` | no top-level field | insufficient typed replay evidence | Unsupported_in_v1 | enforced at run time, not replayable generally |
-| `runtime_constraints.review_requirement` | `runtime.review_requirement` | no top-level field | insufficient typed replay evidence | Unsupported_in_v1 | warning-style evidence is not enough |
+| `runtime_constraints.review_requirement` | `runtime.review_requirement` | no top-level field | warning-only bridge evidence via `raw_evidence_refs` | Active | routes to `Inconclusive + blocking gap`; explicit review satisfaction is still not replayable |
 | full input contract snapshot | `proof.contract_snapshot` | `contract_id` only | `contract.json` by run convention | Active | integrity only |
 | required refs for active checks | `proof.required_artifact` | refs exist in manifest | referenced artifacts | Active | availability / parseability only |
 
@@ -58,7 +58,7 @@ Without an explicit mapping table, it is easy to write check logic for fields th
 | `contract.json` | OAS | full `runtime_constraints` + opaque `eval_criteria` | yes | no | no |
 | `evidence/mode_violations.json` | OAS | `ts`, `tool_name`, `input_summary`, `effective_mode`, `violation_kind` | no for active checks | yes | insufficient |
 | `evidence/token_usage.json` | OAS | turn token snapshots | no | optional annotation | no |
-| `evidence/review_warning.json` | OAS | warning string + effective mode | no | annotation only | insufficient |
+| `evidence/review_warning.json` | OAS | warning string + effective mode | yes for bridge routing | yes as review tripwire source | still insufficient for full typed review satisfaction |
 | `tool_traces/*.jsonl` | OAS | tool trace rows | only as selected artifact presence | optional | partial, still missing typed join fields |
 
 ## 4.1 Phase-1A Selected Artifact List
@@ -69,7 +69,7 @@ Without an explicit mapping table, it is easy to write check logic for fields th
 | contract snapshot | `{run}/contract.json` | yes | `runtime.requested_execution_mode`, `runtime.risk_class`, `proof.contract_snapshot` |
 | mode violations | `{run}/evidence/mode_violations.json` | no | phase-1B friction only |
 | token usage | `{run}/evidence/token_usage.json` | no | advisory only |
-| review warning | `{run}/evidence/review_warning.json` | no | unsupported review semantics in v1 |
+| review warning | `{run}/evidence/review_warning.json` | conditionally yes | active only when `runtime.review_requirement` is declared |
 | tool traces | `{run}/tool_traces/*.jsonl` | no by default | reserved for future active checks |
 | checkpoint | ref target of `checkpoint_ref` | no by default | reserved for future active checks |
 

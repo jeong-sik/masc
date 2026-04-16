@@ -1902,9 +1902,46 @@ let run_turn
              let store = Agent_sdk.Proof_store.default_config in
              let outcome = Cdal_eval_v1.evaluate ~store p in
              let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+             let task_subject =
+               Option.map
+                 (fun task_id ->
+                   Coord_hooks.
+                     { kind = "task"; id = Keeper_id.Task_id.to_string task_id })
+                 meta.current_task_id
+             in
+             let emit_keeper_activity ~kind ~payload ~tags =
+               try
+                 !Coord_hooks.activity_emit_fn config
+                   ~actor:Coord_hooks.{ kind = "agent"; id = meta.agent_name }
+                   ?subject:task_subject
+                   ~kind ~payload ~tags ()
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Keeper.warn
+                   "keeper:%s activity emit failed (%s): %s"
+                   meta.name
+                   kind
+                   (Printexc.to_string exn)
+             in
              let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
              Cdal_eval_v1.persist ?task_id verdict;
              Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
+             emit_keeper_activity
+               ~kind:"keeper.contract_verdict"
+               ~payload:
+                 (Keeper_turn_telemetry.contract_verdict_activity_payload
+                    ~keeper_name:meta.name verdict)
+               ~tags:
+                 ([ "keeper"; "cdal"; "contract_verdict";
+                    Cdal_types.contract_status_to_string verdict.status ]
+                  @
+                  if List.exists
+                       (fun (gap : Cdal_types.completeness_gap) ->
+                         String.equal gap.artifact "evidence/review_warning.json")
+                       verdict.completeness_gaps
+                  then [ "review_requirement" ]
+                  else []);
              (match outcome with
               | Cdal_eval_v1.Load_failure (err, _) ->
                 Log.Keeper.warn
@@ -1913,7 +1950,16 @@ let run_turn
                   (Cdal_loader.load_error_to_string err)
               | Cdal_eval_v1.Verdict (_, _) -> ());
              (match Cdal_eval_v1.friction_of_outcome outcome with
-              | Some fp -> Keeper_turn_telemetry.log_keeper_friction ~keeper_name:meta.name fp
+              | Some fp ->
+                Keeper_turn_telemetry.log_keeper_friction ~keeper_name:meta.name fp;
+                emit_keeper_activity
+                  ~kind:"keeper.friction"
+                  ~payload:
+                    (Keeper_turn_telemetry.friction_activity_payload
+                       ~keeper_name:meta.name fp)
+                  ~tags:
+                    ([ "keeper"; "cdal"; "friction" ]
+                     @ if fp.review_tripwires <> [] then [ "tripwire" ] else [])
               | None -> ())
            | None -> ());
           (* Post-turn deterministic memory write.

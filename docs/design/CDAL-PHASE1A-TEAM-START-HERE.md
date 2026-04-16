@@ -131,7 +131,7 @@ Unavailable means `None`, not inference.
 ## 9. Suggested Implementation Order
 
 1. build ref resolution and manifest/contract loading behind a small reader adapter
-2. implement per-check result evaluation for the 4 active checks
+2. implement per-check result evaluation for the 5 active checks
 3. implement run-level verdict derivation
 4. validate new evaluator against known bundles (replay determinism test)
 5. optionally add `Single_run` friction projection

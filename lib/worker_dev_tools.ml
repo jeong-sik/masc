@@ -708,8 +708,6 @@ let gh_graphql_r2_mutations =
     "removeouterfromorganization"; "transferrepository";
     "archiverepository" ]
 
-(** Extract the HTTP method from a [gh api] invocation.
-    Recognizes [-X], [--method], [-X=M], [--method=M]. *)
 let extract_gh_api_method cmd =
   let tokens =
     String.split_on_char ' ' (String.trim cmd)

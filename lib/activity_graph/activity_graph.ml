@@ -100,34 +100,18 @@ let read_all_events config =
 let matches_filters ?(kinds = []) (value : event) =
   kinds = [] || List.mem value.kind kinds
 
-let list_events config ?(kinds = []) ~after_seq ~limit () =
+(** Returns [(page, total_matching)] where [total_matching] is the count
+    of all events matching filters before [limit] is applied. *)
+let list_events_with_total config ?(kinds = []) ~after_seq ~limit
+    ?since_ms () =
   let all =
     read_all_events config
     |> List.filter (fun value ->
-           value.seq > after_seq && matches_filters ~kinds value)
-  in
-  if after_seq > 0 then
-    List.take limit all
-  else
-    let total = List.length all in
-    all |> List.drop (max 0 (total - limit))
-
-(** Like {!list_events} but also returns the total count of matching
-    events in the store before the [limit] is applied. Callers expose
-    this as [events_total] in JSON responses so dashboards can show
-    "N shown of M stored" instead of conflating page size with store
-    size.
-
-    The additional cost vs [list_events] is a single [List.length]
-    traversal over the already-filtered list — O(n) on n = matching
-    events, not O(all events in store).
-
-    @since 0.150.0 (event-total-shown distinction) *)
-let list_events_with_total config ?(kinds = []) ~after_seq ~limit () =
-  let all =
-    read_all_events config
-    |> List.filter (fun value ->
-           value.seq > after_seq && matches_filters ~kinds value)
+           value.seq > after_seq
+           && matches_filters ~kinds value
+           && (match since_ms with
+               | None -> true
+               | Some ms -> value.ts_ms >= ms))
   in
   let total = List.length all in
   let page =
@@ -137,6 +121,18 @@ let list_events_with_total config ?(kinds = []) ~after_seq ~limit () =
       all |> List.drop (max 0 (total - limit))
   in
   (page, total)
+
+let list_events config ?(kinds = []) ~after_seq ~limit () =
+  fst (list_events_with_total config ~kinds ~after_seq ~limit ())
+
+let window_meta ~limit ~events_shown ~events_store_total
+    ?(extra = []) () : Yojson.Safe.t =
+  `Assoc ([
+    ("limit", `Int limit);
+    ("events_shown", `Int events_shown);
+    ("events_store_total", `Int events_store_total);
+    ("has_more", `Bool (events_store_total > events_shown));
+  ] @ extra)
 
 let latest_seq config = read_current_seq config
 
@@ -216,12 +212,8 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
 
 let graph_json config ?(kinds = []) ?(limit = 500)
     ?(timeline_limit = 80) ?since_ms () =
-  let events_page, events_store_total =
-    list_events_with_total config ~kinds ~after_seq:0 ~limit ()
-  in
-  let events = match since_ms with
-    | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events_page
-    | None -> events_page
+  let events, events_store_total =
+    list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
   in
   let kind_counts_json =
     let counts = Hashtbl.create 16 in
@@ -375,16 +367,13 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     [
       ("generated_at", `String (Types.now_iso ()));
       ( "window",
-        `Assoc
-          [
-            ("limit", `Int limit);
-            ("room_id", `String "default");  (* backward compat *)
+        window_meta ~limit
+          ~events_shown:(List.length events)
+          ~events_store_total
+          ~extra:[
+            ("room_id", `String "default");
             ("kinds", `List (List.map (fun value -> `String value) kinds));
-            ("events_shown", `Int (List.length events));
-            ("events_store_total", `Int events_store_total);
-            ("has_more",
-             `Bool (events_store_total > List.length events));
-          ] );
+          ] () );
       ( "stats",
         `Assoc
           [
@@ -436,12 +425,8 @@ let span_end_status = function
   | _ -> Span_ended
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
-  let events_page, events_store_total =
-    list_events_with_total config ~kinds:[] ~after_seq:0 ~limit ()
-  in
-  let events = match since_ms with
-    | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events_page
-    | None -> events_page
+  let events, events_store_total =
+    list_events_with_total config ~kinds:[] ~after_seq:0 ~limit ?since_ms ()
   in
   let now_ms = now_ts_ms () in
   let open_spans : (string * string option, int * string * string) Hashtbl.t =
@@ -512,12 +497,10 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
       ("min_ms", `Int time_range_min);
       ("max_ms", `Int time_range_max);
     ]);
-    ("window", `Assoc [
-      ("limit", `Int limit);
-      ("events_shown", `Int (List.length events));
-      ("events_store_total", `Int events_store_total);
-      ("spans_count", `Int (List.length all_spans));
-      ("has_more",
-       `Bool (events_store_total > List.length events));
-    ]);
+    ("window",
+     window_meta ~limit
+       ~events_shown:(List.length events)
+       ~events_store_total
+       ~extra:[("spans_count", `Int (List.length all_spans))]
+       ());
   ]

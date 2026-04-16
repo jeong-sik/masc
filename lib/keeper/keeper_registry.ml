@@ -812,19 +812,8 @@ let execute_entry_action_observability
         (Keeper_state_machine.phase_to_string phase)
         event_name
         detail;
-      (try
-         Sse.broadcast
-           (`Assoc [
-              "type", `String "keeper_lifecycle";
-              "name", `String name;
-              "phase", `String (Keeper_state_machine.phase_to_string phase);
-              "event", `String event_name;
-              "detail", `String detail;
-              "ts_unix", `Float ts_unix;
-            ])
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | _exn -> ())
+      let (_ignore_ts : float) = ts_unix in
+      ()
   | Start_compaction
   | Start_handoff
   | Start_drain

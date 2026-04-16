@@ -41,13 +41,13 @@ let sse_payload_json (event : string) : Yojson.Safe.t =
   in
   find_data_line (String.split_on_char '\n' event)
 
-let keeper_lifecycle_events received_events =
+let sse_events_of_type event_type received_events =
   received_events
   |> List.rev
   |> List.filter_map (fun raw_event ->
          let payload = sse_payload_json raw_event in
          match Json.member "type" payload |> Json.to_string_option with
-         | Some "keeper_lifecycle" -> Some payload
+         | Some kind when kind = event_type -> Some payload
          | _ -> None)
 
 (* ── Basic registry operations ─────────────────────────── *)
@@ -219,30 +219,30 @@ let test_set_state () =
   | None -> fail "expected k4"
   | Some e -> check string "state" "paused" (KSM.phase_to_string e.phase)
 
-let test_dispatch_event_emits_lifecycle_sse () =
+let test_dispatch_event_emits_phase_sse () =
   R.clear ();
   let received_events = ref [] in
-  Masc_mcp.Sse.subscribe_external ~id:"keeper-registry-lifecycle"
+  Masc_mcp.Sse.subscribe_external ~id:"keeper-registry-phase"
     ~callback:(fun event -> received_events := event :: !received_events) ();
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Sse.unsubscribe_external "keeper-registry-lifecycle")
+      Masc_mcp.Sse.unsubscribe_external "keeper-registry-phase")
     (fun () ->
       ignore (R.register ~base_path:bp "k4-lifecycle" (make_meta "k4-lifecycle"));
       ignore (R.dispatch_event ~base_path:bp "k4-lifecycle" KSM.Operator_pause);
-      match keeper_lifecycle_events !received_events with
-      | [] -> fail "expected keeper_lifecycle SSE event"
+      match sse_events_of_type "keeper_phase_changed" !received_events with
+      | [] -> fail "expected keeper_phase_changed SSE event"
       | payload :: _ ->
-          check string "lifecycle type" "keeper_lifecycle"
+          check string "phase type" "keeper_phase_changed"
             (Json.member "type" payload |> Json.to_string);
           check string "keeper name" "k4-lifecycle"
             (Json.member "name" payload |> Json.to_string);
-          check string "phase" "paused"
-            (Json.member "phase" payload |> Json.to_string);
-          check string "event" "paused"
-            (Json.member "event" payload |> Json.to_string);
-          check string "detail" "operator request"
-            (Json.member "detail" payload |> Json.to_string))
+          check string "prev phase" "running"
+            (Json.member "prev_phase" payload |> Json.to_string);
+          check string "new phase" "paused"
+            (Json.member "new_phase" payload |> Json.to_string);
+          check string "event" "operator_pause"
+            (Json.member "event" payload |> Json.to_string))
 
 let test_extended_states () =
   R.clear ();
@@ -277,15 +277,15 @@ let test_stopped_entry_action_is_observability_only () =
           check string "stopped phase" "stopped"
             (KSM.phase_to_string entry.phase);
           let stopped_payload =
-            keeper_lifecycle_events !received_events
+            sse_events_of_type "keeper_phase_changed" !received_events
             |> List.find_opt (fun payload ->
-                   Json.member "event" payload |> Json.to_string = "stopped")
+                   Json.member "new_phase" payload |> Json.to_string = "stopped")
           in
           (match stopped_payload with
-           | None -> fail "expected stopped lifecycle SSE event"
+           | None -> fail "expected stopped phase SSE event"
            | Some payload ->
-               check string "stopped detail" "drain_complete"
-                 (Json.member "detail" payload |> Json.to_string)))
+               check string "stop event" "drain_complete"
+                 (Json.member "event" payload |> Json.to_string)))
 
 let test_count_running () =
   R.clear ();
@@ -693,8 +693,8 @@ let () =
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;
           eio_test "set state" test_set_state;
-          eio_test "dispatch event emits lifecycle SSE"
-            test_dispatch_event_emits_lifecycle_sse;
+          eio_test "dispatch event emits phase SSE"
+            test_dispatch_event_emits_phase_sse;
           eio_test "extended states" test_extended_states;
           eio_test "stopped entry action is observability-only"
             test_stopped_entry_action_is_observability_only;

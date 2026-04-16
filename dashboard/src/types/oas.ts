@@ -1,35 +1,69 @@
-// OAS (Open Agent SDK) Event types for dashboard monitoring
+// OAS (Open Agent SDK) event types for dashboard runtime monitoring.
+// Keep this slice as a discriminated union so each event kind has a stable
+// contract instead of one wide product type with many unrelated optionals.
 
-export interface OasAgentEvent {
-  type:
-    | 'selected'
-    | 'decision'
-    | 'action_executed'
-    | 'keeper_lifecycle'
-    | 'trust_updated'
-    | 'reputation_changed'
+interface OasAgentEventBase {
   agent_name: string
-  actor_kind?: 'agent' | 'keeper'
-  keeper_name?: string
-  secondary_agent?: string
-  action?: string
-  trigger?: string
-  trigger_reason?: string
-  event?: string
   event_type?: string
-  detail?: string
-  thompson_score?: number
-  final_score?: number
-  success?: boolean
-  trust_score?: number
-  old_score?: number
-  new_score?: number
-  trend?: string
   correlation_id?: string
   run_id?: string
   event_key?: string
   timestamp: number
 }
+
+export interface OasAgentSelectedEvent extends OasAgentEventBase {
+  type: 'selected'
+  actor_kind: 'agent'
+  trigger?: string
+  thompson_score?: number
+  final_score?: number
+}
+
+export interface OasAgentDecisionEvent extends OasAgentEventBase {
+  type: 'decision'
+  actor_kind: 'agent'
+  action?: string
+  trigger_reason?: string
+}
+
+export interface OasAgentActionExecutedEvent extends OasAgentEventBase {
+  type: 'action_executed'
+  actor_kind: 'agent'
+  action?: string
+  success?: boolean
+}
+
+export interface OasKeeperLifecycleEvent extends OasAgentEventBase {
+  type: 'keeper_lifecycle'
+  actor_kind: 'keeper'
+  keeper_name?: string
+  event?: string
+  phase?: string
+  detail?: string
+}
+
+export interface OasTrustUpdatedEvent extends OasAgentEventBase {
+  type: 'trust_updated'
+  actor_kind: 'agent'
+  secondary_agent?: string
+  trust_score?: number
+}
+
+export interface OasReputationChangedEvent extends OasAgentEventBase {
+  type: 'reputation_changed'
+  actor_kind: 'agent'
+  old_score?: number
+  new_score?: number
+  trend?: string
+}
+
+export type OasAgentEvent =
+  | OasAgentSelectedEvent
+  | OasAgentDecisionEvent
+  | OasAgentActionExecutedEvent
+  | OasKeeperLifecycleEvent
+  | OasTrustUpdatedEvent
+  | OasReputationChangedEvent
 
 export interface OasKeeperSnapshot {
   keeper_name: string

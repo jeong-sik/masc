@@ -33,10 +33,11 @@ describe('oasHealthSummary', () => {
   it('reflects agent event buffer length', () => {
     const evt = {
       type: 'action_executed',
+      actor_kind: 'agent',
       agent_name: 'dreamer',
       timestamp: 1,
       action: 'ponder',
-    } as unknown as OasAgentEvent
+    } satisfies OasAgentEvent
     pushOasAgentEvent(evt)
     pushOasAgentEvent({ ...evt, timestamp: 2 })
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)
@@ -46,11 +47,12 @@ describe('oasHealthSummary', () => {
   it('dedups identical consecutive agent events', () => {
     const evt = {
       type: 'action_executed',
+      actor_kind: 'agent',
       agent_name: 'dreamer',
       timestamp: 1,
       event_key: 'same-event',
       action: 'ponder',
-    } as unknown as OasAgentEvent
+    } satisfies OasAgentEvent
     pushOasAgentEvent(evt)
     pushOasAgentEvent(evt)
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
@@ -59,18 +61,21 @@ describe('oasHealthSummary', () => {
   it('keeps distinct events that only share actor and timestamp', () => {
     pushOasAgentEvent({
       type: 'action_executed',
+      actor_kind: 'agent',
       agent_name: 'dreamer',
       timestamp: 1,
       event_key: 'action',
       action: 'ponder',
-    } as unknown as OasAgentEvent)
+    } satisfies OasAgentEvent)
     pushOasAgentEvent({
-      type: 'action_executed',
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'dreamer',
       timestamp: 1,
       event_key: 'lifecycle',
+      phase: 'running',
       detail: 'started',
-    } as unknown as OasAgentEvent)
+    } satisfies OasAgentEvent)
     expect(oasHealthSummary.value.agentEventsCount).toBe(2)
   })
 

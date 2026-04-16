@@ -610,27 +610,6 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     case 'oas:masc:keeper:lifecycle': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const keeperName = asString(p.keeper_name) ?? ''
-      const actorName = keeperName || asString(p.agent_name) || ''
-      const lifecycleEvent = (p.event as string) ?? undefined
-      const detail = (p.detail as string) ?? undefined
-      addTypedJournalEntry(
-        actorName,
-        `Keeper ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
-        'oas',
-        'oas_event',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText:
-            `${actorLabel(actorName)} keeper lifecycle 이벤트`
-            + ([lifecycleEvent, detail].filter(Boolean).length > 0
-              ? ` (${[lifecycleEvent, detail].filter(Boolean).join(' · ')})`
-              : ''),
-          ...envelopeFromEvent(event),
-        },
-      )
       break
     }
     case 'oas:masc:trust_updated': {

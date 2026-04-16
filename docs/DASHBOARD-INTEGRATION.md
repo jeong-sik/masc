@@ -60,6 +60,8 @@ Experimental features such as TRPG live under `lab`.
 ## SSE Expectations
 - Treat SSE as freshness transport, not as the read model.
 - Use projection endpoints for hydration after events.
+- Dashboard observer sessions receive live `oas:*` tail in addition to durable replay; keeper lifecycle detail comes from `oas:masc:keeper:lifecycle`, while primary keeper state transitions remain `keeper_phase_changed`.
+- Full event inventory and timing notes live in `docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md`.
 - Minimum event classes the operator dashboard reacts to:
   - `broadcast`
   - `task_*`

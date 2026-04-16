@@ -160,25 +160,64 @@ export function resetOasRuntimeSignals(): void {
   oasLastErrorTs.value = null
 }
 
+function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
+  if (left.event_key != null && right.event_key != null) {
+    return left.event_key === right.event_key
+  }
+  if (
+    left.type !== right.type
+    || left.agent_name !== right.agent_name
+    || left.timestamp !== right.timestamp
+  ) {
+    return false
+  }
+  switch (left.type) {
+    case 'selected':
+      return (
+        right.type === 'selected'
+        && left.trigger === right.trigger
+        && left.thompson_score === right.thompson_score
+        && left.final_score === right.final_score
+      )
+    case 'decision':
+      return (
+        right.type === 'decision'
+        && left.action === right.action
+        && left.trigger_reason === right.trigger_reason
+      )
+    case 'action_executed':
+      return (
+        right.type === 'action_executed'
+        && left.action === right.action
+        && left.success === right.success
+      )
+    case 'keeper_lifecycle':
+      return (
+        right.type === 'keeper_lifecycle'
+        && left.keeper_name === right.keeper_name
+        && left.event === right.event
+        && left.phase === right.phase
+        && left.detail === right.detail
+      )
+    case 'trust_updated':
+      return (
+        right.type === 'trust_updated'
+        && left.secondary_agent === right.secondary_agent
+        && left.trust_score === right.trust_score
+      )
+    case 'reputation_changed':
+      return (
+        right.type === 'reputation_changed'
+        && left.old_score === right.old_score
+        && left.new_score === right.new_score
+        && left.trend === right.trend
+      )
+  }
+}
+
 export function pushOasAgentEvent(event: OasAgentEvent): void {
   const head = oasAgentEvents.value[0]
-  const isDuplicate =
-    head != null
-    && (
-      (head.event_key != null && event.event_key != null && head.event_key === event.event_key)
-      || (
-        head.type === event.type
-        && head.agent_name === event.agent_name
-        && head.keeper_name === event.keeper_name
-        && head.secondary_agent === event.secondary_agent
-        && head.action === event.action
-        && head.event === event.event
-        && head.trigger === event.trigger
-        && head.detail === event.detail
-        && head.timestamp === event.timestamp
-      )
-    )
-  if (isDuplicate) {
+  if (head != null && sameOasAgentEvent(head, event)) {
     return
   }
   oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)

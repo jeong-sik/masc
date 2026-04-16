@@ -117,11 +117,18 @@ let publish_keeper_snapshot (bus : Agent_sdk.Event_bus.t) ~keeper_name
 
 (** Publish a keeper keepalive lifecycle event.
     Event names: "started", "stopped", "crashed", "restarted", "dead". *)
-let publish_keeper_lifecycle (bus : Agent_sdk.Event_bus.t) ~event ~keeper_name
-    ~detail =
+let publish_keeper_lifecycle (bus : Agent_sdk.Event_bus.t) ?phase ~event
+    ~keeper_name ~detail () =
+  let phase_json =
+    match phase with
+    | Some phase ->
+      `String (Keeper_state_machine.phase_to_string phase)
+    | None -> `Null
+  in
   let payload = `Assoc [
     ("event", `String event);
     ("keeper_name", `String keeper_name);
+    ("phase", phase_json);
     ("detail", `String detail);
     ("timestamp", `Float (Time_compat.now ()));
   ] in

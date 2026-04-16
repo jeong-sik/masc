@@ -1,5 +1,8 @@
 (** Tests for Verification module *)
 
+(* Mirage_crypto_rng is consumed by V.generate_id (#7544). *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
 module V = Masc_mcp.Verification
 
 (** Use a temporary directory for each test *)
@@ -208,6 +211,26 @@ let test_auto_verify_with_custom_fails () =
         | Error _ -> ()
         | Ok _ -> Alcotest.fail "auto-verify with custom should fail")
 
+(* --- ID generation property test (#7544) --- *)
+
+module StringSet = Set.Make (String)
+
+let test_generate_id_prefix () =
+  let id = V.generate_id () in
+  Alcotest.(check bool) "vrf- prefix" true
+    (String.length id > 4 && String.sub id 0 4 = "vrf-")
+
+let test_generate_id_no_collisions () =
+  (* 10000 consecutive ids must be unique — the old Hashtbl.hash-based
+     generator collided within the same millisecond. *)
+  let n = 10_000 in
+  let seen = ref StringSet.empty in
+  for _ = 1 to n do
+    let id = V.generate_id () in
+    seen := StringSet.add id !seen
+  done;
+  Alcotest.(check int) "all 10k ids unique" n (StringSet.cardinal !seen)
+
 let test_pending_for_agent () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
@@ -242,6 +265,10 @@ let () =
     "cross_agent", [
       Alcotest.test_case "same agent rejected" `Quick test_cross_agent_same;
       Alcotest.test_case "different agents ok" `Quick test_cross_agent_different;
+    ];
+    "id_generation", [
+      Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;
+      Alcotest.test_case "10k ids collision-free" `Quick test_generate_id_no_collisions;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

@@ -196,11 +196,22 @@ let request_of_yojson = function
        | _ -> Error "verification request requires 'id', 'task_id', 'worker' fields")
   | _ -> Error "verification request must be a JSON object"
 
-(** ID generation *)
+(** ID generation — cryptographic random, 128-bit space.
+
+    Prior implementation (#7544) combined [Time_compat.now ()] with
+    [Hashtbl.hash (Unix.gettimeofday ())], which collided inside the
+    same millisecond and relied on OCaml's process-specific structural
+    hash seed. Using [Mirage_crypto_rng] matches [Board.Post_id] and
+    [Autoresearch_knowledge.generate_finding_id] — 16 random bytes
+    (~2^128 collision space), no wallclock dependency. *)
 let generate_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
-  Printf.sprintf "vrf-%d-%06x" ts hash
+  let rnd = Mirage_crypto_rng.generate 16 in
+  let hex = String.concat "" (
+    List.init (String.length rnd) (fun i ->
+      Printf.sprintf "%02x" (Char.code (String.get rnd i))
+    )
+  ) in
+  "vrf-" ^ hex
 
 (** Automated criterion evaluation *)
 let evaluate_criterion output criterion =

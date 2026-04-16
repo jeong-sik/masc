@@ -322,7 +322,7 @@ let test_default_base_path_falls_back_to_home_when_unset () =
         (contains_substring captured
            ("MASC_CONFIG_DIR=" ^ Filename.concat expected_home ".masc/config")))
 
-let test_absolute_inherited_base_path_is_preserved () =
+let test_absolute_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
@@ -348,7 +348,7 @@ let test_absolute_inherited_base_path_is_preserved () =
           stderr;
       let captured = read_file capture in
       let expected_root = canonical_path stale_root in
-      check bool "absolute inherited base path preserved" true
+      check bool "absolute env base path preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_absolute_parent_project_base_path_is_preserved () =
@@ -414,7 +414,7 @@ let test_zshenv_absolute_base_path_is_preserved () =
       check bool "zshenv absolute base path preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
-let test_shared_root_inherited_base_path_is_preserved () =
+let test_shared_root_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
@@ -440,7 +440,7 @@ let test_shared_root_inherited_base_path_is_preserved () =
           stderr;
       let captured = read_file capture in
       let expected_root = canonical_path inherited_root in
-      check bool "shared-root inherited base path preserved" true
+      check bool "shared-root env base path preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_worktree_prefers_local_build_over_workspace_build () =
@@ -699,11 +699,11 @@ let () =
           test_case "default base path falls back to home when unset" `Quick
             test_default_base_path_falls_back_to_home_when_unset;
           test_case
-            "absolute inherited base path is preserved"
+            "absolute env base path is preserved"
             `Quick
-            test_absolute_inherited_base_path_is_preserved;
+            test_absolute_env_base_path_is_preserved;
           test_case
-            "absolute parent project inherited base path is preserved"
+            "absolute parent project env base path is preserved"
             `Quick
             test_absolute_parent_project_base_path_is_preserved;
           test_case "explicit base path execs from base path" `Quick
@@ -722,8 +722,8 @@ let () =
             test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "zshenv absolute base path is preserved" `Quick
             test_zshenv_absolute_base_path_is_preserved;
-          test_case "shared-root inherited base path is preserved" `Quick
-            test_shared_root_inherited_base_path_is_preserved;
+          test_case "shared-root env base path is preserved" `Quick
+            test_shared_root_env_base_path_is_preserved;
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
           test_case

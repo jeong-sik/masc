@@ -75,14 +75,14 @@ let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
       env_home;
     }
 
-let test_sanitize_inherited_test_env_opt_drops_inherited_value () =
+let test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value () =
   let actual =
     Lib.Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
       ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
       ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
   in
-  check (option string) "same inherited value ignored" None actual
+  check (option string) "same captured parent-shell value ignored" None actual
 
 let test_sanitize_inherited_test_env_opt_keeps_runtime_override () =
   let actual =
@@ -101,7 +101,7 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
       ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
       ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
   in
-  check (option string) "opt-in preserves inherited value"
+  check (option string) "opt-in preserves config-path override"
     (Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config") actual
 
 let test_env_override_valid () =
@@ -339,11 +339,11 @@ let () =
         ] );
       ( "test_env_sanitization",
         [
-          test_case "drops inherited config env by default" `Quick
-            test_sanitize_inherited_test_env_opt_drops_inherited_value;
+          test_case "drops captured parent-shell config env by default" `Quick
+            test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value;
           test_case "keeps runtime override" `Quick
             test_sanitize_inherited_test_env_opt_keeps_runtime_override;
-          test_case "opt-in preserves inherited value" `Quick
+          test_case "opt-in preserves config-path override" `Quick
             test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in;
         ] );
     ]

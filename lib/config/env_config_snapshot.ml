@@ -835,8 +835,10 @@ let tempo_entries =
 
 let test_entries =
   [
-    entry ~default:"false" "MASC_TEST_ALLOW_INHERITED_BASE_PATH"
-      "Allow inherited base path in test environments";
+    entry ~default:"false" "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
+      "Allow explicit MASC_BASE_PATH override handling in test executables";
+    entry ~default:"false" "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
+      "Allow explicit MASC_CONFIG_DIR and MASC_PERSONAS_DIR overrides in test executables";
   ]
 
 let timeout_entries =

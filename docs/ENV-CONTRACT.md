@@ -103,6 +103,23 @@ Examples:
   [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml#L321)
   caches the result, so root changes are boot-static.
 
+### 4. Test-only boot overrides
+
+The following flags exist only to make OCaml test executables deterministic:
+
+| Variable | Default test behavior | Opt-in behavior |
+| --- | --- | --- |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | ignore a shell-provided `MASC_BASE_PATH` override and re-sync to the requested path | preserve an explicit `MASC_BASE_PATH` override for resolver coverage |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | ignore inherited `MASC_CONFIG_DIR` / `MASC_PERSONAS_DIR` values captured from the parent shell | preserve explicit config/personas overrides for config-root coverage |
+
+These are not operator-facing runtime controls and should not be used as
+production launch knobs.
+
+Representative code paths:
+
+- [`coord_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/coord/coord_utils_backend_setup.ml)
+- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml)
+
 ## Rules for New Environment Variables
 
 1. New env vars default to `boot_static`.

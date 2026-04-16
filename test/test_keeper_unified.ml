@@ -1105,7 +1105,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
+          Masc_mcp.Oas_worker.cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
           configured_labels = [ "llama:auto" ];
           candidate_models =
             [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ];
@@ -1461,7 +1461,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           cascade_observation =
             Some
               {
-                Masc_mcp.Oas_worker.cascade_name = "keeper_unified";
+                Masc_mcp.Oas_worker.cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
                 configured_labels = [ "llama:auto" ];
                 candidate_models =
                   [
@@ -1552,7 +1552,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
         Yojson.Safe.Util.(json |> member "model_used" |> to_string);
       check bool "cascade field present" true
         Yojson.Safe.Util.(json |> member "cascade" <> `Null);
-      check string "cascade name persisted" "keeper_unified"
+      check string "cascade name persisted" Masc_mcp.Keeper_config.default_cascade_name
         Yojson.Safe.Util.(
           json |> member "cascade" |> member "cascade_name" |> to_string);
       check bool "fallback applied persisted" true
@@ -2190,7 +2190,7 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Cascade_exhausted
          {
-           cascade_name = "keeper_unified";
+           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
            detail = Some "all providers failed";
          })
   in

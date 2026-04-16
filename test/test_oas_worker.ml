@@ -322,7 +322,7 @@ let test_cascade_inference_normalizes_keeper_aliases () =
         ("keeper_unified_max_tokens", `Int 16384);
       ]
   in
-  let canonical = Cascade_inference.for_json ~name:"keeper_unified" json in
+  let canonical = Cascade_inference.for_json ~name:Masc_mcp.Keeper_config.default_cascade_name json in
   let legacy_oas = Cascade_inference.for_json ~name:"oas-keeper_unified" json in
   let legacy_removed = Cascade_inference.for_json ~name:"oas-coding_first" json in
   Alcotest.(check (option (float 0.0001))) "canonical temp"
@@ -337,7 +337,7 @@ let test_cascade_inference_normalizes_keeper_aliases () =
 let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Oas_worker.cascade_observation =
     {
-      cascade_name = "keeper_unified";
+      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
       configured_labels = [ "glm:auto"; "llama:auto" ];
       candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
       primary_model = Some "glm:glm-5.1";
@@ -378,7 +378,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
     }
   in
   let json = Oas_worker.cascade_observation_to_json observation in
-  Alcotest.(check string) "cascade name preserved" "keeper_unified"
+  Alcotest.(check string) "cascade name preserved" Masc_mcp.Keeper_config.default_cascade_name
     Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
   Alcotest.(check bool) "fallback applied preserved" true
     Yojson.Safe.Util.(json |> member "fallback_applied" |> to_bool);
@@ -737,13 +737,13 @@ let test_classify_masc_internal_error_roundtrip () =
     Oas_worker_named.sdk_error_of_masc_internal_error
       (Oas_worker_named.Cascade_exhausted
          {
-           cascade_name = "keeper_unified";
+           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
            detail = Some "all providers failed";
          })
   in
   (match Oas_worker_named.classify_masc_internal_error cascade_err with
    | Some (Oas_worker_named.Cascade_exhausted { cascade_name; detail }) ->
-       Alcotest.(check string) "cascade name" "keeper_unified" cascade_name;
+       Alcotest.(check string) "cascade name" Masc_mcp.Keeper_config.default_cascade_name cascade_name;
        Alcotest.(check (option string)) "cascade detail"
          (Some "all providers failed") detail
    | _ -> Alcotest.fail "expected structured cascade exhaustion");
@@ -751,14 +751,14 @@ let test_classify_masc_internal_error_roundtrip () =
     Oas_worker_named.sdk_error_of_masc_internal_error
       (Oas_worker_named.Accept_rejected
          {
-           scope = "keeper_unified";
+           scope = Masc_mcp.Keeper_config.default_cascade_name;
            model = Some "mock-model";
            reason = "response rejected by accept (model=mock-model)";
          })
   in
   match Oas_worker_named.classify_masc_internal_error accept_err with
   | Some (Oas_worker_named.Accept_rejected { scope; model; reason }) ->
-      Alcotest.(check string) "accept scope" "keeper_unified" scope;
+      Alcotest.(check string) "accept scope" Masc_mcp.Keeper_config.default_cascade_name scope;
       Alcotest.(check (option string)) "accept model"
         (Some "mock-model") model;
       Alcotest.(check bool) "accept reason preserved" true
@@ -1045,7 +1045,7 @@ let make_keeper_meta ?(name = "keeper-checkpoint-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("cascade_name", `String "keeper_unified");
+          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
           ("last_model_used", `String "llama:auto");
         ])
   with

@@ -114,7 +114,7 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("cascade_name", `String "keeper_unified");
+          ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
           ("last_model_used", `String "llama:auto");
         ])
   with

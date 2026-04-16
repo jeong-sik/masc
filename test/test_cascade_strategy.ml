@@ -777,6 +777,72 @@ let test_trace_kind_labels () =
     (ST.kind_to_string ST.Filtered_empty);
   check string "exhausted" "exhausted" (ST.kind_to_string ST.Exhausted)
 
+(* ── Prometheus counter coverage (LT-7) ────────────────── *)
+
+let find_strategy_counter_value text ~cascade ~strategy ~kind =
+  let target_cascade = Printf.sprintf {|cascade="%s"|} cascade in
+  let target_strategy = Printf.sprintf {|strategy="%s"|} strategy in
+  let target_kind = Printf.sprintf {|kind="%s"|} kind in
+  let prefix = "masc_cascade_strategy_decisions_total" in
+  let plen = String.length prefix in
+  let has haystack needle =
+    let nlen = String.length needle in
+    let hlen = String.length haystack in
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in loop 0
+  in
+  let lines = String.split_on_char '\n' text in
+  let matching =
+    List.filter (fun line ->
+      String.length line >= plen
+      && String.sub line 0 plen = prefix
+      && has line target_cascade
+      && has line target_strategy
+      && has line target_kind)
+      lines
+  in
+  match matching with
+  | [] -> None
+  | line :: _ ->
+    (match List.rev (String.split_on_char ' ' line) with
+     | v :: _ -> float_of_string_opt (String.trim v)
+     | [] -> None)
+
+let test_trace_prometheus_counter_increments () =
+  ST.clear ();
+  let before =
+    find_strategy_counter_value
+      (Masc_mcp.Prometheus.to_prometheus_text ())
+      ~cascade:"keeper_unified" ~strategy:"failover" ~kind:"ordered"
+    |> Option.value ~default:0.0
+  in
+  ST.record (mk_trace_event ~cascade_name:"keeper_unified"
+               ~strategy:"failover" ~kind:ST.Ordered ());
+  ST.record (mk_trace_event ~cascade_name:"keeper_unified"
+               ~strategy:"failover" ~kind:ST.Ordered ());
+  ST.record (mk_trace_event ~cascade_name:"nick0cave"
+               ~strategy:"circuit_breaker_cycling"
+               ~kind:ST.Filtered_empty ~backoff_ms:500 ());
+  let text = Masc_mcp.Prometheus.to_prometheus_text () in
+  let ordered =
+    find_strategy_counter_value text
+      ~cascade:"keeper_unified" ~strategy:"failover" ~kind:"ordered"
+    |> Option.value ~default:0.0
+  in
+  let filtered =
+    find_strategy_counter_value text
+      ~cascade:"nick0cave" ~strategy:"circuit_breaker_cycling"
+      ~kind:"filtered_empty"
+    |> Option.value ~default:0.0
+  in
+  check bool "keeper_unified/failover/ordered advanced by >= 2"
+    true (ordered >= before +. 2.0);
+  check bool "nick0cave/circuit_breaker_cycling/filtered_empty >= 1"
+    true (filtered >= 1.0)
+
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -894,5 +960,7 @@ let () =
         test_trace_limit_clamp;
       test_case "kind_to_string serialisation" `Quick
         test_trace_kind_labels;
+      test_case "record bumps Prometheus counter with labels" `Quick
+        test_trace_prometheus_counter_increments;
     ];
   ]

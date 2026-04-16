@@ -50,13 +50,26 @@ let ensure_initialised_locked () =
     count := 0
   end
 
+(* Prometheus counter increment happens *outside* the ring mutex so a slow
+   metrics hashtable mutex cannot block cascade strategy paths.  Labels
+   mirror the JSON projection ({cascade, strategy, kind}) so Grafana can
+   join on the same tuple surfaced to the dashboard card. *)
+let bump_prometheus_counter (ev : event) =
+  Prometheus.inc_counter "masc_cascade_strategy_decisions_total"
+    ~labels:[
+      "cascade", ev.cascade_name;
+      "strategy", ev.strategy;
+      "kind", kind_to_string ev.kind;
+    ] ()
+
 let record ev =
   Mutex.protect mu (fun () ->
       ensure_initialised_locked ();
       let cap = !cap_ref in
       (!buf).(!head) <- Some ev;
       head := (!head + 1) mod cap;
-      if !count < cap then incr count)
+      if !count < cap then incr count);
+  bump_prometheus_counter ev
 
 let clear () =
   Mutex.protect mu (fun () ->

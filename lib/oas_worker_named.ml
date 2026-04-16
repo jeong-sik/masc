@@ -546,6 +546,12 @@ let run_named
    | Some n ->
      Cascade_client_capacity.auto_register_ollama_with_override
        ~base_urls:candidate_base_urls ~max_concurrent:n);
+  (* Refresh ollama [/api/ps] cache for any candidate that looks
+     like ollama and whose cache entry has expired.  Failures are
+     swallowed inside [Cascade_ollama_probe.try_probe] so a flaky
+     probe never breaks the cascade — it just denies the cache
+     optimisation for this attempt. *)
+  Cascade_ollama_probe.refresh_many ~sw ~net candidate_base_urls;
   let adapter : Llm_provider.Provider_config.t Cascade_strategy.adapter = {
     health_key = (fun (c : Llm_provider.Provider_config.t) -> c.model_id);
     capacity_key = (fun (c : Llm_provider.Provider_config.t) -> c.base_url);
@@ -556,7 +562,10 @@ let run_named
     capacity = (fun url ->
       match Cascade_throttle.capacity url with
       | Some _ as v -> v
-      | None -> Cascade_client_capacity.capacity url);
+      | None ->
+        match Cascade_ollama_probe.cached_capacity url with
+        | Some _ as v -> v
+        | None -> Cascade_client_capacity.capacity url);
     now = Unix.gettimeofday ();
     rand_int = Random.int;
     keeper_name;

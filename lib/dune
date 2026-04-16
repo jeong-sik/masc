@@ -35,6 +35,7 @@
    cascade_health_filter
    cascade_health_tracker
    cascade_model_resolve
+   cascade_ollama_probe
    cascade_runtime
    cascade_state
    cascade_strategy

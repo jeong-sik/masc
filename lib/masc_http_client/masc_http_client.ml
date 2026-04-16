@@ -12,9 +12,21 @@
 
 let make_closing_client ~sw ~net ~https =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
-  let last_sock :
-    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t option ref =
-    ref None
+  let tracked_flows :
+    [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t list ref =
+    ref []
+  in
+  let clone_resource resource =
+    let Eio.Resource.T (value, ops) = resource in
+    Eio.Resource.T (value, ops)
+  in
+  let register_flow flow =
+    tracked_flows := clone_resource flow :: !tracked_flows;
+    flow
+  in
+  let close_flow flow =
+    try Eio.Resource.close flow
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
   in
   let connect ~sw:conn_sw uri =
     let service =
@@ -31,24 +43,35 @@ let make_closing_client ~sw ~net ~https =
       | [] -> raise (Failure "failed to resolve hostname")
     in
     let sock = Eio.Net.connect ~sw:conn_sw net addr in
-    last_sock := Some sock;
     (* Return type must include `Close for cohttp-eio make_generic. *)
     match Uri.scheme uri with
     | Some "https" -> (
         match https with
-        | Some wrap ->
-            (wrap uri sock
-              :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+        | Some wrap -> (
+            let wrapped =
+              try
+                wrap uri sock
+              with exn ->
+                close_flow
+                  (clone_resource
+                     (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t));
+                raise exn
+            in
+            tracked_flows :=
+              (clone_resource wrapped
+                :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+              :: !tracked_flows;
+            (wrapped :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t))
         | None -> raise (Failure "HTTPS requested but not enabled"))
-    | _ -> (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+    | _ ->
+        register_flow
+          (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
   in
   let client = Cohttp_eio.Client.make_generic connect in
   Eio.Switch.on_release sw (fun () ->
-    match !last_sock with
-    | None -> ()
-    | Some sock ->
-        last_sock := None;
-        (try Eio.Net.close sock with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()));
+    let flows = !tracked_flows in
+    tracked_flows := [];
+    List.iter close_flow flows);
   client
 
 (** POST with structured error handling.

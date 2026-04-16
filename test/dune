@@ -468,9 +468,9 @@
         test_file_lock_eio
         test_error_logging_coverage
         test_agent_identity
-        test_mcp_full_cycle
-        test_agent_registry_eio
-        test_identity_e2e
+          test_mcp_full_cycle
+          test_agent_registry_eio
+          test_identity_e2e
         test_identity_edge_cases
         test_verification
         test_pulse

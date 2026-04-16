@@ -1,0 +1,5 @@
+(test
+ (name test_masc_http_client)
+ (modules test_masc_http_client)
+ (libraries alcotest cohttp cohttp-eio eio eio_main masc_http_client unix uri))
+

@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-04-16
+
+### Added
+
+- **Keeper compaction audit** (`lib/keeper/keeper_compact_audit.{ml,mli}`).
+  New Event_bus subscriber that observes `ContextCompactStarted` and
+  `ContextCompacted` payloads emitted by OAS, synthesises a per-keeper
+  `compaction_id` to correlate Start/Complete pairs, and appends
+  structured JSONL rows to `.masc/data/harness-compact/YYYY-MM/DD.jsonl`.
+  Rolling retention (default 14 days, override via
+  `MASC_COMPACTION_AUDIT_RETENTION_DAYS`) prunes old day-files on every
+  write — self-healing, no cron. No OAS changes required; subscriber
+  runs alongside existing `oas_sse_bridge` each on its own bounded
+  stream.
+- **Audit CLI** (`bin/masc_compaction_audit.ml`, installed as
+  `masc-compaction-audit`). Options: `--since`, `--until`,
+  `--keeper NAME`, `--orphans-only`, `--prune`, `--retention-days`.
+  Pairs Start/Complete by `compaction_id`, emits human-readable summary,
+  flags orphan rows (compaction that never completed, or server crash).
+- **Compaction FSM/TLA+ audit** (`docs/audits/compaction-fsm-tla-audit-2026-04-16.md`,
+  #7568). Traceability matrix for `KeeperContextLifecycle.tla` and
+  `MemoryCompaction.tla` against 12-phase OCaml FSM. Confirms
+  `Compaction_completed`/`Compaction_failed` handlers align with spec
+  intent; reclassifies the `manual_reconcile_required` drift from prior
+  audit as abstraction mismatch (live behaviour correct via PR #6834's
+  separate event dispatch). Flags gaps: missing
+  `KeeperContextLifecycle-buggy.cfg`, no `CompactionFailed` action in
+  context spec, 3-of-5 gate abstractions.
+
 ## [0.9.4] - 2026-04-16
 
 ### Added

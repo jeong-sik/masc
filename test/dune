@@ -331,6 +331,7 @@
         test_pulse
         test_transport_metrics
         test_adaptive_cache_ttl
+        test_keeper_compact_audit
         test_tool_compact
         test_trajectory
         test_eval_gate
@@ -478,6 +479,7 @@
         test_pulse
         test_transport_metrics
         test_adaptive_cache_ttl
+        test_keeper_compact_audit
         test_tool_compact
         test_trajectory
         test_eval_gate

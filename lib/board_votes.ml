@@ -202,12 +202,7 @@ let stats store =
     ]
   )
 
-let visibility_of_string = function
-  | "public" -> Some Public
-  | "unlisted" -> Some Unlisted
-  | "internal" -> Some Internal
-  | "direct" -> Some Direct
-  | _ -> None
+let visibility_of_string = Board_core_classify.visibility_of_string
 
 let post_of_yojson (json : Yojson.Safe.t) : post option =
   match

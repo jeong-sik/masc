@@ -109,12 +109,7 @@ let board_error_to_string = function
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
 
-let visibility_of_string = function
-  | "public" -> Some Board.Public
-  | "unlisted" -> Some Board.Unlisted
-  | "internal" -> Some Board.Internal
-  | "direct" -> Some Board.Direct
-  | _ -> None
+let visibility_of_string = Board.visibility_of_string
 
 (** Agent lookup callback — set once at server startup with the real
     Coord.is_agent_joined check so that board posts are auto-classified

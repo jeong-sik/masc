@@ -260,7 +260,6 @@ let test_attention_empty () =
   let now = Unix.gettimeofday () in
   let items =
     Lib.Dashboard_attention.collect ~now []
-      (`Assoc [ ("lanes", `List []) ])
   in
   Alcotest.(check int) "no items" 0 (List.length items)
 

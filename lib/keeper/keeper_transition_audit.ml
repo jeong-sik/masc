@@ -81,7 +81,11 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
          open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
        in
        Fun.protect
-         ~finally:(fun () -> try close_out oc with _ -> ())
+         ~finally:(fun () ->
+           try close_out oc
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | _ -> ())
          (fun () -> output_string oc (line ^ "\n"))
      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
 

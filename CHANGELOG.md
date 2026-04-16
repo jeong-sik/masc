@@ -42,11 +42,12 @@ had the full Phase 2 release to migrate.
 
 ### Fixed
 
-- **Release workflow GitHub Action pinned**. `ocaml/setup-ocaml@v3`
-  floating tag regressed between v0.9.0 (2026-04-15) and v0.9.1
-  (2026-04-16) — opam binary resolution fails on `ubuntu-latest` + `x86_64`.
-  Pinned to `ocaml/setup-ocaml@v3.6.0` (latest release as of 2026-03-30)
-  across `release.yml`, `webrtc-live-interop.yml`, `deploy-railway.yml`.
+- **OCaml setup action pin corrected**. The floating `ocaml/setup-ocaml@v3`
+  tag regressed between v0.9.0 (2026-04-15) and v0.9.1 (2026-04-16), and
+  the follow-up `v3.6.0` pin was not a published setup-ocaml release.
+  Re-pinned the shared setup action plus `release.yml`,
+  `webrtc-live-interop.yml`, and `deploy-railway.yml` to the latest
+  published `ocaml/setup-ocaml@v3.5.1` release verified on 2026-04-16.
   Closes #7475.
 
 ## [0.9.1] - 2026-04-16

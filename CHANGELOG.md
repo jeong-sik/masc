@@ -1,6 +1,30 @@
 # Changelog
 
 
+## [0.9.6] - 2026-04-16
+
+### Fixed
+- **Keeper continuity resonance loop** (PR #7612, #7615, #7618) — closes the
+  save/read asymmetry that caused keepers to echo their own prior `[STATE]`
+  narrative every turn.
+  - `keeper_world_observation.ml:read_continuity_summary` now prefers the
+    structured snapshot stored in `Checkpoint.working_context` over
+    re-parsing `[STATE]` blocks from message bodies (PR #7612). Completes
+    the RFC-MASC-001 Phase 1 read side; the save side already wrote
+    structured JSON when enabled.
+  - `scripts/retro-clean-keeper-continuity.sh` one-shot: dry-run default,
+    `--apply` backs up and zeroes stale `continuity_summary` fields across
+    `.masc/keepers/*.json`. Preserves all other fields (PR #7615).
+
+### Changed
+- **`MASC_STRUCTURED_STATE` default flipped to `true`** (PR #7618) —
+  completes RFC-MASC-001 Phase 1 rollout. The structured
+  `Checkpoint.working_context` save path is now active by default;
+  combined with PR #7612 every keeper turn writes a typed snapshot and
+  reads it back on the next turn instead of re-parsing `[STATE]` text.
+  Accepted opt-out values: `false`, `0`, `no`. Legacy text `[STATE]`
+  fallback is preserved for checkpoints without `working_context`.
+
 ## [0.9.5] - 2026-04-16
 
 ### Added

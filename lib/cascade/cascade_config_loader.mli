@@ -109,6 +109,15 @@ type strategy_config = {
       ollama auto-registration default for any ollama-like base URL
       in this cascade's candidate list. *)
 
+  cli_max_concurrent : int option;
+  (** ["{name}_cli_max_concurrent"]. When set, overrides the CLI
+      auto-registration default ([MASC_CLI_MAX_CONCURRENT] or 1)
+      for every CLI provider (Claude_code / Gemini_cli / Codex_cli)
+      in this cascade's candidate list.  CLI providers share a
+      single concurrency cap because each CLI binary is typically
+      limited to one in-flight subprocess.
+      @since 0.9.8 *)
+
   tiers : string list list option;
   (** ["{name}_tiers"]. Used by the [priority_tier] strategy.  Each
       inner array is a tier of provider keys (matched against the

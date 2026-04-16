@@ -84,6 +84,9 @@ let int_of_env ?(default = 0) name =
 let ollama_default_max () =
   max 1 (int_of_env ~default:1 "MASC_OLLAMA_MAX_CONCURRENT")
 
+let cli_default_max () =
+  max 1 (int_of_env ~default:1 "MASC_CLI_MAX_CONCURRENT")
+
 (* Parse "url=max,url=max,..." from MASC_CLIENT_CAPACITY. *)
 let parse_capacity_env s =
   String.split_on_char ',' s
@@ -132,6 +135,12 @@ let looks_like_ollama url =
      127.0.0.1, localhost, bare host:port). *)
   contains_substring url ":11434"
 
+let cli_sentinel_prefix = "cli:"
+
+let looks_like_cli_sentinel url =
+  let plen = String.length cli_sentinel_prefix in
+  String.length url > plen && String.sub url 0 plen = cli_sentinel_prefix
+
 let auto_register_for_candidates ~base_urls =
   let max_concurrent = ollama_default_max () in
   List.iter
@@ -146,3 +155,18 @@ let auto_register_ollama_with_override ~base_urls ~max_concurrent =
        if looks_like_ollama url && not (is_registered url) then
          register ~url ~max_concurrent)
     base_urls
+
+let auto_register_cli_for_candidates ~capacity_keys =
+  let max_concurrent = cli_default_max () in
+  List.iter
+    (fun key ->
+       if looks_like_cli_sentinel key && not (is_registered key) then
+         register ~url:key ~max_concurrent)
+    capacity_keys
+
+let auto_register_cli_with_override ~capacity_keys ~max_concurrent =
+  List.iter
+    (fun key ->
+       if looks_like_cli_sentinel key && not (is_registered key) then
+         register ~url:key ~max_concurrent)
+    capacity_keys

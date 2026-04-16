@@ -536,9 +536,36 @@ let run_named
       ~name:cascade_name
       ()
   in
+  let cli_max =
+    Cascade_config.resolve_cli_max_concurrent
+      ?config_path:(default_config_path ())
+      ~name:cascade_name
+      ()
+  in
   let candidate_base_urls =
     List.map (fun (c : Llm_provider.Provider_config.t) -> c.base_url) candidate_cfgs
   in
+  (* CLI providers (Claude_code / Gemini_cli / Codex_cli) have an
+     empty [base_url].  Map them to a stable per-kind sentinel so the
+     strategy's capacity probe and the client-capacity registry share
+     the same lookup key.  Any new CLI kind added to OAS will fall
+     through this match and get an empty key (capacity treated as
+     "unknown → optimistically available"), preserving Phase A
+     fail-open semantics until the entry is added explicitly. *)
+  let cli_sentinel_of_kind = function
+    | Llm_provider.Provider_config.Claude_code -> Some "cli:claude_code"
+    | Gemini_cli -> Some "cli:gemini_cli"
+    | Codex_cli -> Some "cli:codex_cli"
+    | _ -> None
+  in
+  let capacity_key_of (c : Llm_provider.Provider_config.t) =
+    if c.base_url <> "" then c.base_url
+    else
+      match cli_sentinel_of_kind c.kind with
+      | Some s -> s
+      | None -> ""
+  in
+  let candidate_capacity_keys = List.map capacity_key_of candidate_cfgs in
   (match ollama_max with
    | None ->
      Cascade_client_capacity.auto_register_for_candidates
@@ -552,9 +579,16 @@ let run_named
      probe never breaks the cascade — it just denies the cache
      optimisation for this attempt. *)
   Cascade_ollama_probe.refresh_many ~sw ~net candidate_base_urls;
+  (match cli_max with
+   | None ->
+     Cascade_client_capacity.auto_register_cli_for_candidates
+       ~capacity_keys:candidate_capacity_keys
+   | Some n ->
+     Cascade_client_capacity.auto_register_cli_with_override
+       ~capacity_keys:candidate_capacity_keys ~max_concurrent:n);
   let adapter : Llm_provider.Provider_config.t Cascade_strategy.adapter = {
     health_key = (fun (c : Llm_provider.Provider_config.t) -> c.model_id);
-    capacity_key = (fun (c : Llm_provider.Provider_config.t) -> c.base_url);
+    capacity_key = capacity_key_of;
     weight = (fun _ -> 1);
   } in
   let signal_ctx : Cascade_strategy.signal_ctx = {

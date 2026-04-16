@@ -426,3 +426,14 @@ val resolve_ollama_max_concurrent :
     default ({!Cascade_client_capacity.auto_register_for_candidates}).
     [None] means "use the env-var default
     ([MASC_OLLAMA_MAX_CONCURRENT] or 1)". *)
+
+val resolve_cli_max_concurrent :
+  ?config_path:string ->
+  name:string ->
+  unit ->
+  int option
+(** Per-cascade override for the CLI client-capacity registration
+    default ({!Cascade_client_capacity.auto_register_cli_for_candidates}).
+    [None] means "use the env-var default
+    ([MASC_CLI_MAX_CONCURRENT] or 1)".
+    @since 0.9.8 *)

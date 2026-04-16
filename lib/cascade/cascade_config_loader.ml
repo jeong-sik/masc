@@ -215,6 +215,7 @@ type strategy_config = {
   backoff_base_ms : int option;
   backoff_cap_ms : int option;
   ollama_max_concurrent : int option;
+  cli_max_concurrent : int option;
   tiers : string list list option;
   sticky_ttl_ms : int option;
 }
@@ -255,6 +256,7 @@ let empty_strategy_config = {
   backoff_base_ms = None;
   backoff_cap_ms = None;
   ollama_max_concurrent = None;
+  cli_max_concurrent = None;
   tiers = None;
   sticky_ttl_ms = None;
 }
@@ -270,6 +272,8 @@ let resolve_strategy_config ~config_path ~name =
       backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms");
       ollama_max_concurrent =
         read_int_field json (name ^ "_ollama_max_concurrent");
+      cli_max_concurrent =
+        read_int_field json (name ^ "_cli_max_concurrent");
       tiers = read_tiers_field json (name ^ "_tiers");
       sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms");
     }

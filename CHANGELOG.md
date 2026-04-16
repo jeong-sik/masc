@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [0.9.7] - 2026-04-17
+
+### Changed
+- **OAS pin bump to `v0.152.0`** — raises the `agent_sdk` floor in
+  `dune-project` and updates the helper constants in
+  `scripts/oas-agent-sdk-pin.sh` (BASE_VERSION, SHA, MIN_VERSION) to
+  `d5d92f38f6490b924238b5a176a9feb6e79d17e3`.
+  - Picks up OAS PR #973 (`Agent.options.summarizer` +
+    `Builder.with_summarizer`): downstream consumers can now inject a
+    custom summarizer callback into `Budget_strategy.reduce_for_budget`
+    via the options record instead of falling through to
+    `default_summarizer`.
+  - Also picks up OAS PR #962 (Anthropic `cache_extended_ttl`), included
+    transitively via the 0.151.0 release.
+  - No runtime behavior change in masc-mcp itself: this is a pin-only
+    bump. Registering a `[STATE]`-aware summarizer is the follow-up step
+    and ships separately.
+
 ## [0.9.6] - 2026-04-16
 
 ### Fixed

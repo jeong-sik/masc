@@ -18,3 +18,11 @@ val handle_keeper_shell :
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   string
+
+val interpret_command_result : string -> Unix.process_status -> string -> string option
+
+val persist_large_output :
+  meta:Keeper_types.keeper_meta ->
+  config:Coord.config ->
+  string ->
+  string * string option

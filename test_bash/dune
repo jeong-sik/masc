@@ -1,0 +1,3 @@
+(executable
+ (name test_claude_bash)
+ (libraries alcotest masc_mcp unix))

@@ -91,16 +91,30 @@ require_contains docs/PRODUCT-OPERATING-PLAN.md 'Retired compatibility lanes and
 require_contains docs/spec/A-existing-doc-index.md '`docs/RELEASE-EVIDENCE.md` | Canonical'
 require_not_contains docs/spec/A-existing-doc-index.md '`docs/COMMAND-PLANE-RUNBOOK.md` | Canonical'
 
+require_contains docs/spec/SPEC-INDEX.md 'Historical compatibility lane과 internal orchestration reference는 migration context로만 남긴다.'
+require_contains docs/spec/SPEC-INDEX.md '`06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |'
+require_not_contains docs/spec/SPEC-INDEX.md 'Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며'
+
+require_contains docs/spec/06-command-plane.md '| Status | Historical Reference |'
+require_contains docs/spec/06-command-plane.md '현재 supported front door가 아닌 internal/historical reference subsystem'
+
+require_contains docs/spec/01-system-overview.md 'MASC의 현재 canonical front door는 3가지다.'
+require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator Read Visibility'
+require_contains docs/spec/01-system-overview.md 'Historical compatibility lane(team-session / command-plane HTTP)은 migration context로만 남아 있으며, supported front door로 취급하지 않는다.'
+
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
+require_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` | 56 | Retired compatibility lane removed-surface responder |'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
 require_not_contains docs/spec/09-server-transport.md '| Room | `/api/v1/room/*`'
 require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
 require_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | POST | Keeper config 수정 (PATCH semantic) |'
+require_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Historical compatibility types'
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | PATCH |'
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
+require_not_contains docs/spec/10-dashboard.md 'command-plane.ts         -- Command plane types'
 
 docs_to_scan=(
   README.md
@@ -110,6 +124,8 @@ docs_to_scan=(
   docs/MCP-TEMPLATE.md
   docs/TUI-GUIDE.md
   docs/spec/SPEC-INDEX.md
+  docs/spec/01-system-overview.md
+  docs/spec/06-command-plane.md
   docs/spec/09-server-transport.md
   docs/spec/10-dashboard.md
   docs/spec/A-existing-doc-index.md

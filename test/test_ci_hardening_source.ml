@@ -74,6 +74,9 @@ let test_health_and_ci_runner_diagnostics () =
 let test_release_truth_contracts () =
   check bool "ci workflow defines doc truth job" true
     (file_contains_pattern ".github/workflows/ci.yml" "name: Doc Truth");
+  check bool "ci workflow exports doc truth scope output" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "doc_truth: ${{ steps.scope.outputs.doc_truth }}");
   check bool "ci gate aggregates doc truth" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "check \"doc-truth\"     \"$DOC_TRUTH_RESULT\"");
@@ -87,6 +90,18 @@ let test_release_truth_contracts () =
   check bool "release/doc truth changes trigger build scope" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "docs/|README\\.md$|ROADMAP\\.md$|CHANGELOG\\.md$");
+  check bool "release evidence changes stay in build scope" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "scripts/release-evidence\\.sh$");
+  check bool "health job reruns doc truth scripts" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "scripts/check-doc-truth.sh\n          scripts/check-version-truth.sh");
+  check bool "doc truth job reruns doc, version, and pin checks" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "scripts/check-doc-truth.sh\n          scripts/check-version-truth.sh\n          scripts/sync-oas-pin-docs.sh --check");
+  check bool "ci core fanout intentionally excludes tla" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "Note: tla is intentionally NOT forced on by ci_core.");
   check bool "main build uploads release evidence" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "name: Upload main release evidence");
@@ -101,6 +116,23 @@ let test_release_truth_contracts () =
        "opam install . --deps-only --with-test -y");
   check bool "make release evidence target exists" true
     (file_contains_pattern "Makefile" "release-evidence:")
+
+let test_doc_truth_guard_contracts () =
+  check bool "doc truth script protects spec index front door wording" true
+    (file_contains_pattern "scripts/check-doc-truth.sh"
+       "Historical compatibility lane과 internal orchestration reference는 migration context로만 남긴다.");
+  check bool "doc truth script protects command plane downgrade" true
+    (file_contains_pattern "scripts/check-doc-truth.sh"
+       "| Status | Historical Reference |");
+  check bool "doc truth script protects system overview front door wording" true
+    (file_contains_pattern "scripts/check-doc-truth.sh"
+       "### 7.3 Dashboard and Operator Read Visibility");
+  check bool "doc truth script protects transport removed-surface wording" true
+    (file_contains_pattern "scripts/check-doc-truth.sh"
+       "Retired compatibility lane removed-surface responder");
+  check bool "doc truth script forbids old dashboard command-plane type wording" true
+    (file_contains_pattern "scripts/check-doc-truth.sh"
+       "command-plane.ts         -- Command plane types")
 
 let test_contract_harness_and_execution_session_authz_contracts () =
   check bool "contract harness exposes extract_text helper" true
@@ -674,6 +706,7 @@ let () =
              test_contract_harness_and_execution_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "release truth contracts" `Quick test_release_truth_contracts;
+           test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "keeper direct reply contracts" `Quick

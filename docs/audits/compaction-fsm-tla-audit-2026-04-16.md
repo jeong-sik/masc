@@ -117,16 +117,21 @@ No `-buggy.cfg` variant present (per `ls specs/keeper-state-machine/`) — **thi
 
 ### 1.5 Reproduction Commands
 
-Requires TLA+ tools (`tla2tools.jar` from https://github.com/tlaplus/tlaplus). `tlc` not present in the current machine's PATH — operator must install first.
+`tla2tools.jar` is bundled at `specs/keeper-state-machine/tla2tools.jar`. The repo's canonical script `scripts/tla-check.sh` orchestrates all spec runs with download/caching for CI.
 
 ```bash
 cd ~/me/workspace/yousleepwhen/masc-mcp/specs/keeper-state-machine
 
-# Clean spec — expect "No error"
-java -jar ~/.local/lib/tla2tools.jar tlc KeeperContextLifecycle.tla -config KeeperContextLifecycle.cfg
+# Clean spec
+java -XX:+UseParallelGC -Xmx2g -cp tla2tools.jar tlc2.TLC \
+  -config KeeperContextLifecycle.cfg -workers 4 -deadlock \
+  KeeperContextLifecycle.tla
 
-# No buggy variant exists yet (see §1.4 gap 2)
+# (Recommended) Use the repo's script for full-suite runs:
+~/me/workspace/yousleepwhen/masc-mcp/scripts/tla-check.sh
 ```
+
+**Observed runtime (2026-04-16, M3 Max 128GB)**: KeeperContextLifecycle clean run on default cfg reached **Progress(30) with ~5.6M distinct states explored in 13+ minutes, no invariant or property violations observed**; did not complete in session budget. No drift found within the explored state subset. **Recommendation**: for CI, create a reduced `KeeperContextLifecycle-ci.cfg` with `Keepers={"a"}, MaxTurns=2` (state space ~1-2 orders smaller) that completes in <1 min and retain the default cfg for periodic nightly/release validation.
 
 ### 1.6 Phase Set Isomorphism (TLA+ vs OCaml — completed)
 
@@ -218,17 +223,30 @@ Cannot determine without direct read of `keeper_memory_bank.ml`. The spec's TLA+
 2. Read `lib/keeper/keeper_memory_bank.ml:292-448` → confirm compaction algorithm matches `SafeCompact` action (priority-capped select + fallback fill).
 3. Run `tlc MemoryCompaction.tla -config MemoryCompaction.cfg` (clean) and `-config MemoryCompaction-buggy.cfg` (buggy) → confirm clean passes + buggy fails.
 
-### 2.4 Reproduction Commands
+### 2.4 Reproduction Commands + Observed Results
 
 ```bash
 cd ~/me/workspace/yousleepwhen/masc-mcp/specs/bug-models
 
-# Clean — expect "No error"
-java -jar ~/.local/lib/tla2tools.jar tlc MemoryCompaction.tla -config MemoryCompaction.cfg
+# Buggy — expect "Invariant X is violated"
+java -XX:+UseParallelGC -Xmx2g -cp ../keeper-state-machine/tla2tools.jar tlc2.TLC \
+  -config MemoryCompaction-buggy.cfg -workers 4 -deadlock \
+  MemoryCompaction.tla
 
-# Buggy — expect "Invariant X is violated" (likely ConstraintsPreserved or NeverEmpty)
-java -jar ~/.local/lib/tla2tools.jar tlc MemoryCompaction.tla -config MemoryCompaction-buggy.cfg
+# Clean — expect "No error" (long-running, see below)
+java -XX:+UseParallelGC -Xmx2g -cp ../keeper-state-machine/tla2tools.jar tlc2.TLC \
+  -config MemoryCompaction.cfg -workers 4 -deadlock \
+  MemoryCompaction.tla
 ```
+
+**Observed results (2026-04-16, M3 Max 128GB)**:
+
+| Run | Result | Evidence |
+|-----|--------|----------|
+| `MemoryCompaction-buggy.cfg` | ✓ **Invariant `LongTermProtected` violated** (as expected) | `Error: Invariant LongTermProtected is violated. Error: The behavior up to this point is:` at 1,472,782 states / depth 12 / 13s. TTrace file `MemoryCompaction_TTrace_<ts>.tla` generated. |
+| `MemoryCompaction.cfg` (clean) | ⏳ Did not complete in session | State space explosion — concurrent accumulation orderings generate millions of states. **Recommendation**: similar CI-focused `MemoryCompaction-ci.cfg` with smaller `TargetNotes` to bound exploration. |
+
+**What the buggy violation proves**: the priority-only select strategy (models a broken implementation) allows 8 constraint notes + 1 long_term to dominate the result, starving ConstraintCap=2 respect **AND** reducing long_term below LongTermCap=3 (only 1 retained when bank has 2+). TLC picks up the LongTermProtected invariant as the first invariant to fail; ConstraintsPreserved / RecentFloorRespected may also be violated on other paths — not explored because TLC stops at first violation.
 
 ---
 
@@ -246,13 +264,13 @@ java -jar ~/.local/lib/tla2tools.jar tlc MemoryCompaction.tla -config MemoryComp
 
 ### What needs follow-up (ordered by value)
 
-1. **Install `tla2tools.jar`** and run reproduction commands §1.5 + §2.4 → attach tlc output tails back into this doc.
-2. **Direct read of `lib/keeper/keeper_memory_bank.ml:292-448`** + `keeper_memory_policy.ml:131-148` → confirm spec/code alignment for memory bank compaction.
+1. **Create CI-sized cfg variants** (`*-ci.cfg` with Keepers=1/MaxTurns=2 for context spec; smaller TargetNotes for memory bank) → enable full clean-spec checks in every CI build. Default cfg reserved for nightly/release.
+2. **Direct read of `lib/keeper/keeper_memory_bank.ml:292-448`** + `keeper_memory_policy.ml:131-148` → confirm spec/code alignment for memory bank compaction. Spec comments cite specific line ranges — easy cross-check.
 3. **Propose `KeeperContextLifecycle-buggy.cfg`** → close §1.4 gap 2. Deliberate bug candidate: drop `UNCHANGED <<context_id, resume_ctx_id>>` in `CompactionCompletes` and expect `ContextIsolation`/`ResumeIdentity` violation.
 4. **Propose `CompactionFailed(k)` action** in `KeeperContextLifecycle.tla` → close §1.4 gap 5. Models OCaml's retry-exhaustion path.
 5. **Update TLA+ `TurnSucceeded`** in `KeeperStateMachine.tla` (primary spec, not context spec) to model two-event sequence (Turn_succeeded + Manual_reconcile_cleared) → close §1.4 gap 3.
 6. **Add lint/CI check** for `Compaction_started|Handoff_started` dispatch points → prevent `KeepalivePhaseConsistency.tla` regression (§1.4 gap 6).
-7. **Document abstraction boundary** at top of `KeeperContextLifecycle.tla` → self-documenting spec scope.
+7. **Document abstraction boundary** at top of `KeeperContextLifecycle.tla` → self-documenting spec scope (link to §1.6 of this doc).
 
 ### Out of scope
 - Fixing identified drift: this audit discovers, a separate PR fixes each item.

@@ -17,7 +17,7 @@ describe('resolveKeeperToolPolicy', () => {
         tool_denylist: ['dangerous'],
         resolved_allowlist: ['bash', 'read', 'custom_tool'],
       },
-    } as Pick<KeeperConfig, 'tools'>
+    } as unknown as Pick<KeeperConfig, 'tools'>
     const result = resolveKeeperToolPolicy(config, 'loaded')
     expect(result.source).toBe('keeper_config')
     expect(result.mode).toBe('preset')
@@ -57,7 +57,7 @@ describe('resolveKeeperToolPolicy', () => {
       tools: {
         tool_policy_mode: 'custom',
       },
-    } as Pick<KeeperConfig, 'tools'>
+    } as unknown as Pick<KeeperConfig, 'tools'>
     const result = resolveKeeperToolPolicy(config, 'loaded')
     expect(result.alsoAllow).toEqual([])
     expect(result.customAllowlist).toEqual([])
@@ -71,7 +71,7 @@ describe('resolveKeeperToolPolicy', () => {
         tool_policy_mode: 'preset',
         tool_preset: 'standard',
       },
-    } as Pick<KeeperConfig, 'tools'>
+    } as unknown as Pick<KeeperConfig, 'tools'>
     // Even with error status, tools present means keeper_config
     const result = resolveKeeperToolPolicy(config, 'error')
     expect(result.source).toBe('keeper_config')

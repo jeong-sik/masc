@@ -91,10 +91,8 @@ describe('templateForAgent', () => {
   })
 
   it('prioritizes trait-based over name-based', () => {
-    const nameBased = templateForAgent('janitor')
     const traitBased = templateForAgent('janitor', ['robot'])
     expect(traitBased).toBe('robot')
-    // traitBased may or may not differ from nameBased, but must be 'robot'
   })
 
   it('returns deterministic template for empty traits', () => {

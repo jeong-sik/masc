@@ -14,6 +14,8 @@ let keeper_suffix_config = "/config"
 let keeper_suffix_boot = "/boot"
 let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
+let keeper_suffix_clear = "/clear"
+let keeper_suffix_checkpoints = "/checkpoints"
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
@@ -239,6 +241,8 @@ type keeper_post_route_kind =
   | Keeper_post_boot
   | Keeper_post_shutdown
   | Keeper_post_reset
+  | Keeper_post_clear
+  | Keeper_post_checkpoints
   | Keeper_post_unknown
 
 let classify_keeper_post_route req_path =
@@ -256,7 +260,262 @@ let classify_keeper_post_route req_path =
   else if ends_with keeper_suffix_boot then Keeper_post_boot
   else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
   else if ends_with keeper_suffix_reset then Keeper_post_reset
+  else if ends_with keeper_suffix_clear then Keeper_post_clear
+  else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
   else Keeper_post_unknown
+
+let keeper_path_ends_with req_path suffix =
+  let prefix = keeper_api_prefix in
+  let plen = String.length prefix in
+  let tlen = String.length req_path in
+  let slen = String.length suffix in
+  tlen > plen + slen
+  && String.sub req_path 0 plen = prefix
+  && String.sub req_path (tlen - slen) slen = suffix
+
+let extract_keeper_name_for_suffix req_path suffix =
+  let plen = String.length keeper_api_prefix in
+  let slen = String.length suffix in
+  let raw =
+    String.trim
+      (String.sub req_path plen (String.length req_path - plen - slen))
+  in
+  let valid =
+    String.length raw > 0
+    && String.length raw <= 128
+    && String.to_seq raw
+       |> Seq.for_all (fun c ->
+            (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9')
+            || c = '_' || c = '-')
+  in
+  if valid then raw else ""
+
+let is_keeper_checkpoints_get_path req_path =
+  keeper_path_ends_with req_path keeper_suffix_checkpoints
+
+let trim_to_opt (value : string) =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let truncate_text ~max_chars text =
+  let len = String.length text in
+  if len <= max_chars then text
+  else if max_chars <= 1 then String.sub text 0 (max 0 max_chars)
+  else String.sub text 0 (max_chars - 1) ^ "…"
+
+let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
+  messages
+  |> List.rev
+  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
+       if message.role = Agent_sdk.Types.System then None
+       else
+         Agent_sdk.Types.text_of_message message
+         |> trim_to_opt
+         |> Option.map (truncate_text ~max_chars:180))
+
+let continuity_summary_of_messages (messages : Agent_sdk.Types.message list) =
+  match Keeper_memory_policy.latest_state_snapshot_from_messages messages with
+  | Some snapshot ->
+      Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
+      |> trim_to_opt
+  | None -> None
+
+let stat_json_of_path (path : string) =
+  try
+    let stat = Unix.stat path in
+    `Assoc
+      [
+        ("size_bytes", `Int stat.st_size);
+        ("mtime", `Float stat.st_mtime);
+      ]
+  with
+  | Unix.Unix_error _ -> `Null
+
+let oas_checkpoint_summary_json
+    ~(source_kind : string)
+    ~(snapshot_id : string)
+    ~(path : string)
+    ~(is_current : bool)
+    ~(fallback_generation : int)
+    (checkpoint : Agent_sdk.Checkpoint.t) =
+  let generation =
+    Keeper_context_core.checkpoint_generation checkpoint
+      ~fallback:fallback_generation
+  in
+  let messages = checkpoint.messages in
+  let continuity_summary = continuity_summary_of_messages messages in
+  `Assoc
+    [
+      ("snapshot_id", `String snapshot_id);
+      ("source_kind", `String source_kind);
+      ("is_current", `Bool is_current);
+      ("path", `String path);
+      ("created_at", `Float checkpoint.created_at);
+      ("generation", `Int generation);
+      ("message_count", `Int (List.length messages));
+      ( "system_prompt_present",
+        `Bool
+          (match checkpoint.system_prompt with
+           | Some prompt -> String.trim prompt <> ""
+           | None -> false) );
+      ( "latest_preview",
+        match latest_preview_of_messages messages with
+        | Some preview -> `String preview
+        | None -> `Null );
+      ( "continuity_summary",
+        match continuity_summary with
+        | Some summary -> `String summary
+        | None -> `Null );
+      ("file_stat", stat_json_of_path path);
+    ]
+
+let keeper_checkpoint_inventory_json
+    (config : Coord.config)
+    (name : string) : [ `OK | `Not_found ] * Yojson.Safe.t =
+  match Keeper_types.read_meta_resolved config name with
+  | Error msg ->
+      (`Not_found, `Assoc [("error", `String msg)])
+  | Ok None ->
+      (`Not_found,
+       `Assoc [("error", `String (Printf.sprintf "keeper %S not found" name))])
+  | Ok (Some (_, meta)) ->
+      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+      let session_dir = Keeper_types.keeper_session_dir config trace_id in
+      let current_path =
+        Keeper_checkpoint_store.oas_checkpoint_path
+          ~session_dir ~session_id:trace_id
+      in
+      let current_json =
+        match
+          Keeper_checkpoint_store.load_oas ~session_dir ~session_id:trace_id
+        with
+        | Ok checkpoint ->
+            let current_history_snapshot_id =
+              Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint checkpoint
+            in
+            oas_checkpoint_summary_json
+              ~source_kind:"oas_current"
+              ~snapshot_id:(Filename.basename current_path)
+              ~path:current_path
+              ~is_current:true
+              ~fallback_generation:meta.runtime.generation
+              checkpoint
+            |> fun json -> Some (json, current_history_snapshot_id)
+        | Error _ -> None
+      in
+      let history_json =
+        Keeper_checkpoint_store.list_oas_history_files ~session_dir
+        |> List.filter (fun snapshot_id ->
+             match current_json with
+             | Some (_json, current_history_snapshot_id) ->
+                 snapshot_id <> current_history_snapshot_id
+             | None -> true)
+        |> List.filter_map (fun snapshot_id ->
+             match
+               Keeper_checkpoint_store.load_oas_history_file
+                 ~session_dir ~snapshot_id
+             with
+             | Ok checkpoint ->
+                 Some
+                   (oas_checkpoint_summary_json
+                      ~source_kind:"oas_history"
+                      ~snapshot_id
+                      ~path:
+                        (Keeper_checkpoint_store.oas_history_path
+                           ~session_dir ~snapshot_id)
+                      ~is_current:false
+                      ~fallback_generation:meta.runtime.generation
+                      checkpoint)
+             | Error _ -> None)
+      in
+      ( `OK,
+        `Assoc
+          [
+            ("keeper", `String name);
+            ("trace_id", `String trace_id);
+            ("session_dir", `String session_dir);
+            ("current", match current_json with Some (json, _snapshot_id) -> json | None -> `Null);
+            ("history", `List history_json);
+            ( "legacy_shadow_count",
+              `Int
+                (List.length
+                   (Keeper_checkpoint_store.list_checkpoints ~session_dir)) );
+          ] )
+
+let handle_keeper_checkpoints_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_checkpoints in
+  if String.length name = 0 then
+    Http.Response.json ~status:`Bad_request
+      {|{"ok":false,"error":"keeper name is required"}|} reqd
+  else
+    let config = state.Mcp_server.room_config in
+    try
+      let args = Yojson.Safe.from_string body_str in
+      let action = Safe_ops.json_string ~default:"" "action" args in
+      match action with
+      | "delete_history" ->
+          let snapshot_ids =
+            Safe_ops.json_string_list "snapshot_ids" args
+            |> List.map String.trim
+            |> List.filter (fun value -> value <> "")
+            |> Json_util.dedupe_keep_order
+          in
+          if snapshot_ids = [] then
+            Http.Response.json ~status:`Bad_request
+              {|{"ok":false,"error":"snapshot_ids is required"}|} reqd
+          else
+            let trace_id_result =
+              match Keeper_types.read_meta_resolved config name with
+              | Ok (Some (_, meta)) ->
+                  Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+              | Ok None ->
+                  Error (Printf.sprintf "keeper %S not found" name)
+              | Error msg -> Error msg
+            in
+            (match trace_id_result with
+             | Error msg ->
+                 Http.Response.json ~status:`Not_found
+                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
+                      (String.escaped msg))
+                   reqd
+             | Ok trace_id ->
+                 let session_dir = Keeper_types.keeper_session_dir config trace_id in
+                 let (deleted, missing) =
+                   Keeper_checkpoint_store.delete_oas_history_files
+                     ~session_dir ~snapshot_ids
+                 in
+                 let (_status, inventory) =
+                   keeper_checkpoint_inventory_json config name
+                 in
+                 Http.Response.json ~compress:true ~request:req
+                   (Yojson.Safe.to_string
+                      (`Assoc
+                         [
+                           ("ok", `Bool true);
+                           ("action", `String "delete_history");
+                           ("keeper", `String name);
+                           ("deleted_snapshot_ids", `List (List.map (fun id -> `String id) deleted));
+                           ("missing_snapshot_ids", `List (List.map (fun id -> `String id) missing));
+                           ("inventory", inventory);
+                         ]))
+                   reqd)
+      | "" ->
+          Http.Response.json ~status:`Bad_request
+            {|{"ok":false,"error":"action is required"}|} reqd
+      | other ->
+          Http.Response.json ~status:`Bad_request
+            (Printf.sprintf {|{"ok":false,"error":"unknown action: %s"}|}
+               (String.escaped other))
+            reqd
+    with
+    | Yojson.Json_error e ->
+        Http.Response.json ~status:`Bad_request
+          (Printf.sprintf {|{"ok":false,"error":"invalid json: %s"}|}
+             (String.escaped e))
+          reqd
 
 let is_valid_keeper_name name =
   String.length name > 0
@@ -367,13 +626,15 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                 (String.escaped e))
              reqd)
 
-let handle_keeper_lifecycle_post ~sw ~clock ~tool_name ~action state agent_name req reqd =
+let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
+    state agent_name req reqd =
   let req_path = Http.Request.path req in
   let suffix_result =
     match action with
     | "boot" -> Ok keeper_suffix_boot
     | "shutdown" -> Ok keeper_suffix_shutdown
     | "reset" -> Ok keeper_suffix_reset
+    | "clear" -> Ok keeper_suffix_clear
     | unknown ->
         Error (Printf.sprintf "unknown keeper lifecycle action: %s" unknown)
   in
@@ -398,16 +659,43 @@ let handle_keeper_lifecycle_post ~sw ~clock ~tool_name ~action state agent_name 
         net = state.Mcp_server.net;
       }
     in
-    let args = `Assoc [("name", `String name)] in
+    let args_result =
+      match action with
+      | "clear" -> (
+          match body_str with
+          | None ->
+              Error "request body is required for clear"
+          | Some raw -> (
+              try
+                let parsed = Yojson.Safe.from_string raw in
+                match parsed with
+                | `Assoc fields ->
+                    Ok (`Assoc (("name", `String name) :: List.remove_assoc "name" fields))
+                | _ ->
+                    Error "request body must be a JSON object"
+              with
+              | Yojson.Json_error err ->
+                  Error (Printf.sprintf "invalid json: %s" err)))
+      | _ -> Ok (`Assoc [("name", `String name)])
+    in
+    match args_result with
+    | Error msg ->
+        Http.Response.json ~status:`Bad_request
+          (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
+          reqd
+    | Ok args ->
     match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
-    | Some (true, body) when String.equal action "boot" ->
+    | Some (true, body) when String.equal action "boot" || String.equal action "clear" ->
         Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"boot","name":"%s","detail":%s}|}
-             (String.escaped name) body)
+          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
+             (String.escaped action)
+             (String.escaped name)
+             body)
           reqd
     | Some (true, _body) ->
         Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"shutdown","name":"%s"}|}
+          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
+             (String.escaped action)
              (String.escaped name))
           reqd
     | Some (false, body) ->
@@ -448,6 +736,18 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       Server_auth.respond_json_with_cors ~status:`OK request reqd
         (Yojson.Safe.to_string (Keeper_chat_store.to_json_array messages))
+  else if ends_with keeper_suffix_checkpoints then
+    let name = extract_name keeper_suffix_checkpoints in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
+      let status : Httpun.Status.t =
+        match st with `OK -> `OK | `Not_found -> `Not_found
+      in
+      Http.Response.json ~status ~compress:true ~request:req
+        (Yojson.Safe.to_string json) reqd
   else if ends_with "/config" then
     let name = extract_name "/config" in
     if String.length name = 0 then

@@ -14,7 +14,15 @@ vi.mock('./core', async (importOriginal) => {
   }
 })
 
-import { bootKeeper, sendKeeperMessageDetailed, shutdownKeeper, streamKeeperMessage } from './keeper'
+import {
+  bootKeeper,
+  clearKeeper,
+  deleteKeeperHistorySnapshots,
+  fetchKeeperCheckpoints,
+  sendKeeperMessageDetailed,
+  shutdownKeeper,
+  streamKeeperMessage,
+} from './keeper'
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -130,5 +138,106 @@ describe('keeper lifecycle', () => {
 
     expect(result.ok).toBe(false)
     expect(result.error).toBe('Failed to boot keeper-test (HTTP 502)')
+  })
+
+  it('posts keeper clear payload and returns structured detail', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        action: 'clear',
+        name: 'keeper-test',
+        detail: {
+          cleared_message_count: 12,
+          continuity_cleared: true,
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await clearKeeper('keeper-test', {
+      reason: 'reset stale continuity',
+      preserve_system_prompt: true,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/keeper-test/clear')
+    expect(JSON.parse(String(init.body))).toEqual({
+      reason: 'reset stale continuity',
+      preserve_system_prompt: true,
+    })
+    expect(result.ok).toBe(true)
+    expect(result.action).toBe('clear')
+    expect(result.detail).toEqual({
+      cleared_message_count: 12,
+      continuity_cleared: true,
+    })
+  })
+
+  it('fetches keeper checkpoint inventory from the admin route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keeper: 'keeper-test',
+        trace_id: 'trace-keeper-test',
+        session_dir: '/tmp/trace-keeper-test',
+        current: null,
+        history: [],
+        legacy_shadow_count: 0,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperCheckpoints('keeper-test')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/keepers/keeper-test/checkpoints',
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    )
+    expect(result.trace_id).toBe('trace-keeper-test')
+    expect(result.history).toEqual([])
+  })
+
+  it('posts selected OAS history snapshot ids for deletion', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        action: 'delete_history',
+        keeper: 'keeper-test',
+        deleted_snapshot_ids: ['oas-snapshot-1.json'],
+        missing_snapshot_ids: [],
+        inventory: {
+          keeper: 'keeper-test',
+          trace_id: 'trace-keeper-test',
+          session_dir: '/tmp/trace-keeper-test',
+          current: null,
+          history: [],
+          legacy_shadow_count: 0,
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await deleteKeeperHistorySnapshots('keeper-test', ['oas-snapshot-1.json'])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/keeper-test/checkpoints')
+    expect(JSON.parse(String(init.body))).toEqual({
+      action: 'delete_history',
+      snapshot_ids: ['oas-snapshot-1.json'],
+    })
+    expect(result.deleted_snapshot_ids).toEqual(['oas-snapshot-1.json'])
   })
 })

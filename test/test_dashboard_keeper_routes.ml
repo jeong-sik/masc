@@ -385,6 +385,8 @@ let check_route path expected =
        | Keeper_api.Keeper_post_boot -> "boot"
        | Keeper_api.Keeper_post_shutdown -> "shutdown"
        | Keeper_api.Keeper_post_reset -> "reset"
+       | Keeper_api.Keeper_post_clear -> "clear"
+       | Keeper_api.Keeper_post_checkpoints -> "checkpoints"
        | Keeper_api.Keeper_post_unknown -> "unknown")
       path
 ;;
@@ -395,6 +397,8 @@ let test_keeper_post_route_classification () =
   check_route "/api/v1/keepers/sangsu/boot" Keeper_api.Keeper_post_boot;
   check_route "/api/v1/keepers/sangsu/shutdown" Keeper_api.Keeper_post_shutdown;
   check_route "/api/v1/keepers/sangsu/reset" Keeper_api.Keeper_post_reset;
+  check_route "/api/v1/keepers/sangsu/clear" Keeper_api.Keeper_post_clear;
+  check_route "/api/v1/keepers/sangsu/checkpoints" Keeper_api.Keeper_post_checkpoints;
   check_route "/api/v1/keepers/sangsu" Keeper_api.Keeper_post_unknown;
   check_route "/api/v1/keepers//boot" Keeper_api.Keeper_post_unknown
 ;;
@@ -417,6 +421,7 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
   @@ fun ~port ~config ~admin_token ~keeper_name ->
   let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
   let shutdown_path = Printf.sprintf "/api/v1/keepers/%s/shutdown" keeper_name in
+  let clear_path = Printf.sprintf "/api/v1/keepers/%s/clear" keeper_name in
   let boot_result =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
@@ -445,6 +450,56 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     "shutdown route reaches lifecycle handler"
     true
     (contains_substr {|"action":"shutdown"|} shutdown_result.body);
+  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+   | Ok (Some meta) ->
+       let updated_meta =
+         {
+           meta with
+           continuity_summary = "stale continuity snapshot";
+           updated_at = Masc_mcp.Keeper_types.now_iso ();
+           runtime =
+             {
+               meta.runtime with
+               last_continuity_update_ts = 1234.0;
+             };
+         }
+       in
+       (match Masc_mcp.Keeper_types.write_meta ~force:true config updated_meta with
+        | Ok () -> ()
+        | Error err -> fail ("failed to seed continuity summary: " ^ err))
+   | Ok None -> fail "keeper meta missing before clear route"
+   | Error err -> fail ("failed to read keeper meta before clear: " ^ err));
+  let clear_result =
+    run_curl_post
+      ~body:{|{"reason":"reset stale continuity","preserve_system_prompt":true}|}
+      ~token:admin_token
+      ~port
+      ~path:clear_path
+      ()
+  in
+  require_status "clear route returns 200" 200 clear_result;
+  check
+    bool
+    "clear route is not generic 404"
+    false
+    (contains_substr {|{"error":"not found"}|} clear_result.body);
+  check
+    bool
+    "clear route reaches lifecycle handler"
+    true
+    (contains_substr {|"action":"clear"|} clear_result.body);
+  check
+    bool
+    "clear route reports continuity cleanup"
+    true
+    (contains_substr {|"continuity_cleared":true|} clear_result.body);
+  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
+   | Ok (Some meta) ->
+       check string "clear resets continuity summary" "" meta.continuity_summary;
+       check (float 0.0001) "clear resets continuity freshness" 0.0
+         meta.runtime.last_continuity_update_ts
+   | Ok None -> fail "keeper meta missing after clear route"
+   | Error err -> fail ("failed to read keeper meta after clear: " ^ err));
   match Masc_mcp.Keeper_types.read_meta config keeper_name with
   | Ok (Some meta) -> check bool "shutdown persists paused keeper meta" true meta.paused
   | Ok None -> fail "keeper meta missing after shutdown route"

@@ -239,7 +239,7 @@ export async function fetchKeeperChatHistory(
 
 export interface KeeperLifecycleResponse {
   ok: boolean
-  action?: 'boot' | 'shutdown'
+  action?: 'boot' | 'shutdown' | 'reset' | 'clear'
   name?: string
   detail?: unknown
   error?: string
@@ -266,9 +266,17 @@ async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promi
   }
 }
 
-async function safeKeeperLifecycle(url: string, fallbackError: string): Promise<KeeperLifecycleResponse> {
+async function safeKeeperLifecycle(
+  url: string,
+  fallbackError: string,
+  init?: RequestInit,
+): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetch(url, { method: 'POST', headers: jsonHeaders() })
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      ...init,
+    })
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 
@@ -308,6 +316,99 @@ export function resetKeeper(name: string): Promise<KeeperLifecycleResponse> {
     `/api/v1/keepers/${encodeURIComponent(name)}/reset`,
     `Failed to reset ${name}`,
   )
+}
+
+export interface KeeperClearRequest {
+  reason: string
+  preserve_system_prompt?: boolean
+}
+
+export function clearKeeper(
+  name: string,
+  payload: KeeperClearRequest,
+): Promise<KeeperLifecycleResponse> {
+  return safeKeeperLifecycle(
+    `/api/v1/keepers/${encodeURIComponent(name)}/clear`,
+    `Failed to clear ${name}`,
+    {
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export interface KeeperCheckpointSummary {
+  snapshot_id: string
+  source_kind: 'oas_current' | 'oas_history' | string
+  is_current: boolean
+  path: string
+  created_at: number
+  generation: number
+  message_count: number
+  system_prompt_present: boolean
+  latest_preview: string | null
+  continuity_summary: string | null
+  file_stat: {
+    size_bytes?: number
+    mtime?: number
+  } | null
+}
+
+export interface KeeperCheckpointInventory {
+  keeper: string
+  trace_id: string
+  session_dir: string
+  current: KeeperCheckpointSummary | null
+  history: KeeperCheckpointSummary[]
+  legacy_shadow_count: number
+}
+
+export interface KeeperCheckpointDeleteResponse {
+  ok: boolean
+  action: 'delete_history' | string
+  keeper: string
+  deleted_snapshot_ids: string[]
+  missing_snapshot_ids: string[]
+  inventory: KeeperCheckpointInventory
+}
+
+export async function fetchKeeperCheckpoints(
+  name: string,
+): Promise<KeeperCheckpointInventory> {
+  const resp = await fetchWithTimeout(
+    `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`,
+    {
+      method: 'GET',
+      headers: jsonHeaders(),
+    },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText)
+    throw new Error(`Failed to load checkpoints for ${name} (${resp.status}): ${text}`)
+  }
+  return resp.json() as Promise<KeeperCheckpointInventory>
+}
+
+export async function deleteKeeperHistorySnapshots(
+  name: string,
+  snapshotIds: string[],
+): Promise<KeeperCheckpointDeleteResponse> {
+  const resp = await fetch(
+    `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`,
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        action: 'delete_history',
+        snapshot_ids: snapshotIds,
+      }),
+    },
+  )
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText)
+    throw new Error(`Failed to delete checkpoint history for ${name} (${resp.status}): ${text}`)
+  }
+  return resp.json() as Promise<KeeperCheckpointDeleteResponse>
 }
 
 // --- Keeper tool policy editing ---

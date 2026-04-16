@@ -1,4 +1,10 @@
 ---- MODULE KeeperRecoveryOrchestration ----
+\* HISTORICAL AUDIT MODEL ONLY — NOT a current runtime-owned boundary contract.
+\*
+\* The live keeper boundary contract for ambiguous post-commit recovery is
+\* boundary/KeeperContinueGate.tla. This module is retained only to document
+\* the old two-store reconcile bookkeeping bug and its cross-store sequencing.
+\*
 \* Cross-domain boundary spec: State (data layer) x FSM (condition layer).
 \*
 \* Models the maybe_recover_from_failing multi-event sequence in

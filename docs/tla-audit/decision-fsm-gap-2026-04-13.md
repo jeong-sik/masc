@@ -1,5 +1,8 @@
 # TLA+ Keeper Decision FSM Gap Analysis
 
+> Status: historical audit only.
+> The current authoritative decision-turn contract is the combination of `KeeperTurnCycle.tla`, `KeeperDecisionPipeline.tla`, `KeeperCompositeLifecycle.tla`, and `boundary/KeeperContinueGate.tla`.
+
 Date: 2026-04-13
 Auditor: Claude Opus 4.6
 Scope: Does the existing TLA+ spec portfolio catch Bug #3 (proactive timer freeze)?

@@ -1,4 +1,20 @@
 ---- MODULE KeeperReconcileLiveness ----
+\* HISTORICAL AUDIT MODEL ONLY — NOT part of the canonical keeper runtime set.
+\*
+\* Current authoritative keeper FSM set:
+\*   - KeeperStateMachine.tla
+\*   - KeeperCompositeLifecycle.tla
+\*   - KeeperTurnCycle.tla
+\*   - KeeperDecisionPipeline.tla
+\*   - KeeperCascadeLifecycle.tla
+\*   - KeeperCompactionLifecycle.tla
+\*   - boundary/KeeperContinueGate.tla
+\*
+\* This module is retained as a forensic model for the old two-store
+\* manual_reconcile one-way trap. It does not describe the current
+\* runtime-owned contract and should not be used as the SSOT for live
+\* keeper behavior.
+\*
 \* Keeper Reconcile Liveness — TLA+ Specification
 \*
 \* Verifies that manual_reconcile_required is not a one-way trap:

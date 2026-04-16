@@ -1,5 +1,9 @@
 # TLA+ Cascade/Model Selection FSM Gap Analysis
 
+> Status: historical audit only, not a live keeper contract.
+> The current canonical cascade/runtime-truth specs are `KeeperCascadeLifecycle.tla`, `KeeperCompactionLifecycle.tla`, `KeeperCompositeLifecycle.tla`, `KeeperStateMachine.tla`, and `boundary/KeeperContinueGate.tla`.
+> References to `manual_reconcile` below describe the audited 2026-04-13 system, not the current live API/runtime contract.
+
 Date: 2026-04-13
 Auditor: Claude Opus 4.6 (1M context)
 Status: Audit-only (no spec modifications)

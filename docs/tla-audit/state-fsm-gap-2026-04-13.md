@@ -1,5 +1,9 @@
 # TLA+ Keeper State FSM Gap Analysis — Bug #1 (manual_reconcile one-way trap)
 
+> Status: historical audit only, not a live keeper contract.
+> Current authoritative keeper FSM set is `KeeperStateMachine`, `KeeperCompositeLifecycle`, `KeeperTurnCycle`, `KeeperDecisionPipeline`, `KeeperCascadeLifecycle`, `KeeperCompactionLifecycle`, and `boundary/KeeperContinueGate`.
+> `KeeperReconcileLiveness.tla` and `boundary/KeeperRecoveryOrchestration.tla` are retained here as forensic models for the old two-store reconcile bug.
+
 Date: 2026-04-13
 Auditor: Claude Opus 4.6 (1M context)
 PR: #6834 (fix), this document: audit branch `audit/tla-state-gap`

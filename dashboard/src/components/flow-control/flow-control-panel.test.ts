@@ -7,14 +7,11 @@ void vi
 const fetchPauseStatus = vi.fn().mockResolvedValue(undefined)
 const pauseRoom = vi.fn().mockResolvedValue(undefined)
 const resumeRoom = vi.fn().mockResolvedValue(undefined)
-const fetchRoomStrategy = vi.fn().mockResolvedValue(undefined)
 const runGarbageCollection = vi.fn().mockResolvedValue(undefined)
 const cleanupZombies = vi.fn().mockResolvedValue(undefined)
 
 const flowState = { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' }
 const flowLoading = { value: false }
-const roomStrategy = { value: null as Record<string, unknown> | null }
-const roomStrategyLoading = { value: false }
 const maintenanceResult = { value: null as string | null }
 const maintenanceLoading = { value: false }
 
@@ -28,15 +25,12 @@ async function loadPanel() {
   vi.doMock('./flow-control-state', () => ({
     cleanupZombies,
     fetchPauseStatus,
-    fetchRoomStrategy,
     flowLoading,
     flowState,
     maintenanceLoading,
     maintenanceResult,
     pauseRoom,
     resumeRoom,
-    roomStrategy,
-    roomStrategyLoading,
     runGarbageCollection,
   }))
   return import('./flow-control-panel')
@@ -50,8 +44,6 @@ describe('FlowControlPanel', () => {
     document.body.appendChild(container)
     flowState.value = 'running'
     flowLoading.value = false
-    roomStrategy.value = null
-    roomStrategyLoading.value = false
     maintenanceResult.value = null
     maintenanceLoading.value = false
   })

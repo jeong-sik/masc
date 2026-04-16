@@ -21,6 +21,8 @@ export type TraceEventKind =
   | 'oas_turn'
   | 'oas_context'
 
+export type TraceStatus = 'success' | 'failure' | 'gate_rejected'
+
 export type TraceSourceLane = 'masc' | 'oas'
 
 export interface UnifiedTraceEvent {
@@ -74,6 +76,8 @@ interface TraceSlot {
   loading: boolean
   error: string | null
   filter: TraceEventKind | 'all'
+  statusFilter: TraceStatus | 'all'
+  searchQuery: string
   /** Monotonic fetch token — used to discard stale in-flight responses. */
   fetchToken: number
 }
@@ -83,7 +87,7 @@ interface TraceSlot {
 const traceSlots = signal<Record<string, TraceSlot>>({})
 const liveTraceFeeds = signal<Record<string, UnifiedTraceEvent[]>>({})
 
-const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', fetchToken: 0 }
+const EMPTY_SLOT: TraceSlot = { events: [], loading: false, error: null, filter: 'all', statusFilter: 'all', searchQuery: '', fetchToken: 0 }
 
 const LIVE_TRACE_LIMIT = 120
 let liveTraceSeq = 0
@@ -117,11 +121,65 @@ export function getTraceFilter(agent: string): TraceEventKind | 'all' {
   return getSlot(agent).filter
 }
 
+export function getTraceStatusFilter(agent: string): TraceStatus | 'all' {
+  return getSlot(agent).statusFilter
+}
+
+export function getTraceSearchQuery(agent: string): string {
+  return getSlot(agent).searchQuery
+}
+
+// ── Status classification ────────────────────────────────
+
+export function getEventStatus(e: UnifiedTraceEvent): TraceStatus | null {
+  if (e.gate?.status === 'reject') return 'gate_rejected'
+  if (e.error) return 'failure'
+  if (e.kind === 'tool_call' || e.kind === 'oas_tool') return 'success'
+  return null
+}
+
+// ── Search matching ──────────────────────────────────────
+
+function eventMatchesSearch(e: UnifiedTraceEvent, query: string): boolean {
+  const q = query.toLowerCase()
+  const fields = [
+    e.summary,
+    e.toolName,
+    e.error,
+    e.thinkingContent,
+    e.toolResult?.slice(0, 500),
+    ...Object.values(e.detail).map(v => typeof v === 'string' ? v : ''),
+  ]
+  return fields.some(f => f != null && f.toLowerCase().includes(q))
+}
+
 export function getFilteredEvents(agent: string): UnifiedTraceEvent[] {
-  const filter = getTraceFilter(agent)
+  const slot = getSlot(agent)
+  let events = getTraceEvents(agent)
+  if (slot.filter !== 'all') {
+    events = events.filter(e => e.kind === slot.filter)
+  }
+  if (slot.statusFilter !== 'all') {
+    events = events.filter(e => getEventStatus(e) === slot.statusFilter)
+  }
+  if (slot.searchQuery) {
+    events = events.filter(e => eventMatchesSearch(e, slot.searchQuery))
+  }
+  return events
+}
+
+export function getStatusCounts(agent: string): Record<TraceStatus | 'all', number> {
   const events = getTraceEvents(agent)
-  if (filter === 'all') return events
-  return events.filter(e => e.kind === filter)
+  let success = 0
+  let failure = 0
+  let gate_rejected = 0
+  for (const e of events) {
+    const s = getEventStatus(e)
+    if (s === 'success') success++
+    else if (s === 'failure') failure++
+    else if (s === 'gate_rejected') gate_rejected++
+  }
+  return { all: success + failure + gate_rejected, success, failure, gate_rejected }
 }
 
 export function getTraceSummary(agent: string): TraceSummary {
@@ -241,6 +299,14 @@ export { liveTraceFeeds as _liveTraceFeeds }
 
 export function setTraceFilter(agent: string, filter: TraceEventKind | 'all'): void {
   patchSlot(agent, { filter })
+}
+
+export function setTraceStatusFilter(agent: string, statusFilter: TraceStatus | 'all'): void {
+  patchSlot(agent, { statusFilter })
+}
+
+export function setTraceSearchQuery(agent: string, searchQuery: string): void {
+  patchSlot(agent, { searchQuery })
 }
 
 // ── Converters ─────────────────────────────────────────

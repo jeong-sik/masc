@@ -373,15 +373,40 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
       max min_keeper_context raw
     in
     let base_dir = session_base_dir config in
-    let _session, ctx_opt =
+    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+    let session, ctx_opt =
       load_context_from_checkpoint
         ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~trace_id
         ~primary_model_max_tokens:primary_max_context ~base_dir
     in
     match ctx_opt with
     | Some c ->
-        let snapshot = latest_state_snapshot_from_messages c.messages in
+        (* RFC-MASC-001 Phase 1 read-side symmetry: the save path
+           (Keeper_context_core.patch_checkpoint_last_assistant, gated by
+           MASC_STRUCTURED_STATE) writes a typed snapshot to
+           Checkpoint.working_context alongside the text [STATE] block.
+           Prefer that typed snapshot here so the injected continuity
+           reflects the same structured view the save path produced,
+           instead of re-parsing a [STATE] block from message bodies. *)
+        let structured_snapshot =
+          match
+            Keeper_checkpoint_store.load_oas
+              ~session_dir:session.session_dir ~session_id:trace_id
+          with
+          | Ok cp ->
+              (match cp.Agent_sdk.Checkpoint.working_context with
+               | Some json ->
+                   Keeper_memory_policy
+                   .snapshot_of_structured_working_context json
+               | None -> None)
+          | Error _ -> None
+        in
+        let snapshot =
+          match structured_snapshot with
+          | Some _ as s -> s
+          | None -> latest_state_snapshot_from_messages c.messages
+        in
         (match snapshot with
          | Some s -> keeper_state_snapshot_to_summary_text s
          | None ->

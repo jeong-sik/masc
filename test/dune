@@ -48,6 +48,7 @@
         test_keeper_accountability
         test_keeper_exec_status
         test_keeper_adaptive_thinking
+        test_keeper_turn_intent
         test_keeper_lifecycle
         test_keeper_lifecycle_chaos
         test_keeper_rollover_gate
@@ -135,6 +136,7 @@
           test_keeper_accountability
           test_keeper_exec_status
         test_keeper_adaptive_thinking
+          test_keeper_turn_intent
           test_keeper_lifecycle
           test_keeper_lifecycle_chaos
           test_keeper_rollover_gate

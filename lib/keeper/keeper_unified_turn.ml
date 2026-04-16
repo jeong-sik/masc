@@ -844,10 +844,17 @@ let append_decision_record
                     let timings_fields =
                       match t.timings with
                       | Some ti ->
+                          (* hw_decode_tokens_per_second: unambiguous alias of
+                             provider_tokens_per_second. Both read ti.predicted_per_second
+                             (eval_count / eval_duration from Ollama), which is the true
+                             hardware decode rate — distinct from the wall-clock
+                             tokens_per_second (output_tokens / latency_ms) below. Dashboards
+                             should prefer hw_decode_* name; legacy name kept for backward compat. *)
                           [
                             ("prompt_ms", match ti.prompt_ms with Some v -> `Float v | None -> `Null);
                             ("predicted_ms", match ti.predicted_ms with Some v -> `Float v | None -> `Null);
                             ("provider_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
+                            ("hw_decode_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
                             ("prompt_per_second", match ti.prompt_per_second with Some v -> `Float v | None -> `Null);
                             ("cache_n", match ti.cache_n with Some v -> `Int v | None -> `Null);
                           ]

@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { cleanup, render, screen, fireEvent } from '@testing-library/preact'
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -71,6 +71,18 @@ vi.mock('./common/filter-chips', () => ({
         >${chip.label}${chip.count != null ? ` (${chip.count})` : ''}</button>
       `)}
     </div>
+  `,
+}))
+
+vi.mock('./common/input', () => ({
+  TextInput: ({ value, onInput, placeholder, ariaLabel }: any) => html`
+    <input
+      data-testid="search-input"
+      value=${value}
+      placeholder=${placeholder}
+      aria-label=${ariaLabel}
+      onInput=${onInput}
+    />
   `,
 }))
 
@@ -191,5 +203,36 @@ describe('VerificationRequestsPanel', () => {
     const pendingChip = screen.getByTestId('filter-chip-pending')
     expect(allChip.textContent).toContain('3')
     expect(pendingChip.textContent).toContain('1')
+  })
+
+  it('filters by search query', async () => {
+    const req1 = makeRequest({ request_id: 'req-alpha', task_id: 'task-001', submitted_by: 'keeper-x' })
+    const req2 = makeRequest({ request_id: 'req-beta', task_id: 'task-002', submitted_by: 'keeper-y' })
+    setData([req1, req2])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    // Reset status filter from previous test (module-scope signal)
+    fireEvent.click(screen.getByTestId('filter-chip-all'))
+
+    const searchInput = screen.getByTestId('search-input')
+    fireEvent.input(searchInput, { target: { value: 'alpha' } })
+    await waitFor(() => {
+      const card = screen.getByTestId('card')
+      expect(card.innerHTML).toContain('req-alpha')
+      expect(card.innerHTML).not.toContain('req-beta')
+    })
+  })
+
+  it('shows filter-specific empty state with search', async () => {
+    setData([makeRequest({ request_id: 'req-001' })])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    fireEvent.click(screen.getByTestId('filter-chip-all'))
+
+    const searchInput = screen.getByTestId('search-input')
+    fireEvent.input(searchInput, { target: { value: 'nonexistent' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('empty-state')).toBeTruthy()
+    })
   })
 })

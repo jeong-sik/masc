@@ -23,6 +23,7 @@ import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
 import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import {
   createManagedAsyncResource,
   type ManagedAsyncResource,
@@ -34,6 +35,7 @@ const DEFAULT_LIMIT = 100
 type StatusFilter = VerificationRequestStatus | 'all'
 
 const statusFilter = signal<StatusFilter>('all')
+const searchQuery = signal('')
 
 const FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: '전체' },
@@ -203,11 +205,12 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
 
 function RequestsTable({ requests }: { requests: VerificationRequest[] }) {
   if (requests.length === 0) {
+    const hasFilter = statusFilter.value !== 'all' || searchQuery.value
     return html`
       <${EmptyState}>
-        ${statusFilter.value === 'all'
-          ? '현재 대기중이거나 완료된 검증 요청이 없습니다.'
-          : `"${STATUS_LABEL[statusFilter.value as VerificationRequestStatus]}" 상태의 요청이 없습니다.`}
+        ${hasFilter
+          ? '조건에 맞는 검증 요청이 없습니다.'
+          : '현재 대기중이거나 완료된 검증 요청이 없습니다.'}
       <//>
     `
   }
@@ -259,9 +262,19 @@ export function VerificationRequestsPanel() {
   const current = resource.state.value
   const data = current.data ?? null
   const filtered = data
-    ? statusFilter.value === 'all'
-      ? data.requests
-      : data.requests.filter((r) => r.status === statusFilter.value)
+    ? data.requests.filter((r) => {
+        if (statusFilter.value !== 'all' && r.status !== statusFilter.value) return false
+        if (searchQuery.value) {
+          const q = searchQuery.value.toLowerCase()
+          if (
+            !r.request_id.toLowerCase().includes(q) &&
+            !r.task_id.toLowerCase().includes(q) &&
+            !r.submitted_by.toLowerCase().includes(q) &&
+            !(r.approved_by ?? '').toLowerCase().includes(q)
+          ) return false
+        }
+        return true
+      })
     : []
 
   return html`
@@ -283,7 +296,7 @@ export function VerificationRequestsPanel() {
           : null}
         ${data
           ? html`<span class="text-xs text-[var(--text-muted)]">
-              ${statusFilter.value === 'all'
+              ${statusFilter.value === 'all' && !searchQuery.value
                 ? `총 ${data.total}건`
                 : `${filtered.length} / ${data.total}건`}
             </span>`
@@ -301,6 +314,14 @@ export function VerificationRequestsPanel() {
             : null,
         }))}
         active=${statusFilter}
+      />
+
+      <${TextInput}
+        class="max-w-[260px]"
+        placeholder="검색 (request, task, 제출자...)"
+        ariaLabel="검증 요청 검색"
+        value=${searchQuery.value}
+        onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
       />
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}

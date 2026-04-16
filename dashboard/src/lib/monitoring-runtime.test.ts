@@ -1,277 +1,109 @@
-import { describe, expect, it } from 'vitest'
-
-import type { Agent, Keeper } from '../types'
+import { describe, it, expect } from 'vitest'
 import {
-  keeperPhaseForDisplay,
-  runtimeBandForAgent,
+  runtimeBandMeta,
   summarizeMonitoringEvidence,
-  summarizeKeeperMonitoring,
 } from './monitoring-runtime'
+import type { KeeperMonitoringSummary } from './monitoring-runtime'
 
-function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
+function makeSummary(overrides: Partial<KeeperMonitoringSummary> = {}): KeeperMonitoringSummary {
   return {
-    name: 'analyst',
-    status: 'busy',
-    phase: 'Running',
-    pipeline_stage: 'idle',
+    band: { key: 'active', label: '가동중', description: '정상' },
+    phase: { key: 'Running', label: '실행중', description: '정상 실행' },
+    stage: { key: 'idle', label: '활동 없음', description: '없음' },
+    hint: null,
     ...overrides,
   }
 }
 
-describe('summarizeKeeperMonitoring', () => {
-  it('treats a running keeper with idle pipeline as active, not offline', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-      }),
-    )
+// ================================================================
+// runtimeBandMeta
+// ================================================================
 
-    expect(summary.band.key).toBe('active')
-    expect(summary.phase.label).toBe('실행중')
-    expect(summary.stage.label).toBe('활동 없음')
-    expect(summarizeMonitoringEvidence(summary)).toEqual({
-      phase: null,
-      stage: null,
-    })
+describe('runtimeBandMeta', () => {
+  it('returns active meta', () => {
+    const meta = runtimeBandMeta('active')
+    expect(meta.key).toBe('active')
+    expect(meta.label).toBeTruthy()
   })
 
-  it('promotes paused keepers into the paused operator band', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'paused',
-        phase: 'Paused',
-        pipeline_stage: 'paused',
-        paused: true,
-      }),
-    )
-
-    expect(summary.band.key).toBe('paused')
-    expect(summary.phase.label).toBe('일시정지')
-    expect(summary.stage.label).toBe('일시정지')
-    expect(summarizeMonitoringEvidence(summary)).toEqual({
-      phase: null,
-      stage: null,
-    })
+  it('returns attention meta', () => {
+    const meta = runtimeBandMeta('attention')
+    expect(meta.key).toBe('attention')
+    expect(meta.label).toContain('주의')
   })
 
-  it('prefers paused display phase even when backend phase still says Running', () => {
-    const keeper = makeKeeper({
-      status: 'idle',
-      phase: 'Running',
-      pipeline_stage: 'idle',
-      paused: true,
-    })
-
-    expect(keeperPhaseForDisplay(keeper)).toBe('Paused')
-    expect(summarizeKeeperMonitoring(keeper).phase.label).toBe('일시정지')
+  it('returns paused meta', () => {
+    const meta = runtimeBandMeta('paused')
+    expect(meta.key).toBe('paused')
+    expect(meta.label).toContain('일시정지')
   })
 
-  it('marks failing phases as attention-worthy', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Failing',
-        pipeline_stage: 'failing',
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.phase.label).toBe('오류중')
-    expect(summary.hint).toContain('오류')
-    expect(summarizeMonitoringEvidence(summary)).toEqual({
-      phase: summary.phase,
-      stage: null,
-    })
-  })
-
-  it('does not repeat Running as evidence when attention comes from another signal', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-        last_blocker: 'heartbeat stale',
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summarizeMonitoringEvidence(summary)).toEqual({
-      phase: null,
-      stage: null,
-    })
-  })
-
-  it('prioritizes structured runtime blockers over generic social blockers', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-        runtime_blocker_class: 'ambiguous_post_commit_timeout',
-        runtime_blocker_summary:
-          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        last_blocker: 'missing social headers',
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe(
-      'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-    )
-  })
-
-  it('surfaces continue-gate blockers as continue-gate guidance', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'paused',
-        phase: 'Paused',
-        pipeline_stage: 'paused',
-        paused: true,
-        runtime_blocker_class: 'ambiguous_post_commit_timeout',
-        runtime_blocker_summary:
-          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        runtime_blocker_continue_gate: true,
-      }),
-    )
-
-    expect(summary.band.key).toBe('paused')
-    expect(summary.hint).toBe(
-      '계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-    )
-  })
-
-  it('treats unknown social models as attention and exposes the fallback path', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-        social_model: 'bdi_speech_v1',
-        configured_social_model: 'experimental_v99',
-        social_model_recognized: false,
-        social_model_fallback: 'bdi_speech_v1',
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe(
-      '소셜 모델 experimental_v99 미인식 · bdi_speech_v1로 대체 중입니다.',
-    )
-  })
-
-  it('surfaces autonomous slot wait timeouts as attention', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-        runtime_blocker_class: 'autonomous_slot_wait_timeout',
-        runtime_blocker_summary:
-          'autonomous turn slot wait timeout after 30.0s (limit=30.0s, wait_ms=30000); skipped cycle before OAS run',
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toContain('slot wait timeout')
-  })
-
-  it('uses the server runtime warning threshold instead of the old client hardcode', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-        context_ratio: 0.9,
-      }),
-    )
-
-    expect(summary.band.key).toBe('active')
-  })
-
-  it('honors a keeper-specific runtime warning threshold from the payload', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'idle',
-        context_ratio: 0.9,
-        runtime_warning_ctx_ratio: 0.85,
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe('컨텍스트 사용량이 90%입니다.')
-  })
-
-  it('keeps never-booted keepers in the offline band', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'offline',
-        phase: 'Offline',
-        generation: 0,
-        turn_count: 0,
-        agent: { exists: false },
-      }),
-    )
-
-    expect(summary.band.key).toBe('offline')
-    expect(summary.phase.label).toBe('오프라인')
-    expect(summary.hint).toContain('부팅')
-  })
-  it('keeps active stages only when they add new activity context', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Running',
-        pipeline_stage: 'tool_use',
-      }),
-    )
-
-    expect(summarizeMonitoringEvidence(summary)).toEqual({
-      phase: null,
-      stage: summary.stage,
-    })
-  })
-
-  it('suppresses stage evidence when it matches the same lifecycle reason as phase', () => {
-    const summary = summarizeKeeperMonitoring(
-      makeKeeper({
-        status: 'busy',
-        phase: 'Compacting',
-        pipeline_stage: 'compacting',
-      }),
-    )
-
-    expect(summary.band.key).toBe('attention')
-    expect(summarizeMonitoringEvidence(summary)).toEqual({
-      phase: summary.phase,
-      stage: null,
-    })
+  it('returns offline meta', () => {
+    const meta = runtimeBandMeta('offline')
+    expect(meta.key).toBe('offline')
+    expect(meta.label).toContain('오프라인')
   })
 })
 
-describe('runtimeBandForAgent', () => {
-  it('uses keeper semantics when a keeper runtime is attached', () => {
-    const agent = { name: 'keeper-analyst-agent', status: 'busy' } as Agent
-    const keeper = makeKeeper({
-      status: 'paused',
-      phase: 'Paused',
-      pipeline_stage: 'paused',
-      paused: true,
-    })
+// ================================================================
+// summarizeMonitoringEvidence
+// ================================================================
 
-    expect(runtimeBandForAgent(agent, keeper)).toBe('paused')
+describe('summarizeMonitoringEvidence', () => {
+  it('suppresses Running phase as null', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary())
+    expect(evidence.phase).toBeNull()
   })
 
-  it('maps non-keeper offline agents into the offline band', () => {
-    const agent = { name: 'worker-1', status: 'offline' } as Agent
-    expect(runtimeBandForAgent(agent, null)).toBe('offline')
+  it('suppresses idle stage as null', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary())
+    expect(evidence.stage).toBeNull()
   })
 
-  it('treats online non-keeper agents as active', () => {
-    const agent = { name: 'worker-1', status: 'listening' } as Agent
-    expect(runtimeBandForAgent(agent, null)).toBe('active')
+  it('suppresses offline stage as null', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary({
+      stage: { key: 'offline', label: '오프라인', description: 'offline' },
+    }))
+    expect(evidence.stage).toBeNull()
+  })
+
+  it('exposes attention phase', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary({
+      phase: { key: 'Failing', label: '오류중', description: '오류 감지' },
+    }))
+    expect(evidence.phase).not.toBeNull()
+    expect(evidence.phase!.key).toBe('Failing')
+  })
+
+  it('exposes non-idle stage when not matching phase', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary({
+      stage: { key: 'thinking', label: '사고', description: 'thinking' },
+    }))
+    expect(evidence.stage).not.toBeNull()
+    expect(evidence.stage!.key).toBe('thinking')
+  })
+
+  it('suppresses stage when it matches phase equivalent', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary({
+      phase: { key: 'Compacting', label: '압축중', description: 'compressing' },
+      stage: { key: 'compacting', label: '압축', description: 'compressing stage' },
+    }))
+    expect(evidence.stage).toBeNull()
+  })
+
+  it('suppresses paused stage in paused band', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary({
+      band: { key: 'paused', label: '일시정지', description: 'paused' },
+      stage: { key: 'paused', label: '일시정지', description: 'paused stage' },
+    }))
+    expect(evidence.stage).toBeNull()
+  })
+
+  it('suppresses unknown phase as null when default for band', () => {
+    const evidence = summarizeMonitoringEvidence(makeSummary({
+      band: { key: 'active', label: '가동중', description: 'active' },
+      phase: { key: 'unknown', label: '확인 필요', description: 'unknown' },
+    }))
+    expect(evidence.phase).toBeNull()
   })
 })

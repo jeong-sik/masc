@@ -90,6 +90,38 @@ Dashboard UID: `masc-cascade`. Tag: `cascade`. 8 panels:
 
 Refresh interval: 30s. Default time window: last 6h.
 
+## SLOs
+
+Recording rules + SLO-specific alerts at `infrastructure/monitoring/cascade-slo.yml`.
+
+| SLO | Target | Window | Recording rule |
+|-----|--------|--------|----------------|
+| `cascade_ordered_ratio` | ≥ 0.99 | 28d | `masc:cascade_ordered_ratio:rate28d` |
+| `cascade_exhaustion_daily` | ≤ 1 per cascade | 1h rolling | `masc:cascade_exhaustion_rate_daily:rate1h` |
+| `ollama_rejection_hourly` | ≤ 10/h | 5m | `masc:ollama_rejection_rate_hourly:rate5m` |
+
+### Ordered ratio SLO (99%)
+
+Defines the happy path as an error-budget contract: at most 1% of cycles may hit `filtered_empty` or `exhausted`. The 28d burn-rate rule `masc:cascade_error_budget_burn:rate28d` expresses how fast the budget is being consumed:
+
+- **< 1.0** — within budget
+- **1.0 – 2.0** — degraded, investigate
+- **> 2.0** — fast burn (`CascadeOrderedSLOFastBurn` alert fires at 1h window)
+
+**Error budget policy**: when 28d burn rate exceeds 2×, freeze non-critical cascade changes (cascade.json edits, strategy swaps) until burn returns below 1×. This gate is manual — the rule only surfaces the number.
+
+### Exhaustion SLO (≤ 1/day/cascade)
+
+Per-cascade absolute ceiling. Exhaustion is always user-visible; one per day is already noise but accommodates transient upstream outages. `CascadeExhaustionSLOViolation` alert fires at > 1/day for 1h.
+
+### Ollama rejection SLO (≤ 10/h)
+
+Capacity saturation tolerance. Below 10/h the semaphore sizing is doing its job; above suggests either a runaway keeper or under-provisioned `MASC_OLLAMA_MAX_CONCURRENT`. `OllamaRejectionSLOViolation` alert at > 10/h for 30m.
+
+### Why recording rules
+
+Alerts + Grafana panels + ad-hoc queries all need the same ratios. Computing `(1 - ordered/total) / 0.01` three times is a drift hazard. Recording rules (`masc:...:rate...`) precompute once, everyone reads the same number.
+
 ## Formal correctness link
 
 The `kind` label values are not ad-hoc strings — they mirror the `event_kind` variant in `lib/cascade/cascade_strategy_trace.mli`:

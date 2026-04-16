@@ -1,0 +1,123 @@
+# Prometheus recording rules + alerts for MASC cascade SLOs.
+#
+# An SLO turns a counter into a contract: "we commit to serving 99% of
+# cascade cycles as 'ordered' (happy path)".  Recording rules below
+# precompute the ratios + error budgets so Grafana panels and alerts
+# don't repeat the same PromQL.
+#
+# Companion:
+#   - infrastructure/monitoring/cascade-alerts.yml     (immediate alerts)
+#   - infrastructure/monitoring/grafana-cascade-dashboard.json
+#   - docs/observability/cascade-metrics.md            (SLO section)
+#
+# SLO definitions (see doc for rationale):
+#
+#   1. OrderedRatio  >= 0.99   (1% error budget of cycles may filter/exhaust)
+#   2. ExhaustionRate (per day) <= 1 per cascade
+#   3. OllamaRejectionRate (per hour) <= 10
+#
+# Error budget policy: when 28d burn rate is > 2x, freeze non-critical
+# cascade changes (cascade.json edits, strategy swaps).  That gate is
+# manual — these rules only surface the numbers.
+
+groups:
+  - name: masc_cascade_slo_recording
+    interval: 30s
+    rules:
+      # Instantaneous ordered-ratio (5m window).  Denominator uses
+      # clamp_min to avoid /0 when the server is idle (all-zero window).
+      - record: masc:cascade_ordered_ratio:rate5m
+        expr: |
+          sum(rate(masc_cascade_strategy_decisions_total{kind="ordered"}[5m]))
+          /
+          clamp_min(sum(rate(masc_cascade_strategy_decisions_total[5m])), 0.001)
+
+      # Same ratio over a 28d window, used for multi-window burn rate
+      # and the monthly SLO report.
+      - record: masc:cascade_ordered_ratio:rate28d
+        expr: |
+          sum(rate(masc_cascade_strategy_decisions_total{kind="ordered"}[28d]))
+          /
+          clamp_min(sum(rate(masc_cascade_strategy_decisions_total[28d])), 0.001)
+
+      # Remaining error budget as a fraction of 0.01 (1% allowed failures).
+      # (1 - ratio) / (1 - target) where target = 0.99.
+      # > 1.0 means exceeded budget, <= 1.0 means within budget.
+      - record: masc:cascade_error_budget_burn:rate28d
+        expr: |
+          (1 - masc:cascade_ordered_ratio:rate28d) / 0.01
+
+      # Per-cascade exhaustion rate, normalised to /day.
+      - record: masc:cascade_exhaustion_rate_daily:rate1h
+        expr: |
+          sum by (cascade) (rate(masc_cascade_strategy_decisions_total{kind="exhausted"}[1h])) * 86400
+
+      # Ollama rejection rate per hour.
+      - record: masc:ollama_rejection_rate_hourly:rate5m
+        expr: |
+          sum(rate(masc_cascade_capacity_events_total{kind="rejected_full",key_type="ollama"}[5m])) * 3600
+
+  - name: masc_cascade_slo_alerts
+    interval: 30s
+    rules:
+      # Burn rate > 2x (fast-burn) on a 1h window — if sustained, the
+      # monthly budget is exhausted in < 14 days.
+      - alert: CascadeOrderedSLOFastBurn
+        expr: |
+          (
+            (
+              (1 - (
+                sum(rate(masc_cascade_strategy_decisions_total{kind="ordered"}[1h]))
+                /
+                clamp_min(sum(rate(masc_cascade_strategy_decisions_total[1h])), 0.001)
+              )) / 0.01
+            )
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: slo
+          slo: cascade_ordered_ratio
+          window: 1h
+        annotations:
+          summary: "Cascade ordered-ratio SLO fast-burn (> 2× budget / 1h)"
+          description: |
+            Cascade happy-path ratio fell below 98% for 10 minutes.
+            At this rate the monthly 1% error budget will be exhausted
+            within 14 days.  Freeze non-critical cascade changes and
+            investigate whichever alert fired alongside this one.
+
+      # Per-cascade exhaustion SLO: no cascade should hit `exhausted`
+      # more than 1/day on a 24h average.
+      - alert: CascadeExhaustionSLOViolation
+        expr: masc:cascade_exhaustion_rate_daily:rate1h > 1
+        for: 1h
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: slo
+          slo: cascade_exhaustion_daily
+        annotations:
+          summary: "Cascade {{ $labels.cascade }} exhaustion SLO violated (> 1/day)"
+          description: |
+            Cascade {{ $labels.cascade }} is hitting exhausted at {{ $value | printf "%.2f" }} /day
+            on a 1h rolling average, exceeding the 1/day SLO.  Providers
+            or strategy config need attention.
+
+      # Ollama rejection SLO: no more than 10 rejections/hour.
+      - alert: OllamaRejectionSLOViolation
+        expr: masc:ollama_rejection_rate_hourly:rate5m > 10
+        for: 30m
+        labels:
+          severity: info
+          component: cascade
+          subsystem: slo
+          slo: ollama_rejection_hourly
+        annotations:
+          summary: "Ollama rejection rate SLO violated (> 10/h)"
+          description: |
+            Ollama slot-full rejections running at {{ $value | printf "%.1f" }} /hour for 30 minutes,
+            exceeding 10/h SLO.  Either MASC_OLLAMA_MAX_CONCURRENT is
+            too low for the workload, or an unintended keeper is
+            hammering ollama.

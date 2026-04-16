@@ -267,6 +267,37 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
          })
   |> take limit
 
+let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
+    timeline_event list =
+  let rec take n xs =
+    match (n, xs) with
+    | n, _ when n <= 0 -> []
+    | _, [] -> []
+    | n, x :: rest -> x :: take (n - 1) rest
+  in
+  let scan_limit =
+    let expanded = if limit <= 0 then 0 else limit * 10 in
+    min 1000 (max limit expanded)
+  in
+  let all_events =
+    Activity_graph.list_events config
+      ~kinds:["keeper.contract_verdict"; "keeper.friction"]
+      ~after_seq:0 ~limit:scan_limit ()
+  in
+  all_events
+  |> List.filter (fun (e : Activity_graph.event) ->
+       match e.actor with
+       | Some a -> String.equal a.id agent_name
+       | None -> false)
+  |> List.map (fun (e : Activity_graph.event) ->
+       {
+         ts = Float.of_int e.ts_ms /. 1000.0;
+         ts_iso = e.ts_iso;
+         event_type = e.kind;
+         detail = e.payload;
+       })
+  |> take limit
+
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
@@ -394,10 +425,13 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
       if include_tool_calls then tool_call_events config ~agent_name ~limit:200
       else []
     in
+    let cdal_evts =
+      keeper_cdal_events config ~agent_name ~limit:200
+    in
     let turn_evts =
       turn_completed_events config ~agent_name ~limit:200
     in
-    agent_evts @ task_evts @ msg_evts @ tool_evts @ turn_evts
+    agent_evts @ task_evts @ msg_evts @ tool_evts @ cdal_evts @ turn_evts
   in
   (* Filter by time cutoff and sort chronologically *)
   let filtered =

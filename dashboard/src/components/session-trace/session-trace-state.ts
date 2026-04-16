@@ -265,6 +265,13 @@ function mergeTraceEvents(
   })
 }
 
+function stringArrayField(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+}
+
 function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTraceEvent {
   const ts = safeTimestamp(evt.ts)
   const detail = evt.detail ?? {}
@@ -302,6 +309,42 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
       sourceLane: 'masc',
       summary: evt.type,
       detail,
+    }
+  }
+
+  if (evt.type === 'keeper.contract_verdict') {
+    const status = typeof detail.status === 'string' ? detail.status : 'unknown'
+    const blockingGaps = stringArrayField(detail.blocking_gap_artifacts)
+    const summary = blockingGaps.length > 0
+      ? `CDAL ${status} · gaps ${blockingGaps.join(', ')}`
+      : `CDAL ${status}`
+    return {
+      id: `tl-${ts}-${evt.type}-${index}`,
+      ts,
+      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      kind: 'lifecycle',
+      sourceLane: 'masc',
+      summary,
+      detail: { ...detail, type: evt.type },
+    }
+  }
+
+  if (evt.type === 'keeper.friction') {
+    const tripwires = stringArrayField(detail.review_tripwires)
+    const gaps = stringArrayField(detail.evidence_gap_artifacts)
+    const summary = tripwires.length > 0
+      ? `CDAL friction · ${tripwires.join(', ')}`
+      : gaps.length > 0
+        ? `CDAL friction · gaps ${gaps.join(', ')}`
+        : 'CDAL friction'
+    return {
+      id: `tl-${ts}-${evt.type}-${index}`,
+      ts,
+      ts_iso: evt.ts ?? new Date(ts).toISOString(),
+      kind: 'lifecycle',
+      sourceLane: 'masc',
+      summary,
+      detail: { ...detail, type: evt.type },
     }
   }
 

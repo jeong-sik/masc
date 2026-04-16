@@ -65,15 +65,19 @@ type write_error =
 
 (** {1 Write API} *)
 
-(** Append a start record as a JSONL line. Triggers rolling retention. *)
+(** Append a start record as a JSONL line. Triggers rolling retention
+    via [prune_older_than ~retention_days] after successful append. *)
 val persist_start
   :  base_path:string
+  -> retention_days:int
   -> start_record
   -> (unit, write_error) result
 
-(** Append a complete record as a JSONL line. Triggers rolling retention. *)
+(** Append a complete record as a JSONL line. Triggers rolling retention
+    via [prune_older_than ~retention_days] after successful append. *)
 val persist_complete
   :  base_path:string
+  -> retention_days:int
   -> complete_record
   -> (unit, write_error) result
 

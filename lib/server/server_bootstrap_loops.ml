@@ -51,6 +51,16 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   in
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
+  (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
+     persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
+     with rolling 14-day retention (override via
+     MASC_COMPACTION_AUDIT_RETENTION_DAYS). Independent from the SSE bridge —
+     each subscriber gets its own bounded stream. *)
+  Keeper_compact_audit.spawn_subscriber
+    ~sw ~clock
+    ~base_path:(Env_config.base_path ())
+    ~retention_days:14
+    event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk.Event_bus.subscribe event_bus
       ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->

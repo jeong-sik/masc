@@ -180,19 +180,18 @@ let prune_best_effort base_path ~retention_days =
       "keeper_compact_audit: retention prune failed: %s\n%!"
       (Printexc.to_string e)
 
-let retention_days_env_default = 14
-
-(* Read env once at module load; callers can override via
-   spawn_subscriber's retention_days param. *)
-let env_retention_days () =
+(* Resolve effective retention from env (override) falling back to default.
+   Env var [MASC_COMPACTION_AUDIT_RETENTION_DAYS] is clamped to [1, 365]. *)
+let resolve_retention_days ~default =
   match Sys.getenv_opt "MASC_COMPACTION_AUDIT_RETENTION_DAYS" with
   | Some s ->
     (match int_of_string_opt s with
      | Some n when n >= 1 && n <= 365 -> n
-     | _ -> retention_days_env_default)
-  | None -> retention_days_env_default
+     | _ -> default)
+  | None -> default
 
-let persist_start ~base_path (r : start_record) : (unit, write_error) result =
+let persist_start ~base_path ~retention_days (r : start_record) :
+  (unit, write_error) result =
   let json =
     try Ok (start_to_json r)
     with e -> Error (Serialize_failure (Printexc.to_string e))
@@ -202,11 +201,12 @@ let persist_start ~base_path (r : start_record) : (unit, write_error) result =
   | Ok j ->
     (try
        Dated_jsonl.append (get_store base_path) j;
-       prune_best_effort base_path ~retention_days:(env_retention_days ());
+       prune_best_effort base_path ~retention_days;
        Ok ()
      with e -> Error (Io_failure (Printexc.to_string e)))
 
-let persist_complete ~base_path (r : complete_record) : (unit, write_error) result =
+let persist_complete ~base_path ~retention_days (r : complete_record) :
+  (unit, write_error) result =
   let json =
     try Ok (complete_to_json r)
     with e -> Error (Serialize_failure (Printexc.to_string e))
@@ -216,7 +216,7 @@ let persist_complete ~base_path (r : complete_record) : (unit, write_error) resu
   | Ok j ->
     (try
        Dated_jsonl.append (get_store base_path) j;
-       prune_best_effort base_path ~retention_days:(env_retention_days ());
+       prune_best_effort base_path ~retention_days;
        Ok ()
      with e -> Error (Io_failure (Printexc.to_string e)))
 
@@ -329,7 +329,8 @@ module Pending = struct
 end
 
 (* Translate one OAS event into zero or one persist_* effect. *)
-let handle_event ~base_path (evt : Agent_sdk.Event_bus.event) : unit =
+let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
+  : unit =
   let { Agent_sdk.Event_bus.correlation_id; run_id; ts } = evt.meta in
   match evt.payload with
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
@@ -343,7 +344,7 @@ let handle_event ~base_path (evt : Agent_sdk.Event_bus.event) : unit =
       correlation_id;
       run_id;
     } in
-    (match persist_start ~base_path r with
+    (match persist_start ~base_path ~retention_days r with
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Printf.eprintf "keeper_compact_audit: persist_start failed: %s\n%!" m)
@@ -369,7 +370,7 @@ let handle_event ~base_path (evt : Agent_sdk.Event_bus.event) : unit =
       correlation_id;
       run_id;
     } in
-    (match persist_complete ~base_path r with
+    (match persist_complete ~base_path ~retention_days r with
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Printf.eprintf "keeper_compact_audit: persist_complete failed: %s\n%!" m)
@@ -387,9 +388,10 @@ let spawn_subscriber
     ~sw ~clock ~base_path ~retention_days
     ?(drain_interval_s = 0.25)
     (bus : Agent_sdk.Event_bus.t) : unit =
-  let _ = retention_days in
-  (* retention_days is consumed via env in persist_*; keep the
-     parameter for explicit override in future wireup. *)
+  (* Env override of retention_days; default is the caller-supplied value. *)
+  let effective_retention =
+    resolve_retention_days ~default:retention_days
+  in
   let sub =
     Agent_sdk.Event_bus.subscribe ~filter:compaction_filter bus
   in
@@ -398,7 +400,9 @@ let spawn_subscriber
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       let batch = Agent_sdk.Event_bus.drain sub in
-      List.iter (handle_event ~base_path) batch;
+      List.iter
+        (handle_event ~base_path ~retention_days:effective_retention)
+        batch;
       Eio.Time.sleep clock drain_interval_s;
       loop ()
     in

@@ -46,6 +46,50 @@ let payload_agent_name payload =
   | Some _ as value -> value
   | None -> payload_string_opt "agent" payload
 
+let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
+  let log message =
+    Log.emit Log.Info ~module_name:"oas:event" ~details:json message
+  in
+  match evt.payload with
+  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
+      log
+        (Printf.sprintf "agent started agent=%s task_id=%s" agent_name task_id)
+  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
+      log
+        (Printf.sprintf
+           "agent completed agent=%s task_id=%s elapsed_s=%.3f"
+           agent_name task_id elapsed)
+  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
+      log (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
+  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
+      log (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
+  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
+      log
+        (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
+  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
+      log
+        (Printf.sprintf
+           "tool completed agent=%s tool_name=%s"
+           agent_name tool_name)
+  | Agent_sdk.Event_bus.ContextCompacted
+      { agent_name; before_tokens; after_tokens; phase } ->
+      log
+        (Printf.sprintf
+           "context compacted agent=%s before_tokens=%d after_tokens=%d phase=%s"
+           agent_name before_tokens after_tokens phase)
+  | Agent_sdk.Event_bus.ContextOverflowImminent
+      { agent_name; estimated_tokens; limit_tokens; ratio } ->
+      log
+        (Printf.sprintf
+           "context overflow imminent agent=%s estimated_tokens=%d limit_tokens=%d ratio=%.3f"
+           agent_name estimated_tokens limit_tokens ratio)
+  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
+      log
+        (Printf.sprintf
+           "context compact started agent=%s trigger=%s"
+           agent_name trigger)
+  | _ -> ()
+
 (** Build the SSE JSON wrapper. [correlation_id] and [run_id] are
     mandatory (from the envelope); all other fields are optional. *)
 let wrap_event ~ts ~correlation_id ~run_id ~event_type ~payload
@@ -208,6 +252,7 @@ let relay_event ?store evt =
          from subprocess captures).  Scrub before persisting or broadcasting
          so that JSONL consumers and SSE clients receive well-formed UTF-8. *)
       let j = Inference_utils.sanitize_json_utf8 j in
+      emit_native_event_log evt j;
       (match store with
        | Some store ->
            (try Dated_jsonl.append store j

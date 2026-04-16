@@ -427,6 +427,10 @@ type task_contract = {
   required_evidence : string list;
   inspect_gate_evidence : string list;
   verify_gate_evidence : string list;
+  (** Seconds until AwaitingVerification deadline (optional). Issue #7550. *)
+  verification_deadline_sec : int option;
+  (** Required verifier role (optional, defaults to Reviewer). Issue #7550. *)
+  verification_required_role : role option;
   links : task_execution_links;
 } [@@deriving show]
 
@@ -456,6 +460,12 @@ let task_contract_to_yojson (contract : task_contract) =
         string_list_to_yojson contract.inspect_gate_evidence );
       ( "verify_gate_evidence",
         string_list_to_yojson contract.verify_gate_evidence );
+      ( "verification_deadline_sec",
+        (match contract.verification_deadline_sec with
+         | Some n -> `Int n | None -> `Null) );
+      ( "verification_required_role",
+        (match contract.verification_required_role with
+         | Some r -> `String (role_to_string r) | None -> `Null) );
       ("links", task_execution_links_to_yojson contract.links);
     ]
 
@@ -483,6 +493,14 @@ let task_contract_of_yojson json =
                 autoresearch_loop_id = None;
               })
     in
+    let verification_deadline_sec =
+      match json |> member "verification_deadline_sec" with
+      | `Int n -> Some n | _ -> None
+    in
+    let verification_required_role =
+      match json |> member "verification_required_role" with
+      | `String s -> Some (role_of_string s) | _ -> None
+    in
     Ok
       {
         strict;
@@ -492,6 +510,8 @@ let task_contract_of_yojson json =
           task_contract_string_list json "inspect_gate_evidence";
         verify_gate_evidence =
           task_contract_string_list json "verify_gate_evidence";
+        verification_deadline_sec;
+        verification_required_role;
         links;
       }
   with e -> Error (Printexc.to_string e)

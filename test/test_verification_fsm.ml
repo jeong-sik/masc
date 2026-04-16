@@ -48,6 +48,8 @@ let add_strict_task config =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = ["output.json"];
+    verification_deadline_sec = None;
+    verification_required_role = None;
     links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
   } in
   let _msg = Coord.add_task ~contract config ~title:"strict task"

@@ -22,11 +22,11 @@
 | `README.md` | Canonical | public overview, build/run entry |
 | `docs/QUICK-START.md` | Canonical | install, health check, first workflow |
 | `docs/MCP-TEMPLATE.md` | Canonical | HTTP/stdio MCP config examples |
+| `docs/RELEASE-EVIDENCE.md` | Canonical | reproducible production proof bundle contract |
 | `docs/spec/SPEC-INDEX.md` | Canonical | spec suite index |
-| `docs/COMMAND-PLANE-RUNBOOK.md` | Canonical | CPv2 direct 운영 경로 |
 | `docs/BENCHMARK-RUNBOOK.md` | Canonical | baseline vs swarm recipe |
 | `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` | Canonical | control/search/local64 wrapper |
-| `docs/SUPERVISOR-MODE.md` | Canonical | team-session/operator path |
+| `docs/SUPERVISOR-MODE.md` | Canonical | supervised delivery/operator path |
 | `docs/SWARM-DELIVERY-RUNBOOK.md` | Canonical | swarm delivery path |
 | `docs/TRANSPORT-PRACTICAL-PLAYBOOK.md` | Canonical | transport selection and diagnostics |
 | `docs/KEEPER-USER-MANUAL.md` | Canonical | keeper lifecycle and troubleshooting |
@@ -56,6 +56,7 @@
 | `docs/PRODUCT-REVIEW.md` | Historical | product/security review memo |
 | `docs/MASC-V2-DESIGN.md` | Historical | early v2 concept document |
 | `docs/MULTI-ROOM-DESIGN.md` | Historical | compatibility note only |
+| `docs/COMMAND-PLANE-RUNBOOK.md` | Historical | retired command-plane contract and migration context |
 
 ## Archive and Experiment Stores
 

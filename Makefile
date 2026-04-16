@@ -80,7 +80,7 @@ doc:
 
 # Install dependencies
 install-deps:
-	opam install . --deps-only --with-test --with-doc -y
+	opam install . --deps-only --with-test -y
 
 # Align first-party opam pins (agent_sdk, grpc-direct, etc.) to repo SSOT.
 pin-external-deps:
@@ -88,6 +88,9 @@ pin-external-deps:
 
 sync-oas-pin-docs:
 	bash scripts/sync-oas-pin-docs.sh
+
+release-evidence:
+	bash scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md
 
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:

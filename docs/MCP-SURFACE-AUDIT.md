@@ -2,7 +2,7 @@
 
 Current-state audit of `masc-mcp` MCP exposure, public design, and documentation boundaries.
 
-As of `2026-04-09`, the supported front door is repo coordination plus keeper/runtime visibility. Team-session, operator, and command-plane surfaces are retired compatibility lanes.
+As of `2026-04-16`, the supported front door is repo coordination plus keeper/runtime visibility. Operator remains a reduced supporting surface; team-session and command-plane are historical compatibility lanes.
 
 ## Evidence
 
@@ -133,18 +133,18 @@ flowchart TD
 - MCP server capabilities are exposed correctly for `tools`, `resources`, and `prompts`.
 - `tools/list`, `prompts/list/get`, `resources/list/read/templates/list`, pagination, and resource subscriptions are covered by passing local tests.
 - The dotted canonical names for `decision.*`, `experiment.*`, and `trpg.*` are real public tools, not just documentation fiction.
-- The public default surface remains coherent after retiring command-plane/operator front-door exposure.
+- The public default surface remains coherent after retiring command-plane/team-session front-door exposure.
 
 ### What was confusing
 
-- Historical docs still mention team-session/operator/command-plane as if they were canonical.
+- Historical docs still mention team-session/command-plane as if they were canonical.
 - `Prompt_registry` and `Mcp_prompt_surface` describe two different prompt systems; without an explicit note, they look like one broken or incomplete system.
 - `docs/SPEC.md` still contains historical descriptions that should not be treated as the current front door.
 
 ### What this change fixes
 
 - Front-door docs point to repo coordination and keeper runtime first.
-- Command-plane/operator compatibility paths are no longer treated as canonical.
+- Team-session/command-plane compatibility paths are no longer treated as canonical.
 
 ## Orphan Classification
 

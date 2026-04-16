@@ -19,11 +19,10 @@ Primary user:
 Promise stack:
 
 1. Repo coordination
-2. Supervised delivery swarm
+2. Keeper runtime and supervised delivery
 3. Dashboard and operator visibility
-4. Experimental and research surfaces
 
-The front-door promise is level 1. Levels 2-4 are real, but they are not the first sentence of the product.
+The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired compatibility lanes and research material remain in-tree for history, not as product promise.
 
 ## Capability Posture
 
@@ -38,8 +37,9 @@ The front-door promise is level 1. Levels 2-4 are real, but they are not the fir
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
 | Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
 | Config introspection | Working but split | Supporting | `masc_config`, `/api/v1/dashboard/config`, open issues `#3364`, `#3365`, `#3363` | read contract is duplicated and not yet centralized enough to promise as SSOT | centralize config and expose one canonical read-only snapshot |
-| Release and doc truth | Not done for product promise | Front door | stale roadmap/version drift | package, roadmap, changelog, and release lane drift | enforce version truth in docs and workflow |
-| Research and legacy surfaces | Deferred | Experimental | archived docs, implementation appendix | merged surface area is wider than product promise | keep clearly labeled and avoid front-door promotion |
+| Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
+| Release and doc truth | Working | Front door | doc truth lane + version truth + OAS pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
+| Research and legacy surfaces | Historical only | Not part of product promise | archived docs, implementation appendix | merged surface area is wider than product promise | keep out of front-door docs and remove unused residue when references disappear |
 
 Status legend:
 
@@ -145,6 +145,7 @@ Each PR should link at least one issue and state which promise it affects:
 Implement now:
 
 - CI truth and quick-suite recovery
+- release evidence bundle + front-door proof contract
 - transport health truth
 - config centralization groundwork
 - product/docs/release truth automation
@@ -153,7 +154,7 @@ Research next:
 
 - non-local auth defaults and REST contract versioning
 - delivery-swarm readiness and verifier budget reliability
-- bounded keeper continuity contract and release evidence
+- bounded keeper continuity contract beyond same-trace proof
 - read-only diagnosis bundles for operator workflows
 
 Keep visible, but defer:

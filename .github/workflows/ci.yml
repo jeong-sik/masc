@@ -75,6 +75,7 @@ jobs:
       dashboard: ${{ steps.scope.outputs.dashboard }}
       health: ${{ steps.scope.outputs.health }}
       health_snapshot: ${{ steps.scope.outputs.health_snapshot }}
+      doc_truth: ${{ steps.scope.outputs.doc_truth }}
       tla: ${{ steps.scope.outputs.tla }}
       oas_pin: ${{ steps.scope.outputs.oas_pin }}
 
@@ -96,7 +97,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot tla oas_pin; do
+            for key in build lint dashboard health health_snapshot doc_truth tla oas_pin; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -142,6 +143,7 @@ jobs:
           dashboard=false
           health=false
           health_snapshot=false
+          doc_truth=false
           tla=false
           oas_pin=false
 
@@ -149,11 +151,11 @@ jobs:
             ci_core=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/ci-run-tests\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|dune-workspace$|.*\.opam$|scripts/ci-run-tests\.sh$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/gen-grpc-descriptors\.sh$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|dune-workspace$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/gen-grpc-descriptors\.sh$)'; then
             lint=true
           fi
 
@@ -161,12 +163,16 @@ jobs:
             dashboard=true
           fi
 
-          if has_match '^(bin/|lib/|docs/|README\.md$|CHANGELOG\.md$|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$)'; then
+          if has_match '^(bin/|lib/|docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
             health=true
           fi
 
           if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$)'; then
             health_snapshot=true
+          fi
+
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
+            doc_truth=true
           fi
 
           if has_match '^(specs/|lib/keeper/|lib/oas_.*\.ml$|Makefile$)'; then
@@ -183,6 +189,7 @@ jobs:
             dashboard=true
             health=true
             health_snapshot=true
+            doc_truth=true
             oas_pin=true
             # Note: tla is intentionally NOT forced on by ci_core. TLA+ model
             # checking takes ~14 min and only meaningfully depends on specs/,
@@ -197,11 +204,12 @@ jobs:
           echo "dashboard=${dashboard}" >> "$GITHUB_OUTPUT"
           echo "health=${health}" >> "$GITHUB_OUTPUT"
           echo "health_snapshot=${health_snapshot}" >> "$GITHUB_OUTPUT"
+          echo "doc_truth=${doc_truth}" >> "$GITHUB_OUTPUT"
           echo "tla=${tla}" >> "$GITHUB_OUTPUT"
           echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s tla=%s oas_pin=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${tla}" "${oas_pin}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s doc_truth=%s tla=%s oas_pin=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${doc_truth}" "${tla}" "${oas_pin}"
 
   health:
     name: Health
@@ -276,6 +284,24 @@ jobs:
         with:
           name: health-snapshot
           path: .health/health-snapshot.json
+
+  doc-truth:
+    name: Doc Truth
+    runs-on: ubuntu-latest
+    needs: [pr-sync-check, changes]
+    if: ${{ !cancelled() && needs.changes.outputs.doc_truth == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check doc, version, and pin truth
+        run: |
+          chmod +x scripts/check-doc-truth.sh scripts/check-version-truth.sh scripts/sync-oas-pin-docs.sh
+          scripts/check-doc-truth.sh
+          scripts/check-version-truth.sh
+          scripts/sync-oas-pin-docs.sh --check
 
   oas-pin-check:
     name: OAS Pin Consistency
@@ -418,6 +444,22 @@ jobs:
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "scripts/harness/contract/run_all.sh"
 
+      - name: Generate main release evidence bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p .release-evidence
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            .release-evidence/main-release-evidence.md
+
+      - name: Upload main release evidence
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-main
+          path: .release-evidence/
+
       - name: Verification matrix summary
         run: |
           echo "::notice::Required CI gates: dune test, test_sse_storm_e2e, transport harness, contract harness"
@@ -525,43 +567,6 @@ jobs:
         working-directory: dashboard
         run: pnpm test
 
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup OCaml toolchain
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Pin external OCaml dependencies
-        uses: ./.github/actions/pin-ocaml-deps
-
-      - name: Install system and OCaml dependencies
-        uses: ./.github/actions/install-ocaml-deps
-        with:
-          install-flags: --with-doc
-
-      - name: Install odoc
-        run: |
-          for attempt in 1 2 3; do
-            opam install odoc --yes && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install odoc failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "opam install odoc failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
-
-      - name: Build documentation
-        run: |
-          opam exec -- dune build @doc || echo "Docs build skipped"
-
   tla-specs:
     name: TLA+ Model Checking
     runs-on: ubuntu-latest
@@ -590,7 +595,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes, build, lint, dashboard, health, tla-specs]
+    needs: [pr-sync-check, changes, build, lint, dashboard, health, doc-truth, oas-pin-check, tla-specs]
     if: ${{ !cancelled() }}
     timeout-minutes: 2
 
@@ -603,6 +608,8 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           DASHBOARD_RESULT: ${{ needs.dashboard.result }}
           HEALTH_RESULT: ${{ needs.health.result }}
+          DOC_TRUTH_RESULT: ${{ needs.doc-truth.result }}
+          OAS_PIN_RESULT: ${{ needs.oas-pin-check.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
         run: |
           set -euo pipefail
@@ -623,5 +630,7 @@ jobs:
           check "lint"          "$LINT_RESULT"
           check "dashboard"     "$DASHBOARD_RESULT"
           check "health"        "$HEALTH_RESULT"
+          check "doc-truth"     "$DOC_TRUTH_RESULT"
+          check "oas-pin-check" "$OAS_PIN_RESULT"
           check "tla-specs"     "$TLA_RESULT"
           [ "$fail" -eq 0 ]

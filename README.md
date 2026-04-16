@@ -9,10 +9,10 @@ Built for repo-local, single-machine, trusted-network workflows where several AI
 
 Current product posture:
 
-- Front-door promise: repo coordination for coding workflows
-- Runtime substrate: OAS-backed keeper execution
-- Supporting surface: dashboard, activity views, and keeper status
-- Legacy or secondary: wider transport matrix, research modules, and retired compatibility surfaces
+- Production surface: repo coordination for coding workflows
+- Runtime surface: OAS-backed keeper execution and supervised delivery
+- Supporting surface: dashboard, remote-safe operator visibility, and keeper status
+- Historical or retired: command-plane/team-session compatibility lanes, research modules, and archived docs
 
 Use `masc-mcp` when you need to reduce:
 
@@ -39,7 +39,7 @@ Do not start with `masc-mcp` if you need:
 ┌────────────────▼─────────────────────────────────┐
 │            MASC-MCP  (coordination)               │
 │                                                   │
-│  Room/Board  Keeper   Team-Session  Governance    │
+│  Room/Board  Keeper   Governance    Operator      │
 │  Tasks                             Dashboard      │
 │                                                   │
 │         ┌── OAS bridges ──┐                       │
@@ -302,6 +302,7 @@ Smoke checks (with running server):
 ```bash
 curl -sS http://127.0.0.1:8935/health
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
+make release-evidence
 ```
 
 To reproduce CI-style test output with heartbeat logs locally:
@@ -317,7 +318,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - Legacy `/sse` and `/messages` endpoints are deprecated.
 - Binding to `0.0.0.0` or `::` enables strict auth; local `/mcp` fails closed unless `require_token=true`.
 - `/mcp/operator` is bearer-token only with a remote-safe surface. Do not expose full `/mcp` externally.
-- Command-plane surfaces (`/api/v1/command-plane/*`, `command_plane_*` MCP tools, `lib/command_plane/`) are scheduled for removal. New callers must not depend on them.
+- Command-plane compatibility is retired from the supported product contract. Historical docs may still mention it, but new callers must not depend on it.
 - See [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) and [docs/spec/09-server-transport.md](docs/spec/09-server-transport.md).
 
 ## Product and Planning Docs
@@ -325,6 +326,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | Document | Description |
 |----------|-------------|
 | [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) | Product promise, GitHub operating model, 6-8 week execution tracks |
+| [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md) | Reproducible production-evidence contract and current proof bundle shape |
 | [ROADMAP.md](ROADMAP.md) | Current package version, latest release truth, active tracks |
 | [docs/PRODUCT-REVIEW.md](docs/PRODUCT-REVIEW.md) | Current product posture by promise level |
 | [docs/design/keeper-continuity-product-rfc.md](docs/design/keeper-continuity-product-rfc.md) | Bounded keeper continuity contract and promise level |
@@ -337,6 +339,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | [docs/QUICK-START.md](docs/QUICK-START.md) | Install, health check, first workflow |
 | [docs/CONFIG-DOCTOR.md](docs/CONFIG-DOCTOR.md) | Active config/init diagnosis and root selection |
 | [docs/MCP-TEMPLATE.md](docs/MCP-TEMPLATE.md) | HTTP / stdio MCP config templates |
+| [docs/RELEASE-EVIDENCE.md](docs/RELEASE-EVIDENCE.md) | Release-grade smoke checks and proof bundle contract |
 | [docs/BENCHMARK-RUNBOOK.md](docs/BENCHMARK-RUNBOOK.md) | Benchmark and comparison harnesses |
 | [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | Keeper lifecycle and troubleshooting |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | Supervised execution / operator workflow |
@@ -348,5 +351,5 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 | [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) | Product promise, execution tracks |
 | [llms.txt](llms.txt) / [llms-full.txt](llms-full.txt) | Compressed front door for language models |
 
-Historical and archived documents remain in the repository, but the front-door SSOT is the README, the product operating plan, the roadmap, and the current spec suite.
+Historical and archived documents remain in the repository, but the front-door SSOT is the README, the product operating plan, the release evidence contract, the roadmap, and the current spec suite.
  

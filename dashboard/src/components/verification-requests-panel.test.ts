@@ -135,7 +135,7 @@ describe('VerificationRequestsPanel', () => {
 
     // Filter button is the first element with "검증 대기" text
     const pendingButtons = screen.getAllByText('검증 대기')
-    fireEvent.click(pendingButtons[0])
+    fireEvent.click(pendingButtons[0]!)
     const card = screen.getByTestId('card')
     expect(card.innerHTML).toContain('req-p')
     expect(card.innerHTML).not.toContain('req-a')
@@ -149,7 +149,7 @@ describe('VerificationRequestsPanel', () => {
     render(html`<${VerificationRequestsPanel} />`)
 
     const approvedButtons = screen.getAllByText('승인')
-    fireEvent.click(approvedButtons[0])
+    fireEvent.click(approvedButtons[0]!)
     const card = screen.getByTestId('card')
     expect(card.innerHTML).toContain('req-a')
     expect(card.innerHTML).not.toContain('req-p')
@@ -160,7 +160,7 @@ describe('VerificationRequestsPanel', () => {
     render(html`<${VerificationRequestsPanel} />`)
 
     const rejectedButtons = screen.getAllByText('반려')
-    fireEvent.click(rejectedButtons[0])
+    fireEvent.click(rejectedButtons[0]!)
     expect(screen.getByTestId('empty-state')).toBeTruthy()
   })
 

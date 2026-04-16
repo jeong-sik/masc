@@ -8,6 +8,21 @@
 
     @since 0.137.0 *)
 
+(** {1 Runtime configuration (env-driven, read once at module load)}
+
+    The env var prefix is [MASC_CASCADE_*]; [OAS_CASCADE_*] is accepted
+    as a deprecated alias (legacy of the v0.149.0 OAS→MASC migration)
+    and emits a one-time warning. *)
+
+val window_sec : float
+(** Rolling window duration in seconds.  Default 300.0 (5 min). *)
+
+val cooldown_threshold : int
+(** Consecutive failures before cooldown activates.  Default 3. *)
+
+val cooldown_sec : float
+(** Cooldown duration in seconds.  Default 60.0. *)
+
 (** Opaque health tracker state. *)
 type t
 

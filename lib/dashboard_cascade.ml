@@ -94,16 +94,6 @@ let config_json () =
 
 (* ── Health projection ──────────────────────────────── *)
 
-let float_env ~default key =
-  match Sys.getenv_opt key with
-  | Some s -> (try Float.of_string s with _ -> default)
-  | None -> default
-
-let int_env ~default key =
-  match Sys.getenv_opt key with
-  | Some s -> (try int_of_string s with _ -> default)
-  | None -> default
-
 let provider_info_to_json (info : Health.provider_info) : Yojson.Safe.t =
   `Assoc [
     ("provider_key", `String info.provider_key);
@@ -121,11 +111,13 @@ let health_json () =
   let providers = Health.all_providers Health.global in
   `Assoc [
     ("updated_at", `String (now_iso ()));
-    ("window_sec",
-     `Float (float_env ~default:300.0 "OAS_CASCADE_HEALTH_WINDOW_SEC"));
-    ("cooldown_threshold",
-     `Int (int_env ~default:3 "OAS_CASCADE_COOLDOWN_THRESHOLD"));
-    ("cooldown_sec",
-     `Float (float_env ~default:60.0 "OAS_CASCADE_COOLDOWN_SEC"));
+    (* Health tracker is the SSOT for these values; reading env here would
+       diverge from what the tracker actually applied (e.g. if the operator
+       sets a malformed value that falls back to the default, the tracker
+       has the fallback but a second env read would pick up the malformed
+       string). *)
+    ("window_sec", `Float Health.window_sec);
+    ("cooldown_threshold", `Int Health.cooldown_threshold);
+    ("cooldown_sec", `Float Health.cooldown_sec);
     ("providers", `List (List.map provider_info_to_json providers));
   ]

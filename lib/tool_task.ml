@@ -683,17 +683,17 @@ let handle_transition ctx args =
        && (not force)
     then
       match task_opt with
-      | Some task when Option.is_some task.contract ->
-        let contract = Option.get task.contract in
-        if contract.completion_contract <> [] || contract.required_evidence <> [] then begin
-          Log.Task.info
-            "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
-            task_id ctx.agent_name
-            (List.length contract.completion_contract + List.length contract.required_evidence);
-          Types.Submit_for_verification
-        end else
-          action
-      | _ -> action
+      | Some task ->
+        (match task.contract with
+         | Some contract
+           when contract.completion_contract <> [] || contract.required_evidence <> [] ->
+           Log.Task.info
+             "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
+             task_id ctx.agent_name
+             (List.length contract.completion_contract + List.length contract.required_evidence);
+           Types.Submit_for_verification
+         | _ -> action)
+      | None -> action
     else action
   in
   let default_time = Time_compat.now () -. 60.0 in

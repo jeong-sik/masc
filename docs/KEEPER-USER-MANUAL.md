@@ -617,6 +617,17 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 현재 구현에는 compatibility 이유로 authored 필드가 `.masc/keepers/<name>.json`에
 materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.toml`이다.
 
+`keeper.toml`의 **전체 스펙 필드 목록**은
+[`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
+
+- **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
+- **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `execution_scope` 등 배치별 override 전용.
+- **Allowed value sets**: `execution_scope ∈ {observe_only, workspace, local}`, `tool_preset ∈ {minimal, social, messaging, coding, research, delivery, full}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.json`에 `<name>_models` 키로 존재해야 함.
+- **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
+- **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `room_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
+
+Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)와 `removed_keeper_input_key_names` (`lib/keeper/keeper_config.ml`)다.
+
 운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. 헷갈리면 `main_eio.exe doctor --base-path ...`를 먼저 사용한다. low-level resolver에는 추가 fallback이 있지만, 운영 진단 기준은 `docs/CONFIG-DOCTOR.md`를 따른다.
 
 ### 8.2 Template 변경 반영

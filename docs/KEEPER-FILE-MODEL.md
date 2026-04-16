@@ -139,20 +139,64 @@ persona_name = "analyst"
 
 These are still accepted by the loader, but for consistency they should be used only when a basepath-specific override is genuinely necessary.
 
-| Field | Required | Meaning |
+| Field | Type | Meaning |
 | --- | --- | --- |
-| `goal`, `short_goal`, `mid_goal`, `long_goal` | Optional | Override persona goals |
-| `will`, `needs`, `desires`, `instructions` | Optional | Override persona self-model / prompt |
-| `mention_targets` | Optional | Override persona mention aliases |
-| `policy_voice_enabled` | Optional | Override persona voice policy |
-| `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec` | Optional | Override default proactive behavior |
-| `room_signal_prompt_enabled` | Optional | Override room-signal prompt behavior |
-| `allowed_paths` | Optional | Exceptional path override only; prefer empty and rely on playground default |
-| `tool_also_allow`, `also_allow`, `tool_denylist` | Optional | Policy refinements |
-| `work_discovery_enabled`, `work_discovery_sources`, `work_discovery_interval_sec`, `work_discovery_guidance` | Optional | Work-discovery policy |
-| `telemetry_feedback_enabled`, `telemetry_feedback_window_hours` | Optional | Telemetry feedback policy |
-| `max_turns_per_call`, `max_turns_per_call_scheduled_autonomous` | Optional | Per-keeper turn budget override |
-| `shards` | Optional | Tool shard override |
+| `goal`, `short_goal`, `mid_goal`, `long_goal` | string | Override persona goals |
+| `will`, `needs`, `desires`, `instructions` | string | Override persona self-model / prompt |
+| `mention_targets` | string array | Override persona mention aliases |
+| `policy_voice_enabled` | bool | Override persona voice policy |
+| `proactive_enabled` | bool | Override default proactive scheduling |
+| `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
+| `room_signal_prompt_enabled` | bool | Override room-signal prompt behavior |
+| `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on playground default |
+| `tool_also_allow` | string array | Extra tool names added to the preset surface |
+| `also_allow` | string array | Backward-compat alias for `tool_also_allow` (will warn as "unknown key" after deprecation) |
+| `tool_denylist` | string array | Tool names blocked regardless of preset |
+| `work_discovery_enabled` | bool | Enable work discovery loop |
+| `work_discovery_sources` | string array | e.g. `["github_issues", "stale_tasks"]` |
+| `work_discovery_interval_sec` | int | Scan interval |
+| `work_discovery_guidance` | string | Hint string fed into the work-discovery prompt |
+| `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
+| `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
+| `max_turns_per_call`, `max_turns_per_call_scheduled_autonomous` | int | Per-keeper turn budget override |
+| `shards` | string array | Tool shard override |
+
+### Allowed value sets
+
+Enumerated fields only accept the values below. The loader rejects invalid input with an explicit error.
+
+| Field | Allowed values |
+| --- | --- |
+| `execution_scope` | `observe_only`, `workspace`, `local` |
+| `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |
+| `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
+| `cascade_name` | any `<name>` such that `<name>_models` exists in `cascade.json` (e.g. `keeper_unified`, `nick0cave`) |
+
+### Removed / forbidden fields (hard-rejected)
+
+These keys are **rejected at load time** with an `Error`. They are retained only to flag drift from older configs so that stale deployments fail loud instead of silently mis-configuring keepers.
+
+| Field | Replacement / rationale |
+| --- | --- |
+| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.json`. Do not pin per-keeper. |
+| `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
+| `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |
+| `initiative_scope`, `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec` | Renamed to `proactive_*` (see above). |
+| `policy_mode`, `policy_shell_mode` | Removed with the legacy policy engine. |
+
+Definitive list: `removed_keeper_input_key_names` in [`lib/keeper/keeper_config.ml`](../lib/keeper/keeper_config.ml).
+
+### Unknown-key warning
+
+Keys under `[keeper]` that are neither canonical (above) nor hard-rejected are **silently ignored by the loader, but a warning is emitted**:
+
+```text
+keeper TOML <path> has unknown keys: keeper.room_scope, keeper.scope_kind
+```
+
+Historically, dead config like `room_scope` and `scope_kind` accumulated here. Treat these warnings as drift signals and clean up the TOML. The warning does not block boot.
+
+Definitive canonical list: `canonical_keeper_toml_key_names` in [`lib/keeper/keeper_types_profile.ml`](../lib/keeper/keeper_types_profile.ml).
 
 ## 3. Keeper Runtime State
 

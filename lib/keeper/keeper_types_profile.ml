@@ -368,6 +368,74 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       })
     result
 
+(** Canonical TOML key names recognized by [profile_defaults_of_toml].
+    Keys outside this set under [[keeper]] (or any other table) are silently
+    ignored by the loader, which historically let dead config accumulate
+    (e.g. legacy [room_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
+    uses this list to surface drift on boot, symmetric with
+    [warn_unknown_keeper_meta_keys] on the JSON side.
+
+    [also_allow] is retained as a backward-compat alias for
+    [tool_also_allow] — see the fallback in [profile_defaults_of_toml]. *)
+let canonical_keeper_toml_key_names =
+  [ "name"
+  ; "persona_name"
+  ; "goal"
+  ; "short_goal"
+  ; "mid_goal"
+  ; "long_goal"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
+  ; "policy_voice_enabled"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "proactive_idle_sec"
+  ; "proactive_cooldown_sec"
+  ; "room_signal_prompt_enabled"
+  ; "shards"
+  ; "allowed_paths"
+  ; "execution_scope"
+  ; "tool_preset"
+  ; "tool_also_allow"
+  ; "also_allow"
+  ; "tool_denylist"
+  ; "work_discovery_enabled"
+  ; "work_discovery_sources"
+  ; "work_discovery_interval_sec"
+  ; "work_discovery_guidance"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "max_turns_per_call"
+  ; "max_turns_per_call_scheduled_autonomous"
+  ; "social_model"
+  ; "cascade_name"
+  ; "models"
+  ]
+
+(** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not
+    consume.  Exposed separately from the logging wrapper so tests can
+    assert on the key list without mocking the Log subsystem. *)
+let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
+  let known =
+    canonical_keeper_toml_key_names
+    |> List.map (fun k -> "keeper." ^ k)
+  in
+  doc
+  |> List.map fst
+  |> List.filter (fun key -> not (List.mem key known))
+  |> dedupe_keep_order
+
+let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
+  match detect_unknown_keeper_toml_keys doc with
+  | [] -> ()
+  | unknown ->
+    Log.Keeper.warn
+      "keeper TOML %s has unknown keys: %s"
+      path
+      (String.concat ", " unknown)
+
 let load_keeper_toml (path : string)
     : (string * keeper_profile_defaults, string) result =
   match Safe_ops.read_file_safe path with
@@ -379,6 +447,7 @@ let load_keeper_toml (path : string)
       match profile_defaults_of_toml doc with
       | Error e -> Error (Printf.sprintf "%s: %s" path e)
       | Ok defaults ->
+        warn_unknown_keeper_toml_keys ~path doc;
         let name =
           match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
           | Some n when n <> "" -> n

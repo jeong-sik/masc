@@ -436,10 +436,12 @@ let span_end_status = function
   | _ -> Span_ended
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
-  let events = list_events config ~kinds:[] ~after_seq:0 ~limit () in
+  let events_page, events_store_total =
+    list_events_with_total config ~kinds:[] ~after_seq:0 ~limit ()
+  in
   let events = match since_ms with
-    | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events
-    | None -> events
+    | Some ms -> List.filter (fun e -> e.ts_ms >= ms) events_page
+    | None -> events_page
   in
   let now_ms = now_ts_ms () in
   let open_spans : (string * string option, int * string * string) Hashtbl.t =
@@ -509,5 +511,13 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
     ("time_range", `Assoc [
       ("min_ms", `Int time_range_min);
       ("max_ms", `Int time_range_max);
+    ]);
+    ("window", `Assoc [
+      ("limit", `Int limit);
+      ("events_shown", `Int (List.length events));
+      ("events_store_total", `Int events_store_total);
+      ("spans_count", `Int (List.length all_spans));
+      ("has_more",
+       `Bool (events_store_total > List.length events));
     ]);
   ]

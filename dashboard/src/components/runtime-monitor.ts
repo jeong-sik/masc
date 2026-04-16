@@ -243,6 +243,12 @@ export function RuntimeMonitor() {
                             tone=${'ok'}
                           />`
                         : null}
+                      ${metric.thinking_fraction != null
+                        ? html`<${StatusChip}
+                            label=${`think ${fmtNumber((metric.thinking_fraction ?? 0) * 100, 0)}%`}
+                            tone=${(metric.thinking_fraction ?? 0) > 0.5 ? 'warn' : 'ok'}
+                          />`
+                        : null}
                     </div>
                   </div>
                   <div class="grid grid-cols-3 gap-3 text-[12px] text-text-body">

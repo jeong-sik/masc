@@ -813,6 +813,18 @@ let append_decision_record
           match result with
           | Some r ->
               let surface_model_used = Keeper_agent_run.surface_model_used r in
+              (* Per-turn thinking_enabled read from the same ref that the tool
+                 call log uses; captures the adaptive classifier's decision
+                 (true=Cognitive, false=Mechanical) so the dashboard can surface
+                 thinking fraction per model. *)
+              let (_, _, turn_thinking_enabled, _, _, _, _) =
+                Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
+              in
+              let thinking_enabled_field =
+                match turn_thinking_enabled with
+                | Some b -> [("thinking_enabled", `Bool b)]
+                | None -> []
+              in
               let cascade_fields =
                 match r.cascade_observation with
                 | Some co ->
@@ -880,7 +892,7 @@ let append_decision_record
                   if latency_ms > 0 then
                     `Float (float_of_int r.usage.output_tokens /. (float_of_int latency_ms /. 1000.0))
                   else `Null);
-              ] @ inference_fields @ cascade_fields)
+              ] @ thinking_enabled_field @ inference_fields @ cascade_fields)
           | None ->
               (* Partial telemetry for error turns: record what we know.
                  Without this, 90%+ of turns have no telemetry at all. *)

@@ -46,6 +46,12 @@ type model_stats = {
   hw_decode_avg_tok_per_sec : float option;
   hw_decode_p50_tok_per_sec : float option;
   hw_decode_p95_tok_per_sec : float option;
+  thinking_fraction : float option;
+    (** Fraction [0.0, 1.0] of turns in window where the model was sent
+        think=true (Keeper_turn_intent adaptive classifier decision).
+        [None] when no entry in the window reported [thinking_enabled]
+        (older jsonl rows predating the field, or providers that don't
+        expose it). Denominator = count of reporting entries. *)
   avg_latency_ms : float;
   p50_latency_ms : float;
   p95_latency_ms : float;

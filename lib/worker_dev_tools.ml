@@ -654,6 +654,9 @@ type gh_reversibility =
   | R1_Reversible
   | R2_Irreversible
 
+let string_of_gh_reversibility = function
+  | R0_Read -> "R0" | R1_Reversible -> "R1" | R2_Irreversible -> "R2"
+
 (** (command, subcommand) pairs classified as R2 irreversible.
     Conservative: when an operation *could* leak/destroy state that
     gh itself cannot restore, we mark it R2 even if a manual recovery
@@ -695,10 +698,16 @@ let gh_reversible_mutations =
     ("ruleset", ["create"; "edit"]);
   ]
 
-(** Extract the HTTP method from a [gh api] invocation.
-    Returns uppercase method ("GET", "POST", "DELETE", ...) or "GET"
-    as the gh default when no --method flag is present.
-    Recognizes [-X], [--method], [-X=M], [--method=M]. *)
+(** SSOT: GraphQL mutation names classified as R2 irreversible.
+    Used by both [gh_api_graphql_is_destructive] (R0/R1/R2 classifier)
+    and [is_gh_dangerous_operation] (legacy workflow guard).
+    All names are lowercase for substring matching. *)
+let gh_graphql_r2_mutations =
+  [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
+    "deleteproject"; "deletebranchprotectionrule";
+    "removeouterfromorganization"; "transferrepository";
+    "archiverepository" ]
+
 let extract_gh_api_method cmd =
   let tokens =
     String.split_on_char ' ' (String.trim cmd)
@@ -724,26 +733,9 @@ let extract_gh_api_method cmd =
     are wide; only the destructive-verb-prefix set is R2. *)
 let gh_api_graphql_is_destructive cmd =
   let lower = String.lowercase_ascii cmd in
-  let contains needle =
-    let nl = String.length needle in
-    let sl = String.length lower in
-    let rec scan i =
-      if i + nl > sl then false
-      else if String.sub lower i nl = needle then true
-      else scan (i + 1)
-    in
-    nl > 0 && scan 0
-  in
-  contains "graphql"
-  && (contains "deletepullrequest"
-      || contains "deleteissue"
-      || contains "deletebranch"
-      || contains "deleteref"
-      || contains "deleteproject"
-      || contains "deletebranchprotectionrule"
-      || contains "removeouterfromorganization"
-      || contains "transferrepository"
-      || contains "archiverepository")
+  let has s = contains_substring lower s in
+  has "graphql"
+  && List.exists has gh_graphql_r2_mutations
 
 (** Classify a gh command string by state reversibility.
     The command is the portion after "gh " — a normalized form
@@ -885,44 +877,37 @@ let gh_api_destructive_patterns =
   [ "/merge"; "/merges";
     "state=closed"; "state=\"closed\""; "state='closed'" ]
 
-(** Known destructive GraphQL mutation names (lowercase).
-    Used to detect bypass via "gh api graphql -f query='mutation ...'". *)
+(** Legacy alias. Callers that need the R1 workflow-mutation names
+    (mergepullrequest, closepullrequest, closeissue) add them locally;
+    the R2 set is [gh_graphql_r2_mutations]. *)
 let gh_graphql_destructive_mutations =
-  [ "mergepullrequest"; "closepullrequest"; "closeissue";
-    "deleteissue"; "deleteref"; "deletebranch";
-    "deletebranchprotectionrule"; "deleteproject" ]
+  gh_graphql_r2_mutations
+  @ [ "mergepullrequest"; "closepullrequest"; "closeissue" ]
 
 (** Check if a gh API command uses or implies a non-GET HTTP method.
     Returns [true] for explicit mutating methods (-X POST, --method PATCH,
     etc.) and for implicit POST via field flags (-f, -F, --field,
     --raw-field), matching gh CLI behavior where field flags cause an
     automatic POST. Handles both "--method POST" and "--method=POST". *)
-let has_mutating_http_method parts =
-  let is_mutating m =
-    let m = String.lowercase_ascii m in
-    m = "post" || m = "put" || m = "patch" || m = "delete"
-  in
+let has_implicit_post_flags parts =
   let rec check = function
     | [] -> false
-    | tok :: rest when tok = "-x" || tok = "--method" ->
-      (match rest with m :: _ -> is_mutating m | [] -> false)
     | tok :: rest ->
-      if String.length tok >= 10
-         && String.lowercase_ascii (String.sub tok 0 9) = "--method="
-      then is_mutating (String.sub tok 9 (String.length tok - 9))
-      else if String.length tok > 3
-              && String.lowercase_ascii (String.sub tok 0 3) = "-x="
-      then is_mutating (String.sub tok 3 (String.length tok - 3))
-      else
-        let tok_lower = String.lowercase_ascii tok in
-        if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
-           || String.length tok_lower > 3 && String.sub tok_lower 0 3 = "-f="
-           || String.length tok_lower > 8 && String.sub tok_lower 0 8 = "--field="
-           || String.length tok_lower > 12 && String.sub tok_lower 0 12 = "--raw-field="
-        then true
-        else check rest
+      let tok_lower = String.lowercase_ascii tok in
+      if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
+         || String.length tok_lower > 3 && String.sub tok_lower 0 3 = "-f="
+         || String.length tok_lower > 8 && String.sub tok_lower 0 8 = "--field="
+         || String.length tok_lower > 12 && String.sub tok_lower 0 12 = "--raw-field="
+      then true
+      else check rest
   in
   check parts
+
+let has_mutating_http_method parts =
+  let cmd = String.concat " " parts in
+  let m = String.lowercase_ascii (extract_gh_api_method cmd) in
+  (m = "post" || m = "put" || m = "patch" || m = "delete")
+  || has_implicit_post_flags parts
 
 (** Classify a gh command string by state reversibility.
     The command is the portion after "gh " — a normalized form

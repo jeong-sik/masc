@@ -247,7 +247,13 @@ let rec wait_for_autonomous_queue_head ~(keeper_name : string) ~(ticket : int)
         | Some idx -> idx
         | None -> 0
       in
-      Log.Keeper.warn
+      (* INFO not WARN: this is a fail-safe — the keeper is voluntarily
+         skipping its slot in the queue and will retry on the next
+         cycle. WARN-level here produced ~38 entries per ~3MB log
+         window with 12 keepers contending on a 60s wait budget. The
+         operator only needs to know if these dominate; per-event
+         noise is harmful. Live log evidence: 2026-04-16 /loop iter 8. *)
+      Log.Keeper.info
         "semaphore_wait: autonomous fairness queue wait exceeded %.0fs (keeper=%s ahead=%d), skipping turn"
         semaphore_wait_timeout_sec keeper_name ahead;
       raise (Semaphore_wait_timeout semaphore_wait_timeout_sec)
@@ -290,7 +296,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
         Eio.Time.with_timeout_exn clock semaphore_wait_timeout_sec (fun () ->
           Eio.Semaphore.acquire sem)
       with Eio.Time.Timeout ->
-        Log.Keeper.warn
+        (* INFO not WARN: see commentary above — keeper skips this turn
+           and the next heartbeat re-queues it. Per-event noise hurts
+           operator signal more than it helps. *)
+        Log.Keeper.info
           "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
            skipping turn"
           label semaphore_wait_timeout_sec

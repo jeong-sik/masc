@@ -9,9 +9,17 @@
 
 open Masc_mcp
 
+let rng_initialized = ref false
+
 let with_temp_config ~fsm_enabled f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* Initialize mirage-crypto-rng for verification_id generation.
+     Production initializes this at server startup; tests must do it explicitly. *)
+  if not !rng_initialized then begin
+    Mirage_crypto_rng_unix.use_default ();
+    rng_initialized := true
+  end;
   Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" (if fsm_enabled then "true" else "false");
   let dir = Filename.temp_file "verification_fsm_" "" in
   Unix.unlink dir;

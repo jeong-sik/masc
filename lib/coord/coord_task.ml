@@ -757,9 +757,17 @@ let transition_task_r config ~agent_name ~task_id ~action
           when assignee = agent_name
                && Env_config_runtime.Verification.fsm_enabled () ->
             let verification_id =
-              let ts = int_of_float (Time_compat.now () *. 1000.0) in
-              let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
-              Printf.sprintf "vrf-%d-%06x" ts hash in
+              (* Cryptographic 128-bit ID (CSPRNG). Issue #7544.
+                 masc_coord cannot depend on masc_mcp (lib dep boundary),
+                 so we use mirage-crypto-rng directly here. *)
+              let rnd = Mirage_crypto_rng.generate 16 in
+              let hex = String.concat "" (
+                List.init (String.length rnd) (fun i ->
+                  Printf.sprintf "%02x" (Char.code (String.get rnd i))
+                )
+              ) in
+              Printf.sprintf "vrf-%s" hex
+            in
             Ok (Types.AwaitingVerification {
               assignee;
               submitted_at = now;

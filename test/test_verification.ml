@@ -5,6 +5,9 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc_mcp.Verification
 
+(* Initialize mirage-crypto-rng once (needed by Verification.generate_id). *)
+let () = Mirage_crypto_rng_unix.use_default ()
+
 (** Use a temporary directory for each test *)
 let with_temp_dir f =
   let dir = Filename.temp_dir "masc_verify_test" "" in

@@ -6,7 +6,6 @@ import { ActionButton } from '../common/button'
 import { CountBadge } from '../common/badge'
 import {
   flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom,
-  roomStrategy, roomStrategyLoading, fetchRoomStrategy,
   maintenanceResult, maintenanceLoading, runGarbageCollection, cleanupZombies,
 } from './flow-control-state'
 
@@ -43,28 +42,6 @@ export function FlowControlPanel() {
         <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing} onClick=${() => void resumeRoom()}>
           ${loading && isPaused ? '...' : '재개'}<//>
       </div>
-    <//>
-
-    ${'' /* ── Room Strategy ── */}
-    <${SurfaceCard} variant="compact" class="mb-4">
-      <details>
-        <summary class="cursor-pointer text-[13px] text-[var(--text-strong)] font-medium select-none py-1">룸 전략</summary>
-        <div class="mt-3">
-          ${roomStrategy.value ? html`
-            <div class="flex flex-col gap-1.5 mb-3">
-              ${Object.entries(roomStrategy.value).map(([key, val]) => html`
-                <div key=${key} class="flex items-center justify-between py-1.5 px-3 rounded-lg border border-card-border/50 bg-card/20 text-[12px]">
-                  <span class="font-medium text-text-muted">${key}</span>
-                  <span class="font-semibold text-text-strong font-mono">${String(val)}</span>
-                </div>
-              `)}
-            </div>
-          ` : html`<p class="text-[11px] text-text-dim mb-3">조회되지 않았습니다</p>`}
-          <${ActionButton} variant="ghost" size="sm" disabled=${roomStrategyLoading.value}
-            onClick=${() => void fetchRoomStrategy()}>
-            ${roomStrategyLoading.value ? '...' : '조회'}<//>
-        </div>
-      </details>
     <//>
 
     ${'' /* ── Maintenance ── */}

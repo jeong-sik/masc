@@ -1,21 +1,12 @@
-import { signal, computed, effect } from '@preact/signals'
+import { signal, effect } from '@preact/signals'
 import { callMcpTool } from '../../api/mcp'
 import { namespaceTruth, namespaceTruthInitializing } from '../../namespace-truth-store'
 import { serverStatus } from '../../store'
 import { showToast } from '../common/toast'
-import { createAsyncResource, getData } from '../../lib/async-state'
 
 export type FlowState = 'unknown' | 'initializing' | 'running' | 'paused'
 export const flowState = signal<FlowState>('unknown')
 export const flowLoading = signal(false)
-
-// Room strategy resource
-const roomStrategyResource = createAsyncResource<Record<string, unknown>>()
-const roomStrategyMutating = signal(false)
-export const roomStrategy = computed(() => getData(roomStrategyResource.state.value) ?? null)
-export const roomStrategyLoading = computed(() =>
-  roomStrategyMutating.value || roomStrategyResource.state.value.status === 'loading',
-)
 
 // Maintenance state
 export const maintenanceResult = signal<string | null>(null)
@@ -72,31 +63,6 @@ export async function resumeRoom(): Promise<void> {
   try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('프로젝트 재개', 'success') }
   catch (err) { showToast(`재개 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
-}
-
-
-// ── Room Strategy ───────────────────────────────
-
-export async function fetchRoomStrategy(): Promise<void> {
-  await roomStrategyResource.load(async () => {
-    const raw = await callMcpTool('masc_room_strategy_get', {})
-    return JSON.parse(raw) as Record<string, unknown>
-  }).catch(() => {
-    showToast('프로젝트 전략 조회 실패', 'error')
-  })
-}
-
-export async function setRoomStrategy(updates: Record<string, unknown>): Promise<void> {
-  roomStrategyMutating.value = true
-  try {
-    await callMcpTool('masc_room_strategy_set', updates)
-    showToast('프로젝트 전략 업데이트 완료', 'success')
-    await fetchRoomStrategy()
-  } catch (err) {
-    showToast(`프로젝트 전략 저장 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  } finally {
-    roomStrategyMutating.value = false
-  }
 }
 
 // ── Maintenance ─────────────────────────────────

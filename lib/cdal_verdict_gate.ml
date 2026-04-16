@@ -52,16 +52,11 @@ let lookup_latest_verdict ?(base_dir = default_base_path)
     ~task_id () : Cdal_types.contract_verdict option =
   let store = Dated_jsonl.create ~base_dir () in
   let recent = Dated_jsonl.read_recent store limit in
+  (* Issue #7551: decode via typed persisted_verdict.
+     Handles both new {task_id, verdict} envelope AND legacy flat+_task_id. *)
   let result = List.fold_left (fun acc json ->
-    match json with
-    | `Assoc fields ->
-      (match List.assoc_opt "_task_id" fields with
-       | Some (`String tid) when tid = task_id ->
-         let verdict_fields = List.filter (fun (k, _) -> k <> "_task_id") fields in
-         (match Cdal_types.contract_verdict_of_json (`Assoc verdict_fields) with
-          | Ok v -> Some v
-          | Error _ -> acc)
-       | _ -> acc)
+    match Cdal_types.persisted_verdict_of_json json with
+    | Ok { task_id = Some tid; verdict } when tid = task_id -> Some verdict
     | _ -> acc
   ) None recent in
   (* If we scanned the full limit and still no match, the verdict may exist

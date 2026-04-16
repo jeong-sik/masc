@@ -258,3 +258,48 @@ let compute_judgment_hash (v : contract_verdict) : string =
   in
   let hash = Digest.string canonical |> Digest.to_hex in
   "md5:" ^ hash
+
+(* ================================================================ *)
+(* Persisted verdict envelope — typed wrapper for JSONL entries     *)
+(* Issue #7551: replaces the prior `_task_id` string-prefix hack    *)
+(* with a proper nested structure.                                   *)
+(* ================================================================ *)
+
+type persisted_verdict = {
+  task_id : string option;
+  verdict : contract_verdict;
+}
+
+let persisted_verdict_to_json pv =
+  let base = [("verdict", contract_verdict_to_json pv.verdict)] in
+  let fields = match pv.task_id with
+    | Some tid -> ("task_id", `String tid) :: base
+    | None -> base
+  in
+  `Assoc fields
+
+let persisted_verdict_of_json = function
+  | `Assoc fields ->
+    (* New format: {"task_id": "...", "verdict": {...}} *)
+    (match List.assoc_opt "verdict" fields with
+     | Some verdict_json ->
+       (match contract_verdict_of_json verdict_json with
+        | Ok verdict ->
+          let task_id = match List.assoc_opt "task_id" fields with
+            | Some (`String s) -> Some s
+            | _ -> None
+          in
+          Ok { task_id; verdict }
+        | Error e -> Error e)
+     | None ->
+       (* Legacy format: flat verdict fields + optional "_task_id" prefix *)
+       let task_id = match List.assoc_opt "_task_id" fields with
+         | Some (`String s) -> Some s
+         | _ -> None
+       in
+       let verdict_fields = List.filter (fun (k, _) -> k <> "_task_id") fields in
+       (match contract_verdict_of_json (`Assoc verdict_fields) with
+        | Ok verdict -> Ok { task_id; verdict }
+        | Error e -> Error e))
+  | other -> Error (Printf.sprintf "expected JSON object for persisted_verdict, got: %s"
+                      (Yojson.Safe.to_string other))

@@ -91,12 +91,9 @@ let default_base_path =
 let persist ?(base_dir = default_base_path) ?task_id
     (verdict : Cdal_types.contract_verdict) : unit =
   let store = Dated_jsonl.create ~base_dir () in
-  let json = Cdal_types.contract_verdict_to_json verdict in
-  let envelope = match task_id with
-    | None -> json
-    | Some tid ->
-      match json with
-      | `Assoc fields -> `Assoc (("_task_id", `String tid) :: fields)
-      | other -> other
-  in
-  Dated_jsonl.append store envelope
+  (* Issue #7551: write typed persisted_verdict envelope
+     ({"task_id": "...", "verdict": {...}}) instead of flat verdict with
+     "_task_id" string prefix. Legacy readers still handled by
+     persisted_verdict_of_json. *)
+  let pv : Cdal_types.persisted_verdict = { task_id; verdict } in
+  Dated_jsonl.append store (Cdal_types.persisted_verdict_to_json pv)

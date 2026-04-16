@@ -90,3 +90,18 @@ val contract_verdict_of_json : Yojson.Safe.t -> (contract_verdict, string) resul
     representation with [judgment_hash] set to [""] during computation. *)
 
 val compute_judgment_hash : contract_verdict -> string
+
+(** {2 Persisted Verdict Envelope}
+
+    Typed wrapper for JSONL entries. Replaces the prior [_task_id]
+    string-prefix hack with an explicit nested structure
+    [{"task_id": "...", "verdict": {...}}]. The parser also accepts the
+    legacy flat-verdict format for backward compatibility. Issue #7551. *)
+
+type persisted_verdict = {
+  task_id : string option;
+  verdict : contract_verdict;
+}
+
+val persisted_verdict_to_json : persisted_verdict -> Yojson.Safe.t
+val persisted_verdict_of_json : Yojson.Safe.t -> (persisted_verdict, string) result

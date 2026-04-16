@@ -54,7 +54,18 @@ let on_submit_for_verification ~(config : Coord.config)
 
 let on_approve_verification ~(config : Coord.config)
     ~task_id ~verifier ~verification_id ~notes =
-  ignore config;
+  let base_path = config.Coord.base_path in
+  (* Update Verification.ml state machine: Pending -> Completed Pass.
+     Issue #7544. *)
+  (if verification_id <> "" then
+    match Verification.submit_verdict ~base_path
+            ~req_id:verification_id ~verifier
+            ~verdict:Verification.Pass with
+    | Ok _ -> ()
+    | Error e ->
+      Log.Task.error
+        "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
+        task_id verification_id verifier e);
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
     ("task_id", `String task_id);
@@ -83,7 +94,18 @@ let on_approve_verification ~(config : Coord.config)
 
 let on_reject_verification ~(config : Coord.config)
     ~task_id ~verifier ~verification_id ~reason =
-  ignore config;
+  let base_path = config.Coord.base_path in
+  (* Update Verification.ml state machine: Pending -> Completed (Fail reason).
+     Issue #7544. *)
+  (if verification_id <> "" then
+    match Verification.submit_verdict ~base_path
+            ~req_id:verification_id ~verifier
+            ~verdict:(Verification.Fail reason) with
+    | Ok _ -> ()
+    | Error e ->
+      Log.Task.error
+        "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
+        task_id verification_id verifier e);
   let meta_json = `Assoc [
     ("type", `String "verification_verdict");
     ("task_id", `String task_id);

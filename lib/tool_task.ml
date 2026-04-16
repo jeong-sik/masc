@@ -707,6 +707,16 @@ let handle_transition ctx args =
     end else
       r
   in
+  (* Capture verification_id from AwaitingVerification state BEFORE transition.
+     approve/reject transitions change state, destroying the verification_id.
+     Issue #7543. *)
+  let verification_id_before =
+    match task_opt with
+    | Some t -> (match t.task_status with
+        | Types.AwaitingVerification { verification_id; _ } -> Some verification_id
+        | _ -> None)
+    | None -> None
+  in
   let result = try_transition 0 in
   (* Notify A2A subscribers on successful transition *)
   (match result with
@@ -742,14 +752,16 @@ let handle_transition ctx args =
               | _ -> ())
            | None -> ())
         | Types.Approve_verification ->
+          let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.on_approve_verification
             ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id:"" ~notes
+            ~verification_id ~notes
         | Types.Reject_verification ->
           let reason = if notes <> "" then notes else reason in
+          let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.on_reject_verification
             ~config:ctx.config ~task_id ~verifier:ctx.agent_name
-            ~verification_id:"" ~reason
+            ~verification_id ~reason
         | _ -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));

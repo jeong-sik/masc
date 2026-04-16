@@ -132,6 +132,60 @@ let test_self_rejection_blocked () =
     | Error _ -> ())
 
 (* ================================================================ *)
+(* Verification.ml state sync (P0 #7544)                             *)
+(* ================================================================ *)
+
+(* Directly exercises Verification.submit_verdict — the state-sync primitive
+   that verification_protocol.on_approve/reject calls internally.
+   Full protocol (board + SSE) is tested e2e. *)
+let test_submit_verdict_pass () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let base_path = config.Coord.base_path in
+    let req = match Verification.create_request
+      ~base_path ~task_id:"task-x" ~output:(`Assoc [])
+      ~criteria:[Verification.Custom "tests pass"] ~worker:"worker" () with
+      | Ok r -> r
+      | Error e -> Alcotest.fail e
+    in
+    Alcotest.(check bool) "initial pending" true
+      (match req.status with Pending -> true | _ -> false);
+    let _ = match Verification.submit_verdict ~base_path
+      ~req_id:req.id ~verifier:"verifier-agent"
+      ~verdict:Verification.Pass with
+      | Ok _ -> ()
+      | Error e -> Alcotest.fail ("submit_verdict failed: " ^ e)
+    in
+    match Verification.load_request base_path req.id with
+    | Error e -> Alcotest.fail ("load_request failed: " ^ e)
+    | Ok updated ->
+      Alcotest.(check bool) "completed pass" true
+        (match updated.status with Completed Pass -> true | _ -> false))
+
+let test_submit_verdict_fail () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let base_path = config.Coord.base_path in
+    let req = match Verification.create_request
+      ~base_path ~task_id:"task-y" ~output:(`Assoc [])
+      ~criteria:[Verification.Custom "tests pass"] ~worker:"worker" () with
+      | Ok r -> r
+      | Error e -> Alcotest.fail e
+    in
+    let _ = match Verification.submit_verdict ~base_path
+      ~req_id:req.id ~verifier:"verifier-agent"
+      ~verdict:(Verification.Fail "missing evidence") with
+      | Ok _ -> ()
+      | Error e -> Alcotest.fail ("submit_verdict failed: " ^ e)
+    in
+    match Verification.load_request base_path req.id with
+    | Error e -> Alcotest.fail ("load_request failed: " ^ e)
+    | Ok updated ->
+      Alcotest.(check bool) "completed fail" true
+        (match updated.status with
+         | Completed (Fail r) ->
+           Astring.String.is_infix ~affix:"missing evidence" r
+         | _ -> false))
+
+(* ================================================================ *)
 (* FSM disabled                                                      *)
 (* ================================================================ *)
 
@@ -168,5 +222,11 @@ let () =
     ("fsm_disabled", [
       Alcotest.test_case "submit fails when FSM disabled" `Quick
         test_fsm_disabled_submit_fails;
+    ]);
+    ("verification_state_sync", [
+      Alcotest.test_case "submit_verdict Pass updates state" `Quick
+        test_submit_verdict_pass;
+      Alcotest.test_case "submit_verdict Fail preserves reason" `Quick
+        test_submit_verdict_fail;
     ]);
   ]

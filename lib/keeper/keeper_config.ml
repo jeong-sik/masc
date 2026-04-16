@@ -808,11 +808,12 @@ let keeper_adaptive_thinking_enabled () : bool =
    static base (unchanged legacy behavior). *)
 let keeper_adaptive_thinking_mode_rp =
   _rp_bool ~key:"keeper.turn.adaptive_thinking_mode"
-    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ADAPTIVE_THINKING_MODE" ~default:false)
+    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ADAPTIVE_THINKING_MODE" ~default:true)
     ~description:"Enable per-turn boolean enable_thinking override driven by \
                   Keeper_turn_intent classification (Mechanical → false, \
                   Cognitive → true). Independent of adaptive_thinking budget \
-                  flag." ()
+                  flag. Default: on (set MASC_KEEPER_ADAPTIVE_THINKING_MODE=false \
+                  to opt out)." ()
 
 let keeper_adaptive_thinking_mode () : bool =
   Runtime_params.get keeper_adaptive_thinking_mode_rp

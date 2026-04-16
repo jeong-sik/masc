@@ -251,12 +251,73 @@ let init () =
   register_histogram ~name:"masc_llm_provider_request_latency_seconds"
     ~help:"Per-HTTP-request LLM latency from OAS on_request_end callback. \
            Independent from masc_llm_inference_duration_seconds (turn-scope) — \
-           this fires per provider HTTP call regardless of keeper hook health." ()
+           this fires per provider HTTP call regardless of keeper hook health." ();
+  (* Process-level resource gauges.  Sampled on every /metrics scrape via
+     [update_fd_gauges] so a monotonic ramp (fd leak) is visible in the
+     time series before it crosses the OS limit and crashes the server.
+     Evidence: 2026-04-16 production incident, 4029 CLOSE_WAIT sockets
+     accumulated before the accept() path started failing. *)
+  add "masc_process_open_fds"
+    "Approximate count of open file descriptors for the server process \
+     (derived from /dev/fd). Ramp indicates a socket/file leak." Gauge;
+  add "masc_process_fd_warn_threshold"
+    "Threshold above which open_fds triggers a one-shot WARN log." Gauge
 
 let start_time = Time_compat.now ()
 
 let update_uptime () =
   set_gauge "masc_uptime_seconds" (Time_compat.now () -. start_time)
+
+(** Warn threshold for open_fds.  Default 3000 leaves headroom below the
+    typical macOS launchd soft limit (256 default but usually raised to
+    ~10k for masc-mcp via launchctl).  Override via
+    [MASC_FD_WARN_THRESHOLD] env var. *)
+let fd_warn_threshold =
+  match Sys.getenv_opt "MASC_FD_WARN_THRESHOLD" with
+  | Some s -> (match int_of_string_opt (String.trim s) with
+               | Some v when v > 0 -> v
+               | _ -> 3000)
+  | None -> 3000
+
+let fd_warned_once = ref false
+
+(** Count approximate open fds by reading [/dev/fd] (macOS + Linux both
+    expose live fd list there). The readdir call itself opens a transient
+    descriptor, so the count is [+1 / +2] off — monotonic behavior still
+    surfaces leaks faithfully.  Returns 0 when the directory is not
+    readable (e.g. non-unix host), which keeps the gauge non-fatal. *)
+let approximate_open_fd_count () =
+  let candidates = ["/dev/fd"; "/proc/self/fd"] in
+  let rec first_readable = function
+    | [] -> None
+    | path :: rest ->
+        (try Some (path, Sys.readdir path)
+         with _ -> first_readable rest)
+  in
+  match first_readable candidates with
+  | None -> 0
+  | Some (_path, entries) ->
+      (* Subtract the self-readdir descriptor when possible. *)
+      max 0 (Array.length entries - 1)
+
+let update_fd_gauges () =
+  let count = approximate_open_fd_count () in
+  set_gauge "masc_process_open_fds" (float_of_int count);
+  set_gauge "masc_process_fd_warn_threshold" (float_of_int fd_warn_threshold);
+  if count >= fd_warn_threshold && not !fd_warned_once then begin
+    fd_warned_once := true;
+    (* Log via Stdlib [prerr_endline] to avoid a Log module dependency
+       cycle (Prometheus is low-level).  The server bootstrap's log sink
+       picks it up and routes through the structured logger. *)
+    Printf.eprintf
+      "[WARN] [Server] process open fd count %d has reached warn \
+       threshold %d — likely socket/file leak, investigate before \
+       accept() starts failing with EMFILE.\n%!"
+      count fd_warn_threshold
+  end else if count < fd_warn_threshold / 2 then
+    (* Reset the one-shot latch once we drop back to comfortable range so
+       a fresh spike re-alerts. *)
+    fd_warned_once := false
 
 (** {1 Prometheus Export} *)
 
@@ -275,6 +336,7 @@ let labels_to_string = function
 
 let to_prometheus_text () =
   update_uptime ();
+  update_fd_gauges ();
   (* Snapshot (name, help, metric_type, value, labels) under the mutex so
      the render phase sees a consistent view even when concurrent fibers
      are still updating [metrics].  [m.value] is mutable so we copy it

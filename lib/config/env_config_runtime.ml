@@ -359,6 +359,13 @@ module Cdal = struct
   (** Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. *)
   let gate_enabled () =
     Feature_flag_registry.get_bool "MASC_CDAL_GATE_ENABLED"
+
+  (** Max verdicts to scan when looking up the latest verdict by task_id.
+      Beyond this limit, older entries are silently skipped — WARN is logged
+      by the gate when the task_id is not found. Default: 500.
+      Issue #7546. *)
+  let verdict_lookup_limit () =
+    get_int ~default:500 "MASC_CDAL_VERDICT_LOOKUP_LIMIT"
 end
 
 module Verification = struct

@@ -47,11 +47,12 @@ let default_base_path =
   in
   Filename.concat root "cdal_verdicts"
 
-let lookup_latest_verdict ?(base_dir = default_base_path) ~task_id () :
-    Cdal_types.contract_verdict option =
+let lookup_latest_verdict ?(base_dir = default_base_path)
+    ?(limit = Env_config_runtime.Cdal.verdict_lookup_limit ())
+    ~task_id () : Cdal_types.contract_verdict option =
   let store = Dated_jsonl.create ~base_dir () in
-  let recent = Dated_jsonl.read_recent store 200 in
-  List.fold_left (fun acc json ->
+  let recent = Dated_jsonl.read_recent store limit in
+  let result = List.fold_left (fun acc json ->
     match json with
     | `Assoc fields ->
       (match List.assoc_opt "_task_id" fields with
@@ -62,7 +63,16 @@ let lookup_latest_verdict ?(base_dir = default_base_path) ~task_id () :
           | Error _ -> acc)
        | _ -> acc)
     | _ -> acc
-  ) None recent
+  ) None recent in
+  (* If we scanned the full limit and still no match, the verdict may exist
+     in older entries outside the scan window. Log a WARN so debugging is
+     possible instead of silent skipping. Issue #7546. *)
+  (if result = None && List.length recent >= limit then
+    Log.Task.warn
+      "[cdal-gate] lookup_latest_verdict: scanned limit=%d without finding task_id=%s; \
+       older verdicts beyond window are silently skipped (MASC_CDAL_VERDICT_LOOKUP_LIMIT)"
+      limit task_id);
+  result
 
 let gate_check ?(base_dir = default_base_path) ~task_id () : string option =
   match lookup_latest_verdict ~base_dir ~task_id () with

@@ -159,6 +159,7 @@ end
 module Cdal : sig
   val enabled : unit -> bool
   val gate_enabled : unit -> bool
+  val verdict_lookup_limit : unit -> int
 end
 
 module Verification : sig

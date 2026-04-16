@@ -1370,12 +1370,19 @@ export function fetchKeeperTrajectory(
   name: string,
   limit?: number,
   includeThinking = true,
+  fullOutput = false,
 ): Promise<TrajectoryResponse> {
   const params = new URLSearchParams()
   if (limit != null) params.set('limit', String(limit))
   // Always send include_thinking explicitly — backend defaults to false,
   // so omitting the param means "don't include".
   params.set('include_thinking', includeThinking ? 'true' : 'false')
+  // Request full output for session trace detail view.
+  // Backend caps at 10000 for results, 50000 for thinking content.
+  if (fullOutput) {
+    params.set('result_max_len', '10000')
+    params.set('content_max_len', '50000')
+  }
   const qs = params.toString()
   return get<TrajectoryResponse>(
     `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,

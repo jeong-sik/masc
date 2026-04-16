@@ -115,8 +115,9 @@ describe('appendLiveToolCall', () => {
 
     const events = getTraceEvents('keeper-a')
     expect(events).toHaveLength(2)
-    expect(events[0]!.toolName).toBe('keeper_fs_read')
-    expect(events[1]!.toolName).toBe('keeper_edit')
+    // Newest-first: tsUnix=1712400002 (keeper_edit) comes first
+    expect(events[0]!.toolName).toBe('keeper_edit')
+    expect(events[1]!.toolName).toBe('keeper_fs_read')
   })
 
   it('preserves existing events when appending', () => {
@@ -148,8 +149,9 @@ describe('appendLiveToolCall', () => {
 
     const events = getTraceEvents('keeper-a')
     expect(events).toHaveLength(2)
-    expect(events[0]!.kind).toBe('broadcast')
-    expect(events[1]!.kind).toBe('tool_call')
+    // Newest-first: tool_call (tsUnix=1712400000) > broadcast (ts=1712399000000)
+    expect(events[0]!.kind).toBe('tool_call')
+    expect(events[1]!.kind).toBe('broadcast')
   })
 })
 

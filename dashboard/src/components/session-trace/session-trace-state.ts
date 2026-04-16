@@ -256,7 +256,7 @@ function mergeTraceEvents(
   live: UnifiedTraceEvent[],
 ): UnifiedTraceEvent[] {
   const merged = [...historical, ...live]
-  merged.sort((a, b) => a.ts - b.ts)
+  merged.sort((a, b) => b.ts - a.ts)
   const seen = new Set<string>()
   return merged.filter(event => {
     if (seen.has(event.id)) return false
@@ -433,7 +433,7 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   try {
     const timelinePromise = fetchAgentTimeline(agentName, TIMELINE_HOURS, TIMELINE_LIMIT)
     const trajectoryPromise = isKeeper
-      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT)
+      ? fetchKeeperTrajectory(agentName, TRAJECTORY_LIMIT, true, true)
       : Promise.resolve(null)
 
     const [timeline, trajectory] = await Promise.all([timelinePromise, trajectoryPromise])

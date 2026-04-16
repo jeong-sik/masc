@@ -75,6 +75,7 @@ val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
+val default_thinking_truncation : int
 val entry_to_json : ?result_max_len:int -> tool_call_entry -> Yojson.Safe.t
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t

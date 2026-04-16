@@ -557,6 +557,11 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:2000
            |> max 0 |> min 10000
          in
+         let content_max_len =
+           Server_utils.int_query_param req "content_max_len"
+             ~default:Trajectory.default_thinking_truncation
+           |> max 0 |> min 50000
+         in
          let include_thinking =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
@@ -593,7 +598,7 @@ let handle_keeper_get_subroutes state req request reqd =
            ("total_entries", `Int total);
            ("showing", `Int (List.length recent));
            ("entries", `List (List.map
-             (Trajectory.trajectory_line_to_json ~result_max_len) recent));
+             (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
          ] in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)

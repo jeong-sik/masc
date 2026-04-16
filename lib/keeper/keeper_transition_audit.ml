@@ -83,7 +83,7 @@ let append_to_sink ~keeper_name (rec_ : transition_record) =
        Fun.protect
          ~finally:(fun () -> try close_out oc with _ -> ())
          (fun () -> output_string oc (line ^ "\n"))
-     with _ -> ())
+     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
 
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in

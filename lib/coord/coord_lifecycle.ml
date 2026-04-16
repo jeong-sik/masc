@@ -20,7 +20,7 @@ let agent_parse_error_snapshot ~agent_name ~agent_file =
         let buf = Bytes.create 200 in
         let n = In_channel.input ic buf 0 200 in
         Bytes.sub_string buf 0 n)
-    with _ -> ""
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
   in
   `Assoc [
     ("agent_name", `String agent_name);

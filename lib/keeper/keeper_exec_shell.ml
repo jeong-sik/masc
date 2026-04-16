@@ -1,6 +1,9 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let re_chain_hint = Re.(Pcre.re "chain|redirect|pipe|semicolon" |> compile)
+let re_inject_hint = Re.(Pcre.re "inject|symbol" |> compile)
+
 (** Shell operation timeout constants.
     - [io_timeout_sec]: commands that may block on network/disk I/O
       (git status, ls with large dirs, custom bash).
@@ -442,9 +445,9 @@ let handle_keeper_bash
             "`gh` is not allowed via keeper_bash. Use keeper_shell with \
              op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
           else if String.length reason > 0 &&
-             (Re.execp (Re.Pcre.re "chain|redirect|pipe|semicolon" |> Re.compile) (String.lowercase_ascii reason))
+             (Re.execp re_chain_hint (String.lowercase_ascii reason))
           then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
-          else if Re.execp (Re.Pcre.re "inject|symbol" |> Re.compile) (String.lowercase_ascii reason)
+          else if Re.execp re_inject_hint (String.lowercase_ascii reason)
           then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
           else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
         in

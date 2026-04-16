@@ -156,6 +156,23 @@ let observe_histogram name ?(labels=[]) value =
            metric_type = Counter; value = 1.0; labels;
          }))
 
+(** {1 Metric Name Constants}
+
+    Exported so registration here and [inc_counter] call-sites in
+    [keeper_unified_turn.ml] share a single source of truth. Without
+    this, a typo on either side produces a dead series with no build
+    error (the counter silently drifts to a new key).
+
+    Follow-up #7469 Step 1: only the cache counters are covered — the
+    existing input/output/turns counters still use inline strings and
+    should migrate in a separate pass to keep this PR surgical. *)
+
+let metric_keeper_cache_creation_tokens =
+  "masc_keeper_cache_creation_tokens_total"
+
+let metric_keeper_cache_read_tokens =
+  "masc_keeper_cache_read_tokens_total"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -284,11 +301,12 @@ let init () =
      expose them to Prometheus so cache hit-rate and write cost are
      attributable per keeper + model. Populated dynamically via
      [inc_counter]; tools that never emit cache data (e.g. non-Anthropic
-     providers) simply leave these at 0. *)
-  add "masc_keeper_cache_creation_tokens_total"
+     providers) simply leave these at 0. Names are exported as module
+     constants below so registration and call-sites cannot drift. *)
+  add metric_keeper_cache_creation_tokens
     "Cumulative prompt-cache creation tokens per keeper turn (labels: keeper_name, model)"
     Counter;
-  add "masc_keeper_cache_read_tokens_total"
+  add metric_keeper_cache_read_tokens
     "Cumulative prompt-cache read tokens per keeper turn (labels: keeper_name, model)"
     Counter;
   (* Tool schema budget gauges — set once at boot via

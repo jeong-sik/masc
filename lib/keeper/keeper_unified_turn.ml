@@ -2279,13 +2279,16 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock
              hit rate is observable. Skip when both are zero — non-caching
              providers (GLM/local-llama) would otherwise register a series
-             per keeper+model combination that never moves off zero. *)
+             per keeper+model combination that never moves off zero.
+             Metric names pulled from [Prometheus] constants so a typo
+             here would fail to compile instead of silently creating a
+             dead series. *)
           (if result.usage.cache_creation_input_tokens > 0 then
-             Prometheus.inc_counter "masc_keeper_cache_creation_tokens_total"
+             Prometheus.inc_counter Prometheus.metric_keeper_cache_creation_tokens
                ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
                ~delta:(float_of_int result.usage.cache_creation_input_tokens) ());
           (if result.usage.cache_read_input_tokens > 0 then
-             Prometheus.inc_counter "masc_keeper_cache_read_tokens_total"
+             Prometheus.inc_counter Prometheus.metric_keeper_cache_read_tokens
                ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
                ~delta:(float_of_int result.usage.cache_read_input_tokens) ());
           Log.Keeper.info

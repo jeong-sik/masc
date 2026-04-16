@@ -53,7 +53,8 @@ let names_read_path () =
 
 let read_json_file_opt path =
   try Some (Yojson.Safe.from_file path) with
-  | _ -> None
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error _ | Yojson.Json_error _ -> None
 
 let string_member json key =
   match json |> U.member key with

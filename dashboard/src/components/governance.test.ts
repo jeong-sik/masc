@@ -181,6 +181,8 @@ describe('Governance surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('keeper가 활동 중일 때 자동 생성됩니다')
+    // No approval queue items → banner must stay hidden so it's not noisy.
+    expect(container.querySelector('[data-testid="keeper-hitl-alert-banner"]')).toBeNull()
   }, 20000)
 
   it('shows retired guidance when case tracking is disabled', async () => {
@@ -400,6 +402,20 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('새로고침')
     expect(container.textContent).not.toContain('Case Load Visualized')
     expect(container.textContent).not.toContain('청원 콘솔')
+
+    // Prominent top banner must render when approval queue is non-empty.
+    const banner = container.querySelector('[data-testid="keeper-hitl-alert-banner"]')
+    expect(banner).not.toBeNull()
+    expect(banner?.textContent).toContain('1건')
+    expect(banner?.textContent).toContain('지금 검토')
+    expect(banner?.textContent?.toLowerCase()).toContain('critical')
+
+    // Banner precedes the summary strip so it can't be missed.
+    const governanceRoot = container.firstElementChild as HTMLElement | null
+    expect(governanceRoot?.firstElementChild).toBe(banner)
+
+    // Anchor target on the HITL queue card exists so '지금 검토' can scroll to it.
+    expect(container.querySelector('[data-testid="keeper-hitl-approval"]')).not.toBeNull()
 
     const approveButton = Array.from(container.querySelectorAll('button'))
       .find(button => button.textContent?.trim() === '승인')

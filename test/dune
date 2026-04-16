@@ -712,6 +712,13 @@
  (name test_keeper_summarizer)
  (libraries masc_test_deps))
 
+; Gen7 persistence-layer guard: cap_snapshot bounds string/list
+; growth before continuity_summary is rendered + persisted. Stops
+; monotonic growth when the LLM produces ever-longer [STATE] blocks.
+(test
+ (name test_snapshot_size_cap)
+ (libraries masc_test_deps))
+
 ; Keeper_checkpoint_store.is_not_found_detail classifier
 ; regression (observed 334-retry loop on trace-1775487505102-6a347
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)

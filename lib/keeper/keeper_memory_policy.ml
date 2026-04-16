@@ -305,6 +305,67 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
   in
   if lines = [] then "No continuity snapshot available." else String.concat "\n" lines
 
+(* Gen7 (2026-04-17): snapshot size cap applied before persistence.
+
+   Gen3 (PR #7647) trimmed backward fields at prompt injection and
+   Gen4 (PR #7668) scrubbed [STATE] blocks in OAS compaction, both on
+   the consumption side. Growth of [meta.continuity_summary] itself
+   was still unbounded: if the LLM produces a longer [STATE] block
+   each turn (more decisions, longer goal prose), the parsed snapshot
+   and its rendered summary grow monotonically.
+
+   This cap runs in [keeper_post_turn.apply_continuity_summary] before
+   [keeper_state_snapshot_to_summary_text], bounding:
+     - each string field (goal / progress / done_summary / next_summary)
+       to [max_string_chars]
+     - each list field (next_items / decisions / open_questions /
+       constraints) to [max_list_items] items, with each item trimmed
+       to [max_item_chars]
+
+   Cap is applied post-parse, pre-render. Audit integrity is preserved
+   because we keep the same shape; what drops is just the tail of long
+   prose and surplus list items. *)
+
+let default_max_string_chars = 400
+let default_max_list_items = 5
+let default_max_item_chars = 200
+
+let cap_string ~max_chars = function
+  | None -> None
+  | Some s when String.length s <= max_chars -> Some s
+  | Some s -> Some (String.sub s 0 max_chars ^ "…")
+
+let cap_list ~max_items ~max_item_chars items =
+  let rec take n = function
+    | _ when n <= 0 -> []
+    | [] -> []
+    | x :: rest -> x :: take (n - 1) rest
+  in
+  take max_items items
+  |> List.map (fun item ->
+      if String.length item <= max_item_chars then item
+      else String.sub item 0 max_item_chars ^ "…")
+
+let cap_snapshot
+    ?(max_string_chars = default_max_string_chars)
+    ?(max_list_items = default_max_list_items)
+    ?(max_item_chars = default_max_item_chars)
+    (snapshot : keeper_state_snapshot) : keeper_state_snapshot =
+  {
+    goal = cap_string ~max_chars:max_string_chars snapshot.goal;
+    progress = cap_string ~max_chars:max_string_chars snapshot.progress;
+    done_summary = cap_string ~max_chars:max_string_chars snapshot.done_summary;
+    next_summary = cap_string ~max_chars:max_string_chars snapshot.next_summary;
+    next_items =
+      cap_list ~max_items:max_list_items ~max_item_chars snapshot.next_items;
+    decisions =
+      cap_list ~max_items:max_list_items ~max_item_chars snapshot.decisions;
+    open_questions =
+      cap_list ~max_items:max_list_items ~max_item_chars snapshot.open_questions;
+    constraints =
+      cap_list ~max_items:max_list_items ~max_item_chars snapshot.constraints;
+  }
+
 (* RFC-MASC-001 Phase 1 post-mortem (Gen3 2026-04-17):
    [keeper_state_snapshot_to_summary_text] renders every field for audit/persistence.
    Injecting it verbatim into the next prompt creates a prose-level echo loop:

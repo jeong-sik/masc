@@ -76,6 +76,11 @@ let apply_post_turn_lifecycle
     match snapshot with
     | None -> meta
     | Some snapshot ->
+        (* Gen7: cap snapshot size before rendering + persisting.
+           Bounds string prose and list items so meta.continuity_summary
+           cannot grow unboundedly even when the LLM produces a longer
+           [STATE] block each turn. *)
+        let snapshot = Keeper_memory_policy.cap_snapshot snapshot in
         {
           meta with
           continuity_summary = keeper_state_snapshot_to_summary_text snapshot;

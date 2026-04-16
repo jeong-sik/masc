@@ -15,6 +15,29 @@ let init_registry () =
   | Ok () -> ()
   | Error e -> failwith (Printf.sprintf "init_policy_config failed: %s" e)
 
+let file_contains_pattern file_rel pattern =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let content = In_channel.input_all ic in
+        if String.length pattern = 0 then true
+        else
+          let re = Str.regexp_string pattern in
+          (try ignore (Str.search_forward re content 0); true
+           with Not_found -> false))
+
+let file_not_contains_pattern file_rel pattern =
+  not (file_contains_pattern file_rel pattern)
+
 let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   match Keeper_types.meta_of_json
     (`Assoc [("name", `String name); ("agent_name", `String name);
@@ -158,6 +181,43 @@ let test_concurrent_atomic_writes_never_empty () =
   (try Unix.unlink path with _ -> ());
   (try Unix.rmdir dir with _ -> ())
 
+(* ── Test 3: Keeper/OAS failure severities on main path ─────────────── *)
+
+let test_keeper_mainline_failures_log_at_error () =
+  check bool "missing checkpoint after run logs at ERROR" true
+    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|Log.Keeper.error "keeper:%s missing OAS checkpoint after run"|});
+  check bool "memory write failures log at ERROR" true
+    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|"keeper:%s memory_write failed: %s"|});
+  check bool "memory write failures are no longer WARN" true
+    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|Log.Keeper.warn
+               "keeper:%s memory_write failed: %s"|});
+  check bool "episode creation failures log at ERROR" true
+    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|"keeper:%s episode_create failed: %s"|});
+  check bool "episode creation failures are no longer WARN" true
+    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|});
+  check bool "post-failure read_meta None logs at ERROR" true
+    (file_contains_pattern "lib/keeper/keeper_keepalive.ml"
+       {|Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"|});
+  check bool "post-failure read_meta Error logs at ERROR" true
+    (file_contains_pattern "lib/keeper/keeper_keepalive.ml"
+       {|Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"|})
+
+let test_oas_mainline_warns_are_promoted_in_bridge () =
+  check bool "bridge promotes MCP server failure" true
+    (file_contains_pattern "lib/oas_log_bridge.ml"
+       {|Warn, "agent_config", "MCP server failed" -> true|});
+  check bool "bridge promotes context injector failure" true
+    (file_contains_pattern "lib/oas_log_bridge.ml"
+       {|Warn, "agent_turn", "context_injector raised" -> true|});
+  check bool "bridge promotes approval callback gap" true
+    (file_contains_pattern "lib/oas_log_bridge.ml"
+       {|Warn, "agent_tools", "ApprovalRequired but no approval callback — executing"|})
+
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -178,5 +238,12 @@ let () =
             test_atomic_write_not_empty;
           test_case "concurrent writes never produce empty reads" `Quick
             test_concurrent_atomic_writes_never_empty;
+        ] );
+      ( "mainline_failure_levels",
+        [
+          test_case "keeper mainline failures log at error" `Quick
+            test_keeper_mainline_failures_log_at_error;
+          test_case "oas mainline warns are promoted in bridge" `Quick
+            test_oas_mainline_warns_are_promoted_in_bridge;
         ] );
     ]

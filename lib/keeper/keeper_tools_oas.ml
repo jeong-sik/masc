@@ -247,7 +247,7 @@ let make_tools
                     ("ts_unix", `Float ts);
                   ])
                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-                Log.Keeper.warn
+                Log.Keeper.error
                   "tool %s returned error result (%d/%d): %s"
                   td.name count max_consecutive_failures detail;
                 let normalized_error = normalize_tool_result ~success:false result in

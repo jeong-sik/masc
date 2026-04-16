@@ -1893,7 +1893,7 @@ let run_turn
                  Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s" meta.name e);
               Some patched
             | None ->
-              Log.Keeper.warn "keeper:%s missing OAS checkpoint after run" meta.name;
+              Log.Keeper.error "keeper:%s missing OAS checkpoint after run" meta.name;
               None
           in
           (match result.proof with
@@ -1934,7 +1934,7 @@ let run_turn
                  ~kinds_written
            with
            | exn ->
-             Log.Keeper.warn
+             Log.Keeper.error
                "keeper:%s memory_write failed: %s"
                meta.name
                (Printexc.to_string exn));
@@ -1982,7 +1982,7 @@ let run_turn
            with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
-               Log.Keeper.warn "keeper:%s episode_create failed: %s"
+               Log.Keeper.error "keeper:%s episode_create failed: %s"
                  meta.name (Printexc.to_string exn));
           (* Memory bank compaction: dedup + consolidate if over threshold. *)
           (try

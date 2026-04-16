@@ -309,6 +309,38 @@ let test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit 
     true
     (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool)
 
+let test_runtime_surface_derives_manual_reconcile_from_persisted_ambiguous_blocker () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-persisted-manual-reconcile-test" () in
+  let reason =
+    "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
+  in
+  let meta =
+    {
+      base with
+      paused = true;
+      runtime =
+        {
+          base.runtime with
+          last_blocker = reason;
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-persisted-manual-reconcile"
+  in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class"
+    "ambiguous_post_commit_failure"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check string "runtime blocker summary"
+    reason
+    (runtime |> member "runtime_blocker_summary" |> to_string);
+  check bool "runtime blocker manual_reconcile"
+    true
+    (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool)
+
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
   let base = make_meta ~name:"runtime-social-model-test" () in
@@ -397,6 +429,9 @@ let () =
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
           test_case "runtime surface derives manual reconcile blocker" `Quick
             test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit;
+          test_case "runtime surface derives persisted manual reconcile blocker"
+            `Quick
+            test_runtime_surface_derives_manual_reconcile_from_persisted_ambiguous_blocker;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
         ] );

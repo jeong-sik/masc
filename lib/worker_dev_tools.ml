@@ -240,21 +240,42 @@ let command_blocked_hint name =
      keeper_fs_edit."
     name alt
 
+type block_reason =
+  | Empty_command
+  | Chain_or_redirect
+  | Injection
+  | Process_substitution
+  | Unsafe_redirect
+  | Pipes_not_allowed
+  | Command_not_allowed of string
+
+let block_reason_to_string = function
+  | Empty_command -> "command must not be empty"
+  | Chain_or_redirect ->
+    "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. \
+     Run ONE command per call. Example: cmd='dune build'. \
+     Do NOT use: cmd='cd x && dune build' or cmd='rg foo | wc -l'. \
+     To write files, use keeper_fs_edit."
+  | Injection ->
+    "Shell injection syntax (;, &&, standalone &, `, $) not allowed."
+  | Process_substitution ->
+    "Process substitution (<(...) or >(...)) is not allowed."
+  | Unsafe_redirect ->
+    "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
+  | Pipes_not_allowed ->
+    "Pipes are not allowed. Run one command per call."
+  | Command_not_allowed name -> command_blocked_hint name
+
 let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
-  if trimmed = "" then Error "command must not be empty"
+  if trimmed = "" then Error Empty_command
   else if contains_forbidden_shell_chars trimmed then
-    Error
-      "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. \
-       Run ONE command per call. Example: cmd='dune build'. \
-       Do NOT use: cmd='cd x && dune build' or cmd='rg foo | wc -l'. \
-       To write files, use keeper_fs_edit."
+    Error Chain_or_redirect
   else
     match extract_command_name trimmed with
-    | None -> Error "command must not be empty"
+    | None -> Error Empty_command
     | Some name when List.mem name allowed_commands -> Ok ()
-    | Some name ->
-      Error (command_blocked_hint name)
+    | Some name -> Error (Command_not_allowed name)
 
 let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
@@ -264,28 +285,28 @@ let validate_command_coding_with_allowlist
     ~(allowed_commands : string list)
     cmd =
   let trimmed = String.trim cmd in
-  if trimmed = "" then Error "command must not be empty"
+  if trimmed = "" then Error Empty_command
   else if contains_forbidden_shell_chars_coding trimmed then
-    Error "Shell injection syntax (;, &&, standalone &, `, $) not allowed."
+    Error Injection
   else if has_process_substitution trimmed then
-    Error "Process substitution (<(...) or >(...)) is not allowed."
+    Error Process_substitution
   else if has_unsafe_redirection trimmed then
-    Error "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
+    Error Unsafe_redirect
   else
     match split_pipeline_segments trimmed with
-    | Error _ as err -> err
+    | Error msg -> Error (Command_not_allowed msg)
     | Ok segments ->
       if (not allow_pipes) && List.length segments > 1 then
-        Error "Pipes are not allowed. Run one command per call."
+        Error Pipes_not_allowed
       else
       let rec validate_segments = function
         | [] -> Ok ()
         | segment :: rest -> (
             match extract_command_name segment with
-            | None -> Error "command must not be empty"
+            | None -> Error Empty_command
             | Some name when List.mem name allowed_commands ->
               validate_segments rest
-            | Some name -> Error (command_blocked_hint name))
+            | Some name -> Error (Command_not_allowed name))
       in
       validate_segments segments
 
@@ -1242,8 +1263,8 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
          Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok command ->
          (match validate_command_with_allowlist ~allowed_commands command with
-          | Error e ->
-            Error { Agent_sdk.Types.message = e; recoverable = false }
+          | Error reason ->
+            Error { Agent_sdk.Types.message = block_reason_to_string reason; recoverable = false }
           | Ok () ->
            let timeout =
              Worker_tool_input.extract_float "timeout_s" input

@@ -1,9 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
 
-let re_chain_hint = Re.(Pcre.re "chain|redirect|pipe|semicolon" |> compile)
-let re_inject_hint = Re.(Pcre.re "inject|symbol" |> compile)
-
 (** Shell operation timeout constants.
     - [io_timeout_sec]: commands that may block on network/disk I/O
       (git status, ls with large dirs, custom bash).
@@ -430,32 +427,28 @@ let handle_keeper_bash
       in
       match validate cmd with
       | Error reason ->
-        Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason cmd_for_log;
-        let lower_cmd = String.lowercase_ascii cmd_for_log in
-        let starts_with_gh =
-          let trimmed = String.trim lower_cmd in
-          String.length trimmed >= 2
-          && String.sub trimmed 0 2 = "gh"
-          && (String.length trimmed = 2
-              || trimmed.[2] = ' '
-              || trimmed.[2] = '\t')
-        in
+        let reason_str = Worker_dev_tools.block_reason_to_string reason in
+        Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
         let hint =
-          if starts_with_gh then
+          match reason with
+          | Worker_dev_tools.Command_not_allowed name
+            when String.lowercase_ascii name = "gh" ->
             "`gh` is not allowed via keeper_bash. Use keeper_shell with \
              op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
-          else if String.length reason > 0 &&
-             (Re.execp re_chain_hint (String.lowercase_ascii reason))
-          then "Use separate tool calls instead of chaining. Call keeper_bash once per command."
-          else if Re.execp re_inject_hint (String.lowercase_ascii reason)
-          then "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
-          else "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
+          | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
+            "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+          | Injection | Process_substitution ->
+            "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+          | Command_not_allowed _ ->
+            "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
+          | Empty_command ->
+            "Provide a non-empty command string."
         in
         Yojson.Safe.to_string
           (`Assoc
               [ "ok", `Bool false
               ; "error", `String "command_blocked"
-              ; "reason", `String reason
+              ; "reason", `String reason_str
               ; "hint", `String hint
               ])
       | Ok () ->

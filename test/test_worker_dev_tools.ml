@@ -482,11 +482,11 @@ let () =
       Alcotest.test_case "allows pipe" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "git log | head -5" with
         | Ok () -> ()
-        | Error e -> Alcotest.fail ("should allow pipe: " ^ e));
+        | Error e -> Alcotest.fail ("should allow pipe: " ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "allows redirect" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "dune build 2>&1" with
         | Ok () -> ()
-        | Error e -> Alcotest.fail ("should allow redirect: " ^ e));
+        | Error e -> Alcotest.fail ("should allow redirect: " ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "blocks semicolon" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "ls; rm -rf /" with
         | Error _ -> ()
@@ -530,7 +530,7 @@ let () =
       Alcotest.test_case "allows 2>&1 redirect" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "dune test 2>&1" with
         | Ok () -> ()
-        | Error e -> Alcotest.fail ("should allow 2>&1: " ^ e));
+        | Error e -> Alcotest.fail ("should allow 2>&1: " ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "single-command contract rejects pipe" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding_with_allowlist
@@ -538,8 +538,8 @@ let () =
             ~allowed_commands:["dune"; "git"; "head"]
             "dune build 2>&1 | tail -5"
         with
-        | Error reason when String.starts_with ~prefix:"Pipes are not allowed" reason -> ()
-        | Error reason -> Alcotest.fail ("wrong rejection: " ^ reason)
+        | Error Worker_dev_tools.Pipes_not_allowed -> ()
+        | Error reason -> Alcotest.fail ("wrong rejection: " ^ Worker_dev_tools.block_reason_to_string reason)
         | Ok () -> Alcotest.fail "should reject pipe under single-command contract");
       Alcotest.test_case "single-command contract keeps redirect" `Quick (fun () ->
         match
@@ -549,7 +549,7 @@ let () =
             "dune build 2>&1"
         with
         | Ok () -> ()
-        | Error e -> Alcotest.fail ("should allow direct build with fd redirect: " ^ e));
+        | Error e -> Alcotest.fail ("should allow direct build with fd redirect: " ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "single-command contract enforces custom allowlist" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding_with_allowlist

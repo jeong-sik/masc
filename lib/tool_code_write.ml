@@ -41,16 +41,11 @@ let allowed_shell_commands = [
 ]
 
 let validate_code_shell_command (command : string) : (unit, string) result =
-  (* Pipes (|) are allowed: every segment is independently validated
-     against [allowed_shell_commands], and dangerous metacharacters
-     ([;] [`] [$] [&&] standalone [&]) remain blocked by
-     validate_command_coding_with_allowlist. Without pipes, keepers
-     cannot do common composition like `git log | head` or `rg X | wc`,
-     forcing them into noisy multi-call sequences. *)
   Worker_dev_tools.validate_command_coding_with_allowlist
     ~allow_pipes:true
     ~allowed_commands:allowed_shell_commands
     command
+  |> Result.map_error Worker_dev_tools.block_reason_to_string
 
 let git_common_root path =
   try

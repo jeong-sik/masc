@@ -621,6 +621,7 @@ let observed_triggers_of_observation
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
+  if observation.pending_verification_count > 0 then add "pending_verification";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
   if Option.is_some observation.worktree_change_summary then add "worktree_change";
@@ -635,6 +636,7 @@ let observed_affordances_of_observation
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
+  if observation.pending_verification_count > 0 then add "task_verify";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
 
@@ -749,6 +751,7 @@ let append_decision_record
               ("context_ratio", `Float observation.context_ratio);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("failed_task_count", `Int observation.failed_task_count);
+              ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
               ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
             ] );

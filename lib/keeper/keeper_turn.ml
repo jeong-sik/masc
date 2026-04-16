@@ -103,6 +103,7 @@ let direct_turn_observation (meta : keeper_meta) :
     economic_pressure = Agent_economy.Normal;
     unclaimed_task_count = 0;
     failed_task_count = 0;
+    pending_verification_count = 0;
     active_agent_count = 0;
     last_turn_budget = None;
     last_tools_used = [];

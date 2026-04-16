@@ -129,12 +129,14 @@ let task_status_badge = function
   | Types.Todo -> ("📋", "todo")
   | Types.Claimed _ -> ("🟡", "claimed")
   | Types.InProgress _ -> ("🟢", "in_progress")
+  | Types.AwaitingVerification _ -> ("🔍", "awaiting_verification")
   | Types.Done _ -> ("✅", "done")
   | Types.Cancelled _ -> ("🚫", "cancelled")
 
 let task_assignee = function
   | Types.Claimed { assignee; _ }
   | Types.InProgress { assignee; _ }
+  | Types.AwaitingVerification { assignee; _ }
   | Types.Done { assignee; _ } -> assignee
   | Types.Cancelled { cancelled_by; _ } -> cancelled_by
   | Types.Todo -> "unclaimed"
@@ -212,6 +214,9 @@ let status_summary_string (ctx : context) =
         | Types.Done _ ->
             (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt + 1,
              cancelled_cnt)
+        | Types.AwaitingVerification _ ->
+            (task :: active, todo_cnt, claimed_cnt, in_progress_cnt + 1,
+             done_cnt, cancelled_cnt)
         | Types.Cancelled _ ->
             (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt,
              cancelled_cnt + 1))
@@ -386,7 +391,8 @@ let inspect_state ctx =
       Coord.get_tasks_raw ctx.config
       |> List.exists (fun (task : Types.task) ->
              match task.task_status with
-             | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
+             | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }
+             | Types.AwaitingVerification { assignee; _ } ->
                  assignee = ctx.agent_name || assignee = actual_name
              | Types.Todo | Types.Done _ | Types.Cancelled _ -> false)
     else false

@@ -110,7 +110,7 @@ let split_tasks (tasks : Types.task list) =
   let active =
     List.filter (fun task ->
       match task.Types.task_status with
-      | Types.InProgress _ | Types.Claimed _ -> true
+      | Types.InProgress _ | Types.Claimed _ | Types.AwaitingVerification _ -> true
       | Types.Todo | Types.Done _ | Types.Cancelled _ -> false
     ) tasks
   in
@@ -126,6 +126,7 @@ let task_lines (tasks : Types.task list) =
         match task.task_status with
         | Types.InProgress { assignee; _ } -> assignee
         | Types.Claimed { assignee; _ } -> assignee
+        | Types.AwaitingVerification { assignee; _ } -> assignee
         | Types.Todo | Types.Done _ | Types.Cancelled _ -> "?"
       in
       Printf.sprintf "[P%d] %s (@%s)" task.priority task.title assignee

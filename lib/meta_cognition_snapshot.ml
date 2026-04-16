@@ -385,7 +385,8 @@ let active_task_count tasks =
        (fun acc (task : Types.task) ->
          match task.task_status with
          | Types.Done _ | Types.Cancelled _ -> acc
-         | Types.Todo | Types.Claimed _ | Types.InProgress _ -> acc + 1)
+         | Types.Todo | Types.Claimed _ | Types.InProgress _
+         | Types.AwaitingVerification _ -> acc + 1)
        0
 
 let stagnation_score ~active_agents ~active_tasks ~idle_signal_count

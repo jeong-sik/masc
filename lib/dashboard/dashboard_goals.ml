@@ -20,6 +20,7 @@ let task_assignee (task : Types.task) : string option =
   match task.task_status with
   | Types.Claimed { assignee; _ } -> Some assignee
   | Types.InProgress { assignee; _ } -> Some assignee
+  | Types.AwaitingVerification { assignee; _ } -> Some assignee
   | Types.Done { assignee; _ } -> Some assignee
   | Types.Todo | Types.Cancelled _ -> None
 
@@ -28,18 +29,21 @@ let task_status_label (task : Types.task) : string =
   | Types.Todo -> "pending"
   | Types.Claimed _ -> "claimed"
   | Types.InProgress _ -> "in_progress"
+  | Types.AwaitingVerification _ -> "awaiting_verification"
   | Types.Done _ -> "completed"
   | Types.Cancelled _ -> "cancelled"
 
 let task_is_terminal (task : Types.task) : bool =
   match task.task_status with
   | Types.Done _ | Types.Cancelled _ -> true
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> false
+  | Types.Todo | Types.Claimed _ | Types.InProgress _
+  | Types.AwaitingVerification _ -> false
 
 let task_is_done (task : Types.task) : bool =
   match task.task_status with
   | Types.Done _ -> true
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ | Types.Cancelled _ -> false
+  | Types.Todo | Types.Claimed _ | Types.InProgress _
+  | Types.AwaitingVerification _ | Types.Cancelled _ -> false
 
 let compute_convergence (goal : Goal_store.goal) linked_tasks children =
   (* Convergence = weighted average of own task completion + child convergence.

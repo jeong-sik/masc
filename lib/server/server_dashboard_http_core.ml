@@ -717,7 +717,8 @@ let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
 
 let dashboard_task_assignee (task : Types.task) =
   match task.task_status with
-  | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
+  | Claimed { assignee; _ } | InProgress { assignee; _ }
+  | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
       Some assignee
   | Todo | Cancelled _ -> None
 

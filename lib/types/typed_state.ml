@@ -81,6 +81,10 @@ let of_wire : Types_core.task_status -> any_task_status = function
     Terminal (PDone { assignee; completed_at; notes })
   | Types_core.Cancelled { cancelled_by; cancelled_at; reason } ->
     Terminal (PCancelled { cancelled_by; cancelled_at; reason })
+  | Types_core.AwaitingVerification { assignee; submitted_at; _ } ->
+    (* No PAwaitingVerification variant yet; map to Active PInProgress as
+       fallback — the assignee is still working until a verifier acts. *)
+    Active (PInProgress { assignee; started_at = submitted_at })
 
 let status_name : type p. p task_status_t -> string = function
   | PTodo -> "todo"

@@ -158,6 +158,13 @@ end
 
 module Cdal : sig
   val enabled : unit -> bool
+  val gate_enabled : unit -> bool
+  val verdict_lookup_limit : unit -> int
+end
+
+module Verification : sig
+  val fsm_enabled : unit -> bool
+  val timeout_check_interval_seconds : float
 end
 
 module Board : sig

@@ -113,6 +113,7 @@ let base_observation : WO.world_observation =
     economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
     failed_task_count = 0;
+    pending_verification_count = 0;
     active_agent_count = 0;
     last_turn_budget = None;
     last_tools_used = [];

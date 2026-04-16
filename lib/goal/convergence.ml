@@ -53,7 +53,8 @@ let task_matches_goal ~goal_id (task : Types.task) =
 let is_terminal (task : Types.task) =
   match task.task_status with
   | Types.Done _ | Types.Cancelled _ -> true
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> false
+  | Types.Todo | Types.Claimed _ | Types.InProgress _
+  | Types.AwaitingVerification _ -> false
 
 (** A task counts as completed (not merely cancelled). *)
 let is_completed (task : Types.task) =

@@ -98,6 +98,7 @@ let masc_status_to_a2a (status : Types.task_status) : a2a_task_state =
   | Types.Todo -> Working            (* pending task = actively in queue *)
   | Types.Claimed _ -> Working       (* claimed = agent working on it *)
   | Types.InProgress _ -> Working    (* explicit in-progress *)
+  | Types.AwaitingVerification _ -> Working (* awaiting verifier action *)
   | Types.Done _ -> Completed        (* done = completed *)
   | Types.Cancelled _ -> Canceled    (* cancelled = canceled *)
 

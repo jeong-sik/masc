@@ -184,6 +184,7 @@ let task_status_to_string = function
   | Types.Todo -> "todo"
   | Types.Claimed _ -> "claimed"
   | Types.InProgress _ -> "in_progress"
+  | Types.AwaitingVerification _ -> "awaiting_verification"
   | Types.Done _ -> "done"
   | Types.Cancelled _ -> "cancelled"
 
@@ -200,6 +201,7 @@ let task_status_to_string = function
 let task_assignee_of_status = function
   | Types.Claimed { assignee; _ } -> Some assignee
   | Types.InProgress { assignee; _ } -> Some assignee
+  | Types.AwaitingVerification { assignee; _ } -> Some assignee
   | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
 
 let task_started_at_unix status =
@@ -508,7 +510,8 @@ let claim_task config ~agent_name ~task_id =
           match task.task_status with
           | Todo ->
               { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
-          | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
+          | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
+          | AwaitingVerification { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
               already_claimed := Some assignee;
               task
         end else task
@@ -606,9 +609,11 @@ let claim_task_r config ~agent_name ~task_id
             | Todo ->
                 let t' = { t with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } } in
                 (`Claimed_ok, t' :: acc)
-            | Claimed { assignee; _ } | InProgress { assignee; _ } when assignee = agent_name ->
+            | Claimed { assignee; _ } | InProgress { assignee; _ }
+            | AwaitingVerification { assignee; _ } when assignee = agent_name ->
                 (`Already_mine, t :: acc)
             | Claimed { assignee; _ } | InProgress { assignee; _ }
+            | AwaitingVerification { assignee; _ }
             | Done { assignee; _ } | Cancelled { cancelled_by = assignee; _ } ->
                 (`Claimed_by assignee, t :: acc)
           else
@@ -748,6 +753,57 @@ let transition_task_r config ~agent_name ~task_id ~action
               assignee = agent_name;
               started_at = now;
             }, None)
+        | Types.Submit_for_verification, Types.InProgress { assignee; _ }
+          when assignee = agent_name
+               && Env_config_runtime.Verification.fsm_enabled () ->
+            let verification_id =
+              (* Cryptographic 128-bit ID (CSPRNG). Issue #7544.
+                 masc_coord cannot depend on masc_mcp (lib dep boundary),
+                 so we use mirage-crypto-rng directly here. *)
+              let rnd = Mirage_crypto_rng.generate 16 in
+              let hex = String.concat "" (
+                List.init (String.length rnd) (fun i ->
+                  Printf.sprintf "%02x" (Char.code (String.get rnd i))
+                )
+              ) in
+              Printf.sprintf "vrf-%s" hex
+            in
+            Ok (Types.AwaitingVerification {
+              assignee;
+              submitted_at = now;
+              verification_id;
+              required_verifier_role = Reviewer;
+              deadline = None;
+            }, None)
+        | Types.Approve_verification, Types.AwaitingVerification { assignee; verification_id; _ }
+          when agent_name <> assignee
+               && Env_config_runtime.Verification.fsm_enabled () ->
+            Ok (Types.Done {
+              assignee;
+              completed_at = now;
+              notes = Some (Printf.sprintf "Approved by %s (vrf:%s)%s"
+                agent_name verification_id
+                (if notes = "" then "" else " — " ^ notes));
+            }, None)
+        | Types.Reject_verification, Types.AwaitingVerification { assignee; _ }
+          when agent_name <> assignee
+               && Env_config_runtime.Verification.fsm_enabled () ->
+            Ok (Types.InProgress {
+              assignee;
+              started_at = now;
+            }, None)
+        | Types.Approve_verification, Types.AwaitingVerification { assignee; _ }
+          when agent_name = assignee ->
+            Error (Types.TaskInvalidState
+              "Self-approval not allowed: verifier must be a different agent")
+        | Types.Reject_verification, Types.AwaitingVerification { assignee; _ }
+          when agent_name = assignee ->
+            Error (Types.TaskInvalidState
+              "Self-rejection not allowed: verifier must be a different agent")
+        | (Types.Submit_for_verification | Types.Approve_verification
+          | Types.Reject_verification), _
+          when not (Env_config_runtime.Verification.fsm_enabled ()) ->
+            Error (Types.TaskInvalidState "Verification FSM not enabled (MASC_VERIFICATION_FSM_ENABLED=false)")
         | _ ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -775,7 +831,9 @@ let transition_task_r config ~agent_name ~task_id ~action
                 (match action with
                 | Types.Release -> handoff_context
                 | Types.Claim | Types.Start | Types.Done_action
-                | Types.Cancel ->
+                | Types.Cancel
+                | Types.Submit_for_verification | Types.Approve_verification
+                | Types.Reject_verification ->
                     None);
             }
           else
@@ -852,7 +910,19 @@ let transition_task_r config ~agent_name ~task_id ~action
                            .task_handoff_context_to_yojson
                              handoff_context );
                        ]
-                   | None -> [])));
+                   | None -> []))
+         | Types.Submit_for_verification ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.submit_for_verification"
+               ~payload:(`Assoc [ ("task_id", `String task_id) ])
+         | Types.Approve_verification ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.approved"
+               ~payload:(`Assoc [ ("task_id", `String task_id) ])
+         | Types.Reject_verification ->
+             emit_task_activity config ~agent_name ~task_id
+               ~kind:"task.rejected"
+               ~payload:(`Assoc [ ("task_id", `String task_id) ]));
         let duration_ms =
           match action with
           | Types.Done_action | Types.Cancel ->
@@ -862,7 +932,9 @@ let transition_task_r config ~agent_name ~task_id ~action
                       ((now_ts
                        -. task_started_at_unix task.task_status)
                       *. 1000.0)))
-          | Types.Claim | Types.Start | Types.Release -> None
+          | Types.Claim | Types.Start | Types.Release
+          | Types.Submit_for_verification | Types.Approve_verification
+          | Types.Reject_verification -> None
         in
         observe_task_transition config ~agent_name ~task_id
           ~transition:action_s
@@ -893,7 +965,9 @@ let transition_task_r config ~agent_name ~task_id ~action
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition hebbian cancel hook: %s"
                 (Printexc.to_string exn))
-         | Types.Claim | Types.Start | Types.Release -> ());
+         | Types.Claim | Types.Start | Types.Release
+         | Types.Submit_for_verification | Types.Approve_verification
+         | Types.Reject_verification -> ());
         Ok (Printf.sprintf "✅ %s %s → %s" task_id
               (task_status_to_string task.task_status)
               (task_status_to_string new_status))
@@ -933,7 +1007,8 @@ let complete_task config ~agent_name ~task_id ~notes =
           Printf.sprintf "❌ Task %s not found" task_id
       | Some task ->
           let can_complete = match task.task_status with
-            | Claimed { assignee; _ } | InProgress { assignee; _ } -> assignee = agent_name
+            | Claimed { assignee; _ } | InProgress { assignee; _ }
+            | AwaitingVerification { assignee; _ } -> assignee = agent_name
             | Todo | Done _ | Cancelled _ -> false
           in
           if not can_complete then
@@ -1054,6 +1129,12 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                        (Printf.sprintf
                           "task %s was cancelled by %s; reopen or create a new task instead of calling masc_transition(action=done)"
                           task_id cancelled_by))
+              | AwaitingVerification { assignee; _ } ->
+                  Some
+                    (Types.TaskInvalidState
+                       (Printf.sprintf
+                          "task %s is awaiting verification by %s; approve or reject before marking done"
+                          task_id assignee))
             in
             match completion_error with
             | Some err -> Error err
@@ -1150,7 +1231,8 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
             (* Can cancel if: Todo, Claimed by me, or InProgress by me *)
             let can_cancel = match task.task_status with
               | Types.Todo -> true
-              | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } -> assignee = agent_name
+              | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ }
+              | Types.AwaitingVerification { assignee; _ } -> assignee = agent_name
               | Types.Done _ | Types.Cancelled _ -> false
             in
             if not can_cancel then

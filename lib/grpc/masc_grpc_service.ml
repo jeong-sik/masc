@@ -34,6 +34,7 @@ let safe_filename name =
 let task_assignee_of_status = function
   | Types.Claimed { assignee; _ }
   | Types.InProgress { assignee; _ }
+  | Types.AwaitingVerification { assignee; _ }
   | Types.Done { assignee; _ } -> assignee
   | Types.Todo | Types.Cancelled _ -> ""
 

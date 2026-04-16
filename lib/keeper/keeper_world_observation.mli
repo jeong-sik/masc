@@ -69,6 +69,9 @@ type world_observation = {
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the room backlog. *)
 
+  pending_verification_count : int;
+  (** Number of tasks awaiting cross-agent verification. *)
+
   active_agent_count : int;
   (** Number of agents currently active in the room. *)
 

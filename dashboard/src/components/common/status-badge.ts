@@ -13,6 +13,8 @@ function statusDotColor(status: string): string {
     case 'in_progress':
     case 'running':
       return 'bg-[var(--warn)]'
+    case 'awaiting_verification':
+      return 'bg-[var(--accent)]'
     case 'interrupted':
     case 'listening':
       return 'bg-[var(--accent)]'

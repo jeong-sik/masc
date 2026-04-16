@@ -325,16 +325,16 @@ describe('normalizeMissionBriefing', () => {
         keeper_count: 2,
       },
     })
-    expect(result.basis.namespace).toBe('test-ns')
-    expect(result.basis.crew_count).toBe(5)
-    expect(result.basis.agent_count).toBe(3)
-    expect(result.basis.keeper_count).toBe(2)
+    expect(result.basis!.namespace).toBe('test-ns')
+    expect(result.basis!.crew_count).toBe(5)
+    expect(result.basis!.agent_count).toBe(3)
+    expect(result.basis!.keeper_count).toBe(2)
   })
 
   it('defaults basis fields', () => {
     const result = normalizeMissionBriefing({ status: 'ok' })
-    expect(result.basis.namespace).toBeNull()
-    expect(result.basis.crew_count).toBeUndefined()
+    expect(result.basis!.namespace).toBeNull()
+    expect(result.basis!.crew_count).toBeUndefined()
   })
 
   it('extracts sections with valid status', () => {

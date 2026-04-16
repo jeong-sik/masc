@@ -99,10 +99,10 @@ describe('normalizeOperatorDigest', () => {
         pause_reason: 'maintenance',
       },
     })
-    expect(result.root.project).toBe('masc-mcp')
-    expect(result.root.cluster).toBe('local')
-    expect(result.root.paused).toBe(true)
-    expect(result.root.pause_reason).toBe('maintenance')
+    expect(result.root!.project).toBe('masc-mcp')
+    expect(result.root!.cluster).toBe('local')
+    expect(result.root!.paused).toBe(true)
+    expect(result.root!.pause_reason).toBe('maintenance')
   })
 
   it('defaults root namespace to empty object', () => {
@@ -347,7 +347,7 @@ describe('normalizeOperatorSnapshot', () => {
       ],
     })
     expect(result.persistent_agents).toHaveLength(1)
-    expect(result.persistent_agents[0]!.name).toBe('watcher')
+    expect(result.persistent_agents![0]!.name).toBe('watcher')
   })
 
   it('extracts pending_confirm_envelope', () => {

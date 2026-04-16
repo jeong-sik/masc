@@ -86,7 +86,7 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_tool_list", CanReadState);
     ("masc_tool_grant", CanAdmin);
     ("masc_tool_revoke", CanAdmin);
-    ("masc_tool_admin_snapshot", CanReadState);
+    ("masc_tool_admin_snapshot", CanAdmin);
     ("masc_tool_admin_update", CanAdmin);
     ("masc_portal_open", CanOpenPortal);
     ("masc_portal_close", CanOpenPortal);

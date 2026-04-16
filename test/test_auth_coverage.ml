@@ -441,8 +441,8 @@ let test_permission_for_tool_stats () =
 
 let test_permission_for_tool_admin_snapshot () =
   match Auth.permission_for_tool "masc_tool_admin_snapshot" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
+  | Some Types.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_admin_update () =
   match Auth.permission_for_tool "masc_tool_admin_update" with

@@ -194,8 +194,8 @@ describe('decodeTransportHealthData', () => {
     expect(result!.summary.recent_messages).toBe(42)
     expect(result!.sse.sessions_total).toBe(3)
     expect(result!.sse.hot_sessions).toHaveLength(2)
-    expect(result!.sse.hot_sessions[0].session_id).toBe('sess-1')
-    expect(result!.sse.hot_sessions[0].kind).toBe('observer')
+    expect(result!.sse.hot_sessions[0]!.session_id).toBe('sess-1')
+    expect(result!.sse.hot_sessions[0]!.kind).toBe('observer')
     expect(result!.grpc.enabled).toBe(true)
     expect(result!.grpc.port).toBe(50051)
     expect(result!.websocket.mode).toBe('relay')
@@ -214,10 +214,10 @@ describe('decodeTransportHealthData', () => {
     const result = decodeTransportHealthData(raw)
     const hs = result!.sse.hot_sessions
     expect(hs).toHaveLength(1)
-    expect(hs[0].session_id).toBe('s1')
-    expect(hs[0].kind).toBe('unknown')
-    expect(hs[0].queue_depth).toBe(0)
-    expect(hs[0].idle_seconds).toBe(0)
+    expect(hs[0]!.session_id).toBe('s1')
+    expect(hs[0]!.kind).toBe('unknown')
+    expect(hs[0]!.queue_depth).toBe(0)
+    expect(hs[0]!.idle_seconds).toBe(0)
   })
 
   it('skips hot_session without session_id', () => {

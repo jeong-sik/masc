@@ -78,10 +78,10 @@ describe('decodeGateStatusData', () => {
     const result = decodeGateStatusData(raw)
     expect(result).not.toBeNull()
     expect(result!.channels).toHaveLength(1)
-    expect(result!.channels[0].channel).toBe('discord:guild1:chan1')
-    expect(result!.channels[0].message_count).toBe(100)
-    expect(result!.channels[0].success_rate_pct).toBe(90.0)
-    expect(result!.channels[0].health).toBe('healthy')
+    expect(result!.channels[0]!.channel).toBe('discord:guild1:chan1')
+    expect(result!.channels[0]!.message_count).toBe(100)
+    expect(result!.channels[0]!.success_rate_pct).toBe(90.0)
+    expect(result!.channels[0]!.health).toBe('healthy')
     expect(result!.dedup_table_size).toBe(42)
     expect(result!.uptime_seconds).toBe(86400)
   })
@@ -119,9 +119,9 @@ describe('decodeGateStatusData', () => {
     }
     const result = decodeGateStatusData(raw)
     expect(result!.bindings).toHaveLength(1)
-    expect(result!.bindings[0].channel).toBe('discord:g:c')
-    expect(result!.bindings[0].keeper).toBe('janitor')
-    expect(result!.bindings[0].room_id).toBe('room-1')
+    expect(result!.bindings[0]!.channel).toBe('discord:g:c')
+    expect(result!.bindings[0]!.keeper).toBe('janitor')
+    expect(result!.bindings[0]!.room_id).toBe('room-1')
   })
 
   it('skips binding missing required fields', () => {
@@ -148,9 +148,9 @@ describe('decodeGateStatusData', () => {
     }
     const result = decodeGateStatusData(raw)
     expect(result!.recent_events).toHaveLength(1)
-    expect(result!.recent_events[0].seq).toBe(1)
-    expect(result!.recent_events[0].outcome).toBe('success')
-    expect(result!.recent_events[0].duration_ms).toBe(150)
+    expect(result!.recent_events[0]!.seq).toBe(1)
+    expect(result!.recent_events[0]!.outcome).toBe('success')
+    expect(result!.recent_events[0]!.duration_ms).toBe(150)
   })
 
   it('skips event missing required fields', () => {
@@ -169,7 +169,7 @@ describe('decodeGateStatusData', () => {
   it('handles channel with default health', () => {
     const raw = { channels: [{ channel: 'test' }] }
     const result = decodeGateStatusData(raw)
-    expect(result!.channels[0].health).toBe('idle')
+    expect(result!.channels[0]!.health).toBe('idle')
   })
 })
 
@@ -200,25 +200,27 @@ describe('decodeGateKeepersData', () => {
     const result = decodeGateKeepersData(raw)
     expect(result!.count).toBe(2)
     expect(result!.keepers).toHaveLength(2)
-    expect(result!.keepers[0].name).toBe('janitor')
-    expect(result!.keepers[0].status).toBe('active')
-    expect(result!.keepers[0].keepalive_running).toBe(true)
-    expect(result!.keepers[0].last_turn_ago_s).toBe(30)
-    expect(result!.keepers[1].name).toBe('dreamer')
-    expect(result!.keepers[1].agent_name).toBe('agent-1')
+    expect(result!.keepers[0]!.name).toBe('janitor')
+    expect(result!.keepers[0]!.status).toBe('active')
+    expect(result!.keepers[0]!.keepalive_running).toBe(true)
+    expect(result!.keepers[0]!.last_turn_ago_s).toBe(30)
+    expect(result!.keepers[1]!.name).toBe('dreamer')
+    expect(result!.keepers[1]!.agent_name).toBe('agent-1')
   })
 
   it('skips keeper without name', () => {
     const raw = { keepers: [{ status: 'active' }, { name: 'janitor' }] }
     const result = decodeGateKeepersData(raw)
     expect(result!.keepers).toHaveLength(1)
-    expect(result!.keepers[0].name).toBe('janitor')
+    expect(result!.keepers[0]!.name).toBe('janitor')
   })
 
   it('handles missing optional fields as undefined', () => {
     const raw = { keepers: [{ name: 'minimal' }] }
     const result = decodeGateKeepersData(raw)
-    const keeper = result!.keepers[0]
+    expect(result).not.toBeNull()
+    expect(result!.keepers).toHaveLength(1)
+    const keeper = result!.keepers[0]!
     expect(keeper.name).toBe('minimal')
     expect(keeper.agent_name).toBeUndefined()
     expect(keeper.status).toBeUndefined()
@@ -230,7 +232,7 @@ describe('decodeGateKeepersData', () => {
   it('handles null last_turn_ago_s', () => {
     const raw = { keepers: [{ name: 'test', last_turn_ago_s: null }] }
     const result = decodeGateKeepersData(raw)
-    expect(result!.keepers[0].last_turn_ago_s).toBeNull()
+    expect(result!.keepers[0]!.last_turn_ago_s).toBeNull()
   })
 
   it('uses default count 0', () => {
@@ -334,17 +336,17 @@ describe('decodeGateConnectorsData', () => {
     }
     const result = decodeGateConnectorsData(raw)
     expect(result!.connectors).toHaveLength(1)
-    const conn = result!.connectors[0]
+    const conn = result!.connectors[0]!
     expect(conn.connector_id).toBe('discord-main')
     expect(conn.display_name).toBe('Discord Main')
     expect(conn.channel).toBe('discord')
     expect(conn.capabilities).toEqual(['send', 'receive'])
     expect(conn.available).toBe(true)
     expect(conn.configured_bindings).toHaveLength(1)
-    expect(conn.configured_bindings[0].channel_id).toBe('ch-1')
+    expect(conn.configured_bindings[0]!.channel_id).toBe('ch-1')
     expect(conn.recent_audit).toHaveLength(1)
-    expect(conn.recent_audit[0].action).toBe('bind')
-    expect(conn.recent_audit[0].previous_keeper).toBe('old-keeper')
+    expect(conn.recent_audit[0]!.action).toBe('bind')
+    expect(conn.recent_audit[0]!.previous_keeper).toBe('old-keeper')
     expect(conn.storage_paths.status_path).toBe('/data/status.json')
     expect(conn.runtime_summary.bot_user_name).toBe('TestBot')
     expect(conn.runtime_summary.guild_count).toBe(3)
@@ -364,7 +366,7 @@ describe('decodeGateConnectorsData', () => {
     }
     const result = decodeGateConnectorsData(raw)
     expect(result!.connectors).toHaveLength(1)
-    expect(result!.connectors[0].connector_id).toBe('z')
+    expect(result!.connectors[0]!.connector_id).toBe('z')
   })
 
   it('skips configured_binding missing required fields', () => {
@@ -378,7 +380,7 @@ describe('decodeGateConnectorsData', () => {
       }],
     }
     const result = decodeGateConnectorsData(raw)
-    expect(result!.connectors[0].configured_bindings).toEqual([])
+    expect(result!.connectors[0]!.configured_bindings).toEqual([])
   })
 
   it('skips audit entry missing required fields', () => {
@@ -392,7 +394,7 @@ describe('decodeGateConnectorsData', () => {
       }],
     }
     const result = decodeGateConnectorsData(raw)
-    expect(result!.connectors[0].recent_audit).toEqual([])
+    expect(result!.connectors[0]!.recent_audit).toEqual([])
   })
 
   it('handles missing storage_paths gracefully', () => {
@@ -405,7 +407,7 @@ describe('decodeGateConnectorsData', () => {
       }],
     }
     const result = decodeGateConnectorsData(raw)
-    const sp = result!.connectors[0].storage_paths
+    const sp = result!.connectors[0]!.storage_paths
     expect(sp.status_path).toBe('')
     expect(sp.binding_store_path).toBe('')
   })
@@ -420,8 +422,8 @@ describe('decodeGateConnectorsData', () => {
       }],
     }
     const result = decodeGateConnectorsData(raw)
-    expect(result!.connectors[0].names.guild_names).toEqual({})
-    expect(result!.connectors[0].names.channel_names).toEqual({})
+    expect(result!.connectors[0]!.names.guild_names).toEqual({})
+    expect(result!.connectors[0]!.names.channel_names).toEqual({})
   })
 
   it('filters non-string values from string maps', () => {
@@ -437,7 +439,7 @@ describe('decodeGateConnectorsData', () => {
       }],
     }
     const result = decodeGateConnectorsData(raw)
-    const gn = result!.connectors[0].names.guild_names
+    const gn = result!.connectors[0]!.names.guild_names
     expect(gn['valid']).toBe('Guild A')
     expect('invalid' in gn).toBe(false)
     expect('empty' in gn).toBe(false)
@@ -458,6 +460,6 @@ describe('decodeGateConnectorsData', () => {
     }
     const result = decodeGateConnectorsData(raw)
     // binding_summary is missing, so configured_bindings_count should fallback to 2
-    expect(result!.connectors[0].binding_summary.configured_bindings_count).toBe(2)
+    expect(result!.connectors[0]!.binding_summary.configured_bindings_count).toBe(2)
   })
 })

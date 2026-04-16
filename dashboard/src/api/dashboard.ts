@@ -608,6 +608,14 @@ export interface DashboardRuntimeModelMetric {
   hw_decode_avg_tok_per_sec?: number | null
   hw_decode_p50_tok_per_sec?: number | null
   hw_decode_p95_tok_per_sec?: number | null
+  /**
+   * Fraction [0.0, 1.0] of turns in the window where the model received
+   * think=true. Reflects the Keeper_turn_intent adaptive classifier decision
+   * (Cognitive=true → thinking, Mechanical=false → no thinking). Null when no
+   * entry in the window reported thinking_enabled (older rows or providers
+   * that don't expose the field).
+   */
+  thinking_fraction?: number | null
   avg_latency_ms?: number | null
   p50_latency_ms?: number | null
   p95_latency_ms?: number | null
@@ -707,6 +715,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     hw_decode_avg_tok_per_sec: asNumber(raw.hw_decode_avg_tok_per_sec) ?? null,
     hw_decode_p50_tok_per_sec: asNumber(raw.hw_decode_p50_tok_per_sec) ?? null,
     hw_decode_p95_tok_per_sec: asNumber(raw.hw_decode_p95_tok_per_sec) ?? null,
+    thinking_fraction: asNumber(raw.thinking_fraction) ?? null,
     avg_latency_ms: asNumber(raw.avg_latency_ms) ?? null,
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
     p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,

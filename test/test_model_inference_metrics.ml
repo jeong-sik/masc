@@ -232,6 +232,94 @@ let test_json_roundtrip () =
     check int "total_error_entries" 0
       (json |> member "total_error_entries" |> to_int))
 
+(* ── thinking_fraction tests ─────────────────────── *)
+
+let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
+  let thinking_field = match thinking_enabled with
+    | Some b -> [("thinking_enabled", `Bool b)]
+    | None -> []
+  in
+  `Assoc [
+    ("ts_unix", `Float ts);
+    ("tool_call_count", `Int 0);
+    ("tools_used", `List []);
+    ("telemetry", `Assoc ([
+      ("model_used", `String model);
+      ("tokens_per_second", `Float 10.0);
+      ("request_latency_ms", `Int 500);
+      ("input_tokens", `Int 100);
+      ("output_tokens", `Int 50);
+      ("cache_read_tokens", `Int 0);
+      ("reasoning_tokens", `Int 0);
+      ("fallback_applied", `Bool false);
+      ("cost_usd", `Float 0.01);
+    ] @ thinking_field));
+  ]
+
+let test_thinking_fraction_mixed () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "thinking_mixed" in
+    let ts = now_unix () in
+    (* 3 true + 5 false reported, 2 missing. fraction = 3 / (3+5) = 0.375 *)
+    let entries =
+      List.init 3 (fun i ->
+        success_entry_with_thinking ~model:"m1"
+          ~ts:(ts -. Float.of_int (i * 5))
+          ~thinking_enabled:(Some true) ())
+      @ List.init 5 (fun i ->
+        success_entry_with_thinking ~model:"m1"
+          ~ts:(ts -. Float.of_int ((i + 3) * 5))
+          ~thinking_enabled:(Some false) ())
+      @ List.init 2 (fun i ->
+        success_entry_with_thinking ~model:"m1"
+          ~ts:(ts -. Float.of_int ((i + 8) * 5))
+          ~thinking_enabled:None ())
+    in
+    write_decisions path entries;
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check int "entry_count" 10 s.entry_count;
+    check bool "thinking_fraction present" true
+      (Option.is_some s.thinking_fraction);
+    let f = Option.get s.thinking_fraction in
+    check (float 0.001) "thinking_fraction = 3/8" 0.375 f)
+
+let test_thinking_fraction_all_missing () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "thinking_missing" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry_with_thinking ~model:"m1" ~ts:(ts -. 5.0)
+        ~thinking_enabled:None ();
+      success_entry_with_thinking ~model:"m1" ~ts:(ts -. 10.0)
+        ~thinking_enabled:None ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let s = List.hd agg.models in
+    check bool "thinking_fraction None" true
+      (Option.is_none s.thinking_fraction))
+
+let test_thinking_fraction_json_serialization () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "thinking_json" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry_with_thinking ~model:"m1" ~ts:(ts -. 5.0)
+        ~thinking_enabled:(Some true) ();
+      success_entry_with_thinking ~model:"m1" ~ts:(ts -. 10.0)
+        ~thinking_enabled:(Some false) ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    let json = M.to_json agg in
+    let open Yojson.Safe.Util in
+    let models = json |> member "models" |> to_list in
+    let m = List.hd models in
+    check (float 0.001) "thinking_fraction in JSON"
+      0.5 (m |> member "thinking_fraction" |> to_float))
+
 (* ── Bucket tests ───────────────────────────────── *)
 
 let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
@@ -335,6 +423,11 @@ let () =
       test_case "top tools per model" `Quick test_top_tools_per_model;
       test_case "recent entries capped" `Quick test_recent_entries;
       test_case "json roundtrip" `Quick test_json_roundtrip;
+    ];
+    "thinking_fraction", [
+      test_case "mixed reported yields fraction" `Quick test_thinking_fraction_mixed;
+      test_case "all missing yields None" `Quick test_thinking_fraction_all_missing;
+      test_case "json serialization" `Quick test_thinking_fraction_json_serialization;
     ];
     "buckets", [
       test_case "empty dir → no buckets" `Quick test_buckets_empty_dir;

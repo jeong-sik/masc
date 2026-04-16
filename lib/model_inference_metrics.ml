@@ -52,6 +52,11 @@ type model_stats = {
   hw_decode_avg_tok_per_sec : float option;
   hw_decode_p50_tok_per_sec : float option;
   hw_decode_p95_tok_per_sec : float option;
+  (* Fraction of turns in window where the model received think=true. Reflects
+     Keeper_turn_intent adaptive classifier (Cognitive=true, Mechanical=false).
+     None when no entry in window reported thinking_enabled (older jsonl rows
+     before the field was emitted, or providers that don't expose it). *)
+  thinking_fraction : float option;
   avg_latency_ms : float;
   p50_latency_ms : float;
   p95_latency_ms : float;
@@ -99,6 +104,9 @@ type raw_entry = {
   (* Hardware decode rate when present in telemetry; None for legacy entries
      and non-Ollama providers whose backend doesn't populate inference_timings. *)
   hw_decode_tok_per_sec : float option;
+  (* Per-turn thinking_enabled as sent to the model (adaptive classifier output).
+     None for entries that predate the field or providers that don't expose it. *)
+  thinking_enabled : bool option;
   latency_ms : float;
   input_tokens : int;
   output_tokens : int;
@@ -152,6 +160,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
            in
            Some { model; ts_unix = ts; tok_per_sec = 0.0;
                   hw_decode_tok_per_sec = None;
+                  thinking_enabled = None;
                   latency_ms = 0.0;
                   input_tokens = 0; output_tokens = 0;
                   cache_read_tokens = 0; reasoning_tokens = 0;
@@ -215,8 +224,17 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              match List.assoc_opt "cost_usd" tfields with
              | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
            in
+           (* Per-turn thinking_enabled — emitted by keeper_unified_turn's
+              append_decision_record under telemetry.thinking_enabled. Treat
+              explicit null or absent as None so backfill stays clean. *)
+           let thinking_enabled =
+             match List.assoc_opt "thinking_enabled" tfields with
+             | Some (`Bool b) -> Some b
+             | _ -> None
+           in
            Some { model; ts_unix = ts; tok_per_sec;
                   hw_decode_tok_per_sec;
+                  thinking_enabled;
                   latency_ms;
                   input_tokens; output_tokens;
                   cache_read_tokens; reasoning_tokens; fallback_applied;
@@ -296,6 +314,19 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
     let error_count = List.length (List.filter (fun e -> e.is_error) entries) in
     let total_tool_calls = List.fold_left (fun acc e -> acc + e.tool_call_count) 0 entries in
     let opt_if_any arr f = if Array.length arr = 0 then None else Some (f arr) in
+    (* thinking_fraction: count of entries with thinking_enabled=true over
+       entries that reported the field. Entries without the field (older jsonl
+       rows, providers that don't expose it) are excluded from denominator —
+       None when no reporter at all. *)
+    let thinking_fraction =
+      let reported = List.filter_map (fun e -> e.thinking_enabled) entries in
+      match reported with
+      | [] -> None
+      | xs ->
+        let total = List.length xs in
+        let on_count = List.length (List.filter (fun x -> x) xs) in
+        Some (float_of_int on_count /. float_of_int total)
+    in
     let stats = {
       model_id;
       entry_count = n;
@@ -305,6 +336,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       hw_decode_avg_tok_per_sec = opt_if_any hw_vals avg;
       hw_decode_p50_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 50.0);
       hw_decode_p95_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 95.0);
+      thinking_fraction;
       avg_latency_ms = avg lat_vals;
       p50_latency_ms = percentile lat_vals 50.0;
       p95_latency_ms = percentile lat_vals 95.0;
@@ -488,6 +520,7 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ; ("hw_decode_avg_tok_per_sec", opt_float s.hw_decode_avg_tok_per_sec)
     ; ("hw_decode_p50_tok_per_sec", opt_float s.hw_decode_p50_tok_per_sec)
     ; ("hw_decode_p95_tok_per_sec", opt_float s.hw_decode_p95_tok_per_sec)
+    ; ("thinking_fraction", opt_float s.thinking_fraction)
     ; ("avg_latency_ms", `Float s.avg_latency_ms)
     ; ("p50_latency_ms", `Float s.p50_latency_ms)
     ; ("p95_latency_ms", `Float s.p95_latency_ms)

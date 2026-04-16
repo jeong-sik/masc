@@ -64,7 +64,3 @@ export async function deleteTask(taskId: string): Promise<boolean> {
   return resp.ok
 }
 
-export async function deleteGoal(goalId: string): Promise<boolean> {
-  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/goals/delete', { goal_id: goalId })
-  return resp.ok
-}

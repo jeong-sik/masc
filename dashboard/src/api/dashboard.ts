@@ -797,12 +797,6 @@ export async function fetchRuntimeModelMetrics(
   return decoded
 }
 
-export interface DashboardVerificationRef {
-  kind: string
-  label: string
-  value: string
-}
-
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },

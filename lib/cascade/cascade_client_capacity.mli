@@ -65,6 +65,35 @@ val auto_register_ollama_with_override :
     Idempotent and only touches URLs that look like ollama and are
     not already registered. *)
 
+val auto_register_cli_for_candidates :
+  capacity_keys:string list ->
+  unit
+(** For each capacity key that looks like a CLI sentinel
+    (heuristic: starts with [cli:]) and is not yet registered,
+    register it with the default CLI concurrency
+    (env [MASC_CLI_MAX_CONCURRENT], fallback [1]).
+
+    Idempotent.  CLI providers (Claude_code / Gemini_cli / Codex_cli)
+    have an empty [base_url] so the cascade caller derives a
+    sentinel like [cli:claude_code] for capacity key purposes;
+    registering that sentinel here gives the strategy a uniform
+    [signal_ctx.capacity] view across HTTP and CLI providers.
+
+    @since 0.9.8 *)
+
+val auto_register_cli_with_override :
+  capacity_keys:string list ->
+  max_concurrent:int ->
+  unit
+(** Like {!auto_register_cli_for_candidates} but with an explicit
+    [max_concurrent] that overrides the env default.  Used by the
+    per-cascade [<name>_cli_max_concurrent] field.
+
+    Idempotent and only touches keys that look like CLI sentinels
+    and are not already registered.
+
+    @since 0.9.8 *)
+
 (** {1 Capacity query} *)
 
 val capacity : string -> Cascade_throttle.capacity_info option

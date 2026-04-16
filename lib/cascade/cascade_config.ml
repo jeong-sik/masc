@@ -734,3 +734,11 @@ let resolve_ollama_max_concurrent ?config_path ~name () =
     let cfg = Cascade_config_loader.resolve_strategy_config
                 ~config_path:path ~name in
     cfg.ollama_max_concurrent
+
+let resolve_cli_max_concurrent ?config_path ~name () =
+  match config_path with
+  | None -> None
+  | Some path ->
+    let cfg = Cascade_config_loader.resolve_strategy_config
+                ~config_path:path ~name in
+    cfg.cli_max_concurrent

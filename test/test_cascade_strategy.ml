@@ -296,6 +296,61 @@ let test_ollama_register_with_override () =
   | Some info ->
     check int "override max=4" 4 info.total
 
+(* ── Phase C3: CLI sentinel auto-registration ──────────────── *)
+
+let test_cli_auto_register_filters_sentinels () =
+  C.unregister_all ();
+  C.auto_register_cli_for_candidates ~capacity_keys:[
+    "cli:claude_code";
+    "cli:gemini_cli";
+    "http://127.0.0.1:8085";  (* HTTP, not CLI *)
+    "";                       (* unknown / empty *)
+  ];
+  let urls = C.registered_urls () in
+  check bool "cli:claude_code registered"
+    true (List.mem "cli:claude_code" urls);
+  check bool "cli:gemini_cli registered"
+    true (List.mem "cli:gemini_cli" urls);
+  check bool "http URL NOT registered as CLI"
+    false (List.mem "http://127.0.0.1:8085" urls);
+  check bool "empty key NOT registered"
+    false (List.mem "" urls)
+
+let test_cli_register_with_override () =
+  C.unregister_all ();
+  C.auto_register_cli_with_override
+    ~capacity_keys:["cli:codex_cli"]
+    ~max_concurrent:3;
+  match C.capacity "cli:codex_cli" with
+  | None -> fail "expected CLI registration"
+  | Some info ->
+    check int "CLI override max=3" 3 info.total
+
+let test_cli_acquire_blocks_at_cap () =
+  C.unregister_all ();
+  C.auto_register_cli_with_override
+    ~capacity_keys:["cli:claude_code"]
+    ~max_concurrent:1;
+  match C.try_acquire "cli:claude_code" with
+  | None -> fail "first acquire should succeed"
+  | Some release ->
+    check bool "second acquire returns None at cap"
+      true (C.try_acquire "cli:claude_code" = None);
+    release ();
+    check bool "after release: capacity available again"
+      true (C.try_acquire "cli:claude_code" <> None)
+
+let test_cli_idempotent_registration () =
+  C.unregister_all ();
+  C.auto_register_cli_with_override
+    ~capacity_keys:["cli:gemini_cli"] ~max_concurrent:5;
+  C.auto_register_cli_for_candidates
+    ~capacity_keys:["cli:gemini_cli"];  (* should be no-op *)
+  match C.capacity "cli:gemini_cli" with
+  | None -> fail "expected registration"
+  | Some info ->
+    check int "first override preserved (idempotent)" 5 info.total
+
 (* ── Phase B: Priority_tier (S5) ───────────────────────────── *)
 
 let test_priority_tier_picks_first_tier () =
@@ -488,6 +543,14 @@ let () =
         test_ollama_auto_register;
       test_case "auto_register override sets max" `Quick
         test_ollama_register_with_override;
+      test_case "cli sentinel auto-register filters non-CLI" `Quick
+        test_cli_auto_register_filters_sentinels;
+      test_case "cli auto_register override sets max" `Quick
+        test_cli_register_with_override;
+      test_case "cli acquire blocks at cap, releases freely" `Quick
+        test_cli_acquire_blocks_at_cap;
+      test_case "cli registration is idempotent" `Quick
+        test_cli_idempotent_registration;
     ];
     "priority_tier", [
       test_case "cycle 0 picks first tier" `Quick

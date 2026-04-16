@@ -834,6 +834,52 @@ let test_persona_resolver_rejects_non_public_social_model_arg () =
       check bool "mentions social_model" true (contains_substring e "social_model")
 
 (* ================================================================ *)
+(* Unknown-key detection                                             *)
+(* ================================================================ *)
+
+let test_detect_unknown_keys_empty_when_all_canonical () =
+  let input = {|
+[keeper]
+goal = "canonical"
+mention_targets = ["a", "b"]
+tool_preset = "coding"
+tool_also_allow = ["x"]
+cascade_name = "keeper_unified"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "no unknown keys" [] unknown
+
+let test_detect_unknown_keys_flags_legacy_dead_config () =
+  let input = {|
+[keeper]
+goal = "g"
+room_scope = "current"
+scope_kind = "local"
+mention_targets = ["a"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "surfaces dead config"
+      ["keeper.room_scope"; "keeper.scope_kind"] unknown
+
+let test_detect_unknown_keys_accepts_also_allow_alias () =
+  let input = {|
+[keeper]
+goal = "g"
+also_allow = ["x"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "also_allow is recognized alias" [] unknown
+
+(* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
 
@@ -915,6 +961,15 @@ let () =
             test_profile_max_turns_defaults_when_absent;
           test_case "max_turns rejects out-of-range values" `Quick
             test_profile_max_turns_rejects_out_of_range;
+        ] );
+      ( "unknown_keys",
+        [
+          test_case "empty when all canonical" `Quick
+            test_detect_unknown_keys_empty_when_all_canonical;
+          test_case "flags legacy dead config" `Quick
+            test_detect_unknown_keys_flags_legacy_dead_config;
+          test_case "also_allow alias accepted" `Quick
+            test_detect_unknown_keys_accepts_also_allow_alias;
         ] );
       ( "file_loading",
         [

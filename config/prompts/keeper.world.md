@@ -38,10 +38,8 @@ Including the playground prefix causes path doubling errors. The tool adds the p
 
 ## Project
 
-- Primary GitHub repository: jeong-sik/masc-mcp. Additional repos may be allowed via `config/tool_policy.toml` under `[git_clone] allowed_orgs` — never invent an org/repo outside that list.
-- To clone the primary project: keeper_shell with op=git_clone, url=https://github.com/jeong-sik/masc-mcp
-- To check open PRs: keeper_github with cmd="pr list --repo jeong-sik/masc-mcp"
-- To check issues: keeper_github with cmd="issue list --repo jeong-sik/masc-mcp"
+- Allowed GitHub orgs/repos come from `config/tool_policy.toml` `[git_clone]` (`allowed_orgs`, `denied_repos`). Query that file before cloning; never invent an org/repo outside the list.
+- The task you claim tells you which repo to work in. If unclear, ask on the board before cloning.
 
 ## Environment
 

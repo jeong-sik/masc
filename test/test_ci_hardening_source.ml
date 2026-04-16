@@ -71,6 +71,37 @@ let test_health_and_ci_runner_diagnostics () =
   check bool "ci runner tracks active build dir for diagnostics" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR")
 
+let test_release_truth_contracts () =
+  check bool "ci workflow defines doc truth job" true
+    (file_contains_pattern ".github/workflows/ci.yml" "name: Doc Truth");
+  check bool "ci gate aggregates doc truth" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "check \"doc-truth\"     \"$DOC_TRUTH_RESULT\"");
+  check bool "ci gate aggregates oas pin check" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "check \"oas-pin-check\" \"$OAS_PIN_RESULT\"");
+  check bool "ci workflow removed odoc documentation lane" true
+    (file_not_contains_pattern ".github/workflows/ci.yml" "name: Documentation");
+  check bool "ci workflow no longer installs odoc" true
+    (file_not_contains_pattern ".github/workflows/ci.yml" "Install odoc");
+  check bool "release/doc truth changes trigger build scope" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "docs/|README\\.md$|ROADMAP\\.md$|CHANGELOG\\.md$");
+  check bool "main build uploads release evidence" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "name: Upload main release evidence");
+  check bool "release workflow generates evidence bundle" true
+    (file_contains_pattern ".github/workflows/release.yml"
+       "Generate release evidence bundle");
+  check bool "release workflow ships evidence with artifacts" true
+    (file_contains_pattern ".github/workflows/release.yml"
+       "path: dist/*");
+  check bool "make install deps skips with-doc" true
+    (file_contains_pattern "Makefile"
+       "opam install . --deps-only --with-test -y");
+  check bool "make release evidence target exists" true
+    (file_contains_pattern "Makefile" "release-evidence:")
+
 let test_contract_harness_and_execution_session_authz_contracts () =
   check bool "contract harness exposes extract_text helper" true
     (file_contains_pattern "scripts/harness/lib/test_framework.sh"
@@ -639,6 +670,7 @@ let () =
            test_case "contract harness and team session authz contracts" `Quick
              test_contract_harness_and_execution_session_authz_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
+           test_case "release truth contracts" `Quick test_release_truth_contracts;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "keeper direct reply contracts" `Quick

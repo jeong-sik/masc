@@ -80,15 +80,27 @@ require_contains docs/QUICK-START.md '"method":"initialize"'
 require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'
 require_contains docs/QUICK-START.md 'masc_join(agent_name="codex")'
 require_contains docs/QUICK-START.md '명시적인 `MASC_BASE_PATH`가 없으면 `HOME`을 implicit base path로 사용한다.'
+require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md'
+
+require_contains README.md 'docs/RELEASE-EVIDENCE.md'
+require_not_contains README.md '/api/v1/command-plane'
+
+require_contains docs/PRODUCT-OPERATING-PLAN.md 'Release evidence and local proof'
+require_contains docs/PRODUCT-OPERATING-PLAN.md 'Retired compatibility lanes and research material remain in-tree for history'
+
+require_contains docs/spec/A-existing-doc-index.md '`docs/RELEASE-EVIDENCE.md` | Canonical'
+require_not_contains docs/spec/A-existing-doc-index.md '`docs/COMMAND-PLANE-RUNBOOK.md` | Canonical'
 
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
 require_not_contains docs/spec/09-server-transport.md '| Room | `/api/v1/room/*`'
+require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
 require_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | POST | Keeper config 수정 (PATCH semantic) |'
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | PATCH |'
+require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
 
 docs_to_scan=(
   README.md
@@ -100,7 +112,9 @@ docs_to_scan=(
   docs/spec/SPEC-INDEX.md
   docs/spec/09-server-transport.md
   docs/spec/10-dashboard.md
+  docs/spec/A-existing-doc-index.md
   docs/KEEPER-USER-MANUAL.md
+  docs/RELEASE-EVIDENCE.md
 )
 
 missing_refs=()

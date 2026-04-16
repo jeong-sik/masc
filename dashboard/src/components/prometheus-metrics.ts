@@ -7,6 +7,7 @@ import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { TextInput } from './common/input'
 import { fetchWithTimeout, authHeaders } from '../api/core'
 import { navigate } from '../router'
 
@@ -25,7 +26,7 @@ interface MetricSample {
   value: number
 }
 
-function parsePrometheusText(text: string): ParsedMetric[] {
+export function parsePrometheusText(text: string): ParsedMetric[] {
   const metrics: ParsedMetric[] = []
   const lines = text.split('\n')
   let current: ParsedMetric | null = null
@@ -103,7 +104,7 @@ function parseLabels(raw: string): Record<string, string> {
 
 type MetricCategory = 'server' | 'agent' | 'keeper' | 'transport' | 'inference' | 'tool' | 'delta' | 'provider' | 'other'
 
-function categorize(name: string): MetricCategory {
+export function categorize(name: string): MetricCategory {
   if (name.startsWith('masc_keeper_')) return 'keeper'
   if (name.startsWith('masc_agent_')) return 'agent'
   if (name.startsWith('masc_sse_') || name.startsWith('masc_grpc_') || name.startsWith('masc_ws_')) return 'transport'
@@ -198,6 +199,18 @@ async function fetchPrometheusText(signal?: AbortSignal): Promise<string> {
   return res.text()
 }
 
+// --- Search helpers ---
+
+export function metricMatchesSearch(m: ParsedMetric, q: string): boolean {
+  const lower = q.toLowerCase()
+  if (m.name.toLowerCase().includes(lower)) return true
+  if (m.help.toLowerCase().includes(lower)) return true
+  return m.samples.some(s =>
+    s.name.toLowerCase().includes(lower) ||
+    Object.values(s.labels).some(v => v.toLowerCase().includes(lower)),
+  )
+}
+
 // --- Component ---
 
 export function PrometheusMetrics() {
@@ -205,6 +218,7 @@ export function PrometheusMetrics() {
   const error = useSignal<string | null>(null)
   const metrics = useSignal<ParsedMetric[]>([])
   const lastUpdated = useSignal<string | null>(null)
+  const searchQuery = useSignal('')
   const expandedCategories = useSignal<Set<MetricCategory>>(new Set(['server', 'agent', 'keeper', 'inference']))
 
   async function refresh() {
@@ -235,19 +249,31 @@ export function PrometheusMetrics() {
     return html`<${EmptyState} message="No metrics available" />`
   }
 
-  // Group by category
+  // Group by category (filtered if search active)
+  const query = searchQuery.value.trim().toLowerCase()
+  const filteredMetrics = query
+    ? metrics.value.filter(m => metricMatchesSearch(m, query))
+    : metrics.value
+
   const grouped = new Map<MetricCategory, ParsedMetric[]>()
-  for (const m of metrics.value) {
+  for (const m of filteredMetrics) {
     const cat = categorize(m.name)
     const list = grouped.get(cat) ?? []
     list.push(m)
     grouped.set(cat, list)
   }
 
+  // Auto-expand categories when searching
+  if (query) {
+    const expanded = new Set<MetricCategory>()
+    for (const cat of grouped.keys()) expanded.add(cat)
+    if (expandedCategories.value !== expanded) expandedCategories.value = expanded
+  }
+
   // Summary stats
-  const totalMetrics = metrics.value.length
-  const totalSamples = metrics.value.reduce((sum, m) => sum + m.samples.length, 0)
-  const nonZeroSamples = metrics.value.reduce(
+  const totalMetrics = filteredMetrics.length
+  const totalSamples = filteredMetrics.reduce((sum, m) => sum + m.samples.length, 0)
+  const nonZeroSamples = filteredMetrics.reduce(
     (sum, m) => sum + m.samples.filter(s => s.value !== 0).length,
     0,
   )
@@ -287,6 +313,24 @@ export function PrometheusMetrics() {
           ${error.value}
         </div>
       `}
+
+      <${TextInput}
+        class="max-w-[300px]"
+        placeholder="검색 (메트릭 이름, 라벨...)"
+        ariaLabel="메트릭 검색"
+        value=${searchQuery.value}
+        onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+      />
+
+      ${query && html`
+        <span class="text-xs text-[var(--text-muted)]">
+          ${totalMetrics} / ${metrics.value.length} 메트릭 일치
+        </span>
+      `}
+
+      ${totalMetrics === 0 && query ? html`
+        <${EmptyState} message="조건에 맞는 메트릭이 없습니다." />
+      ` : null}
 
       ${categoryOrder.filter(cat => grouped.has(cat)).map(cat => {
         const catMetrics = grouped.get(cat)!

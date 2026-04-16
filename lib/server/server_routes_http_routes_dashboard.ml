@@ -630,6 +630,13 @@ let rec add_routes ~sw ~clock router =
                  Keeper_api.handle_keeper_checkpoints_post state req reqd body_str
                )
              ) request reqd
+       | Keeper_api.Keeper_post_directive ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_directive_post state agent_name req reqd body_str
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_unknown ->
            Http.Response.json ~status:`Not_found
              {|{"error":"not found"}|} reqd)

@@ -387,6 +387,7 @@ let check_route path expected =
        | Keeper_api.Keeper_post_reset -> "reset"
        | Keeper_api.Keeper_post_clear -> "clear"
        | Keeper_api.Keeper_post_checkpoints -> "checkpoints"
+       | Keeper_api.Keeper_post_directive -> "directive"
        | Keeper_api.Keeper_post_unknown -> "unknown")
       path
 ;;

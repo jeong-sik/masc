@@ -16,6 +16,7 @@ let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
+let keeper_suffix_directive = "/directive"
 
 let dedupe_tool_names names =
   Json_util.dedupe_keep_order
@@ -243,6 +244,7 @@ type keeper_post_route_kind =
   | Keeper_post_reset
   | Keeper_post_clear
   | Keeper_post_checkpoints
+  | Keeper_post_directive
   | Keeper_post_unknown
 
 let classify_keeper_post_route req_path =
@@ -262,6 +264,7 @@ let classify_keeper_post_route req_path =
   else if ends_with keeper_suffix_reset then Keeper_post_reset
   else if ends_with keeper_suffix_clear then Keeper_post_clear
   else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
+  else if ends_with keeper_suffix_directive then Keeper_post_directive
   else Keeper_post_unknown
 
 let keeper_path_ends_with req_path suffix =
@@ -706,6 +709,44 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     | None ->
         Http.Response.json ~status:`Internal_server_error ~request:req
           {|{"ok":false,"error":"dispatch returned None"}|}
+          reqd
+
+(** POST /api/v1/keepers/:name/directive — pause / resume / wakeup.
+
+    Delegates to [Keeper_keepalive.process_directive] which updates
+    registry state, dispatches a state-machine event, and optionally
+    wakes up the keeper fiber. *)
+let handle_keeper_directive_post _state _agent_name req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
+  if String.length name = 0 then
+    Http.Response.json ~status:`Bad_request
+      {|{"error":"keeper name is required"}|} reqd
+  else
+    let action =
+      try
+        let json = Yojson.Safe.from_string body_str in
+        match Safe_ops.json_string_opt "action" json with
+        | Some a when a = "pause" || a = "resume" || a = "wakeup" -> Ok a
+        | Some a ->
+            Error
+              (Printf.sprintf
+                 "invalid action %S: expected pause, resume, or wakeup" a)
+        | None -> Error "missing \"action\" field"
+      with Yojson.Json_error e ->
+        Error (Printf.sprintf "invalid json: %s" (String.escaped e))
+    in
+    match action with
+    | Error msg ->
+        Http.Response.json ~status:`Bad_request
+          (Printf.sprintf {|{"ok":false,"error":%s}|}
+             (Yojson.Safe.to_string (`String msg)))
+          reqd
+    | Ok action_str ->
+        Keeper_keepalive.process_directive ~agent_name:name action_str;
+        Http.Response.json ~compress:true ~request:req
+          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
+             (String.escaped action_str) (String.escaped name))
           reqd
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory.

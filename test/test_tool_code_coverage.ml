@@ -34,13 +34,28 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_ctx () =
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let run_shell_ok ~cwd cmd =
+  let quoted_cwd = Filename.quote cwd in
+  let rc = Sys.command (Printf.sprintf "cd %s && %s" quoted_cwd cmd) in
+  Alcotest.(check int) ("shell command: " ^ cmd) 0 rc
+
+let make_ctx_in_dir base_dir =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir () in
   let config = Coord.default_config base_dir in
   ignore (Coord.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_code.context = { config; agent_name = "test-agent" } in
+  ctx
+
+let make_ctx () =
+  let base_dir = temp_dir () in
+  let ctx = make_ctx_in_dir base_dir in
   (ctx, base_dir)
 
 let dispatch_exn ctx ~name ~args =
@@ -107,6 +122,37 @@ let test_code_search_with_options () =
   let (_, msg) = dispatch_exn ctx ~name:"masc_code_search" ~args in
   Alcotest.(check bool) "has response" true (String.length msg > 0);
   cleanup_dir base_dir
+
+let test_code_search_with_file_pattern_finds_matches () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      run_shell_ok ~cwd:base_dir "git init -q -b main";
+      run_shell_ok ~cwd:base_dir "git config user.email test@example.com";
+      run_shell_ok ~cwd:base_dir "git config user.name test";
+      write_text_file (Filename.concat base_dir "match.ml")
+        "let mascot_needle = 1\n";
+      write_text_file (Filename.concat base_dir "ignore.md")
+        "mascot_needle should not be matched\n";
+      let ctx = make_ctx_in_dir base_dir in
+      let args = `Assoc [
+        ("query", `String "mascot_needle");
+        ("path", `String ".");
+        ("file_pattern", `String "*.ml");
+        ("case_insensitive", `Bool true);
+        ("max_results", `Int 10);
+      ] in
+      let (ok, msg) = dispatch_exn ctx ~name:"masc_code_search" ~args in
+      Alcotest.(check bool) "search succeeds" true ok;
+      let result = Yojson.Safe.from_string msg in
+      let module U = Yojson.Safe.Util in
+      let count = U.(result |> member "count" |> to_int) in
+      Alcotest.(check int) "finds one ml match" 1 count;
+      let first = U.(result |> member "results" |> index 0) in
+      let matched_path = U.(first |> member "path" |> to_string) in
+      Alcotest.(check string) "matched file basename" "match.ml"
+        (Filename.basename matched_path))
 
 (* ============================================================
    code_read validation
@@ -211,6 +257,8 @@ let () =
       Alcotest.test_case "empty query" `Quick test_code_search_empty_query;
       Alcotest.test_case "with query" `Quick test_code_search_with_query;
       Alcotest.test_case "with options" `Quick test_code_search_with_options;
+      Alcotest.test_case "file pattern matches files" `Quick
+        test_code_search_with_file_pattern_finds_matches;
     ]);
     ("code_read", [
       Alcotest.test_case "no path" `Quick test_code_read_no_path;

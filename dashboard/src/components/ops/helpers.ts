@@ -194,6 +194,8 @@ export function actionTypeLabel(value?: string | null): string {
 
 export function targetTypeLabel(value?: string | null): string {
   switch (value) {
+    case 'task':
+      return '작업'
     case 'namespace':
       return '프로젝트 범위'
     case 'room':

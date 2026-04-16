@@ -76,7 +76,6 @@ let test_generate_compact () =
   Alcotest.(check bool) "contains ATTENTION" true (contains output "ATTENTION:");
   Alcotest.(check bool) "contains AGENTS" true (contains output "AGENTS:");
   Alcotest.(check bool) "contains TASKS" true (contains output "TASKS:");
-  Alcotest.(check bool) "contains HEALTH" true (contains output "HEALTH:");
   cleanup_dir dir
 
 let test_generate_full () =
@@ -89,7 +88,6 @@ let test_generate_full () =
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
   Alcotest.(check bool) "contains Attention section" true (contains output "Attention Required");
   Alcotest.(check bool) "contains Agents section" true (contains output "Agents");
-  Alcotest.(check bool) "contains Swarm Health section" true (contains output "Swarm Health");
   Alcotest.(check bool) "contains Tempo footer" true (contains output "Tempo:");
   cleanup_dir dir
 

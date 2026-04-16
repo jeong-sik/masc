@@ -211,6 +211,8 @@ let test_keeper_metrics_registered () =
     (has "masc_keeper_compactions_total");
   check bool "has keeper compaction ratio gauge" true
     (has "masc_keeper_compaction_ratio_change");
+  check bool "has keeper compaction saved tokens counter" true
+    (has "masc_keeper_compaction_saved_tokens_total");
   check bool "has keeper heartbeat successes counter" true
     (has "masc_keeper_heartbeat_successes_total");
   check bool "has keeper heartbeat failures counter" true

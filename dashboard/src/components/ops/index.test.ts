@@ -32,13 +32,10 @@ async function loadOps() {
     operatorRoomDigest: operatorStore.operatorRoomDigest,
     operatorSnapshot: operatorStore.operatorSnapshot,
     hydratedWorkflowId: helpers.hydratedWorkflowId,
-    reviewDecisionReason: helpers.reviewDecisionReason,
-    selectedReviewItemId: helpers.selectedReviewItemId,
-    selectedReviewTab: helpers.selectedReviewTab,
   }
 }
 
-describe('Ops intervene surface', () => {
+describe('Ops surface', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -55,7 +52,7 @@ describe('Ops intervene surface', () => {
     vi.doUnmock('../flow-control/flow-control-panel')
   })
 
-  it('renders a combined activity timeline for healthy mode without legacy KPI cards', async () => {
+  it('renders a combined activity timeline merging recent reviews and interventions', async () => {
     const {
       Ops,
       route,
@@ -65,16 +62,10 @@ describe('Ops intervene surface', () => {
       operatorRoomDigest,
       operatorSnapshot,
       hydratedWorkflowId,
-      reviewDecisionReason,
-      selectedReviewItemId,
-      selectedReviewTab,
     } = await loadOps()
 
     route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
     hydratedWorkflowId.value = null
-    reviewDecisionReason.value = ''
-    selectedReviewItemId.value = ''
-    selectedReviewTab.value = 'active'
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
@@ -135,14 +126,15 @@ describe('Ops intervene surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('최근 운영 활동')
-    expect(container.textContent).toContain('즉시 검토 0')
-    expect(container.textContent).toContain('보류 1')
-    expect(container.textContent).toContain('최근 처리 2')
-    expect(container.textContent).toContain('프로젝트 진행 중')
     expect(container.textContent).toContain('QuickIntervene')
     expect(container.textContent).toContain('FlowControlPanel')
-    expect(container.textContent).not.toContain('Active Queue')
-    expect(container.textContent).not.toContain('Healthy Console')
+
+    // Placeholder-heavy review queue surface is gone — Live Judge + Keeper HITL
+    // handling lives on the Governance page.
+    expect(container.textContent).not.toContain('review_item')
+    expect(container.textContent).not.toContain('큐에서 항목을 고르세요')
+    expect(container.textContent).not.toContain('현재 이 항목에 연결된 operator guidance가 없습니다')
+    expect(container.textContent).not.toContain('실행 작업대')
 
     const items = Array.from(container.querySelectorAll('[data-testid="ops-activity-item"]'))
     expect(items).toHaveLength(3)
@@ -151,7 +143,7 @@ describe('Ops intervene surface', () => {
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
-  it('keeps the review workbench while replacing legacy KPI cards with compact badges', async () => {
+  it('renders the same single surface when active review items are present (no 3-column unhealthy branch)', async () => {
     const {
       Ops,
       route,
@@ -161,16 +153,10 @@ describe('Ops intervene surface', () => {
       operatorRoomDigest,
       operatorSnapshot,
       hydratedWorkflowId,
-      reviewDecisionReason,
-      selectedReviewItemId,
-      selectedReviewTab,
     } = await loadOps()
 
     route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
     hydratedWorkflowId.value = null
-    reviewDecisionReason.value = ''
-    selectedReviewItemId.value = ''
-    selectedReviewTab.value = 'active'
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
@@ -201,19 +187,9 @@ describe('Ops intervene surface', () => {
       review_summary: {
         active_count: 1,
         deferred_count: 0,
-        recent_count: 1,
+        recent_count: 0,
       },
-      recent_reviews: [
-        {
-          item_id: 'review-1',
-          fingerprint: 'fp-review-1',
-          decision: 'resolved',
-          actor: 'dashboard',
-          reason: '방 상태 확인 완료',
-          at: '2026-03-31T10:10:00Z',
-          target_type: 'namespace',
-        },
-      ],
+      recent_reviews: [],
       worker_cards: [],
     } as unknown as OperatorDigest
     operatorActionLog.value = []
@@ -221,15 +197,15 @@ describe('Ops intervene surface', () => {
     render(html`<${Ops} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('즉시 검토 1')
-    expect(container.textContent).toContain('프로젝트 일시정지')
     expect(container.textContent).toContain('QuickIntervene')
     expect(container.textContent).toContain('FlowControlPanel')
-    expect(container.textContent).toContain('실행 작업대')
-    expect(container.textContent).toContain('현재 상태')
-    expect(container.textContent).toContain('마찰 요인')
-    expect(container.textContent).not.toContain('Active Queue')
-    expect(container.textContent).not.toContain('Deferred')
-    expect(container.textContent).not.toContain('Mode')
+    expect(container.textContent).toContain('최근 운영 활동')
+
+    // The placeholder-heavy review queue panel no longer exists regardless of
+    // review_queue contents. review items surface via Governance / Live Judge.
+    expect(container.textContent).not.toContain('방 제어 상태를 재확인하세요')
+    expect(container.textContent).not.toContain('마찰 요인')
+    expect(container.textContent).not.toContain('운영 판단')
+    expect(container.textContent).not.toContain('매뉴얼 처리')
   }, 120000)
 })

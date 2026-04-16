@@ -64,7 +64,13 @@ let resolve_auto_model_id provider_name model_id =
   | "glm" -> resolve_glm_model_id model_id
   | "glm-coding" -> resolve_glm_coding_model_id model_id
   | "gemini" ->
-    if model_id = "auto" then env_or "gemini-2.5-flash" "GEMINI_DEFAULT_MODEL"
+    (* Default bumped from gemini-2.5-flash to gemini-3-flash-preview on
+       2026-04-16 (PR C Cadd follow-up). Capabilities are inherited via
+       the `starts_with "gemini-3"` prefix matcher in
+       oas/lib/llm_provider/capabilities.ml:269 (1M context, tools,
+       parallel tool calls). Override with GEMINI_DEFAULT_MODEL if you
+       still need the 2.5 line. *)
+    if model_id = "auto" then env_or "gemini-3-flash-preview" "GEMINI_DEFAULT_MODEL"
     else model_id
   | "claude" ->
     if model_id = "auto" then env_or "claude-sonnet-4-6-20250514" "ANTHROPIC_DEFAULT_MODEL"

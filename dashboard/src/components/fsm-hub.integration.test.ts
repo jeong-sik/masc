@@ -13,14 +13,15 @@
  * names or returns null where an array is expected, this file breaks
  * before production does.
  *
- * Background: masc-mcp #7315 (keeper wiring) + #7319 (KDP/KCL unstub).
- * See memory/feedback_integration-smoke-test-before-ui-iteration.md.
+ * Background: masc-mcp #7315 (keeper wiring) + #7319 (KDP/KCL unstub)
+ * + #7439 (valibot schema pilot). See API_CONTRACT.md.
  */
 
 import { describe, expect, it } from 'vitest'
 
 import {
-  normalizeKeeperCompositeSnapshot,
+  parseKeeperCompositeSnapshot,
+  CompositeSchemaDriftError,
   type KeeperCompositeSnapshot,
 } from '../api/keeper'
 import type { GateKeepersData } from '../api/gate'
@@ -42,16 +43,11 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   cascade: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: false },
-  recovery: {
-    data_record: false,
-    fsm_condition: false,
-  },
   invariants: {
     phase_turn_alignment: true,
     no_cascade_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
-    recovery_two_store_sync: true,
   },
   is_live: false,
   last_outcome: {
@@ -63,15 +59,13 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   },
 }
 
-/** Legacy server-shaped keeper composite snapshot observed from a live
-    `/api/v1/keepers/:name/composite` response before recovery wiring.
-    The dashboard must normalize this shape instead of crashing at
-    `snapshot.recovery.data_record`. */
-const LEGACY_COMPOSITE_PAYLOAD = {
+/** Real-world payload observed from `keeper_composite_observer.ml`
+    snapshot_to_json — the schema MUST accept this without transformation. */
+const REAL_COMPOSITE_PAYLOAD = {
   correlation_id: '10510-64f79d602ce6c-60c',
   run_id: 'r-1776233076-0',
   ts: 1776235685.221697,
-  phase: 'running',
+  phase: 'Running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
   cascade: { state: 'idle' },
@@ -84,11 +78,8 @@ const LEGACY_COMPOSITE_PAYLOAD = {
     event_priority_monotone: true,
   },
   is_live: false,
-  last_outcome: { turn_id: 353, ended_at: 1776234638.709722 },
+  last_outcome: null,
 }
-
-const LEGACY_NORMALIZED_COMPOSITE_SHAPE: KeeperCompositeSnapshot =
-  normalizeKeeperCompositeSnapshot(LEGACY_COMPOSITE_PAYLOAD)
 
 /** Server-shaped gate keepers response. */
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
@@ -118,13 +109,42 @@ describe('FSM Hub integration — API response shape', () => {
     })
   })
 
-  describe('composite snapshot response', () => {
-    it('normalizes legacy payloads that omit recovery wiring', () => {
-      expect(LEGACY_NORMALIZED_COMPOSITE_SHAPE.recovery).toEqual({
-        data_record: false,
-        fsm_condition: false,
-      })
-      expect(LEGACY_NORMALIZED_COMPOSITE_SHAPE.invariants.recovery_two_store_sync).toBe(true)
+  describe('composite snapshot schema (valibot pilot)', () => {
+    it('accepts the current backend payload shape end-to-end', () => {
+      const parsed = parseKeeperCompositeSnapshot(REAL_COMPOSITE_PAYLOAD)
+      expect(parsed.phase).toBe('Running')
+      expect(parsed.invariants.phase_turn_alignment).toBe(true)
+      expect(parsed.last_outcome).toBeNull()
+    })
+
+    it('rejects payloads missing a required field with a pathful error', () => {
+      const broken = { ...REAL_COMPOSITE_PAYLOAD } as Partial<typeof REAL_COMPOSITE_PAYLOAD>
+      delete broken.invariants
+      expect(() => parseKeeperCompositeSnapshot(broken)).toThrow(
+        CompositeSchemaDriftError,
+      )
+      try {
+        parseKeeperCompositeSnapshot(broken)
+      } catch (err) {
+        expect(err).toBeInstanceOf(CompositeSchemaDriftError)
+        expect((err as CompositeSchemaDriftError).message).toMatch(/invariants/)
+      }
+    })
+
+    it('rejects payloads where a field has the wrong type', () => {
+      const broken = { ...REAL_COMPOSITE_PAYLOAD, is_live: 'true' }
+      expect(() => parseKeeperCompositeSnapshot(broken)).toThrow(
+        CompositeSchemaDriftError,
+      )
+    })
+
+    it('coerces unknown phase values to Stable fallback (forward compat)', () => {
+      const future = { ...REAL_COMPOSITE_PAYLOAD, phase: 'SomeNewPhase' }
+      const parsed = parseKeeperCompositeSnapshot(future)
+      // unknown enum value → fallback, not a hard error. Prevents
+      // backend-added states from bricking the dashboard before the
+      // frontend can ship a matching union member.
+      expect(parsed.phase).toBe('Stable')
     })
 
     it('carries all 5 sub-FSM fields the FsmHub renders', () => {
@@ -146,18 +166,12 @@ describe('FSM Hub integration — API response shape', () => {
       }
     })
 
-    it('all 5 invariants are boolean — InvariantsPanel renders 5/5 or partial', () => {
+    it('all 4 invariants are boolean — InvariantsPanel renders 4/4 or partial', () => {
       const inv = REAL_COMPOSITE_SHAPE.invariants
       expect(typeof inv.phase_turn_alignment).toBe('boolean')
       expect(typeof inv.no_cascade_before_measurement).toBe('boolean')
       expect(typeof inv.compaction_atomicity).toBe('boolean')
       expect(typeof inv.event_priority_monotone).toBe('boolean')
-      expect(typeof inv.recovery_two_store_sync).toBe('boolean')
-    })
-
-    it('recovery.data_record and fsm_condition are boolean — RecoveryStatePanel classifies drift on these', () => {
-      expect(typeof REAL_COMPOSITE_SHAPE.recovery.data_record).toBe('boolean')
-      expect(typeof REAL_COMPOSITE_SHAPE.recovery.fsm_condition).toBe('boolean')
     })
   })
 

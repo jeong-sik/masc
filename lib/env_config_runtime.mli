@@ -164,6 +164,7 @@ end
 
 module Verification : sig
   val fsm_enabled : unit -> bool
+  val timeout_check_interval_seconds : float
 end
 
 module Board : sig

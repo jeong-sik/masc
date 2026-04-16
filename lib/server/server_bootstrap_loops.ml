@@ -268,8 +268,9 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   fork_subsystem "verification_timeout" (fun () ->
+    let interval = Env_config_runtime.Verification.timeout_check_interval_seconds in
     let rec loop () =
-      Eio.Time.sleep clock 60.0;
+      Eio.Time.sleep clock interval;
       Verification_protocol.check_timeouts ~config:state.room_config;
       loop ()
     in

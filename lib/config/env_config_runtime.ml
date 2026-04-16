@@ -372,6 +372,11 @@ module Verification = struct
   (** Enable AwaitingVerification state and cross-agent approval. Default: false. *)
   let fsm_enabled () =
     Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
+
+  (** Interval for verification timeout check fiber (seconds). Default: 60.
+      Issue #7549. *)
+  let timeout_check_interval_seconds =
+    get_float ~default:60.0 "MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC"
 end
 
 (** {1 Slot Scheduling} *)

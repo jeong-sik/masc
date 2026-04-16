@@ -15,7 +15,7 @@ const CTX_COLOR_CRITICAL = '#ef4444'
 const CTX_COLOR_WARN = '#f59e0b'
 const CTX_COLOR_OK = '#22c55e'
 
-function ctxColor(pct: number): string {
+export function ctxColor(pct: number): string {
   return pct > CTX_CRITICAL_PCT ? CTX_COLOR_CRITICAL : pct > CTX_WARN_PCT ? CTX_COLOR_WARN : CTX_COLOR_OK
 }
 
@@ -54,11 +54,11 @@ const CTX_SEGMENT_COLORS: Record<string, string> = {
   unattributed: '#475569',
 }
 
-function ctxSegmentLabel(key: string): string {
+export function ctxSegmentLabel(key: string): string {
   return CTX_SEGMENT_LABELS[key] ?? key.replace(/[_-]+/g, ' ')
 }
 
-function ctxSegmentColor(key: string): string {
+export function ctxSegmentColor(key: string): string {
   return CTX_SEGMENT_COLORS[key] ?? '#94a3b8'
 }
 
@@ -292,7 +292,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   `
 }
 
-function formatDuration(sec: number): string {
+export function formatDuration(sec: number): string {
   if (sec < 60) return `${sec}초`
   if (sec < 3600) return `${Math.floor(sec / 60)}분`
   return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`
@@ -426,12 +426,12 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   `
 }
 
-function formatFingerprint(value: string | null | undefined): string {
+export function formatFingerprint(value: string | null | undefined): string {
   if (!value) return '-'
   return value.length > 16 ? `${value.slice(0, 16)}…` : value
 }
 
-function formatSegmentLabel(key: string): string {
+export function formatSegmentLabel(key: string): string {
   return key.replace(/[_-]+/g, ' ')
 }
 
@@ -681,7 +681,7 @@ const SPARKLINE_H = 40
 const SPARKLINE_PAD = 2
 const MODEL_NAME_MAX_LEN = 20
 
-function miniSparkline(
+export function miniSparkline(
   data: number[],
   maxOverride?: number,
 ): string {

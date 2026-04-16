@@ -7,35 +7,35 @@
 
     @since Phase B+C *)
 
+(* Fail-closed by types: [~assignee] is passed directly by the caller,
+   which already destructures [AwaitingVerification { assignee; _ }]. Removes
+   the prior "unknown" fallback that violated Silent Failure 금지. Issue #7547. *)
 let on_submit_for_verification ~(config : Coord.config)
-    ~(task : Types.task) ~verification_id ~evidence_refs =
+    ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Coord.base_path in
   let criteria = List.map (fun s -> Verification.Custom s)
     (match task.contract with
      | Some c -> c.verify_gate_evidence
      | None -> []) in
-  let worker = match task.task_status with
-    | AwaitingVerification { assignee; _ } -> assignee
-    | _ -> "unknown" in
   let _req =
     Verification.create_request ~base_path ~task_id:task.id
       ~output:(`Assoc [
         ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
         ("task_title", `String task.title);
       ])
-      ~criteria ~worker () in
+      ~criteria ~worker:assignee () in
   let meta_json = `Assoc [
     ("type", `String "verification_request");
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
-    ("worker", `String worker);
+    ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("criteria", `List (List.map Verification.criterion_to_yojson criteria));
   ] in
   let _post = Board_dispatch.create_post
     ~author:"system"
     ~content:(Printf.sprintf "Verification requested for task %s (%s) by %s"
-      task.id task.title worker)
+      task.id task.title assignee)
     ~title:(Printf.sprintf "Verify: %s" task.title)
     ~post_kind:Board.System_post
     ~meta_json
@@ -46,7 +46,7 @@ let on_submit_for_verification ~(config : Coord.config)
     ("type", `String "masc/verification/requested");
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
-    ("worker", `String worker);
+    ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("timestamp", `Float (Time_compat.now ()));
   ]);

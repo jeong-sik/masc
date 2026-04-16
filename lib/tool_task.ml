@@ -746,9 +746,9 @@ let handle_transition ctx args =
                | Some c -> c.verify_gate_evidence
                | None -> [] in
              (match task.task_status with
-              | Types.AwaitingVerification { verification_id; _ } ->
+              | Types.AwaitingVerification { verification_id; assignee; _ } ->
                 Verification_protocol.on_submit_for_verification
-                  ~config:ctx.config ~task ~verification_id ~evidence_refs
+                  ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
               | _ -> ())
            | None -> ())
         | Types.Approve_verification ->

@@ -770,29 +770,12 @@ let transition_task_r config ~agent_name ~task_id ~action
               ) in
               Printf.sprintf "vrf-%s" hex
             in
-            (* Derive deadline + required role from task.contract. Issue #7550.
-               Fallbacks: Reviewer role, no deadline. *)
-            let required_verifier_role =
-              match task.contract with
-              | Some { verification_required_role = Some r; _ } -> r
-              | _ -> Reviewer
-            in
-            let deadline =
-              match task.contract with
-              | Some { verification_deadline_sec = Some sec; _ } ->
-                let dl_ts = Time_compat.now () +. float_of_int sec in
-                let tm = Unix.gmtime dl_ts in
-                Some (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                  (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-                  tm.tm_hour tm.tm_min tm.tm_sec)
-              | _ -> None
-            in
+            (* Deadline and required_role now live on task.contract, read
+               on demand by protocol layer. Issue #7552. *)
             Ok (Types.AwaitingVerification {
               assignee;
               submitted_at = now;
               verification_id;
-              required_verifier_role;
-              deadline;
             }, None)
         | Types.Approve_verification, Types.AwaitingVerification { assignee; verification_id; _ }
           when agent_name <> assignee

@@ -270,9 +270,12 @@ type task_status =
       assignee: string;
       submitted_at: string;
       verification_id: string;
-      required_verifier_role: role;
-      deadline: string option;
     }
+  (* Note: required_verifier_role and deadline were previously inline on this
+     variant. They are now read from task.contract on demand.
+     Issue #7552: variant field-count consistency with siblings (2-3 fields).
+     Trade-off: contract mutation mid-verification now affects deadline/role
+     lookups. This matches how other derived properties behave. *)
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
@@ -310,15 +313,12 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id;
-                           required_verifier_role; deadline } ->
+  | AwaitingVerification { assignee; submitted_at; verification_id } ->
       `Assoc [
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
-        ("required_verifier_role", `String (role_to_string required_verifier_role));
-        ("deadline", Json_util.string_opt_to_json deadline);
       ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
@@ -348,16 +348,12 @@ let task_status_of_yojson json =
         let notes = json |> member "notes" |> to_string_option in
         Ok (Done { assignee; completed_at; notes })
     | "awaiting_verification" ->
+        (* Legacy JSON may have extra required_verifier_role/deadline fields —
+           we ignore them. They're now in task.contract. Issue #7552. *)
         let assignee = json |> member "assignee" |> to_string in
         let submitted_at = json |> member "submitted_at" |> to_string in
         let verification_id = json |> member "verification_id" |> to_string in
-        let required_verifier_role =
-          match json |> member "required_verifier_role" |> to_string_option with
-          | Some s -> role_of_string s
-          | None -> Reviewer in
-        let deadline = json |> member "deadline" |> to_string_option in
-        Ok (AwaitingVerification { assignee; submitted_at; verification_id;
-                                   required_verifier_role; deadline })
+        Ok (AwaitingVerification { assignee; submitted_at; verification_id })
     | "cancelled" ->
         let cancelled_by = json |> member "cancelled_by" |> to_string in
         let cancelled_at = json |> member "cancelled_at" |> to_string in

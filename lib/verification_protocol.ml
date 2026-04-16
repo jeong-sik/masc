@@ -149,34 +149,50 @@ let check_timeouts ~(config : Coord.config) =
       let now = Time_compat.now () in
       List.iter (fun (task : Types.task) ->
         match task.task_status with
-        | Types.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
-          (match Types.parse_iso8601_opt dl with
-           | Some deadline_ts when now > deadline_ts ->
-             let _post = Board_dispatch.create_post
-               ~author:"system"
-               ~content:(Printf.sprintf
-                 "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
-                 task.id task.title assignee dl)
-               ~title:(Printf.sprintf "Timeout: %s" task.title)
-               ~post_kind:Board.System_post
-               ~meta_json:(`Assoc [
-                 ("type", `String "verification_timeout");
-                 ("task_id", `String task.id);
-                 ("verification_id", `String verification_id);
-                 ("assignee", `String assignee);
-                 ("deadline", `String dl);
-               ])
-               ~visibility:Board.Internal
-               ~hearth:"verification"
-               () in
-             Subscriptions.push_event_to_sessions (`Assoc [
-               ("type", `String "masc/verification/timeout");
-               ("task_id", `String task.id);
-               ("verification_id", `String verification_id);
-               ("assignee", `String assignee);
-               ("timestamp", `Float now);
-             ])
-           | _ -> ())
+        | Types.AwaitingVerification { assignee; verification_id; submitted_at } ->
+          (* Deadline is derived from contract + submitted_at.
+             Issue #7552: deadline no longer inlined on variant. *)
+          let deadline_sec = match task.contract with
+            | Some { verification_deadline_sec = Some s; _ } -> Some s
+            | _ -> None
+          in
+          (match deadline_sec with
+           | Some sec ->
+             let submitted_ts = Types.parse_iso8601_opt submitted_at in
+             (match submitted_ts with
+              | Some ts when now > ts +. float_of_int sec ->
+                let dl_iso =
+                  let tm = Unix.gmtime (ts +. float_of_int sec) in
+                  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                    tm.tm_hour tm.tm_min tm.tm_sec
+                in
+                let _post = Board_dispatch.create_post
+                  ~author:"system"
+                  ~content:(Printf.sprintf
+                    "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
+                    task.id task.title assignee dl_iso)
+                  ~title:(Printf.sprintf "Timeout: %s" task.title)
+                  ~post_kind:Board.System_post
+                  ~meta_json:(`Assoc [
+                    ("type", `String "verification_timeout");
+                    ("task_id", `String task.id);
+                    ("verification_id", `String verification_id);
+                    ("assignee", `String assignee);
+                    ("deadline", `String dl_iso);
+                  ])
+                  ~visibility:Board.Internal
+                  ~hearth:"verification"
+                  () in
+                Subscriptions.push_event_to_sessions (`Assoc [
+                  ("type", `String "masc/verification/timeout");
+                  ("task_id", `String task.id);
+                  ("verification_id", `String verification_id);
+                  ("assignee", `String assignee);
+                  ("timestamp", `Float now);
+                ])
+              | _ -> ())
+           | None -> ())
         | _ -> ()
       ) backlog.tasks
     with

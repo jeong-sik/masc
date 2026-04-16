@@ -77,7 +77,11 @@ runs:
         export OPAMSOLVERTIMEOUT=600
         export OPAMYES=1
 
-        opam init --auto-setup --bare --disable-sandboxing --yes
-        opam switch create . --packages="${compiler_pkg}" --yes
+        switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
 
-        echo "${PWD}/_opam/bin" >> "${GITHUB_PATH}"
+        opam init --auto-setup --bare --disable-sandboxing --yes
+        opam switch create "${switch_name}" "${compiler_pkg}" --yes
+
+        switch_prefix="$(opam var prefix --switch="${switch_name}")"
+        echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
+        echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"

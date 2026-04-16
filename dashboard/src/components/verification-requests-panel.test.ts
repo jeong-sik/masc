@@ -59,6 +59,21 @@ vi.mock('./common/status-chip', () => ({
   `,
 }))
 
+vi.mock('./common/filter-chips', () => ({
+  FilterChips: ({ chips, active }: any) => html`
+    <div data-testid="filter-chips">
+      ${chips.map((chip: any) => html`
+        <button
+          key=${chip.key}
+          data-testid="filter-chip-${chip.key}"
+          data-active=${active?.value === chip.key}
+          onClick=${() => { if (active) active.value = chip.key }}
+        >${chip.label}${chip.count != null ? ` (${chip.count})` : ''}</button>
+      `)}
+    </div>
+  `,
+}))
+
 // ── Import after mocks ────────────────────────────────
 
 import { VerificationRequestsPanel } from './verification-requests-panel'
@@ -110,15 +125,14 @@ describe('VerificationRequestsPanel', () => {
     expect(screen.getByTestId('empty-state')).toBeTruthy()
   })
 
-  it('renders filter buttons for all statuses', () => {
+  it('renders FilterChips for all statuses with counts', () => {
     setData([makeRequest()])
     render(html`<${VerificationRequestsPanel} />`)
-    // Filter buttons always present; table content may duplicate labels
-    expect(screen.getAllByText('전체').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('검증 대기').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('승인').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('반려').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('시간 초과').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByTestId('filter-chip-all')).toBeTruthy()
+    expect(screen.getByTestId('filter-chip-pending')).toBeTruthy()
+    expect(screen.getByTestId('filter-chip-approved')).toBeTruthy()
+    expect(screen.getByTestId('filter-chip-rejected')).toBeTruthy()
+    expect(screen.getByTestId('filter-chip-timed_out')).toBeTruthy()
   })
 
   it('shows total count in all filter mode', () => {
@@ -133,9 +147,7 @@ describe('VerificationRequestsPanel', () => {
     setData([pending, approved])
     render(html`<${VerificationRequestsPanel} />`)
 
-    // Filter button is the first element with "검증 대기" text
-    const pendingButtons = screen.getAllByText('검증 대기')
-    fireEvent.click(pendingButtons[0]!)
+    fireEvent.click(screen.getByTestId('filter-chip-pending'))
     const card = screen.getByTestId('card')
     expect(card.innerHTML).toContain('req-p')
     expect(card.innerHTML).not.toContain('req-a')
@@ -148,8 +160,7 @@ describe('VerificationRequestsPanel', () => {
     setData([pending, approved])
     render(html`<${VerificationRequestsPanel} />`)
 
-    const approvedButtons = screen.getAllByText('승인')
-    fireEvent.click(approvedButtons[0]!)
+    fireEvent.click(screen.getByTestId('filter-chip-approved'))
     const card = screen.getByTestId('card')
     expect(card.innerHTML).toContain('req-a')
     expect(card.innerHTML).not.toContain('req-p')
@@ -159,8 +170,7 @@ describe('VerificationRequestsPanel', () => {
     setData([makeRequest({ status: 'approved' })])
     render(html`<${VerificationRequestsPanel} />`)
 
-    const rejectedButtons = screen.getAllByText('반려')
-    fireEvent.click(rejectedButtons[0]!)
+    fireEvent.click(screen.getByTestId('filter-chip-rejected'))
     expect(screen.getByTestId('empty-state')).toBeTruthy()
   })
 
@@ -168,5 +178,18 @@ describe('VerificationRequestsPanel', () => {
     mockState.value = { loading: false, error: 'Network error', data: null }
     render(html`<${VerificationRequestsPanel} />`)
     expect(screen.getByTestId('error-state')).toBeTruthy()
+  })
+
+  it('shows per-status counts in FilterChips', () => {
+    const pending = makeRequest({ request_id: 'req-p', status: 'pending' })
+    const approved = makeRequest({ request_id: 'req-a', status: 'approved' })
+    const rejected = makeRequest({ request_id: 'req-r', status: 'rejected' })
+    setData([pending, approved, rejected])
+    render(html`<${VerificationRequestsPanel} />`)
+
+    const allChip = screen.getByTestId('filter-chip-all')
+    const pendingChip = screen.getByTestId('filter-chip-pending')
+    expect(allChip.textContent).toContain('3')
+    expect(pendingChip.textContent).toContain('1')
   })
 })

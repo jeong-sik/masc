@@ -22,6 +22,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
+import { FilterChips } from './common/filter-chips'
 import {
   createManagedAsyncResource,
   type ManagedAsyncResource,
@@ -289,18 +290,18 @@ export function VerificationRequestsPanel() {
           : null}
       </div>
 
-      <div class="flex items-center gap-1.5 flex-wrap">
-        ${FILTER_OPTIONS.map((opt) => html`
-          <button
-            class=${`rounded px-2 py-0.5 text-[11px] border transition-colors ${
-              statusFilter.value === opt.value
-                ? 'bg-[var(--text-strong)] text-[var(--bg-0)] border-[var(--text-strong)]'
-                : 'bg-[var(--bg-0)] text-[var(--text-muted)] border-[var(--card-border)] hover:text-[var(--text-body)]'
-            }`}
-            onClick=${() => { statusFilter.value = opt.value }}
-          >${opt.label}</button>
-        `)}
-      </div>
+      <${FilterChips}
+        chips=${FILTER_OPTIONS.map((opt) => ({
+          key: opt.value,
+          label: opt.label,
+          count: data
+            ? opt.value === 'all'
+              ? data.total
+              : data.requests.filter((r) => r.status === opt.value).length
+            : null,
+        }))}
+        active=${statusFilter}
+      />
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
 

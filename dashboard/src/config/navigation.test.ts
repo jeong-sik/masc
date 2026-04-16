@@ -43,6 +43,7 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
+    expect(labelFor('observatory')).toBe('관찰소 (beta)')
     expect(labelFor('fleet-health')).toBe('플릿 텔레메트리')
     expect(labelFor('runtime')).toBe('런타임')
     expect(labelFor('agents')).toBe('런타임 디렉터리')
@@ -61,7 +62,9 @@ describe('monitoring navigation labels', () => {
 
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
+    expect(ids).toContain('observatory')
     // Legacy sections removed in Phase 1
+    expect(ids).not.toContain('activity')
     expect(ids).not.toContain('tool-quality')
     expect(ids).not.toContain('fleet')
     expect(ids).not.toContain('telemetry')
@@ -94,11 +97,37 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.section).toBe('fleet-health')
     expect(result.view).toBe('event-log')
   })
+
+  it('redirects legacy activity URL to observatory and upgrades ag_range to range', () => {
+    const result = normalizeRouteParams('monitoring', {
+      section: 'activity',
+      ag_range: '6h',
+      keeper: 'nova',
+    })
+    expect(result.section).toBe('observatory')
+    expect(result.range).toBe('6h')
+    expect(result.ag_range).toBeUndefined()
+    expect(result.keeper).toBe('nova')
+  })
+
+  it('drops unsupported legacy all-range when redirecting activity to observatory', () => {
+    const result = normalizeRouteParams('monitoring', {
+      section: 'activity',
+      ag_range: 'all',
+    })
+    expect(result.section).toBe('observatory')
+    expect(result.range).toBeUndefined()
+    expect(result.ag_range).toBeUndefined()
+  })
 })
 
 describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
   it('exposes the sessions → agents redirect as reference contract', () => {
     expect(SECTION_REDIRECTS['monitoring:sessions']).toEqual({ section: 'agents' })
+  })
+
+  it('exposes the activity → observatory redirect as reference contract', () => {
+    expect(SECTION_REDIRECTS['monitoring:activity']).toEqual({ section: 'observatory' })
   })
 
   it('is the single source of truth for legacy section remaps', () => {
@@ -158,6 +187,17 @@ describe('normalizeRouteParams query param preservation', () => {
     const result = normalizeRouteParams('monitoring', { section: 'sessions', session_id: 's-9' })
     expect(result.section).toBe('agents')
     expect(result.session_id).toBe('s-9')
+  })
+
+  it('preserves keeper filter through the activity → observatory redirect', () => {
+    const result = normalizeRouteParams('monitoring', {
+      section: 'activity',
+      keeper: 'nova',
+      ag_range: '24h',
+    })
+    expect(result.section).toBe('observatory')
+    expect(result.keeper).toBe('nova')
+    expect(result.range).toBe('24h')
   })
 })
 

@@ -81,6 +81,21 @@ let test_sessions_surface_stays_main () =
       check bool "meets_main_gate" true
         Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool)
 
+let test_activity_surface_is_legacy_hidden () =
+  let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.activity" () in
+  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
+  match find_surface surfaces "monitoring.activity" with
+  | None -> fail "monitoring.activity missing"
+  | Some surface ->
+      check string "exposure_status" "legacy"
+        Yojson.Safe.Util.(surface |> member "exposure_status" |> to_string);
+      check bool "hidden_from_nav" true
+        Yojson.Safe.Util.(surface |> member "hidden_from_nav" |> to_bool);
+      check bool "meets_main_gate" false
+        Yojson.Safe.Util.(surface |> member "meets_main_gate" |> to_bool);
+      check bool "route_hash is null" true
+        Yojson.Safe.Util.(surface |> member "route_hash" = `Null)
+
 let test_visible_surfaces_are_listed () =
   let json = Dashboard_surface_readiness.json () in
   let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
@@ -88,6 +103,7 @@ let test_visible_surfaces_are_listed () =
     [
       "overview";
       "monitoring.sessions";
+      "monitoring.observatory";
       "monitoring.agents";
       "monitoring.activity";
       "command.intervene";
@@ -131,6 +147,8 @@ let () =
           test_case "script live spotchecks stay scripts" `Quick
             test_live_spotcheck_keeps_script_values_as_scripts;
           test_case "sessions stays main" `Quick test_sessions_surface_stays_main;
+          test_case "activity surface is legacy hidden" `Quick
+            test_activity_surface_is_legacy_hidden;
           test_case "visible surfaces are listed" `Quick
             test_visible_surfaces_are_listed;
           test_case "config stays lab" `Quick test_config_surface_stays_lab;

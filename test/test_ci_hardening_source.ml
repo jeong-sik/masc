@@ -340,9 +340,9 @@ let test_mission_briefing_memory_guard_contracts () =
        "refreshOperatorSnapshot({ force: true })")
 
 let test_activity_surface_contracts () =
-  check bool "activity tab exposes activity graph label" true
-    (file_contains_pattern "dashboard/src/components/activity.ts"
-       "활동 그래프");
+  check bool "observatory absorbs activity-derived panels" true
+    (file_contains_pattern "dashboard/src/components/observatory/observatory.ts"
+       "ObservatoryActivityPanels");
   check bool "dashboard fetches canonical activity graph route" true
     (file_contains_pattern "dashboard/src/api/actions.ts"
        "/api/v1/activity/graph");

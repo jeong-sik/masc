@@ -1,7 +1,7 @@
 // Activity graph surface — runtime event graph + timeline
 
 import { html } from 'htm/preact'
-import { computed, signal } from '@preact/signals'
+import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { createAsyncResource } from '../lib/async-state'
 import { Card } from './common/card'
@@ -26,69 +26,35 @@ import {
 } from './activity-graph-groups'
 import { fetchActivityGraph } from '../api'
 import { registerActivityRefresh } from '../sse-store'
-import { route, navigate, hashForRoute } from '../router'
+import { hashForRoute } from '../router'
 import {
-  TIME_RANGE_PRESETS,
-  timeRangeShortLabel,
+  currentTimeRangeFilter,
+  timeRangeLabel,
+  type TimeRangePreset,
 } from '../observatory-filter-store'
 import type { ActivityGraphResponse, ActivityGraphNode, ActionTimelineGroup } from '../types'
 
 const graphResource = createAsyncResource<ActivityGraphResponse | null>()
+const DEFAULT_ACTIVITY_RANGE: TimeRangePreset = '1h'
 
-// URL-synced time range: reads ?ag_range= param, defaults to 'all'
-const VALID_AG_RANGES = new Set([...TIME_RANGE_PRESETS.filter(p => p !== '5m'), 'all'])
-export const selectedTimeRange = computed(() => {
-  const v = route.value.params.ag_range
-  return v && VALID_AG_RANGES.has(v) ? v : 'all'
-})
-
-function setActivityTimeRange(value: string): void {
-  const next: Record<string, string> = { ...route.value.params }
-  if (value === 'all') {
-    delete next.ag_range
-  } else {
-    next.ag_range = value
-  }
-  navigate(route.value.tab, next)
-}
 const actionFilter = signal<ActionTimelineFilter>('all')
 const showLifecycle = signal(false)
 const expandedActionGroups = signal<Set<string>>(new Set())
-
-// Reuse shared presets + Activity Graph-specific "all" option
-const TIME_RANGES: Array<{ value: string; label: string }> = [
-  ...TIME_RANGE_PRESETS.filter(p => p !== '5m').map(p => ({ value: p, label: timeRangeShortLabel(p) })),
-  { value: 'all', label: '전체' },
-]
 
 export function visibleNamespaceLabel(namespaceId: string | null | undefined): string | null {
   const value = typeof namespaceId === 'string' ? namespaceId.trim() : ''
   if (!value || value === 'default') return null
   return value
 }
-function loadGraph() {
-  return graphResource.load(() => {
-    const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
-    return fetchActivityGraph(since)
-  })
+
+function activityRange(): TimeRangePreset {
+  return currentTimeRangeFilter() ?? DEFAULT_ACTIVITY_RANGE
 }
 
-function TimeRangeSelector() {
-  const current = selectedTimeRange.value
-  return html`
-    <div class="flex gap-1.5 mb-3">
-      ${TIME_RANGES.map(({ value, label }) => html`
-        <button type="button" key=${value}
-          class="px-3 py-1 text-xs rounded-full border cursor-pointer transition-all duration-150 ${
-            current === value
-              ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
-              : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'
-          }"
-          onClick=${() => { setActivityTimeRange(value); loadGraph() }}
-        >${label}</button>
-      `)}
-    </div>
-  `
+function loadGraph() {
+  return graphResource.load(() => {
+    return fetchActivityGraph(activityRange())
+  })
 }
 
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
@@ -234,8 +200,8 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                     ${group.actor ? html`
                       <a
                         class="rounded-lg border border-[var(--accent-20)] bg-[var(--accent-soft)] px-3 py-1.5 text-[11px] text-[var(--accent)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
-                        href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: selectedTimeRange.value !== 'all' ? selectedTimeRange.value : '1h' })}
-                      >관찰소에서 보기</a>
+                        href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: activityRange() })}
+                      >이 keeper로 보기</a>
                     ` : null}
                     <button
                       type="button"
@@ -318,10 +284,10 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
 function EmptyActivityGraph() {
   return html`
     <div class="flex flex-col gap-5">
-      <${Card} title="활동 그래프" class="section mb-4" testId="activity_graph.graph">
+      <${Card} title="활동 분석" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
-          <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
-          <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
+          <h2 class="monitor-headline">활동 분석 데이터가 비어 있습니다</h2>
+          <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 타임라인과 파생 분석을 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
         </div>
         <${EmptyState} message="아직 claim, broadcast, session runtime, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다." compact />
       <//>
@@ -331,15 +297,103 @@ function EmptyActivityGraph() {
 
 export { loadGraph as refreshActivityGraph }
 
-export function ActivityGraphSurface() {
+function useActivityGraphRefresh() {
   useEffect(() => {
     void loadGraph()
     return registerActivityRefresh(() => {
       void loadGraph()
     })
   }, [])
+}
 
-  const s = graphResource.state.value
+function useActivityGraphState() {
+  useActivityGraphRefresh()
+  return graphResource.state.value
+}
+
+function ActivityTimelinePanel({ data }: { data: ActivityGraphResponse }) {
+  return html`
+    <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
+      <div class="max-h-[360px] overflow-y-auto">
+        <${ActionTimeline} data=${data} />
+      </div>
+    <//>
+  `
+}
+
+function DerivedActivityPanels({ data }: { data: ActivityGraphResponse }) {
+  return html`
+    <div class="flex flex-col gap-5">
+      <${Card} title="실행 이벤트 관계 그래프" class="section mb-4" testId="activity_graph.graph">
+        <div class="mb-4">
+          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 관찰소의 시간 범위를 따라 파생 분석을 갱신합니다.</p>
+        </div>
+        <${StatsRow} data=${data} />
+        <${GraphView} data=${data} />
+        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[13px]">
+          <span>생성 시각: ${data.generated_at}</span>
+          <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
+          <span>필터: ${timeRangeLabel(activityRange())}</span>
+          ${(() => { const ns = visibleNamespaceLabel(data.window.room_id); return ns
+            ? html`<span>namespace: ${ns}</span>`
+            : null; })()}
+        </div>
+      <//>
+
+      <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
+        <div class="mb-3">
+          <p class="monitor-subheadline">의미적 중요도 기준. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
+        </div>
+        <${NodeLeaderboard} nodes=${data.nodes} />
+      <//>
+
+      ${data.timeline.length > 0 ? html`
+        <${ActivityHeatmap} data=${data} />
+      ` : null}
+    </div>
+  `
+}
+
+export function ObservatoryActivityPanels() {
+  const state = useActivityGraphState()
+  const data = state.status === 'loaded' ? state.data : undefined
+  const since = activityRange()
+
+  return html`
+    <div class="flex flex-col gap-5">
+      ${state.status === 'loading' || state.status === 'idle'
+        ? html`<${LoadingState}>활동 분석 패널 불러오는 중...<//>`
+        : state.status === 'error'
+          ? html`
+              <${Card} title="활동 분석" class="section" testId="activity_graph.error">
+                <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.message} compact />
+                <${ActionButton} variant="ghost" onClick=${loadGraph}>다시 시도<//>
+              <//>
+            `
+          : !data || (data.stats.event_count ?? 0) === 0
+            ? html`<${EmptyActivityGraph} />`
+            : html`<${ActivityTimelinePanel} data=${data} />`}
+
+      <${CollapsibleSection} title="에이전트 타임라인">
+        <${ActivitySwimlane} since=${since} />
+      <//>
+
+      <${CollapsibleSection} title="키퍼 상태 전환">
+        <${KeeperPhaseTimeline} />
+      <//>
+
+      ${state.status === 'loaded' && data && (data.stats.event_count ?? 0) > 0 ? html`
+        <${CollapsibleSection} title="파생 분석">
+          <${DerivedActivityPanels} data=${data} />
+        <//>
+      ` : null}
+    </div>
+  `
+}
+
+export function ActivityGraphSurface() {
+  const s = useActivityGraphState()
+
   const data = s.status === 'loaded' ? s.data : undefined
 
   if (s.status === 'loading' || s.status === 'idle') {
@@ -365,43 +419,12 @@ export function ActivityGraphSurface() {
     return html`<${EmptyActivityGraph} />`
   }
 
-  const since = selectedTimeRange.value !== 'all' ? selectedTimeRange.value : undefined
+  const since = activityRange()
 
   return html`
     <div class="flex flex-col gap-5">
-
-      <${Card} title="활동 그래프" class="section mb-4" testId="activity_graph.graph">
-        <div class="mb-4">
-          <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
-          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. Live 패널은 원본 스트림이고, 이 영역은 필터링된 이력과 분석에 집중합니다.</p>
-        </div>
-        <${TimeRangeSelector} />
-        <${StatsRow} data=${data} />
-        <${GraphView} data=${data} />
-        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--text-muted)] text-[13px]">
-          <span>생성 시각: ${data.generated_at}</span>
-          <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
-          ${selectedTimeRange.value !== 'all' ? html`<span>필터: ${TIME_RANGES.find(r => r.value === selectedTimeRange.value)?.label}</span>` : null}
-          ${(() => { const ns = visibleNamespaceLabel(data.window.room_id); return ns
-            ? html`<span>namespace: ${ns}</span>`
-            : null; })()}
-        </div>
-      <//>
-
-      <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-4">
-        <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
-          <div class="mb-3">
-            <p class="monitor-subheadline">의미적 중요도 기준. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
-          </div>
-          <${NodeLeaderboard} nodes=${data.nodes} />
-        <//>
-
-        <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
-          <div class="max-h-[360px] overflow-y-auto">
-            <${ActionTimeline} data=${data} />
-          </div>
-        <//>
-      </div>
+      <${ActivityTimelinePanel} data=${data} />
+      <${DerivedActivityPanels} data=${data} />
 
       <${CollapsibleSection} title="에이전트 타임라인">
         <${ActivitySwimlane} since=${since} />
@@ -410,12 +433,6 @@ export function ActivityGraphSurface() {
       <${CollapsibleSection} title="키퍼 상태 전환">
         <${KeeperPhaseTimeline} />
       <//>
-
-      ${data.timeline.length > 0 ? html`
-        <${CollapsibleSection} title="활동 히트맵">
-          <${ActivityHeatmap} data=${data} />
-        <//>
-      ` : null}
     </div>
   `
 }

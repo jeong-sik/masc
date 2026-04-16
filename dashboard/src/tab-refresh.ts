@@ -9,6 +9,11 @@ async function refreshActivityGraphSurface(): Promise<void> {
   await refreshActivityGraph()
 }
 
+async function refreshObservatoryPanel(): Promise<void> {
+  const { refreshObservatorySurface } = await import('./components/observatory/observatory')
+  refreshObservatorySurface()
+}
+
 async function refreshAutoresearchLabSurface(): Promise<void> {
   const { refreshAutoresearchSurface } = await import('./components/autoresearch')
   await refreshAutoresearchSurface()
@@ -39,6 +44,7 @@ export type RefreshTask =
   | 'namespaceTruth'
   | 'missionSnapshot'
   | 'execution'
+  | 'observatory'
   | 'activityGraph'
   | 'board'
   | 'goals'
@@ -54,8 +60,8 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'overview':
       return ['shell', 'namespaceTruth', 'missionSnapshot']
     case 'monitoring':
-      if (routeState.params.section === 'activity') {
-        return ['execution', 'activityGraph']
+      if (routeState.params.section === 'observatory') {
+        return ['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph']
       }
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
@@ -101,6 +107,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   namespaceTruth: () => { requestNamespaceTruth() },
   missionSnapshot: () => { void refreshMissionSnapshot() },
   execution: () => { void refreshExecution({ force: true }) },
+  observatory: () => { void refreshObservatoryPanel() },
   activityGraph: () => { void refreshActivityGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },

@@ -57,9 +57,10 @@ let parse_since_ms (raw : string) : int option =
   let len = String.length raw in
   if len < 2 then None
   else
-    let suffix = raw.[len - 1] in
-    let num_str = String.sub raw 0 (len - 1) in
-    match (int_of_string_opt num_str, suffix) with
+  let suffix = raw.[len - 1] in
+  let num_str = String.sub raw 0 (len - 1) in
+  match (int_of_string_opt num_str, suffix) with
+    | Some n, 'm' -> Some (n * 60 * 1000)
     | Some n, 'h' -> Some (n * 3600 * 1000)
     | Some n, 'd' -> Some (n * 24 * 3600 * 1000)
     | _ -> None

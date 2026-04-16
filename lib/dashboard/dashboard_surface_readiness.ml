@@ -107,6 +107,25 @@ let all_entries =
         };
     };
     {
+      id = "monitoring.observatory";
+      label = "관찰소";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "관찰소는 라이브 밴드와 activity-derived investigation 패널을 통합한 canonical monitoring surface입니다.";
+      route_hash = Some "#monitoring?section=observatory";
+      refs =
+        {
+          fixture_harness = Some "dune exec ./test/test_activity_graph.exe";
+          live_spotcheck = Some "/api/v1/activity/graph";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = None;
+        };
+    };
+    {
       id = "monitoring.agents";
       label = "에이전트 & 키퍼";
       exposure_status = "main";
@@ -127,11 +146,12 @@ let all_entries =
     {
       id = "monitoring.activity";
       label = "활동 그래프";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale = "실시간 활동은 activity graph test와 SSE/log 경로가 있어 메인에서 유지합니다.";
-      route_hash = Some "#monitoring?section=activity";
+      exposure_status = "legacy";
+      hidden_from_nav = true;
+      meets_main_gate = false;
+      rationale =
+        "활동 그래프 메뉴는 retire 되었고, 레거시 deep link는 관찰소로 redirect 됩니다.";
+      route_hash = None;
       refs =
         {
           fixture_harness = Some "dune exec ./test/test_activity_graph.exe";

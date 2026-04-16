@@ -13,7 +13,7 @@
 //   - SSE live streaming (current: polling per filter change)
 
 import { html } from 'htm/preact'
-import { useSignal } from '@preact/signals'
+import { signal, useSignal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import {
   currentKeeperFilter,
@@ -31,6 +31,7 @@ import {
   type TelemetryEntry,
   type ToolQualityHourlyPoint,
 } from '../../api/dashboard'
+import { registerActivityRefresh } from '../../sse-store'
 import { entryTimestampMs } from './observatory-utils'
 import { EventTrack } from './event-track'
 import { MetricTrack } from './metric-track'
@@ -39,8 +40,11 @@ import { CrossSignalReadout } from './cross-signal-readout'
 import { DetailPane } from './detail-pane'
 import { cursorPosition } from './cursor-store'
 import { LoadingState } from '../common/feedback-state'
+import { Live } from '../live'
+import { ObservatoryActivityPanels } from '../activity-graph'
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
+const observatoryRefreshVersion = signal(0)
 
 // --- Observatory state ---
 
@@ -131,6 +135,10 @@ function RangeSelector() {
 
 const LIVE_INTERVAL_MS = 30_000
 
+export function refreshObservatorySurface(): void {
+  observatoryRefreshVersion.value += 1
+}
+
 export function Observatory() {
   const state = useSignal<ObservatoryData>(emptyData())
   const liveMode = useSignal(false)
@@ -143,6 +151,10 @@ export function Observatory() {
     const id = setInterval(() => { refreshTick.value++ }, LIVE_INTERVAL_MS)
     return () => clearInterval(id)
   }, [liveMode.value])
+
+  useEffect(() => registerActivityRefresh(() => {
+    refreshObservatorySurface()
+  }), [])
 
   useEffect(() => {
     const keeper = currentKeeperFilter() ?? undefined
@@ -200,16 +212,15 @@ export function Observatory() {
     })
 
     return () => { controller.abort() }
-  }, [currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value])
+  }, [currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value, observatoryRefreshVersion.value])
 
   const data = state.value
-
-  if (data.loading && data.events.length === 0 && data.hourlyTrend.length === 0) {
-    return html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
-  }
+  const hasTrackData = data.events.length > 0 || data.hourlyTrend.length > 0
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="flex flex-col gap-5">
+      <${Live} />
+
       <div class="flex items-center justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-[13px] font-semibold text-text-strong">관찰소 (Observatory)</h3>
@@ -253,37 +264,43 @@ export function Observatory() {
         </div>
       ` : null}
 
-      <div class="flex flex-col gap-2 rounded-xl border border-card-border bg-card/30 p-4">
-        <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
-        <${EventTrack}
-          events=${data.events}
-          windowStart=${data.windowStart}
-          windowEnd=${data.windowEnd}
-        />
-        <${ToolCallTrack}
-          events=${data.events}
-          windowStart=${data.windowStart}
-          windowEnd=${data.windowEnd}
-        />
-        <${MetricTrack}
-          points=${data.hourlyTrend}
-          windowStart=${data.windowStart}
-          windowEnd=${data.windowEnd}
-        />
-        ${cursorPosition.value === null ? html`
-          <div class="mt-1 text-[10px] text-text-dim italic">
-            hover any track for cross-signal readout
-          </div>
-        ` : null}
-      </div>
+      ${!hasTrackData && data.loading
+        ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
+        : html`
+            <div class="flex flex-col gap-2 rounded-xl border border-card-border bg-card/30 p-4">
+              <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
+              <${EventTrack}
+                events=${data.events}
+                windowStart=${data.windowStart}
+                windowEnd=${data.windowEnd}
+              />
+              <${ToolCallTrack}
+                events=${data.events}
+                windowStart=${data.windowStart}
+                windowEnd=${data.windowEnd}
+              />
+              <${MetricTrack}
+                points=${data.hourlyTrend}
+                windowStart=${data.windowStart}
+                windowEnd=${data.windowEnd}
+              />
+              ${cursorPosition.value === null ? html`
+                <div class="mt-1 text-[10px] text-text-dim italic">
+                  hover any track for cross-signal readout
+                </div>
+              ` : null}
+            </div>
 
-      <${CrossSignalReadout}
-        events=${data.events}
-        hourlyTrend=${data.hourlyTrend}
-        eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
-      />
+            <${CrossSignalReadout}
+              events=${data.events}
+              hourlyTrend=${data.hourlyTrend}
+              eventWindowMs=${Math.max(30_000, (data.windowEnd - data.windowStart) * 0.05)}
+            />
 
-      <${DetailPane} />
+            <${DetailPane} />
+          `}
+
+      <${ObservatoryActivityPanels} />
 
       <p class="text-[10px] text-text-dim italic">
         Phase 3a — anomaly highlight. 추가 track(메모리, autoresearch)과 compare mode는 이후 단계에서.

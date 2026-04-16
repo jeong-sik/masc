@@ -32,7 +32,17 @@ vi.mock('./components/server-config', () => ({
   refreshServerConfig: vi.fn(),
 }))
 
+vi.mock('./components/observatory/observatory', () => ({
+  refreshObservatorySurface: vi.fn(),
+}))
+
+vi.mock('./components/activity-graph', () => ({
+  refreshActivityGraph: vi.fn(),
+}))
+
 import { refreshFeatureHealth } from './components/feature-health'
+import { refreshActivityGraph } from './components/activity-graph'
+import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 
@@ -56,8 +66,8 @@ describe('refreshPlanForRoute', () => {
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
-      params: { section: 'activity' },
-    })).toEqual(['execution', 'activityGraph'])
+      params: { section: 'observatory' },
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph'])
   })
 
   it('keeps the consolidated command surface hydrated for ops queue deep links', () => {
@@ -108,6 +118,18 @@ describe('refreshPlanForRoute', () => {
     await waitFor(() => {
       expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
       expect(refreshServerConfig).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('refreshes observatory by triggering both the track fetch and activity-derived panels', async () => {
+    refreshForRoute({
+      tab: 'monitoring',
+      params: { section: 'observatory' },
+    })
+
+    await waitFor(() => {
+      expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
+      expect(refreshActivityGraph).toHaveBeenCalledTimes(1)
     })
   })
 })

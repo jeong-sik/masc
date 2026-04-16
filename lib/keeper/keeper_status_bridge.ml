@@ -134,6 +134,19 @@ let runtime_blocker_surface_of_reason (reason : string) =
   let trimmed = String.trim reason in
   if trimmed = "" then
     None
+  else if
+    String_util.contains_substring_ci trimmed
+      "turn outcome ambiguous after committed mutating tool call(s)"
+  then
+    Some
+      {
+        blocker_class =
+          (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+           then "ambiguous_post_commit_timeout"
+           else "ambiguous_post_commit_failure");
+        summary = trimmed;
+        continue_gate = true;
+      }
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
   then
     Some

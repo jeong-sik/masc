@@ -1710,6 +1710,7 @@ let run_turn
            ~initial_messages:history_messages
            ~hooks
            ~context_reducer:reducer
+           ~summarizer:Keeper_summarizer.keeper_summarizer
            ~memory
              (* Keepers use turn-level retry for transient errors but benefit
                from OAS per-call retry for validation errors (malformed tool

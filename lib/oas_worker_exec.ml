@@ -53,6 +53,11 @@ type config = {
   approval : Oas.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
+  summarizer : (Oas.Types.message list -> string) option;
+      (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
+          Emergency-phase compaction. Defaults to OAS's extractive
+          default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
+          to scrub [STATE] blocks before the 100-char truncation. *)
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -88,6 +93,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     approval = None;
     exit_condition = None;
     exit_condition_result = None;
+    summarizer = None;
   }
 
 type run_result = {
@@ -320,6 +326,10 @@ let build
   in
   let builder = match config.exit_condition with
     | Some cond -> Oas.Builder.with_exit_condition cond builder
+    | None -> builder
+  in
+  let builder = match config.summarizer with
+    | Some s -> Oas.Builder.with_summarizer s builder
     | None -> builder
   in
   Oas.Builder.build_safe builder

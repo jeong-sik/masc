@@ -121,6 +121,7 @@ val run_named :
   ?approval:Oas.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
   ?exit_condition_result:(int -> stop_reason * string option) ->
+  ?summarizer:(Oas.Types.message list -> string) ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->

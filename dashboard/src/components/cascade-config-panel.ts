@@ -9,6 +9,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
 import {
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
@@ -32,6 +33,7 @@ import {
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { TextInput } from './common/input'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
@@ -57,12 +59,12 @@ async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   })
 }
 
-function fmtPct(value: number): string {
+export function fmtPct(value: number): string {
   if (Number.isNaN(value)) return '--'
   return `${(value * 100).toFixed(1)}%`
 }
 
-function candidateTone(c: CascadeCandidate): string {
+export function candidateTone(c: CascadeCandidate): string {
   if (c.in_cooldown) return 'bad'
   if (c.effective_weight === 0) return 'bad'
   if (c.success_rate < 0.5) return 'bad'
@@ -70,7 +72,7 @@ function candidateTone(c: CascadeCandidate): string {
   return 'ok'
 }
 
-function sourceLabel(source: CascadeProfile['source']): string {
+export function sourceLabel(source: CascadeProfile['source']): string {
   switch (source) {
     case 'named': return 'named'
     case 'default_fallback': return 'default'
@@ -78,7 +80,7 @@ function sourceLabel(source: CascadeProfile['source']): string {
   }
 }
 
-function sourceTone(source: CascadeProfile['source']): string {
+export function sourceTone(source: CascadeProfile['source']): string {
   switch (source) {
     case 'named': return 'ok'
     case 'default_fallback': return 'warn'
@@ -159,7 +161,7 @@ function KeeperMapping({ config }: { config: CascadeConfigResponse }) {
   `
 }
 
-function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
+export function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
   if (p.in_cooldown) return 'bad'
   if (p.success_rate < 0.7) return 'bad'
   if (p.success_rate < 0.9) return 'warn'
@@ -210,7 +212,7 @@ function HealthTable({ health }: { health: CascadeHealthResponse }) {
   `
 }
 
-function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' {
+export function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' {
   if (entry.total === 0) return 'bad'
   if (entry.available === 0) return 'warn'
   return 'ok'
@@ -226,7 +228,7 @@ function fmtRelativeTime(tsSec: number): string {
   return `${Math.floor(deltaSec / 86400)}일 전`
 }
 
-function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {
+export function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {
   switch (kind) {
     case 'acquired': return 'ok'
     case 'released': return 'neutral'
@@ -234,7 +236,7 @@ function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad'
   }
 }
 
-function eventKindLabel(kind: CascadeCapacityEventKind): string {
+export function eventKindLabel(kind: CascadeCapacityEventKind): string {
   switch (kind) {
     case 'acquired': return 'acquired'
     case 'released': return 'released'
@@ -242,7 +244,7 @@ function eventKindLabel(kind: CascadeCapacityEventKind): string {
   }
 }
 
-function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
+export function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
   switch (kind) {
     case 'cli': return 'CLI'
     case 'ollama': return 'Ollama'
@@ -250,7 +252,7 @@ function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
   }
 }
 
-function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad' {
+export function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad' {
   switch (k) {
     case 'ordered': return 'ok'
     case 'filtered_empty': return 'warn'
@@ -258,7 +260,7 @@ function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad' {
   }
 }
 
-function traceKindLabel(k: CascadeStrategyTraceKind): string {
+export function traceKindLabel(k: CascadeStrategyTraceKind): string {
   switch (k) {
     case 'ordered': return '정렬'
     case 'filtered_empty': return '전부 차단'
@@ -266,13 +268,34 @@ function traceKindLabel(k: CascadeStrategyTraceKind): string {
   }
 }
 
+export function traceEventMatchesSearch(
+  e: CascadeStrategyTraceEvent,
+  query: string,
+): boolean {
+  const q = query.toLowerCase()
+  if (e.cascade_name.toLowerCase().includes(q)) return true
+  if (e.strategy.toLowerCase().includes(q)) return true
+  if (e.kind.toLowerCase().includes(q)) return true
+  if (traceKindLabel(e.kind).toLowerCase().includes(q)) return true
+  if (String(e.cycle).includes(q)) return true
+  if (String(e.candidates_in).includes(q)) return true
+  if (String(e.candidates_out).includes(q)) return true
+  return false
+}
+
 function StrategyTraceTable({
   trace,
-}: { trace: CascadeStrategyTraceResponse }) {
+  searchQuery,
+}: { trace: CascadeStrategyTraceResponse; searchQuery: { value: string } }) {
   if (trace.events.length === 0) {
     return html`<${EmptyState}>최근 strategy decision 이 없습니다. (cascade 호출이 아직 발생하지 않음)<//>`
   }
+  const query = searchQuery.value.trim().toLowerCase()
+  const filtered = query
+    ? trace.events.filter(e => traceEventMatchesSearch(e, query))
+    : trace.events
   return html`
+    ${query ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${filtered.length}/${trace.events.length}건</div>` : null}
     <table class="w-full text-xs">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
@@ -286,7 +309,7 @@ function StrategyTraceTable({
         </tr>
       </thead>
       <tbody>
-        ${trace.events.map((e: CascadeStrategyTraceEvent) => {
+        ${filtered.map((e: CascadeStrategyTraceEvent) => {
           const tone = traceKindTone(e.kind)
           return html`
           <tr class="border-b border-[var(--card-border)] last:border-b-0">
@@ -371,6 +394,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
 }
 
 export function CascadeConfigPanel() {
+  const traceSearch = useSignal('')
   const resourceRef = useRef<ManagedAsyncResource<CascadeData> | null>(null)
   if (resourceRef.current === null) {
     resourceRef.current = createManagedAsyncResource<CascadeData>()
@@ -476,7 +500,18 @@ export function CascadeConfigPanel() {
 
       <${Card} title="Strategy Decisions — cycle 추적">
         ${trace
-          ? html`<${StrategyTraceTable} trace=${trace} />`
+          ? html`
+            <div class="flex items-center gap-3 mb-3">
+              <${TextInput}
+                class="max-w-[280px]"
+                placeholder="검색 (cascade, strategy, 결과...)"
+                ariaLabel="strategy trace 검색"
+                value=${traceSearch.value}
+                onInput=${(e: Event) => { traceSearch.value = (e.target as HTMLInputElement).value }}
+              />
+            </div>
+            <${StrategyTraceTable} trace=${trace} searchQuery=${traceSearch} />
+          `
           : null}
       <//>
     </div>

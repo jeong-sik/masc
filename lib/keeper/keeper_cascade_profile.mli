@@ -5,28 +5,64 @@
     SSOT for the active keeper cascade profile and the legacy aliases that must
     continue to resolve to it. *)
 
-(** Canonical cascade profile for keeper turns. *)
-val default_name : string
+(** SSOT for valid cascade profiles in repo [config/cascade.json].
 
-(** SSOT list of cascade profile names valid in the repo [config/cascade.json].
-    Consumers (dashboards, validators, tests) should reference this list
-    rather than hardcoding their own. Personal/playground-only cascades
-    are NOT included here — those belong under
+    Adding a new profile is a compile-time event: add a variant here
+    and every exhaustive [match] across the codebase flags the consumer
+    sites that need to handle it. Personal/playground-only cascades
+    must NOT be added here — they live in
     [$MASC_BASE_PATH/.masc/playground/.../cascade.json].
+
     @since 0.9.5 *)
+type t =
+  | Default
+  | Keeper_unified
+  | Sangsu
+  | Local_only
+  | Local_recovery
+  | Tool_rerank
+
+val all : t list
+(** [all] is exhaustive: every variant constructor of {!t} appears
+    exactly once. Consumers that need to enumerate profiles should
+    derive from this rather than maintaining a parallel list. *)
+
+val to_string : t -> string
+(** Canonical lowercase-snake-case name, matching the
+    [<name>_models]/[<name>_temperature]/[<name>_max_tokens] convention
+    in [config/cascade.json]. *)
+
+val of_string_opt : string -> t option
+(** Parse a raw cascade name into the variant. Handles legacy aliases
+    ([oas-keeper_unified], [coding_first], [keeper_turn], [keeper_reply])
+    by collapsing them to their canonical variant. Returns [None] for
+    unknown names — use {!canonical} when you want a forced fallback. *)
+
+val canonical : string -> t
+(** [canonical raw] = [of_string_opt raw |> Option.value ~default]. *)
+
+val default : t
+val default_name : string
+(** [default_name = to_string default = "keeper_unified"]. *)
+
 val known_cascades : string list
+(** [known_cascades = List.map to_string all]. Provided for consumers
+    that still operate on strings (cascade.json key prefixes, metric
+    label allow-list); new code should take {!t} directly. *)
 
-(** Map keeper aliases and historical drift names to the canonical
-    cascade profile name. Unknown names fall back to {!default_name}
-    (previously they passed through unchanged, which let typos and dead
-    profile names silently create ghost metric labels). *)
 val canonicalize : string -> string
+(** [canonicalize raw = to_string (canonical raw)]. Existing
+    string-based call sites continue to work; unknown names now fall
+    back to {!default_name} (previously they passed through unchanged,
+    letting typos and dead profile names create ghost metric labels). *)
 
-(** JSON config key for the cascade's configured model list. *)
+(** {1 cascade.json key helpers} *)
+
+val models_key_t : t -> string
+val temperature_key_t : t -> string
+val max_tokens_key_t : t -> string
+
+(** String-based wrappers; first canonicalize, then build the key. *)
 val models_key : string -> string
-
-(** JSON config key for the cascade's configured temperature. *)
 val temperature_key : string -> string
-
-(** JSON config key for the cascade's configured max_tokens. *)
 val max_tokens_key : string -> string

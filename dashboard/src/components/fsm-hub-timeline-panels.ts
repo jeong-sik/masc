@@ -51,7 +51,7 @@ const ALARM_VALUES = new Set([
   'exhausted',
 ])
 
-function swimlaneSegmentColor(value: string): string {
+export function swimlaneSegmentColor(value: string): string {
   if (ALARM_VALUES.has(value)) return 'bg-[rgba(239,68,68,0.5)]'
   if (IDLE_LIKE_VALUES.has(value)) return 'bg-[rgba(255,255,255,0.07)]'
   if (value === 'Overflowed') return 'bg-[rgba(245,158,11,0.45)]'

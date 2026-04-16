@@ -115,7 +115,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'observatory',
       label: '관찰소 (beta)',
-      description: '실시간 라이브 밴드와 조사형 타임라인을 한 화면에 통합합니다.',
+      description: '조사형 타임라인과 활동 분석을 한 화면에서 빠르게 훑습니다.',
       params: { section: 'observatory' },
     },
     {

@@ -45,6 +45,7 @@ import { ObservatoryActivityPanels } from '../activity-graph'
 
 const DEFAULT_RANGE: TimeRangePreset = '1h'
 const observatoryRefreshVersion = signal(0)
+type ObservatoryView = 'timeline' | 'live'
 
 // --- Observatory state ---
 
@@ -131,6 +132,36 @@ function RangeSelector() {
   `
 }
 
+function ViewSelector({
+  current,
+  onSelect,
+}: {
+  current: ObservatoryView
+  onSelect: (view: ObservatoryView) => void
+}) {
+  return html`
+    <div class="inline-flex items-center gap-0.5 rounded-md border border-card-border p-0.5 text-[11px]">
+      ${([
+        { key: 'timeline', label: '타임라인' },
+        { key: 'live', label: '라이브' },
+      ] as const).map(view => html`
+        <button
+          type="button"
+          class="rounded px-2 py-0.5 font-medium transition-colors ${
+            current === view.key
+              ? 'bg-accent/20 text-accent'
+              : 'text-text-muted hover:text-text-strong hover:bg-white/5'
+          }"
+          onClick=${() => onSelect(view.key)}
+          aria-pressed=${current === view.key}
+        >
+          ${view.label}
+        </button>
+      `)}
+    </div>
+  `
+}
+
 // --- Main container ---
 
 const LIVE_INTERVAL_MS = 30_000
@@ -143,20 +174,27 @@ export function Observatory() {
   const state = useSignal<ObservatoryData>(emptyData())
   const liveMode = useSignal(false)
   const refreshTick = useSignal(0)
+  const activeView = useSignal<ObservatoryView>('timeline')
   const activeController = useRef<AbortController | null>(null)
   const latestRequestId = useRef(0)
 
   useEffect(() => {
-    if (!liveMode.value) return
+    if (activeView.value !== 'timeline' || !liveMode.value) return
     const id = setInterval(() => { refreshTick.value++ }, LIVE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [liveMode.value])
+  }, [activeView.value, liveMode.value])
 
   useEffect(() => registerActivityRefresh(() => {
     refreshObservatorySurface()
   }), [])
 
   useEffect(() => {
+    if (activeView.value !== 'timeline') {
+      activeController.current?.abort()
+      activeController.current = null
+      return
+    }
+
     const keeper = currentKeeperFilter() ?? undefined
     const range = currentTimeRangeFilter() ?? DEFAULT_RANGE
 
@@ -212,59 +250,69 @@ export function Observatory() {
     })
 
     return () => { controller.abort() }
-  }, [currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value, observatoryRefreshVersion.value])
+  }, [activeView.value, currentKeeperFilter(), currentTimeRangeFilter(), refreshTick.value, observatoryRefreshVersion.value])
 
   const data = state.value
   const hasTrackData = data.events.length > 0 || data.hourlyTrend.length > 0
 
   return html`
     <div class="flex flex-col gap-5">
-      <${Live} />
-
       <div class="flex items-center justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-[13px] font-semibold text-text-strong">관찰소 (Observatory)</h3>
           <p class="text-[11px] text-text-dim">
-            ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
-            · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
-            · ${data.totalMatchingEvents} events
-            ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
-            ${liveMode.value ? ' · 30s auto-refresh' : ''}
+            ${activeView.value === 'timeline'
+              ? html`
+                  ${currentKeeperFilter() ? `keeper=${currentKeeperFilter()}` : '전체 keeper'}
+                  · ${timeRangeLabel(currentTimeRangeFilter() ?? DEFAULT_RANGE)}
+                  · ${data.totalMatchingEvents} events
+                  ${data.truncatedEvents ? ` · showing ${data.events.length}` : ''}
+                  ${liveMode.value ? ' · 30s 자동 갱신' : ''}
+                `
+              : '실시간 스트림과 에이전트 상태를 한곳에서 봅니다.'}
           </p>
         </div>
         <div class="flex items-center gap-2">
-          <${RangeSelector} />
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              liveMode.value
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
-            }"
-            onClick=${() => {
-              liveMode.value = !liveMode.value
-              if (liveMode.value) refreshTick.value++
-            }}
-            aria-pressed=${liveMode.value}
-          >
-            ${liveMode.value ? html`
-              <span class="relative flex h-2 w-2">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-              </span>
-              Live
-            ` : 'Live'}
-          </button>
+          <${ViewSelector}
+            current=${activeView.value}
+            onSelect=${(view: ObservatoryView) => { activeView.value = view }}
+          />
+          ${activeView.value === 'timeline' ? html`
+            <${RangeSelector} />
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                liveMode.value
+                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                  : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
+              }"
+              onClick=${() => {
+                liveMode.value = !liveMode.value
+                if (liveMode.value) refreshTick.value++
+              }}
+              aria-pressed=${liveMode.value}
+            >
+              ${liveMode.value ? html`
+                <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                </span>
+                자동 갱신
+              ` : '자동 갱신'}
+            </button>
+          ` : null}
         </div>
       </div>
 
-      ${data.error ? html`
+      ${activeView.value === 'timeline' && data.error ? html`
         <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
           일부 데이터 불러오기 실패: ${data.error}
         </div>
       ` : null}
 
-      ${!hasTrackData && data.loading
+      ${activeView.value === 'live'
+        ? html`<${Live} variant="observatory" />`
+        : !hasTrackData && data.loading
         ? html`<${LoadingState}>관찰소 데이터 불러오는 중...<//>`
         : html`
             <div class="flex flex-col gap-2 rounded-xl border border-card-border bg-card/30 p-4">
@@ -300,11 +348,13 @@ export function Observatory() {
             <${DetailPane} />
           `}
 
-      <${ObservatoryActivityPanels} />
+      ${activeView.value === 'timeline' ? html`<${ObservatoryActivityPanels} />` : null}
 
-      <p class="text-[10px] text-text-dim italic">
+      ${activeView.value === 'timeline' ? html`
+        <p class="text-[10px] text-text-dim italic">
         Phase 3a — anomaly highlight. 추가 track(메모리, autoresearch)과 compare mode는 이후 단계에서.
-      </p>
+        </p>
+      ` : null}
     </div>
   `
 }

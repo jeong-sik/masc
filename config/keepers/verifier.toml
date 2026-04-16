@@ -1,0 +1,6 @@
+[keeper]
+persona_name = "verifier"
+execution_scope = "workspace"
+cascade_name = "cross_verifier"
+telemetry_feedback_enabled = true
+telemetry_feedback_window_hours = 24

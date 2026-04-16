@@ -185,34 +185,43 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
 )
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
-  let ctx = make_test_ctx () in
-  let _ = Tool_task.handle_add_task ctx
-    (`Assoc [("title", `String "Contract calibration task")]) in
-  let _ = Tool_task.handle_claim ctx
-    (`Assoc [("task_id", `String "task-001")]) in
-  let verdict_dir = make_temp_dir "masc-verdict-contract-test" in
-  Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
-  let success, result = Tool_task.handle_transition ctx
-    (`Assoc [
-      ("task_id", `String "task-001");
-      ("action", `String "done");
-      ("notes", `String "Applied the fix to the login path.");
-      ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
-      ("evaluator_cascade", `String "glm:auto");
-    ]) in
-  assert (not success);
-  assert (str_contains result "completion contract not satisfied");
-  let store = Eval_calibration.get_store () in
-  let records = Dated_jsonl.read_recent store 10 in
-  assert (List.length records >= 1);
-  let first = List.hd records in
-  let gate = Yojson.Safe.Util.(first |> member "gate" |> to_string) in
-  let evaluator_cascade =
-    Yojson.Safe.Util.(first |> member "evaluator_cascade" |> to_string)
-  in
-  assert (gate = "contract");
-  assert (evaluator_cascade = "glm:auto");
-  Eval_calibration.reset_store_for_testing ()
+  (* Legacy substring gate (Gate 2.5). Issue #7598 redirects
+     Done → Submit_for_verification when MASC_VERIFICATION_FSM_ENABLED
+     is true (default) so a cross-agent verifier keeper can measure
+     the contract. That path requires Eio net scaffolding and does
+     not produce a "contract" calibration verdict. Pin the flag to
+     [false] here to exercise the legacy substring fallback this
+     test asserts. FSM-enabled behaviour is covered by
+     test_verification_fsm.ml. *)
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Tool_task.handle_add_task ctx
+      (`Assoc [("title", `String "Contract calibration task")]) in
+    let _ = Tool_task.handle_claim ctx
+      (`Assoc [("task_id", `String "task-001")]) in
+    let verdict_dir = make_temp_dir "masc-verdict-contract-test" in
+    Eval_calibration.set_store_for_testing ~base_dir:verdict_dir;
+    let success, result = Tool_task.handle_transition ctx
+      (`Assoc [
+        ("task_id", `String "task-001");
+        ("action", `String "done");
+        ("notes", `String "Applied the fix to the login path.");
+        ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
+        ("evaluator_cascade", `String "glm:auto");
+      ]) in
+    assert (not success);
+    assert (str_contains result "completion contract not satisfied");
+    let store = Eval_calibration.get_store () in
+    let records = Dated_jsonl.read_recent store 10 in
+    assert (List.length records >= 1);
+    let first = List.hd records in
+    let gate = Yojson.Safe.Util.(first |> member "gate" |> to_string) in
+    let evaluator_cascade =
+      Yojson.Safe.Util.(first |> member "evaluator_cascade" |> to_string)
+    in
+    assert (gate = "contract");
+    assert (evaluator_cascade = "glm:auto");
+    Eval_calibration.reset_store_for_testing ())
 )
 
 let () = test "handle_add_task_persists_contract" (fun () ->

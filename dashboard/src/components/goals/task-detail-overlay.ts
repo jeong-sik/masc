@@ -128,13 +128,33 @@ function ContractSection({ task }: { task: Task }) {
   const completionItems = gate?.completion_contract ?? contract?.completion_contract ?? []
   const unmetItems = gate?.unmet_completion_contract ?? []
   const requiredEvidence = contract?.required_evidence ?? []
+  const isAwaitingVerification = task.status === 'awaiting_verification'
+  const verifierAssignee = isAwaitingVerification ? task.assignee : undefined
 
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-2">
         <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">계약 게이트</div>
         <span class=${`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${contract?.strict ? 'text-accent border-accent/25 bg-[var(--accent-10)]' : 'text-text-muted border-[var(--white-10)] bg-[var(--white-5)]'}`}>${contract?.strict ? 'strict' : 'advisory'}</span>
+        ${isAwaitingVerification ? html`
+          <span class="rounded-md border border-accent/40 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-accent">
+            검증 대기
+          </span>
+        ` : null}
       </div>
+
+      ${isAwaitingVerification ? html`
+        <div class="rounded-xl border border-accent/30 bg-[var(--accent-5)] px-4 py-3">
+          <div class="text-[12px] font-medium text-accent">Verifier Keeper 검증 중</div>
+          <div class="mt-1 text-[11px] text-text-body">
+            Submitter: <span class="font-mono">${verifierAssignee ?? '(unknown)'}</span>
+          </div>
+          <div class="mt-0.5 text-[11px] text-text-muted">
+            다른 keeper가 completion_contract의 정량 기준을 독립 실측 중입니다.
+            통과 시 approve_verification → done, 미충족 시 reject_verification → in_progress로 복귀.
+          </div>
+        </div>
+      ` : null}
 
       <${GateSection} title="Done Gate" gate=${gate?.done} />
       <${GateSection} title="Inspect → Implement" gate=${gate?.inspect_to_implement} />

@@ -369,19 +369,25 @@ let review
                           pattern reason);
       evaluator_cascade; generator_cascade; gate = Excuse; fallback_reason = None }
   | None ->
-  (* Gate 2.5: contract verification (local, no LLM) *)
+  (* Gate 2.5: contract verification — bypassed when verification FSM is
+     enabled (issue #7598). The verifier keeper performs independent
+     measurement instead of substring matching. When FSM is disabled,
+     the legacy substring check is retained as a minimal safety net. *)
   let contract_rejection =
-    match completion_contract with
-    | None | Some [] -> None
-    | Some contract ->
-      let unmet = check_contract ~notes:notes_trimmed ~contract in
-      if unmet = [] then None
-      else begin
-        Log.Task.info "[anti-rationalization] contract unmet: agent=%s task=%s unmet=[%s]"
-          req.agent_name req.task_title (String.concat "; " unmet);
-        Some (sprintf "completion contract not satisfied. Unmet items: %s"
-                (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") unmet)))
-      end
+    if Env_config_runtime.Verification.fsm_enabled () then
+      None
+    else
+      match completion_contract with
+      | None | Some [] -> None
+      | Some contract ->
+        let unmet = check_contract ~notes:notes_trimmed ~contract in
+        if unmet = [] then None
+        else begin
+          Log.Task.info "[anti-rationalization] contract unmet (legacy): agent=%s task=%s unmet=[%s]"
+            req.agent_name req.task_title (String.concat "; " unmet);
+          Some (sprintf "completion contract not satisfied. Unmet items: %s"
+                  (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") unmet)))
+        end
   in
   match contract_rejection with
   | Some reason ->

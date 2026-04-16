@@ -1,5 +1,7 @@
 (** Tests for OAS integration modules: oas_events, message conversion. *)
 
+module Masc_log = Log
+
 open Agent_sdk
 open Masc_mcp
 
@@ -23,6 +25,16 @@ let rec cleanup_dir path =
       Unix.rmdir path
     end else
       Unix.unlink path
+
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
 
 (* ================================================================ *)
 (* Oas_events tests                                                  *)
@@ -273,6 +285,164 @@ let test_agent_completed_no_usage_on_error () =
         (Option.is_none (List.assoc_opt "input_tokens" payload_fields))
   | Some _ -> Alcotest.fail "expected assoc"
 
+let test_oas_log_bridge_turn_completed_summary () =
+  Oas_log_bridge.install ();
+  let before_seq =
+    match Masc_log.Ring.recent ~module_filter:"oas:agent" ~limit:1 () with
+    | [] -> None
+    | entry :: _ -> Some entry.seq
+  in
+  let logger = Agent_sdk.Log.create ~module_name:"agent" () in
+  Agent_sdk.Log.info logger "turn completed"
+    [
+      Agent_sdk.Log.I ("turn", 72);
+      Agent_sdk.Log.I ("max_turns", 120);
+      Agent_sdk.Log.F ("turn_duration_sec", 1.25);
+      Agent_sdk.Log.S ("model", "glm-5-turbo");
+      Agent_sdk.Log.S ("stop", "end_turn");
+    ];
+  let entries =
+    Masc_log.Ring.recent ~module_filter:"oas:agent" ?since_seq:before_seq
+      ~order:`Oldest_first ()
+  in
+  match List.rev entries with
+  | [] -> Alcotest.fail "expected bridged oas:agent log entry"
+  | entry :: _ ->
+      Alcotest.(check bool) "message includes turn" true
+        (contains_substring entry.message "turn=72");
+      Alcotest.(check bool) "message includes model" true
+        (contains_substring entry.message "model=glm-5-turbo");
+      Alcotest.(check bool) "message includes stop" true
+        (contains_substring entry.message "stop=end_turn");
+      (match entry.details with
+       | `Assoc fields ->
+           Alcotest.(check bool) "details preserve turn" true
+             (List.mem_assoc "turn" fields)
+       | _ -> Alcotest.fail "expected structured details")
+
+let test_oas_sse_bridge_logs_turn_completed_with_agent_name () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "oas_turn_log" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let bus = Event_bus.create () in
+      let before_seq =
+        match Masc_log.Ring.recent ~module_filter:"oas:event" ~limit:1 () with
+        | [] -> None
+        | entry :: _ -> Some entry.seq
+      in
+      Sse.set_clock (Eio.Stdenv.clock env);
+      try
+        Eio.Switch.run (fun sw ->
+          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Event_bus.publish bus
+            (Event_bus.mk_event
+               ~correlation_id:"sess-turn" ~run_id:"run-turn"
+               (TurnCompleted { agent_name = "bridge-agent"; turn = 72 }));
+          Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
+          let entries =
+            Masc_log.Ring.recent ~module_filter:"oas:event" ?since_seq:before_seq
+              ~order:`Oldest_first ()
+          in
+          let entry =
+            match
+              List.find_opt
+                (fun (entry : Masc_log.Ring.entry) ->
+                  contains_substring entry.message
+                    "turn completed agent=bridge-agent turn=72")
+                entries
+            with
+            | Some entry -> entry
+            | None -> Alcotest.fail "expected oas:event turn completed log"
+          in
+          (match entry.details with
+           | `Assoc fields ->
+               let event_type =
+                 match List.assoc_opt "event_type" fields with
+                 | Some (`String value) -> value
+                 | _ -> ""
+               in
+               let agent_name =
+                 match List.assoc_opt "agent_name" fields with
+                 | Some (`String value) -> value
+                 | _ -> ""
+               in
+               let turn =
+                 match List.assoc_opt "turn" fields with
+                 | Some (`Int value) -> value
+                 | _ -> -1
+               in
+               Alcotest.(check string) "event type" "turn_completed" event_type;
+               Alcotest.(check string) "agent name" "bridge-agent" agent_name;
+               Alcotest.(check int) "turn" 72 turn
+           | _ -> Alcotest.fail "expected structured oas:event details");
+          raise Exit)
+      with Exit -> ())
+
+let test_oas_sse_bridge_logs_tool_completed_with_agent_name () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "oas_tool_log" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let bus = Event_bus.create () in
+      let before_seq =
+        match Masc_log.Ring.recent ~module_filter:"oas:event" ~limit:1 () with
+        | [] -> None
+        | entry :: _ -> Some entry.seq
+      in
+      Sse.set_clock (Eio.Stdenv.clock env);
+      try
+        Eio.Switch.run (fun sw ->
+          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Event_bus.publish bus
+            (Event_bus.mk_event
+               ~correlation_id:"sess-tool" ~run_id:"run-tool"
+               (ToolCompleted
+                  {
+                    agent_name = "bridge-agent";
+                    tool_name = "masc_board_list";
+                    output = Ok { Agent_sdk.Types.content = "ok" };
+                  }));
+          Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
+          let entries =
+            Masc_log.Ring.recent ~module_filter:"oas:event" ?since_seq:before_seq
+              ~order:`Oldest_first ()
+          in
+          let entry =
+            match
+              List.find_opt
+                (fun (entry : Masc_log.Ring.entry) ->
+                  contains_substring entry.message
+                    "tool completed agent=bridge-agent tool_name=masc_board_list")
+                entries
+            with
+            | Some entry -> entry
+            | None -> Alcotest.fail "expected oas:event tool completed log"
+          in
+          (match entry.details with
+           | `Assoc fields ->
+               let event_type =
+                 match List.assoc_opt "event_type" fields with
+                 | Some (`String value) -> value
+                 | _ -> ""
+               in
+               let tool_name =
+                 match List.assoc_opt "tool_name" fields with
+                 | Some (`String value) -> value
+                 | _ -> ""
+               in
+               Alcotest.(check string) "event type" "tool_completed" event_type;
+               Alcotest.(check string) "tool name" "masc_board_list" tool_name
+           | _ -> Alcotest.fail "expected structured oas:event details");
+          raise Exit)
+      with Exit -> ())
+
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -289,6 +459,12 @@ let () =
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick
         test_agent_completed_no_usage_on_error;
+      Alcotest.test_case "oas log bridge adds turn completed summary" `Quick
+        test_oas_log_bridge_turn_completed_summary;
+      Alcotest.test_case "sse bridge logs turn completed with agent name" `Quick
+        test_oas_sse_bridge_logs_turn_completed_with_agent_name;
+      Alcotest.test_case "sse bridge logs tool completed with agent name" `Quick
+        test_oas_sse_bridge_logs_tool_completed_with_agent_name;
     ];
     "message_conversion", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;

@@ -44,12 +44,49 @@ let level_to_masc (level : Agent_sdk.Log.level) : Log.level =
   | Warn -> Log.Warn
   | Error -> Log.Error
 
+let field_value_to_human (json : Yojson.Safe.t) : string option =
+  match json with
+  | `String value when String.trim value <> "" -> Some value
+  | `Int value -> Some (string_of_int value)
+  | `Intlit value -> Some value
+  | `Float value -> Some (Printf.sprintf "%.3f" value)
+  | `Bool value -> Some (string_of_bool value)
+  | _ -> None
+
+let preferred_summary_keys message =
+  match message with
+  | "turn completed" | "turn started" ->
+      [ "turn"; "max_turns"; "turn_duration_sec"; "elapsed_run_sec"; "model"; "stop" ]
+  | "agent completed" | "agent started" ->
+      [ "agent_name"; "agent"; "task_id"; "elapsed_s"; "input_tokens"; "output_tokens" ]
+  | "tool completed" | "tool called" ->
+      [ "agent_name"; "agent"; "tool_name"; "turn" ]
+  | _ ->
+      [ "agent_name"; "agent"; "task_id"; "turn"; "tool_name"; "model"; "stop" ]
+
+let summarize_fields ~message (fields : Agent_sdk.Log.field list) : string list =
+  let assoc = List.map field_to_json fields in
+  preferred_summary_keys message
+  |> List.filter_map (fun key ->
+       match List.assoc_opt key assoc with
+       | None -> None
+       | Some value -> (
+           match field_value_to_human value with
+           | Some rendered -> Some (Printf.sprintf "%s=%s" key rendered)
+           | None -> None))
+
+let render_message_with_summary (record : Agent_sdk.Log.record) =
+  match summarize_fields ~message:record.message record.fields with
+  | [] -> record.message
+  | summary -> Printf.sprintf "%s %s" record.message (String.concat " " summary)
+
 (** Build the sink function.  Prefix the module name with ["oas:"] so a
     record emitted by [Agent_sdk.Log.create ~module_name:"agent"] lands
     as ["oas:agent"] in the masc-mcp log stream, distinct from any
     masc-mcp module called "agent". *)
 let make_sink () : Agent_sdk.Log.sink =
  fun record ->
+  let message = render_message_with_summary record in
   let details =
     match record.fields with
     | [] -> None
@@ -58,7 +95,7 @@ let make_sink () : Agent_sdk.Log.sink =
   Log.emit (level_to_masc record.level)
     ~module_name:("oas:" ^ record.module_name)
     ?details
-    record.message
+    message
 
 (** Process-wide latch to make [install] idempotent.  Unlike
     [Llm_metric_bridge] which uses [set_global] (replacement semantics),

@@ -128,11 +128,7 @@ let build_keeper_system_prompt
        </identity>";
     ]
 
-(* Body for <direct_reply_mode>. Sourced from
-   [config/prompts/keeper.reply_guidelines.md] via [Prompt_registry], keeping
-   the 6 guardrail lines in the same versioned-template pipeline as
-   [keeper.constitution] / [keeper.world] / etc. The <direct_reply_mode> XML
-   wrapping stays in code because it is structure, not prompt content. *)
+(* XML wrapping stays in code — it is structure, not prompt content. *)
 let direct_reply_mode_body () =
   Prompt_registry.get_prompt Keeper_prompt_names.reply_guidelines
 

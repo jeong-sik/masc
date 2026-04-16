@@ -8,9 +8,18 @@
 (** Canonical cascade profile for keeper turns. *)
 val default_name : string
 
-(** Map known legacy keeper aliases to the canonical cascade profile name.
-    Unknown names are preserved after trimming. Blank names fall back to
-    {!default_name}. *)
+(** SSOT list of cascade profile names valid in the repo [config/cascade.json].
+    Consumers (dashboards, validators, tests) should reference this list
+    rather than hardcoding their own. Personal/playground-only cascades
+    are NOT included here — those belong under
+    [$MASC_BASE_PATH/.masc/playground/.../cascade.json].
+    @since 0.9.5 *)
+val known_cascades : string list
+
+(** Map keeper aliases and historical drift names to the canonical
+    cascade profile name. Unknown names fall back to {!default_name}
+    (previously they passed through unchanged, which let typos and dead
+    profile names silently create ghost metric labels). *)
 val canonicalize : string -> string
 
 (** JSON config key for the cascade's configured model list. *)

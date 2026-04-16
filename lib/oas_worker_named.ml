@@ -7,6 +7,8 @@
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
+open Result_syntax
+
 (* ================================================================ *)
 (* Cascade profile defaults (moved from Cascade module)              *)
 (* ================================================================ *)
@@ -41,16 +43,102 @@ let admission_wait_timeout_error
   Log.Misc.warn "%s" msg;
   Error (Oas.Error.Internal msg)
 
+let eio_context_error_to_sdk_error detail =
+  Oas.Error.Config
+    (Oas.Error.InvalidConfig { field = "eio_context"; detail })
+
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
-let resolve_cascade_providers = Cascade_runtime.resolve_named_providers
+let resolve_cascade_providers ?provider_filter ~cascade_name () =
+  Cascade_runtime.resolve_named_providers ?provider_filter ~cascade_name ()
 
 (** Resolve from an explicit model string list (user-declared in keeper TOML).
     MASC parses the strings via its local [Cascade_config] and passes the
     resulting provider configs into OAS execution. *)
-let resolve_providers_from_model_strings =
-  Cascade_runtime.resolve_providers_from_model_strings
+let resolve_providers_from_model_strings ?provider_filter model_strings =
+  Cascade_runtime.resolve_providers_from_model_strings ?provider_filter
+    model_strings
+
+type masc_internal_error =
+  | Cascade_exhausted of {
+      cascade_name : string;
+      detail : string option;
+    }
+  | Accept_rejected of {
+      scope : string;
+      model : string option;
+      reason : string;
+    }
+
+let masc_internal_error_prefix = "[masc_oas_error] "
+
+let string_opt_of_assoc key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let masc_internal_error_to_json = function
+  | Cascade_exhausted { cascade_name; detail } ->
+    `Assoc
+      [
+        ("kind", `String "cascade_exhausted");
+        ("cascade_name", `String cascade_name);
+        ("detail", Json_util.string_opt_to_json detail);
+      ]
+  | Accept_rejected { scope; model; reason } ->
+    `Assoc
+      [
+        ("kind", `String "accept_rejected");
+        ("scope", `String scope);
+        ("model", Json_util.string_opt_to_json model);
+        ("reason", `String reason);
+      ]
+
+let sdk_error_of_masc_internal_error err =
+  Oas.Error.Internal
+    (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
+
+let classify_masc_internal_error (err : Oas.Error.sdk_error) :
+    masc_internal_error option =
+  match err with
+  | Oas.Error.Internal msg when String.starts_with ~prefix:masc_internal_error_prefix msg ->
+    let payload =
+      String.sub msg
+        (String.length masc_internal_error_prefix)
+        (String.length msg - String.length masc_internal_error_prefix)
+    in
+    (try
+       match Yojson.Safe.from_string payload with
+       | `Assoc fields as json -> (
+           match List.assoc_opt "kind" fields with
+           | Some (`String "cascade_exhausted") -> (
+               match string_opt_of_assoc "cascade_name" json with
+               | Some cascade_name ->
+                 Some
+                   (Cascade_exhausted
+                      {
+                        cascade_name;
+                        detail = string_opt_of_assoc "detail" json;
+                      })
+               | None -> None)
+           | Some (`String "accept_rejected") -> (
+               match string_opt_of_assoc "scope" json, string_opt_of_assoc "reason" json with
+               | Some scope, Some reason ->
+                 Some
+                   (Accept_rejected
+                      {
+                        scope;
+                        model = string_opt_of_assoc "model" json;
+                        reason;
+                      })
+               | _ -> None)
+           | _ -> None)
+       | _ -> None
+     with Yojson.Json_error _ -> None)
+  | _ -> None
 
 let config_for_label
     ~(name : string)
@@ -73,8 +161,11 @@ let config_for_label
     ?contract
     ?approval
     ~(description : string option)
-    () : Oas_worker_exec.config =
-  let provider = Oas_worker_exec.resolve_provider_of_label model_label in
+    () : (Oas_worker_exec.config, Oas.Error.sdk_error) result =
+  let* provider =
+    Oas_worker_exec.resolve_provider_of_label model_label
+    |> Result.map_error Oas_worker_exec.label_resolution_error_to_sdk_error
+  in
   let model_id = match Cascade_runtime.provider_name_of_label model_label with
     | Some _ ->
       (match String.index_opt model_label ':' with
@@ -82,27 +173,28 @@ let config_for_label
        | None -> model_label)
     | None -> model_label
   in
-  {
-    (Oas_worker_exec.default_config ~name ~provider ~model_id
-       ~system_prompt ~tools)
-    with
-    max_turns;
-    max_tokens;
-    max_input_tokens;
-    max_cost_usd;
-    temperature;
-    max_idle_turns;
-    guardrails;
-    hooks;
-    context_reducer;
-    memory;
-    tool_retry_policy;
-    enable_thinking;
-    contract;
-    description;
-    compact_ratio;
-    approval;
-  }
+  Ok
+    {
+      (Oas_worker_exec.default_config ~name ~provider ~model_id
+         ~system_prompt ~tools)
+      with
+      max_turns;
+      max_tokens;
+      max_input_tokens;
+      max_cost_usd;
+      temperature;
+      max_idle_turns;
+      guardrails;
+      hooks;
+      context_reducer;
+      memory;
+      tool_retry_policy;
+      enable_thinking;
+      contract;
+      description;
+      compact_ratio;
+      approval;
+    }
 
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
@@ -157,7 +249,7 @@ let run_named
     ~cascade_name
     ?model_strings
     ~goal
-    ?provider_filter:_provider_filter
+    ?provider_filter
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -204,7 +296,7 @@ let run_named
     ()
   : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
   match require_eio ?sw ?net () with
-  | Error e -> Error (Oas.Error.Internal e)
+  | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let configured_labels, candidate_cfgs =
@@ -212,18 +304,23 @@ let run_named
     | Some ms when ms <> [] ->
       (* Direct model strings from keeper TOML — skip named preset lookup.
          MASC passes these strings through without interpretation. *)
-      (ms, resolve_providers_from_model_strings ms)
+      (ms, resolve_providers_from_model_strings ?provider_filter ms)
     | _ ->
       let labels = Cascade_runtime.models_of_cascade_name cascade_name in
-      (labels, resolve_cascade_providers ~cascade_name)
+      (labels, resolve_cascade_providers ?provider_filter ~cascade_name ())
   in
   let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
   | [] ->
     Log.Misc.error "cascade %s: no callable models available" cascade_name;
-    Error (Oas.Error.Internal
-      (Printf.sprintf "cascade %s: no callable models available" cascade_name))
+    Error
+      (sdk_error_of_masc_internal_error
+         (Cascade_exhausted
+            {
+              cascade_name;
+              detail = Some "no callable models available";
+            }))
   | _ ->
   let transport_resolved = match transport with
     | Some t -> t
@@ -310,8 +407,13 @@ let run_named
           ~candidate_cfgs ~selected_model_raw:None ~capture
       in
       Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
-      Error (Oas.Error.Internal
-        (Printf.sprintf "cascade %s: all models failed: %s" cascade_name err_msg))
+      Error
+        (sdk_error_of_masc_internal_error
+           (Cascade_exhausted
+              {
+                cascade_name;
+                detail = Some err_msg;
+              }))
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
@@ -356,8 +458,14 @@ let run_named
                ~candidate_cfgs ~selected_model_raw:(Some result.response.model) ~capture
            in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
-           Error (Oas.Error.Internal
-             (Printf.sprintf "cascade %s: %s" cascade_name reason))
+           Error
+             (sdk_error_of_masc_internal_error
+                (Accept_rejected
+                   {
+                     scope = cascade_name;
+                     model = Some result.response.model;
+                     reason;
+                   }))
          | Cascade_fsm.Accept resp ->
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
@@ -433,46 +541,50 @@ let run_model_by_label
     ?net
     ()
   : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
-  (match Cascade_config.parse_model_string model_label with
-  | None ->
-    Error (Oas.Error.Internal
-      (Printf.sprintf "Cannot parse model label: %s" model_label))
-  | Some _pc ->
-    match require_eio ?sw ?net () with
-    | Error e -> Error (Oas.Error.Internal e)
-    | Ok (sw, net) ->
-        let transport_resolved = match transport with
-          | Some t -> t
-          | None -> Masc_grpc_transport.from_env ()
-        in
-        let config =
-          config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-            ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
-            ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
-            ?tool_retry_policy
-            ?enable_thinking
-            ?compact_ratio
-            ~description:(Some (Printf.sprintf "model_label:%s" model_label))
-            ()
-        in
-        let config = { config with transport = transport_resolved } in
-        try
-          Admission_queue.with_permit ?wait_timeout_sec
-            ~priority:Llm_provider.Request_priority.Proactive
-            ~keeper_name:"oas-label-model"
+  let* config =
+    config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
+      ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
+      ~max_idle_turns ?guardrails ?hooks ?context_reducer ?memory
+      ?tool_retry_policy
+      ?enable_thinking
+      ?compact_ratio
+      ~description:(Some (Printf.sprintf "model_label:%s" model_label))
+      ()
+  in
+  match require_eio ?sw ?net () with
+  | Error e -> Error (eio_context_error_to_sdk_error e)
+  | Ok (sw, net) ->
+      let transport_resolved = match transport with
+        | Some t -> t
+        | None -> Masc_grpc_transport.from_env ()
+      in
+      let config = { config with transport = transport_resolved } in
+      try
+        Admission_queue.with_permit ?wait_timeout_sec
+          ~priority:Llm_provider.Request_priority.Proactive
+          ~keeper_name:"oas-label-model"
+          ~cascade_name:model_label
+          (fun () ->
+            match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
+            | Ok result when accept result.response -> Ok result
+            | Ok result ->
+                Error
+                  (sdk_error_of_masc_internal_error
+                     (Accept_rejected
+                        {
+                          scope = model_label;
+                          model = Some result.response.model;
+                          reason =
+                            Printf.sprintf
+                              "response rejected by accept (model=%s)"
+                              result.response.model;
+                        }))
+            | Error e -> Error e)
+      with
+      | Admission_queue.Wait_timeout wait_ms ->
+          admission_wait_timeout_error ~keeper_name:"oas-label-model"
             ~cascade_name:model_label
-            (fun () ->
-              match Oas_worker_exec.run ~sw ~net ~config ?on_event ?contract goal with
-              | Ok result when accept result.response -> Ok result
-              | Ok _ ->
-                  Error (Oas.Error.Internal
-                    (Printf.sprintf "response rejected by accept from %s" model_label))
-              | Error e -> Error e)
-        with
-        | Admission_queue.Wait_timeout wait_ms ->
-            admission_wait_timeout_error ~keeper_name:"oas-label-model"
-              ~cascade_name:model_label
-              ~priority:Llm_provider.Request_priority.Proactive wait_ms)
+            ~priority:Llm_provider.Request_priority.Proactive wait_ms
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -547,20 +659,20 @@ let run_model_with_masc_tools
     ?net
     ()
   : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
+  let* config =
+    config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+      ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
+      ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
+      ?compact_ratio
+      ~description:(Some (Printf.sprintf "model_label:%s" model_label))
+      ()
+  in
   match require_eio ?sw ?net () with
-  | Error e -> Error (Oas.Error.Internal e)
+  | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
         | None -> Masc_grpc_transport.from_env ()
-      in
-        let config =
-          config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
-          ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature ?guardrails ?hooks
-          ?memory ?tool_retry_policy ?enable_thinking
-          ?compact_ratio
-          ~description:(Some (Printf.sprintf "model_label:%s" model_label))
-          ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
       try

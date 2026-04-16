@@ -132,10 +132,27 @@ let tool_annotations_for_profile _profile tool_name =
     | None -> Tool_dispatch.is_idempotent tool_name || read_only
   in
   let is_deprecated = meta.lifecycle = Tool_catalog.Deprecated in
+  (* MCP 2025-03-26: [openWorldHint] signals whether the tool can
+     interact with systems outside the server's closed world.
+     Default per spec is [true]. We emit an explicit value when we
+     are confident:
+     - destructive shell/git tools → open world (external side effects)
+     - pure MASC read-only tools   → closed world (server state only)
+     Otherwise we omit the hint so the spec default applies. This is
+     intentionally coarse (see #7480 Step 1); refinement comes as more
+     tools register explicit metadata. *)
+  let open_world_hint =
+    if destructive then Some true
+    else if read_only then Some false
+    else None
+  in
   let fields =
     [ ("readOnlyHint", `Bool read_only) ]
     @ (if destructive then [ ("destructiveHint", `Bool true) ] else [])
     @ (if idempotent then [ ("idempotentHint", `Bool true) ] else [])
+    @ (match open_world_hint with
+       | Some v -> [ ("openWorldHint", `Bool v) ]
+       | None -> [])
     @ (if is_deprecated then [ ("deprecated", `Bool true) ] else [])
     @ (match meta.replacement with
        | Some r when is_deprecated -> [ ("successor", `String r) ]

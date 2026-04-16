@@ -18,6 +18,8 @@ let health_ctx_critical = Env_config_keeper.DashboardHealth.ctx_critical
 let health_ctx_warn = Env_config_keeper.DashboardHealth.ctx_warn
 let health_penalty_critical = Env_config_keeper.DashboardHealth.penalty_critical
 let health_penalty_warn = Env_config_keeper.DashboardHealth.penalty_warn
+let runtime_warning_ctx_ratio =
+  Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 
 (** Compute keeper health score (0-100). Pure function.
     Inputs: restart_count, max_restarts, recent_crash_count,
@@ -719,6 +721,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("last_compaction_event", match last_compaction_event with Some j -> j | None -> `Null);
               ("context", context);
               ("context_source", context_source);
+              ("runtime_warning_ctx_ratio", `Float runtime_warning_ctx_ratio);
               (* Eval feed: latest verdict snapshot for this keeper (RFC-MASC-005) *)
               ("eval_latest",
                 let base_path = config.base_path in

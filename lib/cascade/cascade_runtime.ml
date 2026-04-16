@@ -263,26 +263,49 @@ let models_of_cascade_name (cascade_name : string) : string list =
 let default_model_strings_from_config () : string list =
   models_of_cascade_name "default"
 
-let resolve_providers_from_model_strings (model_strings : string list)
+let resolve_providers_from_model_strings ?provider_filter
+    (model_strings : string list)
     : Llm_provider.Provider_config.t list =
   let specs = Cascade_config.parse_model_strings model_strings in
-  if specs <> [] then specs
+  let filtered =
+    Cascade_config.apply_provider_filter
+      ~provider_filter
+      ~label:"direct_model_strings"
+      specs
+  in
+  if filtered <> [] then filtered
   else (
     Log.Misc.warn "direct model strings: no callable models from %d entries"
       (List.length model_strings);
     [])
 
-let resolve_named_providers ~cascade_name : Llm_provider.Provider_config.t list =
+let resolve_named_providers ?provider_filter ~cascade_name ()
+    : Llm_provider.Provider_config.t list =
   let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let defaults = default_model_strings ~cascade_name in
-  let configured = models_of_cascade_name cascade_name in
-  let specs = Cascade_config.parse_model_strings configured in
+  let config_path = cascade_config_path () in
+  let weighted =
+    match config_path with
+    | Some path ->
+      Cascade_config_loader.load_profile_weighted ~config_path:path
+        ~name:cascade_name
+    | None -> []
+  in
+  let specs =
+    (if weighted <> [] then
+       Cascade_config.parse_weighted_entries weighted
+     else
+       Cascade_config.parse_model_strings
+         (models_of_cascade_name cascade_name))
+    |> Cascade_config.apply_provider_filter ~provider_filter ~label:cascade_name
+  in
   if specs <> [] then specs
-  else if configured = defaults then (
-    Log.Misc.warn "cascade %s: no callable models from built-in defaults" cascade_name;
+  else if models_of_cascade_name cascade_name = defaults then (
+    Log.Misc.warn "cascade %s: no callable models from built-in defaults"
+      cascade_name;
     [])
   else (
     Log.Misc.warn
       "cascade %s: configured models unavailable — retrying built-in defaults"
       cascade_name;
-    resolve_providers_from_model_strings defaults)
+    resolve_providers_from_model_strings ?provider_filter defaults)

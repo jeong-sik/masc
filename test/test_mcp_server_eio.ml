@@ -726,6 +726,17 @@ let test_handle_request_tools_list_operator_profile () =
                  Alcotest.(check bool) "action readonly hint" false
                    (action_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "readOnlyHint"
+                    |> Yojson.Safe.Util.to_bool);
+                 (* #7480 Step 1: read-only tools advertise
+                    openWorldHint=false so MCP clients know they do not
+                    reach outside MASC's own state. *)
+                 Alcotest.(check bool) "snapshot openWorld=false" false
+                   (snapshot_tool |> Yojson.Safe.Util.member "annotations"
+                    |> Yojson.Safe.Util.member "openWorldHint"
+                    |> Yojson.Safe.Util.to_bool);
+                 Alcotest.(check bool) "digest openWorld=false" false
+                   (digest_tool |> Yojson.Safe.Util.member "annotations"
+                    |> Yojson.Safe.Util.member "openWorldHint"
                     |> Yojson.Safe.Util.to_bool)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")

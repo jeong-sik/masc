@@ -373,7 +373,6 @@ masc_pg_query            → 구현 없음
 #### M2: 115-Module 순환 의존
 
 **Issue**: #3593 (target:now)
-**Report**: `reports/lib-decomposition-phase0.md`
 
 - 586 모듈, 1961 의존 엣지
 - 최대 SCC: 115개 모듈 (전체의 20%)

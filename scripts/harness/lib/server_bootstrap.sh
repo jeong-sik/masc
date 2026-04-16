@@ -57,13 +57,33 @@ harness_find_server_exe() {
 }
 
 harness_pick_free_port() {
-  python3 - <<'PY'
-import socket
-s = socket.socket()
-s.bind(("127.0.0.1", 0))
-print(s.getsockname()[1])
-s.close()
-PY
+  local seed start port attempts=2048
+  local tmp_root reservation_file
+  seed="${HARNESS_PORT_SEED:-$$}"
+  if [[ ! "$seed" =~ ^[0-9]+$ ]]; then
+    seed="$$"
+  fi
+  tmp_root="$(harness_tmp_root)"
+  reservation_file="${tmp_root%/}/masc-harness-ports.${seed}.txt"
+  start=$((9200 + (seed % 1000)))
+  port="$start"
+
+  while (( attempts > 0 )); do
+    if ! lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1 \
+      && ! grep -qx "$port" "$reservation_file" 2>/dev/null; then
+      printf '%s\n' "$port" >>"$reservation_file"
+      printf '%s\n' "$port"
+      return 0
+    fi
+    port=$((port + 1))
+    if (( port > 65535 )); then
+      port=9200
+    fi
+    attempts=$((attempts - 1))
+  done
+
+  echo "unable to find a free TCP port for harness startup" >&2
+  return 1
 }
 
 harness_tmp_root() {

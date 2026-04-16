@@ -51,6 +51,16 @@ let write_initial_admin config agent_name =
   write_text_file file (String.trim agent_name);
   chmod file 0o600
 
+let save_private_text_file path content =
+  run_blocking_io (fun () ->
+      let oc =
+        open_out_gen [ Open_wronly; Open_creat; Open_trunc; Open_text ] 0o600
+          path
+      in
+      Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+          output_string oc content));
+  chmod path 0o600
+
 (** Read the initial admin agent name, if set. *)
 let read_initial_admin config : string option =
   let file = initial_admin_file config in
@@ -87,7 +97,7 @@ let save_auth_config config (auth_cfg : auth_config) =
   ensure_auth_dirs config;
   let file = auth_config_file config in
   let json = auth_config_to_yojson auth_cfg in
-  write_text_file file (Yojson.Safe.pretty_to_string json)
+  save_private_text_file file (Yojson.Safe.pretty_to_string json)
 
 (* ============================================ *)
 (* Credential management                        *)
@@ -118,7 +128,7 @@ let save_credential config (cred : agent_credential) =
   ensure_auth_dirs config;
   let file = credential_file config cred.agent_name in
   let json = agent_credential_to_yojson cred in
-  write_text_file file (Yojson.Safe.pretty_to_string json)
+  save_private_text_file file (Yojson.Safe.pretty_to_string json)
 
 (** Delete agent credential *)
 let delete_credential config agent_name =
@@ -371,9 +381,7 @@ let init_room_secret config : string =
   ensure_auth_dirs config;
   let secret = generate_token () in
   let hash = sha256_hash secret in
-  Out_channel.with_open_text (room_secret_file config) (fun oc ->
-    output_string oc hash
-  );
+  save_private_text_file (room_secret_file config) hash;
   (* Update auth config with hash *)
   let cfg = load_auth_config config in
   save_auth_config config { cfg with room_secret_hash = Some hash };

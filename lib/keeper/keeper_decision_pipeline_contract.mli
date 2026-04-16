@@ -20,6 +20,7 @@ type invariant_key =
   | Inv_no_live_turn_clears_decision
   | Inv_idle_requires_undecided
   | Inv_guard_ok_requires_measurement
+  | Inv_decision_boundary_requires_measurement
   | Inv_gate_rejected_requires_finalizing
   | Inv_non_idle_cascade_requires_decision_boundary
   | Inv_selecting_requires_prompting

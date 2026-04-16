@@ -166,12 +166,12 @@ masc_claim_next()
 
 ## 5. 현재 front door
 
-지원하는 front door는 repo coordination과 keeper runtime이다.
+지원하는 front door는 repo coordination, keeper runtime, 그리고 dashboard/operator read visibility다.
 
 - repo coordination: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
 - keeper runtime: `masc_keeper_up`, `masc_keeper_msg`, `masc_keeper_status`, `masc_keeper_down`
 
-`team-session`, `operator`, `command-plane` compatibility surface는 더 이상 기본 안내 경로가 아니다.
+retired compatibility lane은 historical only다. 새 사용자는 repo coordination과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
 
 ## 6. Tool Surface
 
@@ -254,6 +254,18 @@ masc_keeper_up(name: "sangsu")
 - shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 명시적으로 덮어쓴다.
 - resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 먼저 초기화/사용한다. 그 뒤에만 `~/.masc/config`, repo `config/` 자동 탐색이 fallback으로 동작한다. repo `config/`는 체크인된 default/example source이며, 마지막 fallback이다.
 - `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
+
+## 8. Release-Grade Smoke
+
+최신 build가 실제로 설치/부팅/MCP handshake/dashboard read path를 만족하는지 보려면 evidence bundle을 만든다.
+
+```bash
+make release-evidence
+# or
+scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md
+```
+
+bundle contract와 해석 기준은 `docs/RELEASE-EVIDENCE.md`를 SSOT로 본다.
 
 공유 config/persona를 repo 밖에 두고 실행하는 예시:
 

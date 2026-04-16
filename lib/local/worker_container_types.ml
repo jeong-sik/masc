@@ -103,14 +103,8 @@ let masc_http_base_url () =
   Env_config.masc_http_base_url ()
 
 let mcp_endpoint_url ~(auth_token : string option) =
-  let base = masc_http_base_url () ^ "/mcp" in
-  match auth_token with
-  | Some token when String.trim token <> "" ->
-      (* Keep auth in the query as a loopback-only fallback for local workers.
-         execute_tool_eio already accepts query token auth, and this avoids
-         header transport edge cases when we self-call through curl. *)
-      base ^ "?token=" ^ token
-  | _ -> base
+  ignore auth_token;
+  masc_http_base_url () ^ "/mcp"
 
 let request_id_matches request_id json =
   let open Yojson.Safe.Util in

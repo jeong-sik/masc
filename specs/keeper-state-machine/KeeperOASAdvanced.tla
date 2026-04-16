@@ -2,7 +2,7 @@
 \* Formal specification of the OAS Bridge timeout/error boundary.
 \* Models Eio structured concurrency, OAS-local context rollback, and the
 \* critical distinction between clean fallback and committed external tool side
-\* effects that require explicit reconcile.
+\* effects that require an explicit continue gate.
 
 EXTENDS Naturals, Sequences
 
@@ -13,14 +13,14 @@ VARIABLES
     fiber_state,         \* {"Active", "Cancelling", "Terminated"}
     cascade_turn,        \* 0..MaxTurns: Current depth of the proactive cascade
     oas_api_state,       \* {"Idle", "Fetching", "Success", "Error"}
-    keeper_decision,     \* {"Unknown", "ExecuteSelf", "AutonomyFallback", "Delegate", "NeedsReconcile"}
+    keeper_decision,     \* {"Unknown", "ExecuteSelf", "AutonomyFallback", "Delegate", "NeedsContinueGate"}
     context_polluted,    \* Boolean: Tracks if intermediate OAS context leaked upon failure
     external_side_effect_committed, \* Boolean: A mutating tool already committed outside OAS context
-    reconcile_required   \* Boolean: Human/explicit reconcile is required before claiming clean recovery
+    continue_gate_required \* Boolean: Human/explicit continue gate is required before claiming clean recovery
 
 vars == <<sys_stop_requested, fiber_state, cascade_turn, oas_api_state,
           keeper_decision, context_polluted,
-          external_side_effect_committed, reconcile_required>>
+          external_side_effect_committed, continue_gate_required>>
 
 Init ==
     /\ sys_stop_requested = FALSE
@@ -30,7 +30,7 @@ Init ==
     /\ keeper_decision = "Unknown"
     /\ context_polluted = FALSE
     /\ external_side_effect_committed = FALSE
-    /\ reconcile_required = FALSE
+    /\ continue_gate_required = FALSE
 
 \* ── Events ────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ GlobalStopPreempts ==
     \* If the fiber is active, the Eio switch immediately cancels it.
     /\ IF fiber_state = "Active" THEN fiber_state' = "Cancelling" ELSE fiber_state' = fiber_state
     /\ UNCHANGED <<cascade_turn, oas_api_state, keeper_decision, context_polluted,
-                   external_side_effect_committed, reconcile_required>>
+                   external_side_effect_committed, continue_gate_required>>
 
 \* 2. Eio Timeout (can only happen if Active and Fetching)
 EioTimeoutTriggered ==
@@ -49,7 +49,7 @@ EioTimeoutTriggered ==
     /\ oas_api_state = "Fetching"
     /\ fiber_state' = "Cancelling"
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, oas_api_state, keeper_decision,
-                   context_polluted, external_side_effect_committed, reconcile_required>>
+                   context_polluted, external_side_effect_committed, continue_gate_required>>
 
 \* 3. Start fetching from OAS API
 StartFetching ==
@@ -58,7 +58,7 @@ StartFetching ==
     /\ cascade_turn < MaxTurns
     /\ oas_api_state' = "Fetching"
     /\ UNCHANGED <<sys_stop_requested, fiber_state, cascade_turn, keeper_decision,
-                   context_polluted, external_side_effect_committed, reconcile_required>>
+                   context_polluted, external_side_effect_committed, continue_gate_required>>
 
 \* 3b. A mutating tool call commits outside the OAS-local context.
 ToolSideEffectCommitted ==
@@ -67,7 +67,7 @@ ToolSideEffectCommitted ==
     /\ external_side_effect_committed = FALSE
     /\ external_side_effect_committed' = TRUE
     /\ UNCHANGED <<sys_stop_requested, fiber_state, cascade_turn, oas_api_state,
-                   keeper_decision, context_polluted, reconcile_required>>
+                   keeper_decision, context_polluted, continue_gate_required>>
 
 \* 4. OAS API Completes successfully
 OASApiCompletes ==
@@ -77,7 +77,7 @@ OASApiCompletes ==
     /\ cascade_turn' = cascade_turn + 1
     /\ context_polluted' = TRUE \* Context is dirty (polluted) until cascade completes entirely or rolls back
     /\ UNCHANGED <<sys_stop_requested, fiber_state, keeper_decision,
-                   external_side_effect_committed, reconcile_required>>
+                   external_side_effect_committed, continue_gate_required>>
 
 \* 5. OAS API Fails (Network Error, etc.)
 OASApiError ==
@@ -85,7 +85,7 @@ OASApiError ==
     /\ oas_api_state = "Fetching"
     /\ oas_api_state' = "Error"
     /\ UNCHANGED <<sys_stop_requested, fiber_state, cascade_turn, keeper_decision,
-                   context_polluted, external_side_effect_committed, reconcile_required>>
+                   context_polluted, external_side_effect_committed, continue_gate_required>>
 
 \* 6. Bridge Handles OAS Error
 HandleError ==
@@ -96,7 +96,7 @@ HandleError ==
     /\ oas_api_state' = "Idle"
     /\ keeper_decision' = "AutonomyFallback"
     /\ context_polluted' = FALSE \* Rollback context to clean state
-    /\ reconcile_required' = FALSE
+    /\ continue_gate_required' = FALSE
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
 
 \* 6b. Error after a committed external mutation cannot claim clean fallback.
@@ -106,9 +106,9 @@ HandleErrorAfterCommittedSideEffect ==
     /\ external_side_effect_committed = TRUE
     /\ fiber_state' = "Terminated"
     /\ oas_api_state' = "Idle"
-    /\ keeper_decision' = "NeedsReconcile"
+    /\ keeper_decision' = "NeedsContinueGate"
     /\ context_polluted' = FALSE
-    /\ reconcile_required' = TRUE
+    /\ continue_gate_required' = TRUE
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
 
 \* 7. Cascade Finishes successfully
@@ -120,7 +120,7 @@ FinishCascade ==
     /\ oas_api_state' = "Idle"
     /\ keeper_decision' = "Delegate"
     /\ context_polluted' = FALSE \* Commit context (no longer polluted)
-    /\ reconcile_required' = FALSE
+    /\ continue_gate_required' = FALSE
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
 
 \* 8. Fiber Handles Cancellation (Interrupts Fetching or Idle/Success states safely)
@@ -131,19 +131,20 @@ FiberHandlesCancellation ==
     /\ oas_api_state' = "Idle" \* Eio interrupts the fetch automatically
     /\ keeper_decision' = "AutonomyFallback"
     /\ context_polluted' = FALSE \* Rollback OAS-local context via try/with
-    /\ reconcile_required' = FALSE
+    /\ continue_gate_required' = FALSE
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
 
 \* 8b. Cancellation after a committed external mutation leaves context clean
-\*     but requires explicit reconcile because the outside world already changed.
+\*     but requires an explicit continue gate because the outside world
+\*     already changed.
 CancellationAfterCommittedSideEffect ==
     /\ fiber_state = "Cancelling"
     /\ external_side_effect_committed = TRUE
     /\ fiber_state' = "Terminated"
     /\ oas_api_state' = "Idle"
-    /\ keeper_decision' = "NeedsReconcile"
+    /\ keeper_decision' = "NeedsContinueGate"
     /\ context_polluted' = FALSE
-    /\ reconcile_required' = TRUE
+    /\ continue_gate_required' = TRUE
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
 
 \* 9. [BUG MODEL] Catch-all absorbs cancellation — fiber returns Error instead
@@ -156,7 +157,7 @@ CancelledAbsorbed ==
     \* BUG: keeper_decision becomes a normal result instead of fallback
     /\ keeper_decision' = "ExecuteSelf"
     /\ context_polluted' = TRUE  \* Context NOT rolled back — pollution persists
-    /\ reconcile_required' = FALSE
+    /\ continue_gate_required' = FALSE
     /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
 
 TerminatedStutter ==
@@ -212,17 +213,17 @@ AtomicCascadeFallback ==
     []((fiber_state = "Terminated" /\ keeper_decision = "AutonomyFallback") =>
         /\ context_polluted = FALSE
         /\ external_side_effect_committed = FALSE
-        /\ reconcile_required = FALSE)
+        /\ continue_gate_required = FALSE)
 
 \* 3. If a mutating tool already committed and the turn does not finish with
-\*    Delegate, the system must surface NeedsReconcile instead of pretending the
-\*    fallback was clean.
-CommittedSideEffectsRequireReconcile ==
+\*    Delegate, the system must surface NeedsContinueGate instead of pretending
+\*    the fallback was clean.
+CommittedSideEffectsRequireContinueGate ==
     []((fiber_state = "Terminated"
         /\ external_side_effect_committed
         /\ keeper_decision # "Delegate") =>
-        /\ keeper_decision = "NeedsReconcile"
-        /\ reconcile_required
+        /\ keeper_decision = "NeedsContinueGate"
+        /\ continue_gate_required
         /\ context_polluted = FALSE)
 
 \* 4. Cancellation must never be absorbed — a terminated fiber with polluted
@@ -233,12 +234,12 @@ CancelledNeverAbsorbed ==
     (fiber_state = "Terminated" /\ context_polluted = TRUE)
       => (keeper_decision /= "ExecuteSelf"
           /\ keeper_decision /= "Delegate"
-          /\ keeper_decision /= "NeedsReconcile")
+          /\ keeper_decision /= "NeedsContinueGate")
 
 \* ── Liveness Properties ───────────────────────────────────
 
 \* 5. If a stop is requested before the fiber finishes, it MUST preempt. The
-\*    terminal decision may be clean fallback or NeedsReconcile depending on
+\*    terminal decision may be clean fallback or NeedsContinueGate depending on
 \*    whether an external mutation already committed, but it cannot Delegate.
 StrictStopPreemption ==
     []((sys_stop_requested /\ fiber_state /= "Terminated")

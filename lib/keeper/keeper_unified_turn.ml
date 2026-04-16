@@ -93,12 +93,15 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
   | _ -> false
 
 let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
-  let lower = String.lowercase_ascii (Oas.Error.to_string err) in
-  string_contains_substring
-    ~needle:"completion contract [require_tool_use] violated"
-    lower
-  || ( string_contains_substring ~needle:"tool_choice requested tool use" lower
-       && string_contains_substring ~needle:"no tooluse block" lower )
+  match err with
+  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; reason }) ->
+      String.equal contract "require_tool_use"
+      || let lower = String.lowercase_ascii reason in
+         string_contains_substring
+           ~needle:"tool_choice requested tool use"
+           lower
+         && string_contains_substring ~needle:"no tooluse block" lower
+  | _ -> false
 
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
@@ -232,13 +235,10 @@ let is_context_overflow (err : Oas.Error.sdk_error) : bool =
   | _ -> false
 
 let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
-  match err with
-  | Oas.Error.Internal msg ->
-      string_contains_substring_ci
-        ~needle:"all models failed" msg
-      || string_contains_substring_ci
-           ~needle:"response rejected by accept" msg
-  | _ -> false
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Cascade_exhausted _)
+  | Some (Oas_worker_named.Accept_rejected _) -> true
+  | None -> false
 
 type overflow_retry_plan = {
   retry_max_context : int;
@@ -392,7 +392,7 @@ let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) 
   | Some entry -> entry.meta
   | None -> fallback_meta
 
-let enqueue_reconcile_continue_gate
+let enqueue_partial_commit_continue_gate
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(failure_reason : Keeper_registry.failure_reason)
@@ -401,7 +401,7 @@ let enqueue_reconcile_continue_gate
   let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
   let input =
     `Assoc [
-      ("kind", `String "reconcile_required");
+      ("kind", `String "continue_gate_required");
       ("keeper_name", `String meta.name);
       ("failure_reason", `String reason_text);
       ("error_detail", `String error_detail);
@@ -410,7 +410,7 @@ let enqueue_reconcile_continue_gate
   in
   Keeper_approval_queue.submit_pending
     ~keeper_name:meta.name
-    ~tool_name:"keeper_continue_after_reconcile"
+    ~tool_name:"keeper_continue_after_partial_commit"
     ~input
     ~risk_level:Keeper_approval_queue.Critical
     ~on_resolution:(fun decision ->
@@ -422,7 +422,7 @@ let enqueue_reconcile_continue_gate
         Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
         Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
         Log.Keeper.info
-          "%s: reconcile continue gate approved; auto-resumed keeper"
+          "%s: partial-commit continue gate approved; auto-resumed keeper"
           meta.name
       | Agent_sdk.Hooks.Reject reason ->
         let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true in
@@ -430,7 +430,7 @@ let enqueue_reconcile_continue_gate
           ~base_path:config.base_path meta.name
           (Some failure_reason);
         Log.Keeper.warn
-          "%s: reconcile continue gate rejected; keeper remains paused (%s)"
+          "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
           meta.name reason)
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
@@ -1983,7 +1983,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~paused:true
               in
               let approval_id =
-                enqueue_reconcile_continue_gate
+                enqueue_partial_commit_continue_gate
                   ~config
                   ~meta:paused_meta
                   ~failure_reason

@@ -113,6 +113,14 @@ let () =
      Uses Config.raw_all_tool_schemas which includes Board schemas
      not present in Tools.all_schemas_extended. *)
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  (* Report tool schema budget to Prometheus (#7483 Step 1). *)
+  (let schemas = Config.visible_tool_schemas () in
+   let count = List.length schemas in
+   let chars = List.fold_left (fun acc (s : Types.tool_schema) ->
+     acc + String.length s.name + String.length s.description
+     + String.length (Yojson.Safe.to_string s.input_schema)
+   ) 0 schemas in
+   Prometheus.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
   (* Wire keeper-internal tool call recording to break Config dependency cycle.
      keeper_exec_tools cannot reference Tool_registry directly. *)
   Keeper_exec_tools.on_keeper_tool_call :=

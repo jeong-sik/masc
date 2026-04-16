@@ -542,17 +542,14 @@ Vite 설정:
 | `/api/v1/activity/graph` | GET | Activity graph |
 | `/api/v1/credits` | GET | Credits JSON |
 
-### Command Plane
+### Managed Execution and Historical Compatibility Note
 
 | Endpoint | Method | 용도 |
 |----------|--------|------|
-| `/api/v1/command-plane` | GET | Command plane snapshot |
-| `/api/v1/command-plane/summary` | GET | Command plane summary |
-| `/api/v1/command-plane/help` | GET | Command plane help |
-| `/api/v1/command-plane/swarm` | GET | Swarm status |
-| `/api/v1/command-plane/orchestra` | GET | Orchestra map |
 | `/api/v1/chains/summary` | GET | Chain summary |
 | `/api/v1/chains/runs/:runId` | GET | Chain run detail |
+
+`/api/v1/command-plane/*` HTTP compatibility lane is retired. Current servers answer those paths with a removed-surface response instead of a live read/write contract.
 
 ### Governance
 

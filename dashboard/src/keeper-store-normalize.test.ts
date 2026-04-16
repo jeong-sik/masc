@@ -325,7 +325,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         runtime_blocker_class: 'ambiguous_post_commit_timeout',
         runtime_blocker_summary:
           'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        runtime_blocker_manual_reconcile: true,
+        runtime_blocker_continue_gate: true,
         social_model: 'bdi_speech_v1',
         configured_social_model: 'experimental_v99',
         social_model_recognized: false,
@@ -346,7 +346,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_blocker_class: 'ambiguous_post_commit_timeout',
       runtime_blocker_summary:
         'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-      runtime_blocker_manual_reconcile: true,
+      runtime_blocker_continue_gate: true,
       social_model: 'bdi_speech_v1',
       configured_social_model: 'experimental_v99',
       social_model_recognized: false,

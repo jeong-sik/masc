@@ -388,9 +388,9 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         runtime_blocker_class:
           (asString(row.runtime_blocker_class) as Keeper['runtime_blocker_class']) ?? null,
         runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
-        runtime_blocker_manual_reconcile:
-          typeof row.runtime_blocker_manual_reconcile === 'boolean'
-            ? row.runtime_blocker_manual_reconcile
+        runtime_blocker_continue_gate:
+          typeof row.runtime_blocker_continue_gate === 'boolean'
+            ? row.runtime_blocker_continue_gate
             : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
@@ -423,6 +423,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_speech_act: asString(row.last_speech_act) ?? null,
         last_blocker: asString(row.last_blocker) ?? null,
         last_need: asString(row.last_need) ?? null,
+        runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
         context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),

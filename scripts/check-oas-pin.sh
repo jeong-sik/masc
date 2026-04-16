@@ -143,12 +143,12 @@ if command -v opam >/dev/null 2>&1; then
   if [[ -z "${installed_version}" ]]; then
     echo "agent_sdk is not installed in the current opam switch" >&2
     echo "  opam list output: ${installed_packages:-<empty>}" >&2
-    echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y" >&2
     exit 1
   fi
   if ! version_gte "${installed_version}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
     echo "installed agent_sdk version is ${installed_version}, expected >= ${OAS_AGENT_SDK_MIN_VERSION}" >&2
-    echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test --with-doc -y" >&2
+    echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y" >&2
     exit 1
   fi
 

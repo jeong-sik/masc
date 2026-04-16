@@ -73,7 +73,8 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let severity_rank = function
+let severity_rank s =
+  match String.lowercase_ascii s with
   | "bad" | "risk" | "critical" -> 2
   | "warn" | "watch" | "interrupted" | "degraded" -> 1
   | _ -> 0
@@ -124,8 +125,8 @@ let health_level_of_string s =
   | "critical" -> HL_critical
   | "bad" -> HL_bad
   | "risk" -> HL_risk
-  | "warn" -> HL_warn
-  | "degraded" -> HL_degraded
+  | "warn" | "watch" -> HL_warn
+  | "degraded" | "interrupted" -> HL_degraded
   | "ok" | "good" | "healthy" -> HL_ok
   | _ -> HL_unknown
 
@@ -137,6 +138,11 @@ let string_of_health_level = function
   | HL_degraded -> "degraded"
   | HL_ok -> "ok"
   | HL_unknown -> "unknown"
+
+let severity_rank_of_health_level = function
+  | HL_critical | HL_bad | HL_risk -> 2
+  | HL_warn | HL_degraded -> 1
+  | HL_ok | HL_unknown -> 0
 
 (** Session lifecycle — parsed from session JSON at call sites.
     The variant makes the different terminal sets visible:

@@ -1046,6 +1046,18 @@ let handle_keeper_shell
            LLM can self-recover toward keeper_pr_submit / operator
            approval without a second round-trip. *)
       let reversibility = Worker_dev_tools.classify_gh_reversibility cmd_str in
+      let rev_tag = Worker_dev_tools.string_of_gh_reversibility reversibility in
+      let gh_cmd_display = Printf.sprintf "gh %s" cmd_str in
+      let gh_base ~ok ~cwd extras =
+        Yojson.Safe.to_string
+          (`Assoc
+              ([ "ok", `Bool ok
+               ; "op", `String op
+               ; "cwd", `String cwd
+               ; "command", `String gh_cmd_display
+               ; "reversibility", `String rev_tag
+               ] @ extras))
+      in
       (match reversibility with
        | Worker_dev_tools.R2_Irreversible ->
          let hint =
@@ -1060,15 +1072,9 @@ let handle_keeper_shell
          Log.Keeper.warn
            "keeper_shell op=gh R2 blocked: %s (keeper=%s)"
            cmd_str meta.name;
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool false
-               ; "op", `String op
-               ; "command", `String (Printf.sprintf "gh %s" cmd_str)
-               ; "error", `String "gh_irreversible_blocked"
-               ; "reversibility", `String "R2"
-               ; "hint", `String hint
-               ])
+         gh_base ~ok:false ~cwd:""
+           [ "error", `String "gh_irreversible_blocked"
+           ; "hint", `String hint ]
        | R0_Read | R1_Reversible ->
          (match Worker_dev_tools.validate_gh_command ~allowed_orgs cmd_str with
           | Error reason ->
@@ -1087,11 +1093,6 @@ let handle_keeper_shell
             (match cwd_target () with
              | Error e -> path_error e
              | Ok cwd ->
-               let reversibility_tag = match reversibility with
-                 | R0_Read -> "R0"
-                 | R1_Reversible -> "R1"
-                 | R2_Irreversible -> "R2"  (* unreachable *)
-               in
                if reversibility = Worker_dev_tools.R1_Reversible then
                  Log.Keeper.info
                    "gh_audit: keeper=%s reversibility=R1 cwd=%s cmd=gh %s"
@@ -1105,33 +1106,21 @@ let handle_keeper_shell
                    [ "bash"; "-lc"; full_cmd ]
                in
                if process_status_is_timeout st then
-                 Yojson.Safe.to_string
-                   (`Assoc
-                       [ "ok", `Bool false
-                       ; "op", `String op
-                       ; "cwd", `String cwd
-                       ; "command", `String (Printf.sprintf "gh %s" cmd_str)
-                       ; "reversibility", `String reversibility_tag
-                       ; "error", `String "gh_command_timed_out"
-                       ; "timeout_sec", `Float timeout_sec
-                       ; "status", Keeper_alerting_path.process_status_to_json st
-                       ; "output", `String out
-                       ; "hint", `String
-                           "gh network call exceeded timeout_sec. Retry with a \
-                            larger value (e.g. timeout_sec=60) or narrow the \
-                            query (--state, --limit, --json)."
-                       ])
+                 gh_base ~ok:false ~cwd
+                   [ "error", `String "gh_command_timed_out"
+                   ; "timeout_sec", `Float timeout_sec
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "output", `String out
+                   ; "hint", `String
+                       "gh network call exceeded timeout_sec. Retry with a \
+                        larger value (e.g. timeout_sec=60) or narrow the \
+                        query (--state, --limit, --json)."
+                   ]
                else
-                 Yojson.Safe.to_string
-                   (`Assoc
-                       [ "ok", `Bool (st = Unix.WEXITED 0)
-                       ; "op", `String op
-                       ; "cwd", `String cwd
-                       ; "command", `String (Printf.sprintf "gh %s" cmd_str)
-                       ; "reversibility", `String reversibility_tag
-                       ; "status", Keeper_alerting_path.process_status_to_json st
-                       ; "output", `String out
-                       ]))))
+                 gh_base ~ok:(st = Unix.WEXITED 0) ~cwd
+                   [ "status", Keeper_alerting_path.process_status_to_json st
+                   ; "output", `String out
+                   ])))
   | _ ->
     Yojson.Safe.to_string
       (`Assoc

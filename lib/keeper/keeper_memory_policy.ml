@@ -305,6 +305,34 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
   in
   if lines = [] then "No continuity snapshot available." else String.concat "\n" lines
 
+(* RFC-MASC-001 Phase 1 post-mortem (Gen3 2026-04-17):
+   [keeper_state_snapshot_to_summary_text] renders every field for audit/persistence.
+   Injecting it verbatim into the next prompt creates a prose-level echo loop:
+   LLM reads its own past [Done]/[Decisions] narrative and reproduces a
+   near-identical one. Strip backward-looking fields at prompt assembly so the
+   LLM sees only forward-looking context (Goal, Next plan, Next, OpenQuestions,
+   Constraints). Persistence still retains the full summary. *)
+let filter_forward_looking_summary (summary : string) : string =
+  let backward_labels = [ "Done"; "Progress"; "Decisions" ] in
+  let is_backward_line line =
+    let trimmed = String.trim line in
+    List.exists
+      (fun label ->
+        let prefix = label ^ ":" in
+        String.length trimmed >= String.length prefix
+        && String.sub trimmed 0 (String.length prefix) = prefix)
+      backward_labels
+  in
+  let kept =
+    summary
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (is_backward_line line))
+    |> List.filter (fun line -> String.trim line <> "")
+  in
+  match kept with
+  | [] -> ""
+  | _ -> String.concat "\n" kept
+
 let continuity_fallback_summary_text
     ~(continuity_summary : string)
     ~(last_continuity_update_ts : float) : string =

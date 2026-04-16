@@ -289,13 +289,22 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_string ubuf "\n");
-  (* 8. Continuity — state across turns *)
+  (* 8. Continuity — state across turns.
+     Inject only forward-looking fields (Goal, Next plan, Next, OpenQuestions,
+     Constraints). Backward-looking fields (Done, Progress, Decisions) are
+     stripped to avoid a prose-level echo loop where the LLM re-reads its own
+     prior narrative and reproduces a near-identical one. The full summary
+     remains persisted in meta.continuity_summary for audit. *)
+  let continuity_for_prompt =
+    Keeper_memory_policy.filter_forward_looking_summary
+      observation.continuity_summary
+  in
   if
-    observation.continuity_summary <> ""
+    continuity_for_prompt <> ""
     && observation.continuity_summary <> "No continuity snapshot available."
   then (
     Buffer.add_string ubuf "\n### Continuity\n";
-    Buffer.add_string ubuf observation.continuity_summary;
+    Buffer.add_string ubuf continuity_for_prompt;
     Buffer.add_string ubuf "\n");
   (* 9. Live worktree delta — actionable change signal *)
   (match observation.worktree_change_summary with

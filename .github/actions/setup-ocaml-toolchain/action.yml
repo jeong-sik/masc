@@ -1,5 +1,5 @@
 name: Setup OCaml Toolchain
-description: Shared OCaml toolchain bootstrap with compiler and dune cache.
+description: Shared Linux OCaml toolchain bootstrap that avoids upstream opam binary gaps.
 
 inputs:
   ocaml-compiler:
@@ -18,9 +18,83 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Setup OCaml
-      uses: ocaml/setup-ocaml@v3.5.1
-      with:
-        ocaml-compiler: ${{ inputs.ocaml-compiler }}
-        dune-cache: ${{ inputs.dune-cache }}
-        cache-prefix: ${{ inputs.cache-prefix }}
+    - name: Bootstrap local opam switch
+      shell: bash
+      env:
+        OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
+      run: |
+        set -euo pipefail
+
+        if [ "$(uname -s)" != "Linux" ]; then
+          echo "setup-ocaml-toolchain currently supports Linux runners only" >&2
+          exit 1
+        fi
+
+        case "${OCAML_COMPILER_INPUT}" in
+          5.4|5.4.x)
+            compiler_pkg="ocaml-base-compiler.5.4.1"
+            ;;
+          [0-9]*.[0-9]*.[0-9]*)
+            compiler_pkg="ocaml-base-compiler.${OCAML_COMPILER_INPUT}"
+            ;;
+          ocaml-base-compiler.*)
+            compiler_pkg="${OCAML_COMPILER_INPUT}"
+            ;;
+          *)
+            echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}" >&2
+            exit 1
+            ;;
+        esac
+
+        case "$(uname -m)" in
+          x86_64|amd64)
+            opam_arch="x86_64"
+            ;;
+          aarch64|arm64)
+            opam_arch="arm64"
+            ;;
+          *)
+            echo "Unsupported runner architecture: $(uname -m)" >&2
+            exit 1
+            ;;
+        esac
+
+        opam_version="2.5.0"
+        opam_dir="${RUNNER_TEMP}/opam-bin"
+        opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-linux"
+
+        mkdir -p "${opam_dir}"
+        curl -L --fail "${opam_url}" -o "${opam_dir}/opam"
+        chmod +x "${opam_dir}/opam"
+        export PATH="${opam_dir}:${PATH}"
+        echo "${opam_dir}" >> "${GITHUB_PATH}"
+
+        # Export for this step (opam init/switch-create below need them)
+        export OPAMCOLOR=always
+        export OPAMCONFIRMLEVEL=unsafe-yes
+        export OPAMERRLOGLEN=0
+        export OPAMEXTERNALSOLVER=builtin-0install
+        export OPAMRETRIES=10
+        export OPAMSOLVERTIMEOUT=600
+        export OPAMYES=1
+        # Persist to GITHUB_ENV so later workflow steps (opam install, dune build)
+        # inherit the non-interactive settings. Without this, `opam install`
+        # hits the interactive depext prompt on libprotobuf-dev and aborts.
+        {
+          echo "OPAMCOLOR=always"
+          echo "OPAMCONFIRMLEVEL=unsafe-yes"
+          echo "OPAMERRLOGLEN=0"
+          echo "OPAMEXTERNALSOLVER=builtin-0install"
+          echo "OPAMRETRIES=10"
+          echo "OPAMSOLVERTIMEOUT=600"
+          echo "OPAMYES=1"
+        } >> "${GITHUB_ENV}"
+
+        switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
+
+        opam init --auto-setup --bare --disable-sandboxing --yes
+        opam switch create "${switch_name}" "${compiler_pkg}" --yes
+
+        switch_prefix="$(opam var prefix --switch="${switch_name}")"
+        echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
+        echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"

@@ -322,7 +322,7 @@ let test_default_base_path_falls_back_to_home_when_unset () =
         (contains_substring captured
            ("MASC_CONFIG_DIR=" ^ Filename.concat expected_home ".masc/config")))
 
-let test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved () =
+let test_absolute_inherited_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
@@ -340,7 +340,6 @@ let test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved () =
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", stale_root);
-              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
             ]
           (Printf.sprintf "%s --http --port 9960" (quote script))
       in
@@ -352,7 +351,7 @@ let test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved () =
       check bool "absolute inherited base path preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
-let test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved () =
+let test_absolute_parent_project_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
       let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
@@ -372,7 +371,6 @@ let test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved () 
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", parent);
-              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
             ]
           (Printf.sprintf "%s --http --port 9963" (quote script))
       in
@@ -384,7 +382,7 @@ let test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved () 
       check bool "absolute parent root inheritance preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
-let test_zshenv_absolute_base_path_with_dual_roots_is_preserved () =
+let test_zshenv_absolute_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
       let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
@@ -405,7 +403,6 @@ let test_zshenv_absolute_base_path_with_dual_roots_is_preserved () =
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
-              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
             ]
           (Printf.sprintf "%s --http --port 9965" (quote script))
       in
@@ -417,7 +414,7 @@ let test_zshenv_absolute_base_path_with_dual_roots_is_preserved () =
       check bool "zshenv absolute base path preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
-let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
+let test_shared_root_inherited_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
@@ -435,7 +432,6 @@ let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", inherited_root);
-              ("MASC_ALLOW_INHERITED_BASE_PATH", "1");
             ]
           (Printf.sprintf "%s --http --port 9964" (quote script))
       in
@@ -444,7 +440,7 @@ let test_dual_masc_roots_opt_in_preserves_inherited_base_path () =
           stderr;
       let captured = read_file capture in
       let expected_root = canonical_path inherited_root in
-      check bool "opt-in preserves inherited base path" true
+      check bool "shared-root inherited base path preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_worktree_prefers_local_build_over_workspace_build () =
@@ -500,7 +496,6 @@ let test_explicit_base_path_execs_from_base_path () =
               ("FAKE_CAPTURE_FILE", capture);
               ("HOME", home_dir);
               ("MASC_BASE_PATH", parent);
-              ("MASC_ALLOW_INHERITED_BASE_PATH", "");
             ]
           (Printf.sprintf "%s --http --port 9966 --base-path %s"
              (quote script) (quote parent))
@@ -704,13 +699,13 @@ let () =
           test_case "default base path falls back to home when unset" `Quick
             test_default_base_path_falls_back_to_home_when_unset;
           test_case
-            "absolute inherited base path with dual .masc roots is preserved"
+            "absolute inherited base path is preserved"
             `Quick
-            test_absolute_inherited_base_path_with_dual_masc_roots_is_preserved;
+            test_absolute_inherited_base_path_is_preserved;
           test_case
             "absolute parent project inherited base path is preserved"
             `Quick
-            test_absolute_parent_project_base_path_with_dual_masc_roots_is_preserved;
+            test_absolute_parent_project_base_path_is_preserved;
           test_case "explicit base path execs from base path" `Quick
             test_explicit_base_path_execs_from_base_path;
           test_case
@@ -726,9 +721,9 @@ let () =
           test_case "grpc-direct banner is preserved in stderr" `Quick
             test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "zshenv absolute base path is preserved" `Quick
-            test_zshenv_absolute_base_path_with_dual_roots_is_preserved;
-          test_case "dual roots opt-in preserves inherited base path" `Quick
-            test_dual_masc_roots_opt_in_preserves_inherited_base_path;
+            test_zshenv_absolute_base_path_is_preserved;
+          test_case "shared-root inherited base path is preserved" `Quick
+            test_shared_root_inherited_base_path_is_preserved;
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
           test_case

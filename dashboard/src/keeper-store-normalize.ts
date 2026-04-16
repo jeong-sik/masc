@@ -423,6 +423,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_speech_act: asString(row.last_speech_act) ?? null,
         last_blocker: asString(row.last_blocker) ?? null,
         last_need: asString(row.last_need) ?? null,
+        runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
         context_tokens: asNumber(row.context_tokens) ?? asNumber(contextRaw?.context_tokens),
         context_max: asNumber(row.context_max) ?? asNumber(contextRaw?.context_max),

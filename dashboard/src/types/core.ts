@@ -625,6 +625,7 @@ export interface Keeper {
   last_need?: string | null
   last_drift_reason?: string | null
   drift_count_total?: number
+  runtime_warning_ctx_ratio?: number | null
   generation?: number
   turn_count?: number
   total_turns?: number

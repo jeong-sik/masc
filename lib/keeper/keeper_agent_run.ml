@@ -1902,7 +1902,8 @@ let run_turn
              let store = Agent_sdk.Proof_store.default_config in
              let outcome = Cdal_eval_v1.evaluate ~store p in
              let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
-             Cdal_eval_v1.persist verdict;
+             let task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
+             Cdal_eval_v1.persist ?task_id verdict;
              Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
              (match outcome with
               | Cdal_eval_v1.Load_failure (err, _) ->

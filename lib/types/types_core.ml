@@ -229,6 +229,9 @@ type task_action =
   | Done_action
   | Cancel
   | Release
+  | Submit_for_verification
+  | Approve_verification
+  | Reject_verification
 [@@deriving show]
 
 let task_action_of_string s =
@@ -238,6 +241,9 @@ let task_action_of_string s =
   | "done" -> Ok Done_action
   | "cancel" -> Ok Cancel
   | "release" -> Ok Release
+  | "submit_for_verification" -> Ok Submit_for_verification
+  | "approve" -> Ok Approve_verification
+  | "reject" -> Ok Reject_verification
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -246,15 +252,27 @@ let task_action_to_string = function
   | Done_action -> "done"
   | Cancel -> "cancel"
   | Release -> "release"
+  | Submit_for_verification -> "submit_for_verification"
+  | Approve_verification -> "approve"
+  | Reject_verification -> "reject"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
-let all_task_actions = [Claim; Start; Done_action; Cancel; Release]
+let all_task_actions =
+  [ Claim; Start; Done_action; Cancel; Release;
+    Submit_for_verification; Approve_verification; Reject_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 type task_status =
   | Todo
   | Claimed of { assignee: string; claimed_at: string }
   | InProgress of { assignee: string; started_at: string }
+  | AwaitingVerification of {
+      assignee: string;
+      submitted_at: string;
+      verification_id: string;
+      required_verifier_role: role;
+      deadline: string option;
+    }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
@@ -264,6 +282,7 @@ let task_status_to_string = function
   | Todo -> "todo"
   | Claimed _ -> "claimed"
   | InProgress _ -> "in_progress"
+  | AwaitingVerification _ -> "awaiting_verification"
   | Done _ -> "done"
   | Cancelled _ -> "cancelled"
 
@@ -290,6 +309,16 @@ let task_status_to_yojson = function
         ("assignee", `String assignee);
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
+      ]
+  | AwaitingVerification { assignee; submitted_at; verification_id;
+                           required_verifier_role; deadline } ->
+      `Assoc [
+        ("status", `String "awaiting_verification");
+        ("assignee", `String assignee);
+        ("submitted_at", `String submitted_at);
+        ("verification_id", `String verification_id);
+        ("required_verifier_role", `String (role_to_string required_verifier_role));
+        ("deadline", Json_util.string_opt_to_json deadline);
       ]
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
@@ -318,6 +347,17 @@ let task_status_of_yojson json =
         let completed_at = json |> member "completed_at" |> to_string in
         let notes = json |> member "notes" |> to_string_option in
         Ok (Done { assignee; completed_at; notes })
+    | "awaiting_verification" ->
+        let assignee = json |> member "assignee" |> to_string in
+        let submitted_at = json |> member "submitted_at" |> to_string in
+        let verification_id = json |> member "verification_id" |> to_string in
+        let required_verifier_role =
+          match json |> member "required_verifier_role" |> to_string_option with
+          | Some s -> role_of_string s
+          | None -> Reviewer in
+        let deadline = json |> member "deadline" |> to_string_option in
+        Ok (AwaitingVerification { assignee; submitted_at; verification_id;
+                                   required_verifier_role; deadline })
     | "cancelled" ->
         let cancelled_by = json |> member "cancelled_by" |> to_string in
         let cancelled_at = json |> member "cancelled_at" |> to_string in

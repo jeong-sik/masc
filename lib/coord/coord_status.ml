@@ -91,11 +91,13 @@ let status config =
     let status_icon = match task.task_status with
       | Done _ -> "✅"
       | Claimed _ | InProgress _ -> "🔄"
+      | AwaitingVerification _ -> "🔍"
       | Todo -> "📋"
       | Cancelled _ -> "🚫"
     in
     let assignee = match task.task_status with
-      | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } -> assignee
+      | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
+      | AwaitingVerification { assignee; _ } -> assignee
       | Cancelled { cancelled_by; _ } -> cancelled_by
       | Todo -> "unclaimed"
     in

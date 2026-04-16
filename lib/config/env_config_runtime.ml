@@ -356,6 +356,15 @@ module Cdal = struct
   let enabled () =
     Feature_flag_registry.get_bool "MASC_CDAL_ENABLED"
 
+  (** Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. *)
+  let gate_enabled () =
+    Feature_flag_registry.get_bool "MASC_CDAL_GATE_ENABLED"
+end
+
+module Verification = struct
+  (** Enable AwaitingVerification state and cross-agent approval. Default: false. *)
+  let fsm_enabled () =
+    Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
 end
 
 (** {1 Slot Scheduling} *)

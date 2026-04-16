@@ -105,6 +105,7 @@ let is_pending_task (task : Types.task) : bool =
   | Types.Todo -> true
   | Types.Claimed _ -> true
   | Types.InProgress _ -> true
+  | Types.AwaitingVerification _ -> true
   | Types.Done _ -> false
   | Types.Cancelled _ -> false
 

@@ -158,6 +158,11 @@ end
 
 module Cdal : sig
   val enabled : unit -> bool
+  val gate_enabled : unit -> bool
+end
+
+module Verification : sig
+  val fsm_enabled : unit -> bool
 end
 
 module Board : sig

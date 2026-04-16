@@ -242,6 +242,15 @@ let test_http_write_auth_contracts () =
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        "~net:state.Mcp_server.net")
 
+let test_tool_admin_snapshot_auth_contracts () =
+  check bool "tool admin snapshot metadata requires admin permission" true
+    (file_contains_pattern "lib/tool_misc.ml"
+       {|"masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
+      Some Types.CanAdmin|});
+  check bool "tool admin snapshot legacy permission map requires admin" true
+    (file_contains_pattern "lib/tool_permission_map.ml"
+       {|("masc_tool_admin_snapshot", CanAdmin)|})
+
 let test_keeper_direct_reply_contracts () =
   check bool "dashboard keeper direct messages request direct reply" true
     (file_contains_pattern "dashboard/src/api/keeper.ts"
@@ -709,6 +718,8 @@ let () =
            test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
+           test_case "tool admin snapshot auth contracts" `Quick
+             test_tool_admin_snapshot_auth_contracts;
            test_case "keeper direct reply contracts" `Quick
              test_keeper_direct_reply_contracts;
            test_case "dashboard warm hydration contracts" `Quick

@@ -137,13 +137,12 @@ let _tool_spec_read_only =
 
 let tool_required_permission = function
   | "masc_config" | "masc_dashboard"
-  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search"
-  | "masc_tool_admin_snapshot" ->
+  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" ->
       Some Types.CanReadState
+  | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
+      Some Types.CanAdmin
   | "masc_webrtc_offer" | "masc_webrtc_answer" | "masc_cleanup_zombies" ->
       Some Types.CanBroadcast
-  | "masc_tool_admin_update" ->
-      Some Types.CanAdmin
   | _ -> None
 
 let () =

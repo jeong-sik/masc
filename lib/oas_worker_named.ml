@@ -424,8 +424,14 @@ let run_named
         | Some _ -> checkpoint_after
         | None -> resume_checkpoint
       in
+      (* Track provider call outcome for weighted-routing health.
+         Semantics: response arrived = provider healthy (even if accept
+         logic later rejects); error = provider unhealthy.  The
+         cascade-decision branches (Accept_on_exhaustion / Try_next /
+         Exhausted) are orthogonal to provider health. *)
       (match result with
       | Ok result when accept result.response ->
+        Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id);
         (* FSM: Call_ok → Accept *)
         let observation =
           Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name ~configured_labels
@@ -435,6 +441,7 @@ let run_named
         Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
         Ok result
       | Ok result ->
+        Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id);
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
         let outcome = Cascade_fsm.Accept_rejected
@@ -477,6 +484,7 @@ let run_named
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
            Ok result)
       | Error sdk_err ->
+        Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id);
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->

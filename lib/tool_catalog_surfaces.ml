@@ -211,7 +211,11 @@ let keeper_denied_surface_tools =
     "masc_tool_admin_snapshot";
     "masc_config";
     "masc_keeper_create_from_persona";
-    "masc_keeper_reset";
+    (* NOTE: masc_keeper_reset is on public_mcp_surface_tools (line 126),
+       so it cannot be added to Keeper_denied without violating the
+       Keeper_denied ∩ Public_mcp = ∅ invariant (test_tool_surface_ssot.ml:90).
+       Keepers don't see the public_mcp surface at discovery, so no filter
+       is needed here. Admin permission still blocks execution. *)
     "masc_pause";
     "masc_resume";
   ]

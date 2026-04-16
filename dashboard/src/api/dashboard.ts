@@ -2008,3 +2008,39 @@ export function fetchTlaSpecs(
     signal: opts?.signal,
   })
 }
+
+export type CascadeStrategyTraceKind = 'ordered' | 'filtered_empty' | 'exhausted'
+
+export interface CascadeStrategyTraceEvent {
+  ts: number
+  cascade_name: string
+  strategy: string
+  cycle: number
+  candidates_in: number
+  candidates_out: number
+  backoff_ms: number
+  kind: CascadeStrategyTraceKind
+}
+
+export interface CascadeStrategyTraceResponse {
+  updated_at: string
+  total_events: number
+  events: CascadeStrategyTraceEvent[]
+}
+
+export function fetchCascadeStrategyTrace(opts?: {
+  limit?: number
+  cascade?: string
+  signal?: AbortSignal
+}): Promise<CascadeStrategyTraceResponse> {
+  const params = new URLSearchParams()
+  if (typeof opts?.limit === 'number' && opts.limit > 0) {
+    params.set('limit', String(opts.limit))
+  }
+  if (opts?.cascade) params.set('cascade', opts.cascade)
+  const qs = params.toString()
+  return get<CascadeStrategyTraceResponse>(
+    `/api/v1/cascade/strategy_trace${qs ? `?${qs}` : ''}`,
+    { signal: opts?.signal },
+  )
+}

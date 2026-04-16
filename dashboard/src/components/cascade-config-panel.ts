@@ -12,6 +12,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import {
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
+  fetchCascadeStrategyTrace,
   fetchCascadeConfig,
   fetchCascadeHealth,
   type CascadeCandidate,
@@ -24,6 +25,9 @@ import {
   type CascadeHealthProvider,
   type CascadeHealthResponse,
   type CascadeProfile,
+  type CascadeStrategyTraceEvent,
+  type CascadeStrategyTraceKind,
+  type CascadeStrategyTraceResponse,
 } from '../api/dashboard'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -37,17 +41,19 @@ interface CascadeData {
   health: CascadeHealthResponse | null
   capacity: CascadeClientCapacityResponse | null
   history: CascadeClientCapacityHistoryResponse | null
+  trace: CascadeStrategyTraceResponse | null
 }
 
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
-    const [config, health, capacity, history] = await Promise.all([
+    const [config, health, capacity, history, trace] = await Promise.all([
       fetchCascadeConfig({ signal }),
       fetchCascadeHealth({ signal }),
       fetchCascadeClientCapacity({ signal }),
       fetchCascadeClientCapacityHistory({ limit: 50, signal }),
+      fetchCascadeStrategyTrace({ limit: 50, signal }),
     ])
-    return { config, health, capacity, history }
+    return { config, health, capacity, history, trace }
   })
 }
 
@@ -244,6 +250,60 @@ function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
   }
 }
 
+function traceKindTone(k: CascadeStrategyTraceKind): 'ok' | 'warn' | 'bad' {
+  switch (k) {
+    case 'ordered': return 'ok'
+    case 'filtered_empty': return 'warn'
+    case 'exhausted': return 'bad'
+  }
+}
+
+function traceKindLabel(k: CascadeStrategyTraceKind): string {
+  switch (k) {
+    case 'ordered': return '정렬'
+    case 'filtered_empty': return '전부 차단'
+    case 'exhausted': return '소진'
+  }
+}
+
+function StrategyTraceTable({
+  trace,
+}: { trace: CascadeStrategyTraceResponse }) {
+  if (trace.events.length === 0) {
+    return html`<${EmptyState}>최근 strategy decision 이 없습니다. (cascade 호출이 아직 발생하지 않음)<//>`
+  }
+  return html`
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+          <th class="text-left py-1 w-20">시간</th>
+          <th class="text-left py-1">Cascade</th>
+          <th class="text-left py-1">Strategy</th>
+          <th class="text-right py-1">Cycle</th>
+          <th class="text-right py-1">In/Out</th>
+          <th class="text-right py-1">Backoff(ms)</th>
+          <th class="text-left py-1">결과</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${trace.events.map((e: CascadeStrategyTraceEvent) => {
+          const tone = traceKindTone(e.kind)
+          return html`
+          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+            <td class="py-1 text-[var(--text-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
+            <td class="py-1"><code class="text-[var(--text-strong)]">${e.cascade_name}</code></td>
+            <td class="py-1 text-[var(--text-muted)]">${e.strategy}</td>
+            <td class="py-1 text-right tabular-nums">${e.cycle}</td>
+            <td class="py-1 text-right tabular-nums">${e.candidates_in}/${e.candidates_out}</td>
+            <td class="py-1 text-right tabular-nums">${e.backoff_ms > 0 ? e.backoff_ms : '–'}</td>
+            <td class="py-1"><${StatusChip} tone=${tone}>${traceKindLabel(e.kind)}<//></td>
+          </tr>
+        `})}
+      </tbody>
+    </table>
+  `
+}
+
 function ClientCapacityHistoryTable({
   history,
 }: { history: CascadeClientCapacityHistoryResponse }) {
@@ -328,6 +388,7 @@ export function CascadeConfigPanel() {
   const health = current.data?.health ?? null
   const capacity = current.data?.capacity ?? null
   const history = current.data?.history ?? null
+  const trace = current.data?.trace ?? null
 
   return html`
     <div class="flex flex-col gap-4">
@@ -410,6 +471,12 @@ export function CascadeConfigPanel() {
       <${Card} title="Client Capacity — 최근 이벤트">
         ${history
           ? html`<${ClientCapacityHistoryTable} history=${history} />`
+          : null}
+      <//>
+
+      <${Card} title="Strategy Decisions — cycle 추적">
+        ${trace
+          ? html`<${StrategyTraceTable} trace=${trace} />`
           : null}
       <//>
     </div>

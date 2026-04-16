@@ -196,3 +196,24 @@ let client_capacity_history_json ?limit ?kind ?since_ts () =
     ("total_events", `Int (List.length events));
     ("events", `List (List.map history_event_to_json events));
   ]
+
+let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event)
+  : Yojson.Safe.t =
+  `Assoc [
+    ("ts", `Float ev.ts);
+    ("cascade_name", `String ev.cascade_name);
+    ("strategy", `String ev.strategy);
+    ("cycle", `Int ev.cycle);
+    ("candidates_in", `Int ev.candidates_in);
+    ("candidates_out", `Int ev.candidates_out);
+    ("backoff_ms", `Int ev.backoff_ms);
+    ("kind", `String (Cascade_strategy_trace.kind_to_string ev.kind));
+  ]
+
+let strategy_trace_json ?limit ?cascade () =
+  let events = Cascade_strategy_trace.snapshot ?limit ?cascade () in
+  `Assoc [
+    ("updated_at", `String (now_iso ()));
+    ("total_events", `Int (List.length events));
+    ("events", `List (List.map strategy_trace_event_to_json events));
+  ]

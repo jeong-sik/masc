@@ -13,6 +13,7 @@ module S = Masc_mcp.Cascade_strategy
 module H = Masc_mcp.Cascade_health_tracker
 module C = Masc_mcp.Cascade_client_capacity
 module CH = Masc_mcp.Cascade_client_capacity_history
+module ST = Masc_mcp.Cascade_strategy_trace
 module T = Masc_mcp.Cascade_throttle
 module Cascade_state = Masc_mcp.Cascade_state
 
@@ -702,6 +703,80 @@ let test_history_prometheus_counter_increments () =
   check bool "ollama/rejected_full counter advanced by >= 1"
     true (ollama_rejected >= 1.0)
 
+(* ── Strategy decision trace (LT-5) ─────────────────── *)
+
+let mk_trace_event ?(ts = 0.0) ?(cascade_name = "keeper_unified")
+    ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
+    ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered) () =
+  { ST.ts; cascade_name; strategy; cycle; candidates_in; candidates_out;
+    backoff_ms; kind }
+
+let test_trace_record_snapshot_roundtrip () =
+  ST.clear ();
+  ST.record (mk_trace_event ~ts:1000.0 ~cycle:0 ~kind:ST.Ordered ());
+  ST.record (mk_trace_event ~ts:1001.0 ~cycle:1
+               ~candidates_out:0 ~backoff_ms:500 ~kind:ST.Filtered_empty ());
+  ST.record (mk_trace_event ~ts:1002.0 ~cycle:2
+               ~candidates_out:0 ~kind:ST.Exhausted ());
+  let events = ST.snapshot () in
+  check int "3 events recorded" 3 (List.length events);
+  (match events with
+   | e0 :: e1 :: e2 :: [] ->
+     check (float 0.0) "newest ts" 1002.0 e0.ts;
+     check (float 0.0) "middle ts" 1001.0 e1.ts;
+     check (float 0.0) "oldest ts" 1000.0 e2.ts;
+     check bool "newest kind Exhausted" true (e0.kind = ST.Exhausted);
+     check bool "middle kind Filtered_empty" true (e1.kind = ST.Filtered_empty);
+     check bool "oldest kind Ordered" true (e2.kind = ST.Ordered)
+   | _ -> fail "expected 3 events")
+
+let test_trace_cascade_filter () =
+  ST.clear ();
+  ST.record (mk_trace_event ~cascade_name:"keeper_unified" ~ts:1.0 ());
+  ST.record (mk_trace_event ~cascade_name:"nick0cave" ~ts:2.0 ());
+  ST.record (mk_trace_event ~cascade_name:"keeper_unified" ~ts:3.0 ());
+  let unified = ST.snapshot ~cascade:"keeper_unified" () in
+  check int "keeper_unified → 2 events" 2 (List.length unified);
+  List.iter
+    (fun e -> check string "cascade filter" "keeper_unified" e.ST.cascade_name)
+    unified;
+  let missing = ST.snapshot ~cascade:"does_not_exist" () in
+  check int "missing cascade → empty" 0 (List.length missing)
+
+let test_trace_ring_drops_oldest () =
+  ST.clear ();
+  let cap = ST.capacity () in
+  for i = 0 to cap + 4 do
+    ST.record (mk_trace_event ~ts:(float_of_int i) ~cycle:i ())
+  done;
+  check int "count clamped to capacity" cap (ST.size ());
+  let events = ST.snapshot ~limit:(cap + 10) () in
+  check int "snapshot count = capacity" cap (List.length events);
+  (match events with
+   | newest :: _ ->
+     check (float 0.0) "newest ts = cap+4" (float_of_int (cap + 4)) newest.ts
+   | [] -> fail "expected events");
+  let oldest = List.nth events (cap - 1) in
+  check (float 0.0) "oldest retained ts = 5" 5.0 oldest.ts
+
+let test_trace_limit_clamp () =
+  ST.clear ();
+  for i = 0 to 9 do
+    ST.record (mk_trace_event ~ts:(float_of_int i) ())
+  done;
+  let five = ST.snapshot ~limit:5 () in
+  check int "limit 5" 5 (List.length five);
+  let zero = ST.snapshot ~limit:0 () in
+  check int "limit 0 → empty" 0 (List.length zero);
+  let huge = ST.snapshot ~limit:9999 () in
+  check int "limit>count clamps to count" 10 (List.length huge)
+
+let test_trace_kind_labels () =
+  check string "ordered" "ordered" (ST.kind_to_string ST.Ordered);
+  check string "filtered_empty" "filtered_empty"
+    (ST.kind_to_string ST.Filtered_empty);
+  check string "exhausted" "exhausted" (ST.kind_to_string ST.Exhausted)
+
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -807,5 +882,17 @@ let () =
         test_history_try_acquire_records_events;
       test_case "record bumps Prometheus counter with label" `Quick
         test_history_prometheus_counter_increments;
+    ];
+    "strategy_trace", [
+      test_case "record + snapshot newest-first" `Quick
+        test_trace_record_snapshot_roundtrip;
+      test_case "cascade filter scopes events" `Quick
+        test_trace_cascade_filter;
+      test_case "ring buffer drops oldest" `Quick
+        test_trace_ring_drops_oldest;
+      test_case "limit clamp" `Quick
+        test_trace_limit_clamp;
+      test_case "kind_to_string serialisation" `Quick
+        test_trace_kind_labels;
     ];
   ]

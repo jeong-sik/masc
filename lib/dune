@@ -40,6 +40,7 @@
    cascade_runtime
    cascade_state
    cascade_strategy
+   cascade_strategy_trace
    cascade_throttle
    cancellation
    gate_keeper_backend

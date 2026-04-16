@@ -636,6 +636,18 @@ let run_named
       (sdk_error_of_masc_internal_error
          (Cascade_exhausted { cascade_name; detail = Some detail }))
   in
+  let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
+    Cascade_strategy_trace.record {
+      ts = Unix.gettimeofday ();
+      cascade_name;
+      strategy = Cascade_strategy.kind_to_string strategy.kind;
+      cycle;
+      candidates_in = List.length candidate_cfgs;
+      candidates_out;
+      backoff_ms;
+      kind;
+    }
+  in
   let rec cycle_loop n =
     let ordered =
       Cascade_strategy.order_candidates strategy
@@ -643,14 +655,21 @@ let run_named
     in
     let last_cycle = n + 1 >= strategy.cycle.max_cycles in
     match ordered with
-    | [] when last_cycle -> cascade_exhausted_after_filter ~cycle:n
+    | [] when last_cycle ->
+      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
+      cascade_exhausted_after_filter ~cycle:n
     | [] ->
+      let backoff = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1) in
+      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:backoff
+        ~kind:Filtered_empty;
       Log.Misc.info
         "cascade %s: cycle %d (%s) filtered all candidates, retrying"
         cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
       do_backoff (n + 1);
       cycle_loop (n + 1)
     | _ ->
+      record_trace ~cycle:n ~candidates_out:(List.length ordered)
+        ~backoff_ms:0 ~kind:Ordered;
       let on_success ~provider_key =
         Cascade_strategy.record_choice strategy ~ctx:signal_ctx ~provider_key
       in

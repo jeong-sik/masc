@@ -8,6 +8,10 @@ import {
   getKindCounts,
   setTraceFilter,
   getTraceFilter,
+  setTraceStatusFilter,
+  getTraceStatusFilter,
+  setTraceSearchQuery,
+  getStatusCounts,
   getTraceLoading,
   getTraceError,
   buildTraceEvents,
@@ -40,6 +44,8 @@ describe('appendLiveToolCall', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -70,6 +76,8 @@ describe('appendLiveToolCall', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -94,6 +102,8 @@ describe('appendLiveToolCall', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -135,6 +145,8 @@ describe('appendLiveToolCall', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -247,6 +259,8 @@ describe('getTraceSummary', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -285,6 +299,8 @@ describe('getTraceSummary', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -331,6 +347,8 @@ describe('getTraceSummary', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -375,6 +393,8 @@ describe('getTraceSummary', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -397,6 +417,8 @@ describe('getKindCounts', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -420,6 +442,8 @@ describe('filter', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -440,6 +464,8 @@ describe('closeSessionTrace', () => {
         loading: false,
         error: null,
         filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
         fetchToken: 0,
       },
     }
@@ -448,5 +474,165 @@ describe('closeSessionTrace', () => {
     expect(getTraceEvents('keeper-a')).toEqual([])
     expect(getTraceLoading('keeper-a')).toBe(false)
     expect(getTraceError('keeper-a')).toBeNull()
+  })
+})
+
+describe('status filter', () => {
+  it('classifies tool_call as success and events with error as failure', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'timeout' },
+          { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'rejected', detail: {}, gate: { status: 'reject', reason: 'unsafe' } },
+          { id: '4', ts: 4000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    const counts = getStatusCounts('keeper-a')
+    expect(counts.success).toBe(1)
+    expect(counts.failure).toBe(1)
+    expect(counts.gate_rejected).toBe(1)
+    expect(counts.all).toBe(3) // broadcast has no status
+  })
+
+  it('filters events by status', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'ok', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'err' },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    setTraceStatusFilter('keeper-a', 'failure')
+    expect(getTraceStatusFilter('keeper-a')).toBe('failure')
+    const filtered = getFilteredEvents('keeper-a')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.error).toBe('err')
+  })
+
+  it('combines category filter and status filter', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'ok', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'oas_tool', sourceLane: 'oas', summary: 'oas-ok', detail: {} },
+          { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'err' },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    setTraceFilter('keeper-a', 'tool_call')
+    setTraceStatusFilter('keeper-a', 'success')
+    const filtered = getFilteredEvents('keeper-a')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.id).toBe('1')
+  })
+})
+
+describe('search filter', () => {
+  it('matches against summary, toolName, and error fields', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read file', detail: {}, toolName: 'fs_read' },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit code', detail: {}, toolName: 'edit_file' },
+          { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'bash error', detail: {}, error: 'command not found' },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    // Match by summary
+    setTraceSearchQuery('keeper-a', 'read')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(1)
+
+    // Match by toolName
+    setTraceSearchQuery('keeper-a', 'edit')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(1)
+
+    // Match by error
+    setTraceSearchQuery('keeper-a', 'not found')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(1)
+
+    // No match
+    setTraceSearchQuery('keeper-a', 'nonexistent')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(0)
+  })
+
+  it('is case-insensitive', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'Read File', detail: {} },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    setTraceSearchQuery('keeper-a', 'read')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(1)
+
+    setTraceSearchQuery('keeper-a', 'FILE')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(1)
+  })
+
+  it('combines with category and status filters', () => {
+    traceSlots.value = {
+      'keeper-a': {
+        events: [
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read config', detail: {}, toolName: 'fs_read' },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read config', detail: {}, toolName: 'fs_read', error: 'denied' },
+          { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'read this message', detail: {} },
+        ],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+
+    // Search + category filter
+    setTraceFilter('keeper-a', 'tool_call')
+    setTraceSearchQuery('keeper-a', 'config')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(2)
+
+    // Search + category + status filter
+    setTraceStatusFilter('keeper-a', 'success')
+    expect(getFilteredEvents('keeper-a')).toHaveLength(1)
+    expect(getFilteredEvents('keeper-a')[0]!.id).toBe('1')
   })
 })

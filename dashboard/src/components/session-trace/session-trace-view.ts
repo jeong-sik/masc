@@ -13,6 +13,7 @@ import {
   getTraceError,
   getFilteredEvents,
   getTraceSummary,
+  getTraceSearchQuery,
   loadSessionTrace,
   closeSessionTrace,
   _traceSlots,
@@ -112,6 +113,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
   const error = getTraceError(agentName)
   const events = getFilteredEvents(agentName)
   const summary = getTraceSummary(agentName)
+  const searchQuery = getTraceSearchQuery(agentName)
 
   // Auto-scroll to top when new events arrive (newest-first order)
   const prevCountRef = useRef(0)
@@ -183,7 +185,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
         ref=${listRef}
         class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded-lg border border-[var(--card-border)] bg-[var(--white-2)]"
       >
-        ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} />`)}
+        ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}
         <${LiveIndicator} events=${events} />
       </div>
 

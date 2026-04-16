@@ -13,6 +13,48 @@ import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 // ── Constants ──────────────────────────────────────────
 
 const BROADCAST_PREVIEW_MAX = 160
+
+// ── Search highlight ────────────────────────────────────
+
+interface HighlightSegment {
+  text: string
+  match: boolean
+}
+
+function highlightSegments(text: string, query: string): HighlightSegment[] | null {
+  if (!query) return null
+  const lower = text.toLowerCase()
+  const q = query.toLowerCase()
+  if (!lower.includes(q)) return null
+
+  const parts: HighlightSegment[] = []
+  let lastIndex = 0
+  let index = lower.indexOf(q, lastIndex)
+  while (index !== -1) {
+    if (index > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, index), match: false })
+    }
+    parts.push({ text: text.slice(index, index + q.length), match: true })
+    lastIndex = index + q.length
+    index = lower.indexOf(q, lastIndex)
+  }
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex), match: false })
+  }
+  return parts
+}
+
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  const segments = highlightSegments(text, query)
+  if (!segments) return html`<span>${text}</span>`
+  return html`
+    <span>${segments.map(seg =>
+      seg.match
+        ? html`<mark class="bg-[rgba(99,102,241,0.25)] text-[var(--text-strong)] px-0.5 rounded">${seg.text}</mark>`
+        : seg.text
+    )}</span>
+  `
+}
 const RESULT_COLLAPSED_MAX_HEIGHT = 200 // px
 const RESULT_LINES_THRESHOLD = 12 // lines above which we collapse
 
@@ -352,6 +394,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     const stopReason = typeof d.stop_reason === 'string' ? d.stop_reason : ''
     const durationMs = typeof d.duration_ms === 'number' ? d.duration_ms : null
     const turn = d.turn
+    const responseText = typeof d.response_text === 'string' ? d.response_text : ''
     const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--ok)]' : 'text-[var(--warn)]'
     return html`
       <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(34,211,238,0.04)] border border-[rgba(34,211,238,0.12)] space-y-1">
@@ -361,6 +404,12 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
           ${durationMs != null ? html`<span><span class="text-[var(--text-dim)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span></span>` : null}
           ${turn != null ? html`<span><span class="text-[var(--text-dim)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>
+        ${responseText ? html`
+          <details class="mt-1">
+            <summary class="text-[10px] text-[var(--text-dim)] cursor-pointer hover:text-[var(--text-body)]">응답 텍스트</summary>
+            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-[11px] font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-[300px] overflow-auto">${responseText}</pre>
+          </details>
+        ` : null}
       </div>
     `
   }
@@ -393,7 +442,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   `
 }
 
-export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
+export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceEvent; searchQuery?: string }) {
   const kindStyle = KIND_STYLES[event.kind]
   // For tool_call, use tool-specific icon/color
   // For lifecycle + durable_kind, use durable-specific icon/color
@@ -463,7 +512,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
                 : null}
         </div>
         <div class="mt-0.5 text-[11px] text-[var(--text-muted)] font-mono truncate max-w-full" title=${event.summary}>
-          ${summaryText}
+          <${HighlightedText} text=${summaryText} query=${searchQuery ?? ''} />
         </div>
       </div>
 

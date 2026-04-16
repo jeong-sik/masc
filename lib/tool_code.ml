@@ -243,7 +243,7 @@ let validate_read_path ~agent_name config path =
 (* Handler: masc_code_search - Search code using ripgrep *)
 let handle_code_search ctx args =
   let query = get_string args "query" "" in
-  let path = get_string args "path" "." in
+  let path = get_string args "path" "" in
   let file_pattern = get_string args "file_pattern" "" in
   let case_insensitive = get_bool args "case_insensitive" true in
   let is_regex = get_bool args "is_regex" false in
@@ -251,6 +251,8 @@ let handle_code_search ctx args =
 
   if query = "" then
     (false, "❌ Query required: 'query' parameter")
+  else if String.trim path = "" then
+    (false, "❌ Path required: 'path' parameter")
   else begin
     (* Validate path first *)
     let search_path_result =
@@ -516,8 +518,7 @@ Set is_regex=true only for patterns like 'foo.*bar' or 'class \\w+'.";
         ]);
         ("path", `Assoc [
           ("type", `String "string");
-          ("description", `String "Search path (default: current directory)");
-          ("default", `String ".");
+          ("description", `String "Search path to scope the query (for example 'lib/', 'test/', or 'workspace/yousleepwhen/masc-mcp/lib/')");
         ]);
         ("file_pattern", `Assoc [
           ("type", `String "string");
@@ -535,7 +536,7 @@ Set is_regex=true only for patterns like 'foo.*bar' or 'class \\w+'.";
           ("default", `Int 50);
         ]);
       ]);
-      ("required", `List [`String "query"]);
+      ("required", `List [`String "query"; `String "path"]);
     ];
   };
 

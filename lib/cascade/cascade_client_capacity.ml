@@ -76,14 +76,36 @@ let try_acquire url =
        another fiber bumps the count between read and CAS. *)
     let rec attempt () =
       let current = Atomic.get e.active in
-      if current >= e.max_concurrent then None
+      if current >= e.max_concurrent then begin
+        (* Slot full: record for observability before returning. *)
+        Cascade_client_capacity_history.record {
+          ts = Unix.gettimeofday ();
+          key = url;
+          kind = Rejected_full;
+          active_after = current;
+        };
+        None
+      end
       else if Atomic.compare_and_set e.active current (current + 1) then (
+        Cascade_client_capacity_history.record {
+          ts = Unix.gettimeofday ();
+          key = url;
+          kind = Acquired;
+          active_after = current + 1;
+        };
         let released = Atomic.make false in
         let release () =
-          if not (Atomic.exchange released true) then
+          if not (Atomic.exchange released true) then begin
             (* Decrement once, ensure no underflow from double release
                even though the flag guards us. *)
-            ignore (Atomic.fetch_and_add e.active (-1))
+            let prev = Atomic.fetch_and_add e.active (-1) in
+            Cascade_client_capacity_history.record {
+              ts = Unix.gettimeofday ();
+              key = url;
+              kind = Released;
+              active_after = prev - 1;
+            }
+          end
         in
         Some release)
       else attempt ()

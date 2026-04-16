@@ -1892,3 +1892,35 @@ export function fetchCascadeClientCapacity(
     signal: opts?.signal,
   })
 }
+
+export type CascadeCapacityEventKind = 'acquired' | 'released' | 'rejected_full'
+
+export interface CascadeClientCapacityHistoryEvent {
+  ts: number
+  key: string
+  kind: CascadeCapacityEventKind
+  active_after: number
+}
+
+export interface CascadeClientCapacityHistoryResponse {
+  updated_at: string
+  total_events: number
+  events: CascadeClientCapacityHistoryEvent[]
+}
+
+export function fetchCascadeClientCapacityHistory(opts?: {
+  limit?: number
+  kind?: CascadeCapacityKind
+  signal?: AbortSignal
+}): Promise<CascadeClientCapacityHistoryResponse> {
+  const params = new URLSearchParams()
+  if (typeof opts?.limit === 'number' && opts.limit > 0) {
+    params.set('limit', String(opts.limit))
+  }
+  if (opts?.kind) params.set('kind', opts.kind)
+  const qs = params.toString()
+  return get<CascadeClientCapacityHistoryResponse>(
+    `/api/v1/cascade/client_capacity/history${qs ? `?${qs}` : ''}`,
+    { signal: opts?.signal },
+  )
+}

@@ -170,3 +170,29 @@ let client_capacity_json () =
     ("updated_at", `String (now_iso ()));
     ("entries", `List (List.map client_capacity_entry_to_json sorted));
   ]
+
+(* ── Client capacity history projection ─────────────────── *)
+
+let event_kind_to_string = function
+  | Cascade_client_capacity_history.Acquired -> "acquired"
+  | Released -> "released"
+  | Rejected_full -> "rejected_full"
+
+let history_event_to_json (ev : Cascade_client_capacity_history.event)
+  : Yojson.Safe.t =
+  `Assoc [
+    ("ts", `Float ev.ts);
+    ("key", `String ev.key);
+    ("kind", `String (event_kind_to_string ev.kind));
+    ("active_after", `Int ev.active_after);
+  ]
+
+let client_capacity_history_json ?limit ?kind ?since_ts () =
+  let events =
+    Cascade_client_capacity_history.snapshot ?limit ?kind ?since_ts ()
+  in
+  `Assoc [
+    ("updated_at", `String (now_iso ()));
+    ("total_events", `Int (List.length events));
+    ("events", `List (List.map history_event_to_json events));
+  ]

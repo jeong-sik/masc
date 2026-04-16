@@ -94,3 +94,48 @@ val health_json : unit -> Yojson.Safe.t
 
     @since 0.9.9 *)
 val client_capacity_json : unit -> Yojson.Safe.t
+
+(** JSON snapshot of the {!Cascade_client_capacity_history} ring
+    buffer — per-event transitions (acquire / release / slot-full
+    rejection) recorded by the client-capacity semaphore.
+
+    Complements {!client_capacity_json}: that one answers "how full
+    is the slot right now?", this one answers "how often did
+    saturation happen in the last hour?" without a separate metrics
+    pipeline.
+
+    Shape:
+    {[
+      {
+        "updated_at": "2026-04-16T22:31:00Z",
+        "total_events": 3,
+        "events": [
+          { "ts": 1713280000.5,
+            "key": "cli:claude_code",
+            "kind": "acquired",
+            "active_after": 1 },
+          { "ts": 1713280001.2,
+            "key": "cli:claude_code",
+            "kind": "rejected_full",
+            "active_after": 1 },
+          ...
+        ]
+      }
+    ]}
+
+    Events are returned newest-first (the ring buffer is walked from
+    write-head backwards).  [kind] strings are ["acquired"],
+    ["released"], ["rejected_full"].
+
+    @param limit   max events returned (default 100).
+    @param kind    dashboard classification filter: one of
+           ["cli"], ["ollama"], ["other"].  Unknown filters return
+           an empty event list; omitting returns every kind.
+    @param since_ts  keep only events with [ts >= since_ts].
+
+    @since 0.9.9 *)
+val client_capacity_history_json :
+  ?limit:int ->
+  ?kind:string ->
+  ?since_ts:float ->
+  unit -> Yojson.Safe.t

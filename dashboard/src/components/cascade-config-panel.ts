@@ -11,10 +11,14 @@ import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import {
   fetchCascadeClientCapacity,
+  fetchCascadeClientCapacityHistory,
   fetchCascadeConfig,
   fetchCascadeHealth,
   type CascadeCandidate,
+  type CascadeCapacityEventKind,
   type CascadeClientCapacityEntry,
+  type CascadeClientCapacityHistoryEvent,
+  type CascadeClientCapacityHistoryResponse,
   type CascadeClientCapacityResponse,
   type CascadeConfigResponse,
   type CascadeHealthProvider,
@@ -32,16 +36,18 @@ interface CascadeData {
   config: CascadeConfigResponse | null
   health: CascadeHealthResponse | null
   capacity: CascadeClientCapacityResponse | null
+  history: CascadeClientCapacityHistoryResponse | null
 }
 
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
-    const [config, health, capacity] = await Promise.all([
+    const [config, health, capacity, history] = await Promise.all([
       fetchCascadeConfig({ signal }),
       fetchCascadeHealth({ signal }),
       fetchCascadeClientCapacity({ signal }),
+      fetchCascadeClientCapacityHistory({ limit: 50, signal }),
     ])
-    return { config, health, capacity }
+    return { config, health, capacity, history }
   })
 }
 
@@ -204,12 +210,70 @@ function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' 
   return 'ok'
 }
 
+function fmtRelativeTime(tsSec: number): string {
+  const deltaSec = Date.now() / 1000 - tsSec
+  if (!Number.isFinite(deltaSec) || deltaSec < 0) return '방금'
+  if (deltaSec < 1) return '방금'
+  if (deltaSec < 60) return `${Math.floor(deltaSec)}초 전`
+  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}분 전`
+  if (deltaSec < 86400) return `${Math.floor(deltaSec / 3600)}시간 전`
+  return `${Math.floor(deltaSec / 86400)}일 전`
+}
+
+function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {
+  switch (kind) {
+    case 'acquired': return 'ok'
+    case 'released': return 'neutral'
+    case 'rejected_full': return 'bad'
+  }
+}
+
+function eventKindLabel(kind: CascadeCapacityEventKind): string {
+  switch (kind) {
+    case 'acquired': return 'acquired'
+    case 'released': return 'released'
+    case 'rejected_full': return 'rejected'
+  }
+}
+
 function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
   switch (kind) {
     case 'cli': return 'CLI'
     case 'ollama': return 'Ollama'
     case 'other': return 'Other'
   }
+}
+
+function ClientCapacityHistoryTable({
+  history,
+}: { history: CascadeClientCapacityHistoryResponse }) {
+  if (history.events.length === 0) {
+    return html`<${EmptyState}>최근 capacity 이벤트가 없습니다. (acquire/release가 아직 발생하지 않음)<//>`
+  }
+  return html`
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+          <th class="text-left py-1 w-20">시간</th>
+          <th class="text-left py-1">종류</th>
+          <th class="text-left py-1">키</th>
+          <th class="text-right py-1">활성</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${history.events.map((e: CascadeClientCapacityHistoryEvent) => {
+          const tone = eventKindTone(e.kind)
+          return html`
+          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+            <td class="py-1 text-[var(--text-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
+            <td class="py-1"><${StatusChip} tone=${tone}>${eventKindLabel(e.kind)}<//></td>
+            <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
+            <td class="py-1 text-right tabular-nums">${e.active_after}</td>
+          </tr>
+        `})}
+      </tbody>
+    </table>
+  `
 }
 
 function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResponse }) {
@@ -263,6 +327,7 @@ export function CascadeConfigPanel() {
   const config = current.data?.config ?? null
   const health = current.data?.health ?? null
   const capacity = current.data?.capacity ?? null
+  const history = current.data?.history ?? null
 
   return html`
     <div class="flex flex-col gap-4">
@@ -339,6 +404,12 @@ export function CascadeConfigPanel() {
       <${Card} title="Client Capacity">
         ${capacity
           ? html`<${ClientCapacityTable} capacity=${capacity} />`
+          : null}
+      <//>
+
+      <${Card} title="Client Capacity — 최근 이벤트">
+        ${history
+          ? html`<${ClientCapacityHistoryTable} history=${history} />`
           : null}
       <//>
     </div>

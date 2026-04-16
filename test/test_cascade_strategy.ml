@@ -12,6 +12,7 @@ open Alcotest
 module S = Masc_mcp.Cascade_strategy
 module H = Masc_mcp.Cascade_health_tracker
 module C = Masc_mcp.Cascade_client_capacity
+module CH = Masc_mcp.Cascade_client_capacity_history
 module T = Masc_mcp.Cascade_throttle
 module Cascade_state = Masc_mcp.Cascade_state
 
@@ -526,6 +527,112 @@ let test_cascade_state_round_robin_negative_bound () =
   let v2 = Cascade_state.rotate_round_robin ~cascade:"x" ~bound:(-3) in
   check int "negative bound → returns 0" 0 v2
 
+(* ── Client capacity history (Phase D follow-up) ─────────── *)
+
+let test_history_record_snapshot_roundtrip () =
+  CH.clear ();
+  CH.record { ts = 1000.0; key = "cli:claude_code";
+              kind = Acquired; active_after = 1 };
+  CH.record { ts = 1001.0; key = "cli:claude_code";
+              kind = Released; active_after = 0 };
+  CH.record { ts = 1002.0; key = "http://127.0.0.1:11434";
+              kind = Rejected_full; active_after = 1 };
+  let events = CH.snapshot () in
+  check int "3 events recorded" 3 (List.length events);
+  (* Newest-first ordering: ts=1002 must come first. *)
+  (match events with
+   | e0 :: e1 :: e2 :: [] ->
+     check (float 0.0) "newest ts=1002" 1002.0 e0.ts;
+     check (float 0.0) "middle ts=1001" 1001.0 e1.ts;
+     check (float 0.0) "oldest ts=1000" 1000.0 e2.ts;
+     check bool "newest kind = Rejected_full"
+       true (e0.kind = CH.Rejected_full);
+     check bool "middle kind = Released"
+       true (e1.kind = CH.Released);
+     check bool "oldest kind = Acquired"
+       true (e2.kind = CH.Acquired)
+   | _ -> fail "expected exactly 3 events")
+
+let test_history_ring_buffer_drops_oldest () =
+  CH.clear ();
+  let cap = CH.capacity () in
+  (* Record cap+5 events; oldest 5 must be dropped. *)
+  for i = 0 to cap + 4 do
+    CH.record { ts = float_of_int i;
+                key = "cli:x";
+                kind = Acquired;
+                active_after = i }
+  done;
+  check int "count clamped to capacity" cap (CH.size ());
+  let events = CH.snapshot ~limit:(cap + 10) () in
+  check int "snapshot count = capacity" cap (List.length events);
+  (* Newest must be ts=cap+4.  Oldest retained must be ts=5
+     (i.e. the first 5 inserts at ts=0..4 were overwritten). *)
+  (match events with
+   | [] -> fail "expected at least one event"
+   | newest :: _ ->
+     check (float 0.0) "newest ts = cap+4"
+       (float_of_int (cap + 4)) newest.ts);
+  let oldest = List.nth events (cap - 1) in
+  check (float 0.0) "oldest retained ts = 5 (earlier 5 dropped)"
+    5.0 oldest.ts
+
+let test_history_snapshot_kind_filter () =
+  CH.clear ();
+  CH.record { ts = 1.0; key = "cli:claude_code";
+              kind = Acquired; active_after = 1 };
+  CH.record { ts = 2.0; key = "http://127.0.0.1:11434";
+              kind = Acquired; active_after = 1 };
+  CH.record { ts = 3.0; key = "http://other.example/api";
+              kind = Rejected_full; active_after = 0 };
+  CH.record { ts = 4.0; key = "cli:gemini_cli";
+              kind = Released; active_after = 0 };
+  (* cli filter → 2 events, both cli:* keys *)
+  let cli_events = CH.snapshot ~kind:"cli" () in
+  check int "cli filter → 2 events" 2 (List.length cli_events);
+  List.iter
+    (fun e ->
+       check string "cli filter matches classify_key"
+         "cli" (CH.classify_key e.CH.key))
+    cli_events;
+  (* ollama filter → 1 event for :11434 *)
+  let ollama_events = CH.snapshot ~kind:"ollama" () in
+  check int "ollama filter → 1 event" 1 (List.length ollama_events);
+  (* other filter → 1 event for http://other *)
+  let other_events = CH.snapshot ~kind:"other" () in
+  check int "other filter → 1 event" 1 (List.length other_events);
+  (* Unknown kind → empty list *)
+  let unknown = CH.snapshot ~kind:"no_such_kind" () in
+  check int "unknown kind → empty" 0 (List.length unknown)
+
+let test_history_try_acquire_records_events () =
+  CH.clear ();
+  C.unregister_all ();
+  C.register ~url:"cli:claude_code" ~max_concurrent:1;
+  (* First acquire → Acquired recorded *)
+  (match C.try_acquire "cli:claude_code" with
+   | None -> fail "first acquire should succeed"
+   | Some release ->
+     (* Second acquire → Rejected_full recorded *)
+     check bool "second acquire hits cap"
+       true (C.try_acquire "cli:claude_code" = None);
+     release ();
+     let events = CH.snapshot () in
+     (* Expected newest-first: Released, Rejected_full, Acquired. *)
+     check int "3 events recorded" 3 (List.length events);
+     (match events with
+      | r :: f :: a :: [] ->
+        check bool "newest = Released" true (r.kind = CH.Released);
+        check int "released active_after = 0" 0 r.active_after;
+        check bool "middle = Rejected_full"
+          true (f.kind = CH.Rejected_full);
+        check int "rejected active_after = 1" 1 f.active_after;
+        check bool "oldest = Acquired" true (a.kind = CH.Acquired);
+        check int "acquired active_after = 1" 1 a.active_after;
+        check string "all keys = cli:claude_code"
+          "cli:claude_code" a.key
+      | _ -> fail "expected 3 events"))
+
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -619,5 +726,15 @@ let () =
         test_cascade_state_sticky_zero_ttl_no_record;
       test_case "round_robin bound<=0 returns 0" `Quick
         test_cascade_state_round_robin_negative_bound;
+    ];
+    "client_capacity_history", [
+      test_case "record + snapshot roundtrip newest-first" `Quick
+        test_history_record_snapshot_roundtrip;
+      test_case "ring buffer drops oldest when full" `Quick
+        test_history_ring_buffer_drops_oldest;
+      test_case "snapshot kind filter" `Quick
+        test_history_snapshot_kind_filter;
+      test_case "try_acquire records events on registered URL" `Quick
+        test_history_try_acquire_records_events;
     ];
   ]

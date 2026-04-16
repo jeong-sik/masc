@@ -29,6 +29,7 @@
    cache_eio
    cascade_inference
    cascade_client_capacity
+   cascade_client_capacity_history
    cascade_config
    cascade_config_loader
    cascade_fsm

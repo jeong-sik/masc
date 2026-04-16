@@ -3,6 +3,17 @@
     Creates an OTel span for each tool call using data from [Tool_result.t].
     Also records a Prometheus histogram observation for tool call duration.
 
+    Span attributes are dual-emitted: the legacy [tool.*] keys stay so
+    existing custom dashboards keep working, and the OpenTelemetry GenAI
+    semantic-convention keys ([gen_ai.tool.name],
+    [gen_ai.operation.name]) are added so vendors that auto-categorise
+    on [gen_ai.*] (Datadog v1.37+, Grafana, etc.) classify these spans
+    as AI/LLM activity instead of generic tool calls. See #7461 Step 1.
+
+    Note: as of 2026-04 most GenAI semconv attributes are
+    Stability.Experimental, so dual-emit also acts as a hedge against
+    spec changes — only the legacy keys would survive a rename event.
+
     @since 2.103.0 *)
 
 module OT = Opentelemetry
@@ -21,12 +32,22 @@ let on_tool_result (result : Tool_result.t) : Tool_result.t =
       else
         [("otel.status_code", `String "ERROR")]
     in
-    let attrs =
+    let legacy_attrs =
       [ ("tool.name", `String result.tool_name);
         ("tool.success", `Bool result.success);
         ("tool.duration_ms", `Int (int_of_float result.duration_ms)) ]
-      @ status_attrs
     in
+    (* OpenTelemetry GenAI semantic conventions
+       (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
+       within an agent run is the [execute_tool] operation per the spec.
+       [gen_ai.system] / [gen_ai.request.model] are intentionally omitted —
+       those belong on the parent agent / chat span (Step 2 of #7461),
+       not on the inner tool span which is provider-agnostic. *)
+    let gen_ai_attrs =
+      [ ("gen_ai.operation.name", `String "execute_tool");
+        ("gen_ai.tool.name", `String result.tool_name) ]
+    in
+    let attrs = legacy_attrs @ gen_ai_attrs @ status_attrs in
     ignore (OT.Trace.with_ ("tool/" ^ result.tool_name) ~attrs
       (fun _scope -> ()))
   end;

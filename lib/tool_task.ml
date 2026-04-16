@@ -743,7 +743,7 @@ let handle_transition ctx args =
           (match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
            | Some task ->
              let evidence_refs = match task.contract with
-               | Some c -> c.verify_gate_evidence
+               | Some c -> List.map Types.show_evidence_criterion c.verify_gate_evidence
                | None -> [] in
              (match task.task_status with
               | Types.AwaitingVerification { verification_id; assignee; _ } ->

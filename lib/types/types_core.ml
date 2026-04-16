@@ -420,13 +420,70 @@ let task_execution_links_of_yojson json =
       }
   with e -> Error (Printexc.to_string e)
 
+(** Typed evidence criterion for verification gates. Replaces the prior
+    [string list] which couldn't distinguish between path references,
+    URIs, and natural-language criteria. Issue #7548.
+    Mirrors [Verification.criterion] to avoid lib boundary cycles. *)
+type evidence_criterion =
+  | Schema_match of Yojson.Safe.t   (** Output matches JSON schema *)
+  | Contains of string              (** Output must contain substring *)
+  | Not_contains of string          (** Output must not contain substring *)
+  | Custom of string                (** Natural-language criterion for verifier *)
+
+let show_evidence_criterion = function
+  | Schema_match _ -> "Schema_match"
+  | Contains s -> Printf.sprintf "Contains %S" s
+  | Not_contains s -> Printf.sprintf "Not_contains %S" s
+  | Custom s -> Printf.sprintf "Custom %S" s
+
+let pp_evidence_criterion fmt c =
+  Format.fprintf fmt "%s" (show_evidence_criterion c)
+
+let evidence_criterion_to_yojson = function
+  | Schema_match schema ->
+    `Assoc [("type", `String "schema_match"); ("schema", schema)]
+  | Contains s ->
+    `Assoc [("type", `String "contains"); ("value", `String s)]
+  | Not_contains s ->
+    `Assoc [("type", `String "not_contains"); ("value", `String s)]
+  | Custom s ->
+    `Assoc [("type", `String "custom"); ("description", `String s)]
+
+let evidence_criterion_of_yojson = function
+  (* Legacy: bare string → Custom (backward compat for string list migration) *)
+  | `String s -> Ok (Custom s)
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "schema_match") ->
+       (match List.assoc_opt "schema" fields with
+        | Some schema -> Ok (Schema_match schema)
+        | None -> Error "schema_match requires 'schema' field")
+     | Some (`String "contains") ->
+       (match List.assoc_opt "value" fields with
+        | Some (`String s) -> Ok (Contains s)
+        | _ -> Error "contains requires 'value' string field")
+     | Some (`String "not_contains") ->
+       (match List.assoc_opt "value" fields with
+        | Some (`String s) -> Ok (Not_contains s)
+        | _ -> Error "not_contains requires 'value' string field")
+     | Some (`String "custom") ->
+       (match List.assoc_opt "description" fields with
+        | Some (`String s) -> Ok (Custom s)
+        | _ -> Error "custom requires 'description' string field")
+     | Some (`String t) -> Error (Printf.sprintf "unknown criterion type: %s" t)
+     | _ -> Error "criterion requires 'type' field")
+  | _ -> Error "criterion must be a JSON object or string"
+
 (** Task contract - persisted deterministic gate inputs *)
 type task_contract = {
   strict : bool;
   completion_contract : string list;
   required_evidence : string list;
   inspect_gate_evidence : string list;
-  verify_gate_evidence : string list;
+  (** Verification gate criteria — typed evidence specification.
+      Legacy JSON format [string list] is still accepted (each becomes Custom).
+      Issue #7548. *)
+  verify_gate_evidence : evidence_criterion list;
   (** Seconds until AwaitingVerification deadline (optional). Issue #7550. *)
   verification_deadline_sec : int option;
   (** Required verifier role (optional, defaults to Reviewer). Issue #7550. *)
@@ -459,7 +516,7 @@ let task_contract_to_yojson (contract : task_contract) =
       ( "inspect_gate_evidence",
         string_list_to_yojson contract.inspect_gate_evidence );
       ( "verify_gate_evidence",
-        string_list_to_yojson contract.verify_gate_evidence );
+        `List (List.map evidence_criterion_to_yojson contract.verify_gate_evidence) );
       ( "verification_deadline_sec",
         (match contract.verification_deadline_sec with
          | Some n -> `Int n | None -> `Null) );
@@ -509,7 +566,14 @@ let task_contract_of_yojson json =
         inspect_gate_evidence =
           task_contract_string_list json "inspect_gate_evidence";
         verify_gate_evidence =
-          task_contract_string_list json "verify_gate_evidence";
+          (match json |> member "verify_gate_evidence" with
+           | `List items ->
+             List.filter_map (fun j ->
+               match evidence_criterion_of_yojson j with
+               | Ok c -> Some c
+               | Error _ -> None
+             ) items
+           | _ -> []);
         verification_deadline_sec;
         verification_required_role;
         links;

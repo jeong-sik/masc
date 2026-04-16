@@ -7,16 +7,27 @@
 
     @since Phase B+C *)
 
+(* Bridge types_core.evidence_criterion → Verification.criterion.
+   Same shape; types are distinct to respect the masc_coord/masc_mcp lib
+   boundary. Issue #7548. *)
+let evidence_criterion_to_verification_criterion
+    : Types.evidence_criterion -> Verification.criterion = function
+  | Types.Schema_match j -> Verification.Schema_match j
+  | Types.Contains s -> Verification.Contains s
+  | Types.Not_contains s -> Verification.Not_contains s
+  | Types.Custom s -> Verification.Custom s
+
 (* Fail-closed by types: [~assignee] is passed directly by the caller,
    which already destructures [AwaitingVerification { assignee; _ }]. Removes
    the prior "unknown" fallback that violated Silent Failure 금지. Issue #7547. *)
 let on_submit_for_verification ~(config : Coord.config)
     ~(task : Types.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Coord.base_path in
-  let criteria = List.map (fun s -> Verification.Custom s)
-    (match task.contract with
-     | Some c -> c.verify_gate_evidence
-     | None -> []) in
+  let criteria =
+    match task.contract with
+    | Some c -> List.map evidence_criterion_to_verification_criterion c.verify_gate_evidence
+    | None -> []
+  in
   let _req =
     Verification.create_request ~base_path ~task_id:task.id
       ~output:(`Assoc [

@@ -104,7 +104,7 @@ let normalize_task_contract (contract : Types.task_contract) =
     completion_contract = normalized_string_list contract.completion_contract;
     required_evidence = normalized_string_list contract.required_evidence;
     inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence;
-    verify_gate_evidence = normalized_string_list contract.verify_gate_evidence;
+    verify_gate_evidence = contract.verify_gate_evidence;
     links = normalize_execution_links contract.links;
   }
 

@@ -168,9 +168,9 @@ let compact_if_needed
           sync_oas_context { ctx with messages }
         in
         let new_ratio = context_ratio compacted_ctx in
-        Prometheus.inc_counter "masc_keeper_compactions_total"
+        Prometheus.inc_counter Prometheus.metric_keeper_compactions
           ~labels:[("keeper", meta.name)] ();
-        Prometheus.set_gauge "masc_keeper_compaction_ratio_change"
+        Prometheus.set_gauge Prometheus.metric_keeper_compaction_ratio_change
           ~labels:[("keeper", meta.name)]
           (ratio -. new_ratio);
         (compacted_ctx, Some reason, "applied:" ^ reason)

@@ -959,7 +959,7 @@ let sync_keeper_presence
           !consecutive_failures
           (max_consecutive_heartbeat_failures ());
         (* RFC-0002: dispatch heartbeat failure *)
-        Prometheus.inc_counter "masc_keeper_heartbeat_failures_total"
+        Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_failures
           ~labels:[("keeper", meta_current.name)] ();
         ignore (Keeper_registry.dispatch_event
           ~base_path:ctx.config.base_path meta_current.name
@@ -974,13 +974,13 @@ let sync_keeper_presence
         ignore (Keeper_registry.dispatch_event
           ~base_path:ctx.config.base_path meta_current.name
           Keeper_state_machine.Heartbeat_ok);
-        Prometheus.inc_counter "masc_keeper_heartbeat_successes_total"
+        Prometheus.inc_counter Prometheus.metric_keeper_heartbeat_successes
           ~labels:[("keeper", meta_current.name)] ();
         maybe_recover_from_failing ~ctx ~meta:meta_current);
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->
-        Prometheus.inc_counter "masc_keeper_write_meta_failures_total"
+        Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
           ~labels:[("keeper", synced.name); ("phase", "heartbeat")] ();
         Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
         synced
@@ -1140,7 +1140,7 @@ let run_keepalive_unified_turn
         match write_meta ctx.config meta_after_observe with
         | Ok () -> ()
         | Error e ->
-            Prometheus.inc_counter "masc_keeper_write_meta_failures_total"
+            Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
               ~labels:[("keeper", meta_after_observe.name); ("phase", "cursor_update")] ();
             Log.Keeper.warn "write_meta failed (message cursor update): %s" e);
       if Atomic.get stop
@@ -1863,7 +1863,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     (match write_meta ctx.config synced with
      | Ok () -> ()
      | Error e ->
-       Prometheus.inc_counter "masc_keeper_write_meta_failures_total"
+       Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
          ~labels:[("keeper", synced.name); ("phase", "bootstrap")] ();
        Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
     synced

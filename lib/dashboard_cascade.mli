@@ -139,3 +139,35 @@ val client_capacity_history_json :
   ?kind:string ->
   ?since_ts:float ->
   unit -> Yojson.Safe.t
+
+(** JSON projection of {!Cascade_strategy_trace} — recent per-cycle
+    strategy decisions (candidate in/out counts, backoff, kind).
+
+    Shape:
+    {[
+      {
+        "updated_at": "ISO-8601",
+        "total_events": <int>,
+        "events": [
+          { "ts": <unix seconds>,
+            "cascade_name": "keeper_unified",
+            "strategy": "circuit_breaker_cycling",
+            "cycle": 2,
+            "candidates_in": 3,
+            "candidates_out": 1,
+            "backoff_ms": 2000,
+            "kind": "ordered" | "filtered_empty" | "exhausted" }, ...
+        ]
+      }
+    ]}
+
+    Sorted newest-first (delegated to {!Cascade_strategy_trace.snapshot}).
+
+    @param limit    max events returned (default 100).
+    @param cascade  filter by [cascade_name]; omit to include every cascade.
+
+    @since 0.9.10 *)
+val strategy_trace_json :
+  ?limit:int ->
+  ?cascade:string ->
+  unit -> Yojson.Safe.t

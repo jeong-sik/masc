@@ -56,3 +56,15 @@ let add_routes router =
            Http.Response.json ~compress:true ~request:req
              (Yojson.Safe.to_string json) reqd
          ) request reqd)
+  |> Http.Router.get "/api/v1/cascade/strategy_trace" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let limit =
+           clamp_history_limit (int_query_param req "limit" ~default:100)
+         in
+         let cascade = query_param req "cascade" in
+         let json =
+           Dashboard_cascade.strategy_trace_json ~limit ?cascade ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)

@@ -96,7 +96,7 @@ let capture_turn_evidence
   in
   if collision_warnings <> [] then begin
     let n = List.length collision_warnings in
-    Prometheus.inc_counter "masc_keeper_collision_detected_total"
+    Prometheus.inc_counter Prometheus.metric_keeper_collision_detected
       ~labels:[("keeper", keeper_name)] ();
     Log.Keeper.warn
       "evidence: %s has %d file collision(s) with other keeper(s) — \

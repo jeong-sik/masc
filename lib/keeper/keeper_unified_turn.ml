@@ -1924,7 +1924,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let is_server_parse_rejection = is_server_rejected_parse_error err in
           let is_auto_recoverable = is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
-          Prometheus.inc_counter "masc_keeper_turns_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
@@ -2271,12 +2271,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
             | Oas_worker.MutationBoundaryReached _ -> "mutation_boundary"
           in
-          Prometheus.inc_counter "masc_keeper_turns_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", updated_meta.name); ("outcome", outcome_label)] ();
-          Prometheus.inc_counter "masc_keeper_input_tokens_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_input_tokens
             ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
             ~delta:(float_of_int result.usage.input_tokens) ();
-          Prometheus.inc_counter "masc_keeper_output_tokens_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_output_tokens
             ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
             ~delta:(float_of_int result.usage.output_tokens) ();
           (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock

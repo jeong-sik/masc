@@ -134,7 +134,10 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              | Some (`List ((`String m) :: _)) -> m
              | _ ->
                match List.assoc_opt "cascade_name" tfields with
-               | Some (`String s) -> s ^ " (cascade)"
+               | Some (`String s) ->
+                 (* Canonicalize so error attribution buckets match the
+                    SSOT profile names instead of drift/ghost values. *)
+                 Keeper_cascade_profile.canonicalize s ^ " (cascade)"
                | _ -> "__error__"
            in
            Some { model; ts_unix = ts; tok_per_sec = 0.0; latency_ms = 0.0;

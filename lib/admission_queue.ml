@@ -84,6 +84,10 @@ let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
 let rec _acquire ?wait_timeout_sec ~priority ~keeper_name ~cascade_name t =
+  (* Normalize at the gate: any cascade name stored in the admission info
+     record or forwarded to metrics passes through the SSOT canonicalizer,
+     so downstream consumers never see drift/ghost values. *)
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   let resolved = Llm_provider.Request_priority.resolve priority in
   let rank = Llm_provider.Request_priority.to_int resolved in
   let action =
@@ -176,6 +180,9 @@ let check_host_resources ~keeper_name =
   end
 
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
+  (* SSOT: every admission_queue entry point canonicalizes cascade_name
+     so metrics/structs never see drift values. *)
+  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
   check_host_resources ~keeper_name;
   (* Passthrough: provider-level throttling belongs in OAS (cascade),
      not in MASC.  The cascade distributes requests across providers

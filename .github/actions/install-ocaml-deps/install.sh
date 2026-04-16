@@ -80,6 +80,9 @@ main() {
     exit 1
   fi
 
+  export OPAMCONFIRMLEVEL="${OPAMCONFIRMLEVEL:-unsafe-yes}"
+  export OPAMYES="${OPAMYES:-1}"
+
   install_os_packages
 
   for attempt in 1 2 3; do

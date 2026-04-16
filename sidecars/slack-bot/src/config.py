@@ -67,16 +67,51 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("SLACK_DEFAULT_KEEPER", "default_keeper"),
     )
 
-    # Timeouts
-    gate_timeout_sec: float = Field(default=120.0)
-    gate_breaker_failure_threshold: int = Field(default=3)
-    gate_breaker_reset_sec: int = Field(default=30)
-    status_cache_ttl_sec: int = Field(default=15)
-    keeper_cache_ttl_sec: int = Field(default=30)
+    # Timeouts — common Gate knobs reuse GATE_/STATUS_/KEEPER_ names to match
+    # the other sidecars (see discord-bot and telegram-bot). Field-name aliases
+    # are kept so in-process kwargs still work.
+    gate_timeout_sec: float = Field(
+        default=120.0,
+        validation_alias=AliasChoices("GATE_TIMEOUT_SEC", "gate_timeout_sec"),
+    )
+    gate_breaker_failure_threshold: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "GATE_BREAKER_FAILURE_THRESHOLD", "gate_breaker_failure_threshold"
+        ),
+    )
+    gate_breaker_reset_sec: int = Field(
+        default=30,
+        validation_alias=AliasChoices("GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"),
+    )
+    status_cache_ttl_sec: int = Field(
+        default=15,
+        validation_alias=AliasChoices("STATUS_CACHE_TTL_SEC", "status_cache_ttl_sec"),
+    )
+    keeper_cache_ttl_sec: int = Field(
+        default=30,
+        validation_alias=AliasChoices("KEEPER_CACHE_TTL_SEC", "keeper_cache_ttl_sec"),
+    )
 
-    # State paths
-    binding_store_path: str = Field(default=DEFAULT_BINDING_STORE_PATH)
-    status_path: str = Field(default=DEFAULT_STATUS_PATH)
+    # State paths — SLACK_ prefix matches sidecar-local convention; the
+    # MASC_SLACK_ alias lets OCaml-side env vars (MASC_SLACK_*_PATH) line up
+    # when both halves of the stack are deployed by the same operator.
+    binding_store_path: str = Field(
+        default=DEFAULT_BINDING_STORE_PATH,
+        validation_alias=AliasChoices(
+            "SLACK_BINDING_STORE_PATH",
+            "MASC_SLACK_BINDING_STORE_PATH",
+            "binding_store_path",
+        ),
+    )
+    status_path: str = Field(
+        default=DEFAULT_STATUS_PATH,
+        validation_alias=AliasChoices(
+            "SLACK_STATUS_PATH",
+            "MASC_SLACK_STATUS_PATH",
+            "status_path",
+        ),
+    )
     # Legacy read-fallback (pre-v0.9.0 layout). Not env-configurable.
     legacy_binding_store_path: str = Field(default=LEGACY_BINDING_STORE_PATH)
 

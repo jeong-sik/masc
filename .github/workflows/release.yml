@@ -38,10 +38,17 @@ jobs:
             scripts/check-version-truth.sh
           fi
 
-      - name: Setup OCaml
+      - name: Setup OCaml (Linux)
+        if: runner.os == 'Linux'
         uses: ./.github/actions/setup-ocaml-toolchain
         with:
           ocaml-compiler: 5.4.1
+
+      - name: Setup OCaml (macOS)
+        if: runner.os == 'macOS'
+        uses: ocaml/setup-ocaml@v3.6.0
+        with:
+          ocaml-compiler: 5.4.x
 
       - name: Pin private dependencies
         run: |

@@ -307,7 +307,8 @@ let test_calibration_stats_cross_model_mix () =
   let same_cascade =
     make_result ~cascade:"verifier" ~gen_cascade:"verifier" () in
   let cross_a =
-    make_result ~cascade:"verifier" ~gen_cascade:"keeper_unified" () in
+    make_result ~cascade:"verifier"
+      ~gen_cascade:Masc_mcp.Keeper_config.default_cascade_name () in
   let cross_b =
     make_result ~cascade:"cross_verifier" ~gen_cascade:"local_only" () in
   let no_generator = make_result ~cascade:"verifier" () in

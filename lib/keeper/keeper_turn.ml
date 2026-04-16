@@ -164,7 +164,12 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~generation:meta.runtime.generation
       in
-      let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn" in
+      (* Historical drift: "keeper_turn" / "keeper_reply" were never defined
+         as separate cascade profiles in cascade.json; they always fell
+         through to default via Keeper_cascade_profile.canonicalize. Using
+         default_name here makes the resolution explicit and keeps metric
+         buckets/Prometheus labels from seeing ghost cascade names. *)
+      let turn_cascade_name = Keeper_cascade_profile.default_name in
       let effective_models =
         if direct_reply then
           Cascade_runtime.models_of_cascade_name turn_cascade_name

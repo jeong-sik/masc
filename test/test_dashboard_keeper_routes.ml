@@ -281,7 +281,7 @@ let make_keeper_meta_json ?(name = "route-shadow-demo") () =
           ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
           ; "trace_id", `String ("trace-" ^ name ^ "-seed")
           ; "goal", `String "Route shadow regression fixture"
-          ; "cascade_name", `String "keeper_unified"
+          ; "cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name
           ; "updated_at", `String "2026-04-04T00:00:00Z"
           ; "paused", `Bool true
           ])

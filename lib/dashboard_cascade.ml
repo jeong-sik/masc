@@ -33,14 +33,7 @@ let source_to_string = function
     Keepers run through [Keeper_cascade_profile.canonicalize], so any unknown
     keeper [cascade_name] from the registry also shows up below by virtue of
     being included in [keeper_profiles]. *)
-let standard_profiles = [
-  "keeper_unified";
-  "default";
-  "local_only";
-  "local_recovery";
-  "nick0cave";
-  "tool_rerank";
-]
+let standard_profiles = Keeper_cascade_profile.known_cascades
 
 let profile_json ~config_path name =
   let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in

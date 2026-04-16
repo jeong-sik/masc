@@ -337,7 +337,7 @@ let test_keeper_status_exposes_model_observability () =
             ( "cascade",
               `Assoc
                 [
-                  ("cascade_name", `String "keeper_unified");
+                  ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
                   ( "configured_labels",
                     `List [ `String "llama:auto"; `String "glm:auto" ] );
                   ( "candidate_models",
@@ -387,7 +387,7 @@ let test_keeper_status_exposes_model_observability () =
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
         ("cascade name surfaced\n" ^ status_dump)
-        (Some "keeper_unified")
+        (Some Masc_mcp.Keeper_config.default_cascade_name)
         (observability |> member "cascade_name" |> to_string_option);
       Alcotest.(check bool) "recent turn observation true" true
         (observability |> member "recent_turn_observation" |> to_bool);

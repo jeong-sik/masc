@@ -25,6 +25,11 @@ val verdict_of_outcome : eval_outcome -> Cdal_types.contract_verdict
 val friction_of_outcome :
   eval_outcome -> Cdal_friction_projection.friction_projection option
 
+(** Default JSONL directory: [$MASC_DATA_DIR/cdal_verdicts] or
+    [<base_path>/data/cdal_verdicts]. Issue #7554: shared with
+    [Cdal_verdict_gate] to eliminate path duplication. *)
+val default_base_path : string
+
 (** Persist a verdict to date-split JSONL.
     Defaults to data/cdal_verdicts. Pass [~base_dir] for test isolation. *)
 val persist : ?base_dir:string -> ?task_id:string -> Cdal_types.contract_verdict -> unit

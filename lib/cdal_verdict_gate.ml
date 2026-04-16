@@ -39,13 +39,9 @@ let check_verdict (v : Cdal_types.contract_verdict) : gate_result =
       in
       Reject msg
 
-let default_base_path =
-  let root =
-    match Sys.getenv_opt "MASC_DATA_DIR" with
-    | Some dir -> dir
-    | None -> Filename.concat (Env_config_core.base_path ()) "data"
-  in
-  Filename.concat root "cdal_verdicts"
+(* Share the verdict JSONL path with Cdal_eval_v1 to eliminate duplication.
+   Issue #7554. *)
+let default_base_path = Cdal_eval_v1.default_base_path
 
 let lookup_latest_verdict ?(base_dir = default_base_path)
     ?(limit = Env_config_runtime.Cdal.verdict_lookup_limit ())

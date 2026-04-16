@@ -7,6 +7,17 @@
 
     @since Phase B+C *)
 
+(* Board post constants shared across all verification posts.
+   Centralized here to prevent drift. Issue #7553. *)
+let hearth = "verification"
+let post_kind = Board.System_post
+let visibility = Board.Internal
+
+let create_verification_post ?title ~author ~content ~meta_json () =
+  Board_dispatch.create_post
+    ~author ~content ?title
+    ~post_kind ~meta_json ~visibility ~hearth ()
+
 (* Bridge types_core.evidence_criterion → Verification.criterion.
    Same shape; types are distinct to respect the masc_coord/masc_mcp lib
    boundary. Issue #7548. *)
@@ -43,16 +54,12 @@ let on_submit_for_verification ~(config : Coord.config)
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("criteria", `List (List.map Verification.criterion_to_yojson criteria));
   ] in
-  let _post = Board_dispatch.create_post
+  let _post = create_verification_post
     ~author:"system"
     ~content:(Printf.sprintf "Verification requested for task %s (%s) by %s"
       task.id task.title assignee)
     ~title:(Printf.sprintf "Verify: %s" task.title)
-    ~post_kind:Board.System_post
-    ~meta_json
-    ~visibility:Board.Internal
-    ~hearth:"verification"
-    () in
+    ~meta_json () in
   Subscriptions.push_event_to_sessions (`Assoc [
     ("type", `String "masc/verification/requested");
     ("task_id", `String task.id);
@@ -83,16 +90,12 @@ let on_approve_verification ~(config : Coord.config)
     ("verification_id", `String verification_id);
     ("verdict", `String "approved");
   ] in
-  let _post = Board_dispatch.create_post
+  let _post = create_verification_post
     ~author:verifier
     ~content:(Printf.sprintf "Approved task %s (vrf:%s)%s"
       task_id verification_id
       (if notes = "" then "" else " — " ^ notes))
-    ~post_kind:Board.System_post
-    ~meta_json
-    ~visibility:Board.Internal
-    ~hearth:"verification"
-    () in
+    ~meta_json () in
   Subscriptions.push_event_to_sessions (`Assoc [
     ("type", `String "masc/verification/verdict");
     ("task_id", `String task_id);
@@ -123,15 +126,11 @@ let on_reject_verification ~(config : Coord.config)
     ("verification_id", `String verification_id);
     ("verdict", `String "rejected");
   ] in
-  let _post = Board_dispatch.create_post
+  let _post = create_verification_post
     ~author:verifier
     ~content:(Printf.sprintf "Rejected task %s (vrf:%s): %s"
       task_id verification_id reason)
-    ~post_kind:Board.System_post
-    ~meta_json
-    ~visibility:Board.Internal
-    ~hearth:"verification"
-    () in
+    ~meta_json () in
   Subscriptions.push_event_to_sessions (`Assoc [
     ("type", `String "masc/verification/rejected");
     ("task_id", `String task_id);
@@ -167,23 +166,19 @@ let check_timeouts ~(config : Coord.config) =
                     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
                     tm.tm_hour tm.tm_min tm.tm_sec
                 in
-                let _post = Board_dispatch.create_post
+                let _post = create_verification_post
                   ~author:"system"
                   ~content:(Printf.sprintf
                     "Verification timeout: task %s (%s) by %s — no verifier responded within deadline %s"
                     task.id task.title assignee dl_iso)
                   ~title:(Printf.sprintf "Timeout: %s" task.title)
-                  ~post_kind:Board.System_post
                   ~meta_json:(`Assoc [
                     ("type", `String "verification_timeout");
                     ("task_id", `String task.id);
                     ("verification_id", `String verification_id);
                     ("assignee", `String assignee);
                     ("deadline", `String dl_iso);
-                  ])
-                  ~visibility:Board.Internal
-                  ~hearth:"verification"
-                  () in
+                  ]) () in
                 Subscriptions.push_event_to_sessions (`Assoc [
                   ("type", `String "masc/verification/timeout");
                   ("task_id", `String task.id);

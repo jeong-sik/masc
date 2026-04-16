@@ -700,6 +700,13 @@
  (name test_keeper_state_snapshot_json)
  (libraries masc_test_deps))
 
+; RFC-MASC-001 Phase 1 prose echo guard: prompt-time summary filter
+; strips backward-looking fields (Done, Decisions, Progress) while
+; preserving forward-looking ones (Goal, Next plan, Next, etc.).
+(test
+ (name test_continuity_forward_filter)
+ (libraries masc_test_deps))
+
 ; Keeper_checkpoint_store.is_not_found_detail classifier
 ; regression (observed 334-retry loop on trace-1775487505102-6a347
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)

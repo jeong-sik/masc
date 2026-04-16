@@ -19,7 +19,7 @@ runs:
   using: composite
   steps:
     - name: Setup OCaml
-      uses: ocaml/setup-ocaml@v3.6.0
+      uses: ocaml/setup-ocaml@v3.5.1
       with:
         ocaml-compiler: ${{ inputs.ocaml-compiler }}
         dune-cache: ${{ inputs.dune-cache }}

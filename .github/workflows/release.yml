@@ -39,7 +39,7 @@ jobs:
           fi
 
       - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3.6.0
+        uses: ocaml/setup-ocaml@v3.5.1
         with:
           ocaml-compiler: 5.4.x
 

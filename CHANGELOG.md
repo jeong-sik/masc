@@ -2,30 +2,43 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Pin `agent_sdk` to OAS v0.150.0 (`0752f68c`). OAS 0.150 removed the
-  `OAS_OLLAMA_SUPPORTS_TOOL_CHOICE` env var in favor of a per-config
-  `Provider_config.supports_tool_choice_override : bool option` field.
+## [0.9.4] - 2026-04-16
 
 ### Added
 
-- `Cascade_config_loader.weighted_entry.supports_tool_choice : bool option`
-  — per-entry capability override parsed from cascade.json. Example:
-  ```json
-  {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90, "supports_tool_choice": true}
-  ```
-- `Cascade_config.parse_model_string ?supports_tool_choice_override` —
-  forwards the flag to `Llm_provider.Provider_config.make`.
-- `Cascade_config.parse_weighted_entry` / `parse_weighted_entries` —
-  convert `weighted_entry` values to `Provider_config.t`, threading the
-  per-entry `supports_tool_choice` into `supports_tool_choice_override`.
-  The weight is not part of Provider_config; cascade ordering is
-  handled separately.
-- `config/cascade.json`: `sangsu` profile's ollama entry now declares
-  `"supports_tool_choice": true`. Qwen3.5 w/ native Jinja chat template
-  honors `tool_choice:required` in practice
-  (memory/research-9b-jinja-native-benchmark: 100% on 21-tool suite).
+- **Runtime TOML config** for all 4 Python sidecars (#7509, #7518). Each
+  sidecar reads an optional `$MASC_BASE_PATH/.gate/runtime/<kind>/config.toml`.
+  File absent = field defaults only (zero-config works). Secrets stay in
+  env vars. Priority: env > TOML > field default.
+- **Shared bindings-store helpers** (`gate_shared/bindings_store.py`,
+  #7501). `load_bindings` + `save_bindings` free functions replace 3x38
+  duplicated lines across Slack/iMessage/Telegram sidecars.
+- **Env-var aliases** for Slack + Telegram timeout/path config fields
+  (#7506).
+- **Cascade `weighted_entry.supports_tool_choice`** (#7493). Per-entry
+  capability override parsed from cascade.json; `sangsu` profile's
+  Ollama entry declares `"supports_tool_choice": true`.
+
+### Changed
+
+- **OAS pin bumped to v0.150.0** (#7493). Removes
+  `OAS_OLLAMA_SUPPORTS_TOOL_CHOICE` env var in favor of per-config
+  `Provider_config.supports_tool_choice_override`.
+- **Code quality pass** (#7516): trimmed 56 LOC of excessive comments +
+  fixed 3 TOCTOU `Sys.file_exists` pre-checks in `read_json_file_opt`.
+
+### Fixed
+
+- Keeper: redirect `gh` to keeper_shell op=gh (#7474), demote
+  semaphore_wait logs to INFO (#7472), add admin tools to Keeper_denied
+  surface (#7455), hand off after overflow retry (#7435), accept both
+  `pr_number` and `number` in keeper_pr_review (#7476).
+- CI: pin `ocaml/setup-ocaml` to avoid upstream opam-binary regression
+  (#7499).
+- Dashboard: activity_graph events_shown vs events_store_total (#7502).
+- Coord: before-state snapshots in error path logging (#7512), unified
+  transition log_event JSON (#7504), correlation_id/run_id on task
+  activity (#7511).
 
 ## [0.9.3] - 2026-04-16
 

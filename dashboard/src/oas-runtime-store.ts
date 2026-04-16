@@ -10,7 +10,10 @@ import {
   resetOasRuntimeSignals,
   updateOasKeeperSnapshot,
 } from './store'
-import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
+import type {
+  OasKeeperLifecycleEvent,
+  OasKeeperSnapshot,
+} from './types/oas'
 
 type OasRuntimeEnvelope = Record<string, unknown> & {
   type: string
@@ -109,7 +112,7 @@ function agentNameFromEnvelope(event: OasRuntimeEnvelope): string {
   )
 }
 
-function keeperLifecycleEvent(event: OasRuntimeEnvelope): OasAgentEvent {
+function keeperLifecycleEvent(event: OasRuntimeEnvelope): OasKeeperLifecycleEvent {
   const payload = eventPayload(event)
   const keeperName = asString(payload.keeper_name)
   const actorName = keeperName ?? asString(payload.agent_name) ?? ''
@@ -119,6 +122,7 @@ function keeperLifecycleEvent(event: OasRuntimeEnvelope): OasAgentEvent {
     actor_kind: 'keeper',
     keeper_name: keeperName,
     event: asString(payload.event),
+    phase: asString(payload.phase),
     detail: asString(payload.detail),
     event_type: runtimeEventType(event),
     correlation_id: asString(event.correlation_id),
@@ -220,7 +224,29 @@ function ingestRuntimeProjection(
       } satisfies OasKeeperSnapshot)
       return
     case 'oas:masc:keeper:lifecycle':
-      pushOasAgentEvent(keeperLifecycleEvent(event))
+      {
+        const lifecycle = keeperLifecycleEvent(event)
+        pushOasAgentEvent(lifecycle)
+        if (opts?.includeLiveTrace) {
+          const actorName = lifecycle.keeper_name ?? lifecycle.agent_name
+          const summaryParts = [
+            lifecycle.event,
+            lifecycle.phase,
+            lifecycle.detail,
+          ].filter(Boolean)
+          maybeAppendLiveTrace(actorName, event, {
+            idSuffix: summaryParts.join('|') || 'lifecycle',
+            kind: 'lifecycle',
+            summary: `keeper ${summaryParts.join(' · ') || 'lifecycle'}`,
+            data: {
+              keeper_name: lifecycle.keeper_name ?? null,
+              event: lifecycle.event ?? null,
+              phase: lifecycle.phase ?? null,
+              detail: lifecycle.detail ?? null,
+            },
+          })
+        }
+      }
       return
     case 'oas:masc:trust_updated':
       pushOasAgentEvent({

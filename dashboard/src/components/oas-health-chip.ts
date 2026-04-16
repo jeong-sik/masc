@@ -33,9 +33,29 @@ const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {
  *  Exposed for unit testing. */
 export function describeAgentEvent(evt: OasAgentEvent): string {
   const label = EVENT_TYPE_LABELS[evt.type]
-  const action = evt.action ?? evt.event ?? evt.trigger
-  const target = evt.secondary_agent ? ` → ${evt.secondary_agent}` : ''
-  return `${label}${action ? ` · ${action}` : ''}${target}`
+  switch (evt.type) {
+    case 'selected':
+      return `${label}${evt.trigger ? ` · ${evt.trigger}` : ''}`
+    case 'decision': {
+      const detail = evt.action ?? evt.trigger_reason
+      return `${label}${detail ? ` · ${detail}` : ''}`
+    }
+    case 'action_executed':
+      return `${label}${evt.action ? ` · ${evt.action}` : ''}`
+    case 'keeper_lifecycle': {
+      const detail = evt.event ?? evt.phase ?? evt.detail
+      return `${label}${detail ? ` · ${detail}` : ''}`
+    }
+    case 'trust_updated':
+      return `${label}${evt.trust_score != null ? ` · ${evt.trust_score.toFixed(2)}` : ''}${evt.secondary_agent ? ` → ${evt.secondary_agent}` : ''}`
+    case 'reputation_changed': {
+      const summary =
+        evt.old_score != null && evt.new_score != null
+          ? `${evt.old_score.toFixed(2)} → ${evt.new_score.toFixed(2)}`
+          : evt.trend
+      return `${label}${summary ? ` · ${summary}` : ''}`
+    }
+  }
 }
 
 /** Pick the N most recently updated keepers from a snapshot map.

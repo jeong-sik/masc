@@ -83,6 +83,27 @@ let test_event_bus_task_transition () =
     Alcotest.(check string) "task id" "task-1" tid
   | _ -> Alcotest.fail "expected Custom masc:task_transition event"
 
+let test_event_bus_keeper_lifecycle_includes_phase () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let bus = Event_bus.create () in
+  let sub = Event_bus.subscribe bus in
+  Oas_events.publish_keeper_lifecycle bus
+    ~event:"started"
+    ~keeper_name:"keeper-a"
+    ~phase:Masc_mcp.Keeper_state_machine.Running
+    ~detail:"supervised"
+    ();
+  let events = Event_bus.drain sub in
+  Alcotest.(check int) "one event" 1 (List.length events);
+  match (List.hd events : Event_bus.event).payload with
+  | Event_bus.Custom ("masc:keeper:lifecycle", payload) ->
+    let phase = Yojson.Safe.Util.(member "phase" payload |> to_string) in
+    let event = Yojson.Safe.Util.(member "event" payload |> to_string) in
+    Alcotest.(check string) "phase" "running" phase;
+    Alcotest.(check string) "event" "started" event
+  | _ -> Alcotest.fail "expected Custom masc:keeper:lifecycle event"
+
 let test_oas_sse_bridge_persists_native_events () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -129,6 +150,41 @@ let test_oas_sse_bridge_persists_native_events () =
                Alcotest.(check string) "run id" "run-bridge"
                  (field_string "run_id")
            | _ -> Alcotest.fail "expected persisted oas event object");
+          raise Exit)
+      with Exit -> ())
+
+let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "oas_sse_bridge_observer" in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Masc_mcp.Sse.close_all_clients ());
+      cleanup_dir dir)
+    (fun () ->
+      let config = Coord.default_config dir in
+      let bus = Event_bus.create () in
+      Masc_mcp.Sse.set_clock (Eio.Stdenv.clock env);
+      try
+        Eio.Switch.run (fun sw ->
+          ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
+                    "observer-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
+          ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
+                    "coordinator-lifecycle" ~push:(fun _ -> ()) ~last_event_id:0);
+          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Oas_events.publish_keeper_lifecycle bus
+            ~event:"started"
+            ~keeper_name:"keeper-a"
+            ~phase:Masc_mcp.Keeper_state_machine.Running
+            ~detail:"supervised"
+            ();
+          Eio.Time.sleep (Eio.Stdenv.clock env) 2.2;
+          let observer_event = Masc_mcp.Sse.try_pop "observer-lifecycle" in
+          let coordinator_event = Masc_mcp.Sse.try_pop "coordinator-lifecycle" in
+          Alcotest.(check bool) "observer got oas lifecycle" true
+            (observer_event <> None);
+          Alcotest.(check bool) "coordinator got oas lifecycle" true
+            (coordinator_event <> None);
           raise Exit)
       with Exit -> ())
 
@@ -453,8 +509,12 @@ let () =
       Alcotest.test_case "heartbeat event" `Quick test_event_bus_heartbeat;
       Alcotest.test_case "task transition event" `Quick
         test_event_bus_task_transition;
+      Alcotest.test_case "keeper lifecycle includes phase" `Quick
+        test_event_bus_keeper_lifecycle_includes_phase;
       Alcotest.test_case "sse bridge persists native events" `Quick
         test_oas_sse_bridge_persists_native_events;
+      Alcotest.test_case "sse bridge sends lifecycle to observers" `Quick
+        test_oas_sse_bridge_broadcasts_lifecycle_to_observers;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick

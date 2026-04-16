@@ -121,6 +121,35 @@ describe('oas-runtime-store', () => {
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
   })
 
+  it('hydrates keeper lifecycle phase from OAS payload', () => {
+    hydrateOasRuntimeFromTelemetryEntries([
+      {
+        source: 'oas_event',
+        type: 'oas:masc:keeper:lifecycle',
+        ts_unix: 210,
+        correlation_id: 'corr-life',
+        run_id: 'run-life',
+        payload: {
+          keeper_name: 'keeper-a',
+          event: 'started',
+          phase: 'running',
+          detail: 'supervised',
+          timestamp: 210,
+        },
+      } as TelemetryEntry,
+    ])
+
+    expect(oasHealthSummary.value.totalEvents).toBe(1)
+    expect(oasHealthSummary.value.agentEventsCount).toBe(1)
+    expect(oasAgentEvents.value[0]).toMatchObject({
+      type: 'keeper_lifecycle',
+      keeper_name: 'keeper-a',
+      phase: 'running',
+      event: 'started',
+      detail: 'supervised',
+    })
+  })
+
   it('dedupes timestamp-less events across replay/live time drift', () => {
     vi.useFakeTimers()
     try {

@@ -48,36 +48,61 @@ describe('topKeepers', () => {
 })
 
 describe('describeAgentEvent', () => {
-  function evt(partial: Partial<OasAgentEvent> & { type: OasAgentEvent['type'] }): OasAgentEvent {
-    return {
-      agent_name: 'a',
-      timestamp: 0,
-      ...partial,
-    }
+  function evt(partial: OasAgentEvent): OasAgentEvent {
+    return partial
   }
 
   it('renders label + action', () => {
-    expect(describeAgentEvent(evt({ type: 'action_executed', action: 'ponder' }))).toBe('실행 · ponder')
+    expect(describeAgentEvent(evt({
+      type: 'action_executed',
+      actor_kind: 'agent',
+      agent_name: 'a',
+      timestamp: 0,
+      action: 'ponder',
+    }))).toBe('실행 · ponder')
   })
 
-  it('falls back to event when action absent', () => {
-    expect(describeAgentEvent(evt({ type: 'decision', event: 'shortlist' }))).toBe('결정 · shortlist')
+  it('falls back to trigger_reason when decision action is absent', () => {
+    expect(describeAgentEvent(evt({
+      type: 'decision',
+      actor_kind: 'agent',
+      agent_name: 'a',
+      timestamp: 0,
+      trigger_reason: 'shortlist',
+    }))).toBe('결정 · shortlist')
   })
 
   it('falls back to trigger when action and event absent', () => {
-    expect(describeAgentEvent(evt({ type: 'selected', trigger: 'heartbeat' }))).toBe('선택 · heartbeat')
+    expect(describeAgentEvent(evt({
+      type: 'selected',
+      actor_kind: 'agent',
+      agent_name: 'a',
+      timestamp: 0,
+      trigger: 'heartbeat',
+    }))).toBe('선택 · heartbeat')
   })
 
   it('includes secondary_agent arrow when present', () => {
     expect(describeAgentEvent(evt({
       type: 'trust_updated',
-      action: 'bump',
+      actor_kind: 'agent',
+      agent_name: 'a',
+      timestamp: 0,
+      trust_score: 0.75,
       secondary_agent: 'b',
-    }))).toBe('신뢰도 · bump → b')
+    }))).toBe('신뢰도 · 0.75 → b')
   })
 
-  it('omits action segment when all three fields missing', () => {
-    expect(describeAgentEvent(evt({ type: 'keeper_lifecycle' }))).toBe('생명주기')
+  it('prefers lifecycle event and phase when present', () => {
+    expect(describeAgentEvent(evt({
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
+      agent_name: 'keeper-a',
+      keeper_name: 'keeper-a',
+      timestamp: 0,
+      event: 'started',
+      phase: 'running',
+    }))).toBe('생명주기 · started')
   })
 
   it('maps all discriminants to Korean labels', () => {
@@ -90,7 +115,19 @@ describe('describeAgentEvent', () => {
       'reputation_changed',
     ]
     for (const t of types) {
-      const rendered = describeAgentEvent(evt({ type: t }))
+      const rendered = describeAgentEvent(
+        t === 'selected'
+          ? evt({ type: t, actor_kind: 'agent', agent_name: 'a', timestamp: 0 })
+          : t === 'decision'
+            ? evt({ type: t, actor_kind: 'agent', agent_name: 'a', timestamp: 0 })
+            : t === 'action_executed'
+              ? evt({ type: t, actor_kind: 'agent', agent_name: 'a', timestamp: 0 })
+              : t === 'keeper_lifecycle'
+                ? evt({ type: t, actor_kind: 'keeper', agent_name: 'a', timestamp: 0 })
+                : t === 'trust_updated'
+                  ? evt({ type: t, actor_kind: 'agent', agent_name: 'a', timestamp: 0 })
+                  : evt({ type: t, actor_kind: 'agent', agent_name: 'a', timestamp: 0 }),
+      )
       // Non-Latin label should be present (Korean)
       expect(rendered.length).toBeGreaterThan(0)
       expect(/^[a-zA-Z]+$/.test(rendered)).toBe(false)

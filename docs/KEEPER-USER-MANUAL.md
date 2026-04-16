@@ -180,7 +180,7 @@ Keepalive는 Eio fiber로 구현되어 주기적으로 실행된다.
 |----------|--------|------|
 | heartbeat interval | 30초 | durable keeper의 내부 heartbeat 주기. keeper별 설정값은 없다. |
 | jitter | base * 20% | 주기에 추가되는 랜덤 지연 |
-| snapshot_interval_sec | 60초 | JSONL 메트릭 스냅샷 간격 (환경변수 `MASC_KEEPER_SNAPSHOT_SEC`) |
+| snapshot_interval_sec | 300초 | JSONL 메트릭 스냅샷 간격 (환경변수 `MASC_KEEPER_SNAPSHOT_SEC`, runtime key `keeper.snapshot_sec`) |
 
 Heartbeat fiber가 수행하는 작업 (매 주기):
 1. Room에서 agent 존재 갱신

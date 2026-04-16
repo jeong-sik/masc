@@ -1874,22 +1874,26 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     m
 ;;
 
-let publish_keeper_lifecycle ~event ~keeper_name ~detail : unit =
+let publish_keeper_lifecycle ?phase ~event ~keeper_name ~detail () : unit =
   match get_bus () with
   | Some bus ->
     Oas_events.publish_keeper_lifecycle
       bus
+      ?phase
       ~event
       ~keeper_name
       ~detail
+      ()
   | None -> ()
 ;;
 
 let publish_keeper_started ~(live_meta : keeper_meta) : unit =
   publish_keeper_lifecycle
+    ~phase:Keeper_state_machine.Running
     ~event:"started"
     ~keeper_name:live_meta.name
     ~detail:"keepalive"
+    ()
 ;;
 
 let dispatch_fiber_started ~base_path keeper_name =
@@ -1928,7 +1932,8 @@ let record_keeper_stopped
       Keeper_state_machine.Stop_requested);
     ignore (Keeper_registry.dispatch_event ~base_path keeper_name
       Keeper_state_machine.Drain_complete);
-    publish_keeper_lifecycle ~event:"stopped" ~keeper_name ~detail;
+    publish_keeper_lifecycle ~phase:Keeper_state_machine.Stopped
+      ~event:"stopped" ~keeper_name ~detail ();
     true)
   else
     false
@@ -1949,7 +1954,8 @@ let record_keeper_crashed
       (Keeper_state_machine.Fiber_terminated { outcome = reason }));
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
-    publish_keeper_lifecycle ~event:"crashed" ~keeper_name ~detail:reason)
+    publish_keeper_lifecycle ~phase:Keeper_state_machine.Crashed
+      ~event:"crashed" ~keeper_name ~detail:reason ())
 ;;
 
 let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_meta) : unit
@@ -1973,10 +1979,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
      | None -> ());
     let live_meta = bootstrap_live_keeper_meta ~ctx m in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
-    publish_keeper_started ~live_meta;
     (* Telemetry feedback refresh loop removed in #6814:
        behavioral_stats no longer consumed by build_prompt. *)
     dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
+    publish_keeper_started ~live_meta;
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
       let record_crash failure_reason =
         record_keeper_crashed

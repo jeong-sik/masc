@@ -262,7 +262,7 @@ let relay_event ?store evt =
                 Log.Misc.warn "oas_sse_bridge: durable append failed: %s"
                   (Printexc.to_string exn))
        | None -> ());
-      (try Sse.broadcast_to Coordinators j
+      (try Sse.broadcast_to All j
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

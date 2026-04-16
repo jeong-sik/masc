@@ -46,11 +46,11 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
 
 (* ── Event publishing ────────────────────────────────────── *)
 
-let publish_lifecycle event_name keeper_name detail =
+let publish_lifecycle ?phase event_name keeper_name detail () =
   match Keeper_keepalive.get_bus () with
   | Some bus ->
       Oas_events.publish_keeper_lifecycle bus ~event:event_name
-        ~keeper_name ~detail
+        ?phase ~keeper_name ~detail ()
   | None -> ()
 
 (* ── Supervised fiber launch ─────────────────────────────── *)
@@ -89,7 +89,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            ignore (Keeper_registry.dispatch_event ~base_path meta.name
              Keeper_state_machine.Drain_complete);
            if resolve_done `Stopped then
-             publish_lifecycle "stopped" meta.name "normal exit"
+             publish_lifecycle ~phase:Keeper_state_machine.Stopped
+               "stopped" meta.name "normal exit" ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -121,7 +122,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                ~name:meta.name ~ts ~reason ~restart_count:rc;
              Keeper_registry.record_error ~base_path meta.name reason;
              if resolve_done (`Crashed reason) then
-               publish_lifecycle "crashed" meta.name reason))
+               publish_lifecycle ~phase:Keeper_state_machine.Crashed
+                 "crashed" meta.name reason ()))
       ~finally:(fun () ->
         Keeper_registry.cleanup_tracking ~base_path meta.name;
         if not !resolved then begin
@@ -147,7 +149,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             ignore (Keeper_registry.dispatch_event ~base_path meta.name
               (Keeper_state_machine.Fiber_terminated { outcome = reason }));
             if resolve_done (`Crashed reason) then
-              publish_lifecycle "crashed" meta.name reason
+              publish_lifecycle ~phase:Keeper_state_machine.Crashed
+                "crashed" meta.name reason ()
           end
         end))
 
@@ -180,8 +183,9 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name
       live_meta;
-    publish_lifecycle "started" meta.name "supervised";
-    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg
+    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg;
+    publish_lifecycle ~phase:Keeper_state_machine.Running
+      "started" meta.name "supervised" ()
   end
 
 (* ── Sweep and recover ───────────────────────────────────── *)
@@ -219,7 +223,8 @@ let reconcile_keepalive_keepers (ctx : _ context) =
              if not dominated_by_sweep then begin
                supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
                if Keeper_registry.is_running ~base_path meta.name then begin
-                 publish_lifecycle "reconciled" meta.name "durable keeper";
+                 publish_lifecycle ~phase:Keeper_state_machine.Running
+                   "reconciled" meta.name "durable keeper" ();
                  Log.Keeper.info "%s: reconciled durable keeper" meta.name
                end
              end
@@ -248,20 +253,21 @@ let cleanup_dead_tombstone (ctx : _ context)
       in
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       if persisted_paused then begin
-        publish_lifecycle "dead_cleaned" entry.name "paused meta persisted";
+        publish_lifecycle "dead_cleaned" entry.name "paused meta persisted" ();
         Log.Keeper.info "%s: dead tombstone cleaned up" entry.name
       end else begin
-        publish_lifecycle "dead_cleaned" entry.name "meta write failed, unregistered anyway";
+        publish_lifecycle "dead_cleaned" entry.name
+          "meta write failed, unregistered anyway" ();
         Log.Keeper.warn "%s: dead tombstone unregistered despite meta write failure" entry.name
       end
   | Ok None ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
-      publish_lifecycle "dead_cleaned" entry.name "meta missing";
+      publish_lifecycle "dead_cleaned" entry.name "meta missing" ();
       Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
   | Error err ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
       publish_lifecycle "dead_cleaned" entry.name
-        (Printf.sprintf "meta read error: %s" err);
+        (Printf.sprintf "meta read error: %s" err) ();
       Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)"
         entry.name err
 
@@ -304,7 +310,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
         (List.length dominant_entries) n_total ratio dominant_key;
       publish_lifecycle "self_preservation" "supervisor"
         (Printf.sprintf "%d/%d suppressed, cohort=%s"
-           (List.length dominant_entries) n_total dominant_key);
+           (List.length dominant_entries) n_total dominant_key) ();
       Keeper_crash_persistence.enqueue_sp_event
         ~keepers_dir
         ~ts:(Time_compat.now ())
@@ -374,9 +380,9 @@ let sweep_and_recover (ctx : _ context) =
     ignore (Keeper_registry.dispatch_event ~base_path entry.name
       Keeper_state_machine.Restart_budget_exhausted);
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
-    publish_lifecycle "dead" entry.name
+    publish_lifecycle ~phase:Keeper_state_machine.Dead "dead" entry.name
       (Printf.sprintf "restart budget exhausted (%d), last: %s"
-         max_restarts msg);
+         max_restarts msg) ();
     Log.Keeper.error "%s: restart budget exhausted (%d). Dead."
       entry.name max_restarts
   ) !to_mark_dead;
@@ -405,8 +411,9 @@ let sweep_and_recover (ctx : _ context) =
           ~restart_count:attempt ~last_restart_ts:now
           ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
         launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
-        publish_lifecycle "restarted" old_entry.name
-          (Printf.sprintf "attempt %d" attempt);
+        publish_lifecycle ~phase:Keeper_state_machine.Running
+          "restarted" old_entry.name
+          (Printf.sprintf "attempt %d" attempt) ();
         Log.Keeper.info "%s: restarted (attempt %d, backoff %.0fs)"
           old_entry.name attempt (backoff_delay (attempt - 1))
     | _ ->
@@ -426,7 +433,7 @@ let sweep_and_recover (ctx : _ context) =
                (try
                   Sys.remove path;
                   publish_lifecycle "paused_pruned" name
-                    (Printf.sprintf "last_updated=%s" meta.updated_at);
+                    (Printf.sprintf "last_updated=%s" meta.updated_at) ();
                   Log.Keeper.info "%s: stale paused meta pruned" name
                 with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                   Log.Keeper.warn "%s: paused meta prune failed: %s"

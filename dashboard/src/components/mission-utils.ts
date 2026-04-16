@@ -1,7 +1,6 @@
 import { signal } from '@preact/signals'
 import { navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
-import { findKeeper } from '../lib/keeper-utils'
 import type {
   Agent,
   DashboardMissionAttentionQueueItem,
@@ -149,29 +148,6 @@ export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): O
   }
 }
 
-export function enrichedKeeperRow(brief: DashboardMissionKeeperBrief): EnrichedKeeperRow {
-  const keeper =
-    findKeeper(brief.name) ?? findKeeper(brief.agent_name)
-  return {
-    brief,
-    keeper,
-    currentWork:
-      trimText(brief.current_work, 110)
-      ?? trimText(keeper?.skill_primary, 110)
-      ?? trimText(keeper?.last_proactive_reason, 110)
-      ?? '명시된 키퍼 초점 없음',
-    recentInput:
-      trimText(keeper?.recent_input_preview, 120) ?? null,
-    recentOutput:
-      trimText(keeper?.recent_output_preview, 120)
-      ?? trimText(keeper?.last_proactive_preview, 120)
-      ?? null,
-    recentEvent:
-      trimText(keeper?.last_proactive_reason, 120)
-      ?? null,
-    recentTools: keeper?.recent_tool_names ?? [],
-  }
-}
 
 export function sessionLookupById() {
   const mission = missionSnapshot.value

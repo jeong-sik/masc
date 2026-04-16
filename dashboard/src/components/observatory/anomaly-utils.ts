@@ -53,14 +53,3 @@ export function detectAnomalies(
   })
 }
 
-export function anomalySummary(results: AnomalyResult[]): {
-  count: number
-  worstDrop: AnomalyResult | null
-} {
-  const anomalies = results.filter(r => r.isAnomaly)
-  const drops = anomalies.filter(r => r.zScore < 0).sort((a, b) => a.zScore - b.zScore)
-  return {
-    count: anomalies.length,
-    worstDrop: drops[0] ?? null,
-  }
-}

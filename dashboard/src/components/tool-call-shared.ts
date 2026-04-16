@@ -117,12 +117,6 @@ export function formatArgs(args: Record<string, unknown> | string): string {
   return keys.length > ARGS_MAX_KEYS ? `{${preview}, ...}` : `{${preview}}`
 }
 
-export function formatResult(result: string | null, error: string | null, maxLen = 80): string {
-  if (error) return `err: ${truncate(error, maxLen)}`
-  if (!result) return '-'
-  return truncate(result, maxLen)
-}
-
 export function prettyArgs(args: Record<string, unknown> | string): string {
   if (typeof args === 'string') return args
   try { return JSON.stringify(args, null, 2) } catch { return String(args) }

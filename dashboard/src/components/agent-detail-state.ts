@@ -47,7 +47,6 @@ export type AgentFitness = {
   [key: string]: unknown
 }
 export const agentFitness = signal<AgentFitness | null>(null)
-export const fitnessLoading = signal(false)
 
 // --- Selectors ---
 

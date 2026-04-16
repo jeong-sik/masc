@@ -28,14 +28,6 @@ export function keeperIdentitySearchTerms(
   return [primary, runtime].filter((value): value is string => Boolean(value))
 }
 
-export function keeperRuntimeLabel(
-  keeperName: string | null | undefined,
-  agentName: string | null | undefined,
-): string | null {
-  const runtime = runtimeAgentName(keeperName, agentName)
-  return runtime ? `runtime · ${runtime}` : null
-}
-
 export function keeperIdentityHint(
   keeperName: string | null | undefined,
   agentName: string | null | undefined,

@@ -11,6 +11,24 @@ open Coord_broadcast
 (* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
    All coordination scoped by cluster basepath only. *)
 
+(** Bounded snapshot of a corrupt agent JSON file for error diagnostics.
+    Reads at most 200 bytes to avoid OOM on large/corrupt files. *)
+let agent_parse_error_snapshot ~agent_name ~agent_file =
+  let raw_head =
+    try
+      In_channel.with_open_text agent_file (fun ic ->
+        let buf = Bytes.create 200 in
+        let n = In_channel.input ic buf 0 200 in
+        Bytes.sub_string buf 0 n)
+    with _ -> ""
+  in
+  `Assoc [
+    ("agent_name", `String agent_name);
+    ("agent_file", `String agent_file);
+    ("raw_head",
+      if raw_head = "" then `Null else `String raw_head);
+  ]
+
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
@@ -100,28 +118,9 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
                ]);
        end
      | Error e ->
-         let raw =
-           try
-             Some
-               (In_channel.with_open_text agent_file_dedup
-                  In_channel.input_all)
-           with _ -> None
-         in
-         let raw_head =
-           match raw with
-           | None -> `Null
-           | Some s ->
-             `String
-               (if String.length s > 200 then String.sub s 0 200 else s)
-         in
          let snapshot =
-           `Assoc [
-             ("agent_name", `String nickname);
-             ("agent_file", `String agent_file_dedup);
-             ("raw_size",
-               `Int (Option.fold ~none:0 ~some:String.length raw));
-             ("raw_head", raw_head);
-           ]
+           agent_parse_error_snapshot ~agent_name:nickname
+             ~agent_file:agent_file_dedup
          in
          Log.Coord.warn
            "agent rejoin: invalid agent JSON for %s: %s | snapshot=%s"
@@ -210,26 +209,8 @@ let leave config ~agent_name =
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
        write_json config agent_file (agent_to_yojson updated)
      | Error e ->
-         let raw =
-           try
-             Some (In_channel.with_open_text agent_file In_channel.input_all)
-           with _ -> None
-         in
-         let raw_head =
-           match raw with
-           | None -> `Null
-           | Some s ->
-             `String
-               (if String.length s > 200 then String.sub s 0 200 else s)
-         in
          let snapshot =
-           `Assoc [
-             ("agent_name", `String actual_name);
-             ("agent_file", `String agent_file);
-             ("raw_size",
-               `Int (Option.fold ~none:0 ~some:String.length raw));
-             ("raw_head", raw_head);
-           ]
+           agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
          in
          Log.Coord.warn
            "agent leave: invalid agent JSON for %s: %s | snapshot=%s"

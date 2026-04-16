@@ -562,7 +562,12 @@ let run_named
       let secs = float_of_int ms /. 1000. in
       match cycle_clock with
       | Some clock -> Eio.Time.sleep clock secs
-      | None -> Unix.sleepf secs
+      | None ->
+        (* No Eio clock available — skip backoff rather than block the
+           thread.  Reachable only outside an Eio.Switch, which is not a
+           supported entry path for this worker; the cycle simply
+           continues without throttling. *)
+        ()
   in
   let cascade_exhausted_after_filter ~cycle =
     let observation =

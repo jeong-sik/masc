@@ -21,5 +21,4 @@
    masc_config
    masc_core
    masc_pulse
-   masc_types
    fs_compat))

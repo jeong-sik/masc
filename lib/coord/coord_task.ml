@@ -216,7 +216,7 @@ let observe_task_transition config ~agent_name ~task_id ~transition ~details =
     so existing dashboard readers do not break. *)
 let transition_log_event ~event_type ~agent_name ~task_id
     ~from_status ~to_status ?action ?notes ?reason ?duration_ms
-    ?handoff_context ?(forced = false) () : Yojson.Safe.t =
+    ?handoff_context ?(forced = false) ?(now = now_iso ()) () : Yojson.Safe.t =
   let optional_field name = function
     | Some value -> [ (name, value) ]
     | None -> []
@@ -230,7 +230,7 @@ let transition_log_event ~event_type ~agent_name ~task_id
        ("from_status", `String (task_status_to_string from_status));
        ("to_status", `String (task_status_to_string to_status));
        ("forced", `Bool forced);
-       ("ts", `String (now_iso ()));
+       ("ts", `String now);
      ]
     @ optional_field "action" (Option.map (fun v -> `String v) action)
     @ optional_field "notes" (Option.map (fun v -> `String v) notes)

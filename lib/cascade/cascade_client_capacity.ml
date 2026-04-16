@@ -27,6 +27,22 @@ let registered_urls () =
   Mutex.protect registry_mu (fun () ->
       Hashtbl.fold (fun url _ acc -> url :: acc) registry [])
 
+let snapshot () =
+  Mutex.protect registry_mu (fun () ->
+      Hashtbl.fold
+        (fun url e acc ->
+           let active = Atomic.get e.active in
+           let info : Cascade_throttle.capacity_info =
+             { total = e.max_concurrent;
+               process_active = active;
+               process_available = max 0 (e.max_concurrent - active);
+               process_queue_length = 0;
+               source = Llm_provider.Provider_throttle.Fallback;
+             }
+           in
+           (url, info) :: acc)
+        registry [])
+
 let unregister_all () =
   Mutex.protect registry_mu (fun () -> Hashtbl.clear registry)
 

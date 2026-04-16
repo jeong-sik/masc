@@ -1860,3 +1860,26 @@ export function fetchCascadeConfig(opts?: AbortableRequestOptions): Promise<Casc
 export function fetchCascadeHealth(opts?: AbortableRequestOptions): Promise<CascadeHealthResponse> {
   return get<CascadeHealthResponse>('/api/v1/cascade/health', { signal: opts?.signal })
 }
+
+export type CascadeCapacityKind = 'cli' | 'ollama' | 'other'
+
+export interface CascadeClientCapacityEntry {
+  key: string
+  kind: CascadeCapacityKind
+  total: number
+  active: number
+  available: number
+}
+
+export interface CascadeClientCapacityResponse {
+  updated_at: string
+  entries: CascadeClientCapacityEntry[]
+}
+
+export function fetchCascadeClientCapacity(
+  opts?: AbortableRequestOptions,
+): Promise<CascadeClientCapacityResponse> {
+  return get<CascadeClientCapacityResponse>('/api/v1/cascade/client_capacity', {
+    signal: opts?.signal,
+  })
+}

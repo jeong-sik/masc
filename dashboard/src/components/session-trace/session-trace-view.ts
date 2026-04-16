@@ -68,7 +68,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
 function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   if (events.length === 0) return null
 
-  const lastEvt = events[events.length - 1]
+  const lastEvt = events[0]
   if (!lastEvt) return null
   const isRecent = Date.now() - lastEvt.ts < 60_000
   if (!isRecent) return null
@@ -113,14 +113,14 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
   const events = getFilteredEvents(agentName)
   const summary = getTraceSummary(agentName)
 
-  // Auto-scroll to bottom when new events arrive
+  // Auto-scroll to top when new events arrive (newest-first order)
   const prevCountRef = useRef(0)
   useEffect(() => {
     if (events.length > prevCountRef.current && listRef.current) {
       const el = listRef.current
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100
-      if (isNearBottom) {
-        el.scrollTop = el.scrollHeight
+      const isNearTop = el.scrollTop < 100
+      if (isNearTop) {
+        el.scrollTop = 0
       }
     }
     prevCountRef.current = events.length

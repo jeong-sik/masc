@@ -265,20 +265,130 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
 }
 
 function OasDetail({ event }: { event: UnifiedTraceEvent }) {
-  const detailRows = Object.entries(event.detail)
+  const d = event.detail
+
+  // ── OAS tool call ──
+  if (event.kind === 'oas_tool') {
+    const phase = typeof d.phase === 'string' ? d.phase : ''
+    const toolName = typeof d.tool_name === 'string' ? d.tool_name : 'unknown'
+    const phaseLabel = phase === 'called' ? '호출' : phase === 'completed' ? '완료' : phase
+    const phaseColor = phase === 'called' ? 'text-[var(--accent)]' : 'text-[var(--ok)]'
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)] space-y-1">
+        <div class="flex items-center gap-2 text-[12px]">
+          <span class="text-[var(--text-dim)]">단계:</span>
+          <span class="font-mono font-semibold ${phaseColor}">${phaseLabel}</span>
+        </div>
+        <div class="flex items-center gap-2 text-[12px]">
+          <span class="text-[var(--text-dim)]">도구:</span>
+          <span class="font-mono text-[var(--text-body)]">${toolName}</span>
+        </div>
+      </div>
+    `
+  }
+
+  // ── OAS turn ──
+  if (event.kind === 'oas_turn') {
+    const phase = typeof d.phase === 'string' ? d.phase : ''
+    const turn = d.turn
+    const phaseLabel = phase === 'started' ? '시작' : phase === 'completed' ? '완료' : phase
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)]">
+        <div class="flex items-center gap-2 text-[12px]">
+          <span class="text-[var(--text-dim)]">턴 ${turn != null ? String(turn) : '-'}:</span>
+          <span class="font-mono font-semibold text-[var(--text-body)]">${phaseLabel}</span>
+        </div>
+      </div>
+    `
+  }
+
+  // ── OAS context compaction ──
+  if (event.kind === 'oas_context') {
+    const before = typeof d.before_tokens === 'number' ? d.before_tokens : null
+    const after = typeof d.after_tokens === 'number' ? d.after_tokens : null
+    const saved = before != null && after != null ? before - after : null
+    const ratio = before != null && after != null && before > 0 ? ((saved ?? 0) / before * 100) : null
+    const compactPhase = typeof d.phase === 'string' ? d.phase : ''
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.15)] space-y-2">
+        <div class="flex items-center gap-3 text-[12px]">
+          ${before != null ? html`<span><span class="text-[var(--text-dim)]">Before:</span> <span class="font-mono">${before.toLocaleString()}</span></span>` : null}
+          <span class="text-[var(--text-dim)]">→</span>
+          ${after != null ? html`<span><span class="text-[var(--text-dim)]">After:</span> <span class="font-mono">${after.toLocaleString()}</span></span>` : null}
+        </div>
+        ${saved != null && saved > 0 ? html`
+          <div class="flex items-center gap-2">
+            <div class="flex-1 h-2 bg-[var(--white-8)] rounded-full overflow-hidden">
+              <div class="h-full bg-[#38bdf8] rounded-full" style="width: ${Math.min(ratio ?? 0, 100).toFixed(1)}%"></div>
+            </div>
+            <span class="text-[10px] font-mono text-[#38bdf8]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
+          </div>
+        ` : null}
+        ${compactPhase ? html`<div class="text-[10px] text-[var(--text-dim)]">단계: ${compactPhase}</div>` : null}
+      </div>
+    `
+  }
+
+  // ── Lifecycle with durable_kind ──
+  const durableKind = typeof d.durable_kind === 'string' ? d.durable_kind : ''
+
+  if (durableKind === 'llm_request') {
+    const model = typeof d.model === 'string' ? d.model : 'unknown'
+    const inputTokens = typeof d.input_tokens === 'number' ? d.input_tokens : 0
+    const turn = d.turn
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(56,189,248,0.04)] border border-[rgba(56,189,248,0.12)] space-y-1">
+        <div class="flex items-center gap-3 text-[12px]">
+          <span><span class="text-[var(--text-dim)]">모델:</span> <span class="font-mono">${model}</span></span>
+          <span><span class="text-[var(--text-dim)]">입력:</span> <span class="font-mono">${inputTokens.toLocaleString()}tok</span></span>
+          ${turn != null ? html`<span><span class="text-[var(--text-dim)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
+        </div>
+      </div>
+    `
+  }
+
+  if (durableKind === 'llm_response') {
+    const outputTokens = typeof d.output_tokens === 'number' ? d.output_tokens : 0
+    const stopReason = typeof d.stop_reason === 'string' ? d.stop_reason : ''
+    const durationMs = typeof d.duration_ms === 'number' ? d.duration_ms : null
+    const turn = d.turn
+    const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--ok)]' : 'text-[var(--warn)]'
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(34,211,238,0.04)] border border-[rgba(34,211,238,0.12)] space-y-1">
+        <div class="flex items-center gap-3 text-[12px] flex-wrap">
+          <span><span class="text-[var(--text-dim)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
+          <span><span class="text-[var(--text-dim)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
+          ${durationMs != null ? html`<span><span class="text-[var(--text-dim)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatDuration(durationMs)}</span></span>` : null}
+          ${turn != null ? html`<span><span class="text-[var(--text-dim)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
+        </div>
+      </div>
+    `
+  }
+
+  if (durableKind === 'error_occurred') {
+    const domain = typeof d.error_domain === 'string' ? d.error_domain : 'unknown'
+    const errorDetail = typeof d.detail === 'string' ? d.detail : ''
+    return html`
+      <div class="mt-2 px-3 py-2 rounded-lg bg-[rgba(239,68,68,0.04)] border border-[rgba(239,68,68,0.15)] space-y-1">
+        <div class="text-[12px]"><span class="text-[var(--text-dim)]">도메인:</span> <span class="font-mono text-[var(--bad)]">${domain}</span></div>
+        ${errorDetail ? html`<div class="text-[11px] font-mono text-[var(--text-body)] break-all">${errorDetail}</div>` : null}
+      </div>
+    `
+  }
+
+  // ── Fallback: generic detail rows ──
+  const detailRows = Object.entries(d)
     .filter(([, value]) => value != null && value !== '')
     .map(([label, value]) => ({ label, value: typeof value === 'string' ? value : JSON.stringify(value) }))
   if (detailRows.length === 0) return null
   return html`
-    <div class="mt-2 grid gap-2">
-      <div class="grid gap-1.5 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)]">
-        ${detailRows.map(row => html`
-          <div class="flex items-start gap-2 text-[12px] leading-relaxed">
-            <span class="min-w-[92px] text-[var(--text-dim)] font-mono">${row.label}</span>
-            <span class="text-[var(--text-body)] font-mono break-all">${row.value}</span>
-          </div>
-        `)}
-      </div>
+    <div class="mt-2 grid gap-1.5 px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--white-6)]">
+      ${detailRows.map(row => html`
+        <div class="flex items-start gap-2 text-[12px] leading-relaxed">
+          <span class="min-w-[92px] text-[var(--text-dim)] font-mono">${row.label}</span>
+          <span class="text-[var(--text-body)] font-mono break-all">${row.value}</span>
+        </div>
+      `)}
     </div>
   `
 }
@@ -313,6 +423,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
     || event.kind === 'oas_tool'
     || event.kind === 'oas_turn'
     || event.kind === 'oas_context'
+    || (event.kind === 'lifecycle' && event.detail.durable_kind)
 
   const row = html`
     <div class="flex items-start gap-3 py-2 px-3 rounded-lg ${gateRejected ? 'opacity-50' : ''}">
@@ -384,6 +495,7 @@ export function SessionTraceEntry({ event }: { event: UnifiedTraceEvent }) {
         ${event.kind === 'task' ? html`<${TaskDetail} event=${event} />` : null}
         ${event.kind === 'thinking' ? html`<${ThinkingDetail} event=${event} />` : null}
         ${event.kind === 'oas_tool' || event.kind === 'oas_turn' || event.kind === 'oas_context'
+          || (event.kind === 'lifecycle' && event.detail.durable_kind)
           ? html`<${OasDetail} event=${event} />`
           : null}
       </div>

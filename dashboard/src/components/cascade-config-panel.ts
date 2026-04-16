@@ -10,9 +10,12 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import {
+  fetchCascadeClientCapacity,
   fetchCascadeConfig,
   fetchCascadeHealth,
   type CascadeCandidate,
+  type CascadeClientCapacityEntry,
+  type CascadeClientCapacityResponse,
   type CascadeConfigResponse,
   type CascadeHealthProvider,
   type CascadeHealthResponse,
@@ -28,15 +31,17 @@ import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/as
 interface CascadeData {
   config: CascadeConfigResponse | null
   health: CascadeHealthResponse | null
+  capacity: CascadeClientCapacityResponse | null
 }
 
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
-    const [config, health] = await Promise.all([
+    const [config, health, capacity] = await Promise.all([
       fetchCascadeConfig({ signal }),
       fetchCascadeHealth({ signal }),
+      fetchCascadeClientCapacity({ signal }),
     ])
-    return { config, health }
+    return { config, health, capacity }
   })
 }
 
@@ -193,6 +198,54 @@ function HealthTable({ health }: { health: CascadeHealthResponse }) {
   `
 }
 
+function capacityTone(entry: CascadeClientCapacityEntry): 'ok' | 'warn' | 'bad' {
+  if (entry.total === 0) return 'bad'
+  if (entry.available === 0) return 'warn'
+  return 'ok'
+}
+
+function capacityKindLabel(kind: CascadeClientCapacityEntry['kind']): string {
+  switch (kind) {
+    case 'cli': return 'CLI'
+    case 'ollama': return 'Ollama'
+    case 'other': return 'Other'
+  }
+}
+
+function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResponse }) {
+  if (capacity.entries.length === 0) {
+    return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 CLI/ollama provider 미사용)<//>`
+  }
+  return html`
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+          <th class="text-left py-1 w-4"></th>
+          <th class="text-left py-1">Kind</th>
+          <th class="text-left py-1">Key</th>
+          <th class="text-right py-1">Active</th>
+          <th class="text-right py-1">Available</th>
+          <th class="text-right py-1">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${capacity.entries.map((e: CascadeClientCapacityEntry) => {
+          const tone = capacityTone(e)
+          return html`
+          <tr class="border-b border-[var(--card-border)] last:border-b-0">
+            <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
+            <td class="py-1"><${StatusChip} tone=${tone === 'ok' ? 'neutral' : tone}>${capacityKindLabel(e.kind)}<//></td>
+            <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
+            <td class="py-1 text-right tabular-nums">${e.active}</td>
+            <td class="py-1 text-right tabular-nums">${e.available}</td>
+            <td class="py-1 text-right tabular-nums">${e.total}</td>
+          </tr>
+        `})}
+      </tbody>
+    </table>
+  `
+}
+
 export function CascadeConfigPanel() {
   const resourceRef = useRef<ManagedAsyncResource<CascadeData> | null>(null)
   if (resourceRef.current === null) {
@@ -209,6 +262,7 @@ export function CascadeConfigPanel() {
   const current = resource.state.value
   const config = current.data?.config ?? null
   const health = current.data?.health ?? null
+  const capacity = current.data?.capacity ?? null
 
   return html`
     <div class="flex flex-col gap-4">
@@ -279,6 +333,12 @@ export function CascadeConfigPanel() {
             </div>
             <${HealthTable} health=${health} />
           `
+          : null}
+      <//>
+
+      <${Card} title="Client Capacity">
+        ${capacity
+          ? html`<${ClientCapacityTable} capacity=${capacity} />`
           : null}
       <//>
     </div>

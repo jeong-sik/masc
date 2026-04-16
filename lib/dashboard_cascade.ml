@@ -121,3 +121,52 @@ let health_json () =
     ("cooldown_sec", `Float Health.cooldown_sec);
     ("providers", `List (List.map provider_info_to_json providers));
   ]
+
+(* ── Client capacity projection ─────────────────────── *)
+
+(** Classify a capacity registry key for the dashboard.  CLI sentinels
+    use the [cli:] prefix; ollama uses the well-known [:11434] port.
+    Everything else is reported as [other] so operators can spot
+    surprise registrations (e.g. a manually-registered HTTP slot). *)
+let classify_capacity_key url =
+  if String.length url > 4 && String.sub url 0 4 = "cli:" then "cli"
+  else
+    let len = String.length url in
+    let needle = ":11434" in
+    let nlen = String.length needle in
+    let rec scan i =
+      if i + nlen > len then false
+      else if String.sub url i nlen = needle then true
+      else scan (i + 1)
+    in
+    if scan 0 then "ollama" else "other"
+
+let client_capacity_entry_to_json (url, info : string * Cascade_throttle.capacity_info)
+  : Yojson.Safe.t =
+  `Assoc [
+    ("key", `String url);
+    ("kind", `String (classify_capacity_key url));
+    ("total", `Int info.total);
+    ("active", `Int info.process_active);
+    ("available", `Int info.process_available);
+  ]
+
+let client_capacity_json () =
+  let entries = Cascade_client_capacity.snapshot () in
+  (* Stable ordering by (kind, key) so the dashboard table doesn't
+     reshuffle on every poll.  Hashtbl iteration is unordered, so we
+     sort here rather than depend on insertion order. *)
+  let sorted =
+    List.sort
+      (fun (k1, _) (k2, _) ->
+         let c1 = classify_capacity_key k1 in
+         let c2 = classify_capacity_key k2 in
+         match String.compare c1 c2 with
+         | 0 -> String.compare k1 k2
+         | n -> n)
+      entries
+  in
+  `Assoc [
+    ("updated_at", `String (now_iso ()));
+    ("entries", `List (List.map client_capacity_entry_to_json sorted));
+  ]

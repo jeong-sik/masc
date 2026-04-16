@@ -38,6 +38,21 @@ val register : url:string -> max_concurrent:int -> unit
 val registered_urls : unit -> string list
 (** Snapshot of currently-registered URLs.  Test helper. *)
 
+val snapshot : unit -> (string * Cascade_throttle.capacity_info) list
+(** Atomic snapshot of every registered URL paired with the current
+    [capacity_info] (total, active, available).  Used by the
+    dashboard projection to surface client-declared semaphores
+    (ollama HTTP, CLI sentinels) in a single uniform table.
+
+    The snapshot is taken under the registry mutex so all entries
+    are read consistently with respect to register/unregister, but
+    the [process_active] count is read atomically per-entry so
+    concurrent acquires/releases between entries can produce
+    slightly stale counts.  Callers treat this as observability
+    data, not a transactional view.
+
+    @since 0.9.9 *)
+
 val unregister_all : unit -> unit
 (** Remove every registration.  Test helper. *)
 

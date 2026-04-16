@@ -351,6 +351,36 @@ let test_cli_idempotent_registration () =
   | Some info ->
     check int "first override preserved (idempotent)" 5 info.total
 
+let test_snapshot_returns_all_entries () =
+  C.unregister_all ();
+  C.register ~url:"http://127.0.0.1:11434" ~max_concurrent:1;
+  C.register ~url:"cli:claude_code" ~max_concurrent:2;
+  let entries = C.snapshot () in
+  check int "snapshot contains both entries" 2 (List.length entries);
+  let lookup k = List.assoc_opt k entries in
+  (match lookup "http://127.0.0.1:11434" with
+   | Some info -> check int "ollama total" 1 info.total
+   | None -> fail "ollama entry missing");
+  (match lookup "cli:claude_code" with
+   | Some info ->
+     check int "cli total" 2 info.total;
+     check int "cli initial active" 0 info.process_active;
+     check int "cli initial available" 2 info.process_available
+   | None -> fail "cli entry missing")
+
+let test_snapshot_reflects_active_acquires () =
+  C.unregister_all ();
+  C.register ~url:"cli:codex_cli" ~max_concurrent:2;
+  match C.try_acquire "cli:codex_cli" with
+  | None -> fail "first acquire failed"
+  | Some _release ->
+    let entries = C.snapshot () in
+    match List.assoc_opt "cli:codex_cli" entries with
+    | None -> fail "snapshot missing entry"
+    | Some info ->
+      check int "active counted" 1 info.process_active;
+      check int "available decremented" 1 info.process_available
+
 (* ── Phase B: Priority_tier (S5) ───────────────────────────── *)
 
 let test_priority_tier_picks_first_tier () =
@@ -551,6 +581,10 @@ let () =
         test_cli_acquire_blocks_at_cap;
       test_case "cli registration is idempotent" `Quick
         test_cli_idempotent_registration;
+      test_case "snapshot returns all registered entries" `Quick
+        test_snapshot_returns_all_entries;
+      test_case "snapshot reflects active acquires" `Quick
+        test_snapshot_reflects_active_acquires;
     ];
     "priority_tier", [
       test_case "cycle 0 picks first tier" `Quick

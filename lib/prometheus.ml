@@ -277,7 +277,14 @@ let init () =
     Counter;
   add "masc_keeper_output_tokens_total"
     "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
-    Counter
+    Counter;
+  (* Tool schema budget gauges — set once at boot via
+     [set_tool_schema_stats]. Covers #7483 Step 1. *)
+  add "masc_mcp_tool_schema_count"
+    "Number of tool schemas exposed to MCP clients" Gauge;
+  add "masc_mcp_tool_schema_tokens_approx"
+    "Approximate token count of all tool schemas combined (chars/4)"
+    Gauge
 
 let metric_open_fds = "masc_process_open_fds"
 
@@ -319,6 +326,10 @@ let update_fd_gauges () =
       count fd_warn_threshold
   end else if count < fd_warn_threshold / 2 then
     fd_warned_once := false
+
+let set_tool_schema_stats ~count ~approx_tokens =
+  set_gauge "masc_mcp_tool_schema_count" (float_of_int count);
+  set_gauge "masc_mcp_tool_schema_tokens_approx" (float_of_int approx_tokens)
 
 (** {1 Prometheus Export} *)
 

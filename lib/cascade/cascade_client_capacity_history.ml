@@ -80,13 +80,30 @@ let ensure_initialised_locked () =
     count := 0
   end
 
+let string_of_kind = function
+  | Acquired -> "acquired"
+  | Released -> "released"
+  | Rejected_full -> "rejected_full"
+
+(* Prometheus counter increment happens *outside* the ring mutex so a slow
+   metrics hashtable mutex never blocks cascade acquire paths.  The counter
+   name + labels match the dashboard projection (classify_key) so Grafana
+   queries can join on the same {kind, key_type} tuple. *)
+let bump_prometheus_counter (ev : event) =
+  Prometheus.inc_counter "masc_cascade_capacity_events_total"
+    ~labels:[
+      "kind", string_of_kind ev.kind;
+      "key_type", classify_key ev.key;
+    ] ()
+
 let record ev =
   Mutex.protect mu (fun () ->
       ensure_initialised_locked ();
       let cap = !cap_ref in
       (!buf).(!head) <- Some ev;
       head := (!head + 1) mod cap;
-      if !count < cap then incr count)
+      if !count < cap then incr count);
+  bump_prometheus_counter ev
 
 let clear () =
   Mutex.protect mu (fun () ->

@@ -290,6 +290,7 @@ let run_named
     ?approval
     ?exit_condition
     ?exit_condition_result
+    ?summarizer
     ?oas_checkpoint
     ?event_bus
     ?sw
@@ -366,6 +367,7 @@ let run_named
         approval;
         exit_condition;
         exit_condition_result;
+        summarizer;
         initial_messages; raw_trace; yield_on_tool;
       }
     in

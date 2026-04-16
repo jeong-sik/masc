@@ -1,0 +1,132 @@
+# Prometheus alerting rules for MASC cascade observability.
+#
+# Companion metrics (exposed via /metrics):
+#   - masc_cascade_capacity_events_total{kind, key_type}
+#       kind ∈ {acquired, released, rejected_full}
+#       key_type ∈ {cli, ollama, other}
+#       See lib/cascade/cascade_client_capacity_history.ml
+#
+#   - masc_cascade_strategy_decisions_total{cascade, strategy, kind}
+#       kind ∈ {ordered, filtered_empty, exhausted}
+#       See lib/cascade/cascade_strategy_trace.ml
+#
+# Thresholds below are conservative starting points; tune per deployment.
+# Rate windows use 5m so a single transient event does not page; duration
+# guards (for:) require the condition to persist across two 5m windows.
+#
+# Label cardinality is bounded:
+#   - key_type: 3 values
+#   - kind (capacity): 3 values
+#   - kind (strategy): 3 values
+#   - strategy: 7 values (S1..S7)
+#   - cascade: bounded by cascade.json entries (typically < 20)
+# Total series < 3*3 + 3*7*20 = 429.
+
+groups:
+  - name: masc_cascade_capacity
+    interval: 30s
+    rules:
+      - alert: OllamaCapacityRejectionSurge
+        expr: |
+          rate(masc_cascade_capacity_events_total{kind="rejected_full",key_type="ollama"}[5m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: capacity
+        annotations:
+          summary: "Ollama slot rejections > 0.5/s for 10m"
+          description: |
+            Ollama capacity semaphore is rejecting cascade attempts at
+            rate {{ $value }}/s for 10 minutes. Suggests either a
+            mis-sized MASC_OLLAMA_MAX_CONCURRENT or a runaway keeper
+            hammering the same model. Check cascade strategy trace
+            (/api/v1/cascade/strategy_trace?cascade=<name>) to see
+            which cascade is saturating.
+
+      - alert: CliCapacityRejectionSurge
+        expr: |
+          rate(masc_cascade_capacity_events_total{kind="rejected_full",key_type="cli"}[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: capacity
+        annotations:
+          summary: "CLI provider rejections > 1/s for 10m"
+          description: |
+            CLI provider (claude_code / gemini_cli / codex_cli) slot
+            rejections at {{ $value }}/s. Indicates multi-keeper
+            contention on shared local processes. Either raise
+            MASC_CLI_MAX_CONCURRENT (risks process thrash) or
+            add a different provider to the cascade.
+
+  - name: masc_cascade_strategy
+    interval: 30s
+    rules:
+      - alert: CascadeExhaustionBurst
+        expr: |
+          rate(masc_cascade_strategy_decisions_total{kind="exhausted"}[5m]) > 0.1
+        for: 15m
+        labels:
+          severity: critical
+          component: cascade
+          subsystem: strategy
+        annotations:
+          summary: "Cascade exhaustion > 0.1/s for 15m — providers failing"
+          description: |
+            Cascade {{ $labels.cascade }} (strategy {{ $labels.strategy }})
+            is hitting max_cycles without a successful provider pick at
+            {{ $value }}/s. Every hit is a user-visible cascade failure.
+            Inspect /api/v1/cascade/health and /api/v1/cascade/config for
+            the offending cascade. Bug-model spec pattern (LT-1 TLA+ Phase B)
+            documents the Exhausted variant as a terminal state — if this
+            is firing, the spec invariant holds but operationally providers
+            are unusable.
+
+      - alert: StrategyFilteredEmptyStorm
+        expr: |
+          rate(masc_cascade_strategy_decisions_total{kind="filtered_empty"}[5m])
+          /
+          ignoring(kind)
+          sum without (kind) (
+            rate(masc_cascade_strategy_decisions_total[5m])
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: cascade
+          subsystem: strategy
+        annotations:
+          summary: "Strategy {{ $labels.strategy }} filtering > 50% of cycles"
+          description: |
+            Cascade {{ $labels.cascade }} running {{ $labels.strategy }}
+            is filtering more than half of cycles as filtered_empty.
+            Either cooldown / capacity signals are saturated (check
+            adjacent OllamaCapacityRejectionSurge) or the strategy
+            configuration is too restrictive. Capacity_aware +
+            Circuit_breaker_cycling are the usual culprits.
+
+  - name: masc_cascade_health
+    interval: 30s
+    rules:
+      - alert: NoCapacityEventsInLastHour
+        expr: |
+          (
+            sum(increase(masc_cascade_capacity_events_total[1h])) == 0
+            or
+            absent(masc_cascade_capacity_events_total)
+          )
+        for: 10m
+        labels:
+          severity: info
+          component: cascade
+          subsystem: capacity
+        annotations:
+          summary: "No cascade capacity events for 1h"
+          description: |
+            No acquired / released / rejected events in the last hour.
+            Either the server is idle, or capacity tracing is broken.
+            Cross-check /api/v1/cascade/client_capacity for the current
+            snapshot — if that has entries but no events, the history
+            ring buffer wiring regressed.

@@ -196,10 +196,7 @@ let sync_to_graphql (f : finding) : (bool, string) result =
 (** {1 Public API} *)
 
 let generate_finding_id () =
-  let rnd = Mirage_crypto_rng.generate 6 in
-  "fn-" ^ String.concat ""
-    (List.init (String.length rnd) (fun i ->
-      Printf.sprintf "%02x" (Char.code (String.get rnd i))))
+  Random_id.prefixed ~prefix:"fn-" ~bytes:6
 
 let record_finding ~(finding : finding) : Yojson.Safe.t =
   append_finding finding;

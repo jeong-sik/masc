@@ -10,6 +10,5 @@
    re.str
    re.pcre
    eio
-   mirage-crypto
-   mirage-crypto-rng)
+   masc_random_id)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

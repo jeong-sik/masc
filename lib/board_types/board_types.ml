@@ -49,15 +49,7 @@ end = struct
 
   let to_string t = t
 
-  (* Cryptographically random ID using mirage-crypto *)
-  let generate () =
-    let rnd = Mirage_crypto_rng.generate 16 in
-    let hex = String.concat "" (
-      List.init (String.length rnd) (fun i ->
-        Printf.sprintf "%02x" (Char.code (String.get rnd i))
-      )
-    ) in
-    Printf.sprintf "p-%s" hex
+  let generate () = Random_id.prefixed ~prefix:"p-" ~bytes:16
 end
 
 module Comment_id : sig
@@ -78,14 +70,7 @@ end = struct
 
   let to_string t = t
 
-  let generate () =
-    let rnd = Mirage_crypto_rng.generate 16 in
-    let hex = String.concat "" (
-      List.init (String.length rnd) (fun i ->
-        Printf.sprintf "%02x" (Char.code (String.get rnd i))
-      )
-    ) in
-    Printf.sprintf "c-%s" hex
+  let generate () = Random_id.prefixed ~prefix:"c-" ~bytes:16
 end
 
 module Agent_id : sig

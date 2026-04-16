@@ -200,18 +200,10 @@ let request_of_yojson = function
 
     Prior implementation (#7544) combined [Time_compat.now ()] with
     [Hashtbl.hash (Unix.gettimeofday ())], which collided inside the
-    same millisecond and relied on OCaml's process-specific structural
-    hash seed. Using [Mirage_crypto_rng] matches [Board.Post_id] and
-    [Autoresearch_knowledge.generate_finding_id] — 16 random bytes
-    (~2^128 collision space), no wallclock dependency. *)
+    same millisecond. Now shared with [Coord_task]'s verification_id
+    generation via [Random_id], so the algorithm is defined once. *)
 let generate_id () =
-  let rnd = Mirage_crypto_rng.generate 16 in
-  let hex = String.concat "" (
-    List.init (String.length rnd) (fun i ->
-      Printf.sprintf "%02x" (Char.code (String.get rnd i))
-    )
-  ) in
-  "vrf-" ^ hex
+  Random_id.prefixed ~prefix:"vrf-" ~bytes:16
 
 (** Automated criterion evaluation *)
 let evaluate_criterion output criterion =

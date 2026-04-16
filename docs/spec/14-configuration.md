@@ -343,6 +343,70 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 
 `{cascade_name}_temperature`, `{cascade_name}_max_tokens` 키로 cascade별 온도와 토큰 수를 오버라이드할 수 있다. 미설정 시 호출자 기본값 사용.
 
+### 7.4 Pluggable Strategy (Phase A~B, #7606/#7611)
+
+각 cascade는 `{cascade_name}_strategy` 키로 provider 선택 전략을 지정할 수 있다. 미설정 시 `failover`(= backward-compatible linear fallback, `max_cycles=1`)로 동작한다.
+
+| 전략 | 키 값 | 설명 |
+|------|-------|------|
+| S1 Failover | `failover` | 입력 순서 유지, 재시도 없음 (기본값) |
+| S2 Capacity-aware | `capacity_aware` | endpoint capacity == 0인 provider 필터링, cycle 반복 |
+| S3 Weighted random | `weighted_random` | `config_weight × success_rate` 기반 가중 셔플 |
+| S4 Circuit-breaker cycling | `circuit_breaker_cycling` | S2 + `is_in_cooldown` 제외 + exponential backoff |
+| S5 Priority tier | `priority_tier` | tier별 그룹 진행. cycle `n` → tier `n` (마지막 tier에 clamp) |
+| S6 Sticky | `sticky` | `(keeper, cascade)` 단위로 첫 성공 provider를 `sticky_ttl_ms`동안 고정 |
+| S7 Round-robin | `round_robin` | per-cascade cursor 기반 회전 |
+
+관련 튜닝 키:
+
+| 키 | 타입 | 기본값 | 적용 전략 |
+|-----|------|--------|-----------|
+| `{name}_max_cycles` | int | 1 | 모든 전략 (S4는 3 권장) |
+| `{name}_backoff_base_ms` | int | 500 | S2 이상에서 cycle>0 시 적용 |
+| `{name}_backoff_cap_ms` | int | 10_000 | backoff 상한 |
+| `{name}_tiers` | `string list list` | `[]` | S5만 사용. 예: `[["ollama:qwen3"], ["gemini_cli:auto"]]` |
+| `{name}_sticky_ttl_ms` | int | `300_000`(5분) | S6만 사용. 0 이하 → affinity 비활성화 |
+
+Unknown strategy 값은 warn + `failover` fallback (keeper 시작은 막지 않는다).
+
+### 7.5 Client Capacity (Phase A/C3, #7606/#7623)
+
+ollama HTTP 및 CLI provider(Claude_code / Gemini_cli / Codex_cli)는 endpoint slot API가 없어 **클라이언트 측 semaphore**로 throttling한다. 각 keeper 호출 전에 slot을 시도 획득하고, 실패 시 전략 filter가 해당 provider를 건너뛴다.
+
+기본 동시성 = 1. 두 keeper가 같은 cascade를 동시에 호출하면 두 번째는 자동으로 다음 provider fallback.
+
+| 키 | 타입 | 기본값 | Env override |
+|-----|------|--------|-------------|
+| `{name}_ollama_max_concurrent` | int | 1 | `MASC_OLLAMA_MAX_CONCURRENT` |
+| `{name}_cli_max_concurrent` | int | 1 | `MASC_CLI_MAX_CONCURRENT` |
+
+우선순위: per-cascade 키 > env var > 1 (min clamp 1).
+
+CLI sentinel key는 내부적으로 `cli:claude_code` / `cli:gemini_cli` / `cli:codex_cli` 형태로 registry에 등록된다. 대시보드 `/api/v1/cascade/client_capacity`에서 현재 이용률 확인 가능.
+
+### 7.6 Ollama HTTP Probe (Phase C2, #7619)
+
+ollama provider는 `/api/ps` endpoint를 가진다. MASC는 cycle 시작마다 해당 endpoint를 병렬로 조회하여 실제 활성 모델 수를 capacity로 변환한다. 캐시 TTL 2초. 응답 실패 시 silent fail → Phase A client-capacity semaphore로 fallback.
+
+capacity 조회 순서: `Cascade_throttle` (llama-server /slots 기반) → `Cascade_ollama_probe` (discovered via /api/ps) → `Cascade_client_capacity` (declared semaphore).
+
+### 7.7 예시
+
+```json
+{
+  "keeper_unified_models": [
+    "glm-coding:auto",
+    "ollama:qwen3.5:35b-a3b-nvfp4",
+    "gemini_cli:auto"
+  ],
+  "keeper_unified_strategy": "circuit_breaker_cycling",
+  "keeper_unified_max_cycles": 3,
+  "keeper_unified_backoff_base_ms": 500,
+  "keeper_unified_ollama_max_concurrent": 1,
+  "keeper_unified_cli_max_concurrent": 1
+}
+```
+
 ---
 
 ## 8. Runtime Parameters

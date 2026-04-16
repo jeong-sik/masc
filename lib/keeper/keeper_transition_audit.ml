@@ -49,11 +49,48 @@ let get_or_create_ring name =
     Hashtbl.replace rings name r;
     r
 
+(* ================================================================ *)
+(* Optional file sink — best-effort jsonl append                    *)
+(* ================================================================ *)
+
+(** Path of the persistent transition log, configured via the
+    [MASC_KEEPER_TRANSITION_LOG] env var. When unset the sink is disabled
+    and only the in-memory ring is updated. Reading the env on each call
+    keeps the surface tiny — one keeper transition per second is the
+    upper bound, so the cost is negligible. *)
+let sink_path () = Sys.getenv_opt "MASC_KEEPER_TRANSITION_LOG"
+
+(** Append a single jsonl line for the given transition. Wraps the record
+    json with the keeper name so a single sink file can mux multiple
+    keepers. Any IO error is swallowed: the in-memory ring is the
+    authoritative trail for live dashboards, the sink is for restart
+    forensics only. *)
+let append_to_sink ~keeper_name (rec_ : transition_record) =
+  match sink_path () with
+  | None -> ()
+  | Some path ->
+    (try
+       let line =
+         Yojson.Safe.to_string
+           (`Assoc [
+              "keeper", `String keeper_name;
+              "record", to_json rec_;
+            ])
+       in
+       let oc =
+         open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path
+       in
+       Fun.protect
+         ~finally:(fun () -> try close_out oc with _ -> ())
+         (fun () -> output_string oc (line ^ "\n"))
+     with _ -> ())
+
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in
   ring.buf.(ring.pos) <- Some rec_;
   ring.pos <- (ring.pos + 1) mod ring_capacity;
-  ring.count <- ring.count + 1
+  ring.count <- ring.count + 1;
+  append_to_sink ~keeper_name rec_
 
 let recent_transitions ~keeper_name ~limit : transition_record list =
   match Hashtbl.find_opt rings keeper_name with

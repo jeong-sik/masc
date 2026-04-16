@@ -142,6 +142,19 @@ function KeeperMapping({ config }: { config: CascadeConfigResponse }) {
   `
 }
 
+function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
+  if (p.in_cooldown) return 'bad'
+  if (p.success_rate < 0.7) return 'bad'
+  if (p.success_rate < 0.9) return 'warn'
+  return 'ok'
+}
+
+const TONE_DOT: Record<string, string> = {
+  ok: 'bg-[var(--ok)]',
+  warn: 'bg-[var(--warn)]',
+  bad: 'bg-[var(--bad)]',
+}
+
 function HealthTable({ health }: { health: CascadeHealthResponse }) {
   if (health.providers.length === 0) {
     return html`<${EmptyState}>아직 기록된 provider 이벤트가 없습니다.<//>`
@@ -150,6 +163,7 @@ function HealthTable({ health }: { health: CascadeHealthResponse }) {
     <table class="w-full text-xs">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+          <th class="text-left py-1 w-4"></th>
           <th class="text-left py-1">Provider</th>
           <th class="text-right py-1">Success</th>
           <th class="text-right py-1">Consec. fail</th>
@@ -158,8 +172,11 @@ function HealthTable({ health }: { health: CascadeHealthResponse }) {
         </tr>
       </thead>
       <tbody>
-        ${health.providers.map((p: CascadeHealthProvider) => html`
+        ${health.providers.map((p: CascadeHealthProvider) => {
+          const tone = providerTone(p)
+          return html`
           <tr class="border-b border-[var(--card-border)] last:border-b-0">
+            <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${p.provider_key}</code></td>
             <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
             <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
@@ -170,7 +187,7 @@ function HealthTable({ health }: { health: CascadeHealthResponse }) {
                 : html`<span class="text-[var(--text-muted)]">—</span>`}
             </td>
           </tr>
-        `)}
+        `})}
       </tbody>
     </table>
   `
@@ -185,7 +202,8 @@ export function CascadeConfigPanel() {
 
   useEffect(() => {
     void loadCascadeData(resource)
-    return () => { resource.cancel() }
+    const id = setInterval(() => void loadCascadeData(resource), 30_000)
+    return () => { clearInterval(id); resource.cancel() }
   }, [resource])
 
   const current = resource.state.value

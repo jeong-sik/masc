@@ -16,24 +16,62 @@
 
 (* ── Configuration ────────────────────────────── *)
 
+(** One-time deprecation warning for legacy OAS_CASCADE_* env vars.
+    The cascade routing layer was migrated from OAS to MASC in v0.149.0
+    (see docs/rfc/RFC-OAS-006-weighted-cascade-routing.md + follow-ups);
+    the env var prefix stayed [OAS_CASCADE_*] by drift.  We accept both
+    during the transition and emit a one-shot warning per deprecated
+    key so operators can update their deployment config. *)
+let deprecation_warned : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+let getenv_with_alias ~primary ~deprecated =
+  match Sys.getenv_opt primary with
+  | Some v -> Some v
+  | None ->
+    (match Sys.getenv_opt deprecated with
+     | Some _ as some ->
+       if not (Hashtbl.mem deprecation_warned deprecated) then begin
+         Hashtbl.add deprecation_warned deprecated ();
+         Printf.eprintf
+           "[warn] env var %s is deprecated; use %s (same semantics)\n%!"
+           deprecated primary
+       end;
+       some
+     | None -> None)
+
 (** Rolling window duration in seconds.  Events older than this are
-    discarded on read.  Default: 300s (5 minutes), matching OpenRouter. *)
+    discarded on read.  Default: 300s (5 minutes), matching OpenRouter's
+    rolling percentile window. *)
 let window_sec =
-  match Sys.getenv_opt "OAS_CASCADE_HEALTH_WINDOW_SEC" with
+  match getenv_with_alias
+          ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
+          ~deprecated:"OAS_CASCADE_HEALTH_WINDOW_SEC" with
   | Some s -> (try Float.of_string s with _ -> 300.0)
   | None -> 300.0
 
 (** Number of consecutive failures before cooldown activates.
     Default: 3, matching LiteLLM's [allowed_fails] concept. *)
 let cooldown_threshold =
-  match Sys.getenv_opt "OAS_CASCADE_COOLDOWN_THRESHOLD" with
+  match getenv_with_alias
+          ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
+          ~deprecated:"OAS_CASCADE_COOLDOWN_THRESHOLD" with
   | Some s -> (try int_of_string s with _ -> 3)
   | None -> 3
 
 (** Cooldown duration in seconds.  During cooldown, the provider is
-    skipped (not attempted).  Default: 60s. *)
+    skipped (not attempted).  Default: 60s.
+
+    Trade-off vs LiteLLM's 30s default: 60s is 2x more conservative,
+    prioritizing hot-loop avoidance over fast recovery.  A flapping
+    provider that recovers within one cooldown window is re-entered on
+    the next selection tick; at 30s, transient errors on the retry
+    boundary can cause the cascade to thrash between providers.
+    Override via [MASC_CASCADE_COOLDOWN_SEC] if recovery latency matters
+    more than thrashing avoidance in your deployment. *)
 let cooldown_sec =
-  match Sys.getenv_opt "OAS_CASCADE_COOLDOWN_SEC" with
+  match getenv_with_alias
+          ~primary:"MASC_CASCADE_COOLDOWN_SEC"
+          ~deprecated:"OAS_CASCADE_COOLDOWN_SEC" with
   | Some s -> (try Float.of_string s with _ -> 60.0)
   | None -> 60.0
 

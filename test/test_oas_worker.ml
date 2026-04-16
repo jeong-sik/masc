@@ -703,20 +703,67 @@ let test_oas_worker_exec_build_applies_priority () =
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
-  match
-    try
-      ignore (Oas_worker_exec.resolve_provider_of_label "not-a-model-label");
-      Ok ()
-    with Invalid_argument msg -> Error msg
-  with
-  | Ok () ->
+  match Oas_worker_exec.resolve_provider_of_label "not-a-model-label" with
+  | Ok _ ->
       Alcotest.fail
         "expected invalid explicit model label to be rejected without fallback"
-  | Error msg ->
+  | Error err ->
+      let msg = Oas_worker_exec.label_resolution_error_to_string err in
       Alcotest.(check bool) "mentions invalid model label" true
         (contains_substring ~needle:"invalid model label" msg);
       Alcotest.(check bool) "mentions rejected label" true
         (contains_substring ~needle:"not-a-model-label" msg)
+
+let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
+  match
+    Oas_worker.run_model_with_masc_tools
+      ~model_label:"not-a-model-label"
+      ~goal:"test goal"
+      ~masc_tools:[]
+      ~dispatch:(fun ~name:_ ~args:_ -> (true, "ok"))
+      ()
+  with
+  | Ok _ ->
+      Alcotest.fail "expected invalid explicit model label to fail before execution"
+  | Error (Oas.Error.Config (Oas.Error.InvalidConfig { field; detail })) ->
+      Alcotest.(check string) "invalid field" "model_label" field;
+      Alcotest.(check bool) "detail mentions rejected label" true
+        (contains_substring ~needle:"not-a-model-label" detail)
+  | Error err ->
+      Alcotest.failf "unexpected error shape: %s" (Oas.Error.to_string err)
+
+let test_classify_masc_internal_error_roundtrip () =
+  let cascade_err =
+    Oas_worker_named.sdk_error_of_masc_internal_error
+      (Oas_worker_named.Cascade_exhausted
+         {
+           cascade_name = "keeper_unified";
+           detail = Some "all providers failed";
+         })
+  in
+  (match Oas_worker_named.classify_masc_internal_error cascade_err with
+   | Some (Oas_worker_named.Cascade_exhausted { cascade_name; detail }) ->
+       Alcotest.(check string) "cascade name" "keeper_unified" cascade_name;
+       Alcotest.(check (option string)) "cascade detail"
+         (Some "all providers failed") detail
+   | _ -> Alcotest.fail "expected structured cascade exhaustion");
+  let accept_err =
+    Oas_worker_named.sdk_error_of_masc_internal_error
+      (Oas_worker_named.Accept_rejected
+         {
+           scope = "keeper_unified";
+           model = Some "mock-model";
+           reason = "response rejected by accept (model=mock-model)";
+         })
+  in
+  match Oas_worker_named.classify_masc_internal_error accept_err with
+  | Some (Oas_worker_named.Accept_rejected { scope; model; reason }) ->
+      Alcotest.(check string) "accept scope" "keeper_unified" scope;
+      Alcotest.(check (option string)) "accept model"
+        (Some "mock-model") model;
+      Alcotest.(check bool) "accept reason preserved" true
+        (contains_substring ~needle:"response rejected by accept" reason)
+  | _ -> Alcotest.fail "expected structured accept rejection"
 
 let test_worker_build_agent_uses_default_internal_retry_policy () =
   with_raw_trace "worker_build_agent_retry" @@ fun raw_trace ->
@@ -1837,6 +1884,10 @@ let () =
         test_oas_worker_exec_build_applies_priority;
       Alcotest.test_case "invalid explicit model label is rejected" `Quick
         test_resolve_provider_of_label_rejects_invalid_explicit_label;
+      Alcotest.test_case "run_model_with_masc_tools rejects invalid explicit model label" `Quick
+        test_run_model_with_masc_tools_rejects_invalid_explicit_label;
+      Alcotest.test_case "structured MASC internal errors roundtrip through classifier" `Quick
+        test_classify_masc_internal_error_roundtrip;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

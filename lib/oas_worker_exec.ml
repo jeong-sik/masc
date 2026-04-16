@@ -123,17 +123,30 @@ let proof_result_status_to_string status =
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-let resolve_provider_of_label (label : string) : Oas.Provider.config =
+type label_resolution_error =
+  | Invalid_model_label of string
+
+let label_resolution_error_to_string = function
+  | Invalid_model_label label ->
+    Printf.sprintf "invalid model label %S" label
+
+let label_resolution_error_to_sdk_error err =
+  Oas.Error.Config
+    (Oas.Error.InvalidConfig
+       {
+         field = "model_label";
+         detail = label_resolution_error_to_string err;
+       })
+
+let resolve_provider_of_label (label : string) :
+    (Oas.Provider.config, label_resolution_error) result =
   match Cascade_config.parse_model_string label with
-  | Some pc -> Oas.Provider.config_of_provider_config pc
+  | Some pc -> Ok (Oas.Provider.config_of_provider_config pc)
   | None ->
       Log.error ~ctx:"oas_worker_exec"
         "refusing unresolved explicit model label=%S; execution never falls back to discovery-only models"
         label;
-      invalid_arg
-        (Printf.sprintf
-           "Oas_worker_exec.resolve_provider_of_label: invalid model label %S"
-           label)
+      Error (Invalid_model_label label)
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

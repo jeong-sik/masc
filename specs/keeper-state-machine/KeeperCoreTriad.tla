@@ -379,9 +379,9 @@ RunningEventuallyCompletes ==
         (turn_status = "done" \/ phase /= "Running")
 
 \* L2: Failing phase eventually resolves — DELEGATED to KeeperStateMachine.tla.
-\* This property requires operator intervention (manual_reconcile_clear) which
-\* is outside cascade routing scope. The counterexample: partial_commit in
-\* Failing creates a cycle only breakable by operator action + next success.
+\* This property may require external operator approval/recovery clearance,
+\* which is outside cascade routing scope. The counterexample: partial_commit
+\* in Failing creates a cycle only breakable by external action + next success.
 \* Retained as definition for documentation; removed from cfg PROPERTIES.
 FailingResolves ==
     phase = "Failing" ~> phase /= "Failing"

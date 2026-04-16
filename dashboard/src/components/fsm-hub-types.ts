@@ -27,13 +27,6 @@ export function extractLaneValue(
   }
 }
 
-export type TransitionEntry = {
-  ts: number
-  from: string
-  to: string
-  field: string
-}
-
 export type TopTransition = {
   field: string
   from: string

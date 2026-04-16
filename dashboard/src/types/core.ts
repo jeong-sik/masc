@@ -222,54 +222,6 @@ export type KeeperLifecycleState =
   | 'unbooted'
   | 'stopped'
 
-// --- Keeper SSE Events ---
-
-export interface KeeperHeartbeatEvent {
-  type: 'keeper_heartbeat'
-  name: string
-  generation: number
-  context_ratio: number
-  ts_unix: number
-}
-
-export interface KeeperHandoffEvent {
-  type: 'keeper_handoff'
-  name: string
-  from_generation: number
-  to_generation: number
-  from_model: string
-  to_model: string
-  ts_unix: number
-}
-
-export interface KeeperCompactionEvent {
-  type: 'keeper_compaction'
-  name: string
-  generation: number
-  before_tokens: number
-  after_tokens: number
-  saved_tokens: number
-  trigger: string
-  ts_unix: number
-}
-
-export interface KeeperGuardrailEvent {
-  type: 'keeper_guardrail'
-  name: string
-  generation: number
-  reason: string
-  ts_unix: number
-}
-
-export interface KeeperPhaseChangedEvent {
-  type: 'keeper_phase_changed'
-  name: string
-  prev_phase: string
-  new_phase: string
-  event: string
-  ts_unix: number
-}
-
 export interface Goal {
   id: string
   horizon: 'short' | 'mid' | 'long'

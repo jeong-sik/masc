@@ -444,21 +444,6 @@ export interface OperatorWorkerCard {
   last_turn_ts_iso?: string | null
 }
 
-export interface OperatorSessionCard {
-  session_id: string
-  goal?: string
-  status?: string
-  health?: string
-  scale_profile?: string
-  control_profile?: string
-  planned_worker_count?: number
-  active_agent_count?: number
-  last_turn_age_sec?: number | null
-  attention_count?: number
-  recommended_action_count?: number
-  top_attention?: OperatorAttentionItem | null
-  top_recommendation?: OperatorRecommendedAction | null
-}
 
 export interface OperatorJudgeRuntime {
   enabled?: boolean

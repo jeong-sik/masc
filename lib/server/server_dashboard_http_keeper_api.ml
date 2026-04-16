@@ -716,7 +716,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     Delegates to [Keeper_keepalive.process_directive] which updates
     registry state, dispatches a state-machine event, and optionally
     wakes up the keeper fiber. *)
-let handle_keeper_directive_post state agent_name req reqd body_str =
+let handle_keeper_directive_post _state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then

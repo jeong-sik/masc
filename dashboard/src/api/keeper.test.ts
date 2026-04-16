@@ -165,7 +165,7 @@ describe('keeper lifecycle', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper-test/clear')
     expect(JSON.parse(String(init.body))).toEqual({
       reason: 'reset stale continuity',
@@ -234,7 +234,7 @@ describe('keeper lifecycle', () => {
     const result = await deleteKeeperHistorySnapshots('keeper-test', ['oas-snapshot-1.json'])
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper-test/checkpoints')
     expect(JSON.parse(String(init.body))).toEqual({
       action: 'delete_history',
@@ -256,7 +256,7 @@ describe('keeper lifecycle', () => {
 
     expect(result.ok).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0]
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({ action: 'pause' })
@@ -274,7 +274,7 @@ describe('keeper lifecycle', () => {
     const result = await resumeKeeper('janitor')
 
     expect(result.ok).toBe(true)
-    const [url, init] = fetchMock.mock.calls[0]
+    const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(JSON.parse(init.body)).toEqual({ action: 'resume' })
   })

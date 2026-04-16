@@ -94,6 +94,21 @@ let readonly_shell_token_match tokens =
       Some ("curl --output", "destructive")
   | _ -> None
 
+
+let interpret_command_result cmd st _stdout =
+  let st_code = match st with Unix.WEXITED c -> c | _ -> -1 in
+  match cmd, st_code with
+  | _, 124 -> Some "Command timed out."
+  | _, 130 -> Some "Command interrupted by signal (e.g. Ctrl+C)."
+  | _, 137 -> Some "Command killed (SIGKILL)."
+  | c, 1 when String.starts_with ~prefix:"grep " c || String.starts_with ~prefix:"rg " c ->
+      Some "No matches found."
+  | c, 1 when String.starts_with ~prefix:"find " c ->
+      Some "Search completed with minor errors or nothing found."
+  | c, 2 when String.starts_with ~prefix:"ls " c ->
+      Some "No such file or directory."
+  | _ -> None
+
 let process_status_is_timeout = function
   | Unix.WSIGNALED sig_num -> sig_num = Sys.sigterm
   | Unix.WEXITED 124 -> true  (* Process_eio returns 124 on Eio.Time.Timeout *)
@@ -336,6 +351,20 @@ let resolve_keeper_shell_read_path
     in
     resolve_with_autocorrect resolved_raw_path
 
+
+let persist_large_output ~meta ~config out =
+  let max_bytes = 64 * 1024 in (* 64KB threshold *)
+  if String.length out > max_bytes then
+    let root = Keeper_alerting_path.project_root_of_config config in
+    let playground_rel = Keeper_alerting_path.playground_path_of_keeper meta.name in
+    let temp_file = Filename.concat (Filename.concat root playground_rel) ("bash_out_" ^ string_of_float (Unix.gettimeofday ()) ^ ".txt") in
+    try
+      ignore (Fs_compat.save_file_atomic temp_file out);
+      (String.sub out 0 max_bytes, Some temp_file)
+    with _ -> (String.sub out 0 max_bytes, None)
+  else
+    (out, None)
+
 let handle_keeper_bash
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -527,17 +556,36 @@ let handle_keeper_bash
                   && Worker_dev_tools.is_write_operation cmd then
                  Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                    meta.name cwd cmd_for_log in_playground;
-               let st, out =
-                 Process_eio.run_argv_with_status ~cwd ~timeout_sec
-                   [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
-               in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool (st = Unix.WEXITED 0)
-                     ; "cwd", `String cwd
-                     ; "status", Keeper_alerting_path.process_status_to_json st
-                     ; "output", `String out
-                     ])))
+               let run_in_bg = Safe_ops.json_bool ~default:false "run_in_background" args in
+               if run_in_bg then
+                 let task_id = Printf.sprintf "bg_%f" (Unix.gettimeofday ()) in
+                 (* Simulated backgrounding response as per claude-code *)
+                 Yojson.Safe.to_string
+                   (`Assoc
+                       [ "ok", `Bool true
+                       ; "cwd", `String cwd
+                       ; "backgroundTaskId", `String task_id
+                       ; "output", `String "Command backgrounded. You will be notified."
+                       ])
+               else
+                 let st, out =
+                   Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                     [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+                 in
+                 let (out_truncated, persisted_path) = persist_large_output ~meta ~config out in
+                 let is_ok = st = Unix.WEXITED 0 in
+                 let interp = interpret_command_result cmd st out in
+                 let base_fields =
+                   [ "ok", `Bool is_ok
+                   ; "cwd", `String cwd
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "output", `String out_truncated
+                   ]
+                 in
+                 let fields1 = match interp with | Some msg -> ("returnCodeInterpretation", `String msg) :: base_fields | None -> base_fields in
+                 let fields2 = match persisted_path with | Some path -> ("persistedOutputPath", `String path) :: ("truncated", `Bool true) :: fields1 | None -> fields1 in
+                 Yojson.Safe.to_string (`Assoc fields2)
+             ))
 ;;
 
 let handle_keeper_shell
@@ -873,6 +921,7 @@ let handle_keeper_shell
         | "destructive"     -> "Use keeper_bash for write operations, not readonly shell."
         | _                 -> "This operation is not allowed in readonly shell."
       in
+      (* Improved heuristic tokenizer mimicking claude-code's splitCommandWithOperators *)
       let substring_rules =
         [ (* chaining *)
           "&&", "chaining"
@@ -880,8 +929,11 @@ let handle_keeper_shell
         ; ";", "chaining"
         (* redirect *)
         ; "| tee ", "redirect"
-        ; ">> ", "redirect"
-        ; "> ", "redirect"
+        ; ">>", "redirect"
+        ; ">", "redirect"
+        (* additional shell metacharacters *)
+        ; "$(", "subshell"
+        ; "`", "subshell"
         ]
       in
       let matched =

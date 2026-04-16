@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+### Changed (specs)
+
+- **`KeeperContextLifecycle.tla` completeness pass** — closes 3 of the
+  gaps flagged by the 2026-04-16 compaction FSM/TLA+ audit
+  (#7568 §1.4):
+  - `CompactionFailed(k)` action added (documentation-only in the
+    clean `Next` to avoid infinite retry without a bounded retry
+    variable; exercised by `NextBuggy`). Models the
+    `Compaction_failed` event at `keeper_state_machine.ml:383-389`
+    that routes `compacting → overflow_retry` without clearing
+    `context_overflow`.
+  - `CompactionCompletesBuggy(k)` + `NextBuggy` + `SpecBuggy` —
+    new Bug Model variant that reallocates `context_id` during
+    compaction (models a broken Context.t identity path).
+  - `CheckpointConsistency` strengthened: previously a duplicate of
+    `TurnMonotonicity` (`ckpt_turn <= turn + 1`); now verifies that
+    `ckpt_ctx_id` references an allocated context_id
+    (`0 < ckpt_ctx_id < next_ctx_id`). Strengthens formally-verified
+    surface without weakening the turn-monotonicity check.
+
+### Added (specs)
+
+- `KeeperContextLifecycle-buggy.cfg` — Bug Model cfg that runs the
+  deliberate `CompactionCompletesBuggy` variant. TLC finds
+  `Invariant ResumeIdentity is violated` at 377 states / depth 6 /
+  1s. Completes the Bug Model pattern coverage that was missing.
+- `KeeperContextLifecycle-ci.cfg` — smaller-constant cfg for quick
+  invariant validation in every CI build. Reserves the default cfg
+  (5.6M+ states) for nightly/release runs. Liveness
+  (`PROPERTIES`) intentionally omitted — see file header comment.
+
+### Follow-ups (out of scope)
+
+- Add a bounded retry-budget variable to model the
+  `compact_retry_exhausted` latch → `Paused` routing, then include
+  `CompactionFailed(k)` in the clean `Next` and re-add liveness to
+  `KeeperContextLifecycle-ci.cfg`.
+- Upgrade `TurnSucceeds` fairness from WF to SF so small-model
+  liveness holds without growing the state space (exposed by
+  `KeeperContextLifecycle-ci.cfg` during this work).
+
 ## [0.9.5] - 2026-04-16
 
 ### Added

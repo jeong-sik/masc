@@ -6,7 +6,7 @@ import {
   type KeeperCompositeSnapshot,
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate'
-import { keepers } from '../store'
+import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { EmptyState } from './common/empty-state'
@@ -75,6 +75,17 @@ export {
 export {
   isTransitionInSegment,
 } from './fsm-hub-timeline-panels'
+
+export function shouldUseGateKeeperFallback(
+  executionLoadedValue: boolean,
+  storeNames: string[],
+): boolean {
+  return !executionLoadedValue && storeNames.length === 0
+}
+
+export function isCompositeFetchNotFound(err: unknown): boolean {
+  return err instanceof Error && /composite fetch failed: 404$/.test(err.message)
+}
 
 // ── State Reducer ──────────────────────────────────────
 
@@ -252,12 +263,13 @@ export function FsmHub() {
   // details (only sends configured_keepers count), so without this
   // fallback the FsmHub sees zero keepers and renders empty state.
   const storeKeeperList = keepers.value
+  const executionLoadedValue = executionLoaded.value
   const storeNames = useMemo(
     () => storeKeeperList.map(k => k.name).sort(),
     [storeKeeperList],
   )
   useEffect(() => {
-    if (storeNames.length > 0) return
+    if (!shouldUseGateKeeperFallback(executionLoadedValue, storeNames)) return
     let cancelled = false
     void (async () => {
       try {
@@ -275,9 +287,11 @@ export function FsmHub() {
       }
     })()
     return () => { cancelled = true }
-  }, [storeNames.length, pollTick])
+  }, [executionLoadedValue, storeNames, pollTick])
 
-  const keeperNames = storeNames.length > 0 ? storeNames : gateKeeperNames
+  const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)
+    ? gateKeeperNames
+    : storeNames
   const activeSelected = useMemo(() => {
     if (selected && keeperNames.includes(selected)) return selected
     return keeperNames[0] ?? null
@@ -316,6 +330,17 @@ export function FsmHub() {
         })
       } catch (err) {
         if (requestIdRef.current !== requestId) return
+        if (isCompositeFetchNotFound(err)) {
+          setGateKeeperNames(prev => prev.filter(name => name !== activeSelected))
+          setSelected(prev => (prev === activeSelected ? null : prev))
+          void refreshExecution({ force: true })
+          dispatch({
+            type: 'fetch_failed',
+            keeperName: activeSelected,
+            error: '선택한 keeper가 종료되었거나 등록 해제되었습니다',
+          })
+          return
+        }
         dispatch({
           type: 'fetch_failed',
           keeperName: activeSelected,

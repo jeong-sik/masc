@@ -10,7 +10,16 @@ let handle_keeper_pr_review_read
       ~(args : Yojson.Safe.t)
   =
   ignore meta;
-  let pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  let pr_number =
+  (* Schema-drift compatibility: tool_shard.ml advertises [number]
+     (and most other PR tools also use [number]), but earlier
+     versions of these handlers required [pr_number]. Live log
+     2026-04-16 /loop iter 9 shows 14/3MB failures from keepers
+     sending the schema-canonical key. Read both. *)
+  let from_pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  if from_pr_number <> 0 then from_pr_number
+  else Safe_ops.json_int ~default:0 "number" args
+in
   let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
   if pr_number = 0 then
     error_json "pr_number is required. Good: pr_number=123."
@@ -48,7 +57,16 @@ let handle_keeper_pr_review_comment
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
-  let pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  let pr_number =
+  (* Schema-drift compatibility: tool_shard.ml advertises [number]
+     (and most other PR tools also use [number]), but earlier
+     versions of these handlers required [pr_number]. Live log
+     2026-04-16 /loop iter 9 shows 14/3MB failures from keepers
+     sending the schema-canonical key. Read both. *)
+  let from_pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  if from_pr_number <> 0 then from_pr_number
+  else Safe_ops.json_int ~default:0 "number" args
+in
   let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
   let event = Safe_ops.json_string ~default:"COMMENT" "event" args |> String.trim |> String.uppercase_ascii in
   let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in
@@ -104,7 +122,16 @@ let handle_keeper_pr_review_reply
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
-  let pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  let pr_number =
+  (* Schema-drift compatibility: tool_shard.ml advertises [number]
+     (and most other PR tools also use [number]), but earlier
+     versions of these handlers required [pr_number]. Live log
+     2026-04-16 /loop iter 9 shows 14/3MB failures from keepers
+     sending the schema-canonical key. Read both. *)
+  let from_pr_number = Safe_ops.json_int ~default:0 "pr_number" args in
+  if from_pr_number <> 0 then from_pr_number
+  else Safe_ops.json_int ~default:0 "number" args
+in
   let comment_id = Safe_ops.json_int ~default:0 "comment_id" args in
   let body = Safe_ops.json_string ~default:"" "body" args |> String.trim in
   let repo = Safe_ops.json_string ~default:"" "repo" args |> String.trim in

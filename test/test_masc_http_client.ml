@@ -89,11 +89,14 @@ let test_release_closes_all_tracked_connections () =
   start_mock_server ~sw:server_sw ~net ~port;
   let baseline = count_open_fds () in
   Eio.Switch.run (fun client_sw ->
-  exercise_client ~sw:client_sw ~net ~https:None ~request_count:12
+    exercise_client ~sw:client_sw ~net ~https:None ~request_count:12
       ~url:(Printf.sprintf "http://127.0.0.1:%d/repeat" port));
   let after_release =
     wait_for_fd_baseline ~clock ~baseline ~allowed_extra_fds:1 ~attempts_left:50
   in
+  (* The same-process mock server can briefly retain one accepted fd while the
+     daemon server fiber drains the final request. Client-side leaks should not
+     exceed that slack after the request switch releases. *)
   check bool "fd count returns to baseline (+1 transient server slack)" true
     (after_release <= baseline + 1)
 

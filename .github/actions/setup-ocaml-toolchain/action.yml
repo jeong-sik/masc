@@ -69,6 +69,7 @@ runs:
         export PATH="${opam_dir}:${PATH}"
         echo "${opam_dir}" >> "${GITHUB_PATH}"
 
+        # Export for this step (opam init/switch-create below need them)
         export OPAMCOLOR=always
         export OPAMCONFIRMLEVEL=unsafe-yes
         export OPAMERRLOGLEN=0
@@ -76,6 +77,18 @@ runs:
         export OPAMRETRIES=10
         export OPAMSOLVERTIMEOUT=600
         export OPAMYES=1
+        # Persist to GITHUB_ENV so later workflow steps (opam install, dune build)
+        # inherit the non-interactive settings. Without this, `opam install`
+        # hits the interactive depext prompt on libprotobuf-dev and aborts.
+        {
+          echo "OPAMCOLOR=always"
+          echo "OPAMCONFIRMLEVEL=unsafe-yes"
+          echo "OPAMERRLOGLEN=0"
+          echo "OPAMEXTERNALSOLVER=builtin-0install"
+          echo "OPAMRETRIES=10"
+          echo "OPAMSOLVERTIMEOUT=600"
+          echo "OPAMYES=1"
+        } >> "${GITHUB_ENV}"
 
         switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
 

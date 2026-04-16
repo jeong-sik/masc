@@ -426,6 +426,7 @@
    keeper_text_processing
    keeper_context_core
    keeper_compact_policy
+   keeper_compact_audit
    keeper_rollover
    keeper_post_turn
    keeper_exec_context
@@ -596,6 +597,7 @@
   keeper_text_processing
   keeper_context_core
   keeper_compact_policy
+  keeper_compact_audit
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn

@@ -35,14 +35,7 @@ module Session = struct
   let mutex = Eio.Mutex.create ()
 
   let generate_id () =
-    (* Use Mirage_crypto_rng for secure random ID *)
-    let random_str = Mirage_crypto_rng.generate 16 in
-    let hex = random_str
-      |> String.to_seq
-      |> Seq.map (fun c -> Printf.sprintf "%02x" (Char.code c))
-      |> List.of_seq
-      |> String.concat ""
-    in
+    let hex = Random_id.hex ~bytes:16 in
     (* Format as UUID: 8-4-4-4-12 *)
     Printf.sprintf "%s-%s-%s-%s-%s"
       (String.sub hex 0 8)

@@ -767,6 +767,9 @@
    masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
+   ;; Random identifier helper — shared between masc_coord and masc_mcp
+   ;; so the vrf-/p-/c-/fn- generation algorithm lives in one place.
+   masc_random_id
    ;; Room coordination (extracted sub-library)
    masc_coord
    ;; Environment configuration (extracted sub-library)

@@ -1,0 +1,9 @@
+(include_subdirs no)
+(library
+ (name masc_random_id)
+ (public_name masc_mcp.masc_random_id)
+ (wrapped false)
+ (modules random_id)
+ (libraries
+   mirage-crypto
+   mirage-crypto-rng))

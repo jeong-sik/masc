@@ -558,6 +558,11 @@
    (run %{test})))
  (libraries masc_test_deps))
 
+(test
+ (name test_cascade_runtime)
+ (modules test_cascade_runtime)
+ (libraries masc_test_deps))
+
 ; ── Tool_name variant roundtrip + coverage ──────────────
 (test
  (name test_tool_name)

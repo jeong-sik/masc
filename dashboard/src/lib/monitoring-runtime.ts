@@ -34,7 +34,7 @@ export interface MonitoringEvidence {
 }
 
 const HEARTBEAT_STALE_MS = 5 * 60 * 1000
-const CONTEXT_ATTENTION_RATIO = 0.85
+const DEFAULT_CONTEXT_ATTENTION_RATIO = 0.95
 
 const CANONICAL_PHASE_KEYS = new Set([
   'Offline',
@@ -204,6 +204,13 @@ function isHeartbeatStale(keeper: Keeper): boolean {
   return Date.now() - ts > HEARTBEAT_STALE_MS
 }
 
+function contextAttentionRatio(keeper: Keeper): number {
+  const value = keeper.runtime_warning_ctx_ratio
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : DEFAULT_CONTEXT_ATTENTION_RATIO
+}
+
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
   if (keeper.paused || phaseKey === 'Paused' || lifecycleKey === 'paused') return 'paused'
   if (
@@ -221,7 +228,7 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
     || keeper.social_model_recognized === false
     || Boolean(keeper.last_blocker?.trim())
     || isHeartbeatStale(keeper)
-    || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= CONTEXT_ATTENTION_RATIO)
+    || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper))
   ) {
     return 'attention'
   }
@@ -243,7 +250,7 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
   if (blocker) return blocker
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
   if (isHeartbeatStale(keeper)) return '오래 응답이 없어 실제 상태 확인이 필요합니다.'
-  if (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= CONTEXT_ATTENTION_RATIO) {
+  if (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper)) {
     return `컨텍스트 사용량이 ${Math.round(keeper.context_ratio * 100)}%입니다.`
   }
   if (band === 'attention') return stage.description

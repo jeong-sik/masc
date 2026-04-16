@@ -28,6 +28,7 @@
    bounded
    cache_eio
    cascade_inference
+   cascade_client_capacity
    cascade_config
    cascade_config_loader
    cascade_fsm
@@ -35,6 +36,7 @@
    cascade_health_tracker
    cascade_model_resolve
    cascade_runtime
+   cascade_strategy
    cascade_throttle
    cancellation
    gate_keeper_backend

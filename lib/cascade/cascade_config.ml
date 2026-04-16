@@ -664,3 +664,61 @@ let local_capacity_for_selections ~sw ~net ?config_path selections =
         { empty_capacity with all_discovered = true }
         infos
   end
+
+(* ── Pluggable strategy resolution (since 0.9.6) ─────── *)
+
+(* One-time warning per (cascade name, raw value) pair so misspelled
+   strategy fields do not flood the log on every keeper turn. *)
+let strategy_warned : (string * string, unit) Hashtbl.t = Hashtbl.create 4
+
+let warn_unknown_strategy ~name ~raw ~msg =
+  let key = (name, raw) in
+  if not (Hashtbl.mem strategy_warned key) then begin
+    Hashtbl.add strategy_warned key ();
+    Printf.eprintf
+      "[warn] cascade %s: %s; falling back to failover\n%!" name msg
+  end
+
+let parse_kind_or_default ~name = function
+  | None -> Cascade_strategy.Failover
+  | Some raw ->
+    match Cascade_strategy.parse_kind raw with
+    | Ok k -> k
+    | Error msg ->
+      warn_unknown_strategy ~name ~raw ~msg;
+      Cascade_strategy.Failover
+
+let cycle_policy_from_loader (cfg : Cascade_config_loader.strategy_config) =
+  let d = Cascade_strategy.default_cycle_policy in
+  let max_cycles = match cfg.max_cycles with
+    | Some n when n >= 1 -> n
+    | _ -> d.max_cycles
+  in
+  let backoff_base_ms = match cfg.backoff_base_ms with
+    | Some n when n >= 1 -> n
+    | _ -> d.backoff_base_ms
+  in
+  let backoff_cap_ms = match cfg.backoff_cap_ms with
+    | Some n when n >= backoff_base_ms -> n
+    | Some _ -> backoff_base_ms       (* cap < base: clamp up *)
+    | None -> max d.backoff_cap_ms backoff_base_ms
+  in
+  { Cascade_strategy.max_cycles; backoff_base_ms; backoff_cap_ms }
+
+let resolve_strategy ?config_path ~name () =
+  match config_path with
+  | None -> Cascade_strategy.failover
+  | Some path ->
+    let cfg = Cascade_config_loader.resolve_strategy_config
+                ~config_path:path ~name in
+    let kind = parse_kind_or_default ~name cfg.kind in
+    let cycle = cycle_policy_from_loader cfg in
+    { Cascade_strategy.kind; cycle }
+
+let resolve_ollama_max_concurrent ?config_path ~name () =
+  match config_path with
+  | None -> None
+  | Some path ->
+    let cfg = Cascade_config_loader.resolve_strategy_config
+                ~config_path:path ~name in
+    cfg.ollama_max_concurrent

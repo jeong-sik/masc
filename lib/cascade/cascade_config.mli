@@ -387,3 +387,42 @@ val local_capacity_for_selections :
     Returns [endpoints_found = 0] for cloud-only selections.
 
     @since 0.97.0 *)
+
+(** {1 Pluggable strategy resolution}
+
+    @since 0.9.6 *)
+
+val resolve_strategy :
+  ?config_path:string ->
+  name:string ->
+  unit ->
+  Cascade_strategy.t
+(** [resolve_strategy ~config_path ~name] reads
+    [{name}_strategy], [{name}_max_cycles], [{name}_backoff_base_ms],
+    [{name}_backoff_cap_ms] from [config_path] and returns the
+    corresponding {!Cascade_strategy.t}.
+
+    Behaviour when fields are absent or [config_path] is [None]:
+    - returns {!Cascade_strategy.failover} (linear failover, single
+      cycle, default backoff).  This guarantees bit-identical
+      behaviour to cascade calls that have no strategy
+      configuration.
+
+    Behaviour on parse error:
+    - unknown [strategy] value → emits a one-time stderr warning and
+      falls back to [Failover].  Keeper startup is not blocked by
+      config typos.
+    - non-positive [max_cycles] → clamped to 1.
+    - non-positive [backoff_base_ms] → clamped to 1.
+    - [backoff_cap_ms < backoff_base_ms] → clamped up to
+      [backoff_base_ms]. *)
+
+val resolve_ollama_max_concurrent :
+  ?config_path:string ->
+  name:string ->
+  unit ->
+  int option
+(** Per-cascade override for the ollama client-capacity registration
+    default ({!Cascade_client_capacity.auto_register_for_candidates}).
+    [None] means "use the env-var default
+    ([MASC_OLLAMA_MAX_CONCURRENT] or 1)". *)

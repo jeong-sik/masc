@@ -635,9 +635,19 @@ let test_rest_generate_openapi_document () =
   check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
   check string "info.version matches repo version" Masc_mcp.Version.version
     (doc |> member "info" |> member "version" |> to_string);
+  check string "bearer security scheme type" "http"
+    (doc |> member "components" |> member "securitySchemes"
+     |> member "bearerAuth" |> member "type" |> to_string);
+  check string "bearer security scheme" "bearer"
+    (doc |> member "components" |> member "securitySchemes"
+     |> member "bearerAuth" |> member "scheme" |> to_string);
   let mcp_post = doc |> member "paths" |> member "/mcp" |> member "post" in
   check string "mcp operation id" "mcp_tools_call"
     (mcp_post |> member "operationId" |> to_string);
+  check string "mcp auth mode" "conditional_bearer"
+    (mcp_post |> member "x-auth-mode" |> to_string);
+  check bool "mcp security present" true
+    (mcp_post |> member "security" <> `Null);
   let operations = mcp_post |> member "x-mcp-operations" |> to_list in
   let status_entry =
     operations
@@ -670,7 +680,18 @@ let test_rest_generate_openapi_document () =
     (List.exists
        (fun row ->
          row |> member "path" |> to_string = "/api/v1/broadcast")
-       (broadcast_entry |> member "x-rest-bindings" |> to_list))
+       (broadcast_entry |> member "x-rest-bindings" |> to_list));
+  let broadcast_post =
+    doc |> member "paths" |> member "/api/v1/broadcast" |> member "post"
+  in
+  check string "broadcast auth mode" "bearer_required"
+    (broadcast_post |> member "x-auth-mode" |> to_string);
+  check bool "broadcast security present" true
+    (broadcast_post |> member "security" <> `Null);
+  check bool "broadcast 401 documented" true
+    (broadcast_post |> member "responses" |> member "401" <> `Null);
+  check bool "broadcast 403 documented" true
+    (broadcast_post |> member "responses" |> member "403" <> `Null)
 
 let test_rest_generate_openapi_document_relative_server_fallback () =
   let open Yojson.Safe.Util in

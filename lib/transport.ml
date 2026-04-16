@@ -159,6 +159,73 @@ module Rest = struct
   let list_json values =
     `List (List.map (fun value -> `String value) values)
 
+  type auth_mode =
+    | Public
+    | Conditional_bearer
+    | Same_origin_or_bearer
+    | Bearer_required
+
+  let auth_mode_name = function
+    | Public -> "public"
+    | Conditional_bearer -> "conditional_bearer"
+    | Same_origin_or_bearer -> "same_origin_or_bearer"
+    | Bearer_required -> "bearer_required"
+
+  let auth_mode_description = function
+    | Public ->
+        "No bearer token is required for this route."
+    | Conditional_bearer ->
+        "Bearer token auth is required when room auth/token enforcement is active; loopback-local development may allow access without a bearer."
+    | Same_origin_or_bearer ->
+        "Loopback browser requests may use same-origin checks; non-browser clients should use Authorization: Bearer <token>."
+    | Bearer_required ->
+        "Authorization: Bearer <token> is required for this route."
+
+  let openapi_bearer_security =
+    `List [ `Assoc [ ("bearerAuth", `List []) ] ]
+
+  let auth_mode_of_operation = function
+    | "masc_websocket_discovery" -> Public
+    | "masc_webrtc_offer" | "masc_webrtc_answer" -> Same_origin_or_bearer
+    | "masc_broadcast"
+    | "masc_operator_action"
+    | "masc_operator_confirm" -> Bearer_required
+    | "masc_status"
+    | "masc_tasks"
+    | "masc_who"
+    | "masc_messages"
+    | "masc_operator_snapshot"
+    | "masc_operator_digest"
+    | "masc_agent_card" -> Conditional_bearer
+    | _ -> Conditional_bearer
+
+  let auth_mode_of_mcp_path () = Conditional_bearer
+
+  let auth_response_entries mode =
+    match mode with
+    | Public -> []
+    | Same_origin_or_bearer | Conditional_bearer | Bearer_required ->
+        [
+          ( "401",
+            `Assoc
+              [ ("description", `String "Authentication required or invalid bearer token") ] );
+          ( "403",
+            `Assoc
+              [ ("description", `String "Authenticated caller lacks permission") ] );
+        ]
+
+  let auth_fields_for_mode mode =
+    let base =
+      [
+        ("x-auth-mode", `String (auth_mode_name mode));
+        ("x-auth-description", `String (auth_mode_description mode));
+      ]
+    in
+    match mode with
+    | Public | Same_origin_or_bearer -> base
+    | Conditional_bearer | Bearer_required ->
+        ("security", openapi_bearer_security) :: base
+
   let actual_rest_bindings_for_operation = function
     | "masc_status" -> [ (GET, "/api/v1/status") ]
     | "masc_tasks" -> [ (GET, "/api/v1/tasks") ]
@@ -347,6 +414,7 @@ module Rest = struct
 
   let rest_operation_json name method_ (schema : Types.tool_schema) =
     let entry = help_entry name in
+    let auth_mode = auth_mode_of_operation name in
     let base_fields =
       [
         ("summary", `String entry.short_description);
@@ -354,6 +422,7 @@ module Rest = struct
         ("tags", list_json (tags_for_operation name));
         ("x-canonical-operation", `String name);
       ]
+      @ auth_fields_for_mode auth_mode
     in
     let request_fields =
       match method_ with
@@ -381,26 +450,28 @@ module Rest = struct
       (List.rev
          ( ( "responses",
              `Assoc
-               [
-                 ( "200",
-                   `Assoc
-                     [
-                       ("description", `String "Success");
-                       ( "content",
-                         `Assoc
-                           [
-                             ( "application/json",
-                               `Assoc
-                                 [ ("schema", success_response_schema) ] );
-                           ] );
-                     ] );
-               ] )
+               ([
+                  ( "200",
+                    `Assoc
+                      [
+                        ("description", `String "Success");
+                        ( "content",
+                          `Assoc
+                            [
+                              ( "application/json",
+                                `Assoc
+                                  [ ("schema", success_response_schema) ] );
+                            ] );
+                      ] );
+                ]
+                @ auth_response_entries auth_mode) )
          :: request_fields ))
 
   let generate_openapi_document
       ?(host = Env_config_core.masc_host ())
       ?(port = Env_config_core.masc_http_port_int ()) () :
       Yojson.Safe.t =
+    let mcp_auth_mode = auth_mode_of_mcp_path () in
     let operation_entries =
       Sdk_tool_contract.core_remote_operation_names
       |> List.filter_map (fun name ->
@@ -459,20 +530,24 @@ module Rest = struct
               ] );
           ( "responses",
             `Assoc
-              [
-                ( "200",
-                  `Assoc
-                    [
-                      ("description", `String "JSON-RPC response envelope");
-                      ( "content",
-                        `Assoc
-                          [
-                            ( "application/json",
-                              `Assoc
-                                [ ("schema", success_response_schema) ] );
-                          ] );
-                    ] );
-              ] );
+              ([
+                 ( "200",
+                   `Assoc
+                     [
+                       ("description", `String "JSON-RPC response envelope");
+                       ( "content",
+                         `Assoc
+                           [
+                             ( "application/json",
+                               `Assoc
+                                 [ ("schema", success_response_schema) ] );
+                           ] );
+                     ] );
+               ]
+               @ auth_response_entries mcp_auth_mode) );
+          ("x-auth-mode", `String (auth_mode_name mcp_auth_mode));
+          ("x-auth-description", `String (auth_mode_description mcp_auth_mode));
+          ("security", openapi_bearer_security);
           ("x-mcp-operations", `List operation_catalog);
           ("x-agent-sdk-tools", `List sdk_tools);
         ]);
@@ -507,7 +582,25 @@ module Rest = struct
                 ];
             ] );
         ("paths", `Assoc path_entries);
-        ("components", `Assoc [ ("schemas", `Assoc components_schemas) ]);
+        ( "components",
+          `Assoc
+            [
+              ("schemas", `Assoc components_schemas);
+              ( "securitySchemes",
+                `Assoc
+                  [
+                    ( "bearerAuth",
+                      `Assoc
+                        [
+                          ("type", `String "http");
+                          ("scheme", `String "bearer");
+                          ("bearerFormat", `String "opaque-token");
+                          ( "description",
+                            `String
+                              "MASC room bearer token. Some loopback-local routes may additionally permit same-origin browser access." );
+                        ] );
+                  ] );
+            ] );
       ]
 
   (** Compatibility helper. Returns a concrete REST route when one exists;

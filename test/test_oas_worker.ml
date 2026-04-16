@@ -1342,6 +1342,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:100
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       Alcotest.(check int) "generation incremented" 1
@@ -1413,6 +1414,7 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:100
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       Alcotest.(check string) "trace unchanged" (Keeper_id.Trace_id.to_string meta.runtime.trace_id)

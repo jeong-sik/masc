@@ -178,6 +178,7 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:512
+          ~current_turn_overflow_blocker:None
           ~checkpoint:None
       in
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
@@ -262,6 +263,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
           ~on_compaction_started:(fun () -> incr compaction_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:320
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       check int "compaction start hook called once" 1 !compaction_started;
@@ -332,6 +334,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
@@ -392,6 +395,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
           ~on_handoff_started:(fun () -> incr handoff_started)
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       check int "compaction start hook called once" 1 !compaction_started;
@@ -427,6 +431,57 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
           check bool "new trace checkpoint exists" true
             (List.length loaded.messages > 0)
       | None -> fail "expected rollover checkpoint in new trace")
+
+let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
+    =
+  let base_dir = temp_dir "keeper_lifecycle_overflow_signal_handoff" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        let base = make_keeper_meta ~trace_id:"trace-overflow-signal" () in
+        {
+          base with
+          auto_handoff = true;
+          handoff_threshold = 0.85;
+          handoff_cooldown_sec = 0;
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 0;
+            };
+        }
+      in
+      let checkpoint =
+        KEC.create ~system_prompt:"stable" ~max_tokens:4096
+        |> fun ctx ->
+        KEC.append ctx
+          (Agent_sdk.Types.user_msg "short checkpoint")
+        |> KEC.sync_oas_context
+        |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_overflow_blocker:
+            (Some "Invalid request: Prompt exceeds max length")
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "ratio stays below threshold" true
+        (lifecycle.context_ratio < meta.handoff_threshold);
+      check bool "handoff attempted" true lifecycle.handoff_attempted;
+      check bool "handoff emitted" true (Option.is_some lifecycle.handoff_json);
+      check int "generation advanced" 1
+        lifecycle.updated_meta.runtime.generation)
 
 let test_rollover_aborts_on_save_failure () =
   let base_dir = temp_dir "keeper_lifecycle_rollover_abort" in
@@ -478,6 +533,7 @@ let test_rollover_aborts_on_save_failure () =
           ~base_dir ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       (* Restore permissions before assertions *)
@@ -728,6 +784,7 @@ let test_rollover_repairs_orphan_tool_result () =
           ~meta
           ~model:"llama:auto"
           ~primary_model_max_tokens:256
+          ~current_turn_overflow_blocker:None
           ~checkpoint:(Some checkpoint)
       in
       check bool "rollover attempted" true rollover.attempted;
@@ -1746,6 +1803,8 @@ let () =
             test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
+          test_case "handoff runs on current-turn overflow signal" `Quick
+            test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
           test_case "rollover aborts on save failure" `Quick
             test_rollover_aborts_on_save_failure;
           test_case "overflow retry compacts OAS checkpoint" `Quick

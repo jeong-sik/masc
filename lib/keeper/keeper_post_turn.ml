@@ -49,6 +49,7 @@ let apply_post_turn_lifecycle
     ~(meta : keeper_meta)
     ~(model : string)
     ~(primary_model_max_tokens : int)
+    ~(current_turn_overflow_blocker : string option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
   let no_checkpoint_decision = "skipped:no_checkpoint" in
@@ -211,6 +212,7 @@ let apply_post_turn_lifecycle
           ~meta:meta_after_compaction
           ~model
           ~primary_model_max_tokens
+          ~current_turn_overflow_blocker
           ~checkpoint
       in
       let continuity_meta =

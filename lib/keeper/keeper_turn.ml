@@ -357,6 +357,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~meta
                   ~model:result.model_used
                   ~primary_model_max_tokens:max_cascade_context
+                  ~current_turn_overflow_blocker:None
                   ~checkpoint:result.checkpoint
               in
               Keeper_exec_context.dispatch_post_turn_lifecycle_events

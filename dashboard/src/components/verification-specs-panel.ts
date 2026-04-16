@@ -9,9 +9,11 @@
 // cascade-config-panel.ts.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import {
   fetchTlaSpecs,
+  type TlaSpecCategory,
   type TlaSpecEntry,
   type TlaSpecsResponse,
 } from '../api/dashboard'
@@ -19,7 +21,13 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
+import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+
+type CategoryFilter = 'all' | TlaSpecCategory
+const categoryFilter = signal<CategoryFilter>('all')
+const searchQuery = signal('')
 
 async function loadSpecs(resource: ManagedAsyncResource<TlaSpecsResponse>) {
   await resource.load(async (signal) => fetchTlaSpecs({ signal }))
@@ -115,9 +123,21 @@ export function VerificationSpecsPanel() {
 
   const current = resource.state.value
   const data = current.data
-  const boundaryCount = data?.entries.filter((e: TlaSpecEntry) => e.category === 'boundary').length ?? 0
-  const bugModelCount = data?.entries.filter((e: TlaSpecEntry) => e.category === 'bug-models').length ?? 0
   const dirLabel = data?.specs_dir ?? '(not found)'
+
+  const allEntries = data?.entries ?? []
+  const filtered = allEntries.filter((e: TlaSpecEntry) => {
+    if (categoryFilter.value !== 'all' && e.category !== categoryFilter.value) return false
+    if (searchQuery.value) {
+      const q = searchQuery.value.toLowerCase()
+      if (!e.name.toLowerCase().includes(q) && !e.path.toLowerCase().includes(q)) return false
+    }
+    return true
+  })
+
+  const boundaryCount = allEntries.filter((e: TlaSpecEntry) => e.category === 'boundary').length
+  const bugModelCount = allEntries.filter((e: TlaSpecEntry) => e.category === 'bug-models').length
+  const otherCount = allEntries.filter((e: TlaSpecEntry) => e.category === 'other').length
 
   return html`
     <div class="flex flex-col gap-4">
@@ -132,6 +152,36 @@ export function VerificationSpecsPanel() {
         ${data?.updated_at
           ? html`<span class="text-xs text-[var(--text-muted)]">specs · ${data.updated_at}</span>`
           : null}
+        ${data
+          ? html`<span class="text-xs text-[var(--text-muted)]">
+              ${categoryFilter.value === 'all' && !searchQuery.value
+                ? `총 ${data.count}건`
+                : `${filtered.length} / ${data.count}건`}
+            </span>`
+          : null}
+      </div>
+
+      <div class="flex flex-wrap gap-3 items-center">
+        <${FilterChips}
+          chips=${[
+            { key: 'all' as CategoryFilter, label: '전체', count: allEntries.length },
+            { key: 'boundary' as CategoryFilter, label: '경계', count: boundaryCount },
+            { key: 'bug-models' as CategoryFilter, label: '버그 모델', count: bugModelCount },
+            { key: 'other' as CategoryFilter, label: '기타', count: otherCount },
+          ]}
+          active=${categoryFilter}
+          size="sm"
+          tone="accent"
+        />
+        <${TextInput}
+          class="max-w-[200px]"
+          name="spec_search"
+          ariaLabel="스펙 검색"
+          autoComplete="off"
+          placeholder="스펙 이름 검색..."
+          value=${searchQuery.value}
+          onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+        />
       </div>
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
@@ -142,12 +192,13 @@ export function VerificationSpecsPanel() {
 
       <${Card} title="Formal Specs">
         <div class="mb-2 text-xs text-slate-400">
-          ${data?.count ?? 0} specs · boundary ${boundaryCount} · bug-models ${bugModelCount}
-          · <span class="font-mono">${dirLabel}</span>
+          <span class="font-mono">${dirLabel}</span>
         </div>
-        ${!data || data.entries.length === 0
-          ? html`<${EmptyState} message="TLA+ 스펙을 찾지 못했습니다 (MASC_SPECS_DIR 확인)" />`
-          : html`<${SpecsTable} entries=${data.entries} />`}
+        ${filtered.length === 0
+          ? html`<${EmptyState} message=${categoryFilter.value === 'all' && !searchQuery.value
+              ? 'TLA+ 스펙을 찾지 못했습니다 (MASC_SPECS_DIR 확인)'
+              : '조건에 맞는 스펙이 없습니다.'} />`
+          : html`<${SpecsTable} entries=${filtered} />`}
       <//>
     </div>
   `

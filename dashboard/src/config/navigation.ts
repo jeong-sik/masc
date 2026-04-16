@@ -5,7 +5,6 @@ export type SurfaceSectionId =
   // monitoring
   | 'observatory'
   | 'agents'
-  | 'activity'       // kept alongside observatory until observatory exits beta
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'memory-subsystems'
@@ -116,7 +115,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'observatory',
       label: '관찰소 (beta)',
-      description: '이벤트/메트릭을 단일 timeline에 통합. RFC-MASC-006 Phase 2a.',
+      description: '실시간 라이브 밴드와 조사형 타임라인을 한 화면에 통합합니다.',
       params: { section: 'observatory' },
     },
     {
@@ -124,12 +123,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '런타임 디렉터리',
       description: '누가 살아 있고 어떤 런타임인지 빠르게 훑어봅니다. 이벤트, 도구, 거버넌스는 플릿 텔레메트리에서 봅니다.',
       params: { section: 'agents' },
-    },
-    {
-      id: 'activity',
-      label: '활동 그래프',
-      description: '실시간 이벤트 흐름 (broadcast, task, keeper 이벤트). Observatory 졸업 후 통합 예정.',
-      params: { section: 'activity' },
     },
     {
       id: 'runtime',
@@ -238,6 +231,7 @@ type TabSectionKey = `${TabId}:${string}`
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
+  'monitoring:activity': { section: 'observatory' },
 
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
@@ -259,6 +253,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
+  const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
   if (tabId === 'overview' || tabId === 'logs') {
     delete next.section
@@ -269,6 +264,14 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   // Apply redirect table (pure transform: no side effects).
   const inputSection = next.section
   if (inputSection) {
+    if (tabId === 'monitoring' && inputSection === 'activity') {
+      const legacyRange = next.ag_range
+      if (legacyRange && !next.range && legacyObservatoryRanges.has(legacyRange)) {
+        next.range = legacyRange
+      }
+      delete next.ag_range
+    }
+
     const redirect = SECTION_REDIRECTS[`${tabId}:${inputSection}` as TabSectionKey]
     if (redirect) {
       if (redirect.view && !next.view) next.view = redirect.view

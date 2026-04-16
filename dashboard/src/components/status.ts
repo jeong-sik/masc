@@ -5,19 +5,18 @@
 import { html } from 'htm/preact'
 import { route } from '../router'
 import { AgentsUnified } from './agents-unified'
-import { Activity } from './activity'
 import { RuntimePanel } from './runtime-panel'
 import { MemorySubsystems } from './memory-subsystems'
 import { FleetHealthPanel } from './fleet-health-panel'
 import { Observatory } from './observatory/observatory'
 
-type StatusSection = 'observatory' | 'agents' | 'activity' | 'runtime' | 'fleet-health' | 'memory-subsystems'
+type StatusSection = 'observatory' | 'agents' | 'runtime' | 'fleet-health' | 'memory-subsystems'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
     section === 'observatory'
-    || section === 'activity' || section === 'runtime'
+    || section === 'runtime'
     || section === 'fleet-health' || section === 'memory-subsystems'
   ) return section
   return 'agents'
@@ -31,8 +30,6 @@ export function Status() {
       <div class="transition-opacity duration-300">
         ${section === 'observatory'
           ? html`<${Observatory} />`
-          : section === 'activity'
-            ? html`<${Activity} />`
           : section === 'runtime'
             ? html`<${RuntimePanel} />`
           : section === 'fleet-health'

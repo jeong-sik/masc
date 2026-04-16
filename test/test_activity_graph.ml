@@ -265,6 +265,12 @@ let test_agent_spans_json_honors_since_ms () =
       check string "recent span label kept" "task-new"
         (List.hd spans |> member "label" |> to_string))
 
+let test_parse_since_ms_supports_minutes () =
+  check (option int) "5m parses" (Some (5 * 60 * 1000))
+    (Lib.Server_activity_http.parse_since_ms "5m");
+  check (option int) "1h still parses" (Some (3600 * 1000))
+    (Lib.Server_activity_http.parse_since_ms "1h")
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -283,5 +289,7 @@ let () =
             `Quick test_graph_json_reports_kind_counts_and_heatmap_totals;
           test_case "agent spans honor since filter" `Quick
             test_agent_spans_json_honors_since_ms;
+          test_case "parse_since_ms supports minutes" `Quick
+            test_parse_since_ms_supports_minutes;
         ] );
     ]

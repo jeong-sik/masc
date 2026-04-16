@@ -96,11 +96,7 @@ let inbound_of_json json =
       let raw = str "channel" in
       String.lowercase_ascii (String.trim raw)
     in
-    (* Read priority for the keeper-routing field: accept the new
-       [destination_id] key first and fall back to the legacy [keeper_name]
-       key. Both map onto the same record field for now; emit-side is still
-       [keeper_name] only (B2 Phase 1 — parse-both / emit-legacy). The
-       emit-side rotation happens in Phase 2. *)
+    (* Prefer [destination_id]; fall back to legacy [keeper_name]. *)
     let keeper_name =
       let destination = str "destination_id" in
       if destination <> "" then destination
@@ -138,12 +134,7 @@ let outbound_to_json out =
           ("tokens_used", `Int s.tokens_used);
         ]
   in
-  (* B2 Phase 3: [destination_id] is the sole outbound routing key. The
-     legacy [keeper_name] output was dropped now that all known consumers
-     (sidecars via gate_shared.GateResponse.from_json, #7485) prefer
-     [destination_id] and only fall back to [keeper_name] when the new key
-     is absent. Inbound parse still accepts either key — Phase 4 can
-     retire the [keeper_name] wire form entirely in a future major bump. *)
+  (* Inbound still accepts [keeper_name] for backward compatibility. *)
   let base = [
     ("ok", `Bool true);
     ("destination_id", `String out.keeper_name);

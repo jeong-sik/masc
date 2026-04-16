@@ -52,11 +52,8 @@ let names_read_path () =
     ~default:default_names_path ~legacy:legacy_names_path
 
 let read_json_file_opt path =
-  if not (Sys.file_exists path) then
-    None
-  else
-    try Some (Yojson.Safe.from_file path) with
-    | _ -> None
+  try Some (Yojson.Safe.from_file path) with
+  | _ -> None
 
 let string_member json key =
   match json |> U.member key with

@@ -1,25 +1,8 @@
 """Shared bindings-store helpers for Channel Gate sidecars.
 
-Slack, iMessage, and Telegram sidecars all need to load a simple
-`{channel_id: keeper_name}` JSON file with 1-tier legacy fallback, and
-Slack + Telegram also need to persist the same shape atomically. This
-module collapses the duplicated 38-line `_load_bindings` /
-`_save_bindings` blocks into a pair of pure functions that take the
-paths as arguments — no base class, no mixin, no state.
-
-Discord's sidecar uses a richer `BindingStore` class with atomic writes
-and audit coupling; it stays separate and is not affected by this
-module.
-
-Read priority in `load_bindings`:
-  1. `default_path` (if the file exists)
-  2. `legacy_path` (if provided, the file exists, and default is absent)
-  3. empty dict
-
-Writes in `save_bindings` always land at the caller's `path`, so the
-one-shot migration introduced in #7477/#7478/#7479 remains transparent
-— next save after a legacy load hits the new default and the legacy
-file becomes dormant.
+Load and persist ``{channel_id: keeper_name}`` JSON with 1-tier legacy
+fallback.  Discord's richer ``BindingStore`` class (audit coupling +
+mtime tracking) is intentionally separate.
 """
 
 from __future__ import annotations

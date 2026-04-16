@@ -529,6 +529,8 @@ let run_turn
       ~instructions:meta.instructions
       ~persona_extended
       ~keeper_name:meta.name
+      ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
+      ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)

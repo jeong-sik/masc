@@ -433,16 +433,94 @@ function approvalRiskToneClass(riskLevel: string): string {
   return 'border-white/10 bg-white/5 text-text-muted'
 }
 
+const RISK_RANK: Record<string, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+}
+
+function maxApprovalRisk(items: readonly { risk_level?: string | null }[]): string | null {
+  let topRank = 0
+  let topLabel: string | null = null
+  for (const item of items) {
+    const raw = item.risk_level?.trim().toLowerCase()
+    const rank = raw ? (RISK_RANK[raw] ?? 0) : 0
+    if (rank > topRank) {
+      topRank = rank
+      topLabel = raw ?? null
+    }
+  }
+  return topLabel
+}
+
+function scrollToKeeperApprovalSection(): void {
+  const el = document.getElementById('keeper-hitl-approval')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function KeeperApprovalAlertBanner() {
+  const items = governanceData.value?.approval_queue ?? []
+  if (items.length === 0) return null
+
+  const maxRisk = maxApprovalRisk(items)
+  const isCritical = maxRisk === 'critical' || maxRisk === 'high'
+  const tone = isCritical
+    ? 'border-bad/40 bg-bad/10 text-bad'
+    : 'border-warn/40 bg-warn/10 text-warn'
+  const ringTone = isCritical ? 'ring-bad/25' : 'ring-warn/25'
+
+  return html`
+    <div
+      class="mb-3.5 flex items-center gap-4 rounded-xl border ${tone} p-4 shadow-sm ring-2 ${ringTone}"
+      data-testid="keeper-hitl-alert-banner"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="shrink-0 flex items-center justify-center w-11 h-11 rounded-full border border-current/30 bg-current/10">
+        <${AlertTriangle} size=${22} aria-hidden="true" />
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-baseline gap-2 flex-wrap">
+          <span class="text-[20px] font-extrabold leading-none">${items.length}건</span>
+          <span class="text-[13px] font-semibold">Keeper HITL 승인 대기</span>
+          ${maxRisk ? html`<span class="text-[11px] font-bold uppercase tracking-wider opacity-80">최고 ${maxRisk}</span>` : null}
+        </div>
+        <div class="mt-1 text-[12px] opacity-85">
+          위험도 threshold를 넘은 keeper tool call이 사용자 판단을 기다리고 있습니다.
+        </div>
+      </div>
+      <${ActionButton}
+        variant=${isCritical ? 'danger' : 'primary'}
+        size="md"
+        class="shrink-0"
+        onClick=${scrollToKeeperApprovalSection}
+      >
+        지금 검토 →
+      <//>
+    </div>
+  `
+}
+
 function KeeperApprovalQueueSection() {
   const items = governanceData.value?.approval_queue ?? []
   const actingId = governanceApprovalActing.value
+  const maxRisk = maxApprovalRisk(items)
+  const hasItems = items.length > 0
+  const countBadgeClass = hasItems
+    ? (maxRisk === 'critical' || maxRisk === 'high'
+        ? 'border-bad/40 bg-bad/15 text-bad text-[13px] px-3 py-1 font-extrabold'
+        : 'border-warn/40 bg-warn/15 text-warn text-[13px] px-3 py-1 font-extrabold')
+    : 'border-white/10 bg-white/5 text-text-muted text-[11px] px-2 py-0.5 font-bold'
   return html`
+    <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-[12px] text-text-muted">
           위험도가 threshold를 넘은 keeper tool call이 여기서 대기합니다.
         </div>
-        <span class="rounded-md border border-warn/20 bg-warn/10 px-2 py-0.5 text-[11px] font-bold text-warn">
+        <span class="rounded-md border ${countBadgeClass}">
           ${items.length}건 대기
         </span>
       </div>
@@ -501,6 +579,7 @@ function KeeperApprovalQueueSection() {
             </div>
           `}
     <//>
+    </div>
   `
 }
 
@@ -514,6 +593,7 @@ export function Governance() {
 
   return html`
     <div class="flex flex-col gap-0.5">
+      <${KeeperApprovalAlertBanner} />
       <${GovernanceSummaryStrip} />
       ${caseTrackingRetired
         ? html`

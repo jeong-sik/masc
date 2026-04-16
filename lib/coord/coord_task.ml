@@ -157,7 +157,9 @@ let merge_envelope_into_payload ?correlation_id ?run_id payload =
   else
     match payload with
     | `Assoc fields -> `Assoc (fields @ extras)
-    | other -> `Assoc [ ("payload", other); ("envelope", `Assoc extras) ]
+    | _ ->
+        Log.Misc.warn "emit_task_activity: non-Assoc payload, envelope fields skipped";
+        payload
 
 let emit_task_activity ?correlation_id ?run_id
     config ~agent_name ~task_id ~kind ~payload =

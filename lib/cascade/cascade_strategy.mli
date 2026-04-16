@@ -8,10 +8,15 @@
     after a backoff sleep); the strategy can return a different ordering
     because health and capacity signals may have changed.
 
-    S5 (priority_tier), S6 (sticky), S7 (round_robin) require per-cascade
-    external state and are deferred to a follow-up PR.
+    Phase A (S1–S4) is purely stateless.  Phase B introduces three
+    additional kinds — [Priority_tier], [Sticky], [Round_robin] — that
+    consult per-cascade-name state owned by {!Cascade_state}.  The
+    ordering function remains read-only; mutations happen via the
+    explicit {!record_choice} hook the cascade caller invokes after a
+    successful attempt.
 
-    @since 0.9.6 *)
+    @since 0.9.6
+    @since 0.9.7 Phase B (Priority_tier / Sticky / Round_robin) *)
 
 (** {1 Signal context — what the strategy can read} *)
 
@@ -32,6 +37,21 @@ type signal_ctx = {
   rand_int : int -> int;
   (** Random integer generator in [0, n).  Passed in for determinism
       in tests. *)
+
+  keeper_name : string;
+  (** Owning keeper.  Used by [Sticky] to key its state.  Set to ["" ]
+      when the cascade is invoked outside a keeper context (CLI,
+      bootstrap probes); [Sticky] then degrades to a per-cascade-only
+      affinity (still useful), and other kinds ignore the field.
+
+      @since 0.9.7 *)
+
+  cascade_name : string;
+  (** Cascade identifier (the [<name>] in [<name>_models]).  Used by
+      [Sticky] and [Round_robin] to scope their state.  Required for
+      stateful kinds; tolerated as ["" ] for stateless kinds.
+
+      @since 0.9.7 *)
 }
 
 (** {1 Cycle policy — orthogonal to strategy kind} *)
@@ -83,6 +103,33 @@ type kind =
         circuit-breaker semantics live in Cascade_health_tracker; this
         strategy is the policy that reads them. *)
 
+  | Priority_tier
+    (** S5 — providers grouped into ordered tiers via [tiers] in {!t}.
+        Cycle [n] only considers tier [n] (clamped to last tier).
+        Within a tier, capacity-aware filtering is applied; the tier
+        is "active" iff at least one of its providers survives the
+        filter, otherwise the cycle yields the empty list and the
+        caller advances to the next cycle (i.e. next tier).
+        @since 0.9.7 *)
+
+  | Sticky
+    (** S6 — per-[(keeper_name, cascade_name)] affinity.  When a
+        previous successful provider is still within [sticky_ttl_ms],
+        return only that provider as the singleton ordering.  When no
+        sticky entry exists or it has expired, fall back to plain
+        Failover ordering.  The cascade caller is responsible for
+        invoking {!record_choice} after a successful attempt so the
+        affinity is recorded.
+        @since 0.9.7 *)
+
+  | Round_robin
+    (** S7 — per-cascade rotation cursor.  The first attempt of each
+        cascade call rotates the input list by the current cursor
+        value (mod list length), then advances the cursor.  Within a
+        single cycle, the rotated order is preserved (Failover
+        within); cross-call fairness comes from the cursor.
+        @since 0.9.7 *)
+
 val kind_to_string : kind -> string
 val parse_kind : string -> (kind, string) result
 (** [parse_kind s] returns [Ok kind] for known names, [Error msg] for
@@ -94,11 +141,32 @@ val parse_kind : string -> (kind, string) result
 type t = {
   kind : kind;
   cycle : cycle_policy;
+
+  tiers : string list list;
+  (** Used only by [Priority_tier].  Each inner list is the set of
+      provider keys (matched against [adapter.health_key]) that form
+      one tier; outer order is tier order (tier 0 = highest priority).
+      Empty list when the strategy is not [Priority_tier].
+      @since 0.9.7 *)
+
+  sticky_ttl_ms : int;
+  (** Used only by [Sticky].  Time-to-live for a recorded sticky
+      choice in milliseconds.  Defaults to [300_000] (5 minutes) when
+      the strategy is [Sticky]; ignored otherwise.  Values [<= 0]
+      effectively disable affinity (every call is a fresh Failover).
+      @since 0.9.7 *)
 }
 
 val failover : t
-(** [{ kind = Failover; cycle = default_cycle_policy }].  What callers
-    receive when no per-cascade strategy is configured. *)
+(** [{ kind = Failover; cycle = default_cycle_policy; tiers = [];
+       sticky_ttl_ms = 0 }].  What callers receive when no per-cascade
+    strategy is configured. *)
+
+val default_sticky_ttl_ms : int
+(** [300_000] (5 minutes).  The fallback TTL used by config loaders
+    when [Sticky] is selected without an explicit
+    [<name>_sticky_ttl_ms].
+    @since 0.9.7 *)
 
 (** {1 Candidate adapter}
 
@@ -136,4 +204,34 @@ val order_candidates :
     This function is pure and must not perform IO.  [cycle] is
     0-indexed (first cycle = 0).  Some strategies (notably
     Weighted_random) consult [ctx.rand_int]; tests can pass a
-    deterministic RNG. *)
+    deterministic RNG.
+
+    Stateful kinds may consult {!Cascade_state} (which is technically
+    side-effectful for [Round_robin] because it advances a cursor on
+    every call); the function still returns deterministic output for
+    a given state snapshot, and tests can reset the snapshot via
+    {!Cascade_state.clear_all}. *)
+
+(** {1 Stateful hooks}
+
+    Phase B kinds need a write path so the cascade caller can record
+    successful attempts.  Phase A kinds ignore these hooks. *)
+
+val record_choice :
+  t ->
+  ctx:signal_ctx ->
+  provider_key:string ->
+  unit
+(** [record_choice t ~ctx ~provider_key] is invoked by the cascade
+    caller after a successful attempt completes (HTTP 200, FSM
+    [Accept]/[Accept_on_exhaustion]).  For [Sticky], stores
+    [(ctx.keeper_name, ctx.cascade_name) -> provider_key] in
+    {!Cascade_state} with [t.sticky_ttl_ms].  For all other kinds
+    (including [Round_robin], whose cursor was advanced at order
+    time), this is a no-op.
+
+    Idempotent: calling twice for the same attempt simply overwrites
+    the same entry.  Safe under concurrent fibers via
+    {!Cascade_state} mutex.
+
+    @since 0.9.7 *)

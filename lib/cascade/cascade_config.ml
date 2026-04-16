@@ -713,7 +713,19 @@ let resolve_strategy ?config_path ~name () =
                 ~config_path:path ~name in
     let kind = parse_kind_or_default ~name cfg.kind in
     let cycle = cycle_policy_from_loader cfg in
-    { Cascade_strategy.kind; cycle }
+    let tiers =
+      match kind, cfg.tiers with
+      | Cascade_strategy.Priority_tier, Some t -> t
+      | Cascade_strategy.Priority_tier, None -> []  (* misconfig → empty tier *)
+      | _, _ -> []
+    in
+    let sticky_ttl_ms =
+      match kind, cfg.sticky_ttl_ms with
+      | Cascade_strategy.Sticky, Some n -> n
+      | Cascade_strategy.Sticky, None -> Cascade_strategy.default_sticky_ttl_ms
+      | _, _ -> 0
+    in
+    { Cascade_strategy.kind; cycle; tiers; sticky_ttl_ms }
 
 let resolve_ollama_max_concurrent ?config_path ~name () =
   match config_path with

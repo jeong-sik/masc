@@ -5,6 +5,8 @@ type signal_ctx = {
   capacity : string -> Cascade_throttle.capacity_info option;
   now : float;
   rand_int : int -> int;
+  keeper_name : string;
+  cascade_name : string;
 }
 
 type cycle_policy = {
@@ -35,30 +37,49 @@ type kind =
   | Capacity_aware
   | Weighted_random
   | Circuit_breaker_cycling
+  | Priority_tier
+  | Sticky
+  | Round_robin
 
 let kind_to_string = function
   | Failover -> "failover"
   | Capacity_aware -> "capacity_aware"
   | Weighted_random -> "weighted_random"
   | Circuit_breaker_cycling -> "circuit_breaker_cycling"
+  | Priority_tier -> "priority_tier"
+  | Sticky -> "sticky"
+  | Round_robin -> "round_robin"
 
 let parse_kind = function
   | "failover" -> Ok Failover
   | "capacity_aware" -> Ok Capacity_aware
   | "weighted_random" -> Ok Weighted_random
   | "circuit_breaker_cycling" -> Ok Circuit_breaker_cycling
+  | "priority_tier" -> Ok Priority_tier
+  | "sticky" -> Ok Sticky
+  | "round_robin" -> Ok Round_robin
   | other ->
     Error (Printf.sprintf
              "unknown cascade strategy %S (expected one of: \
               failover, capacity_aware, weighted_random, \
-              circuit_breaker_cycling)" other)
+              circuit_breaker_cycling, priority_tier, sticky, \
+              round_robin)" other)
+
+let default_sticky_ttl_ms = 300_000
 
 type t = {
   kind : kind;
   cycle : cycle_policy;
+  tiers : string list list;
+  sticky_ttl_ms : int;
 }
 
-let failover = { kind = Failover; cycle = default_cycle_policy }
+let failover = {
+  kind = Failover;
+  cycle = default_cycle_policy;
+  tiers = [];
+  sticky_ttl_ms = 0;
+}
 
 type 'a adapter = {
   health_key : 'a -> string;
@@ -134,9 +155,78 @@ let weighted_shuffle adapter ctx cands =
   in
   pick [] effective
 
+(* ── Priority tier ──────────────────────────────────────────────── *)
+
+(* Pick the tier for [cycle], clamped to the last tier when [cycle]
+   exceeds [length tiers - 1].  Returns [[]] when [tiers] is empty
+   (no usable configuration → starvation guard handled at caller). *)
+let tier_for_cycle tiers ~cycle =
+  match tiers with
+  | [] -> []
+  | _ ->
+    let n = List.length tiers in
+    let idx = if cycle >= n then n - 1 else max 0 cycle in
+    List.nth tiers idx
+
+let priority_tier_order adapter ctx ~tiers ~cycle cands =
+  let allowed = tier_for_cycle tiers ~cycle in
+  match allowed with
+  | [] -> []
+  | _ ->
+    let in_tier c = List.mem (adapter.health_key c) allowed in
+    cands
+    |> List.filter in_tier
+    |> filter_capacity adapter ctx
+
+(* ── Sticky ─────────────────────────────────────────────────────── *)
+
+let sticky_order adapter ctx cands =
+  match
+    Cascade_state.lookup_sticky
+      ~keeper:ctx.keeper_name
+      ~cascade:ctx.cascade_name
+      ~now:ctx.now
+  with
+  | None -> cands
+  | Some pinned ->
+    (match List.find_opt
+             (fun c -> adapter.health_key c = pinned)
+             cands
+     with
+     | Some c -> [c]
+     | None ->
+       (* Pinned provider no longer in candidate list (config drift,
+          cascade.json reload).  Fall back to plain Failover. *)
+       cands)
+
+(* ── Round-robin ────────────────────────────────────────────────── *)
+
+(* Rotation: take cursor mod len, return [tail @ head] where the
+   first [cursor] elements move to the back.  Cursor advances on
+   every call, even when the cascade ends up using a later element —
+   the goal is cross-call fairness, not per-attempt fairness. *)
+let round_robin_order ctx cands =
+  let n = List.length cands in
+  if n <= 1 then cands
+  else
+    let cursor =
+      Cascade_state.rotate_round_robin
+        ~cascade:ctx.cascade_name
+        ~bound:n
+    in
+    let head, tail =
+      let rec split i acc = function
+        | xs when i <= 0 -> (List.rev acc, xs)
+        | [] -> (List.rev acc, [])
+        | x :: rest -> split (i - 1) (x :: acc) rest
+      in
+      split cursor [] cands
+    in
+    tail @ head
+
 (* ── Public ordering ────────────────────────────────────────────── *)
 
-let order_candidates t ~adapter ~ctx ~cycle:_ cands =
+let order_candidates t ~adapter ~ctx ~cycle cands =
   match t.kind with
   | Failover ->
     cands
@@ -148,3 +238,28 @@ let order_candidates t ~adapter ~ctx ~cycle:_ cands =
     cands
     |> filter_cooldown adapter ctx
     |> filter_capacity adapter ctx
+  | Priority_tier ->
+    priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
+  | Sticky ->
+    sticky_order adapter ctx cands
+  | Round_robin ->
+    round_robin_order ctx cands
+
+(* ── Stateful hooks ─────────────────────────────────────────────── *)
+
+let record_choice t ~ctx ~provider_key =
+  match t.kind with
+  | Sticky ->
+    Cascade_state.record_sticky_choice
+      ~keeper:ctx.keeper_name
+      ~cascade:ctx.cascade_name
+      ~provider:provider_key
+      ~ttl_ms:t.sticky_ttl_ms
+      ~now:ctx.now
+  | Failover
+  | Capacity_aware
+  | Weighted_random
+  | Circuit_breaker_cycling
+  | Priority_tier
+  | Round_robin ->
+    ()

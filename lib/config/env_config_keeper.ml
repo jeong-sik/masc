@@ -165,6 +165,31 @@ module KeeperRuntime = struct
 
 end
 
+(** {1 Keeper Context Reducer Configuration}
+
+    Controls for the {!Agent_sdk.Context_reducer} stages applied to the
+    keeper message history before each turn.  Extracted from a hardcoded
+    literal (masc-mcp PR #xxxx) so the reducer cap can be tuned per
+    deployment without a rebuild.  Default preserves the prior value. *)
+
+module KeeperReducer = struct
+  (** Max message tokens retained by
+      {!Agent_sdk.Context_reducer.cap_message_tokens} in the keeper run
+      reducer pipeline.  Default: 32000.  Minimum: 1024.
+
+      Env: [MASC_KEEPER_REDUCER_CAP_TOKENS]. *)
+  let cap_message_tokens =
+    max 1024 (get_int ~default:32000 "MASC_KEEPER_REDUCER_CAP_TOKENS")
+
+  (** Recent messages kept verbatim by
+      {!Agent_sdk.Context_reducer.cap_message_tokens}.  Default: 3.
+      Range: [1, 20].
+
+      Env: [MASC_KEEPER_REDUCER_KEEP_RECENT]. *)
+  let cap_message_keep_recent =
+    max 1 (min 20 (get_int ~default:3 "MASC_KEEPER_REDUCER_KEEP_RECENT"))
+end
+
 (** {1 Alert Dedup Configuration} *)
 
 module AlertDedup = struct

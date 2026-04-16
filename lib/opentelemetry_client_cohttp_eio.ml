@@ -92,7 +92,7 @@ let report_err_ = function
 module Httpc : sig
   type t
 
-  val create : _ Eio.Net.t -> t
+  val create : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> t
 
   val send :
     t ->
@@ -104,7 +104,15 @@ end = struct
   open Opentelemetry.Proto
   module Httpc = Cohttp_eio.Client
 
-  type t = Httpc.t
+  type https_connector =
+    Uri.t ->
+    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+    [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
+
+  type t = {
+    net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
+    https : https_connector option;
+  }
 
   let authenticator () =
     match Ca_certs.authenticator () with
@@ -127,11 +135,20 @@ end = struct
 
   let create net =
     let authenticator = authenticator () in
-    Httpc.make ~https:(Some (https ~authenticator)) net
+    let https uri raw =
+      (https ~authenticator uri raw
+        :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
+    in
+    { net = (net :> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t);
+      https = Some https }
 
   let send (client : t) ~url ~decode (body : string) : ('a, error) result =
     Switch.run @@ fun sw ->
     let uri = Uri.of_string url in
+    let client =
+      Masc_http_client.make_closing_client ~sw ~net:client.net
+        ~https:client.https
+    in
 
     let open Cohttp in
     let headers = Header.(add_list (init ()) (Config.Env.get_headers ())) in

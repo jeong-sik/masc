@@ -611,6 +611,9 @@ let test_http_client_fd_safety_contracts () =
   check bool "voice bridge builds clients through masc http client" true
     (file_contains_pattern "lib/voice/voice_bridge_core.ml"
        "Masc_http_client.make_closing_client");
+  check bool "otel exporter builds clients through masc http client" true
+    (file_contains_pattern "lib/opentelemetry_client_cohttp_eio.ml"
+       "Masc_http_client.make_closing_client");
   ()
 
 let test_router_contract_alignment () =

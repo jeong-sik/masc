@@ -209,6 +209,37 @@ let observe_task_transition config ~agent_name ~task_id ~transition ~details =
   !Coord_hooks.observe_task_transition_fn config ~agent_name
     ~task_id ~transition ~details
 
+(** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
+    with an envelope (type/agent/actor_kind/task/from_status/to_status/ts) so
+    every transition log line carries the same schema. Optional [?action]
+    preserves the legacy "action" field used by the unified transition path
+    so existing dashboard readers do not break. *)
+let transition_log_event ~event_type ~agent_name ~task_id
+    ~from_status ~to_status ?action ?notes ?reason ?duration_ms
+    ?handoff_context ?(forced = false) ?(now = now_iso ()) () : Yojson.Safe.t =
+  let optional_field name = function
+    | Some value -> [ (name, value) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("type", `String event_type);
+       ("agent", `String agent_name);
+       ("actor_kind", `String (task_actor_kind agent_name));
+       ("task", `String task_id);
+       ("from_status", `String (task_status_to_string from_status));
+       ("to_status", `String (task_status_to_string to_status));
+       ("forced", `Bool forced);
+       ("ts", `String now);
+     ]
+    @ optional_field "action" (Option.map (fun v -> `String v) action)
+    @ optional_field "notes" (Option.map (fun v -> `String v) notes)
+    @ optional_field "reason" (Option.map (fun v -> `String v) reason)
+    @ optional_field "duration_ms"
+        (Option.map (fun v -> `Int v) duration_ms)
+    @ optional_field "handoff_context"
+        (Option.map Types.task_handoff_context_to_yojson handoff_context))
+
 (** Normalize title for deduplication: lowercase, keep only alphanumeric+space.
     Deterministic string transform — no LLM involved. *)
 let normalize_title_for_dedup (title : string) : string =
@@ -741,41 +772,17 @@ let transition_task_r config ~agent_name ~task_id ~action
                 agent);
         log_event config
           (Yojson.Safe.to_string
-             (`Assoc
-               ([
-                  ("type", `String "task_transition");
-                  ("agent", `String agent_name);
-                  ( "actor_kind",
-                    `String (task_actor_kind agent_name) );
-                  ("task", `String task_id);
-                  ("action", `String action_s);
-                  ( "from",
-                    `String
-                      (task_status_to_string task.task_status)
-                  );
-                  ( "to",
-                    `String (task_status_to_string new_status)
-                  );
-                  ("ts", `String now);
-                ]
-               @
-               (match trim_opt (Some notes) with
-               | Some notes -> [ ("notes", `String notes) ]
-               | None -> [])
-               @
-               (match trim_opt (Some reason) with
-               | Some reason -> [ ("reason", `String reason) ]
-               | None -> [])
-               @
-               (match handoff_context with
-               | Some handoff_context when action = Types.Release
-                 ->
-                   [
-                     ( "handoff_context",
-                       Types.task_handoff_context_to_yojson
-                         handoff_context );
-                   ]
-               | _ -> []))));
+             (transition_log_event ~event_type:"task_transition"
+                ~agent_name ~task_id
+                ~from_status:task.task_status ~to_status:new_status
+                ~action:action_s ~forced:force
+                ?notes:(trim_opt (Some notes))
+                ?reason:(trim_opt (Some reason))
+                ?handoff_context:
+                  (match handoff_context with
+                   | Some _ when action = Types.Release -> handoff_context
+                   | _ -> None)
+                ()));
         (match action with
          | Types.Claim ->
              emit_task_activity config ~agent_name ~task_id
@@ -937,15 +944,17 @@ let complete_task config ~agent_name ~task_id ~notes =
                   ]);
               log_event config
                 (Yojson.Safe.to_string
-                   (`Assoc
-                     [
-                       ("type", `String "task_done");
-                       ("agent", `String agent_name);
-                       ("actor_kind", `String (task_actor_kind agent_name));
-                       ("task", `String task_id);
-                       ("notes", if notes = "" then `Null else `String notes);
-                       ("ts", `String (now_iso ()));
-                     ]));
+                   (transition_log_event ~event_type:"task_done"
+                      ~agent_name ~task_id
+                      ~from_status:task.task_status
+                      ~to_status:
+                        (Types.Done {
+                           assignee = agent_name;
+                           completed_at = now_iso ();
+                           notes = if notes = "" then None else Some notes;
+                         })
+                      ?notes:(if notes = "" then None else Some notes)
+                      ()));
             observe_task_transition config ~agent_name ~task_id
               ~transition:"done"
               ~details:
@@ -1046,7 +1055,19 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                       ("task_id", `String task_id);
                       ("notes", if notes = "" then `Null else `String notes);
                     ]);
-              log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
+              log_event config
+                (Yojson.Safe.to_string
+                   (transition_log_event ~event_type:"task_done"
+                      ~agent_name ~task_id
+                      ~from_status:task.task_status
+                      ~to_status:
+                        (Types.Done {
+                           assignee = agent_name;
+                           completed_at = now_iso ();
+                           notes = if notes = "" then None else Some notes;
+                         })
+                      ?notes:(if notes = "" then None else Some notes)
+                      ()));
               observe_task_transition config ~agent_name ~task_id
                 ~transition:"done"
                 ~details:
@@ -1132,15 +1153,17 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                     ]);
               log_event config
                 (Yojson.Safe.to_string
-                   (`Assoc
-                     [
-                       ("type", `String "task_cancelled");
-                       ("agent", `String agent_name);
-                       ("actor_kind", `String (task_actor_kind agent_name));
-                       ("task", `String task_id);
-                       ("reason", if reason = "" then `Null else `String reason);
-                       ("ts", `String (now_iso ()));
-                     ]));
+                   (transition_log_event ~event_type:"task_cancelled"
+                      ~agent_name ~task_id
+                      ~from_status:task.task_status
+                      ~to_status:
+                        (Types.Cancelled {
+                           cancelled_by = agent_name;
+                           cancelled_at = now_iso ();
+                           reason = if reason = "" then None else Some reason;
+                         })
+                      ?reason:(if reason = "" then None else Some reason)
+                      ()));
               observe_task_transition config ~agent_name ~task_id
                 ~transition:"cancel"
                 ~details:

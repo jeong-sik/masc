@@ -47,27 +47,38 @@ let load_json path =
       if not (Float.equal refreshed_mtime mtime) then
         load_current ()
       else
-        with_cache_lock (fun () ->
-            match Hashtbl.find_opt config_cache path with
-            | Some (cached_mtime, cached_json)
-              when Float.equal cached_mtime refreshed_mtime ->
-              Ok cached_json
-            | prior ->
-              Hashtbl.replace config_cache path (refreshed_mtime, json);
-              (* Observability: trace first-load vs reload so operators
-                 editing cascade.json can verify their change took effect.
-                 Keeping this at traceln (stderr) matches existing OAS
-                 convention (see Cascade_config.apply_provider_filter). *)
-              (match prior with
-               | None ->
-                 Eio.traceln
-                   "[CascadeConfig] loaded %s mtime=%.0f"
-                   path refreshed_mtime
-               | Some (old_mtime, _) ->
-                 Eio.traceln
-                   "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
-                   path old_mtime refreshed_mtime);
-              Ok json)
+        (* Keep the critical section to Hashtbl access only. Any Eio-aware
+           work (traceln in particular) must run OUTSIDE the Stdlib.Mutex
+           because traceln can suspend the fiber while the lock is held,
+           blocking unrelated fibers on the domain.
+           Ref: memory/feedback_eio-traceln-outside-critical-section.md *)
+        let outcome =
+          with_cache_lock (fun () ->
+              match Hashtbl.find_opt config_cache path with
+              | Some (cached_mtime, cached_json)
+                when Float.equal cached_mtime refreshed_mtime ->
+                `Returning_cached cached_json
+              | prior ->
+                Hashtbl.replace config_cache path (refreshed_mtime, json);
+                `Installed_new (Option.map fst prior))
+        in
+        (match outcome with
+         | `Returning_cached cached_json -> Ok cached_json
+         | `Installed_new prior_mtime ->
+           (* Observability: trace first-load vs reload so operators
+              editing cascade.json can verify their change took effect.
+              Keeping this at traceln (stderr) matches existing OAS
+              convention (see Cascade_config.apply_provider_filter). *)
+           (match prior_mtime with
+            | None ->
+              Eio.traceln
+                "[CascadeConfig] loaded %s mtime=%.0f"
+                path refreshed_mtime
+            | Some old_mtime ->
+              Eio.traceln
+                "[CascadeConfig] reloaded %s old_mtime=%.0f new_mtime=%.0f"
+                path old_mtime refreshed_mtime);
+           Ok json)
   in
   try load_current () with
   | Sys_error msg -> Error msg

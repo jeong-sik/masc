@@ -1,0 +1,303 @@
+{
+  "__meta": {
+    "purpose": "MASC cascade observability — imports into Grafana 10+ via File → Import.",
+    "metrics": [
+      "masc_cascade_capacity_events_total{kind, key_type}",
+      "masc_cascade_strategy_decisions_total{cascade, strategy, kind}"
+    ],
+    "companion_alerts": "infrastructure/monitoring/cascade-alerts.yml",
+    "companion_doc": "docs/observability/cascade-metrics.md"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "grafana" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Capacity events by (kind, key_type) — rate / 5m",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Raw acquire / release / rejected_full rate. Spikes in rejected_full are the ollama/cli saturation signal wired by OllamaCapacityRejectionSurge + CliCapacityRejectionSurge alerts.",
+      "targets": [
+        {
+          "expr": "sum by (kind, key_type) (rate(masc_cascade_capacity_events_total[5m]))",
+          "legendFormat": "{{kind}} / {{key_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Strategy decisions — rate by kind / 5m",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-kind cycle decision rate. exhausted (red) == user-visible cascade failure; filtered_empty (yellow) == backoff + retry; ordered (green) == happy path.",
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(masc_cascade_strategy_decisions_total[5m]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "exhausted" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "filtered_empty" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "ordered" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Exhaustion events — last 24h",
+      "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Every count == one user-visible cascade failure. Paired with CascadeExhaustionBurst alert at rate > 0.1/s.",
+      "targets": [
+        {
+          "expr": "sum(increase(masc_cascade_strategy_decisions_total{kind=\"exhausted\"}[24h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Ollama rejections — last 1h",
+      "gridPos": { "x": 6, "y": 8, "w": 6, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Slot-full events for ollama URLs. OllamaCapacityRejectionSurge fires at rate > 0.5/s sustained.",
+      "targets": [
+        {
+          "expr": "sum(increase(masc_cascade_capacity_events_total{kind=\"rejected_full\",key_type=\"ollama\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "CLI rejections — last 1h",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Slot-full events for CLI providers (claude_code / gemini_cli / codex_cli). CliCapacityRejectionSurge fires at rate > 1/s.",
+      "targets": [
+        {
+          "expr": "sum(increase(masc_cascade_capacity_events_total{kind=\"rejected_full\",key_type=\"cli\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Strategy filter-empty ratio — 5m",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "filtered_empty / total cycles. > 50% triggers StrategyFilteredEmptyStorm.",
+      "targets": [
+        {
+          "expr": "sum(rate(masc_cascade_strategy_decisions_total{kind=\"filtered_empty\"}[5m])) / clamp_min(sum(rate(masc_cascade_strategy_decisions_total[5m])), 0.001)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.25 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Exhaustion by cascade — rate / 5m",
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Which cascades are failing? A persistent non-zero line for a specific cascade name is a config or provider-key problem.",
+      "targets": [
+        {
+          "expr": "sum by (cascade) (rate(masc_cascade_strategy_decisions_total{kind=\"exhausted\"}[5m]))",
+          "legendFormat": "{{cascade}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Decision totals (24h) by (cascade, strategy, kind)",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Tabular view of every (cascade × strategy × kind) bucket over the last 24h. Useful for spotting strategy drift across deployments.",
+      "targets": [
+        {
+          "expr": "sort_desc(sum by (cascade, strategy, kind) (increase(masc_cascade_strategy_decisions_total[24h])))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "left" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Value" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } },
+              { "id": "custom.align", "value": "right" },
+              { "id": "thresholds", "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": 0 },
+                    { "color": "yellow", "value": 100 },
+                    { "color": "red", "value": 1000 }
+                  ]
+                } }
+            ] }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Value", "desc": true }]
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["masc", "cascade", "observability"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "refresh": 1,
+        "regex": ""
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "MASC Cascade Observability",
+  "uid": "masc-cascade",
+  "version": 1,
+  "weekStart": ""
+}

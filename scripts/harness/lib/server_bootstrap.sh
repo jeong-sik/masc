@@ -58,15 +58,20 @@ harness_find_server_exe() {
 
 harness_pick_free_port() {
   local seed start port attempts=2048
+  local tmp_root reservation_file
   seed="${HARNESS_PORT_SEED:-$$}"
   if [[ ! "$seed" =~ ^[0-9]+$ ]]; then
     seed="$$"
   fi
+  tmp_root="$(harness_tmp_root)"
+  reservation_file="${tmp_root%/}/masc-harness-ports.${seed}.txt"
   start=$((9200 + (seed % 1000)))
   port="$start"
 
   while (( attempts > 0 )); do
-    if ! lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1; then
+    if ! lsof -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1 \
+      && ! grep -qx "$port" "$reservation_file" 2>/dev/null; then
+      printf '%s\n' "$port" >>"$reservation_file"
       printf '%s\n' "$port"
       return 0
     fi

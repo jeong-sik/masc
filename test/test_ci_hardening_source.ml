@@ -223,9 +223,12 @@ let test_keeper_direct_reply_contracts () =
   check bool "keeper turn parses direct reply flag" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "get_bool args \"direct_reply\"");
-  check bool "keeper turn promotes direct replies to reply cascade" true
-    (file_contains_pattern "lib/keeper/keeper_turn.ml"
-       {|let turn_cascade_name = if direct_reply then "keeper_reply" else "keeper_turn"|});
+  (* Historical: direct_reply once forked cascade name into
+     "keeper_reply"/"keeper_turn", but neither was ever defined in
+     cascade.json — the drift collapsed to the default cascade via
+     Keeper_cascade_profile.canonicalize. The fork is gone; the
+     direct_reply flag now only affects persona prompt + skill-route
+     suppression (checked below). *)
   check bool "keeper turn suppresses skill route headers for direct reply" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "let effective_no_skill_route = no_skill_route || direct_reply");

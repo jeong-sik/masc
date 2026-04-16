@@ -278,6 +278,19 @@ let init () =
   add "masc_keeper_output_tokens_total"
     "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
     Counter;
+  (* Anthropic / Bedrock prompt caching observability (#7469 Step 1).
+     OAS already receives [cache_creation_input_tokens] and
+     [cache_read_input_tokens] in every [api_usage]; these counters
+     expose them to Prometheus so cache hit-rate and write cost are
+     attributable per keeper + model. Populated dynamically via
+     [inc_counter]; tools that never emit cache data (e.g. non-Anthropic
+     providers) simply leave these at 0. *)
+  add "masc_keeper_cache_creation_tokens_total"
+    "Cumulative prompt-cache creation tokens per keeper turn (labels: keeper_name, model)"
+    Counter;
+  add "masc_keeper_cache_read_tokens_total"
+    "Cumulative prompt-cache read tokens per keeper turn (labels: keeper_name, model)"
+    Counter;
   (* Tool schema budget gauges — set once at boot via
      [set_tool_schema_stats]. Covers #7483 Step 1. *)
   add "masc_mcp_tool_schema_count"

@@ -81,6 +81,7 @@ let load_json path =
 type weighted_entry = {
   model: string;
   weight: int;
+  supports_tool_choice: bool option;
 }
 
 let parse_weight_field = function
@@ -90,15 +91,24 @@ let parse_weight_field = function
     if i > 0 && Float.equal f (float_of_int i) then i else 1
   | _ -> 1
 
+let parse_supports_tool_choice_field = function
+  | `Bool b -> Some b
+  | _ -> None
+
 let parse_weighted_item = function
-  | `String s -> Some { model = String.trim s; weight = 1 }
+  | `String s ->
+    Some { model = String.trim s; weight = 1; supports_tool_choice = None }
   | `Assoc fields ->
     let open Yojson.Safe.Util in
     let json = `Assoc fields in
     (match json |> member "model" with
      | `String s when String.trim s <> "" ->
        let w = parse_weight_field (json |> member "weight") in
-       Some { model = String.trim s; weight = w }
+       let stc =
+         parse_supports_tool_choice_field
+           (json |> member "supports_tool_choice")
+       in
+       Some { model = String.trim s; weight = w; supports_tool_choice = stc }
      | _ -> None)
   | _ -> None
 

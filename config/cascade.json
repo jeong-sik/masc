@@ -28,7 +28,7 @@
   "local_recovery_max_tokens": 8192,
   "_comment_sangsu": "sangsu is a persona keeper (홍상수-style 40대 남자) whose conversational turns rarely need tool calls.  Bias heavily toward local ollama to keep cost near zero, but include glm-coding as the second link in the cascade so [require_tool_use] turns auto-failover to a tool-capable cloud model instead of leaving the keeper idle.  Lower temperature (0.1) tightens ollama tool-call obedience per memory/reference_ollama-config-2026-04.  Cascade weight ordering acts as a fallback chain: 90% of orderings put ollama first (then glm), 10% put glm first (then ollama).",
   "sangsu_models": [
-    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90},
+    {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90, "supports_tool_choice": true},
     {"model": "glm-coding:glm-5.1", "weight": 10}
   ],
   "sangsu_temperature": 0.1,

@@ -43,13 +43,47 @@ val parse_model_string :
   ?max_tokens:int ->
   ?system_prompt:string ->
   ?api_key_env_overrides:(string * string) list ->
+  ?supports_tool_choice_override:bool ->
   string -> Llm_provider.Provider_config.t option
 (** [api_key_env_overrides] defaults to [[]]. When non-empty, it overrides
     the registry default API key env var for matching providers; see
     {!parse_model_strings} for format details. Empty-string entries fall
     through to the next level of the resolution chain.
 
-    @since 0.122.0 api_key_env_overrides parameter added *)
+    [supports_tool_choice_override] is forwarded to
+    {!Llm_provider.Provider_config.make}. [None] leaves the per-kind default
+    from {!Llm_provider.Capabilities} in place; [Some b] forces [b].
+
+    @since 0.122.0 api_key_env_overrides parameter added
+    @since 0.150.0 supports_tool_choice_override parameter added *)
+
+(** Parse a {!Cascade_config_loader.weighted_entry} into a
+    {!Llm_provider.Provider_config.t}. Forwards
+    [entry.supports_tool_choice] as the
+    [supports_tool_choice_override]. The [weight] is not part of
+    Provider_config; it drives cascade ordering separately.
+
+    @since 0.150.0 *)
+val parse_weighted_entry :
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?system_prompt:string ->
+  ?api_key_env_overrides:(string * string) list ->
+  Cascade_config_loader.weighted_entry ->
+  Llm_provider.Provider_config.t option
+
+(** Parse a list of weighted entries, discarding unavailable providers.
+    Preserves input order. Equivalent to
+    [List.filter_map parse_weighted_entry].
+
+    @since 0.150.0 *)
+val parse_weighted_entries :
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?system_prompt:string ->
+  ?api_key_env_overrides:(string * string) list ->
+  Cascade_config_loader.weighted_entry list ->
+  Llm_provider.Provider_config.t list
 
 (** Like {!parse_model_string} but returns a [Result] with a diagnostic
     error message explaining why parsing failed (unknown provider, missing

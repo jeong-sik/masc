@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [0.9.8] - 2026-04-17
+
+### Changed
+- **OAS pin bump to `v0.153.0`** — picks up OAS PR #975
+  (`Budget_strategy.default_summarizer` exported in the `.mli`).
+- **`keeper_summarizer.ml` simplified** — deletes the local
+  `default_extractive_summary` re-implementation and delegates to
+  `Agent_sdk.Budget_strategy.default_summarizer` directly. This was
+  the follow-up promised in PR #7668 (Gen4 compaction-layer [STATE]
+  scrub). Net diff: −36 lines; behavior unchanged (4 existing tests
+  in `test_keeper_summarizer.ml` still pass).
+- `scripts/oas-agent-sdk-pin.sh` BASE/SHA/MIN → `v0.153.0` /
+  `485ac29af8c14942e29c99381a9946c7000a55c9` / `0.153.0`.
+
 ## [0.9.7] - 2026-04-17
 
 ### Changed

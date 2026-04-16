@@ -193,8 +193,11 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     handle them once the fiber terminates. *)
 let reconcile_keepalive_keepers (ctx : _ context) =
   let base_path = ctx.config.base_path in
-  Keeper_types.keepalive_keeper_names ctx.config
-  |> List.iter (fun name ->
+  let names = Keeper_types.keepalive_keeper_names ctx.config in
+  Log.Keeper.info "reconcile_keepalive_keepers: started (candidates=%d)"
+    (List.length names);
+  let t0 = Time_compat.now () in
+  List.iter (fun name ->
          match read_meta ctx.config name with
          | Ok (Some meta) when not meta.paused ->
              let dominated_by_sweep =
@@ -224,6 +227,9 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          | Ok None -> ()
          | Error err ->
              Log.Keeper.debug "reconcile: read_meta failed for %s: %s" name err)
+    names;
+  Log.Keeper.info "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
+    (int_of_float ((Time_compat.now () -. t0) *. 1000.0))
 
 let cleanup_dead_tombstone (ctx : _ context)
     (entry : Keeper_registry.registry_entry) =

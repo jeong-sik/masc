@@ -13,12 +13,11 @@ Supports:
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
+
+from gate_shared.bindings_store import load_bindings, save_bindings
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -45,52 +44,14 @@ class SlackGateBot:
         self._messages_failed = 0
 
     def _load_bindings(self) -> None:
-        """Load channel-to-keeper bindings.
-
-        Read priority: new default (binding_store_path) > legacy
-        (legacy_binding_store_path) > empty. Next _save_bindings always
-        writes to the new default, so the migration is transparent after
-        the .gate/runtime/ rollout (see #7468, #7471).
-        """
-        path = Path(self.cfg.binding_store_path)
-        source = "default"
-        if not path.exists():
-            legacy_path = Path(self.cfg.legacy_binding_store_path)
-            if legacy_path.exists():
-                path = legacy_path
-                source = "legacy"
-            else:
-                return
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                self._bindings = {
-                    str(k): str(v)
-                    for k, v in data.items()
-                    if isinstance(v, str)
-                }
-                if source == "legacy":
-                    logger.info(
-                        "Loaded %d binding(s) from legacy store %s; next write goes to %s",
-                        len(self._bindings),
-                        path,
-                        self.cfg.binding_store_path,
-                    )
-                else:
-                    logger.info("Loaded %d binding(s)", len(self._bindings))
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to load bindings from %s: %s", path, e)
+        self._bindings = load_bindings(
+            self.cfg.binding_store_path,
+            legacy_path=self.cfg.legacy_binding_store_path,
+            logger=logger,
+        )
 
     def _save_bindings(self) -> None:
-        path = Path(self.cfg.binding_store_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.tmp")
-        try:
-            tmp.write_text(json.dumps(self._bindings, indent=2), encoding="utf-8")
-            os.replace(tmp, path)
-        except OSError as e:
-            logger.error("Failed to save bindings: %s", e)
-            tmp.unlink(missing_ok=True)
+        save_bindings(self.cfg.binding_store_path, self._bindings, logger=logger)
 
     def _resolve_keeper(self, channel_id: str) -> str:
         return self._bindings.get(channel_id, self.cfg.default_keeper)

@@ -197,6 +197,27 @@ let keeper_denied_surface_tools =
   [
     "masc_reset";
     "masc_spawn";
+    (* Admin surface — [CanAdmin]-gated, keepers cannot execute these.
+       Log evidence (2026-04-16 /loop): ~49 Forbidden errors per ~3MB
+       window from keepers (ani1999, etc.) trying to call these. They
+       were already denied at dispatch, but the schemas still appeared
+       in keeper tool lists so the LLM kept hallucinating calls. Listing
+       them here filters schemas out at discovery time, so the model
+       never sees them.
+       Source: admin_surface_tools at tool_catalog_surfaces.ml:182. *)
+    "masc_tool_grant";
+    "masc_tool_revoke";
+    "masc_tool_admin_update";
+    "masc_tool_admin_snapshot";
+    "masc_config";
+    "masc_keeper_create_from_persona";
+    (* NOTE: masc_keeper_reset is on public_mcp_surface_tools (line 126),
+       so it cannot be added to Keeper_denied without violating the
+       Keeper_denied ∩ Public_mcp = ∅ invariant (test_tool_surface_ssot.ml:90).
+       Keepers don't see the public_mcp surface at discovery, so no filter
+       is needed here. Admin permission still blocks execution. *)
+    "masc_pause";
+    "masc_resume";
   ]
 
 let system_internal_surface_tools =

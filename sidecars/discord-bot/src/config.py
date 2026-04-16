@@ -14,7 +14,12 @@ from typing import Final, cast
 from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/discord/bindings.json"
 DEFAULT_BINDING_AUDIT_PATH: Final[str] = ".gate/runtime/discord/binding_audit.jsonl"
@@ -33,6 +38,12 @@ LEGACY_STATUS_PATH: Final[str] = ".masc/connectors/discord/status.json"
 LEGACY_NAMES_PATH: Final[str] = ".masc/connectors/discord/names.json"
 
 
+def _runtime_toml_path() -> Path:
+    raw = os.getenv("MASC_BASE_PATH", "").strip()
+    root = Path(raw).expanduser() if raw else Path.cwd()
+    return root / ".gate/runtime/discord/config.toml"
+
+
 def _is_loopback_host(raw_host: str | None) -> bool:
     if raw_host is None:
         return False
@@ -46,9 +57,34 @@ def _is_loopback_host(raw_host: str | None) -> bool:
 
 
 class BotConfig(BaseSettings):
-    """Bot configuration from environment variables."""
+    """Bot configuration.  Priority: env > runtime TOML > field defaults."""
 
-    model_config = {"env_prefix": "", "case_sensitive": True, "env_file": ".env"}
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        env_file=".env",
+        extra="ignore",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        toml_source = TomlConfigSettingsSource(
+            settings_cls, toml_file=_runtime_toml_path()
+        )
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            toml_source,
+            file_secret_settings,
+        )
 
     # Required
     discord_bot_token: str = Field(

@@ -42,12 +42,13 @@ had the full Phase 2 release to migrate.
 
 ### Fixed
 
-- **OCaml setup action pin corrected**. The floating `ocaml/setup-ocaml@v3`
-  tag regressed between v0.9.0 (2026-04-15) and v0.9.1 (2026-04-16), and
-  the follow-up `v3.6.0` pin was not a published setup-ocaml release.
-  Re-pinned the shared setup action plus `release.yml`,
-  `webrtc-live-interop.yml`, and `deploy-railway.yml` to the latest
-  published `ocaml/setup-ocaml@v3.5.1` release verified on 2026-04-16.
+- **OCaml bootstrap no longer depends on upstream latest-opam auto-pick**.
+  On 2026-04-16 the latest stable `opam 2.5.1` release was published
+  before Linux x86_64 binaries were attached, so `ocaml/setup-ocaml`
+  failed early with `Failed to find opam binary for 'linux' and 'x86_64'`.
+  The shared toolchain bootstrap now downloads the published `opam 2.5.0`
+  Linux binary directly and `release.yml`, `webrtc-live-interop.yml`, and
+  `deploy-railway.yml` reuse the same local bootstrap.
   Closes #7475.
 
 ## [0.9.1] - 2026-04-16

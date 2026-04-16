@@ -157,8 +157,6 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
       pending_approvals: asNumber(commandBlock.pending_approvals),
       bad_alerts: asNumber(commandBlock.bad_alerts),
       warn_alerts: asNumber(commandBlock.warn_alerts),
-      moving_lanes: asNumber(commandBlock.moving_lanes),
-      active_lanes: asNumber(commandBlock.active_lanes),
       provenance: asString(commandBlock.provenance) ?? null,
     },
     meta_cognition: {

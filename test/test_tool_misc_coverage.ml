@@ -556,7 +556,7 @@ let () = test "dispatch_tool_admin_snapshot" (fun () ->
       assert (Yojson.Safe.Util.member "mode" json = `Null);
       (* keeper_policies removed with policy_mode purge *)
       assert (Yojson.Safe.Util.member "keeper_policies" json = `Null);
-      assert (Yojson.Safe.Util.member "command_plane" json <> `Null)
+      assert (Yojson.Safe.Util.member "command_plane" json = `Null)
   | None -> failwith "dispatch returned None"
 )
 

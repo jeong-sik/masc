@@ -168,8 +168,6 @@ export interface DashboardNamespaceTruthResponse {
     pending_approvals?: number
     bad_alerts?: number
     warn_alerts?: number
-    moving_lanes?: number
-    active_lanes?: number
     provenance?: string | null
   }
   meta_cognition?: DashboardNamespaceTruthMetaCognition | null

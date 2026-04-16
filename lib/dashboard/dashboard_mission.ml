@@ -562,7 +562,6 @@ type mission_projection = {
   snapshot_json : Yojson.Safe.t;
   digest_json : Yojson.Safe.t;
   namespace_json : Yojson.Safe.t;
-  command_json : Yojson.Safe.t;
   incidents : Yojson.Safe.t list;
   recommended_actions : Yojson.Safe.t list;
   attention_queue : attention_context list;
@@ -572,7 +571,7 @@ type mission_projection = {
   internal_signals : Yojson.Safe.t list;
 }
 
-let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock
+let build_projection ?actor ~config ~sw ~clock
     ~proc_mgr () =
   let actor_name =
     match actor with
@@ -601,25 +600,15 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
           ~include_messages:false
           ~include_keepers:true
           ~include_summary_fields:false
-          ~include_command_plane:false
           ~lightweight_summary:true
           ctx)
-  in
-  let command_json =
-    Dashboard_cache.get_or_compute
-      (room_scoped_cache_key config "command_projection" actor_name)
-      ~ttl:3.0
-      (fun () -> `Assoc [])
   in
   let digest_json =
     Dashboard_cache.get_or_compute
       (room_scoped_cache_key config "digest" actor_name)
       ~ttl:5.0
       (fun () ->
-        match
-          Operator_control.digest_json ~actor:actor_name ?command_plane_summary
-            ?swarm_status ctx
-        with
+        match Operator_control.digest_json ~actor:actor_name ctx with
         | Ok json -> json
         | Error message ->
             `Assoc
@@ -627,8 +616,6 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
                 ("health", `String "warn");
                 ("attention_items", `List []);
                 ("recommended_actions", `List []);
-                ("swarm_status", Swarm_status.empty_json);
-                ("command_plane", `Assoc []);
                 ("error", `String message);
               ])
   in
@@ -662,7 +649,6 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     snapshot_json;
     digest_json;
     namespace_json;
-    command_json;
     incidents;
     recommended_actions;
     attention_queue;
@@ -670,19 +656,13 @@ let build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw ~cl
     agent_briefs;
     keeper_briefs;
     internal_signals;
-  }
+}
 
-let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mgr
+let json ?actor ~config ~sw ~clock ~proc_mgr
     () =
   let projection =
-    build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw
+    build_projection ?actor ~config ~sw
       ~clock ~proc_mgr ()
-  in
-  let operations_summary =
-    member_assoc "operations" projection.command_json |> member_assoc "summary"
-  in
-  let decisions_summary =
-    member_assoc "decisions" projection.command_json |> member_assoc "summary"
   in
   let summary_json =
     `Assoc
@@ -696,9 +676,8 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
     `Assoc
       [
         ("health", `String (string_field ~default:"ok" "health" projection.digest_json));
-        ("active_operations", `Int (int_field "active" operations_summary));
-        ("pending_approvals", `Int (int_field "pending" decisions_summary));
-        ("swarm_overview", member_assoc "swarm_status" projection.digest_json |> member_assoc "overview");
+        ("active_operations", `Int 0);
+        ("pending_approvals", `Int 0);
         ("top_attention", top_item projection.incidents);
         ("top_action", top_item projection.recommended_actions);
       ]
@@ -727,15 +706,15 @@ let json ?actor ?command_plane_summary ?swarm_status ~config ~sw ~clock ~proc_mg
       ("internal_signals", `List projection.internal_signals);
     ]
 
-let session_json ?actor ?command_plane_summary ?swarm_status ~session_id ~config ~sw
+let session_json ?actor ~session_id ~config ~sw
     ~clock ~proc_mgr () =
   let projection =
-    build_projection ?actor ?command_plane_summary ?swarm_status ~config ~sw
+    build_projection ?actor ~config ~sw
       ~clock ~proc_mgr ()
   in
   let session_row_json =
     Dashboard_mission_assembly.build_sessions projection.sessions projection.attention_queue projection.agent_briefs
-      projection.keeper_briefs projection.command_json
+      projection.keeper_briefs
     |> List.find_opt (fun json ->
            String.equal (string_field "session_id" json) session_id)
   in
@@ -758,7 +737,7 @@ let session_json ?actor ?command_plane_summary ?swarm_status ~session_id ~config
     ignore (config, session_id);
     `Null
   in
-  let operation_contexts = Dashboard_mission_assembly.build_operation_contexts projection.command_json in
+  let operation_contexts = Dashboard_mission_assembly.build_operation_contexts () in
   let operations_json =
     match session_context with
     | None -> []

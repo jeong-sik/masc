@@ -248,12 +248,6 @@ let handle_tool_admin_snapshot ctx args =
         ("status", `String "ok");
         ("generated_at", `String (Types.now_iso ()));
         ("auth", auth_snapshot_json ctx);
-        ( "command_plane",
-          `Assoc
-            [
-              ("policy_status", `Assoc []);
-              ("enforcement_summary", enforcement_summary_json ());
-            ] );
         ( "tool_inventory",
           tool_inventory_json ctx ~include_hidden ~include_deprecated );
       ]

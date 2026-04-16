@@ -166,19 +166,15 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ~include_messages:false
           ~include_keepers:true
           ~include_summary_fields:false
-          ~include_command_plane:false
           ~lightweight_summary:true
           ctx
       in
       Eio.Fiber.yield ();
-      let command_plane_json =
-        `Assoc []
-      in
       (* Yield between heavy computation phases to prevent fiber starvation.
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
          so other fibers (SSE, health checks) can progress. *)
       Eio.Fiber.yield ();
-      let operation_contexts = build_operation_contexts command_plane_json in
+      let operation_contexts = build_operation_contexts () in
       let session_contexts = [] in
       let execution_queue =
         build_execution_queue session_contexts operation_contexts

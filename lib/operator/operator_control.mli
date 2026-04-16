@@ -9,7 +9,6 @@ val snapshot_json :
   ?include_messages:bool ->
   ?include_keepers:bool ->
   ?include_summary_fields:bool ->
-  ?include_command_plane:bool ->
   ?lightweight_summary:bool ->
   'a context ->
   Yojson.Safe.t

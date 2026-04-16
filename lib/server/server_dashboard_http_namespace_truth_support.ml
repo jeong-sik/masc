@@ -310,8 +310,6 @@ let namespace_truth_command_summary_json command_summary_json =
   let command_detachments = json_assoc_field "detachments" command_summary_json in
   let command_alerts = json_assoc_field "alerts" command_summary_json in
   let command_decisions = json_assoc_field "decisions" command_summary_json in
-  let swarm_status = json_assoc_field "swarm_status" command_summary_json in
-  let swarm_overview = json_assoc_field "overview" swarm_status in
   `Assoc
     [
       ( "active_operations",
@@ -334,8 +332,6 @@ let namespace_truth_command_summary_json command_summary_json =
         `Int
           (json_int_field "warn" (json_assoc_field "summary" command_alerts)
              ~default:0) );
-      ("moving_lanes", `Int (json_int_field "moving_lanes" swarm_overview ~default:0));
-      ("active_lanes", `Int (json_int_field "active_lanes" swarm_overview ~default:0));
       ("provenance", `String "truth");
     ]
 

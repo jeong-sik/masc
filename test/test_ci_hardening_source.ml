@@ -360,9 +360,12 @@ let test_mission_briefing_memory_guard_contracts () =
   check bool "mission briefing snapshot disables keeper payload" true
     (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
        "~include_keepers:false");
+  check bool "mission briefing snapshot no longer references command plane" true
+    (file_not_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
+       "include_command_plane");
   check bool "mission briefing snapshot stays off command plane" true
     (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
-       "~include_command_plane:false");
+       "~include_summary_fields:false");
   check bool "mission briefing snapshot stays lightweight" true
     (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
        "~lightweight_summary:true");

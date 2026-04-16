@@ -303,9 +303,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
       .filter((item): item is OperatorRecommendedAction => item !== null),
     recommendation_summary: normalizeGuidanceSummary(root.recommendation_summary),
     root: normalizeNamespace(root.root),
-    swarm_status: isRecord(root.swarm_status)
-      ? (root.swarm_status as unknown as OperatorDigest['swarm_status'])
-      : undefined,
     attention_items: extractArray(root.attention_items)
       .map(normalizeAttentionItem)
       .filter((item): item is OperatorAttentionItem => item !== null),

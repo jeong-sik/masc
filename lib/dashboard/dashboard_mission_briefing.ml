@@ -141,7 +141,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
          snapshot path and can spike memory on rooms with many keepers. *)
       Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
         ~include_messages:false ~include_keepers:false
-        ~include_summary_fields:false ~include_command_plane:false
+        ~include_summary_fields:false
         ~lightweight_summary:true ctx
     in
     let scope_json =

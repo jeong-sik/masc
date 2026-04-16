@@ -39,9 +39,7 @@ let normalized_actor ~context_actor = function
 let operator_surface_contract_json =
   `Assoc
     [
-      ("command_plane", `String "truth");
       ("judgment", `String "judgment");
-      ("swarm_status", `String "derived");
       ("attention_items", `String "derived");
       ("recommended_actions", `String "fallback");
       ("active_recommended_actions", `String "judgment_or_fallback");

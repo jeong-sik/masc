@@ -164,7 +164,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "task_inject")
            confirm_required_actions))
 
-let test_snapshot_summary_view_can_omit_command_plane () =
+let test_snapshot_summary_view_excludes_retired_command_plane () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -177,11 +177,12 @@ let test_snapshot_summary_view_can_omit_command_plane () =
       ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
-          ~include_messages:false ~include_command_plane:false
+          ~include_messages:false
           (operator_ctx env sw config "owner")
       in
-      Alcotest.(check bool) "command_plane omitted" true
-        (Yojson.Safe.Util.member "command_plane" json = `Null);
+      Alcotest.(check bool) "command_plane field absent" true
+        (not (List.mem_assoc "command_plane"
+           Yojson.Safe.Util.(to_assoc json)));
       Alcotest.(check bool) "swarm_status omitted" true
         (Yojson.Safe.Util.member "swarm_status" json = `Null);
       Alcotest.(check bool) "attention summary still present" true
@@ -202,7 +203,7 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
       ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
-          ~include_keepers:true ~include_messages:true ~include_command_plane:false
+          ~include_keepers:true ~include_messages:true
           ~lightweight_summary:true
           (operator_ctx env sw config "owner")
       in

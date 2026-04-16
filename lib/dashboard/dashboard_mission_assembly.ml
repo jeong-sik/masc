@@ -335,59 +335,8 @@ let build_internal_signals incidents actions =
   |> List.sort (fun left right -> Int.compare right.pressure_rank left.pressure_rank)
   |> List.map (fun (row : keeper_context) -> row.json)
 
-let detachment_index command_plane_json =
-  let table = Hashtbl.create 16 in
-  let detachments =
-    member_assoc "detachments" command_plane_json
-    |> member_assoc "detachments"
-    |> function
-    | `List items -> items
-    | _ -> []
-  in
-  List.iter
-    (fun detachment_card ->
-      let detachment = member_assoc "detachment" detachment_card in
-      let operation_id = string_field "operation_id" detachment in
-      if operation_id <> "" then
-        Hashtbl.replace table operation_id
-          ( trim_to_option (string_field "session_id" detachment),
-            trim_to_option (string_field "status" detachment) ))
-    detachments;
-  table
-
-let build_operation_contexts command_plane_json =
-  let operations =
-    member_assoc "operations" command_plane_json
-    |> member_assoc "operations"
-    |> function
-    | `List items -> items
-    | _ -> []
-  in
-  let detachments = detachment_index command_plane_json in
-  operations
-  |> List.filter_map (fun operation_card ->
-         let operation = member_assoc "operation" operation_card in
-         let operation_id = string_field "operation_id" operation in
-         if operation_id = "" then None
-         else
-           let linked_session_id, detachment_status =
-             match Hashtbl.find_opt detachments operation_id with
-             | Some (session_id, status_str) ->
-                 (session_id, status_str)
-             | None ->
-                 (trim_to_option (string_field "detachment_session_id" operation), None)
-           in
-           let status = trim_to_option (string_field "status" operation) in
-           Some
-             {
-               operation_id;
-               linked_session_id;
-               status;
-               stage = trim_to_option (string_field "stage" operation);
-               detachment_status;
-               objective = trim_to_option (string_field "objective" operation);
-               updated_at = trim_to_option (string_field "updated_at" operation);
-             })
+let build_operation_contexts () =
+  []
 
 let operation_badge_json (operation : operation_context) =
   let status_str =
@@ -490,7 +439,7 @@ let keeper_refs_for_session member_names keeper_briefs =
                  ("current_work", member_assoc "current_work" row);
                ]))
 
-let build_sessions sessions attention_queue agent_briefs keeper_briefs command_plane_json =
+let build_sessions sessions attention_queue agent_briefs keeper_briefs =
   let related_attention_count session_id =
     attention_queue
     |> List.fold_left
@@ -498,7 +447,7 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
            if List.mem session_id attention.related_session_ids then acc + 1 else acc)
          0
   in
-  let operation_contexts = build_operation_contexts command_plane_json in
+  let operation_contexts = build_operation_contexts () in
   sessions
   |> List.map (fun (session : session_context) ->
          let attention_count = related_attention_count session.session_id in

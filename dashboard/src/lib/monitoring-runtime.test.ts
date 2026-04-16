@@ -122,7 +122,7 @@ describe('summarizeKeeperMonitoring', () => {
     )
   })
 
-  it('surfaces continue-gate blockers as manual reconcile guidance', () => {
+  it('surfaces continue-gate blockers as continue-gate guidance', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({
         status: 'paused',
@@ -132,7 +132,7 @@ describe('summarizeKeeperMonitoring', () => {
         runtime_blocker_class: 'ambiguous_post_commit_timeout',
         runtime_blocker_summary:
           'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        runtime_blocker_manual_reconcile: true,
+        runtime_blocker_continue_gate: true,
       }),
     )
 
@@ -175,6 +175,34 @@ describe('summarizeKeeperMonitoring', () => {
 
     expect(summary.band.key).toBe('attention')
     expect(summary.hint).toContain('slot wait timeout')
+  })
+
+  it('uses the server runtime warning threshold instead of the old client hardcode', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'busy',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        context_ratio: 0.9,
+      }),
+    )
+
+    expect(summary.band.key).toBe('active')
+  })
+
+  it('honors a keeper-specific runtime warning threshold from the payload', () => {
+    const summary = summarizeKeeperMonitoring(
+      makeKeeper({
+        status: 'busy',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        context_ratio: 0.9,
+        runtime_warning_ctx_ratio: 0.85,
+      }),
+    )
+
+    expect(summary.band.key).toBe('attention')
+    expect(summary.hint).toBe('컨텍스트 사용량이 90%입니다.')
   })
 
   it('keeps never-booted keepers in the offline band', () => {

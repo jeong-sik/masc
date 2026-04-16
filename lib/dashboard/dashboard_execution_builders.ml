@@ -45,7 +45,8 @@ let keeper_action_stale_sec = Env_config.Dashboard.keeper_action_stale_sec
 
 let task_assignee (task : Types.task) =
   match task.task_status with
-  | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ } ->
+  | Claimed { assignee; _ } | InProgress { assignee; _ }
+  | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
       Some assignee
   | Todo | Cancelled _ -> None
 

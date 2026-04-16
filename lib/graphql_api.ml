@@ -145,6 +145,18 @@ let task_status_info_of_task (task : Types.task) =
         cancelled_at = Some cancelled_at;
         reason;
       }
+  | Types.AwaitingVerification { assignee; submitted_at; _ } ->
+      {
+        status = "awaiting_verification";
+        assignee = Some assignee;
+        claimed_at = None;
+        started_at = Some submitted_at;
+        completed_at = None;
+        notes = None;
+        cancelled_by = None;
+        cancelled_at = None;
+        reason = None;
+      }
 
 let page_info_typ =
   Schema.obj "PageInfo"

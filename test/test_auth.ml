@@ -30,6 +30,9 @@ let cleanup_test_room dir =
   in
   try rm_rf dir with _ -> ()
 
+let permission_bits path =
+  (Unix.stat path).Unix.st_perm land 0o777
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -106,6 +109,16 @@ let test_save_load_auth_config_in_eio_runtime () =
         check bool "enabled persisted in eio" true loaded.enabled;
         check bool "require_token persisted in eio" true loaded.require_token))
 
+let test_auth_config_saved_private () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      let cfg = { Types.default_auth_config with enabled = true } in
+      Auth.save_auth_config dir cfg;
+      check int "auth config mode 0600" 0o600
+        (permission_bits (Auth.auth_config_file dir)))
+
 (* ============================================ *)
 (* Credential management tests                  *)
 (* ============================================ *)
@@ -122,6 +135,29 @@ let test_create_credential () =
       check int "stored token is 64 chars" 64 (String.length cred.token)
   | Error _ ->
       fail "create_token should succeed"
+
+let test_credential_saved_private () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      match Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker with
+      | Ok _ ->
+          check int "credential mode 0600" 0o600
+            (permission_bits (Auth.credential_file dir "claude"))
+      | Error e ->
+          fail
+            (Printf.sprintf "create_token should succeed: %s"
+               (Types.masc_error_to_string e)))
+
+let test_room_secret_saved_private () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.init_room_secret dir);
+      check int "room secret mode 0600" 0o600
+        (permission_bits (Auth.room_secret_file dir)))
 
 let test_verify_token () =
   let dir = setup_test_room () in
@@ -432,9 +468,13 @@ let () =
       test_case "save/load config" `Quick test_save_load_auth_config;
       test_case "save/load config in Eio runtime" `Quick
         test_save_load_auth_config_in_eio_runtime;
+      test_case "auth config saved private" `Quick
+        test_auth_config_saved_private;
     ];
     "credentials", [
       test_case "create credential" `Quick test_create_credential;
+      test_case "credential saved private" `Quick
+        test_credential_saved_private;
       test_case "verify token" `Quick test_verify_token;
       test_case "verify wrong token" `Quick test_verify_wrong_token;
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
@@ -468,5 +508,6 @@ let () =
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;
+      test_case "room secret saved private" `Quick test_room_secret_saved_private;
     ];
   ]

@@ -108,7 +108,7 @@ let runtime_keepalive_started_at (config : Coord_utils.config)
 type runtime_blocker_surface = {
   blocker_class : string;
   summary : string;
-  manual_reconcile : bool;
+  continue_gate : bool;
 }
 
 let runtime_blocker_surface_of_failure_reason
@@ -126,7 +126,7 @@ let runtime_blocker_surface_of_failure_reason
         {
           blocker_class;
           summary = detail;
-          manual_reconcile = true;
+          continue_gate = true;
         }
   | _ -> None
 
@@ -134,13 +134,26 @@ let runtime_blocker_surface_of_reason (reason : string) =
   let trimmed = String.trim reason in
   if trimmed = "" then
     None
+  else if
+    String_util.contains_substring_ci trimmed
+      "turn outcome ambiguous after committed mutating tool call(s)"
+  then
+    Some
+      {
+        blocker_class =
+          (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
+           then "ambiguous_post_commit_timeout"
+           else "ambiguous_post_commit_failure");
+        summary = trimmed;
+        continue_gate = true;
+      }
   else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
   then
     Some
       {
         blocker_class = "autonomous_slot_wait_timeout";
         summary = trimmed;
-        manual_reconcile = false;
+        continue_gate = false;
       }
   else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
   then
@@ -148,7 +161,7 @@ let runtime_blocker_surface_of_reason (reason : string) =
       {
         blocker_class = "admission_queue_wait_timeout";
         summary = trimmed;
-        manual_reconcile = false;
+        continue_gate = false;
       }
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
           && String_util.contains_substring_ci trimmed "semaphore_wait_ms="
@@ -157,7 +170,7 @@ let runtime_blocker_surface_of_reason (reason : string) =
       {
         blocker_class = "turn_timeout_after_queue_wait";
         summary = trimmed;
-        manual_reconcile = false;
+        continue_gate = false;
       }
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then
@@ -165,7 +178,7 @@ let runtime_blocker_surface_of_reason (reason : string) =
       {
         blocker_class = "turn_timeout";
         summary = trimmed;
-        manual_reconcile = false;
+        continue_gate = false;
       }
   else if String_util.contains_substring_ci trimmed "completion contract"
           || String_util.contains_substring_ci trimmed "completion_contract"
@@ -174,7 +187,7 @@ let runtime_blocker_surface_of_reason (reason : string) =
       {
         blocker_class = "completion_contract_violation";
         summary = trimmed;
-        manual_reconcile = false;
+        continue_gate = false;
       }
   else
     None
@@ -204,13 +217,13 @@ let runtime_blocker_fields_json (config : Coord_utils.config)
       [
         ("runtime_blocker_class", `String blocker.blocker_class);
         ("runtime_blocker_summary", `String blocker.summary);
-        ("runtime_blocker_manual_reconcile", `Bool blocker.manual_reconcile);
+        ("runtime_blocker_continue_gate", `Bool blocker.continue_gate);
       ]
   | None ->
       [
         ("runtime_blocker_class", `Null);
         ("runtime_blocker_summary", `Null);
-        ("runtime_blocker_manual_reconcile", `Bool false);
+        ("runtime_blocker_continue_gate", `Bool false);
       ]
 
 let trimmed_string_json value =

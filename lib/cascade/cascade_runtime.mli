@@ -34,6 +34,8 @@ val default_model_strings : cascade_name:string -> string list
 val models_of_cascade_name : string -> string list
 val default_model_strings_from_config : unit -> string list
 val resolve_named_providers :
-  cascade_name:string -> Llm_provider.Provider_config.t list
+  ?provider_filter:string list ->
+  cascade_name:string -> unit -> Llm_provider.Provider_config.t list
 val resolve_providers_from_model_strings :
+  ?provider_filter:string list ->
   string list -> Llm_provider.Provider_config.t list

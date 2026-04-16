@@ -2,7 +2,7 @@
 
 | 항목 | 값 |
 |------|-----|
-| Status | Draft |
+| Status | Historical Reference |
 | Team | Foundation |
 | Maps to | `lib/command_plane_v2.ml`, `lib/command_plane/*.ml`, `lib/command_plane_orchestra.ml` |
 | Dependencies | 02-types-and-invariants, 03-room-coordination |
@@ -13,7 +13,7 @@
 
 ## 1. Purpose
 
-Command Plane V2(CPv2)는 MASC의 조직 구조와 작전 운용을 관리하는 서브시스템이다. 군사 조직 비유를 차용하여 Unit(조직), Operation(작전), Detachment(파견대), Intent(의도), Policy Decision(정책 결정), Trace(추적)의 6가지 엔티티로 멀티 에이전트 환경의 지휘 통제를 모델링한다.
+Command Plane V2(CPv2)는 MASC의 현재 supported front door가 아닌 internal/historical reference subsystem이다. 남아 있는 code path, migration context, retained read-model vocabulary를 설명하기 위해 보존하며, 새 caller onboarding은 repo coordination, keeper runtime, dashboard/operator read visibility를 기준으로 한다.
 
 핵심 역할:
 

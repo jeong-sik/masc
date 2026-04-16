@@ -372,6 +372,8 @@
    cdal_judge
    cdal_eval_v1
    cdal_friction_projection
+   cdal_verdict_gate
+   verification_protocol
    artifact_store
    golden_set
    adversarial_eval

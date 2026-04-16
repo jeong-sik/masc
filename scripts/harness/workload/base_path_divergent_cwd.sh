@@ -6,15 +6,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 source "$REPO_ROOT/scripts/harness/lib/server_bootstrap.sh"
 
-RUN_ID="${RUN_ID:-base-path-dual-root-$(date +%Y%m%d_%H%M%S)-$$}"
-RUN_DIR="${RUN_DIR:-$REPO_ROOT/logs/base_path_dual_root/$RUN_ID}"
+RUN_ID="${RUN_ID:-base-path-divergent-cwd-$(date +%Y%m%d_%H%M%S)-$$}"
+RUN_DIR="${RUN_DIR:-$REPO_ROOT/logs/base_path_divergent_cwd/$RUN_ID}"
 mkdir -p "$RUN_DIR"
 
 PORT="${PORT:-$(harness_pick_free_port)}"
 SERVER_EXE="${SERVER_EXE:-}"
-CONFIG_DIR="${CONFIG_DIR:-$REPO_ROOT/config}"
+CONFIG_DIR="${CONFIG_DIR:-}"
 CWD_PATH="${CWD_PATH:-$REPO_ROOT}"
-BASE_PATH="${BASE_PATH:-$(mktemp -d "${TMPDIR:-/tmp}/masc-dual-root.${RUN_ID}.XXXXXX")}"
+BASE_PATH="${BASE_PATH:-$(mktemp -d "${TMPDIR:-/tmp}/masc-divergent-cwd.${RUN_ID}.XXXXXX")}"
 SERVER_LOG="${SERVER_LOG:-$RUN_DIR/server.log}"
 HEALTH_JSON="${HEALTH_JSON:-$RUN_DIR/health.json}"
 KEEP_SERVER="${KEEP_SERVER:-0}"
@@ -22,10 +22,11 @@ KEEP_PATHS="${KEEP_PATHS:-0}"
 
 TEMP_BASE_PATH=""
 TEMP_CWD_PATH=""
+TEMP_CONFIG_DIR=""
 SERVER_PID=""
 
 log() {
-  printf '[dual-root-guard] %s\n' "$*" >&2
+  printf '[divergent-cwd] %s\n' "$*" >&2
 }
 
 canonical_path() {
@@ -50,9 +51,11 @@ cleanup() {
   if [[ "$KEEP_PATHS" != "1" ]]; then
     [[ -n "$TEMP_BASE_PATH" && -d "$TEMP_BASE_PATH" ]] && rm -rf "$TEMP_BASE_PATH" || true
     [[ -n "$TEMP_CWD_PATH" && -d "$TEMP_CWD_PATH" ]] && rm -rf "$TEMP_CWD_PATH" || true
+    [[ -n "$TEMP_CONFIG_DIR" && -d "$TEMP_CONFIG_DIR" ]] && rm -rf "$TEMP_CONFIG_DIR" || true
   else
     [[ -n "$TEMP_BASE_PATH" ]] && log "keeping base_path fixture: $TEMP_BASE_PATH" || true
     [[ -n "$TEMP_CWD_PATH" ]] && log "keeping cwd fixture: $TEMP_CWD_PATH" || true
+    [[ -n "$TEMP_CONFIG_DIR" ]] && log "keeping config fixture: $TEMP_CONFIG_DIR" || true
   fi
   return 0
 }
@@ -62,7 +65,19 @@ trap cleanup EXIT
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
 
-if [[ ! -d "$CONFIG_DIR" ]]; then
+if [[ -z "$CONFIG_DIR" ]]; then
+  CONFIG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/masc-divergent-config.${RUN_ID}.XXXXXX")"
+  TEMP_CONFIG_DIR="$CONFIG_DIR"
+  mkdir -p "$CONFIG_DIR/prompts" "$CONFIG_DIR/keepers" "$CONFIG_DIR/personas"
+  if [[ -f "$REPO_ROOT/config/cascade.json" ]]; then
+    cp "$REPO_ROOT/config/cascade.json" "$CONFIG_DIR/cascade.json"
+  else
+    printf '{}\n' >"$CONFIG_DIR/cascade.json"
+  fi
+  if [[ -f "$REPO_ROOT/config/tool_policy.toml" ]]; then
+    cp "$REPO_ROOT/config/tool_policy.toml" "$CONFIG_DIR/tool_policy.toml"
+  fi
+elif [[ ! -d "$CONFIG_DIR" ]]; then
   echo "CONFIG_DIR does not exist: $CONFIG_DIR" >&2
   exit 1
 fi
@@ -95,17 +110,19 @@ log "port=$PORT"
   export MASC_CONFIG_DIR="$CONFIG_DIR"
   export MASC_PERSONAS_DIR="$CONFIG_DIR/personas"
   export MASC_STORAGE_TYPE="filesystem"
+  export MASC_BASE_PATH_STRICT="1"
+  export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
   export MASC_AUTONOMY_ENABLED="0"
   export MASC_ORCHESTRATOR_ENABLED="0"
+  export MASC_WS_ENABLED="0"
+  export MASC_WEBRTC_ENABLED="0"
+  export GRAPHQL_API_KEY=""
+  export GRAPHQL_URL="http://127.0.0.1:9/graphql"
   exec "$SERVER_EXE" --port "$PORT" --base-path "$BASE_PATH"
 ) >"$SERVER_LOG" 2>&1 &
 SERVER_PID="$!"
 
 if ! harness_wait_for_health "$PORT" 20; then
-  if rg -qi 'dual \.masc roots are not supported|dual \.masc roots are unsupported' "$SERVER_LOG"; then
-    log "pass: dual-root startup was rejected"
-    exit 0
-  fi
   log "server did not become healthy"
   harness_print_log_tail "$SERVER_LOG" 120
   exit 1
@@ -113,11 +130,14 @@ fi
 
 curl -fsS "http://127.0.0.1:${PORT}/health" | jq '.' >"$HEALTH_JSON"
 
-DUAL_ROOTS="$(jq -r '.paths.dual_masc_roots // false' "$HEALTH_JSON")"
 ROOTS_DIVERGE="$(jq -r '.paths.roots_diverge // false' "$HEALTH_JSON")"
 HEALTH_CWD="$(jq -r '.paths.cwd // ""' "$HEALTH_JSON")"
 HEALTH_BASE_PATH="$(jq -r '.paths.effective_base_path // ""' "$HEALTH_JSON")"
 HEALTH_WARNING="$(jq -r '.paths.warning // ""' "$HEALTH_JSON")"
+STRICT_MODE_REQUESTED="$(jq -r '.paths.strict_mode_requested // false' "$HEALTH_JSON")"
+STARTUP_REJECTED="$(jq -r '.paths.startup_rejected // false' "$HEALTH_JSON")"
+STARTUP_ABORT_ELIGIBLE="$(jq -r '.paths.startup_abort_eligible // false' "$HEALTH_JSON")"
+STRICT_VIOLATION="$(jq -r '.paths.strict_violation // false' "$HEALTH_JSON")"
 CONFIG_ROOT="$(jq -r '.startup.config_resolution.config_root.path // ""' "$HEALTH_JSON")"
 EXPECTED_CWD="$(canonical_path "$CWD_PATH")"
 EXPECTED_BASE_PATH="$(canonical_path "$BASE_PATH")"
@@ -150,13 +170,34 @@ if [[ "$(canonical_path "$CONFIG_ROOT")" != "$EXPECTED_CONFIG_DIR" ]]; then
   exit 1
 fi
 
-echo "FAIL: server became healthy under a dual-root fixture" >&2
-echo "  cwd=$HEALTH_CWD" >&2
-echo "  effective_base_path=$HEALTH_BASE_PATH" >&2
-echo "  dual_masc_roots=$DUAL_ROOTS" >&2
-echo "  roots_diverge=$ROOTS_DIVERGE" >&2
-if [[ -n "$HEALTH_WARNING" ]]; then
-  echo "  warning=$HEALTH_WARNING" >&2
+if [[ "$ROOTS_DIVERGE" != "true" ]]; then
+  echo "FAIL: expected roots_diverge=true, got $ROOTS_DIVERGE" >&2
+  exit 1
 fi
-echo "  health_json=$HEALTH_JSON" >&2
-exit 1
+
+if [[ "$STRICT_MODE_REQUESTED" != "true" ]]; then
+  echo "FAIL: expected strict_mode_requested=true, got $STRICT_MODE_REQUESTED" >&2
+  exit 1
+fi
+
+if [[ "$STARTUP_REJECTED" != "false" ]]; then
+  echo "FAIL: expected startup_rejected=false, got $STARTUP_REJECTED" >&2
+  exit 1
+fi
+
+if [[ "$STARTUP_ABORT_ELIGIBLE" != "false" ]]; then
+  echo "FAIL: expected startup_abort_eligible=false, got $STARTUP_ABORT_ELIGIBLE" >&2
+  exit 1
+fi
+
+if [[ "$STRICT_VIOLATION" != "false" ]]; then
+  echo "FAIL: expected strict_violation=false, got $STRICT_VIOLATION" >&2
+  exit 1
+fi
+
+if [[ -n "$HEALTH_WARNING" ]]; then
+  echo "FAIL: expected no health warning, got: $HEALTH_WARNING" >&2
+  exit 1
+fi
+
+log "pass: divergent cwd remains observational under strict mode"

@@ -113,6 +113,7 @@ let base_observation : WO.world_observation =
     economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
     failed_task_count = 0;
+    pending_verification_count = 0;
     active_agent_count = 0;
     last_turn_budget = None;
     last_tools_used = [];
@@ -618,8 +619,8 @@ let test_pending_approval_blocks_turns_until_resolved () =
   let id =
     AQ.submit_pending
       ~keeper_name:minimal_meta.name
-      ~tool_name:"keeper_continue_after_reconcile"
-      ~input:(`Assoc [ ("kind", `String "reconcile_required") ])
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [ ("kind", `String "continue_gate_required") ])
       ~risk_level:AQ.Critical
       ~on_resolution:(fun _ -> ())
   in

@@ -21,17 +21,25 @@ function pressureLabel(pressure: 'calm' | 'normal' | 'hot'): string {
   }
 }
 
-export function FocusSidebar() {
+interface FocusSidebarProps {
+  compact?: boolean
+}
+
+function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
   const list = focusAgents.value
   const selected = selectedAgentName.value
 
   return html`
     <div class="grid gap-3 grid-rows-[auto_1fr] min-h-0">
-      <div class="focus-sidebar-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
-        <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--text-strong)]">에이전트</h3>
-        <span class="text-xs text-[var(--text-muted)]">${list.length}명 활성</span>
-      </div>
-      <div class="grid gap-1.5 content-start overflow-y-auto max-h-[560px] pr-1">
+      ${compact
+        ? null
+        : html`
+            <div class="focus-sidebar-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
+              <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--text-strong)]">에이전트</h3>
+              <span class="text-xs text-[var(--text-muted)]">${list.length}명 활성</span>
+            </div>
+          `}
+      <div class="grid content-start gap-1.5 overflow-y-auto pr-1 ${compact ? 'max-h-[32vh]' : 'max-h-[560px]'}">
         ${list.length === 0
           ? html`<div class="py-6 text-center text-[var(--text-muted)] text-[13px]">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`
@@ -66,4 +74,8 @@ export function FocusSidebar() {
       </div>
     </div>
   `
+}
+
+export function FocusSidebar(props: FocusSidebarProps) {
+  return html`<${FocusSidebarContent} compact=${props.compact ?? false} />`
 }

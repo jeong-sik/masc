@@ -276,18 +276,18 @@ let test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta () =
   check string "runtime blocker summary"
     reason
     (runtime |> member "runtime_blocker_summary" |> to_string);
-  check bool "runtime blocker manual_reconcile stays false"
+  check bool "runtime blocker continue gate stays false"
     false
-    (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool)
+    (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
 
-let test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit () =
+let test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit () =
   KR.clear ();
-  let meta = make_meta ~name:"runtime-manual-reconcile-test" () in
+  let meta = make_meta ~name:"runtime-continue-gate-test" () in
   let detail =
     "Mutating tools [keeper_fs_edit] committed before the turn timed out."
   in
   let config =
-    Coord.default_config "/tmp/test-keeper-exec-status-manual-reconcile"
+    Coord.default_config "/tmp/test-keeper-exec-status-continue-gate"
   in
   ignore (KR.register ~base_path:config.base_path meta.name meta);
   KR.set_failure_reason ~base_path:config.base_path meta.name
@@ -305,9 +305,41 @@ let test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit 
   check string "runtime blocker summary"
     detail
     (runtime |> member "runtime_blocker_summary" |> to_string);
-  check bool "runtime blocker manual_reconcile"
+  check bool "runtime blocker continue gate"
     true
-    (runtime |> member "runtime_blocker_manual_reconcile" |> to_bool)
+    (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
+
+let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker () =
+  KR.clear ();
+  let base = make_meta ~name:"runtime-persisted-manual-reconcile-test" () in
+  let reason =
+    "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
+  in
+  let meta =
+    {
+      base with
+      paused = true;
+      runtime =
+        {
+          base.runtime with
+          last_blocker = reason;
+        };
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-persisted-manual-reconcile"
+  in
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  check string "runtime blocker class"
+    "ambiguous_post_commit_failure"
+    (runtime |> member "runtime_blocker_class" |> to_string);
+  check string "runtime blocker summary"
+    reason
+    (runtime |> member "runtime_blocker_summary" |> to_string);
+  check bool "runtime blocker continue gate"
+    true
+    (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
 
 let test_runtime_surface_exposes_social_model_resolution_fields () =
   KR.clear ();
@@ -395,8 +427,11 @@ let () =
             test_keeper_surface_status_maps_dead_to_inactive;
           test_case "runtime surface derives slot wait timeout blocker" `Quick
             test_runtime_surface_derives_autonomous_slot_wait_timeout_from_meta;
-          test_case "runtime surface derives manual reconcile blocker" `Quick
-            test_runtime_surface_derives_manual_reconcile_from_ambiguous_partial_commit;
+          test_case "runtime surface derives continue-gate blocker" `Quick
+            test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit;
+          test_case "runtime surface derives persisted continue-gate blocker"
+            `Quick
+            test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker;
           test_case "runtime surface exposes social model fields" `Quick
             test_runtime_surface_exposes_social_model_resolution_fields;
         ] );

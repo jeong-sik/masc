@@ -91,6 +91,14 @@ jobs:
           chmod +x scripts/release-binary-smoke.sh
           scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
 
+      - name: Generate release evidence bundle
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p dist
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            dist/release-evidence-${{ matrix.arch }}.md
+
       - name: Package binary
         run: |
           mkdir -p dist
@@ -101,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: masc-mcp-${{ matrix.arch }}
-          path: dist/masc-mcp-${{ matrix.arch }}
+          path: dist/*
 
   release:
     needs: build

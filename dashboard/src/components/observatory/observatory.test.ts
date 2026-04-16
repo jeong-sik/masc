@@ -91,7 +91,7 @@ describe('Observatory', () => {
     vi.resetModules()
   })
 
-  it('renders live monitoring and activity-derived panels on one surface', async () => {
+  it('shows timeline panels by default', async () => {
     const { Observatory } = await import('./observatory')
 
     await act(async () => {
@@ -102,9 +102,44 @@ describe('Observatory', () => {
 
     expect(fetchTelemetry).toHaveBeenCalledTimes(1)
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('live-monitor-stub')
     expect(container.textContent).toContain('activity-panels-stub')
+    expect(container.textContent).not.toContain('live-monitor-stub')
     expect(container.textContent).toContain('최근 1시간')
+    expect(container.textContent).toContain('자동 갱신')
     expect(container.textContent).toContain('hover any track for cross-signal readout')
-  })
+  }, 30000)
+
+  it('switches to live tab without rendering timeline panels', async () => {
+    const { Observatory, refreshObservatorySurface } = await import('./observatory')
+
+    await act(async () => {
+      render(html`<${Observatory} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const liveButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('라이브'))
+
+    expect(liveButton).toBeTruthy()
+
+    await act(async () => {
+      liveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('live-monitor-stub')
+    expect(container.textContent).not.toContain('activity-panels-stub')
+    expect(container.textContent).toContain('실시간 스트림과 에이전트 상태를 한곳에서 봅니다.')
+
+    await act(async () => {
+      refreshObservatorySurface()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(fetchTelemetry).toHaveBeenCalledTimes(1)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
+  }, 30000)
 })

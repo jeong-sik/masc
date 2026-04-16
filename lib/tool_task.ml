@@ -186,15 +186,24 @@ let strict_release_requires_handoff = function
   | Some ({ contract = Some contract; _ } : Types.task) -> contract.strict
   | _ -> false
 
-let _contract_gate_rejection_message _reasons =
-  (* Task_contract_gate removed — always allow completion *)
-  "task contract gate is not available"
-
 let persisted_contract_rejection ~(ctx : context)
     ~(task_opt : Types.task option) ~(notes : string) =
-  (* Task_contract_gate removed — always allow completion *)
-  ignore (ctx, task_opt, notes);
-  None
+  ignore notes;
+  match task_opt with
+  | None -> None
+  | Some task ->
+    if not (Env_config_runtime.Cdal.gate_enabled ()) then begin
+      Log.Task.info "[cdal-gate] disabled, skipping for task=%s agent=%s"
+        task.id ctx.agent_name;
+      None
+    end else
+      match task.contract with
+      | None -> None
+      | Some contract when not contract.strict -> None
+      | Some _contract ->
+        Log.Task.info "[cdal-gate] checking verdict for task=%s agent=%s"
+          task.id ctx.agent_name;
+        Cdal_verdict_gate.gate_check ~task_id:task.id ()
 
 (* Handlers *)
 
@@ -698,6 +707,16 @@ let handle_transition ctx args =
     end else
       r
   in
+  (* Capture verification_id from AwaitingVerification state BEFORE transition.
+     approve/reject transitions change state, destroying the verification_id.
+     Issue #7543. *)
+  let verification_id_before =
+    match task_opt with
+    | Some t -> (match t.task_status with
+        | Types.AwaitingVerification { verification_id; _ } -> Some verification_id
+        | _ -> None)
+    | None -> None
+  in
   let result = try_transition 0 in
   (* Notify A2A subscribers on successful transition *)
   (match result with
@@ -717,7 +736,33 @@ let handle_transition ctx args =
          ("action", `String action_s);
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
-       ])
+       ]);
+       (match action with
+        | Types.Submit_for_verification ->
+          let tasks = Coord.get_tasks_raw ctx.config in
+          (match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
+           | Some task ->
+             let evidence_refs = match task.contract with
+               | Some c -> c.verify_gate_evidence
+               | None -> [] in
+             (match task.task_status with
+              | Types.AwaitingVerification { verification_id; assignee; _ } ->
+                Verification_protocol.on_submit_for_verification
+                  ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
+              | _ -> ())
+           | None -> ())
+        | Types.Approve_verification ->
+          let verification_id = Option.value ~default:"" verification_id_before in
+          Verification_protocol.on_approve_verification
+            ~config:ctx.config ~task_id ~verifier:ctx.agent_name
+            ~verification_id ~notes
+        | Types.Reject_verification ->
+          let reason = if notes <> "" then notes else reason in
+          let verification_id = Option.value ~default:"" verification_id_before in
+          Verification_protocol.on_reject_verification
+            ~config:ctx.config ~task_id ~verifier:ctx.agent_name
+            ~verification_id ~reason
+        | _ -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics *)

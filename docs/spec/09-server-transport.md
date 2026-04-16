@@ -341,9 +341,9 @@ let make_routes ~port ~host ~sw ~clock =
   |> Server_routes_http_routes_room.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
-  |> Server_routes_http_routes_command_plane_read.add_routes
-  |> Server_routes_http_routes_command_plane_write.add_routes ~sw ~clock
-  |> Server_routes_http_routes_activity.add_routes
+  |> Server_routes_http_routes_cascade.add_routes
+  |> Server_routes_http_routes_activity.add_routes ~sw ~clock
+  |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
 ```
 
 주요 REST 라우트 그룹:
@@ -353,10 +353,10 @@ let make_routes ~port ~host ~sw ~clock =
 | Frontend | `/`, `/health`, `/metrics` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
 | Room | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_room` | `GET /api/v1/status` |
-| Command Plane (R) | `/api/v1/command-plane/*` | `_command_plane_read` | `GET /api/v1/command-plane/topology` |
-| Command Plane (W) | `/api/v1/command-plane/*` | `_command_plane_write` | `POST /api/v1/command-plane/operations` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
+| Cascade | `/api/v1/cascade/*` | `_cascade` | `GET /api/v1/cascade/health` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
+| Channel Gate | `/api/v1/gate/*` | `_channel_gate` | `GET /api/v1/gate/health` |
 | Board | `/api/v1/board/*` | main_eio 직접 | `GET /api/v1/board/{id}` |
 | GraphQL | `/graphql` | main_eio 직접 | `POST /graphql` |
 | OpenAPI | `/api/v1/openapi.json` | `Transport.Rest` | OpenAPI 3.1 문서 자동 생성 |
@@ -852,7 +852,7 @@ sequenceDiagram
 | `server_auth.ml` | 491 | HTTP 레벨 인증/권한 |
 | `server_routes_http.ml` | 17 | 라우트 조립 진입점 |
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
-| `server_command_plane_http.ml` | 56 | Command Plane HTTP 핸들러 |
+| `server_command_plane_http.ml` | 56 | Retired compatibility lane removed-surface responder |
 | `server_utils.ml` | 120 | 공용 유틸리티 |
 
 ### 18.3 gRPC (lib/grpc/)

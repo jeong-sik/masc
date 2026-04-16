@@ -38,6 +38,7 @@ type world_observation = {
   economic_pressure : Agent_economy.pressure_mode;
   unclaimed_task_count : int;
   failed_task_count : int;
+  pending_verification_count : int;
   active_agent_count : int;
   last_turn_budget : (int * int) option;
   last_tools_used : string list;
@@ -203,7 +204,7 @@ let apply_message_cursor_updates (meta : keeper_meta)
     meta updates
 
 (** Read room backlog counts. *)
-let read_backlog_counts ~(config : Coord.config) : int * int =
+let read_backlog_counts ~(config : Coord.config) : int * int * int =
   try
     let backlog = Coord.read_backlog config in
     let unclaimed =
@@ -219,10 +220,18 @@ let read_backlog_counts ~(config : Coord.config) : int * int =
              match t.task_status with Types.Cancelled _ -> true | _ -> false)
            backlog.tasks)
     in
-    (unclaimed, failed)
+    let pending_verification =
+      List.length
+        (List.filter
+           (fun (t : Types.task) ->
+             match t.task_status with
+             | Types.AwaitingVerification _ -> true | _ -> false)
+           backlog.tasks)
+    in
+    (unclaimed, failed, pending_verification)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> (0, 0)
+  | _ -> (0, 0, 0)
 
 (** Count active agents in room. *)
 let count_active_agents ~(config : Coord.config) : int =
@@ -619,7 +628,7 @@ let observe ~(pending_board_events : pending_board_event list option)
   let pending_mentions, pending_scope_messages, message_cursor_updates =
     collect_message_scope ~config ~meta
   in
-  let unclaimed_task_count, failed_task_count =
+  let unclaimed_task_count, failed_task_count, pending_verification_count =
     read_backlog_counts ~config
   in
   let active_agent_count = count_active_agents ~config in
@@ -669,6 +678,7 @@ let observe ~(pending_board_events : pending_board_event list option)
     economic_pressure;
     unclaimed_task_count;
     failed_task_count;
+    pending_verification_count;
     active_agent_count;
     last_turn_budget = None;
     last_tools_used = [];
@@ -682,6 +692,7 @@ let actionable_signal_present (observation : world_observation) =
   || Option.is_some observation.worktree_change_summary
   || observation.unclaimed_task_count > 0
   || observation.failed_task_count > 0
+  || observation.pending_verification_count > 0
   || observation.work_discovery_due
 
 let proactive_work_signal_present ~(meta : keeper_meta)

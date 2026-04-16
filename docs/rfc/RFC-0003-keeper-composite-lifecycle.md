@@ -7,11 +7,10 @@
 
 > Runtime note (2026-04-16)
 > Legacy `manual_reconcile` two-store runtime ownership was removed in `#7334`.
-> The current OCaml observer keeps the `recovery` / `recovery_two_store_sync`
-> payload only as a compatibility-clean projection so the dashboard/API shape
-> remains stable. Any `reconcile_data` / `reconcile_fsm` discussion below is
-> historical audit/spec context, not current runtime truth, until a new
-> recovery contract is defined.
+> Composite observer/runtime truth no longer exports placeholder `recovery`
+> or `recovery_two_store_sync` fields. Any `reconcile_data` /
+> `reconcile_fsm` discussion below is historical audit/spec context, not the
+> live dashboard/API contract.
 
 ## Related Documents
 
@@ -25,7 +24,9 @@
 - `specs/keeper-state-machine/KeeperCoreTriad.tla` — State × Decision × Cascade (5-phase 투사)
 - `specs/state-product/StateProduct.tla` — Keeper × Turn × Validation 직교 합성
 - `specs/keeper-state-machine/KeeperContextLifecycle.tla` — Context + Compaction + Checkpoint
-- `specs/bug-models/MemoryCompaction.tla`, `CascadeLiveness.tla`
+- `specs/keeper-state-machine/KeeperCascadeLifecycle.tla`
+- `specs/keeper-state-machine/KeeperCompactionLifecycle.tla`
+- `specs/boundary/KeeperContinueGate.tla`
 
 ## 1. Context & Motivation
 
@@ -41,7 +42,7 @@
 
 - `Keeper_state_machine.mli:131-136` `Context_measured` 이벤트는 Decision, Compaction, Cascade, Recovery의 분기 조건을 공통으로 공급하지만 이 공유 측정의 존재를 joint spec으로 명시한 곳이 없다.
 - `keeper_post_turn.ml:45-232` `apply_post_turn_lifecycle`는 `Compaction_started/completed`, `Handoff_started/completed`를 한 turn 안에 atomic하게 emit하지만, 이 atomic 경계를 TLC로 검증할 수 있는 spec이 없다.
-- `docs/tla-audit/state-fsm-gap-2026-04-13.md` Bug #1(PR #6834, `keeper_keepalive.ml:774-836`)은 **data record 스토어와 FSM condition 스토어 간 비동기**가 만든 one-way trap이었다. 감사 문서 §5는 P4 `KeeperRecoveryOrchestration.tla` 신규를 제안했으나 아직 spec 파일이 없다.
+- `docs/tla-audit/state-fsm-gap-2026-04-13.md` Bug #1(PR #6834, `keeper_keepalive.ml:774-836`)은 **data record 스토어와 FSM condition 스토어 간 비동기**가 만든 one-way trap이었다. 이 RFC의 live observer contract에서는 그 two-store 축을 더 이상 ownership 대상으로 두지 않는다. `KeeperRecoveryOrchestration.tla`는 historical audit model로만 남는다.
 - 대시보드 관점에서 각 FSM이 `dashboard/src/components/keeper-*.ts`의 개별 위젯으로 흩어져 있어 "이 keeper의 현재 상태가 invariants를 만족하는가"를 한눈에 볼 수 없다.
 
 이 RFC는 **새 controller를 만들지 않고**, 기존 sub-spec들 사이의 일관성을 관찰하는 composition observer를 spec + OCaml + dashboard payload 계층으로 정의한다.
@@ -97,8 +98,8 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | `ksm_phase` | `KeeperStateMachine.tla` 12-state → 7-state 투사 | `{Running, Failing, Overflowed, Compacting, HandingOff, Draining, Stable}` | Lossy projection. Stable은 turn cycle 밖 |
 | `ktc_turn_phase` | `KeeperTurnCycle.tla` / `keeper_unified_turn.ml` | `{idle, prompting, executing, compacting, finalizing}` | |
 | `kdp_decision` | `KeeperDecisionPipeline.tla` | `{undecided, guard_ok, gate_rejected, tool_policy_selected}` | Narrow projection |
-| `kcl_cascade_state` | `CascadeLiveness.tla` | `{idle, selecting, trying, done, exhausted}` | |
-| `kmc_compaction` | `MemoryCompaction.tla` | `{accumulating, compacting, done}` | |
+| `kcl_cascade_state` | `KeeperCascadeLifecycle.tla` | `{idle, selecting, trying, done, exhausted}` | |
+| `kmc_compaction` | `KeeperCompactionLifecycle.tla` | `{accumulating, compacting, done}` | |
 | `shared_measurement` | `Context_measured` | `Nat` (0 = none, else snapshot id) | **hub** |
 | `measurement_turn` | `turn_tick` at capture | `Nat` | ordering |
 | `turn_tick` | monotone counter | `0..MaxTurnTicks` | model bound |

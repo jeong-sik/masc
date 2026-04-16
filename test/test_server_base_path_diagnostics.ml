@@ -46,20 +46,7 @@ let canonical_path path =
   try Unix.realpath path with
   | Unix.Unix_error _ -> path
 
-let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > hay_len then
-      false
-    else if String.sub haystack idx needle_len = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  if needle_len = 0 then true else loop 0
-
-let test_detects_dual_masc_roots () =
+let test_divergent_cwd_is_observational_only () =
   with_temp_dir "base-path-diag" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -79,26 +66,10 @@ let test_detects_dual_masc_roots () =
       ()
   in
   Alcotest.(check bool) "roots diverge" true diag.roots_diverge;
-  Alcotest.(check bool) "dual roots" true diag.dual_masc_roots;
-  Alcotest.(check bool) "cwd .masc exists" true diag.cwd_has_masc_dir;
   Alcotest.(check bool) "effective .masc exists" true diag.effective_has_masc_dir;
-  Alcotest.(check bool) "warning present" true (Option.is_some diag.warning);
-  Alcotest.(check (list string)) "cwd legacy dirs" [ "perpetual" ]
-    diag.cwd_legacy_dirs;
-  Alcotest.(check bool) "warning mentions ignored legacy dirs" true
-    (match diag.warning with
-     | Some warning ->
-         string_contains ~needle:"ignored cwd .masc still contains legacy dirs (perpetual)"
-           warning
-     | None -> false)
+  Alcotest.(check bool) "warning removed" false (Option.is_some diag.warning)
 
-let test_implicit_dual_roots_are_strict_violation () =
-  (* When [effective_base_path] was derived from a cwd heuristic
-     (no [input_base_path], no [resolution_source] → implicit), a
-     dual-.masc-root situation forces fail-fast even if the operator
-     did not explicitly opt in via [MASC_BASE_PATH_STRICT]. Cwd
-     heuristics are unreliable enough that "start the server next to
-     two different .masc trees" is unambiguously an operator error. *)
+let test_divergent_cwd_is_not_a_strict_violation () =
   with_temp_dir "base-path-strict" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -115,28 +86,14 @@ let test_implicit_dual_roots_are_strict_violation () =
   in
   Alcotest.(check bool) "strict_mode_requested stays false" false
     diag.strict_mode_requested;
-  Alcotest.(check bool) "startup_rejected derived from implicit dual roots" true
+  Alcotest.(check bool) "startup_rejected stays false" false
     diag.startup_rejected;
-  Alcotest.(check bool) "startup_abort_eligible derived from implicit dual roots" true
+  Alcotest.(check bool) "startup_abort_eligible stays false" false
     diag.startup_abort_eligible;
-  Alcotest.(check bool) "implicit dual roots violate" true
+  Alcotest.(check bool) "divergent cwd does not violate" false
     (Server_base_path_diagnostics.strict_violation diag)
 
-let test_explicit_resolution_source_escapes_strict_violation () =
-  (* When the operator/test-harness explicitly set MASC_BASE_PATH (or
-     passed --base-path on the CLI), the runtime trusts that decision
-     and uses the explicit path — the warning still fires so operator
-     tools can flag the stale cwd .masc tree, but strict_violation
-     must return false so the server keeps running.
-
-     Pre-#6548 behavior had this escape via the
-     [not explicit_resolution_source] clause in [strict_violation].
-     #6548 flattened [strict_violation] to just [dual_masc_roots],
-     which broke the [Run SSE reconnect e2e] CI step because the test
-     harness runs from a git worktree (with its own committed
-     .masc/) while pointing at a tmp [/tmp/sse-storm-base-<hex>]
-     MASC_BASE_PATH. The fix restores the escape for explicit
-     resolution sources. *)
+let test_explicit_env_resolution_remains_observational_only () =
   with_temp_dir "base-path-explicit" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -154,25 +111,18 @@ let test_explicit_resolution_source_escapes_strict_violation () =
       ~effective_masc_root:(Filename.concat effective ".masc")
       ()
   in
-  Alcotest.(check bool) "dual roots still detected" true diag.dual_masc_roots;
-  Alcotest.(check bool) "warning still present" true
+  Alcotest.(check bool) "warning removed" false
     (Option.is_some diag.warning);
   Alcotest.(check bool) "strict_mode_requested reflects user STRICT=true" true
     diag.strict_mode_requested;
   Alcotest.(check bool) "startup_rejected false for explicit env source" false
     diag.startup_rejected;
-  Alcotest.(check bool) "startup_abort_eligible remains true under strict mode" true
+  Alcotest.(check bool) "startup_abort_eligible remains false" false
     diag.startup_abort_eligible;
-  Alcotest.(check bool) "explicit env source escapes violation" false
+  Alcotest.(check bool) "explicit env source stays non-violating" false
     (Server_base_path_diagnostics.strict_violation diag)
 
-let test_explicit_cli_resolution_source_also_escapes () =
-  (* Symmetric with [test_explicit_resolution_source_escapes_strict_violation]
-     but drives [resolution_source:"explicit_cli"]. [explicit_resolution_source]
-     pattern-matches on both ["explicit_env"] and ["explicit_cli"], so both
-     must take the escape branch. This test guards against a future
-     refactor that splits those literals into separate code paths and
-     accidentally drops the CLI case. *)
+let test_explicit_cli_resolution_source_remains_observational_only () =
   with_temp_dir "base-path-explicit-cli" @@ fun root ->
   let cwd = Filename.concat root "repo" in
   let effective = Filename.concat root "workspace" in
@@ -189,14 +139,13 @@ let test_explicit_cli_resolution_source_also_escapes () =
       ~effective_masc_root:(Filename.concat effective ".masc")
       ()
   in
-  Alcotest.(check bool) "dual roots still detected" true diag.dual_masc_roots;
   Alcotest.(check bool) "strict_mode_requested false without user STRICT" false
     diag.strict_mode_requested;
   Alcotest.(check bool) "startup_rejected false for explicit cli source" false
     diag.startup_rejected;
   Alcotest.(check bool) "startup_abort_eligible false without user STRICT" false
     diag.startup_abort_eligible;
-  Alcotest.(check bool) "explicit cli source escapes violation" false
+  Alcotest.(check bool) "explicit cli source stays non-violating" false
     (Server_base_path_diagnostics.strict_violation diag)
 
 let test_to_yojson_exposes_effective_paths () =
@@ -216,8 +165,8 @@ let test_to_yojson_exposes_effective_paths () =
     (json |> member "effective_masc_root" |> to_string);
   Alcotest.(check bool) "roots diverge field" true
     (json |> member "roots_diverge" |> to_bool);
-  Alcotest.(check int) "cwd legacy dirs exposed" 0
-    (json |> member "cwd_legacy_dirs" |> to_list |> List.length);
+  Alcotest.(check bool) "cwd legacy dirs removed" true
+    (match json |> member "cwd_legacy_dirs" with `Null -> true | _ -> false);
   Alcotest.(check int) "effective legacy dirs exposed" 0
     (json |> member "effective_legacy_dirs" |> to_list |> List.length)
 
@@ -316,18 +265,18 @@ let () =
     [
       ( "diagnostics",
         [
-          Alcotest.test_case "detects dual .masc roots" `Quick
-            test_detects_dual_masc_roots;
-          Alcotest.test_case "implicit dual roots are strict violation" `Quick
-            test_implicit_dual_roots_are_strict_violation;
+          Alcotest.test_case "divergent cwd is observational only" `Quick
+            test_divergent_cwd_is_observational_only;
+          Alcotest.test_case "divergent cwd is not strict violation" `Quick
+            test_divergent_cwd_is_not_a_strict_violation;
           Alcotest.test_case
-            "explicit env resolution source escapes strict violation"
+            "explicit env resolution remains observational only"
             `Quick
-            test_explicit_resolution_source_escapes_strict_violation;
+            test_explicit_env_resolution_remains_observational_only;
           Alcotest.test_case
-            "explicit cli resolution source also escapes"
+            "explicit cli resolution remains observational only"
             `Quick
-            test_explicit_cli_resolution_source_also_escapes;
+            test_explicit_cli_resolution_source_remains_observational_only;
           Alcotest.test_case "json exposes effective paths" `Quick
             test_to_yojson_exposes_effective_paths;
           Alcotest.test_case "json exposes resolution source" `Quick

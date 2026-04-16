@@ -6,6 +6,28 @@ open Alcotest
 module Sup = Masc_mcp.Keeper_supervisor
 module Reg = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module AQ = Masc_mcp.Keeper_approval_queue
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_supervisor_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let ensure_fs env =
+  if not (Fs_compat.has_fs ()) then
+    Fs_compat.set_fs (Eio.Stdenv.fs env)
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun name -> rm (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
 
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
 
@@ -203,6 +225,83 @@ let test_fiber_health_respects_max_restarts_override () =
     Masc_mcp.Governance_registry.keeper_supervisor_max_restarts;
   Reg.clear ()
 
+let test_sweep_restores_reconcile_gate_for_paused_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive ~base_path:base_dir "paused-reconcile";
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let base = make_meta "paused-reconcile" in
+      let meta =
+        {
+          base with
+          paused = true;
+          autoboot_enabled = true;
+          runtime =
+            {
+              base.runtime with
+              last_blocker =
+                "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated";
+            };
+        }
+      in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      let pending_before = AQ.pending_count () in
+      Sup.sweep_and_recover ctx;
+      check bool "paused keeper has pending approval" true
+        (AQ.has_pending_for_keeper ~keeper_name:meta.name);
+      check int "approval count incremented"
+        (pending_before + 1) (AQ.pending_count ());
+      let approval_id =
+        match AQ.list_pending_json () with
+        | `List entries ->
+            entries
+            |> List.find_map (function
+                 | `Assoc fields ->
+                     let row = `Assoc fields in
+                     if Yojson.Safe.Util.(row |> member "keeper_name" |> to_string_option)
+                        = Some meta.name
+                     then Yojson.Safe.Util.(row |> member "id" |> to_string_option)
+                     else None
+                 | _ -> None)
+            |> Option.value ~default:""
+        | _ -> ""
+      in
+      check bool "approval id present" true (approval_id <> "");
+      (match AQ.resolve ~id:approval_id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error msg -> fail ("resolve failed: " ^ msg));
+      let resumed_meta =
+        match KT.read_meta config meta.name with
+        | Ok (Some value) -> value
+        | Ok None -> fail "expected resumed keeper meta"
+        | Error err -> fail err
+      in
+      check bool "paused cleared after approval" false resumed_meta.paused;
+      check string "blocker cleared after approval" "" resumed_meta.runtime.last_blocker;
+      check bool "keeper registered after approval" true
+        (Reg.is_registered ~base_path:config.base_path meta.name))
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -238,5 +337,9 @@ let () =
     "runtime_override", [
       test_case "fiber_health_of respects max_restarts override" `Quick
         test_fiber_health_respects_max_restarts_override;
+    ];
+    "reconcile_gate_recovery", [
+      test_case "sweep restores reconcile gate for paused keeper" `Quick
+        test_sweep_restores_reconcile_gate_for_paused_keeper;
     ];
   ]

@@ -85,6 +85,8 @@ export function statusLabel(value?: string | null): string {
       return '점유됨'
     case 'in_progress':
       return '진행 중'
+    case 'awaiting_verification':
+      return '검증 대기'
     case 'todo':
       return '대기'
     case 'preview':

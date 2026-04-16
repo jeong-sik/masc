@@ -88,7 +88,15 @@ let default_base_path =
   in
   Filename.concat root "cdal_verdicts"
 
-let persist ?(base_dir = default_base_path)
+let persist ?(base_dir = default_base_path) ?task_id
     (verdict : Cdal_types.contract_verdict) : unit =
   let store = Dated_jsonl.create ~base_dir () in
-  Dated_jsonl.append store (Cdal_types.contract_verdict_to_json verdict)
+  let json = Cdal_types.contract_verdict_to_json verdict in
+  let envelope = match task_id with
+    | None -> json
+    | Some tid ->
+      match json with
+      | `Assoc fields -> `Assoc (("_task_id", `String tid) :: fields)
+      | other -> other
+  in
+  Dated_jsonl.append store envelope

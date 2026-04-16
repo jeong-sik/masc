@@ -64,7 +64,7 @@ function socialModelFallbackHint(keeper: Keeper): string | null {
   return '미인식 소셜 모델 설정'
 }
 
-function manualReconcileHint(keeper: Keeper): string {
+function continueGateHint(keeper: Keeper): string {
   const detail = keeper.runtime_blocker_summary?.trim()
   if (detail) return `계속 진행 승인 대기 · ${detail}`
   if (keeper.runtime_blocker_class === 'ambiguous_post_commit_timeout') {
@@ -78,7 +78,7 @@ function manualReconcileHint(keeper: Keeper): string {
 
 export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
-  if (keeper.runtime_blocker_manual_reconcile) return manualReconcileHint(keeper)
+  if (keeper.runtime_blocker_continue_gate) return continueGateHint(keeper)
   const blockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
   if (runtimeBlocker) return runtimeBlocker

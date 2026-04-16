@@ -15,7 +15,8 @@ let agent_current_task_matches_backlog backlog ~agent_name task_id =
   with
   | Some task -> (
       match task.task_status with
-      | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+      | Claimed { assignee; _ } | InProgress { assignee; _ }
+      | AwaitingVerification { assignee; _ } ->
           String.equal assignee agent_name
       | Todo | Done _ | Cancelled _ -> false)
   | None -> false
@@ -81,7 +82,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(task_filter=fun (_:
          tasks that permanently block the backlog. *)
       let previous_claim = List.find_opt (fun (t : Types.task) ->
         match t.task_status with
-        | Claimed { assignee; _ } | InProgress { assignee; _ } ->
+        | Claimed { assignee; _ } | InProgress { assignee; _ }
+        | AwaitingVerification { assignee; _ } ->
             String.equal assignee agent_name
         | Todo | Done _ | Cancelled _ -> false
       ) backlog.tasks in
@@ -322,6 +324,7 @@ let release_stale_claims config ~ttl_seconds =
                 task.id assignee (now_f -. ts) now_str);
               { task with task_status = Todo }
             end else task
+        | AwaitingVerification _ -> task  (* leave alone; awaiting verifier *)
         | Todo | Done _ | Cancelled _ -> task
       ) backlog.tasks in
       if !stale_tasks <> [] then begin

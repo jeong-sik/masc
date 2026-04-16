@@ -44,6 +44,28 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
     in
     updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
 
+let ambiguous_partial_commit_prefix =
+  "turn outcome ambiguous after committed mutating tool call(s)"
+
+let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
+  meta.paused
+  && String_util.contains_substring_ci
+       (String.trim meta.runtime.last_blocker)
+       ambiguous_partial_commit_prefix
+
+let committed_tools_of_ambiguous_blocker (blocker : string) =
+  let trimmed = String.trim blocker in
+  match String.index_opt trimmed '[' with
+  | None -> []
+  | Some open_idx -> (
+      match String.index_from_opt trimmed (open_idx + 1) ']' with
+      | Some close_idx when close_idx > open_idx + 1 ->
+          String.sub trimmed (open_idx + 1) (close_idx - open_idx - 1)
+          |> String.split_on_char ','
+          |> List.map String.trim
+          |> List.filter (fun tool -> tool <> "")
+      | _ -> [])
+
 (* ── Event publishing ────────────────────────────────────── *)
 
 let publish_lifecycle event_name keeper_name detail =
@@ -183,6 +205,89 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     publish_lifecycle "started" meta.name "supervised";
     launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg
   end
+
+let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
+  let latest_meta =
+    match read_meta ctx.config meta.name with
+    | Ok (Some latest) -> latest
+    | _ -> meta
+  in
+  let resumed_meta =
+    {
+      latest_meta with
+      paused = false;
+      updated_at = now_iso ();
+      runtime =
+        {
+          latest_meta.runtime with
+          last_blocker = "";
+        };
+    }
+  in
+  (match write_meta ctx.config resumed_meta with
+   | Ok () -> ()
+   | Error err ->
+       Log.Keeper.error
+         "%s: reconcile gate resume write_meta failed: %s"
+         resumed_meta.name err);
+  Keeper_registry.update_meta ~base_path:ctx.config.base_path resumed_meta.name
+    resumed_meta;
+  Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path
+    resumed_meta.name None;
+  Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path
+    resumed_meta.name;
+  ignore
+    (Keeper_registry.dispatch_event ~base_path:ctx.config.base_path
+       resumed_meta.name Keeper_state_machine.Operator_resume);
+  match Keeper_registry.get ~base_path:ctx.config.base_path resumed_meta.name with
+  | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
+      Atomic.set entry.fiber_wakeup true
+  | Some _ ->
+      Keeper_registry.unregister ~base_path:ctx.config.base_path
+        resumed_meta.name;
+      supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
+  | None -> supervise_keepalive ~proactive_warmup_sec:0 ctx resumed_meta
+
+let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
+  let blocker = String.trim meta.runtime.last_blocker in
+  let committed_tools = committed_tools_of_ambiguous_blocker blocker in
+  let failure_reason =
+    if String_util.contains_substring_ci blocker "turn wall-clock timeout"
+    then "ambiguous_partial_commit(post_commit_timeout)"
+    else "ambiguous_partial_commit(post_commit_failure)"
+  in
+  let input =
+    `Assoc
+      [
+        ("kind", `String "reconcile_required");
+        ("keeper_name", `String meta.name);
+        ("failure_reason", `String failure_reason);
+        ("error_detail", `String blocker);
+        ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
+      ]
+  in
+  let _approval_id =
+    Keeper_approval_queue.submit_pending
+      ~keeper_name:meta.name
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input
+      ~risk_level:Keeper_approval_queue.Critical
+      ~on_resolution:(fun decision ->
+        match decision with
+        | Agent_sdk.Hooks.Approve
+        | Agent_sdk.Hooks.Edit _ ->
+            resume_keeper_after_reconcile_gate ctx meta;
+            Log.Keeper.info
+              "%s: restored reconcile continue gate approved; keeper resumed"
+              meta.name
+        | Agent_sdk.Hooks.Reject reason ->
+            Log.Keeper.warn
+              "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
+              meta.name reason)
+  in
+  Log.Keeper.warn
+    "%s: restored reconcile continue gate from persisted paused meta"
+    meta.name
 
 (* ── Sweep and recover ───────────────────────────────────── *)
 
@@ -414,14 +519,33 @@ let sweep_and_recover (ctx : _ context) =
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name
   ) restart_list;
-  (* Phase 2: prune stale paused keeper meta files from disk *)
+  (* Phase 2: restore paused reconcile gates whose approval queue was lost
+     on restart. The queue itself is in-memory, but paused keeper meta is
+     durable, so rebuild the human gate from persisted blocker evidence. *)
+  Keeper_types.keeper_names ctx.config
+  |> List.iter (fun name ->
+         match read_meta ctx.config name with
+         | Ok (Some meta)
+           when paused_meta_requires_reconcile_recovery meta
+                && not
+                     (Keeper_approval_queue.has_pending_for_keeper
+                        ~keeper_name:meta.name) ->
+             restore_reconcile_continue_gate ctx meta
+         | _ -> ());
+  (* Phase 3: prune stale paused keeper meta files from disk. Keep
+     reconcile-recovery pauses until the operator explicitly resolves them. *)
   let paused_ttl_sec = Env_config.KeeperSupervisor.paused_cleanup_ttl_sec in
   Keeper_types.keeper_names ctx.config
   |> List.iter (fun name ->
          if Keeper_registry.is_running ~base_path name then ()
          else
            match read_meta ctx.config name with
-           | Ok (Some meta) when is_stale_paused_meta ~now ~paused_ttl_sec meta ->
+           | Ok (Some meta)
+             when is_stale_paused_meta ~now ~paused_ttl_sec meta
+                  && not (paused_meta_requires_reconcile_recovery meta)
+                  && not
+                       (Keeper_approval_queue.has_pending_for_keeper
+                          ~keeper_name:meta.name) ->
                let path = Keeper_types.keeper_meta_path ctx.config name in
                (try
                   Sys.remove path;
@@ -432,5 +556,5 @@ let sweep_and_recover (ctx : _ context) =
                   Log.Keeper.warn "%s: paused meta prune failed: %s"
                     name (Printexc.to_string exn))
            | _ -> ());
-  (* Phase 3: reconcile LAST — only orphaned durable keepers *)
+  (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx

@@ -171,9 +171,8 @@ let test_resolve_masc_base_path_ignores_explicit_env_without_opt_in () =
       check string "explicit env ignored without opt-in" requested
         (Coord_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_ignores_explicit_env_with_dual_masc_roots ()
-    =
-  let scratch = Filename.temp_dir "room-utils-dual-roots" "" in
+let test_resolve_masc_base_path_ignores_explicit_env_with_local_masc_dir () =
+  let scratch = Filename.temp_dir "room-utils-local-masc" "" in
   let requested = Filename.concat scratch "repo" in
   let explicit = Filename.concat scratch "parent-root" in
   Unix.mkdir requested 0o755;
@@ -187,11 +186,11 @@ let test_resolve_masc_base_path_ignores_explicit_env_with_dual_masc_roots ()
         [ ("MASC_BASE_PATH", Some explicit);
           ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
         (fun () ->
-          check string "dual roots still honor requested path in tests" requested
+          check string "local .masc still honors requested path in tests" requested
             (Coord_utils.resolve_masc_base_path requested)))
 
-let test_resolve_masc_base_path_dual_root_opt_in_preserves_explicit_env () =
-  let scratch = Filename.temp_dir "room-utils-dual-opt-in" "" in
+let test_resolve_masc_base_path_opt_in_preserves_explicit_env () =
+  let scratch = Filename.temp_dir "room-utils-explicit-opt-in" "" in
   let requested = Filename.concat scratch "repo" in
   let explicit = Filename.concat scratch "parent-root" in
   Unix.mkdir requested 0o755;
@@ -205,7 +204,7 @@ let test_resolve_masc_base_path_dual_root_opt_in_preserves_explicit_env () =
         [ ("MASC_BASE_PATH", Some explicit);
           ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", Some "true") ]
         (fun () ->
-          check string "dual-root opt-in preserves explicit path" explicit
+          check string "opt-in preserves explicit path" explicit
             (Coord_utils.resolve_masc_base_path requested)))
 
 let test_resolve_masc_base_path_ignores_ancestor_explicit_path_without_opt_in () =
@@ -623,10 +622,10 @@ let () =
         test_resolve_masc_base_path_collapses_explicit_env_masc_dir;
       test_case "ignores explicit env without opt-in" `Quick
         test_resolve_masc_base_path_ignores_explicit_env_without_opt_in;
-      test_case "ignores explicit env with dual .masc roots" `Quick
-        test_resolve_masc_base_path_ignores_explicit_env_with_dual_masc_roots;
-      test_case "dual-root opt-in preserves explicit env" `Quick
-        test_resolve_masc_base_path_dual_root_opt_in_preserves_explicit_env;
+      test_case "ignores explicit env when requested path has local .masc" `Quick
+        test_resolve_masc_base_path_ignores_explicit_env_with_local_masc_dir;
+      test_case "opt-in preserves explicit env" `Quick
+        test_resolve_masc_base_path_opt_in_preserves_explicit_env;
       test_case "ignores ancestor explicit path without opt-in" `Quick
         test_resolve_masc_base_path_ignores_ancestor_explicit_path_without_opt_in;
       test_case "default config syncs test base env" `Quick

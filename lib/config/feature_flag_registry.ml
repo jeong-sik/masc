@@ -201,6 +201,16 @@ let all_flags : flag list = [
     default = true; category = "runtime";
     lifecycle = Active; since = "2.162.0" };
 
+  { env_name = "MASC_CDAL_GATE_ENABLED";
+    description = "CDAL verdict gate: block task completion when verdict is Violated/Inconclusive";
+    default = false; category = "runtime";
+    lifecycle = Active; since = "0.9.3" };
+
+  { env_name = "MASC_VERIFICATION_FSM_ENABLED";
+    description = "Task verification FSM: AwaitingVerification state and cross-agent approval";
+    default = false; category = "runtime";
+    lifecycle = Active; since = "0.9.3" };
+
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

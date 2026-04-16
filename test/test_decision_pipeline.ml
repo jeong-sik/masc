@@ -330,7 +330,7 @@ let test_observer_last_outcome_preserved_across_finish_idempotent () =
   check bool "last_outcome preserved across redundant mark_turn_finished"
     true (lo_first = lo_second)
 
-let test_observer_snapshot_json_exposes_recovery_contract () =
+let test_observer_snapshot_json_omits_retired_recovery_contract () =
   Eio_main.run @@ fun _env ->
   let name = "obs-recovery-json" in
   let _ = Reg.register ~base_path:test_obs_bp name (make_obs_meta name) in
@@ -338,14 +338,11 @@ let test_observer_snapshot_json_exposes_recovery_contract () =
   | None -> Alcotest.fail "entry missing"
   | Some entry ->
     let json = Obs.snapshot_to_json (Obs.observe entry) in
-    let recovery = YU.member "recovery" json in
     let invariants = YU.member "invariants" json in
-    check bool "recovery.data_record is exported"
-      false (YU.member "data_record" recovery |> YU.to_bool);
-    check bool "recovery.fsm_condition is exported"
-      false (YU.member "fsm_condition" recovery |> YU.to_bool);
-    check bool "recovery_two_store_sync is exported"
-      true (YU.member "recovery_two_store_sync" invariants |> YU.to_bool)
+    check bool "recovery object omitted"
+      true (match YU.member "recovery" json with `Null -> true | _ -> false);
+    check bool "recovery_two_store_sync omitted"
+      true (match YU.member "recovery_two_store_sync" invariants with `Null -> true | _ -> false)
 (* ── Test Suite ──────────────────────────────────────── *)
 
 let () =
@@ -392,6 +389,6 @@ let () =
       test_case "is_live = false on idle keeper" `Quick test_observer_is_live_false_when_idle;
       test_case "last_outcome populated after turn" `Quick test_observer_last_outcome_populated_after_turn;
       test_case "last_outcome preserved across redundant finish" `Quick test_observer_last_outcome_preserved_across_finish_idempotent;
-      test_case "snapshot json exports recovery contract" `Quick test_observer_snapshot_json_exposes_recovery_contract;
+      test_case "snapshot json omits retired recovery contract" `Quick test_observer_snapshot_json_omits_retired_recovery_contract;
     ];
   ]

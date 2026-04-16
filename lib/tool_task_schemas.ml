@@ -184,9 +184,11 @@ Tip: Look for status='todo' tasks to claim.";
   };
   {
     name = "masc_transition";
-    description = "Move a task through its lifecycle: claim, start, done, cancel, or release. \
+    description = "Move a task through its lifecycle: claim, start, done, cancel, release, \
+submit_for_verification, approve, or reject. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
-After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'.";
+After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'. \
+Use submit_for_verification to request cross-agent review; approve/reject for verifier actions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -200,7 +202,7 @@ After masc_add_task or masc_claim_next; pair with masc_deliver before action='do
         ]);
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Transition action: claim | start | done | cancel | release");
+          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject");
         ]);
         ("expected_version", `Assoc [
           ("type", `String "integer");

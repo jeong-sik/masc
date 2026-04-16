@@ -156,6 +156,53 @@ let observe_histogram name ?(labels=[]) value =
            metric_type = Counter; value = 1.0; labels;
          }))
 
+(** {1 Metric Name Constants}
+
+    Exported so registration here and [inc_counter] / [set_gauge]
+    call-sites in the keeper modules share a single source of truth.
+    Without this, a typo on either side produces a dead series with
+    no build error (the counter silently drifts to a new key).
+
+    Convention: constant name drops the Prometheus convention suffix
+    ([_total] for counters), full metric name lives on the right-hand
+    side. Consumers import [Prometheus.<constant>] so the compiler
+    catches typos. *)
+
+(* Keeper turn lifecycle (registered in init, incremented in
+   keeper_unified_turn.ml). *)
+let metric_keeper_turns = "masc_keeper_turns_total"
+let metric_keeper_input_tokens = "masc_keeper_input_tokens_total"
+let metric_keeper_output_tokens = "masc_keeper_output_tokens_total"
+let metric_keeper_cache_creation_tokens =
+  "masc_keeper_cache_creation_tokens_total"
+let metric_keeper_cache_read_tokens =
+  "masc_keeper_cache_read_tokens_total"
+
+(* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
+let metric_keeper_compactions = "masc_keeper_compactions_total"
+let metric_keeper_compaction_ratio_change =
+  "masc_keeper_compaction_ratio_change"
+let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
+let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
+
+(* Keeper keepalive (keeper_keepalive.ml). *)
+let metric_keeper_heartbeat_successes =
+  "masc_keeper_heartbeat_successes_total"
+let metric_keeper_heartbeat_failures =
+  "masc_keeper_heartbeat_failures_total"
+let metric_keeper_write_meta_failures =
+  "masc_keeper_write_meta_failures_total"
+
+(* Keeper evidence (keeper_evidence.ml). *)
+let metric_keeper_collision_detected =
+  "masc_keeper_collision_detected_total"
+
+(* MCP tool schema budget (set once at boot from mcp_server_eio.ml
+   via [set_tool_schema_stats]). *)
+let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
+let metric_mcp_tool_schema_tokens_approx =
+  "masc_mcp_tool_schema_tokens_approx"
+
 (** {1 Built-in Metrics} *)
 
 let init () =
@@ -187,19 +234,19 @@ let init () =
   add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter;
   add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
-  add "masc_keeper_compactions_total"
+  add metric_keeper_compactions
     "Total keeper compactions performed" Counter;
-  add "masc_keeper_compaction_ratio_change"
+  add metric_keeper_compaction_ratio_change
     "Context ratio change after compaction (pre - post)" Gauge;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
-  add "masc_keeper_operator_compact_total"
+  add metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;
-  add "masc_keeper_operator_clear_total"
+  add metric_keeper_operator_clear
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)" Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
-  add "masc_keeper_heartbeat_successes_total"
+  add metric_keeper_heartbeat_successes
     "Total keeper heartbeat successes" Counter;
-  add "masc_keeper_heartbeat_failures_total"
+  add metric_keeper_heartbeat_failures
     "Total keeper heartbeat failures" Counter;
   add "masc_provider_prefix_cache_creation_tokens_total"
     "Total provider prefix cache creation tokens (Anthropic)" Counter;
@@ -233,10 +280,10 @@ let init () =
      gives them a HELP description in /metrics output and a zero-value
      baseline so dashboards see "0" instead of "no data" before the
      first observation. *)
-  add "masc_keeper_write_meta_failures_total"
+  add metric_keeper_write_meta_failures
     "Total keeper meta-file write failures, labeled by keeper and phase"
     Counter;
-  add "masc_keeper_collision_detected_total"
+  add metric_keeper_collision_detected
     "Total keeper-name collision detections during evidence assembly"
     Counter;
   add "masc_board_truncated_posts_total"
@@ -269,20 +316,34 @@ let init () =
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
-  add "masc_keeper_turns_total"
+  add metric_keeper_turns
     "Total keeper turns by outcome (labels: keeper_name, outcome=success|failure|budget_exhausted|mutation_boundary)"
     Counter;
-  add "masc_keeper_input_tokens_total"
+  add metric_keeper_input_tokens
     "Cumulative input tokens per keeper turn (labels: keeper_name, model)"
     Counter;
-  add "masc_keeper_output_tokens_total"
+  add metric_keeper_output_tokens
     "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
+    Counter;
+  (* Anthropic / Bedrock prompt caching observability (#7469 Step 1).
+     OAS already receives [cache_creation_input_tokens] and
+     [cache_read_input_tokens] in every [api_usage]; these counters
+     expose them to Prometheus so cache hit-rate and write cost are
+     attributable per keeper + model. Populated dynamically via
+     [inc_counter]; tools that never emit cache data (e.g. non-Anthropic
+     providers) simply leave these at 0. Names are exported as module
+     constants below so registration and call-sites cannot drift. *)
+  add metric_keeper_cache_creation_tokens
+    "Cumulative prompt-cache creation tokens per keeper turn (labels: keeper_name, model)"
+    Counter;
+  add metric_keeper_cache_read_tokens
+    "Cumulative prompt-cache read tokens per keeper turn (labels: keeper_name, model)"
     Counter;
   (* Tool schema budget gauges — set once at boot via
      [set_tool_schema_stats]. Covers #7483 Step 1. *)
-  add "masc_mcp_tool_schema_count"
+  add metric_mcp_tool_schema_count
     "Number of tool schemas exposed to MCP clients" Gauge;
-  add "masc_mcp_tool_schema_tokens_approx"
+  add metric_mcp_tool_schema_tokens_approx
     "Approximate token count of all tool schemas combined (chars/4)"
     Gauge
 
@@ -328,8 +389,8 @@ let update_fd_gauges () =
     fd_warned_once := false
 
 let set_tool_schema_stats ~count ~approx_tokens =
-  set_gauge "masc_mcp_tool_schema_count" (float_of_int count);
-  set_gauge "masc_mcp_tool_schema_tokens_approx" (float_of_int approx_tokens)
+  set_gauge metric_mcp_tool_schema_count (float_of_int count);
+  set_gauge metric_mcp_tool_schema_tokens_approx (float_of_int approx_tokens)
 
 (** {1 Prometheus Export} *)
 

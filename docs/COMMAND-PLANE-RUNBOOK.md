@@ -2,7 +2,7 @@
 
 > **이 문서와 Command Plane(CP) 전체가 제거 예정입니다.**
 >
-> CP는 keeper 실행과 결합되지 않은 별도 ledger였고, 양방향 cross-reference가 0줄입니다. HTTP `/api/v1/command-plane/*` 표면, `command_plane_*` MCP tools, `lib/command_plane/` 디렉터리 전부가 다가오는 CP purge PR 시리즈에서 제거됩니다.
+> CP는 keeper 실행과 결합되지 않은 별도 ledger였고, 양방향 cross-reference가 0줄입니다. HTTP `/api/v1/command-plane/*` 표면은 supported product surface에서 이미 제거되었고, 이 문서는 historical migration context만 보존합니다.
 >
 > 새 코드는 CP에 의존하지 마십시오. 진짜 조정 경로는 `board_posts.jsonl` + keeper FSM + namespace/task hygiene입니다.
 >

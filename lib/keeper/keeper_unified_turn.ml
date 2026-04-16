@@ -392,7 +392,7 @@ let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) 
   | Some entry -> entry.meta
   | None -> fallback_meta
 
-let enqueue_reconcile_continue_gate
+let enqueue_partial_commit_continue_gate
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(failure_reason : Keeper_registry.failure_reason)
@@ -401,7 +401,7 @@ let enqueue_reconcile_continue_gate
   let reason_text = Keeper_registry.failure_reason_to_string failure_reason in
   let input =
     `Assoc [
-      ("kind", `String "reconcile_required");
+      ("kind", `String "continue_gate_required");
       ("keeper_name", `String meta.name);
       ("failure_reason", `String reason_text);
       ("error_detail", `String error_detail);
@@ -410,7 +410,7 @@ let enqueue_reconcile_continue_gate
   in
   Keeper_approval_queue.submit_pending
     ~keeper_name:meta.name
-    ~tool_name:"keeper_continue_after_reconcile"
+    ~tool_name:"keeper_continue_after_partial_commit"
     ~input
     ~risk_level:Keeper_approval_queue.Critical
     ~on_resolution:(fun decision ->
@@ -422,7 +422,7 @@ let enqueue_reconcile_continue_gate
         Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
         Keeper_registry.reset_turn_failures ~base_path:config.base_path meta.name;
         Log.Keeper.info
-          "%s: reconcile continue gate approved; auto-resumed keeper"
+          "%s: partial-commit continue gate approved; auto-resumed keeper"
           meta.name
       | Agent_sdk.Hooks.Reject reason ->
         let _ = sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true in
@@ -430,7 +430,7 @@ let enqueue_reconcile_continue_gate
           ~base_path:config.base_path meta.name
           (Some failure_reason);
         Log.Keeper.warn
-          "%s: reconcile continue gate rejected; keeper remains paused (%s)"
+          "%s: partial-commit continue gate rejected; keeper remains paused (%s)"
           meta.name reason)
 
 (* Dedupe "mixed cascade context budget" log: the values are constant
@@ -621,6 +621,7 @@ let observed_triggers_of_observation
   if observation.pending_scope_messages <> [] then add "scope_message";
   if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
   if observation.failed_task_count > 0 then add "failed_task";
+  if observation.pending_verification_count > 0 then add "pending_verification";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
   if Option.is_some observation.worktree_change_summary then add "worktree_change";
@@ -635,6 +636,7 @@ let observed_affordances_of_observation
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.unclaimed_task_count > 0 then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
+  if observation.pending_verification_count > 0 then add "task_verify";
   if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
 
@@ -749,6 +751,7 @@ let append_decision_record
               ("context_ratio", `Float observation.context_ratio);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("failed_task_count", `Int observation.failed_task_count);
+              ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
               ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
             ] );
@@ -1921,7 +1924,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let is_server_parse_rejection = is_server_rejected_parse_error err in
           let is_auto_recoverable = is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
-          Prometheus.inc_counter "masc_keeper_turns_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
@@ -1983,7 +1986,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~paused:true
               in
               let approval_id =
-                enqueue_reconcile_continue_gate
+                enqueue_partial_commit_continue_gate
                   ~config
                   ~meta:paused_meta
                   ~failure_reason
@@ -2268,14 +2271,29 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
             | Oas_worker.MutationBoundaryReached _ -> "mutation_boundary"
           in
-          Prometheus.inc_counter "masc_keeper_turns_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", updated_meta.name); ("outcome", outcome_label)] ();
-          Prometheus.inc_counter "masc_keeper_input_tokens_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_input_tokens
             ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
             ~delta:(float_of_int result.usage.input_tokens) ();
-          Prometheus.inc_counter "masc_keeper_output_tokens_total"
+          Prometheus.inc_counter Prometheus.metric_keeper_output_tokens
             ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
             ~delta:(float_of_int result.usage.output_tokens) ();
+          (* #7469 Step 1: emit prompt-cache usage so Anthropic/Bedrock
+             hit rate is observable. Skip when both are zero — non-caching
+             providers (GLM/local-llama) would otherwise register a series
+             per keeper+model combination that never moves off zero.
+             Metric names pulled from [Prometheus] constants so a typo
+             here would fail to compile instead of silently creating a
+             dead series. *)
+          (if result.usage.cache_creation_input_tokens > 0 then
+             Prometheus.inc_counter Prometheus.metric_keeper_cache_creation_tokens
+               ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+               ~delta:(float_of_int result.usage.cache_creation_input_tokens) ());
+          (if result.usage.cache_read_input_tokens > 0 then
+             Prometheus.inc_counter Prometheus.metric_keeper_cache_read_tokens
+               ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+               ~delta:(float_of_int result.usage.cache_read_input_tokens) ());
           Log.Keeper.info
             "%s: keeper cycle OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
             updated_meta.name model_used

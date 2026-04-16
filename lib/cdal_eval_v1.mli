@@ -27,4 +27,4 @@ val friction_of_outcome :
 
 (** Persist a verdict to date-split JSONL.
     Defaults to data/cdal_verdicts. Pass [~base_dir] for test isolation. *)
-val persist : ?base_dir:string -> Cdal_types.contract_verdict -> unit
+val persist : ?base_dir:string -> ?task_id:string -> Cdal_types.contract_verdict -> unit

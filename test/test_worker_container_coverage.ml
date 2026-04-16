@@ -1,6 +1,16 @@
 open Alcotest
 open Masc_mcp
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv name old
+      | None -> Unix.putenv name "")
+    f
+
 let worker_usage ?cost_usd ~input_tokens ~output_tokens () :
     Agent_sdk.Types.api_usage =
   {
@@ -62,6 +72,13 @@ let test_merge_usage_sums_costs_when_both_present () =
   check (option (float 0.000001)) "costs summed" (Some 0.15)
     merged.cost_usd
 
+let test_mcp_endpoint_url_does_not_leak_token () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" (fun () ->
+    let url =
+      Worker_container_types.mcp_endpoint_url ~auth_token:(Some "secret-token")
+    in
+    check string "mcp url stays clean" "http://127.0.0.1:8935/mcp" url)
+
 let () =
   run "Worker_runtime"
     [
@@ -75,5 +92,7 @@ let () =
             test_merge_usage_preserves_present_cost;
           test_case "merge usage sums costs" `Quick
             test_merge_usage_sums_costs_when_both_present;
+          test_case "mcp endpoint url does not leak token" `Quick
+            test_mcp_endpoint_url_does_not_leak_token;
         ] );
     ]

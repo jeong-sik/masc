@@ -1234,11 +1234,11 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
       runtime_blocker_class: normalizeRuntimeBlockerClass(runtime.runtime_blocker_class),
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
-      runtime_blocker_manual_reconcile:
-        typeof runtime.runtime_blocker_manual_reconcile === 'boolean'
-          ? runtime.runtime_blocker_manual_reconcile
-          : (typeof runtime.runtime_blocker_manual_reconcile === 'string'
-              ? asLooseBoolean(runtime.runtime_blocker_manual_reconcile)
+      runtime_blocker_continue_gate:
+        typeof runtime.runtime_blocker_continue_gate === 'boolean'
+          ? runtime.runtime_blocker_continue_gate
+          : (typeof runtime.runtime_blocker_continue_gate === 'string'
+              ? asLooseBoolean(runtime.runtime_blocker_continue_gate)
               : null),
     },
     coordination: {

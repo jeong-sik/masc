@@ -65,6 +65,7 @@ let task_updated_at (task : Types.task) =
   | Types.Done { completed_at; _ } -> completed_at
   | Types.Cancelled { cancelled_at; _ } -> cancelled_at
   | Types.InProgress { started_at; _ } -> started_at
+  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
   | Types.Claimed { claimed_at; _ } -> claimed_at
   | Types.Todo -> task.created_at
 
@@ -72,7 +73,8 @@ let task_completed_at (task : Types.task) =
   match task.task_status with
   | Types.Done { completed_at; _ } -> Some completed_at
   | Types.Cancelled { cancelled_at; _ } -> Some cancelled_at
-  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> None
+  | Types.Todo | Types.Claimed _ | Types.InProgress _
+  | Types.AwaitingVerification _ -> None
 
 let task_execution_links_json (task : Types.task) =
   match task.contract with

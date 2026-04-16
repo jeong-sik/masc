@@ -13,7 +13,12 @@ from typing import Final
 from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/slack"
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/slack/bindings.json"
@@ -23,6 +28,12 @@ DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/slack/status.json"
 # loads from here if the new default is absent, then writes to the new
 # default on next save.
 LEGACY_BINDING_STORE_PATH: Final[str] = ".masc/connectors/slack/bindings.json"
+
+
+def _runtime_toml_path() -> Path:
+    raw = os.getenv("MASC_BASE_PATH", "").strip()
+    root = Path(raw).expanduser() if raw else Path.cwd()
+    return root / ".gate/runtime/slack/config.toml"
 
 
 def _is_loopback_host(raw_host: str | None) -> bool:
@@ -38,9 +49,28 @@ def _is_loopback_host(raw_host: str | None) -> bool:
 
 
 class BotConfig(BaseSettings):
-    """Bot configuration from environment variables."""
+    """Bot configuration.  Priority: env > runtime TOML > field defaults."""
 
-    model_config = {"env_prefix": "", "case_sensitive": True, "env_file": ".env"}
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=True,
+        env_file=".env",
+        extra="ignore",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        toml_source = TomlConfigSettingsSource(
+            settings_cls, toml_file=_runtime_toml_path()
+        )
+        return (init_settings, env_settings, dotenv_settings, toml_source, file_secret_settings)
 
     # Required: Slack Bot Token (xoxb-...)
     slack_bot_token: str = Field(

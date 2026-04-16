@@ -288,7 +288,6 @@
         test_thompson_sampling
         test_safe_ops
         test_json_util
-        test_swarm_status
         test_process_eio_coverage
         test_provider_adapter
         test_worker_container_coverage
@@ -437,7 +436,6 @@
         test_thompson_sampling
         test_safe_ops
         test_json_util
-        test_swarm_status
         test_process_eio_coverage
         test_provider_adapter
         test_worker_container_coverage

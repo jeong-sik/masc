@@ -55,16 +55,6 @@ type room_snapshot = Dashboard_labels.room_snapshot = {
   locks: int;
 }
 
-type swarm_lane_summary = Dashboard_labels.swarm_lane_summary = {
-  label: string;
-  present: bool;
-  phase: Swarm_status_types.lane_phase;
-  motion_state: Swarm_status_types.lane_motion;
-  age: string;
-  current_step: string;
-  hard_flags: Swarm_status_types.flag_code list;
-}
-
 (** Format a section *)
 let format_section (s : section) : string =
   let header = Printf.sprintf "== %s ==" s.title in
@@ -256,95 +246,6 @@ let room_snapshot (config : Coord_utils.config) ~current_room room_id =
     locks = count_locks_for_room config room_id;
   }
 
-let swarm_json (config : Coord_utils.config) =
-  if Coord.is_initialized config then Swarm_status.build_json config
-  else Swarm_status.empty_json
-
-let swarm_lane_summaries now json =
-  let open Yojson.Safe.Util in
-  match json |> member "lanes" with
-  | `List lanes ->
-      lanes
-      |> List.filter_map (fun lane ->
-             match lane with
-             | `Assoc _ ->
-                 let label =
-                   lane |> member "label" |> to_string_option
-                   |> Option.value ~default:"Unknown lane"
-                 in
-                 let present = lane |> member "present" |> to_bool_option |> Option.value ~default:false in
-                 let phase =
-                   lane |> member "phase" |> to_string_option
-                   |> Option.value ~default:"forming"
-                   |> Swarm_status_json.lane_phase_of_string
-                 in
-                 let motion_state =
-                   lane |> member "motion_state" |> to_string_option
-                   |> Option.value ~default:"waiting"
-                   |> Swarm_status_json.lane_motion_of_string
-                 in
-                 let current_step =
-                   lane |> member "current_step" |> to_string_option
-                   |> Option.value ~default:"Observe lane"
-                 in
-                 let age =
-                   match lane |> member "last_movement_at" |> to_string_option with
-                   | Some timestamp -> format_elapsed now timestamp "n/a"
-                   | None -> "n/a"
-                 in
-                 let hard_flags =
-                   match lane |> member "hard_flags" with
-                   | `List flags ->
-                       flags
-                       |> List.filter_map (fun flag ->
-                              flag |> member "code" |> to_string_option
-                              |> (fun opt -> Option.bind opt Swarm_status_json.flag_code_of_string))
-                   | _ -> []
-                 in
-                 Some { label; present; phase; motion_state; age; current_step; hard_flags }
-             | _ -> None)
-      |> List.filter (fun lane -> lane.present)
-  | _ -> []
-
-(** Operator-friendly swarm health section with translated labels *)
-let swarm_health_section now (_config : Coord_utils.config) (json : Yojson.Safe.t) : section =
-  let open Yojson.Safe.Util in
-  let lanes = swarm_lane_summaries now json in
-  let next_action = json |> member "recommended_next_action" in
-  let next_label =
-    next_action |> member "label" |> to_string_option
-    |> Option.value ~default:"Observe operator state"
-  in
-  let next_tool =
-    next_action |> member "tool" |> to_string_option
-    |> Option.value ~default:"masc_operator_snapshot"
-  in
-  let verdict = Dashboard_labels.health_verdict lanes in
-  let lane_lines =
-    lanes
-    |> List.map (fun (lane : swarm_lane_summary) ->
-           let status =
-             Dashboard_labels.translate_lane_status ~phase:lane.phase
-               ~motion_state:lane.motion_state ~age:lane.age
-           in
-           let extras =
-             match lane.hard_flags with
-             | [] -> ""
-             | flags ->
-                 " | "
-                 ^ String.concat ", "
-                     (List.map Dashboard_labels.translate_flag_code flags)
-           in
-           Printf.sprintf "%s: %s%s" lane.label status extras)
-  in
-  let content =
-    [ verdict ]
-    @ (if lane_lines = [] then [ "(no active lanes)" ]
-       else [ "" ] @ lane_lines)
-    @ [ ""; Printf.sprintf "Next: %s (%s)" next_label next_tool ]
-  in
-  { title = "Swarm Health"; content; empty_msg = "(no swarm activity)" }
-
 let room_overview_section (snapshots : room_snapshot list) : section =
   let content =
     List.map (fun snapshot ->
@@ -519,9 +420,8 @@ let keepers_section now : section =
   { title = "Keepers"; content; empty_msg = "(no keepers registered)" }
 
 (** Attention section: items requiring operator action *)
-let attention_section now (snapshots : room_snapshot list)
-    (swarm_json_data : Yojson.Safe.t) : section =
-  let items = Dashboard_attention.collect ~now snapshots swarm_json_data in
+let attention_section now (snapshots : room_snapshot list) : section =
+  let items = Dashboard_attention.collect ~now snapshots in
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
@@ -541,7 +441,6 @@ let generate ?(scope = All) (config : Coord_utils.config) : string =
   in
   let all_agents = List.concat_map (fun s -> s.agents) snapshots in
   let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
-  let swarm = swarm_json config in
   let header =
     Printf.sprintf
       "========================================\n   MASC Dashboard   %s\n   Namespace: %s (flattened) | %d namespace%s | %d agents\n========================================"
@@ -554,11 +453,10 @@ let generate ?(scope = All) (config : Coord_utils.config) : string =
   (* Operator-first section order *)
   let sections =
     [
-      attention_section now snapshots swarm;
+      attention_section now snapshots;
       agents_grouped_section now all_agents;
       keepers_section now;
       tasks_section all_tasks;
-      swarm_health_section now config swarm;
       messages_section
         (List.concat_map (fun s -> s.messages) snapshots);
     ]
@@ -625,19 +523,9 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let k_running = keeper_by_phase Running in
   let k_dead = keeper_by_phase Dead in
   let k_other = List.length keeper_entries - k_running - k_dead in
-  (* Swarm health *)
-  let swarm = swarm_json config in
-  let lanes = swarm_lane_summaries now swarm in
-  let health = Dashboard_labels.health_verdict lanes in
   (* Attention *)
-  let attention_items = Dashboard_attention.collect ~now snapshots swarm in
+  let attention_items = Dashboard_attention.collect ~now snapshots in
   let attention_line = Dashboard_attention.compact_summary attention_items in
-  (* Next action *)
-  let open Yojson.Safe.Util in
-  let next_tool =
-    swarm |> member "recommended_next_action" |> member "tool"
-    |> to_string_option |> Option.value ~default:"masc_observe_swarm"
-  in
   String.concat "\n"
     [
       Printf.sprintf "MASC [%s namespace] %d agents / %d tasks"
@@ -650,5 +538,4 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         (List.length blocked_tasks);
       Printf.sprintf "KEEPERS: %d running / %d dead / %d other"
         k_running k_dead k_other;
-      Printf.sprintf "HEALTH: %s | Next: %s" health next_tool;
     ]

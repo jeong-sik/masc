@@ -1,6 +1,6 @@
 (** Dashboard Attention — Collect actionable items that require operator intervention.
 
-    Pure functions. Scans room snapshots and swarm JSON to produce a sorted list
+    Pure functions. Scans room snapshots to produce a sorted list
     of items the operator should act on. Each item includes a suggested MCP tool. *)
 
 (* ===== Types ===== *)
@@ -65,66 +65,6 @@ let detect_stuck_agents ~(now : float)
                }
          | _ -> None)
 
-(** Detect pending approvals from swarm lanes *)
-let detect_pending_approvals (swarm_json : Yojson.Safe.t) :
-    attention_item list =
-  let open Yojson.Safe.Util in
-  match swarm_json |> member "lanes" with
-  | `List lanes ->
-      lanes
-      |> List.filter_map (fun lane ->
-             let approvals =
-               lane |> member "approvals" |> to_int_option
-               |> Option.value ~default:0
-             in
-             let label =
-               lane |> member "label" |> to_string_option
-               |> Option.value ~default:"Unknown"
-             in
-             if approvals > 0 then
-               Some
-                 {
-                   severity = Critical;
-                   category = "pending_approval";
-                   summary =
-                     Printf.sprintf "Approval needed: %s waiting for confirmation"
-                       label;
-                   suggested_tool = "masc_operator_confirm";
-                 }
-             else None)
-  | _ -> []
-
-(** Detect stalled lanes *)
-let detect_stalled_lanes (swarm_json : Yojson.Safe.t) : attention_item list =
-  let open Yojson.Safe.Util in
-  match swarm_json |> member "lanes" with
-  | `List lanes ->
-      lanes
-      |> List.filter_map (fun lane ->
-             let motion =
-               lane |> member "motion_state" |> to_string_option
-               |> Option.value ~default:""
-             in
-             let present =
-               lane |> member "present" |> to_bool_option
-               |> Option.value ~default:false
-             in
-             let label =
-               lane |> member "label" |> to_string_option
-               |> Option.value ~default:"Unknown"
-             in
-             if present && String.equal motion "stalled" then
-               Some
-                 {
-                   severity = Warning;
-                   category = "stalled_lane";
-                   summary =
-                     Printf.sprintf "Lane stalled: %s has no progress" label;
-                   suggested_tool = "masc_observe_swarm";
-                 }
-             else None)
-  | _ -> []
-
 (** Detect idle agents when pending tasks exist *)
 let detect_idle_with_pending ~(now : float)
     (snapshots : Dashboard_labels.room_snapshot list) : attention_item list =
@@ -168,11 +108,9 @@ let detect_idle_with_pending ~(now : float)
 
 (** Collect all attention items, sorted by severity (critical first). *)
 let collect ~(now : float) (snapshots : Dashboard_labels.room_snapshot list)
-    (swarm_json : Yojson.Safe.t) : attention_item list =
+    : attention_item list =
   let items =
-    detect_pending_approvals swarm_json
-    @ detect_stuck_agents ~now snapshots
-    @ detect_stalled_lanes swarm_json
+    detect_stuck_agents ~now snapshots
     @ detect_idle_with_pending ~now snapshots
   in
   List.sort

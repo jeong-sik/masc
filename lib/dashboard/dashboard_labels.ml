@@ -6,19 +6,6 @@
 
 (* ===== Shared Types (to break circular dependency) ===== *)
 
-(** Lane summary — extracted from swarm JSON, used by both Dashboard and Dashboard_attention.
-    Phase/motion_state/hard_flags use variants from Swarm_status_types to make
-    exhaustive matching possible and catch new values at compile time. *)
-type swarm_lane_summary = {
-  label: string;
-  present: bool;
-  phase: Swarm_status_types.lane_phase;
-  motion_state: Swarm_status_types.lane_motion;
-  age: string;
-  current_step: string;
-  hard_flags: Swarm_status_types.flag_code list;
-}
-
 (** Coord snapshot — shared between Dashboard and Dashboard_attention *)
 type room_snapshot = {
   room_id: string;
@@ -207,71 +194,3 @@ let classify_agent ~(now : float) (agent : Types.agent) : agent_group =
   | Types.Listening -> Idle
   | Types.Inactive -> Offline
 
-(* ===== Lane Status Translation ===== *)
-
-(** Translate lane phase + motion_state into a single human-readable sentence. *)
-let translate_lane_status ~(phase : Swarm_status_types.lane_phase)
-    ~(motion_state : Swarm_status_types.lane_motion) ~(age : string) : string =
-  let open Swarm_status_types in
-  match (phase, motion_state) with
-  | Executing, Moving -> Printf.sprintf "Running (last %s)" age
-  | Executing, Stalled -> "STALLED - no progress"
-  | Executing, Waiting -> "Waiting (has workers)"
-  | Dispatching, _ -> "Assigning work to agents"
-  | Awaiting_approval, _ -> "BLOCKED - needs your approval"
-  | Blocked, _ -> "BLOCKED"
-  | Lane_completed, _ -> "Done"
-  | Forming, _ -> "Not started"
-  | Executing, Terminal ->
-      Printf.sprintf "%s / %s"
-        (Swarm_status_json.lane_phase_to_string phase)
-        (Swarm_status_json.lane_motion_to_string motion_state)
-
-(* ===== Flag Code Translation ===== *)
-
-(** Translate raw flag codes to human-readable descriptions. *)
-let translate_flag_code (code : Swarm_status_types.flag_code) : string =
-  let open Swarm_status_types in
-  match code with
-  | Pending_manual_confirmation -> "Waiting for your approval"
-  | Missing_trace_events -> "No audit trail"
-  | Missing_worker_binding -> "No assigned workers"
-  | Projected_only -> "No managed runtime (projection only)"
-  | Stale_data -> "Data may be outdated"
-  | Missing_runtime_progress -> "No runtime progress"
-  | Dashboard_source_split -> "Dashboard source split"
-
-(* ===== Severity Icons ===== *)
-
-let severity_icon (severity : Swarm_status_types.flag_severity) : string =
-  let open Swarm_status_types in
-  match severity with
-  | Flag_bad -> "[!]"
-  | Flag_warn -> "[~]"
-
-(* ===== Health Verdict ===== *)
-
-(** Produce a one-line health summary from lane summaries.
-    A lane can be both stalled and blocked (lane_phase maps stalled motion
-    to "blocked" phase), so we count distinct lanes needing attention. *)
-let health_verdict (lanes : swarm_lane_summary list) : string =
-  let open Swarm_status_types in
-  let needs_attention (l : swarm_lane_summary) =
-    l.motion_state = Stalled || l.phase = Awaiting_approval || l.phase = Blocked
-  in
-  let moving =
-    List.filter (fun (l : swarm_lane_summary) -> l.motion_state = Moving) lanes
-  in
-  let attention_count =
-    List.length (List.filter needs_attention lanes)
-  in
-  let total = List.length lanes in
-  if total = 0 then "No active lanes"
-  else if attention_count > 0 then
-    Printf.sprintf "%d lane%s active, %d needs attention"
-      total (if total > 1 then "s" else "")
-      attention_count
-  else
-    Printf.sprintf "%d lane%s running (%d moving)"
-      total (if total > 1 then "s" else "")
-      (List.length moving)

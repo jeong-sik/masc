@@ -188,11 +188,6 @@ let test_permission_for_tool_runtime_verify () =
   | Some Types.CanReadState -> ()
   | _ -> fail "expected CanReadState"
 
-let test_permission_for_tool_observe_swarm () =
-  match Auth.permission_for_tool "masc_observe_swarm" with
-  | Some Types.CanReadState -> ()
-  | _ -> fail "expected CanReadState"
-
 let test_permission_for_tool_who () =
   match Auth.permission_for_tool "masc_who" with
   | Some Types.CanReadState -> ()
@@ -762,7 +757,6 @@ let () =
       test_case "tool_admin_snapshot" `Quick test_permission_for_tool_admin_snapshot;
       test_case "tool_admin_update" `Quick test_permission_for_tool_admin_update;
       test_case "runtime_verify" `Quick test_permission_for_tool_runtime_verify;
-      test_case "observe_swarm" `Quick test_permission_for_tool_observe_swarm;
       test_case "operator_snapshot" `Quick test_permission_for_tool_operator_snapshot;
       test_case "operator_digest" `Quick test_permission_for_tool_operator_digest;
       test_case "surface_audit" `Quick test_permission_for_tool_surface_audit;

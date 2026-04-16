@@ -27,7 +27,6 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_operation_status", CanReadState);
     ("masc_dispatch_plan", CanReadState);
     ("masc_observe_operations", CanReadState);
-    ("masc_observe_swarm", CanReadState);
     ("masc_observe_capacity", CanReadState);
     ("masc_observe_traces", CanReadState);
     ("masc_agent_card", CanReadState);

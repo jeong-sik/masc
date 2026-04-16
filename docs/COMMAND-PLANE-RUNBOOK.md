@@ -189,7 +189,6 @@ hot runtime contract:
 
 확인 위치:
 
-- `masc_observe_swarm(run_id=<RUN_ID>, operation_id=<OP_ID>)`
 - HTTP projection `GET /api/v1/command-plane/swarm?...` 는 read-model surface로 남아 있지만 canonical harness path는 아니다.
 - dashboard `Command Plane -> swarm`
 

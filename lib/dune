@@ -256,8 +256,6 @@
    streamable_http
    subsystem_health
    subscriptions
-   swarm_status
-   swarm_status_inputs
    swarm_checkpoint
    telemetry_eio
    telemetry_unified
@@ -568,7 +566,6 @@
  server_routes_http_routes_room
  server_routes_http_routes_dashboard
  server_routes_http_routes_activity
- swarm_status_inputs
  server_mcp_transport_http_types
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
@@ -793,8 +790,6 @@
    masc_mcp.activity_graph
    ;; Prompt registry and override storage (extracted sub-library)
    masc_mcp.prompt_registry
-   ;; Swarm status core/helpers (wrapper + inputs remain in monolith)
-   masc_mcp.swarm_status
    ;; MCP transport/session leaf primitives (extracted sub-libraries)
    masc_mcp.mcp_transport_protocol
    masc_mcp.mcp_session

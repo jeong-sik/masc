@@ -388,7 +388,6 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 | `masc_observe_topology` | Unit 트리 + health + operation count |
 | `masc_observe_alerts` | Alert 목록 (severity 정렬) |
 | `masc_observe_operations` | Operation 요약 + microarch |
-| `masc_observe_swarm` | Swarm live artifacts + proof |
 | `masc_observe_capacity` | Unit별 utilization |
 | `masc_observe_traces` | Event log + team session + operator traces |
 

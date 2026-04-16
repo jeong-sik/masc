@@ -505,7 +505,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
         let candidates =
           List.map (fun m ->
             candidate_info_of_weighted
-              { Cascade_config_loader.model = m; weight = 1 })
+              { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None })
             defaults
         in
         (defaults, { candidates; source = Hardcoded_defaults })
@@ -513,7 +513,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
     let candidates =
       List.map (fun m ->
         candidate_info_of_weighted
-          { Cascade_config_loader.model = m; weight = 1 })
+          { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None })
         defaults
     in
     (defaults, { candidates; source = Hardcoded_defaults })

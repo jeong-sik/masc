@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Pin `agent_sdk` to OAS v0.150.0 (`0752f68c`). OAS 0.150 removed the
+  `OAS_OLLAMA_SUPPORTS_TOOL_CHOICE` env var in favor of a per-config
+  `Provider_config.supports_tool_choice_override : bool option` field.
+
+### Added
+
+- `Cascade_config_loader.weighted_entry.supports_tool_choice : bool option`
+  — per-entry capability override parsed from cascade.json. Example:
+  ```json
+  {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90, "supports_tool_choice": true}
+  ```
+  Scope of this release: JSON parsing lands. Wiring this value through
+  `parse_model_string` → `Provider_config.make ~supports_tool_choice_override`
+  is a separate follow-up PR.
+
 ## [0.9.3] - 2026-04-16
 
 ### Changed

@@ -12,10 +12,18 @@ val load_json : string -> (Yojson.Safe.t, string) result
 
 (** A model entry with an optional weight for weighted cascade selection.
     Weight defaults to 1 when not specified.
-    @since 0.137.0 *)
+    @since 0.137.0
+    @since 0.150.0 [supports_tool_choice] field added *)
 type weighted_entry = {
   model: string;
   weight: int;
+  supports_tool_choice: bool option;
+  (** Per-entry capability override forwarded to
+      [Llm_provider.Provider_config.supports_tool_choice_override].
+      [None] = use registry default; [Some b] = force [b]. Consumers
+      declare verified model-side tool_choice support per cascade entry
+      (e.g. Qwen3.5 w/ native Jinja chat template) without the SDK
+      pattern-matching on [model_id]. *)
 }
 
 (** Load a named model list from a JSON config file.

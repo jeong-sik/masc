@@ -50,9 +50,11 @@ let running_under_test_executable executable_name =
   |> String.lowercase_ascii
   |> String.starts_with ~prefix:"test_"
 
+let test_config_path_override_env = "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
+
 let allow_inherited_test_config_paths () =
   Env_config_core.get_bool ~default:false
-    "MASC_TEST_ALLOW_INHERITED_CONFIG_PATHS"
+    test_config_path_override_env
 
 let initial_env_config_dir = Env_config_core.config_dir_opt ()
 let initial_env_personas_dir = Env_config_core.personas_dir_opt ()

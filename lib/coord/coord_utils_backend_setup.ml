@@ -102,9 +102,14 @@ let running_under_test_executable () =
   in
   String.starts_with ~prefix:"test_" executable
 
+let test_base_path_override_env = "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
+
+let test_base_path_override_enabled () =
+  Env_config_core.get_bool ~default:false test_base_path_override_env
+
 let sync_test_base_path_env resolved_path =
   if running_under_test_executable ()
-     && not (Env_config_core.get_bool ~default:false "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+     && not (test_base_path_override_enabled ())
   then
     match Env_config_core.base_path_opt () with
     | Some current when String.equal current resolved_path -> ()
@@ -155,29 +160,26 @@ let resolve_requested_base_path path =
 
 (** Resolve base_path with a single authority:
     - in normal executables, explicit [MASC_BASE_PATH] wins
-    - in test executables, inherited [MASC_BASE_PATH] is ignored unless it
-      matches the requested path or the test explicitly opts in
+    - in test executables, a shell-provided [MASC_BASE_PATH] override is
+      ignored unless it matches the requested path or the test explicitly opts
+      in via [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]
     - otherwise resolve the requested path to its git root *)
 let resolve_masc_base_path path =
   let requested = resolve_requested_base_path path in
   match Env_config_core.base_path_opt () with
   | Some explicit
     when running_under_test_executable ()
-         && not
-              (Env_config_core.get_bool ~default:false
-                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH") ->
+         && not (test_base_path_override_enabled ()) ->
       log_once_info
-        "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
+        "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
         explicit path;
       requested
   | Some explicit
     when running_under_test_executable ()
-         && not
-              (Env_config_core.get_bool ~default:false
-                 "MASC_TEST_ALLOW_INHERITED_BASE_PATH")
+         && not (test_base_path_override_enabled ())
          && not (String.equal explicit requested) ->
       log_once_info
-        "Ignoring inherited MASC_BASE_PATH=%s for requested test path %s"
+        "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
         explicit path;
       requested
   | Some explicit ->

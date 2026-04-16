@@ -106,7 +106,7 @@ let test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default () =
     (Printf.sprintf "gitdir: %s\n" branch_gitdir);
   with_envs
     [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested git root wins in tests" repo_root
         (Coord_utils.resolve_masc_base_path worktree_path))
@@ -117,7 +117,7 @@ let test_resolve_masc_base_path_prefers_requested_path_in_test () =
   in
   with_envs
     [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested path wins in tests" requested
         (Coord_utils.resolve_masc_base_path requested))
@@ -128,7 +128,7 @@ let test_resolve_masc_base_path_keeps_matching_explicit_env () =
   in
   with_envs
     [ ("MASC_BASE_PATH", Some requested);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "matching explicit env preserved" requested
         (Coord_utils.resolve_masc_base_path requested))
@@ -141,7 +141,7 @@ let test_resolve_masc_base_path_collapses_requested_masc_dir () =
   in
   with_envs
     [ ("MASC_BASE_PATH", None);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested .masc input collapses to parent"
         (Filename.dirname requested)
@@ -154,24 +154,25 @@ let test_resolve_masc_base_path_collapses_explicit_env_masc_dir () =
   let explicit = Filename.concat requested ".masc" in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "explicit .masc env collapses to parent" requested
         (Coord_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_ignores_explicit_env_without_opt_in () =
+let test_resolve_masc_base_path_ignores_base_path_override_without_opt_in () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "room-utils-opt-in"
   in
   let explicit = "/Users/dancer/me" in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
-      check string "explicit env ignored without opt-in" requested
+      check string "base path override ignored without opt-in" requested
         (Coord_utils.resolve_masc_base_path requested))
 
-let test_resolve_masc_base_path_ignores_explicit_env_with_local_masc_dir () =
+let test_resolve_masc_base_path_ignores_base_path_override_with_local_masc_dir ()
+    =
   let scratch = Filename.temp_dir "room-utils-local-masc" "" in
   let requested = Filename.concat scratch "repo" in
   let explicit = Filename.concat scratch "parent-root" in
@@ -184,12 +185,13 @@ let test_resolve_masc_base_path_ignores_explicit_env_with_local_masc_dir () =
     (fun () ->
       with_envs
         [ ("MASC_BASE_PATH", Some explicit);
-          ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+          ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
         (fun () ->
-          check string "local .masc still honors requested path in tests" requested
+          check string "local .masc still ignores base path override in tests"
+            requested
             (Coord_utils.resolve_masc_base_path requested)))
 
-let test_resolve_masc_base_path_opt_in_preserves_explicit_env () =
+let test_resolve_masc_base_path_opt_in_preserves_base_path_override () =
   let scratch = Filename.temp_dir "room-utils-explicit-opt-in" "" in
   let requested = Filename.concat scratch "repo" in
   let explicit = Filename.concat scratch "parent-root" in
@@ -202,12 +204,13 @@ let test_resolve_masc_base_path_opt_in_preserves_explicit_env () =
     (fun () ->
       with_envs
         [ ("MASC_BASE_PATH", Some explicit);
-          ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", Some "true") ]
+          ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", Some "true") ]
         (fun () ->
-          check string "opt-in preserves explicit path" explicit
+          check string "opt-in preserves base path override" explicit
             (Coord_utils.resolve_masc_base_path requested)))
 
-let test_resolve_masc_base_path_ignores_ancestor_explicit_path_without_opt_in () =
+let test_resolve_masc_base_path_ignores_ancestor_base_path_override_without_opt_in ()
+    =
   let scratch = Filename.temp_dir "room-utils-ancestor" "" in
   let explicit = scratch in
   let sub_repo = Filename.concat scratch "workspace/sub-repo" in
@@ -225,9 +228,10 @@ let test_resolve_masc_base_path_ignores_ancestor_explicit_path_without_opt_in ()
     (fun () ->
       with_envs
         [ ("MASC_BASE_PATH", Some explicit);
-          ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+          ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
         (fun () ->
-          check string "requested sub-repo wins without opt-in" sub_repo
+          check string "requested sub-repo wins without base path override opt-in"
+            sub_repo
             (Coord_utils.resolve_masc_base_path sub_repo)))
 
 let test_default_config_syncs_test_base_path_env () =
@@ -237,7 +241,7 @@ let test_default_config_syncs_test_base_path_env () =
   with_envs
     [ ("MASC_BASE_PATH", None);
       ("MASC_TEST_SYNCED_BASE_PATH", None);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       ignore (Coord_utils.default_config requested);
       check (option string) "env synced to requested path" (Some requested)
@@ -253,7 +257,7 @@ let test_auto_synced_test_base_path_does_not_override_later_requests () =
   with_envs
     [ ("MASC_BASE_PATH", None);
       ("MASC_TEST_SYNCED_BASE_PATH", None);
-      ("MASC_TEST_ALLOW_INHERITED_BASE_PATH", None) ]
+      ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       ignore (Coord_utils.default_config first);
       check string "later requested path wins over auto-synced env" second
@@ -620,14 +624,15 @@ let () =
         test_resolve_masc_base_path_collapses_requested_masc_dir;
       test_case "collapses explicit .masc env" `Quick
         test_resolve_masc_base_path_collapses_explicit_env_masc_dir;
-      test_case "ignores explicit env without opt-in" `Quick
-        test_resolve_masc_base_path_ignores_explicit_env_without_opt_in;
-      test_case "ignores explicit env when requested path has local .masc" `Quick
-        test_resolve_masc_base_path_ignores_explicit_env_with_local_masc_dir;
-      test_case "opt-in preserves explicit env" `Quick
-        test_resolve_masc_base_path_opt_in_preserves_explicit_env;
-      test_case "ignores ancestor explicit path without opt-in" `Quick
-        test_resolve_masc_base_path_ignores_ancestor_explicit_path_without_opt_in;
+      test_case "ignores base path override without opt-in" `Quick
+        test_resolve_masc_base_path_ignores_base_path_override_without_opt_in;
+      test_case "ignores base path override when requested path has local .masc"
+        `Quick
+        test_resolve_masc_base_path_ignores_base_path_override_with_local_masc_dir;
+      test_case "opt-in preserves base path override" `Quick
+        test_resolve_masc_base_path_opt_in_preserves_base_path_override;
+      test_case "ignores ancestor base path override without opt-in" `Quick
+        test_resolve_masc_base_path_ignores_ancestor_base_path_override_without_opt_in;
       test_case "default config syncs test base env" `Quick
         test_default_config_syncs_test_base_path_env;
       test_case "auto-synced test base env does not override later requests" `Quick

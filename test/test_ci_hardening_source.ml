@@ -169,6 +169,9 @@ let test_http_write_auth_contracts () =
   check bool "board comment route overwrites author from auth identity" true
     (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
        {|json_upsert_string_field "author" agent_name|});
+  check bool "tool-host-failures route requires tool auth" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|with_tool_auth ~tool_name:"masc_broadcast"|});
   check bool "provider runs post requires admin permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
        {|with_token_permission_auth ~permission:Types.CanAdmin|});

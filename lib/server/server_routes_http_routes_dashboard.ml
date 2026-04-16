@@ -167,7 +167,7 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/logs/tool-host-failures" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_tool_auth ~tool_name:"masc_broadcast" (fun state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            let fallback_agent = agent_from_request request in
            let report_result =

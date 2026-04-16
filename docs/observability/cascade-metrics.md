@@ -69,6 +69,27 @@ rule_files:
 
 **StrategyFilteredEmptyStorm** — the strategy is rejecting >50% of cycles. Usually means `Capacity_aware` or `Circuit_breaker_cycling` is too restrictive, or cooldowns are saturated. Cross-reference with `OllamaCapacityRejectionSurge` to separate root cause.
 
+## Grafana Dashboard
+
+Pre-built dashboard at `infrastructure/monitoring/grafana-cascade-dashboard.json`.
+
+Import via Grafana UI: **Dashboards → New → Import → Upload JSON file**. When prompted for a data source, pick your Prometheus instance; the dashboard uses `${DS_PROMETHEUS}` templating so it works across environments.
+
+Dashboard UID: `masc-cascade`. Tag: `cascade`. 8 panels:
+
+| # | Panel | Query highlight |
+|---|-------|-----------------|
+| 1 | Capacity events (kind × key_type) | `rate(...capacity_events_total[5m])` |
+| 2 | Strategy decisions (kind) | colour-coded green/orange/red |
+| 3 | Exhaustion (24h) | `increase(...{kind="exhausted"}[24h])` |
+| 4 | Ollama rejections (1h) | ties to `OllamaCapacityRejectionSurge` alert |
+| 5 | CLI rejections (1h) | ties to `CliCapacityRejectionSurge` alert |
+| 6 | Filter-empty ratio (5m) | ties to `StrategyFilteredEmptyStorm` alert |
+| 7 | Exhaustion by cascade | per-cascade breakdown |
+| 8 | 24h decision table | sortable `(cascade, strategy, kind)` totals |
+
+Refresh interval: 30s. Default time window: last 6h.
+
 ## Formal correctness link
 
 The `kind` label values are not ad-hoc strings — they mirror the `event_kind` variant in `lib/cascade/cascade_strategy_trace.mli`:

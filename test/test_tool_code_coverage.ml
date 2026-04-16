@@ -105,9 +105,9 @@ let test_code_search_empty_query () =
 let test_code_search_with_query () =
   let ctx, base_dir = make_ctx () in
   let args = `Assoc [("query", `String "test_pattern")] in
-  let (_, msg) = dispatch_exn ctx ~name:"masc_code_search" ~args in
-  (* May fail (no rg, no git root) but should return a response *)
-  Alcotest.(check bool) "has response" true (String.length msg > 0);
+  let (ok, msg) = dispatch_exn ctx ~name:"masc_code_search" ~args in
+  Alcotest.(check bool) "missing path fails" false ok;
+  Alcotest.(check bool) "mentions path required" true (msg_contains ~needle:"path required" msg);
   cleanup_dir base_dir
 
 let test_code_search_with_options () =
@@ -153,6 +153,23 @@ let test_code_search_with_file_pattern_finds_matches () =
       let matched_path = U.(first |> member "path" |> to_string) in
       Alcotest.(check string) "matched file basename" "match.ml"
         (Filename.basename matched_path))
+
+let test_code_search_schema_requires_path () =
+  let schema =
+    List.find_opt (fun (schema : Types.tool_schema) ->
+      String.equal schema.name "masc_code_search")
+      Tool_code.schemas
+  in
+  match schema with
+  | None -> Alcotest.fail "masc_code_search schema missing"
+  | Some schema ->
+      let module U = Yojson.Safe.Util in
+      let required =
+        schema.input_schema |> U.member "required" |> U.to_list
+        |> List.filter_map (function `String value -> Some value | _ -> None)
+      in
+      Alcotest.(check bool) "query required" true (List.mem "query" required);
+      Alcotest.(check bool) "path required" true (List.mem "path" required)
 
 (* ============================================================
    code_read validation
@@ -255,10 +272,12 @@ let () =
     ]);
     ("code_search", [
       Alcotest.test_case "empty query" `Quick test_code_search_empty_query;
-      Alcotest.test_case "with query" `Quick test_code_search_with_query;
+      Alcotest.test_case "with query requires path" `Quick test_code_search_with_query;
       Alcotest.test_case "with options" `Quick test_code_search_with_options;
       Alcotest.test_case "file pattern matches files" `Quick
         test_code_search_with_file_pattern_finds_matches;
+      Alcotest.test_case "schema requires path" `Quick
+        test_code_search_schema_requires_path;
     ]);
     ("code_read", [
       Alcotest.test_case "no path" `Quick test_code_read_no_path;

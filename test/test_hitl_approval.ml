@@ -260,8 +260,8 @@ let test_background_pending_callback_and_keeper_lookup () =
   let id =
     AQ.submit_pending
       ~keeper_name:"gate-keeper"
-      ~tool_name:"keeper_continue_after_reconcile"
-      ~input:(`Assoc [("kind", `String "reconcile_required")])
+      ~tool_name:"keeper_continue_after_partial_commit"
+      ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> callback_result := Some decision)
   in

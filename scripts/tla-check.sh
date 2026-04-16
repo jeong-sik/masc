@@ -109,10 +109,16 @@ ensure_trace_data() {
 # Run all keeper state machine specs
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperStateMachine.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperTurnCycle.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCascadeLifecycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCascadeLifecycle.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASBridge.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOASAdvanced.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle.tla"
+run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
+run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then

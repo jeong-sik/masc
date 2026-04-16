@@ -110,11 +110,13 @@ GuardOk ==
                     measurement_bound, selected_model_bound>>
 
 \* keeper_agent_run.ml: tool disclosure completes, selected policy becomes active.
-\* Runtime allows this from undecided as well as guard_ok.
+\* Runtime may surface the decision stage as undecided or guard_ok here, but
+\* the measurement must already be bound before policy selection commits.
 SelectToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ cascade_state = "idle"
+    /\ measurement_bound
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ decision_stage' = "tool_policy_selected"
     /\ cascade_state' = "selecting"

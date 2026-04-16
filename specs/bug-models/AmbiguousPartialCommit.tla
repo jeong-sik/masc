@@ -4,7 +4,7 @@
 \* committed mutations creates an "ambiguous partial commit" state.
 \*
 \* Safety property: MutationsNeverOrphan ensures that if mutations are
-\* committed, the turn either succeeds or enters manual_reconcile —
+\* committed, the turn either succeeds or enters the continue gate —
 \* never silently retried (which would cause duplicate mutations).
 \*
 \* Evidence: sangsu keeper, 2026-04-09. Timeout after 573.2s with
@@ -17,7 +17,7 @@ CONSTANTS
     MaxRetries      \* max transient retries (e.g. 2)
 
 VARIABLES
-    turn_phase,           \* "init" | "running" | "completed" | "failed" | "reconcile"
+    turn_phase,           \* "init" | "running" | "completed" | "failed" | "continue_gate"
     tool_calls_made,      \* count of tool calls executed
     mutating_committed,   \* count of committed mutating tool calls
     retry_count,          \* current retry attempt
@@ -28,7 +28,7 @@ vars == <<turn_phase, tool_calls_made, mutating_committed,
           retry_count, provider_error, retry_performed>>
 
 TypeOK ==
-    /\ turn_phase \in {"init", "running", "completed", "failed", "reconcile"}
+    /\ turn_phase \in {"init", "running", "completed", "failed", "continue_gate"}
     /\ tool_calls_made \in 0..MaxToolCalls
     /\ mutating_committed \in 0..MaxToolCalls
     /\ retry_count \in 0..MaxRetries
@@ -80,8 +80,8 @@ ProviderError ==
     /\ turn_phase = "running"
     /\ provider_error' \in {"timeout", "rate_limit", "internal"}
     /\ IF mutating_committed > 0
-       THEN \* Ambiguous partial commit — go to reconcile, no retry
-            /\ turn_phase' = "reconcile"
+       THEN \* Ambiguous partial commit — open continue gate, no retry
+            /\ turn_phase' = "continue_gate"
             /\ UNCHANGED <<tool_calls_made, retry_count, retry_performed>>
        ELSE IF retry_count < MaxRetries /\ provider_error' \in {"timeout", "rate_limit"}
             THEN \* Transient error, no mutations — safe to retry
@@ -98,7 +98,7 @@ ProviderError ==
 
 \* Terminal states stutter (prevent TLC deadlock detection)
 Done ==
-    /\ turn_phase \in {"completed", "failed", "reconcile"}
+    /\ turn_phase \in {"completed", "failed", "continue_gate"}
     /\ UNCHANGED vars
 
 Next ==
@@ -113,7 +113,7 @@ Spec == Init /\ [][Next]_vars
 
 \* ── Safety Properties ───────────────────────────────────────
 
-\* Committed mutations + error must go to reconcile, never to failed.
+\* Committed mutations + error must go to the continue gate, never to failed.
 \* "failed" with committed mutations means mutations were lost without notice.
 MutationsNeverOrphan ==
     ~(turn_phase = "failed" /\ mutating_committed > 0)

@@ -45,6 +45,7 @@ type invariant_key =
   | Inv_no_live_turn_clears_decision
   | Inv_idle_requires_undecided
   | Inv_guard_ok_requires_measurement
+  | Inv_decision_boundary_requires_measurement
   | Inv_gate_rejected_requires_finalizing
   | Inv_non_idle_cascade_requires_decision_boundary
   | Inv_selecting_requires_prompting
@@ -54,6 +55,7 @@ let all_invariant_keys =
     Inv_no_live_turn_clears_decision;
     Inv_idle_requires_undecided;
     Inv_guard_ok_requires_measurement;
+    Inv_decision_boundary_requires_measurement;
     Inv_gate_rejected_requires_finalizing;
     Inv_non_idle_cascade_requires_decision_boundary;
     Inv_selecting_requires_prompting;
@@ -63,6 +65,8 @@ let invariant_key_to_string = function
   | Inv_no_live_turn_clears_decision -> "NoLiveTurnClearsDecision"
   | Inv_idle_requires_undecided -> "IdleRequiresUndecided"
   | Inv_guard_ok_requires_measurement -> "GuardOkRequiresMeasurement"
+  | Inv_decision_boundary_requires_measurement ->
+      "DecisionBoundaryRequiresMeasurement"
   | Inv_gate_rejected_requires_finalizing -> "GateRejectedRequiresFinalizing"
   | Inv_non_idle_cascade_requires_decision_boundary ->
       "NonIdleCascadeRequiresDecisionBoundary"
@@ -72,6 +76,8 @@ let invariant_key_of_string = function
   | "NoLiveTurnClearsDecision" -> Some Inv_no_live_turn_clears_decision
   | "IdleRequiresUndecided" -> Some Inv_idle_requires_undecided
   | "GuardOkRequiresMeasurement" -> Some Inv_guard_ok_requires_measurement
+  | "DecisionBoundaryRequiresMeasurement" ->
+      Some Inv_decision_boundary_requires_measurement
   | "GateRejectedRequiresFinalizing" ->
       Some Inv_gate_rejected_requires_finalizing
   | "NonIdleCascadeRequiresDecisionBoundary" ->

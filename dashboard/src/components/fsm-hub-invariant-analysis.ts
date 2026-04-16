@@ -52,7 +52,7 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
       : 'No turn has completed yet; the first live turn should populate the observer.'
   }
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
-    return 'A healthy provider path must clear Failing before Running can resume.'
+    return 'A healthy provider path or explicit recovery clearance must clear Failing before Running can resume.'
   }
   if (snapshot.phase === 'Overflowed') {
     return 'Context overflow must resolve through compaction or explicit operator clearance before the lifecycle can settle.'

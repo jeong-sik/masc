@@ -219,7 +219,7 @@ describe('fetchKeeperConfig', () => {
         fiber_health: 'healthy',
         presence_keepalive: 'true',
         presence_keepalive_sec: '30',
-        runtime_blocker_manual_reconcile: 'false',
+        runtime_blocker_continue_gate: 'false',
       },
       coordination: {
         room_scope: 'global',

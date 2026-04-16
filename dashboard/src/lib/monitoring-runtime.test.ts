@@ -122,7 +122,7 @@ describe('summarizeKeeperMonitoring', () => {
     )
   })
 
-  it('surfaces continue-gate blockers as manual reconcile guidance', () => {
+  it('surfaces continue-gate blockers as continue-gate guidance', () => {
     const summary = summarizeKeeperMonitoring(
       makeKeeper({
         status: 'paused',
@@ -132,7 +132,7 @@ describe('summarizeKeeperMonitoring', () => {
         runtime_blocker_class: 'ambiguous_post_commit_timeout',
         runtime_blocker_summary:
           'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        runtime_blocker_manual_reconcile: true,
+        runtime_blocker_continue_gate: true,
       }),
     )
 

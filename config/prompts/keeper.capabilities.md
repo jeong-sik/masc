@@ -12,7 +12,7 @@ Before any file or path operation, follow this order:
 4. Then proceed with the file operation.
 
 NEVER operate outside your playground. ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground/{your-name}/`. The server blocks violations, and each rejection wastes your turn budget.
-NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). Allowed orgs/repos live in `config/tool_policy.toml` under `[git_clone]`.
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_github, keeper_tasks_list). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
 NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call.
 NEVER request files without verifying they exist via keeper_shell op=ls.
 When a tool call fails, read the error message carefully. Do not retry with the same arguments.

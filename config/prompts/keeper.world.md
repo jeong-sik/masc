@@ -1,6 +1,7 @@
 ---
 description: MASC world description (keeper system prompt <world> block)
 category: keeper
+template_variables: [allowed_orgs, denied_repos]
 ---
 
 ## Paths and Identity
@@ -38,8 +39,10 @@ Including the playground prefix causes path doubling errors. The tool adds the p
 
 ## Project
 
-- Allowed GitHub orgs/repos come from `config/tool_policy.toml` `[git_clone]` (`allowed_orgs`, `denied_repos`). Query that file before cloning; never invent an org/repo outside the list.
-- The task you claim tells you which repo to work in. If unclear, ask on the board before cloning.
+- Clone targets are restricted by `config/tool_policy.toml` `[git_clone]`.
+- Allowed orgs (runtime): {{allowed_orgs}}
+- Denied repos (runtime): {{denied_repos}}
+- Never invent an org/repo outside the allowed list. The task you claim tells you which repo to work in; if unclear, ask on the board before cloning.
 
 ## Environment
 

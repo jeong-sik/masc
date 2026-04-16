@@ -18,9 +18,35 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
 let keeper_constitution () =
   Prompt_registry.get_prompt Keeper_prompt_names.constitution
 
+(** Format a string list for prompt rendering. Empty list -> "(none)". *)
+let format_list_for_prompt (items : string list) : string =
+  match items with
+  | [] -> "(none)"
+  | xs -> String.concat ", " xs
+
+(** Resolve the <world> prompt with git_clone allow/deny lists injected
+    as template variables.  The caller supplies the lists (pulled from
+    [Keeper_tool_policy]); keeping them as arguments avoids a dependency
+    cycle between [Keeper_prompt] and [Keeper_tool_policy].  Falls back
+    to the raw template text if rendering fails so that prompt wiring
+    bugs do not brick keepers. *)
+let render_world_prompt ~allowed_orgs ~denied_repos : string =
+  let vars =
+    [
+      ("allowed_orgs", format_list_for_prompt allowed_orgs);
+      ("denied_repos", format_list_for_prompt denied_repos);
+    ]
+  in
+  match
+    Prompt_registry.render_prompt_template Keeper_prompt_names.world vars
+  with
+  | Ok rendered -> rendered
+  | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.world
+
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
-    ~instructions ?(persona_extended = "") ?(keeper_name = "") () =
+    ~instructions ?(persona_extended = "") ?(keeper_name = "")
+    ?(allowed_orgs = []) ?(denied_repos = []) () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -91,7 +117,8 @@ let build_keeper_system_prompt
        </continuity>\n\
        \n\
        <world>\n";
-      substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.world);
+      substitute_keeper_name
+        (render_world_prompt ~allowed_orgs ~denied_repos);
       "\n</world>\n\
        \n\
        <capabilities>\n";

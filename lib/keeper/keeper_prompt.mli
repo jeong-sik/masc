@@ -17,8 +17,16 @@ val build_keeper_system_prompt :
   instructions:string ->
   ?persona_extended:string ->
   ?keeper_name:string ->
+  ?allowed_orgs:string list ->
+  ?denied_repos:string list ->
   unit ->
   string
+(** [allowed_orgs] / [denied_repos] are surfaced in the <world> block so
+    the keeper sees the live git_clone allow/deny lists without having
+    to query [tool_policy.toml].  Callers should pass the values from
+    [Keeper_tool_policy.git_clone_allowed_orgs] /
+    [git_clone_denied_repos]; omitted or empty lists render as
+    ["(none)"]. *)
 
 val append_direct_reply_mode_prompt :
   base_prompt:string ->

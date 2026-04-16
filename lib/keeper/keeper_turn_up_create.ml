@@ -230,6 +230,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
+            ~allowed_orgs:(Keeper_tool_policy.git_clone_allowed_orgs ())
+            ~denied_repos:(Keeper_tool_policy.git_clone_denied_repos ())
             ()
       in
       let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in

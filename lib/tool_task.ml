@@ -671,6 +671,31 @@ let handle_transition ctx args =
     else
       (false, completion_rejection_message ~allow_force:true reason)
   | None ->
+  (* Verifier gate: if the task has a completion_contract and the
+     verification FSM is enabled, redirect Done → Submit_for_verification
+     so a cross-agent verifier keeper can independently validate the
+     quantitative criteria. Gates 1-3 (length, excuse, LLM) still run
+     above; this replaces Gate 2.5 (substring match) with real
+     measurement by the verifier. See issue #7598. *)
+  let action =
+    if action = Types.Done_action
+       && Env_config_runtime.Verification.fsm_enabled ()
+       && (not force)
+    then
+      match task_opt with
+      | Some task when Option.is_some task.contract ->
+        let contract = Option.get task.contract in
+        if contract.completion_contract <> [] || contract.required_evidence <> [] then begin
+          Log.Task.info
+            "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
+            task_id ctx.agent_name
+            (List.length contract.completion_contract + List.length contract.required_evidence);
+          Types.Submit_for_verification
+        end else
+          action
+      | _ -> action
+    else action
+  in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with

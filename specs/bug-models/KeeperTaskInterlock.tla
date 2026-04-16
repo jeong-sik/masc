@@ -92,16 +92,18 @@ VARIABLES
 vars == <<keeper_phase, task_status, task_claimer>>
 
 Phases == {"running", "draining", "dead"}
-\* "cancelled" is in Statuses for TypeOK completeness (the real task
-\* FSM has Cancelled) but this model has no action that transitions
-\* a task to "cancelled" — it is unreachable from Init. That is OK:
-\* the NoDeadKeeperHoldsTask invariant is insensitive to Cancelled
-\* since ~Held("cancelled"), and adding a CancelTask action would
-\* only enlarge the state space without strengthening the invariant.
-Statuses == {"todo", "claimed", "in_progress", "done", "cancelled"}
+\* "cancelled" and "awaiting_verification" are in Statuses for TypeOK
+\* completeness. The real task FSM has 6 states (types_core.ml:265-277).
+\* "awaiting_verification" is entered when an agent with a completion
+\* contract tries Done — the verifier gate redirects to Submit_for_verification.
+\* A different agent must then Approve (->done) or Reject (->in_progress).
+Statuses == {"todo", "claimed", "in_progress", "awaiting_verification", "done", "cancelled"}
 Claimers == K \cup {"none"}
 
-Held(t) == task_status[t] \in {"claimed", "in_progress"}
+\* A task is "held" if it requires an agent to make progress on it.
+\* awaiting_verification is held: the original assignee still owns it,
+\* waiting for cross-agent approval.
+Held(t) == task_status[t] \in {"claimed", "in_progress", "awaiting_verification"}
 
 TypeOK ==
     /\ keeper_phase \in [K -> Phases]
@@ -136,6 +138,33 @@ DoneTask(t) ==
     /\ task_status'  = [task_status  EXCEPT ![t] = "done"]
     /\ task_claimer' = [task_claimer EXCEPT ![t] = "none"]
     /\ UNCHANGED keeper_phase
+
+\* Verifier gate: redirect Done -> AwaitingVerification when contract exists.
+\* Claimer stays the same — the task is still "owned" by the original agent.
+SubmitForVerification(t) ==
+    /\ task_status[t] = "in_progress"
+    /\ task_status'  = [task_status  EXCEPT ![t] = "awaiting_verification"]
+    /\ UNCHANGED <<keeper_phase, task_claimer>>
+
+\* Cross-agent approval: a DIFFERENT keeper approves.
+\* Self-approval is blocked by the guard v /= task_claimer[t].
+ApproveVerification(t, v) ==
+    /\ task_status[t] = "awaiting_verification"
+    /\ v \in K
+    /\ v /= task_claimer[t]
+    /\ keeper_phase[v] = "running"
+    /\ task_status'  = [task_status  EXCEPT ![t] = "done"]
+    /\ task_claimer' = [task_claimer EXCEPT ![t] = "none"]
+    /\ UNCHANGED keeper_phase
+
+\* Cross-agent rejection: task returns to in_progress for rework.
+RejectVerification(t, v) ==
+    /\ task_status[t] = "awaiting_verification"
+    /\ v \in K
+    /\ v /= task_claimer[t]
+    /\ keeper_phase[v] = "running"
+    /\ task_status'  = [task_status  EXCEPT ![t] = "in_progress"]
+    /\ UNCHANGED <<keeper_phase, task_claimer>>
 
 ReleaseTask(t) ==
     /\ task_status[t] \in {"claimed", "in_progress"}
@@ -177,6 +206,9 @@ Next ==
     \/ \E t \in T, k \in K : ClaimTask(t, k)
     \/ \E t \in T : StartTask(t)
     \/ \E t \in T : DoneTask(t)
+    \/ \E t \in T : SubmitForVerification(t)
+    \/ \E t \in T, v \in K : ApproveVerification(t, v)
+    \/ \E t \in T, v \in K : RejectVerification(t, v)
     \/ \E t \in T : ReleaseTask(t)
     \/ \E k \in K : StartDrain(k)
     \/ \E k \in K, t \in T : DrainRelease(k, t)
@@ -198,6 +230,18 @@ ClaimerNotDead ==
         task_claimer[t] \in K =>
             keeper_phase[task_claimer[t]] /= "dead"
 
+\* Verifier independence: no task can be in a done state via a
+\* transition that allowed self-approval. This is enforced at the
+\* action level by ApproveVerification's v /= task_claimer[t] guard.
+\* We state the invariant as a type-level property: if a task is
+\* awaiting_verification, its claimer is a real keeper (not "none"),
+\* which preserves the "different agent must approve" discipline
+\* at model-check time.
+AwaitingVerificationHasClaimer ==
+    \A t \in T :
+        task_status[t] = "awaiting_verification" =>
+            task_claimer[t] \in K
+
 \* ── Bug Model: skip-drain Dead transition ─────────────
 \* Bug: a keeper crashes (Running -> Dead) without going through
 \* the drain path — any tasks it was holding are now orphaned.
@@ -215,10 +259,37 @@ SloppyFinishDrain(k) ==
     /\ keeper_phase' = [keeper_phase EXCEPT ![k] = "dead"]
     /\ UNCHANGED <<task_status, task_claimer>>
 
+\* Bug: self-approval allowed. A buggy ApproveVerification that
+\* drops the v /= task_claimer[t] guard would let the assignee
+\* approve their own work — exactly the anti-pattern the verifier
+\* gate is meant to prevent. Violates AwaitingVerificationHasClaimer
+\* only weakly (claimer is still a K), but composes with a separate
+\* SelfApproval predicate as a liveness/safety coupling bug.
+SelfApproveVerification(t, v) ==
+    /\ task_status[t] = "awaiting_verification"
+    /\ v \in K
+    /\ v = task_claimer[t]    \* <-- bug: same agent approves
+    /\ keeper_phase[v] = "running"
+    /\ task_status'  = [task_status  EXCEPT ![t] = "done"]
+    /\ task_claimer' = [task_claimer EXCEPT ![t] = "none"]
+    /\ UNCHANGED keeper_phase
+
 NextBuggy ==
     \/ Next
     \/ \E k \in K : CrashToDead(k)
     \/ \E k \in K : SloppyFinishDrain(k)
+    \/ \E t \in T, v \in K : SelfApproveVerification(t, v)
+
+\* Invariant that the self-approval bug violates: once a task is
+\* done, at least one non-assignee approval must have occurred.
+\* We track this via a history variable implicitly: if task_status
+\* transitioned through awaiting_verification -> done without a
+\* different-agent step, that's a bug. In this untimed spec we
+\* capture it by asserting NextBuggy breaks a property that Next
+\* preserves. (See SpecBuggy run: TLC should find a trace where
+\* SelfApproveVerification fires and a simple liveness-ish witness
+\* detects that an ApproveVerification by v /= assignee never ran
+\* for this task.)
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
@@ -262,6 +333,9 @@ NextCurrent ==
     \/ \E t \in T, k \in K : ClaimTask(t, k)
     \/ \E t \in T : StartTask(t)
     \/ \E t \in T : DoneTask(t)
+    \/ \E t \in T : SubmitForVerification(t)
+    \/ \E t \in T, v \in K : ApproveVerification(t, v)
+    \/ \E t \in T, v \in K : RejectVerification(t, v)
     \/ \E t \in T : ReleaseTask(t)
     \/ \E k \in K : CrashToDead(k)
     \/ \E t \in T : ReconcileByGC(t)

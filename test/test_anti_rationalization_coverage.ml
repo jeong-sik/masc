@@ -162,7 +162,22 @@ let () = test "review_result_custom_evaluator_cascade" (fun () ->
 
 (* ================================================================ *)
 (* Gate 2.5: Completion contract (#3071)                             *)
+(*                                                                    *)
+(* NOTE: issue #7598 bypasses the substring match when                *)
+(* MASC_VERIFICATION_FSM_ENABLED=true (default). The verifier keeper  *)
+(* replaces this gate with independent measurement. These tests       *)
+(* disable the FSM flag to verify the legacy substring fallback is    *)
+(* still correct for deployments that opt out.                        *)
 (* ================================================================ *)
+
+let with_fsm_disabled f =
+  let prev = Sys.getenv_opt "MASC_VERIFICATION_FSM_ENABLED" in
+  Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "false";
+  let restore () = match prev with
+    | None -> (try Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "" with _ -> ())
+    | Some v -> Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" v
+  in
+  Fun.protect ~finally:restore f
 
 let () = test "contract_all_met" (fun () ->
   let r = Anti_rationalization.review
@@ -171,31 +186,44 @@ let () = test "contract_all_met" (fun () ->
   (* Contract met — should proceed to Gate 3 (LLM unavailable → approve) *)
   assert_approve r)
 
-let () = test "contract_unmet_rejects" (fun () ->
+let () = test "contract_unmet_rejects_legacy" (fun () ->
+  with_fsm_disabled (fun () ->
+    let r = Anti_rationalization.review
+      ~completion_contract:["test coverage"; "migration"]
+      (make_request "Applied fix to the login flow.") in
+    assert (r.gate = Anti_rationalization.Contract);
+    assert_reject r))
+
+let () = test "contract_unmet_lists_items_legacy" (fun () ->
+  with_fsm_disabled (fun () ->
+    let r = Anti_rationalization.review
+      ~completion_contract:["test"; "migration"; "rollback"]
+      (make_request "Applied fix and added test to verify.") in
+    match r.verdict with
+    | Anti_rationalization.Reject reason ->
+      (* "migration" and "rollback" should be unmet *)
+      let has sub =
+        let slen = String.length sub in
+        let rlen = String.length reason in
+        if slen > rlen then false
+        else let rec s i = if i > rlen - slen then false
+          else if String.sub reason i slen = sub then true else s (i+1) in s 0
+      in
+      assert (has "migration");
+      assert (has "rollback")
+    | Anti_rationalization.Approve ->
+      failwith "expected Reject for unmet contract"))
+
+(* New: verify that FSM-enabled path bypasses the substring gate. *)
+let () = test "contract_substring_bypassed_when_fsm_enabled" (fun () ->
+  Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "true";
   let r = Anti_rationalization.review
     ~completion_contract:["test coverage"; "migration"]
     (make_request "Applied fix to the login flow.") in
-  assert (r.gate = Anti_rationalization.Contract);
-  assert_reject r)
-
-let () = test "contract_unmet_lists_items" (fun () ->
-  let r = Anti_rationalization.review
-    ~completion_contract:["test"; "migration"; "rollback"]
-    (make_request "Applied fix and added test to verify.") in
-  match r.verdict with
-  | Anti_rationalization.Reject reason ->
-    (* "migration" and "rollback" should be unmet *)
-    let has sub =
-      let slen = String.length sub in
-      let rlen = String.length reason in
-      if slen > rlen then false
-      else let rec s i = if i > rlen - slen then false
-        else if String.sub reason i slen = sub then true else s (i+1) in s 0
-    in
-    assert (has "migration");
-    assert (has "rollback")
-  | Anti_rationalization.Approve ->
-    failwith "expected Reject for unmet contract")
+  (* Gate 2.5 is bypassed; LLM unavailable in test → Gate 4 Fallback approves.
+     The verifier keeper is the enforcement path in production. *)
+  assert (r.gate <> Anti_rationalization.Contract);
+  assert_approve r)
 
 let () = test "contract_empty_no_effect" (fun () ->
   let r = Anti_rationalization.review

@@ -584,6 +584,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_dashboard_tla_specs)
+ (modules test_dashboard_tla_specs)
+ (libraries masc_test_deps))
+
+(test
  (name test_cascade_ollama_probe)
  (modules test_cascade_ollama_probe)
  (libraries masc_test_deps))

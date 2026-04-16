@@ -1982,3 +1982,29 @@ export function fetchVerificationRequests(
     : '/api/v1/verification/requests'
   return get<VerificationRequestsResponse>(path, { signal: opts?.signal })
 }
+
+export type TlaSpecCategory = 'boundary' | 'bug-models' | 'other'
+
+export interface TlaSpecEntry {
+  name: string
+  path: string
+  category: TlaSpecCategory
+  has_clean_cfg: boolean
+  has_buggy_cfg: boolean
+  mtime_iso: string
+}
+
+export interface TlaSpecsResponse {
+  updated_at: string
+  specs_dir: string | null
+  count: number
+  entries: TlaSpecEntry[]
+}
+
+export function fetchTlaSpecs(
+  opts?: AbortableRequestOptions,
+): Promise<TlaSpecsResponse> {
+  return get<TlaSpecsResponse>('/api/v1/verification/specs', {
+    signal: opts?.signal,
+  })
+}

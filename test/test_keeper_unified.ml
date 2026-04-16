@@ -2177,12 +2177,12 @@ let test_required_tool_contract_violation_detected () =
   check bool "tool-choice contract violation detected" true
     (UT.is_required_tool_contract_violation err)
 
-let test_required_tool_contract_violation_detected_from_legacy_internal_error () =
+let test_required_tool_contract_violation_ignores_legacy_internal_error () =
   let err =
     Agent_sdk.Error.Internal
       "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
   in
-  check bool "tool-choice contract violation detected" true
+  check bool "legacy internal contract violation ignored" false
     (UT.is_required_tool_contract_violation err)
 
 let test_cascade_exhausted_error_detected_from_structured_internal_error () =
@@ -2197,10 +2197,23 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
   check bool "structured cascade exhausted error detected" true
     (UT.is_cascade_exhausted_error err)
 
-let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
+let test_cascade_exhausted_error_ignores_legacy_internal_error () =
   let err =
     Agent_sdk.Error.Internal
-      "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
+      "cascade keeper_unified: all models failed: no providers available"
+  in
+  check bool "legacy internal cascade exhaustion ignored" false
+    (UT.is_cascade_exhausted_error err)
+
+let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
+  let err =
+    Agent_sdk.Error.Agent
+      (CompletionContractViolation
+         {
+           contract = "require_tool_use";
+           reason =
+             "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
+         })
   in
   check bool "tool-choice contract violation is not globally auto-recoverable" false
     (UT.is_auto_recoverable_turn_error err)
@@ -3408,10 +3421,12 @@ let () =
             test_auto_recoverable_turn_error_includes_server_parse_rejection;
           test_case "required tool contract violation detected from structured error" `Quick
             test_required_tool_contract_violation_detected;
-          test_case "required tool contract violation detected from legacy internal error" `Quick
-            test_required_tool_contract_violation_detected_from_legacy_internal_error;
+          test_case "legacy internal contract violation is ignored" `Quick
+            test_required_tool_contract_violation_ignores_legacy_internal_error;
           test_case "structured cascade exhausted error detected" `Quick
             test_cascade_exhausted_error_detected_from_structured_internal_error;
+          test_case "legacy internal cascade exhaustion is ignored" `Quick
+            test_cascade_exhausted_error_ignores_legacy_internal_error;
           test_case "auto-recoverable excludes tool-choice contract violation" `Quick
             test_auto_recoverable_turn_error_excludes_required_tool_contract_violation;
           test_case "auto-recoverable excludes persistent errors" `Quick

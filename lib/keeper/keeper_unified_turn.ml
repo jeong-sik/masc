@@ -101,13 +101,7 @@ let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
            ~needle:"tool_choice requested tool use"
            lower
          && string_contains_substring ~needle:"no tooluse block" lower
-  | _ ->
-      let lower = String.lowercase_ascii (Oas.Error.to_string err) in
-      string_contains_substring
-        ~needle:"completion contract [require_tool_use] violated"
-        lower
-      || ( string_contains_substring ~needle:"tool_choice requested tool use" lower
-           && string_contains_substring ~needle:"no tooluse block" lower )
+  | _ -> false
 
 let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
   is_transient_network_error err
@@ -244,14 +238,7 @@ let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted _)
   | Some (Oas_worker_named.Accept_rejected _) -> true
-  | None ->
-      match err with
-      | Oas.Error.Internal msg ->
-          string_contains_substring_ci
-            ~needle:"all models failed" msg
-          || string_contains_substring_ci
-               ~needle:"response rejected by accept" msg
-      | _ -> false
+  | None -> false
 
 type overflow_retry_plan = {
   retry_max_context : int;

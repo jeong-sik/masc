@@ -16,14 +16,18 @@ concurrency:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-14  # Apple Silicon
             arch: macos-arm64
+            may-fail: true   # upstream opam macOS arm64 binary missing (#7475)
           - os: ubuntu-latest
             arch: linux-x64
+            may-fail: false
 
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.may-fail }}
     timeout-minutes: 45
 
     steps:

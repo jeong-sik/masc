@@ -89,6 +89,7 @@
    dashboard_provider_runs
    dashboard_cascade
    dashboard_verification
+   dashboard_tla_specs
    proactive_refresh
    server_dashboard_http_runtime_support
    server_dashboard_http_runtime_info

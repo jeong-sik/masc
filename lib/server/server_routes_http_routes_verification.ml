@@ -1,8 +1,13 @@
-(** HTTP route for the verification-request dashboard projection.
+(** HTTP routes for the verification domain.
 
     Kept as a dedicated file to avoid bloating
     [server_routes_http_routes_cascade.ml] — the verification domain is
-    independent of cascade. *)
+    independent of cascade.
+
+    - [GET /api/v1/verification/requests] — operator view of pending /
+      approved / rejected verification requests (see {!Dashboard_verification}).
+    - [GET /api/v1/verification/specs] — TLA+ spec index with clean / buggy
+      cfg coverage (see {!Dashboard_tla_specs}). *)
 
 open Server_auth
 
@@ -26,6 +31,12 @@ let add_routes router =
          let json =
            Dashboard_verification.requests_json ?task_id ?limit ()
          in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/verification/specs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Dashboard_tla_specs.specs_json () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

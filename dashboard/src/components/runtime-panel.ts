@@ -16,10 +16,11 @@ import { OasHealthChip } from './oas-health-chip'
 import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { CascadeConfigPanel } from './cascade-config-panel'
+import { VerificationSpecsPanel } from './verification-specs-panel'
 
-export type RuntimeView = 'default' | 'cascade' | 'providers' | 'prometheus'
+export type RuntimeView = 'default' | 'cascade' | 'providers' | 'prometheus' | 'verification'
 
-const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'prometheus']
+const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'prometheus', 'verification']
 
 function isRuntimeView(v: string | undefined): v is RuntimeView {
   return !!v && (RUNTIME_VIEWS as string[]).includes(v)
@@ -35,6 +36,7 @@ const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'cascade', label: 'Cascade' },
   { key: 'providers', label: '프로바이더' },
   { key: 'prometheus', label: '메트릭' },
+  { key: 'verification', label: '형식검증' },
 ]
 
 function updateViewParam(view: RuntimeView): void {
@@ -65,11 +67,14 @@ export function RuntimePanel() {
           `
         : view === 'prometheus'
           ? html`<${PrometheusMetrics} />`
+        : view === 'verification'
+          ? html`<${VerificationSpecsPanel} />`
         : html`
             <${CascadeConfigPanel} />
             <${OasHealthChip} />
             <${RuntimeMonitor} />
             <${PrometheusMetrics} />
+            <${VerificationSpecsPanel} />
           `}
       </div>
     </div>

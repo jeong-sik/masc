@@ -29,8 +29,13 @@ val update_local_agent_state :
     the same discipline for its own agent-state writes. *)
 
 val emit_task_activity :
+  ?correlation_id:string -> ?run_id:string ->
   config -> agent_name:string -> task_id:string ->
   kind:string -> payload:Yojson.Safe.t -> unit
+(** Optional [correlation_id] / [run_id] are merged into the activity
+    payload as additional fields when present, so call sites can opt in
+    without breaking existing callers. Backed by
+    [merge_envelope_into_payload]. *)
 
 val task_actor_kind : string -> string
 

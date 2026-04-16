@@ -140,7 +140,30 @@ let merge_execution_links (existing : Types.task_execution_links) ?session_id
       | None -> trim_opt existing.autoresearch_loop_id);
   }
 
-let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
+(** Merge optional OAS event_bus envelope identifiers (correlation_id,
+    run_id) into the task activity payload. When both ids are absent the
+    original payload is returned untouched, so existing callers compile
+    and behave identically. *)
+let merge_envelope_into_payload ?correlation_id ?run_id payload =
+  let optional name = function
+    | Some v -> [ (name, `String v) ]
+    | None -> []
+  in
+  let extras =
+    optional "correlation_id" correlation_id
+    @ optional "run_id" run_id
+  in
+  if extras = [] then payload
+  else
+    match payload with
+    | `Assoc fields -> `Assoc (fields @ extras)
+    | other -> `Assoc [ ("payload", other); ("envelope", `Assoc extras) ]
+
+let emit_task_activity ?correlation_id ?run_id
+    config ~agent_name ~task_id ~kind ~payload =
+  let payload =
+    merge_envelope_into_payload ?correlation_id ?run_id payload
+  in
   try
     !Coord_hooks.activity_emit_fn config
       ~actor:Coord_hooks.{ kind = task_actor_kind agent_name; id = agent_name }

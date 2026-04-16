@@ -5,7 +5,7 @@
 > Last Updated: 2026-04-16
 > Snapshot baseline: `dune-project` version `0.9.4`
 
-MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Claude, Gemini, Codex, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, Command Plane 오케스트레이션을 제공하며, MCP JSON-RPC 프로토콜을 통해 모든 주요 AI IDE/CLI와 통합된다.
+MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Claude, Gemini, Codex, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Historical compatibility lane과 internal orchestration reference는 migration context로만 남긴다.
 
 ## Snapshot Metadata
 
@@ -30,7 +30,7 @@ graph TB
     L6["Layer 6: Integration<br/>OAS bridge, autoresearch, research loop"]
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
-    L3["Layer 3: Engine<br/>chain, keeper, swarm, team_session, command_plane"]
+    L3["Layer 3: Engine<br/>chain, keeper, swarm, internal command_plane"]
     L2["Layer 2: Domain<br/>room, board"]
     L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
     L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]
@@ -53,7 +53,7 @@ graph TB
 | `03-room-coordination.md` | Room Coordination | Room 생명주기, session 관리, agent join/leave | Draft |
 | `04-chain-engine.md` | Chain Engine | Multi-step chain DSL, execution, snapshot | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
-| `06-command-plane.md` | Command Plane v2 | Units, operations, search fabric, detachments, policy, orchestra | Draft |
+| `06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
 | `10-dashboard.md` | Dashboard | Web UI, API endpoints, SSE real-time updates | Draft |
 | `11-board.md` | Board System | Posts, comments, votes, PG/JSONL backend | Draft |
@@ -66,6 +66,8 @@ graph TB
 | `C-implementation-status.md` | Implementation Status | 구현 상태와 coverage snapshot | Draft |
 
 ## Active Design Documents
+
+`06-command-plane.md`는 retained code/inventory를 설명하는 internal reference다. Supported front-door contract나 새 caller onboarding SSOT로 읽지 않는다.
 
 이 spec suite 외에 `docs/design/`와 `docs/rfc/`에 위치한 활성 설계 문서들:
 

@@ -287,6 +287,63 @@ let rec add_routes ~sw ~clock router =
                   (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
          )
        ) request reqd)
+
+  (* Operator surface restored after cp-purge (#7349): handlers existed in
+     server_dashboard_http_core/.ml but their Router.get/post registrations
+     were deleted together with the Command Plane. Dashboard SSE hydrates
+     the same caches, so this path only services HTTP fallbacks (first load
+     before SSE attaches + explicit tab-refresh). *)
+  |> Http.Router.get "/api/v1/operator" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json = operator_snapshot_http_json ~state ~sw ~clock req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/operator/digest" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         match operator_digest_http_json ~state ~sw ~clock req with
+         | Ok json ->
+             Http.Response.json ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         | Error message ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (operator_error_json message))
+       ) request reqd)
+  |> Http.Router.post "/api/v1/operator/action" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_operator_action" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match operator_action_http_json ~state ~sw ~clock req ~args with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (operator_error_json message))
+           with Yojson.Json_error msg ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+       ) request reqd)
+  |> Http.Router.post "/api/v1/operator/confirm" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_operator_confirm" (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args = Yojson.Safe.from_string body_str in
+             match operator_confirm_http_json ~state ~sw ~clock req ~args with
+             | Ok json ->
+                 respond_json_with_cors request reqd (Yojson.Safe.to_string json)
+             | Error message ->
+                 respond_json_with_cors ~status:`Bad_request request reqd
+                   (Yojson.Safe.to_string (operator_error_json message))
+           with Yojson.Json_error msg ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string
+                  (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/dashboard/planning" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_planning_http_json ~config:state.Mcp_server.room_config in

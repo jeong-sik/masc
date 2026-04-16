@@ -1215,11 +1215,14 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
 
 (** Feature flag: when true, store structured JSON in
     [Checkpoint.working_context] alongside the text [STATE] block.
-    Default false — existing behavior preserved. RFC-MASC-001 Phase 1. *)
+    Default TRUE as of RFC-MASC-001 Phase 1 rollout; set
+    [MASC_STRUCTURED_STATE=false] to restore legacy text-only behavior.
+    Accepted false values: [false], [0], [no]. Any other value (or
+    unset) enables the structured path. *)
 let structured_state_enabled () =
   match Sys.getenv_opt "MASC_STRUCTURED_STATE" with
-  | Some ("true" | "1" | "yes") -> true
-  | _ -> false
+  | Some ("false" | "0" | "no") -> false
+  | _ -> true
 
 (** Patch an OAS checkpoint: unify session_id and replace the last
     assistant message's text content with [response_text] (which includes

@@ -10,6 +10,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
+import { signal } from '@preact/signals'
 import {
   fetchVerificationRequests,
   type VerificationRequest,
@@ -28,6 +29,18 @@ import {
 
 const AUTO_REFRESH_MS = 15_000
 const DEFAULT_LIMIT = 100
+
+type StatusFilter = VerificationRequestStatus | 'all'
+
+const statusFilter = signal<StatusFilter>('all')
+
+const FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: '전체' },
+  { value: 'pending', label: '검증 대기' },
+  { value: 'approved', label: '승인' },
+  { value: 'rejected', label: '반려' },
+  { value: 'timed_out', label: '시간 초과' },
+]
 
 async function loadData(
   resource: ManagedAsyncResource<VerificationRequestsResponse>,
@@ -187,11 +200,13 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
 
 // ── Table ─────────────────────────────────────────────
 
-function RequestsTable({ data }: { data: VerificationRequestsResponse }) {
-  if (data.requests.length === 0) {
+function RequestsTable({ requests }: { requests: VerificationRequest[] }) {
+  if (requests.length === 0) {
     return html`
       <${EmptyState}>
-        현재 대기중이거나 완료된 검증 요청이 없습니다.
+        ${statusFilter.value === 'all'
+          ? '현재 대기중이거나 완료된 검증 요청이 없습니다.'
+          : `"${STATUS_LABEL[statusFilter.value as VerificationRequestStatus]}" 상태의 요청이 없습니다.`}
       <//>
     `
   }
@@ -211,7 +226,7 @@ function RequestsTable({ data }: { data: VerificationRequestsResponse }) {
           </tr>
         </thead>
         <tbody>
-          ${data.requests.map(
+          ${requests.map(
             (row) => html`<${VerificationRow} key=${row.request_id} row=${row} />`,
           )}
         </tbody>
@@ -242,6 +257,11 @@ export function VerificationRequestsPanel() {
 
   const current = resource.state.value
   const data = current.data ?? null
+  const filtered = data
+    ? statusFilter.value === 'all'
+      ? data.requests
+      : data.requests.filter((r) => r.status === statusFilter.value)
+    : []
 
   return html`
     <div class="flex flex-col gap-4">
@@ -262,9 +282,24 @@ export function VerificationRequestsPanel() {
           : null}
         ${data
           ? html`<span class="text-xs text-[var(--text-muted)]">
-              총 ${data.total}건
+              ${statusFilter.value === 'all'
+                ? `총 ${data.total}건`
+                : `${filtered.length} / ${data.total}건`}
             </span>`
           : null}
+      </div>
+
+      <div class="flex items-center gap-1.5 flex-wrap">
+        ${FILTER_OPTIONS.map((opt) => html`
+          <button
+            class=${`rounded px-2 py-0.5 text-[11px] border transition-colors ${
+              statusFilter.value === opt.value
+                ? 'bg-[var(--text-strong)] text-[var(--bg-0)] border-[var(--text-strong)]'
+                : 'bg-[var(--bg-0)] text-[var(--text-muted)] border-[var(--card-border)] hover:text-[var(--text-body)]'
+            }`}
+            onClick=${() => { statusFilter.value = opt.value }}
+          >${opt.label}</button>
+        `)}
       </div>
 
       ${current.error ? html`<${ErrorState} message=${current.error} />` : null}
@@ -274,7 +309,7 @@ export function VerificationRequestsPanel() {
         : null}
 
       <${Card} title="검증 요청">
-        ${data ? html`<${RequestsTable} data=${data} />` : null}
+        ${data ? html`<${RequestsTable} requests=${filtered} />` : null}
       <//>
     </div>
   `

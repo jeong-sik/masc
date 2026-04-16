@@ -633,6 +633,75 @@ let test_history_try_acquire_records_events () =
           "cli:claude_code" a.key
       | _ -> fail "expected 3 events"))
 
+(* ── Prometheus counter coverage (LT-6) ──────────────────
+
+   The counter increment runs outside the ring-buffer mutex and uses the
+   same (kind, key_type) labels as the JSON projection.  We exercise the
+   full surface in-memory by scraping Masc_mcp.Prometheus.to_prometheus_text
+   after a record() call.  The counter value check is >= rather than = so
+   the test is robust to other cases in the suite touching the same metric. *)
+
+let counter_value_from_text text kind key_type =
+  (* Scan lines of the form:
+       masc_cascade_capacity_events_total{kind="acquired",key_type="cli"} 3.0
+     and return the numeric value for the matching label pair.  Returns
+     [None] when the line is missing. *)
+  let target_kind = Printf.sprintf {|kind="%s"|} kind in
+  let target_key  = Printf.sprintf {|key_type="%s"|} key_type in
+  let lines = String.split_on_char '\n' text in
+  let matching =
+    List.filter (fun line ->
+      String.length line > 0
+      && String.length line >= String.length "masc_cascade_capacity_events_total"
+      && String.sub line 0 (String.length "masc_cascade_capacity_events_total")
+         = "masc_cascade_capacity_events_total"
+      && (let has s =
+            let nlen = String.length s in
+            let llen = String.length line in
+            let rec f i =
+              if i + nlen > llen then false
+              else if String.sub line i nlen = s then true
+              else f (i + 1)
+            in f 0
+          in has target_kind && has target_key))
+      lines
+  in
+  match matching with
+  | [] -> None
+  | line :: _ ->
+    (* Last whitespace-separated token is the value. *)
+    let parts = String.split_on_char ' ' line in
+    (match List.rev parts with
+     | v :: _ -> float_of_string_opt (String.trim v)
+     | [] -> None)
+
+let test_history_prometheus_counter_increments () =
+  CH.clear ();
+  let before =
+    counter_value_from_text
+      (Masc_mcp.Prometheus.to_prometheus_text ()) "acquired" "cli"
+    |> Option.value ~default:0.0
+  in
+  CH.record { ts = 1.0; key = "cli:claude_code";
+              kind = Acquired; active_after = 1 };
+  CH.record { ts = 2.0; key = "cli:gemini_cli";
+              kind = Acquired; active_after = 1 };
+  CH.record { ts = 3.0; key = "http://127.0.0.1:11434";
+              kind = Rejected_full; active_after = 1 };
+  let text = Masc_mcp.Prometheus.to_prometheus_text () in
+  let cli_acquired =
+    counter_value_from_text text "acquired" "cli"
+    |> Option.value ~default:0.0
+  in
+  let ollama_rejected =
+    counter_value_from_text text "rejected_full" "ollama"
+    |> Option.value ~default:0.0
+  in
+  check bool "cli/acquired counter advanced by >= 2"
+    true (cli_acquired >= before +. 2.0);
+  check bool "ollama/rejected_full counter advanced by >= 1"
+    true (ollama_rejected >= 1.0)
+
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -736,5 +805,7 @@ let () =
         test_history_snapshot_kind_filter;
       test_case "try_acquire records events on registered URL" `Quick
         test_history_try_acquire_records_events;
+      test_case "record bumps Prometheus counter with label" `Quick
+        test_history_prometheus_counter_increments;
     ];
   ]

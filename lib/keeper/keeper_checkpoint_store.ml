@@ -130,12 +130,92 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
 let oas_checkpoint_path ~(session_dir : string) ~(session_id : string) =
   Filename.concat session_dir (session_id ^ ".json")
 
+let oas_history_prefix = "oas-snapshot-"
+let oas_history_suffix = ".json"
+
+let is_oas_history_file (filename : string) : bool =
+  let len = String.length filename in
+  len > String.length oas_history_prefix + String.length oas_history_suffix
+  && String.sub filename 0 (String.length oas_history_prefix) = oas_history_prefix
+  && String.sub filename (len - String.length oas_history_suffix)
+       (String.length oas_history_suffix) = oas_history_suffix
+
+let list_oas_history_files ~(session_dir : string) : string list =
+  if not (Fs_compat.file_exists session_dir) then []
+  else
+    Sys.readdir session_dir
+    |> Array.to_list
+    |> List.filter is_oas_history_file
+    |> List.sort (fun a b -> compare b a)
+
+let max_oas_history_retained = 12
+
+let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
+  Filename.concat session_dir snapshot_id
+
+let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : string =
+  let generation =
+    match ckpt.working_context with
+    | Some (`Assoc fields) -> (
+        match List.assoc_opt "keeper_generation" fields with
+        | Some (`Int n) -> n
+        | Some (`Intlit raw) -> (try int_of_string raw with _ -> 0)
+        | _ -> 0)
+    | _ -> 0
+  in
+  let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
+  Printf.sprintf "%s%013d-g%d%s"
+    oas_history_prefix created_ms generation oas_history_suffix
+
+let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : unit =
+  let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
+  Keeper_fs.save_atomic
+    (oas_history_path ~session_dir ~snapshot_id)
+    (Agent_sdk.Checkpoint.to_string ckpt);
+  let files = list_oas_history_files ~session_dir in
+  if List.length files > max_oas_history_retained then
+    files
+    |> List.filteri (fun index _ -> index >= max_oas_history_retained)
+    |> List.iter (fun filename ->
+         let path = oas_history_path ~session_dir ~snapshot_id:filename in
+         try Sys.remove path with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
+               path (Printexc.to_string exn))
+
+let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string list)
+    : string list * string list =
+  List.fold_left
+    (fun (deleted, missing) snapshot_id ->
+      let path = oas_history_path ~session_dir ~snapshot_id in
+      if Fs_compat.file_exists path then (
+        try
+          Sys.remove path;
+          (snapshot_id :: deleted, missing)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Keeper.warn "OAS snapshot delete failed for %s: %s"
+              path (Printexc.to_string exn);
+            (deleted, snapshot_id :: missing))
+      else
+        (deleted, snapshot_id :: missing))
+    ([], [])
+    snapshot_ids
+  |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
+
 let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =
   let fallback () =
     Keeper_fs.save_atomic
       (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
       (Agent_sdk.Checkpoint.to_string ckpt);
+    (try save_oas_history ~session_dir ckpt with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+         Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
+           ckpt.session_id (Printexc.to_string exn));
     Ok ()
   in
   try
@@ -144,8 +224,16 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
     | Some fs when Eio_guard.is_ready () ->
         let dir = Eio.Path.(fs / session_dir) in
         (match Agent_sdk.Checkpoint_store.create dir with
-         | Ok store -> Agent_sdk.Checkpoint_store.save store ckpt
-             |> Result.map_error Agent_sdk.Error.to_string
+         | Ok store -> (
+             match Agent_sdk.Checkpoint_store.save store ckpt with
+             | Ok () ->
+                 (try save_oas_history ~session_dir ckpt with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                      Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
+                        ckpt.session_id (Printexc.to_string exn));
+                 Ok ()
+             | Error err -> Error (Agent_sdk.Error.to_string err))
          | Error err -> Error (Agent_sdk.Error.to_string err))
     | Some _ | None ->
         fallback ()
@@ -217,6 +305,19 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | _ -> Io_error (Agent_sdk.Error.to_string e)
+
+let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
+    (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =
+  let path = oas_history_path ~session_dir ~snapshot_id in
+  if Fs_compat.file_exists path then
+    try
+      match Agent_sdk.Checkpoint.of_string (Fs_compat.load_file path) with
+      | Ok ckpt -> Ok ckpt
+      | Error e -> Error (classify_sdk_error e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Error (Io_error (Printexc.to_string exn))
+  else Error Not_found
 
 let load_oas ~(session_dir : string) ~(session_id : string) :
     (Agent_sdk.Checkpoint.t, checkpoint_load_error) result =

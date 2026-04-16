@@ -797,11 +797,66 @@ let handle_keeper_clear ctx args : tool_result =
             | Some meta -> meta.runtime.generation
             | None -> 0
           in
-          let checkpoint =
-            Keeper_exec_context.create_checkpoint cleared_ctx ~generation:(current_gen + 1)
-          in
-          Keeper_exec_context.save_session_checkpoint session checkpoint;
+          (match meta_for_trace with
+           | Some meta ->
+               let model = Keeper_exec_context.checkpoint_model_of_meta meta in
+               (match
+                  Keeper_exec_context.save_oas_checkpoint
+                    ~max_checkpoint_messages
+                    ~session
+                    ~agent_name:meta.agent_name
+                    ~model
+                    ~ctx:cleared_ctx
+                    ~generation:(current_gen + 1)
+                with
+                | Ok _ -> ()
+                | Error err ->
+                    Log.Keeper.warn
+                      "%s: failed to save cleared OAS checkpoint: %s"
+                      name err)
+           | None -> ());
           msg_count - List.length cleared_messages
+      in
+      let legacy_shadow_removed_count =
+        let files = Keeper_checkpoint_store.list_checkpoints ~session_dir:session.session_dir in
+        List.fold_left
+          (fun count filename ->
+            let path = Filename.concat session.session_dir filename in
+            try
+              Sys.remove path;
+              count + 1
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Log.Keeper.warn
+                  "%s: failed to remove legacy checkpoint shadow %s: %s"
+                  name path (Printexc.to_string exn);
+                count)
+          0 files
+      in
+      let continuity_cleared =
+        match meta_for_trace with
+        | Some meta ->
+            let updated_meta =
+              {
+                meta with
+                continuity_summary = "";
+                updated_at = Keeper_types.now_iso ();
+                runtime =
+                  {
+                    meta.runtime with
+                    last_continuity_update_ts = 0.0;
+                  };
+              }
+            in
+            (match Keeper_types.write_meta ~force:true ctx.config updated_meta with
+             | Ok () -> true
+             | Error err ->
+                 Log.Keeper.warn
+                   "%s: failed to clear continuity meta during operator clear: %s"
+                   name err;
+                 false)
+        | None -> false
       in
       (* Dispatch FSM event to clear overflow conditions *)
       Keeper_exec_context.dispatch_keeper_phase_event
@@ -828,6 +883,8 @@ let handle_keeper_clear ctx args : tool_result =
                | None -> "unknown"));
            ("cleared_message_count", `Int cleared_count);
            ("checkpoint_found", `Bool checkpoint_found);
+           ("continuity_cleared", `Bool continuity_cleared);
+           ("legacy_shadow_removed_count", `Int legacy_shadow_removed_count);
            ("preserve_system_prompt", `Bool preserve_system);
            ("reason", `String reason);
          ]))

@@ -1165,6 +1165,50 @@ let test_keeper_checkpoint_store_oas_missing_returns_none () =
               | Io_error d -> "io:" ^ d
               | Not_found -> "not_found"))))
 
+let test_keeper_checkpoint_store_writes_oas_history () =
+  let base_dir = temp_dir "keeper_oas_history_store" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let session_dir = Filename.concat base_dir "trace-history" in
+      let checkpoint1 =
+        make_oas_checkpoint ~session_id:"trace-history"
+          ~messages:[Agent_sdk.Types.user_msg "first"]
+          ~created_at:1711234500.0 ()
+      in
+      let checkpoint2 =
+        make_oas_checkpoint ~session_id:"trace-history"
+          ~messages:[Agent_sdk.Types.user_msg "second"]
+          ~created_at:1711234560.0 ()
+      in
+      (match Keeper_checkpoint_store.save_oas ~session_dir checkpoint1 with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail (Printf.sprintf "save_oas #1 failed: %s" e));
+      (match Keeper_checkpoint_store.save_oas ~session_dir checkpoint2 with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail (Printf.sprintf "save_oas #2 failed: %s" e));
+      let history_files =
+        Keeper_checkpoint_store.list_oas_history_files ~session_dir
+      in
+      Alcotest.(check int) "history file count" 2 (List.length history_files);
+      let latest_snapshot_id =
+        match history_files with
+        | latest :: _ -> latest
+        | [] -> Alcotest.fail "expected OAS snapshot history file"
+      in
+      match
+        Keeper_checkpoint_store.load_oas_history_file
+          ~session_dir ~snapshot_id:latest_snapshot_id
+      with
+      | Ok loaded ->
+          Alcotest.(check (float 0.000001)) "history created_at preserved"
+            checkpoint2.created_at
+            loaded.created_at;
+          Alcotest.(check string) "latest history message" "second"
+            (Agent_sdk.Types.text_of_message (List.hd loaded.messages))
+      | Error _ -> Alcotest.fail "expected OAS history checkpoint load to succeed")
+
 let test_keeper_checkpoint_prefers_oas_checkpoint () =
   let base_dir = temp_dir "keeper_oas_checkpoint" in
   Fun.protect
@@ -1924,6 +1968,8 @@ let () =
     "keeper_checkpoint_store", [
       Alcotest.test_case "OAS store roundtrip" `Quick
         test_keeper_checkpoint_store_oas_roundtrip;
+      Alcotest.test_case "OAS store writes history snapshots" `Quick
+        test_keeper_checkpoint_store_writes_oas_history;
       Alcotest.test_case "OAS store missing returns none" `Quick
         test_keeper_checkpoint_store_oas_missing_returns_none;
       Alcotest.test_case "prefers OAS checkpoint over legacy" `Quick

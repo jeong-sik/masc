@@ -6,11 +6,19 @@ import { html } from 'htm/preact'
 import { isOfflineStatus } from '../lib/status-utils'
 import { keeperDisplayStatus, keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
-import { useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { requestConfirm } from './common/confirm-dialog'
 import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
-import { bootKeeper, shutdownKeeper } from '../api/keeper'
+import {
+  bootKeeper,
+  clearKeeper,
+  deleteKeeperHistorySnapshots,
+  fetchKeeperCheckpoints,
+  shutdownKeeper,
+  type KeeperCheckpointInventory,
+  type KeeperCheckpointSummary,
+} from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
@@ -247,6 +255,316 @@ function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; e
   return null
 }
 
+function KeeperClearContextDialog({
+  keeperName,
+  open,
+  pending,
+  reason,
+  preserveSystemPrompt,
+  onClose,
+  onReasonInput,
+  onPreserveToggle,
+  onSubmit,
+}: {
+  keeperName: string
+  open: boolean
+  pending: boolean
+  reason: string
+  preserveSystemPrompt: boolean
+  onClose: () => void
+  onReasonInput: (next: string) => void
+  onPreserveToggle: (next: boolean) => void
+  onSubmit: () => void
+}) {
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
+  const titleId = `keeper-clear-title-${keeperName}`
+  const descId = `keeper-clear-desc-${keeperName}`
+  if (!open) return null
+
+  return html`
+    <${DialogOverlay}
+      labelledBy=${titleId}
+      describedBy=${descId}
+      onClose=${pending ? () => {} : onClose}
+      initialFocusRef=${reasonRef}
+      overlayClass="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
+      panelClass="w-full max-w-[520px] rounded-2xl border border-[var(--bad-30)] bg-[rgba(13,21,38,0.98)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+    >
+      <div class="p-5 flex flex-col gap-4">
+        <div class="flex flex-col gap-1">
+          <h3 id=${titleId} class="m-0 text-[17px] font-semibold text-[var(--text-strong)]">키퍼 컨텍스트 비우기</h3>
+          <p id=${descId} class="m-0 text-[13px] leading-relaxed text-[var(--text-muted)]">
+            ${keeperName}의 checkpoint 대화와 continuity summary를 비웁니다. 사유는 감사 로그에 남습니다.
+          </p>
+        </div>
+
+        <label class="flex flex-col gap-2">
+          <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">사유</span>
+          <textarea
+            ref=${reasonRef}
+            class="min-h-[112px] resize-y rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-2 text-[13px] leading-[1.55] text-[var(--text-body)] outline-none focus:border-[rgba(71,184,255,0.45)] focus:ring-2 focus:ring-[rgba(71,184,255,0.18)]"
+            placeholder="예: stale continuity replay 제거"
+            disabled=${pending}
+            value=${reason}
+            onInput=${(event: Event) => onReasonInput((event.currentTarget as HTMLTextAreaElement).value)}
+          ></textarea>
+        </label>
+
+        <label class="flex items-start gap-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-body)]">
+          <input
+            type="checkbox"
+            class="mt-0.5"
+            checked=${preserveSystemPrompt}
+            disabled=${pending}
+            onChange=${(event: Event) => onPreserveToggle((event.currentTarget as HTMLInputElement).checked)}
+          />
+          <span>
+            system prompt는 보존하고 나머지 메시지만 비웁니다.
+            <span class="block mt-1 text-[var(--text-muted)]">끄면 system prompt까지 같이 제거합니다.</span>
+          </span>
+        </label>
+
+        <div class="rounded-xl border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+          마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
+        </div>
+
+        <div class="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            class="px-4 py-2 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            disabled=${pending}
+            onClick=${onClose}
+          >취소</button>
+          <button
+            type="button"
+            class="px-4 py-2 rounded-lg text-[13px] font-medium border border-transparent bg-[var(--bad)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            disabled=${pending || reason.trim() === ''}
+            onClick=${onSubmit}
+          >${pending ? '비우는 중...' : '비우기'}</button>
+        </div>
+      </div>
+    <//>
+  `
+}
+
+function formatCheckpointTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '-'
+  return new Date(timestamp * 1000).toLocaleString('ko-KR', {
+    hour12: false,
+  })
+}
+
+function CheckpointSummaryCard({
+  title,
+  summary,
+}: {
+  title: string
+  summary: KeeperCheckpointSummary | null
+}) {
+  if (!summary) {
+    return html`
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
+        ${title}: 저장된 checkpoint 없음
+      </div>
+    `
+  }
+
+  return html`
+    <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-[12px] font-semibold text-[var(--text-strong)]">${title}</span>
+        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+          gen ${summary.generation}
+        </span>
+        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+          ${summary.message_count} msgs
+        </span>
+        ${summary.system_prompt_present
+          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">system kept</span>`
+          : null}
+      </div>
+      <div class="mt-2 text-[11px] text-[var(--text-muted)]">
+        ${formatCheckpointTime(summary.created_at)}
+      </div>
+      ${summary.latest_preview
+        ? html`<div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">${summary.latest_preview}</div>`
+        : null}
+      ${summary.continuity_summary
+        ? html`<pre class="mt-2 whitespace-pre-wrap rounded-lg border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${summary.continuity_summary}</pre>`
+        : html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">continuity snapshot 없음</div>`}
+    </div>
+  `
+}
+
+function KeeperCheckpointPanel({ keeperName, refreshToken }: { keeperName: string; refreshToken: number }) {
+  const [inventory, setInventory] = useState<KeeperCheckpointInventory | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [deleting, setDeleting] = useState(false)
+
+  const loadInventory = () => {
+    void (async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const next = await fetchKeeperCheckpoints(keeperName)
+        setInventory(next)
+        setSelectedIds(prev =>
+          prev.filter(id => next.history.some(item => item.snapshot_id === id)),
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'checkpoint inventory load failed')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }
+
+  useEffect(() => {
+    setInventory(null)
+    setSelectedIds([])
+    loadInventory()
+  }, [keeperName, refreshToken])
+
+  const toggleSnapshot = (snapshotId: string, checked: boolean) => {
+    setSelectedIds(prev =>
+      checked
+        ? (prev.includes(snapshotId) ? prev : [...prev, snapshotId])
+        : prev.filter(id => id !== snapshotId),
+    )
+  }
+
+  const deleteSelected = () => {
+    void (async () => {
+      if (selectedIds.length === 0) {
+        showToast('삭제할 snapshot을 먼저 고르세요', 'warning')
+        return
+      }
+      const confirmed = await requestConfirm({
+        title: 'OAS snapshot 삭제',
+        message: `${selectedIds.length}개 snapshot history를 삭제합니다.\n현재 active checkpoint는 건드리지 않습니다.`,
+        tone: 'danger',
+        confirmText: '삭제',
+      })
+      if (!confirmed) return
+      setDeleting(true)
+      try {
+        const result = await deleteKeeperHistorySnapshots(keeperName, selectedIds)
+        setInventory(result.inventory)
+        setSelectedIds([])
+        const missingSuffix =
+          result.missing_snapshot_ids.length > 0
+            ? ` (누락 ${result.missing_snapshot_ids.length})`
+            : ''
+        showToast(`${result.deleted_snapshot_ids.length}개 snapshot 삭제${missingSuffix}`, 'success')
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
+      } finally {
+        setDeleting(false)
+      }
+    })()
+  }
+
+  if (loading) {
+    return html`
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
+        checkpoint inventory 로딩 중...
+      </div>
+    `
+  }
+
+  if (error) {
+    return html`
+      <div class="rounded-xl border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-[12px] text-[#fda4af]">
+        ${error}
+        <button
+          type="button"
+          class="ml-2 rounded border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
+          onClick=${loadInventory}
+        >다시 로드</button>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-[11px] text-[var(--text-muted)]">
+          current OAS checkpoint와 OAS snapshot history만 노출합니다.
+          ${inventory && inventory.legacy_shadow_count > 0
+            ? html`<span class="block mt-1 text-amber-300">legacy shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
+            : null}
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-lg border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-body)] hover:bg-[var(--white-8)] cursor-pointer"
+            onClick=${loadInventory}
+          >새로고침</button>
+          <button
+            type="button"
+            class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-[11px] font-semibold text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            disabled=${deleting || selectedIds.length === 0}
+            onClick=${deleteSelected}
+          >${deleting ? '삭제 중...' : `선택 삭제 (${selectedIds.length})`}</button>
+        </div>
+      </div>
+
+      <${CheckpointSummaryCard}
+        title="현재 active checkpoint"
+        summary=${inventory?.current ?? null}
+      />
+
+      <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)]">
+        <div class="border-b border-[var(--card-border)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          OAS Snapshot History
+        </div>
+        ${!inventory || inventory.history.length === 0
+          ? html`<div class="px-3 py-3 text-[12px] text-[var(--text-muted)]">저장된 OAS history snapshot이 아직 없습니다.</div>`
+          : html`
+              <div class="flex flex-col">
+                ${inventory.history.map(item => html`
+                  <label class="flex gap-3 border-b border-[var(--card-border)] px-3 py-3 text-[12px] last:border-b-0">
+                    <input
+                      type="checkbox"
+                      class="mt-1"
+                      checked=${selectedIds.includes(item.snapshot_id)}
+                      onChange=${(event: Event) => toggleSnapshot(item.snapshot_id, (event.currentTarget as HTMLInputElement).checked)}
+                    />
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-mono text-[var(--text-strong)]">${item.snapshot_id}</span>
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+                          gen ${item.generation}
+                        </span>
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+                          ${item.message_count} msgs
+                        </span>
+                        ${item.system_prompt_present
+                          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">system kept</span>`
+                          : null}
+                      </div>
+                      <div class="mt-1 text-[11px] text-[var(--text-muted)]">
+                        ${formatCheckpointTime(item.created_at)}
+                        ${item.file_stat?.size_bytes ? html` · ${(item.file_stat.size_bytes / 1024).toFixed(1)} KB` : null}
+                      </div>
+                      ${item.latest_preview
+                        ? html`<div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">${item.latest_preview}</div>`
+                        : null}
+                      ${item.continuity_summary
+                        ? html`<pre class="mt-2 whitespace-pre-wrap rounded-lg border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">${item.continuity_summary}</pre>`
+                        : html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">continuity snapshot 없음</div>`}
+                    </div>
+                  </label>
+                `)}
+              </div>
+            `}
+      </div>
+    </div>
+  `
+}
+
 // ── Comms Panel ──────────────────────────────────────────
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
@@ -422,10 +740,52 @@ export function KeeperDetailOverlay() {
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
   const [diagOpen, setDiagOpen] = useState(shouldOpenDiagnostics)
+  const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [clearReason, setClearReason] = useState('')
+  const [preserveSystemPrompt, setPreserveSystemPrompt] = useState(true)
+  const [clearPending, setClearPending] = useState(false)
+  const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name
     setDiagOpen(shouldOpenDiagnostics)
+  }
+  useEffect(() => {
+    setClearDialogOpen(false)
+    setClearReason('')
+    setPreserveSystemPrompt(true)
+    setClearPending(false)
+  }, [keeper.name])
+
+  const submitClearContext = () => {
+    void (async () => {
+      const trimmedReason = clearReason.trim()
+      if (!trimmedReason) {
+        showToast('사유를 먼저 적으세요', 'warning')
+        return
+      }
+      setClearPending(true)
+      try {
+        const res = await clearKeeper(keeper.name, {
+          reason: trimmedReason,
+          preserve_system_prompt: preserveSystemPrompt,
+        })
+        if (res.ok) {
+          setClearDialogOpen(false)
+          setClearReason('')
+          setPreserveSystemPrompt(true)
+          setCheckpointRefreshToken(token => token + 1)
+          showToast(`${keeper.name} 컨텍스트를 비웠습니다`, 'success')
+          await refreshAfterRuntimeAction()
+        } else {
+          showToast(res.error ?? '컨텍스트 비우기 실패', 'error')
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : '컨텍스트 비우기 실패', 'error')
+      } finally {
+        setClearPending(false)
+      }
+    })()
   }
 
   return html`
@@ -504,6 +864,11 @@ export function KeeperDetailOverlay() {
             </div>
           </div>
           <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="py-1 px-3 rounded-lg text-[11px] font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[#fb7185] hover:bg-[rgba(239,68,68,0.15)] transition-colors"
+              onClick=${() => setClearDialogOpen(true)}
+            >비우기</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
               ref=${closeButtonRef}
@@ -735,6 +1100,19 @@ export function KeeperDetailOverlay() {
               <${KeeperConfigPanel} keeperName=${keeper.name} />
             </div>
           </details>
+
+          <details class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm">
+            <summary class="cursor-pointer text-[11px] font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+              Checkpoint & Snapshots
+            </summary>
+            <div class="mt-4">
+              <${KeeperCheckpointPanel}
+                keeperName=${keeper.name}
+                refreshToken=${checkpointRefreshToken}
+              />
+            </div>
+          </details>
         </div>
 
         ${'' /* ── Debug (journal + raw data) ── */}
@@ -756,6 +1134,21 @@ export function KeeperDetailOverlay() {
         </details>
 
         </div>
+
+        <${KeeperClearContextDialog}
+          keeperName=${keeper.name}
+          open=${clearDialogOpen}
+          pending=${clearPending}
+          reason=${clearReason}
+          preserveSystemPrompt=${preserveSystemPrompt}
+          onClose=${() => {
+            if (clearPending) return
+            setClearDialogOpen(false)
+          }}
+          onReasonInput=${setClearReason}
+          onPreserveToggle=${setPreserveSystemPrompt}
+          onSubmit=${submitClearContext}
+        />
     <//>
   `
 }

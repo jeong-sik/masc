@@ -511,9 +511,15 @@ let rec add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         Keeper_api.handle_keeper_get_subroutes state req request reqd
-       ) request reqd)
+       if Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request) then
+         with_token_permission_auth ~permission:Types.CanAdmin
+           (fun state _agent_name req reqd ->
+             Keeper_api.handle_keeper_get_subroutes state req request reqd
+           ) request reqd
+       else
+         with_public_read (fun state req reqd ->
+           Keeper_api.handle_keeper_get_subroutes state req request reqd
+         ) request reqd)
 
   (* Keeper config or tools update.  This prefix_post catches ALL POST
      /api/v1/keepers/* requests.  We check the suffix BEFORE auth so that
@@ -550,6 +556,22 @@ let rec add_routes ~sw ~clock router =
              (fun state agent_name req reqd ->
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_reset"
                  ~action:"reset" state agent_name req reqd
+             ) request reqd
+       | Keeper_api.Keeper_post_clear ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_lifecycle_post ~body_str ~sw ~clock
+                   ~tool_name:"masc_keeper_clear" ~action:"clear"
+                   state agent_name req reqd
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_checkpoints ->
+           with_token_permission_auth ~permission:Types.CanAdmin
+             (fun state _agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_checkpoints_post state req reqd body_str
+               )
              ) request reqd
        | Keeper_api.Keeper_post_unknown ->
            Http.Response.json ~status:`Not_found

@@ -66,11 +66,8 @@ let binding_audit_read_path () =
     ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
 
 let read_json_file_opt path =
-  if not (Sys.file_exists path) then
-    None
-  else
-    try Some (Yojson.Safe.from_file path) with
-    | Sys_error _ | Yojson.Json_error _ -> None
+  try Some (Yojson.Safe.from_file path) with
+  | Sys_error _ | Yojson.Json_error _ -> None
 
 let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
   match json with

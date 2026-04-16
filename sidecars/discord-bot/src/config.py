@@ -39,16 +39,6 @@ LEGACY_NAMES_PATH: Final[str] = ".masc/connectors/discord/names.json"
 
 
 def _runtime_toml_path() -> Path:
-    """Resolve the optional runtime config.toml location.
-
-    The file is not required — when absent, every setting falls back to its
-    Field default. When present, its values override the defaults but are
-    still overridden by env vars (so ephemeral deployment overrides remain
-    unambiguous).
-
-    Location: ``$MASC_BASE_PATH/.gate/runtime/discord/config.toml``.
-    Falls back to cwd-relative when MASC_BASE_PATH is unset.
-    """
     raw = os.getenv("MASC_BASE_PATH", "").strip()
     root = Path(raw).expanduser() if raw else Path.cwd()
     return root / ".gate/runtime/discord/config.toml"
@@ -67,18 +57,7 @@ def _is_loopback_host(raw_host: str | None) -> bool:
 
 
 class BotConfig(BaseSettings):
-    """Bot configuration.
-
-    Resolution priority, highest first:
-      1. Env vars — including ``.env`` file — primary surface for secrets
-         (``DISCORD_BOT_TOKEN``, ``GATE_API_TOKEN``) and for emergency
-         deployment overrides on any field.
-      2. Runtime TOML at ``$MASC_BASE_PATH/.gate/runtime/discord/config.toml``
-         (optional; see :func:`_runtime_toml_path`). Operator-editable, same
-         directory as ``bindings.json``/``status.json``. Not git-tracked.
-      3. Field defaults compiled into this class — the system works
-         end-to-end with no TOML or env var beyond the bot token.
-    """
+    """Bot configuration.  Priority: env > runtime TOML > field defaults."""
 
     model_config = SettingsConfigDict(
         env_prefix="",

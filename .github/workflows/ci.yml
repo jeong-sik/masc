@@ -341,7 +341,7 @@ jobs:
         uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-test
-          os-packages: jq
+          os-packages: jq ripgrep
 
       - name: Setup Go
         uses: actions/setup-go@v6

@@ -3,8 +3,12 @@
     are routed to specific meta-skills (heartbeat, autonomy) based on
     the user's request. *)
 
+(* Keyword_scored: deterministic keyword-count + tie-break scoring over the
+   keeper skill registry. Named explicitly (not "Heuristic") so consumers see
+   it is a Det rule, not an unclassified guess. MEMORY feedback:
+   memory/feedback_no-heuristic-category.md (Det/NonDet/Remove only). *)
 type selection_mode =
-  | Heuristic
+  | Keyword_scored
   | Model_selected of string
   | Model_rejected of string
 
@@ -112,8 +116,8 @@ let route_keeper_skill ~(message : string) : keeper_skill_route =
   in
   { primary_skill
   ; secondary_skill
-  ; reason = "Heuristic match based on message content"
-  ; selection_mode = Heuristic
+  ; reason = "Keyword match score on message content"
+  ; selection_mode = Keyword_scored
   }
 
 let format_skill_route_line (route : keeper_skill_route) : string =
@@ -123,9 +127,9 @@ let format_skill_route_line (route : keeper_skill_route) : string =
 
 let format_skill_route_reason (route : keeper_skill_route) : string =
   match route.selection_mode with
-  | Heuristic -> Printf.sprintf "SKILL_REASON: %s" route.reason
+  | Keyword_scored -> Printf.sprintf "SKILL_REASON: %s" route.reason
   | Model_selected r -> Printf.sprintf "SKILL_REASON: %s" r
-  | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (heuristic fallback)" r
+  | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (keyword fallback)" r
 
 let strip_skill_route_lines (raw : string) : string =
   let lines = String.split_on_char '\n' raw in

@@ -36,7 +36,7 @@ let skill_route_text =
   let route : KSR.keeper_skill_route =
     { primary_skill = "code_review";
       secondary_skill = None;
-      reason = ""; selection_mode = Heuristic }
+      reason = ""; selection_mode = Keyword_scored }
   in
   KSR.skill_route_context_text
     ~fallback_route:route 

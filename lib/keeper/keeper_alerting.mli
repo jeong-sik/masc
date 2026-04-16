@@ -12,7 +12,7 @@ open Keeper_memory
 (** {1 Included: Keeper_skill_routing types} *)
 
 type selection_mode =
-  | Heuristic
+  | Keyword_scored
   | Model_selected of string
   | Model_rejected of string
 

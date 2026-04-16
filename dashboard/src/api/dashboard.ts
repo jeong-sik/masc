@@ -2044,3 +2044,35 @@ export function fetchCascadeStrategyTrace(opts?: {
     { signal: opts?.signal },
   )
 }
+
+export type CascadeSloStatus = 'ok' | 'warn' | 'violated'
+
+export interface CascadeSloTargets {
+  ordered_ratio_min: number
+  exhaustion_count_max: number
+  burn_rate_max: number
+}
+
+export interface CascadeSloCurrent {
+  ordered_ratio: number
+  exhaustion_count: number
+  burn_rate: number
+  total_events: number
+}
+
+export interface CascadeSloResponse {
+  updated_at: string
+  window_sample_size: number
+  targets: CascadeSloTargets
+  current: CascadeSloCurrent
+  status: CascadeSloStatus
+  violations: string[]
+}
+
+export function fetchCascadeSlo(
+  opts?: AbortableRequestOptions,
+): Promise<CascadeSloResponse> {
+  return get<CascadeSloResponse>('/api/v1/cascade/slo', {
+    signal: opts?.signal,
+  })
+}

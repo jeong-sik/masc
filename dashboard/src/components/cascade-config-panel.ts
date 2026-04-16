@@ -14,6 +14,7 @@ import {
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
   fetchCascadeStrategyTrace,
+  fetchCascadeSlo,
   fetchCascadeConfig,
   fetchCascadeHealth,
   type CascadeCandidate,
@@ -29,6 +30,8 @@ import {
   type CascadeStrategyTraceEvent,
   type CascadeStrategyTraceKind,
   type CascadeStrategyTraceResponse,
+  type CascadeSloResponse,
+  type CascadeSloStatus,
 } from '../api/dashboard'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -44,18 +47,20 @@ interface CascadeData {
   capacity: CascadeClientCapacityResponse | null
   history: CascadeClientCapacityHistoryResponse | null
   trace: CascadeStrategyTraceResponse | null
+  slo: CascadeSloResponse | null
 }
 
 async function loadCascadeData(resource: ManagedAsyncResource<CascadeData>) {
   await resource.load(async (signal) => {
-    const [config, health, capacity, history, trace] = await Promise.all([
+    const [config, health, capacity, history, trace, slo] = await Promise.all([
       fetchCascadeConfig({ signal }),
       fetchCascadeHealth({ signal }),
       fetchCascadeClientCapacity({ signal }),
       fetchCascadeClientCapacityHistory({ limit: 50, signal }),
       fetchCascadeStrategyTrace({ limit: 50, signal }),
+      fetchCascadeSlo({ signal }),
     ])
-    return { config, health, capacity, history, trace }
+    return { config, health, capacity, history, trace, slo }
   })
 }
 
@@ -283,6 +288,60 @@ export function traceEventMatchesSearch(
   return false
 }
 
+function sloStatusTone(status: CascadeSloStatus): 'ok' | 'warn' | 'bad' {
+  switch (status) {
+    case 'ok': return 'ok'
+    case 'warn': return 'warn'
+    case 'violated': return 'bad'
+  }
+}
+
+function sloStatusLabel(status: CascadeSloStatus): string {
+  switch (status) {
+    case 'ok': return '정상'
+    case 'warn': return '경고'
+    case 'violated': return '위반'
+  }
+}
+
+function SloCard({ slo }: { slo: CascadeSloResponse }) {
+  const tone = sloStatusTone(slo.status)
+  const ratioPct = (slo.current.ordered_ratio * 100).toFixed(2)
+  const targetPct = (slo.targets.ordered_ratio_min * 100).toFixed(0)
+  const burn = slo.current.burn_rate.toFixed(2)
+  const exh = slo.current.exhaustion_count
+  const exhTarget = slo.targets.exhaustion_count_max
+  const totalEvents = slo.current.total_events
+  return html`
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center gap-2 flex-wrap">
+        <${StatusChip} tone=${tone}>${sloStatusLabel(slo.status)}<//>
+        <span class="text-xs text-[var(--text-muted)]">sample ${totalEvents}/${slo.window_sample_size}</span>
+        ${slo.violations.length > 0
+          ? html`<span class="text-xs text-red-500">violating: ${slo.violations.join(', ')}</span>`
+          : null}
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <${StatCell}
+          label="Ordered Ratio"
+          value=${`${ratioPct}%`}
+          detail=${`≥ ${targetPct}% 목표`}
+        />
+        <${StatCell}
+          label="Exhaustion (sample)"
+          value=${String(exh)}
+          detail=${`≤ ${exhTarget} 목표`}
+        />
+        <${StatCell}
+          label="Burn Rate"
+          value=${burn}
+          detail=${`≤ ${slo.targets.burn_rate_max.toFixed(1)} 목표`}
+        />
+      </div>
+    </div>
+  `
+}
+
 function StrategyTraceTable({
   trace,
   searchQuery,
@@ -413,6 +472,7 @@ export function CascadeConfigPanel() {
   const capacity = current.data?.capacity ?? null
   const history = current.data?.history ?? null
   const trace = current.data?.trace ?? null
+  const slo = current.data?.slo ?? null
 
   return html`
     <div class="flex flex-col gap-4">
@@ -496,6 +556,12 @@ export function CascadeConfigPanel() {
         ${history
           ? html`<${ClientCapacityHistoryTable} history=${history} />`
           : null}
+      <//>
+
+      <${Card} title="SLO Status">
+        ${slo
+          ? html`<${SloCard} slo=${slo} />`
+          : html`<${EmptyState}>SLO 데이터를 불러오는 중입니다.<//>`}
       <//>
 
       <${Card} title="Strategy Decisions — cycle 추적">

@@ -171,3 +171,46 @@ val strategy_trace_json :
   ?limit:int ->
   ?cascade:string ->
   unit -> Yojson.Safe.t
+
+(** Instantaneous SLO snapshot computed from the live
+    {!Cascade_strategy_trace} ring buffer.
+
+    Mirrors the SLO definitions codified in
+    {{:../../infrastructure/monitoring/cascade-slo.yml}cascade-slo.yml}
+    but evaluated in-process so the MASC dashboard can surface the
+    same targets without a Prometheus round-trip.
+
+    Shape:
+    {[
+      {
+        "updated_at": "ISO-8601",
+        "window_sample_size": 1000,
+        "targets": {
+          "ordered_ratio_min":    0.99,
+          "exhaustion_count_max": 10,
+          "burn_rate_max":        1.0
+        },
+        "current": {
+          "ordered_ratio":     0.987,
+          "exhaustion_count":  3,
+          "burn_rate":         1.3,
+          "total_events":      847
+        },
+        "status":        "ok" | "warn" | "violated",
+        "violations":    ["ordered_ratio", "burn_rate", ...]
+      }
+    ]}
+
+    Semantics:
+    - [ordered_ratio] is computed over the most recent {b up to 1000}
+      events (defensive cap matching the default ring limit).  When
+      the ring is empty the ratio defaults to [1.0] (treat idle as
+      healthy).
+    - [exhaustion_count] counts [Exhausted] events in the same sample.
+    - [burn_rate] is [(1 - ordered_ratio) / 0.01], matching the
+      Prometheus recording rule [masc:cascade_error_budget_burn].
+    - [status] derives from [violations]: empty → ["ok"], burn_rate
+      alone → ["warn"], any SLO hard-breach → ["violated"].
+
+    @since 0.9.11 *)
+val slo_json : unit -> Yojson.Safe.t

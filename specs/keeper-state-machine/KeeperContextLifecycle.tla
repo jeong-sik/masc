@@ -149,6 +149,24 @@ CompactionCompletes(k) ==
     /\ UNCHANGED <<turn_number, tool_pairs, ckpt_ctx_id, ckpt_turn,
                    ckpt_valid, fail_count, next_ctx_id>>
 
+\* 5b. Compaction Failed: strategy returned an error — context_tokens
+\*     stay above budget, keeper transitions back to overflow_retry for
+\*     another compaction attempt.
+\*     Models keeper_state_machine.ml:383-389 Compaction_failed _ handler:
+\*     clears compaction_active but leaves context_overflow=true.
+\*     NOTE: the retry-exhaustion latch (compact_retry_exhausted → Paused)
+\*     lives in keeper_unified_turn and is not yet modelled here. Without
+\*     fairness on CompactionCompletes, TLC explores both retry and
+\*     success paths; adding a bounded retry variable is a separate
+\*     refinement.
+CompactionFailed(k) ==
+    /\ keeper_phase[k] = "compacting"
+    /\ keeper_phase' = [keeper_phase EXCEPT ![k] = "overflow_retry"]
+    \* tokens/messages preserved — nothing was reduced
+    /\ UNCHANGED <<turn_number, context_id, context_tokens, message_count,
+                   tool_pairs, ckpt_ctx_id, ckpt_turn, ckpt_valid,
+                   resume_ctx_id, fail_count, next_ctx_id>>
+
 \* 6. Turn Succeeds: save checkpoint, advance turn counter.
 \*    Models Oas_worker_exec.build_checkpoint + persist_checkpoint.
 TurnSucceeds(k) ==
@@ -217,14 +235,57 @@ KeeperDone(k) ==
                    tool_pairs, ckpt_ctx_id, ckpt_turn, ckpt_valid,
                    resume_ctx_id, fail_count, next_ctx_id>>
 
+\* ── Buggy variant (for Bug Model pattern) ────────────────
+\*
+\* Deliberate bug: CompactionCompletesBuggy reallocates context_id
+\* during compaction instead of preserving it. Models a broken
+\* implementation where Context_reducer returns a NEW Context.t
+\* rather than mutating the original. Expected to violate
+\* ContextIsolation or ResumeIdentity.
+CompactionCompletesBuggy(k) ==
+    /\ keeper_phase[k] = "compacting"
+    /\ context_tokens' = [context_tokens EXCEPT ![k] = CompactTarget]
+    /\ message_count' = [message_count EXCEPT ![k] =
+         IF message_count[k] > 2 THEN 2 ELSE message_count[k]]
+    \* BUG: allocate a brand-new context_id (simulates new Context.t).
+    \* resume_ctx_id is NOT updated → ResumeIdentity violated on next
+    \* running step. ContextIsolation can collide across keepers.
+    /\ context_id' = [context_id EXCEPT ![k] = next_ctx_id]
+    /\ next_ctx_id' = next_ctx_id + 1
+    /\ keeper_phase' = [keeper_phase EXCEPT ![k] = "running"]
+    /\ UNCHANGED <<turn_number, tool_pairs, ckpt_ctx_id, ckpt_turn,
+                   ckpt_valid, resume_ctx_id, fail_count>>
+
 \* ── Next-State Relation ──────────────────────────────────
 
+\* Clean Next intentionally excludes [CompactionFailed] — modeling the
+\* "always eventually succeeds" abstraction. The action is defined
+\* above for documentation and is exercised by NextBuggy (below) and
+\* will be reachable once a retry-budget variable is added in a
+\* follow-up refinement. Including it here without bounded retry
+\* introduces an infinite compacting ↔ overflow_retry cycle that
+\* violates CompactionProgress even under strong fairness.
 Next == \E k \in Keepers :
     \/ StartTurn(k)
     \/ TurnProducesOutput(k)
     \/ TokenBudgetExceeded(k)
     \/ StartCompaction(k)
     \/ CompactionCompletes(k)
+    \/ TurnSucceeds(k)
+    \/ TurnFails(k)
+    \/ RecoverFromError(k)
+    \/ RecoverFresh(k)
+    \/ KeeperDone(k)
+
+\* Next-state relation with deliberate bug — used by
+\* KeeperContextLifecycle-buggy.cfg via SpecBuggy.
+NextBuggy == \E k \in Keepers :
+    \/ StartTurn(k)
+    \/ TurnProducesOutput(k)
+    \/ TokenBudgetExceeded(k)
+    \/ StartCompaction(k)
+    \/ CompactionCompletesBuggy(k)
+    \/ CompactionFailed(k)
     \/ TurnSucceeds(k)
     \/ TurnFails(k)
     \/ RecoverFromError(k)
@@ -242,6 +303,7 @@ Fairness ==
         /\ WF_vars(KeeperDone(k))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
+SpecBuggy == Init /\ [][NextBuggy]_vars
 
 \* ── Safety Properties ────────────────────────────────────
 
@@ -273,12 +335,19 @@ TurnMonotonicity ==
 CompactionPairIntegrity ==
     \A k \in Keepers : tool_pairs[k] >= 0
 
-\* S5. Checkpoint Consistency: a valid checkpoint refers to either the
-\*     current context_id or a previous one (before fresh recovery).
-\*     After RecoverFresh, checkpoint is invalid so this holds vacuously.
+\* S5. Checkpoint Consistency: a valid checkpoint references an
+\*     allocated context_id (1 <= ckpt_ctx_id < next_ctx_id). Catches a
+\*     separate bug class from TurnMonotonicity: a checkpoint pointing at
+\*     a never-allocated or future context_id would pass monotonicity but
+\*     break RecoverFromError's "restore identity" contract.
+\*     Previously this invariant duplicated TurnMonotonicity
+\*     (ckpt_turn <= turn + 1); the stronger allocation check strengthens
+\*     the verified surface without weakening TurnMonotonicity.
 CheckpointConsistency ==
     \A k \in Keepers :
-        ckpt_valid[k] => ckpt_turn[k] <= turn_number[k] + 1
+        ckpt_valid[k] =>
+            /\ ckpt_ctx_id[k] > 0
+            /\ ckpt_ctx_id[k] < next_ctx_id
 
 \* S6. Budget After Compaction: after compaction, tokens are within budget.
 BudgetAfterCompaction ==

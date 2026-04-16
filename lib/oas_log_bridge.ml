@@ -37,6 +37,93 @@ let field_to_json (field : Agent_sdk.Log.field) : string * Yojson.Safe.t =
   | Agent_sdk.Log.B (k, v) -> (k, `Bool v)
   | Agent_sdk.Log.J (k, v) -> (k, v)
 
+let details_of_fields (fields : Agent_sdk.Log.field list)
+    : (string * Yojson.Safe.t) list =
+  List.map field_to_json fields
+
+let json_stringish = function
+  | `String s ->
+      let trimmed = String.trim s in
+      if trimmed = "" then None else Some trimmed
+  | `Int n -> Some (string_of_int n)
+  | `Float f when Float.is_finite f ->
+      Some
+        (if Float.equal f (Float.of_int (int_of_float f)) then
+           string_of_int (int_of_float f)
+         else
+           string_of_float f)
+  | `Bool b -> Some (string_of_bool b)
+  | _ -> None
+
+let first_detail_label details keys =
+  let rec find_key = function
+    | [] -> None
+    | key :: rest -> (
+        match List.assoc_opt key details with
+        | Some value -> (
+            match json_stringish value with
+            | Some _ as label -> label
+            | None -> find_key rest)
+        | None -> find_key rest)
+  in
+  find_key keys
+
+let replace_first_placeholder message value =
+  let len = String.length message in
+  let rec loop idx =
+    if idx + 1 >= len then
+      message
+    else if message.[idx] = '%'
+            && (message.[idx + 1] = 's' || message.[idx + 1] = 'd')
+    then
+      String.sub message 0 idx ^ value
+      ^ String.sub message (idx + 2) (len - idx - 2)
+    else
+      loop (idx + 1)
+  in
+  loop 0
+
+let interpolate_printf_message message details =
+  if not (String.contains message '%') then
+    message
+  else
+    let replacements =
+      [
+        first_detail_label details [ "tool_name"; "tool" ];
+        first_detail_label details [ "fixes" ];
+        first_detail_label details [ "count" ];
+        first_detail_label details [ "client_name" ];
+        first_detail_label details [ "phase" ];
+        first_detail_label details [ "request_id" ];
+        first_detail_label details [ "session_id" ];
+      ]
+      |> List.filter_map Fun.id
+    in
+    List.fold_left replace_first_placeholder message replacements
+
+let render_agent_tools_message ~message ~details =
+  match
+    first_detail_label details [ "tool_name"; "tool" ],
+    first_detail_label details [ "fixes"; "count" ]
+  with
+  | Some tool_name, Some fixes
+    when String.equal message "correction_pipeline fixed tool input fields"
+         || String.equal message
+              "tool %s: correction_pipeline fixed %d field(s)" ->
+      Some
+        (Printf.sprintf "tool %s: correction_pipeline fixed %s field(s)"
+           tool_name fixes)
+  | _ -> None
+
+let render_record_message (record : Agent_sdk.Log.record) : string =
+  let details = details_of_fields record.fields in
+  match record.module_name with
+  | "agent_tools" -> (
+      match render_agent_tools_message ~message:record.message ~details with
+      | Some rendered -> rendered
+      | None -> interpolate_printf_message record.message details)
+  | _ -> interpolate_printf_message record.message details
+
 let level_to_masc (level : Agent_sdk.Log.level) : Log.level =
   match level with
   | Debug -> Log.Debug
@@ -75,11 +162,29 @@ let summarize_fields ~message (fields : Agent_sdk.Log.field list) : string list 
            | Some rendered -> Some (Printf.sprintf "%s=%s" key rendered)
            | None -> None))
 
-let render_message_with_summary (record : Agent_sdk.Log.record) =
-  match summarize_fields ~message:record.message record.fields with
-  | [] -> record.message
-  | summary -> Printf.sprintf "%s %s" record.message (String.concat " " summary)
+let should_promote_warn_to_error (record : Agent_sdk.Log.record) =
+  match record.level, record.module_name, record.message with
+  | Warn, "agent_config", "MCP server failed" -> true
+  | Warn, "agent_turn", "context_injector raised" -> true
+  | Warn, "agent_tools", "ApprovalRequired but no approval callback — executing" ->
+      true
+  | _ -> false
 
+let effective_level (record : Agent_sdk.Log.record) : Log.level =
+  if should_promote_warn_to_error record then
+    Log.Error
+  else
+    level_to_masc record.level
+
+let render_message_with_summary (record : Agent_sdk.Log.record) =
+  let base_message = render_record_message record in
+  if not (String.equal base_message record.message) then
+    base_message
+  else
+    match summarize_fields ~message:record.message record.fields with
+    | [] -> base_message
+    | summary ->
+        Printf.sprintf "%s %s" base_message (String.concat " " summary)
 (** Build the sink function.  Prefix the module name with ["oas:"] so a
     record emitted by [Agent_sdk.Log.create ~module_name:"agent"] lands
     as ["oas:agent"] in the masc-mcp log stream, distinct from any
@@ -92,7 +197,7 @@ let make_sink () : Agent_sdk.Log.sink =
     | [] -> None
     | fields -> Some (`Assoc (List.map field_to_json fields))
   in
-  Log.emit (level_to_masc record.level)
+  Log.emit (effective_level record)
     ~module_name:("oas:" ^ record.module_name)
     ?details
     message

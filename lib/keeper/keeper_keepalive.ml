@@ -1185,11 +1185,11 @@ let run_keepalive_unified_turn
             (match read_meta ctx.config meta_after_observe.name with
              | Ok (Some latest) -> latest
              | Ok None ->
-               Log.Keeper.warn "keeper:%s read_meta returned None after turn failure, using stale meta"
+               Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"
                  meta_after_observe.name;
                meta_after_observe
              | Error e ->
-               Log.Keeper.warn "keeper:%s read_meta failed after turn failure (%s), using stale meta"
+               Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"
                  meta_after_observe.name e;
                meta_after_observe)
           | Ok updated ->

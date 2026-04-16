@@ -1,5 +1,7 @@
 (** Tests for Keeper_tools_oas — OAS Tool.t wrapping of keeper tools. *)
 
+module Mlog = Log
+
 open Agent_sdk
 open Alcotest
 open Masc_mcp
@@ -139,6 +141,45 @@ let test_error_json_is_returned_as_tool_error () =
           check bool "detail preserves path" true
             (Option.is_some (Safe_ops.json_string_opt "path" detail))
       | Ok _ -> fail "missing file should be surfaced as tool error")
+
+let latest_log_seq () =
+  match Mlog.Ring.recent ~limit:1 () with
+  | (entry : Mlog.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
+
+let test_error_result_logs_at_error_level () =
+  let meta = make_test_meta () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_keeper_tools_log_level_%d" (Random.int 100000)) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.readdir dir |> Array.iter (fun f ->
+        Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir with _ -> ()))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord.default_config dir in
+      let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+      let tool = find_tool "keeper_fs_read" tools in
+      let baseline = latest_log_seq () in
+      (match Tool.execute tool
+               (`Assoc [("path", `String "missing-file-for-keeper-tools-oas.txt")])
+       with
+       | Error _ -> ()
+       | Ok _ -> fail "missing file should be surfaced as tool error");
+      let entry =
+        Mlog.Ring.recent ~limit:50 ~module_filter:"Keeper" ~since_seq:baseline ()
+        |> List.find_opt (fun (entry : Mlog.Ring.entry) ->
+          string_contains ~sub:"returned error result" entry.message)
+      in
+      match entry with
+      | None -> fail "expected keeper error log for failing tool result"
+      | Some (entry : Mlog.Ring.entry) ->
+          check string "failing tool result logs at ERROR" "ERROR"
+            entry.normalized_level)
 
 let test_missing_file_error_includes_directory_suggestions () =
   let meta = make_test_meta () in
@@ -507,6 +548,8 @@ let () =
       test_case "valid schemas" `Quick test_tools_have_valid_schemas;
       test_case "count matches allowed" `Quick test_tool_count_matches_allowed;
       test_case "error json becomes tool error" `Quick test_error_json_is_returned_as_tool_error;
+      test_case "error result logs at error level" `Quick
+        test_error_result_logs_at_error_level;
       test_case "missing file error includes suggestions" `Quick
         test_missing_file_error_includes_directory_suggestions;
       test_case "repeated errors are blocked" `Quick test_repeated_error_results_are_blocked;

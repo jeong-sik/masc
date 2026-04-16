@@ -426,14 +426,14 @@ let make_hooks
 
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
-        Log.Keeper.warn "keeper:%s on_error: %s (context: %s)"
+        Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
-        Log.Keeper.warn "keeper:%s tool_error: %s — %s"
+        Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
@@ -443,8 +443,8 @@ let make_hooks
         let meta = !meta_ref in
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
-           is already emitted at WARN by keeper_tools_oas before this hook
-           runs. Emitting a second WARN here with the same error content
+           is already emitted at ERROR by keeper_tools_oas before this hook
+           runs. Emitting a second ERROR here with the same error content
            produces paired duplicate lines per tool failure. Keep a debug
            trace for hook-chain readers; the metric below still records. *)
         Log.Keeper.debug "keeper:%s tool_use_failure: %s — %s"

@@ -255,6 +255,7 @@
         test_eval_feed
         test_dashboard_tools
         test_dashboard_cascade
+        test_dashboard_verification
         test_tool_quality_classify
         test_tui_decode
         test_dashboard_governance
@@ -403,6 +404,7 @@
         test_eval_feed
         test_dashboard_tools
         test_dashboard_cascade
+        test_dashboard_verification
         test_tool_quality_classify
         test_tui_decode
         test_dashboard_governance

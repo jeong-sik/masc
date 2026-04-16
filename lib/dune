@@ -88,6 +88,7 @@
    dashboard_feature_health
    dashboard_provider_runs
    dashboard_cascade
+   dashboard_verification
    proactive_refresh
    server_dashboard_http_runtime_support
    server_dashboard_http_runtime_info
@@ -112,6 +113,7 @@
    server_routes_http_routes_dashboard
    server_routes_http_routes_provider_runs
    server_routes_http_routes_cascade
+   server_routes_http_routes_verification
    server_routes_http_routes_activity
    server_routes_http_routes_channel_gate
    server_h2_gateway

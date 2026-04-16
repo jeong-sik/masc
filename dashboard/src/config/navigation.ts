@@ -13,6 +13,7 @@ export type SurfaceSectionId =
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
+  | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
   // lab
   | 'tools'
   | 'autoresearch'
@@ -163,6 +164,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '계획 & 목표',
       description: '실행 단위 칸반과 상위 의도 구조(목표 트리)를 함께 봅니다.',
       params: { section: 'planning' },
+    },
+    {
+      id: 'verification',
+      label: '검증',
+      description: 'Cross-agent 검증 요청 테이블 (completion contract + 증거 목록).',
+      params: { section: 'verification' },
     },
   ],
   lab: [

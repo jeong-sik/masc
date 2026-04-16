@@ -116,7 +116,7 @@ function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  const manualReconcile = keeper.runtime_blocker_manual_reconcile === true
+  const continueGate = keeper.runtime_blocker_continue_gate === true
   const socialFallbackActive = keeper.social_model_recognized === false
   const blocker = keeper.last_blocker?.trim()
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
@@ -146,7 +146,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>`
           : null}
-        ${keeper.paused && keeper.keepalive_running && manualReconcile
+        ${keeper.paused && keeper.keepalive_running && continueGate
           ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
           : keeper.paused && keeper.keepalive_running
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
@@ -155,7 +155,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(239,68,68,0.14)] text-[var(--bad)]">Heartbeat stale</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
-        ${manualReconcile
+        ${continueGate
           ? html`
               <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">
                 계속 진행 승인 대기

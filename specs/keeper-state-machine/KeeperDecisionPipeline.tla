@@ -40,6 +40,7 @@ InvariantSet == {
     "NoLiveTurnClearsDecision",
     "IdleRequiresUndecided",
     "GuardOkRequiresMeasurement",
+    "DecisionBoundaryRequiresMeasurement",
     "GateRejectedRequiresFinalizing",
     "NonIdleCascadeRequiresDecisionBoundary",
     "SelectingRequiresPrompting"
@@ -84,11 +85,13 @@ GuardOk ==
     /\ decision_stage' = "guard_ok"
     /\ UNCHANGED <<turn_live, turn_phase, cascade_state, measurement_bound>>
 
-\* Runtime allows policy selection directly from undecided or from guard_ok.
+\* Runtime may surface policy selection from undecided or from guard_ok, but
+\* the measurement is already bound by the time the policy is committed.
 SelectToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ cascade_state = "idle"
+    /\ measurement_bound
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ decision_stage' = "tool_policy_selected"
     /\ cascade_state' = "selecting"
@@ -164,6 +167,11 @@ GuardOkRequiresMeasurement ==
         /\ measurement_bound
         /\ cascade_state = "idle"
 
+DecisionBoundaryRequiresMeasurement ==
+    decision_stage \in {"guard_ok", "tool_policy_selected", "gate_rejected"} =>
+        /\ turn_live
+        /\ measurement_bound
+
 GateRejectedRequiresFinalizing ==
     decision_stage = "gate_rejected" =>
         /\ turn_live
@@ -184,6 +192,7 @@ Safety ==
     /\ NoLiveTurnClearsDecision
     /\ IdleRequiresUndecided
     /\ GuardOkRequiresMeasurement
+    /\ DecisionBoundaryRequiresMeasurement
     /\ GateRejectedRequiresFinalizing
     /\ NonIdleCascadeRequiresDecisionBoundary
     /\ SelectingRequiresPrompting
@@ -193,5 +202,17 @@ DecisionEventuallyClears ==
 
 Liveness ==
     DecisionEventuallyClears
+
+BugSelectWithoutMeasurement ==
+    /\ turn_live
+    /\ turn_phase = "prompting"
+    /\ cascade_state = "idle"
+    /\ decision_stage = "undecided"
+    /\ ~measurement_bound
+    /\ decision_stage' = "tool_policy_selected"
+    /\ cascade_state' = "selecting"
+    /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
+
+SpecBuggy == Init /\ [][Next \/ BugSelectWithoutMeasurement]_vars /\ WF_vars(FinishTurn)
 
 ====

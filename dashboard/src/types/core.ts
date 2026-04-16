@@ -596,7 +596,7 @@ export interface Keeper {
     | 'completion_contract_violation'
     | null
   runtime_blocker_summary?: string | null
-  runtime_blocker_manual_reconcile?: boolean | null
+  runtime_blocker_continue_gate?: boolean | null
   active_goal_ids?: string[]
   last_autonomous_action_at?: string | null
   autonomous_action_count?: number
@@ -815,7 +815,7 @@ export interface KeeperConfigRuntime {
     | 'completion_contract_violation'
     | null
   runtime_blocker_summary?: string | null
-  runtime_blocker_manual_reconcile?: boolean | null
+  runtime_blocker_continue_gate?: boolean | null
 }
 
 export interface KeeperConfigCoordination {

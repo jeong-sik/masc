@@ -73,7 +73,7 @@ describe('mission keeper runtime helpers', () => {
     )
   })
 
-  it('renders continue-gate hints when manual reconcile is required', () => {
+  it('renders continue-gate hints when approval is required', () => {
     const keeper = {
       name: 'uranium666',
       status: 'idle',
@@ -82,7 +82,7 @@ describe('mission keeper runtime helpers', () => {
       runtime_blocker_class: 'ambiguous_post_commit_timeout',
       runtime_blocker_summary:
         'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-      runtime_blocker_manual_reconcile: true,
+      runtime_blocker_continue_gate: true,
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(

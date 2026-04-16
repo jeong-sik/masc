@@ -109,12 +109,6 @@ type invariants_check = {
   no_cascade_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
-  recovery_two_store_sync : bool;
-}
-
-type recovery_state = {
-  data_record : bool;
-  fsm_condition : bool;
 }
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
@@ -139,7 +133,6 @@ type snapshot = {
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  recovery : recovery_state;
   invariants : invariants_check;
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is
@@ -179,11 +172,11 @@ val turn_phase_of_string : string -> turn_phase option
 val decision_stage_to_string : decision_stage -> string
 val decision_stage_of_string : string -> decision_stage option
 
-(** Stringify [cascade_state]. Mirrors CascadeLiveness.tla action labels. *)
+(** Stringify [cascade_state]. Mirrors KeeperCascadeLifecycle.tla. *)
 val cascade_state_to_string : cascade_state -> string
 val cascade_state_of_string : string -> cascade_state option
 
-(** Stringify [compaction_stage]. Mirrors MemoryCompaction.tla. *)
+(** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
 val compaction_stage_to_string : compaction_stage -> string
 val compaction_stage_of_string : string -> compaction_stage option
 

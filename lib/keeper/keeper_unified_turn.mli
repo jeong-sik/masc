@@ -121,6 +121,10 @@ val is_ambiguous_side_effect_error : Oas.Error.sdk_error -> bool
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Oas.Error.sdk_error -> bool
 
+(** [true] when an error represents terminal cascade exhaustion or a
+    final accept-rejected result from the MASC OAS boundary. *)
+val is_cascade_exhausted_error : Oas.Error.sdk_error -> bool
+
 (** Resolve the initial keeper turn context budget.
     Uses the first available model in the cascade rather than the largest
     fallback model, so lifecycle context math matches the provider that will

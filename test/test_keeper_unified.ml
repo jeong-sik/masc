@@ -2166,11 +2166,36 @@ let test_auto_recoverable_turn_error_includes_server_parse_rejection () =
 
 let test_required_tool_contract_violation_detected () =
   let err =
+    Agent_sdk.Error.Agent
+      (CompletionContractViolation
+         {
+           contract = "require_tool_use";
+           reason =
+             "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
+         })
+  in
+  check bool "tool-choice contract violation detected" true
+    (UT.is_required_tool_contract_violation err)
+
+let test_required_tool_contract_violation_detected_from_legacy_internal_error () =
+  let err =
     Agent_sdk.Error.Internal
       "Completion contract [require_tool_use] violated: required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block"
   in
   check bool "tool-choice contract violation detected" true
     (UT.is_required_tool_contract_violation err)
+
+let test_cascade_exhausted_error_detected_from_structured_internal_error () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Cascade_exhausted
+         {
+           cascade_name = "keeper_unified";
+           detail = Some "all providers failed";
+         })
+  in
+  check bool "structured cascade exhausted error detected" true
+    (UT.is_cascade_exhausted_error err)
 
 let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
   let err =
@@ -3379,14 +3404,18 @@ let () =
             test_server_rejected_parse_error_network_error;
           test_case "auto-recoverable includes transient network" `Quick
             test_auto_recoverable_turn_error_includes_transient_network;
-            test_case "auto-recoverable includes server parse rejection" `Quick
-              test_auto_recoverable_turn_error_includes_server_parse_rejection;
-            test_case "required tool contract violation detected" `Quick
-              test_required_tool_contract_violation_detected;
-            test_case "auto-recoverable excludes tool-choice contract violation" `Quick
-              test_auto_recoverable_turn_error_excludes_required_tool_contract_violation;
-            test_case "auto-recoverable excludes persistent errors" `Quick
-              test_auto_recoverable_turn_error_excludes_persistent_errors;
+          test_case "auto-recoverable includes server parse rejection" `Quick
+            test_auto_recoverable_turn_error_includes_server_parse_rejection;
+          test_case "required tool contract violation detected from structured error" `Quick
+            test_required_tool_contract_violation_detected;
+          test_case "required tool contract violation detected from legacy internal error" `Quick
+            test_required_tool_contract_violation_detected_from_legacy_internal_error;
+          test_case "structured cascade exhausted error detected" `Quick
+            test_cascade_exhausted_error_detected_from_structured_internal_error;
+          test_case "auto-recoverable excludes tool-choice contract violation" `Quick
+            test_auto_recoverable_turn_error_excludes_required_tool_contract_violation;
+          test_case "auto-recoverable excludes persistent errors" `Quick
+            test_auto_recoverable_turn_error_excludes_persistent_errors;
           test_case "bounded OAS timeout keeps adaptive timeout under full budget" `Quick
             test_bounded_oas_timeout_uses_adaptive_when_budget_is_large;
           test_case "bounded OAS timeout caps to remaining turn budget" `Quick

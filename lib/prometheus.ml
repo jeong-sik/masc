@@ -182,6 +182,8 @@ let metric_keeper_cache_read_tokens =
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change =
   "masc_keeper_compaction_ratio_change"
+let metric_keeper_compaction_saved_tokens =
+  "masc_keeper_compaction_saved_tokens_total"
 let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
 let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 
@@ -238,6 +240,8 @@ let init () =
     "Total keeper compactions performed" Counter;
   add metric_keeper_compaction_ratio_change
     "Context ratio change after compaction (pre - post)" Gauge;
+  add metric_keeper_compaction_saved_tokens
+    "Total tokens removed by keeper context compaction" Counter;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
   add metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;

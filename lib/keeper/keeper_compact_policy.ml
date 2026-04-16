@@ -168,9 +168,35 @@ let compact_if_needed
           sync_oas_context { ctx with messages }
         in
         let new_ratio = context_ratio compacted_ctx in
+        let new_msg_count = message_count compacted_ctx in
+        let new_tok_count = token_count compacted_ctx in
+        let saved_tokens = max 0 (tok_count - new_tok_count) in
+        let saved_messages = max 0 (msg_count - new_msg_count) in
         Prometheus.inc_counter Prometheus.metric_keeper_compactions
           ~labels:[("keeper", meta.name)] ();
         Prometheus.set_gauge Prometheus.metric_keeper_compaction_ratio_change
           ~labels:[("keeper", meta.name)]
           (ratio -. new_ratio);
+        Prometheus.inc_counter Prometheus.metric_keeper_compaction_saved_tokens
+          ~labels:[("keeper", meta.name)]
+          ~delta:(float_of_int saved_tokens)
+          ();
+        Log.emit Log.Info ~module_name:"Harness"
+          ~details:
+            (`Assoc
+              [
+                ("keeper_name", `String meta.name);
+                ("trigger", `String reason);
+                ("before_ratio", `Float ratio);
+                ("after_ratio", `Float new_ratio);
+                ("before_messages", `Int msg_count);
+                ("after_messages", `Int new_msg_count);
+                ("before_tokens", `Int tok_count);
+                ("after_tokens", `Int new_tok_count);
+                ("saved_messages", `Int saved_messages);
+                ("saved_tokens", `Int saved_tokens);
+              ])
+          (Printf.sprintf
+             "post_compact keeper=%s trigger=%s saved_tokens=%d"
+             meta.name reason saved_tokens);
         (compacted_ctx, Some reason, "applied:" ^ reason)

@@ -1726,6 +1726,48 @@ let test_compact_if_needed_emergency_bypass_ignores_cooldown () =
   check bool "compaction was triggered (emergency bypass)" true (Option.is_some trigger);
   check bool "decision starts with applied:" true (String.starts_with ~prefix:"applied:" decision)
 
+let test_compact_if_needed_records_saved_tokens_metric () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let now_ts = 20_000.0 in
+  let meta =
+    make_gate_only_meta
+      ~last_continuity_update_ts:(now_ts -. 60.0)
+      ~cooldown_sec:0
+      ()
+  in
+  let long_text = String.make emergency_test_text_length 'x' in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:100
+    |> fun c -> KEC.append c (Agent_sdk.Types.user_msg long_text)
+    |> fun c -> KEC.append c (Agent_sdk.Types.assistant_msg long_text)
+    |> KEC.sync_oas_context
+  in
+  let labels = [ ("keeper", meta.name) ] in
+  let before_metric =
+    Masc_mcp.Prometheus.get_metric_value
+      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      ~labels
+      ()
+    |> Option.value ~default:0.0
+  in
+  let (compacted_ctx, trigger, decision) =
+    KEC.compact_if_needed ~meta ~now_ts ctx
+  in
+  let after_metric =
+    Masc_mcp.Prometheus.get_metric_value
+      Masc_mcp.Prometheus.metric_keeper_compaction_saved_tokens
+      ~labels
+      ()
+    |> Option.value ~default:0.0
+  in
+  check bool "compaction was triggered" true (Option.is_some trigger);
+  check bool "decision starts with applied:" true
+    (String.starts_with ~prefix:"applied:" decision);
+  check bool "token count reduced" true
+    (KCC.token_count compacted_ctx < KCC.token_count ctx);
+  check bool "saved tokens metric increased" true (after_metric > before_metric)
+
 let test_dispatch_keeper_phase_event_uses_room_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_phase" in
   Fun.protect
@@ -1875,6 +1917,8 @@ let () =
             test_compact_if_needed_ts_zero_bypasses_cooldown;
           test_case "emergency ratio bypasses cooldown gate" `Quick
             test_compact_if_needed_emergency_bypass_ignores_cooldown;
+          test_case "compaction records saved tokens metric" `Quick
+            test_compact_if_needed_records_saved_tokens_metric;
         ] );
       ( "registry_dispatch",
         [

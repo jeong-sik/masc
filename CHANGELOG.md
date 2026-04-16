@@ -15,9 +15,17 @@
   ```json
   {"model": "ollama:qwen3.5:35b-a3b-nvfp4", "weight": 90, "supports_tool_choice": true}
   ```
-  Scope of this release: JSON parsing lands. Wiring this value through
-  `parse_model_string` → `Provider_config.make ~supports_tool_choice_override`
-  is a separate follow-up PR.
+- `Cascade_config.parse_model_string ?supports_tool_choice_override` —
+  forwards the flag to `Llm_provider.Provider_config.make`.
+- `Cascade_config.parse_weighted_entry` / `parse_weighted_entries` —
+  convert `weighted_entry` values to `Provider_config.t`, threading the
+  per-entry `supports_tool_choice` into `supports_tool_choice_override`.
+  The weight is not part of Provider_config; cascade ordering is
+  handled separately.
+- `config/cascade.json`: `sangsu` profile's ollama entry now declares
+  `"supports_tool_choice": true`. Qwen3.5 w/ native Jinja chat template
+  honors `tool_choice:required` in practice
+  (memory/research-9b-jinja-native-benchmark: 100% on 21-tool suite).
 
 ## [0.9.3] - 2026-04-16
 

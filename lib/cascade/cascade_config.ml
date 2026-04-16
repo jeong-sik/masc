@@ -66,7 +66,8 @@ let split_provider_model (s : string) : (string * string) option =
 (* ── Shared config construction helpers ──────────────────── *)
 
 (** Build a {!Llm_provider.Provider_config.t} for "custom:model@url" specs. *)
-let make_custom_config ~temperature ~max_tokens ?system_prompt model_id =
+let make_custom_config ~temperature ~max_tokens ?system_prompt
+    ?supports_tool_choice_override model_id =
   let actual_model, base_url = parse_custom_model model_id in
   if actual_model = "" then None
   else Some (Llm_provider.Provider_config.make
@@ -77,6 +78,7 @@ let make_custom_config ~temperature ~max_tokens ?system_prompt model_id =
                ~temperature
                ~max_tokens
                ?system_prompt
+               ?supports_tool_choice_override
                ())
 
 (** Resolve the effective API key env var name for a provider.
@@ -105,7 +107,7 @@ let resolve_effective_api_key_env
 
 (** Build a {!Llm_provider.Provider_config.t} from a registry entry. *)
 let make_registry_config ~temperature ~max_tokens ?system_prompt
-    ?(api_key_env_overrides=[])
+    ?(api_key_env_overrides=[]) ?supports_tool_choice_override
     ~provider_name ~model_id (entry : Llm_provider.Provider_registry.entry) =
   let defaults = entry.defaults in
   let effective_api_key_env =
@@ -164,6 +166,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
     ~max_tokens
     ~max_context
     ?system_prompt
+    ?supports_tool_choice_override
     ()
 
 (* ── Model string parsing ──────────────────────────────── *)
@@ -172,18 +175,48 @@ let parse_model_string
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)
     ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
     ?system_prompt ?(api_key_env_overrides = [])
+    ?supports_tool_choice_override
     (s : string) : Llm_provider.Provider_config.t option =
   match split_provider_model (String.trim s) with
   | None -> None
   | Some ("custom", model_id) ->
-    make_custom_config ~temperature ~max_tokens ?system_prompt model_id
+    make_custom_config ~temperature ~max_tokens ?system_prompt
+      ?supports_tool_choice_override model_id
   | Some (provider_name, model_id) ->
     match Llm_provider.Provider_registry.find default_registry provider_name with
     | None -> None
     | Some entry when not (entry.is_available ()) -> None
     | Some entry ->
       Some (make_registry_config ~temperature ~max_tokens ?system_prompt
-              ~api_key_env_overrides ~provider_name ~model_id entry)
+              ~api_key_env_overrides ?supports_tool_choice_override
+              ~provider_name ~model_id entry)
+
+(** Parse a {!Cascade_config_loader.weighted_entry} into a
+    {!Llm_provider.Provider_config.t}, forwarding the entry's
+    [supports_tool_choice] override. The [weight] is not part of the
+    Provider_config; it drives cascade ordering separately. *)
+let parse_weighted_entry
+    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
+    ?system_prompt ?(api_key_env_overrides = [])
+    (entry : Cascade_config_loader.weighted_entry)
+  : Llm_provider.Provider_config.t option =
+  parse_model_string ~temperature ~max_tokens ?system_prompt
+    ~api_key_env_overrides
+    ?supports_tool_choice_override:entry.supports_tool_choice
+    entry.model
+
+(** Parse a list of weighted entries, discarding unavailable providers. *)
+let parse_weighted_entries
+    ?(temperature = Llm_provider.Constants.Inference.default_temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)
+    ?system_prompt ?(api_key_env_overrides = [])
+    (entries : Cascade_config_loader.weighted_entry list)
+  : Llm_provider.Provider_config.t list =
+  List.filter_map
+    (parse_weighted_entry ~temperature ~max_tokens ?system_prompt
+       ~api_key_env_overrides)
+    entries
 
 let parse_model_string_exn
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)

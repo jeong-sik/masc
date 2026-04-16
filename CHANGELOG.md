@@ -1,5 +1,40 @@
 # Changelog
 
+
+## [0.9.5] - 2026-04-16
+
+### Added
+- **CDAL Verdict Gate** (PR #7531, env `MASC_CDAL_GATE_ENABLED`, default off) —
+  `cdal_verdict_gate.ml` blocks task completion when CDAL verdict is Violated
+  or Inconclusive with blocking gaps. Reads persisted verdicts with task_id
+  filtering via typed `persisted_verdict` envelope.
+- **Task verification FSM** (PR #7531, env `MASC_VERIFICATION_FSM_ENABLED`,
+  default off) — new `AwaitingVerification` task_status + 3 actions
+  (`submit_for_verification`, `approve`, `reject`). Cross-agent enforcement
+  (worker ≠ verifier). Contract-driven deadline and required role.
+- **Verification protocol** (`verification_protocol.ml`) — board post + SSE
+  event emission on submit/approve/reject/timeout. Updates
+  `Verification.ml` state machine on cross-agent verdicts.
+- **Keeper-as-verifier** — `pending_verification_count` in
+  `world_observation`; keepers can observe and act on verification requests
+  via `masc_transition(action=approve|reject)`.
+- **Typed evidence criterion** — `Types_core.evidence_criterion` ADT
+  (Schema_match/Contains/Not_contains/Custom) replaces string list for
+  `task_contract.verify_gate_evidence`. Backward compat reader.
+- **Env-configurable knobs** —
+  `MASC_CDAL_VERDICT_LOOKUP_LIMIT` (default 500),
+  `MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC` (default 60.0).
+
+### Changed
+- verification_id now cryptographically random (128-bit CSPRNG via
+  mirage-crypto). Previously used `Hashtbl.hash` + timestamp (weak).
+- Dashboard shows `검증 대기` badge for `awaiting_verification` status
+  (accent color, event icons).
+
+### Deprecated
+- Legacy `_task_id` string-prefix JSONL envelope still read but no longer
+  written. Reader handles both formats.
+
 ## [Unreleased]
 
 ## [0.9.4] - 2026-04-16

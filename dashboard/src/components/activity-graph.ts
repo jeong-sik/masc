@@ -124,14 +124,14 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
     filter === 'all' ? true : group.category === filter,
   )
   const chips = [
-    { key: 'all', label: 'All', count: visibleBaseGroups.length },
-    { key: 'task', label: 'Task', count: baseCounts.task },
-    { key: 'session', label: 'Session', count: baseCounts.session },
-    { key: 'message', label: 'Message', count: baseCounts.message },
-    { key: 'board', label: 'Board', count: baseCounts.board },
-    { key: 'governance', label: 'Governance', count: baseCounts.governance },
+    { key: 'all', label: '전체', count: visibleBaseGroups.length },
+    { key: 'task', label: '작업', count: baseCounts.task },
+    { key: 'session', label: '세션', count: baseCounts.session },
+    { key: 'message', label: '메시지', count: baseCounts.message },
+    { key: 'board', label: '보드', count: baseCounts.board },
+    { key: 'governance', label: '거버넌스', count: baseCounts.governance },
     ...(baseCounts.other > 0 || filter === 'other'
-      ? [{ key: 'other' as const, label: 'Other', count: baseCounts.other }]
+      ? [{ key: 'other' as const, label: '기타', count: baseCounts.other }]
       : []),
   ]
 
@@ -143,10 +143,10 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
     <div class="flex flex-col gap-3">
       <div class="flex flex-col gap-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]/50 p-4">
         <div class="flex flex-col gap-1">
-          <div class="text-[14px] font-semibold text-[var(--text-strong)]">라이브 패널은 원본 스트림, 여기서는 최근 실행을 액션 단위로 묶어 봅니다.</div>
+          <div class="text-[14px] font-semibold text-[var(--text-strong)]">원본 실행 이벤트를 최근 액션 단위로 묶어 보여줍니다.</div>
           <div class="text-[12px] text-[var(--text-muted)]">
             액션 ${filteredGroups.length}개 · 원본 타임라인 ${data.timeline.length}건 · 분석 범위 ${data.stats.event_count ?? data.timeline.length}건
-            ${lifecycleHiddenCount > 0 ? ` · lifecycle ${lifecycleHiddenCount}건 숨김` : ''}
+            ${lifecycleHiddenCount > 0 ? ` · 생명주기 ${lifecycleHiddenCount}건 숨김` : ''}
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
@@ -158,7 +158,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
-            Lifecycle ${showLifecycle.value ? '표시 중' : '숨김'}
+            생명주기 ${showLifecycle.value ? '표시 중' : '숨김'}
             <span class="rounded-md bg-[var(--white-6)] px-1.5 py-0.5 text-[10px]">${rawCounts.lifecycle}</span>
           </button>
         </div>
@@ -183,7 +183,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                     <div class="mt-1 text-[13px] leading-[1.6] text-[var(--text-body)]">${group.summary}</div>
                   </div>
                   <div class="flex shrink-0 flex-col items-end gap-2 text-[11px] text-[var(--text-muted)]">
-                    <span>${group.rawCount} events</span>
+                    <span>${group.rawCount}건</span>
                     <${TimeAgo} timestamp=${group.latestTs} />
                   </div>
                 </div>
@@ -358,6 +358,7 @@ export function ObservatoryActivityPanels() {
   const state = useActivityGraphState()
   const data = state.status === 'loaded' ? state.data : undefined
   const since = activityRange()
+  const actionCount = data ? buildActionTimelineGroups(data.timeline).length : 0
 
   return html`
     <div class="flex flex-col gap-5">
@@ -372,7 +373,14 @@ export function ObservatoryActivityPanels() {
             `
           : !data || (data.stats.event_count ?? 0) === 0
             ? html`<${EmptyActivityGraph} />`
-            : html`<${ActivityTimelinePanel} data=${data} />`}
+            : html`
+                <${CollapsibleSection}
+                  title="활동 분석"
+                  badge=${html`<span class="ml-1 text-[10px] font-normal text-[var(--text-dim)]">액션 ${actionCount}</span>`}
+                >
+                  <${ActivityTimelinePanel} data=${data} />
+                <//>
+              `}
 
       <${CollapsibleSection} title="에이전트 타임라인">
         <${ActivitySwimlane} since=${since} />

@@ -272,6 +272,9 @@ cd dashboard && pnpm run build
 # Dev server (Vite dev mode, HMR, proxy)
 cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:8935" pnpm run dev
 
+# Vite port를 5173이 아닌 값으로 바꾸면 서버 쪽 allowlist도 같이 맞춘다.
+MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc-mcp.sh
+
 # Production build (static assets in dist/)
 cd dashboard && pnpm run build
 ```
@@ -400,4 +403,3 @@ cd dashboard && pnpm run build  # TypeScript type check
 - [ ] Registry-like file 수정했는가? → Section #13 체크
 
 **마지막 업데이트**: 2026-03-30 (ADR-003 추가, Section #8-#13 신규)
-

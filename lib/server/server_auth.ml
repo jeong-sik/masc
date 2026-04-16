@@ -146,7 +146,15 @@ let default_port_of_scheme = function
 let normalize_loopback_host host =
   match String.lowercase_ascii (String.trim host) with
   | "127.0.0.1" -> "localhost"
+  | "::1" | "0:0:0:0:0:0:0:1" -> "localhost"
   | other -> other
+
+let trim_nonempty raw =
+  let value = String.trim raw in
+  if String.equal value "" then None else Some value
+
+let split_csv_nonempty raw =
+  raw |> String.split_on_char ',' |> List.filter_map trim_nonempty
 
 (** Returns (host, explicit_port, scheme). *)
 let host_port_scheme_of_origin origin =
@@ -185,6 +193,36 @@ let allow_anonymous_mutations =
   | Some ("1" | "true") -> true
   | _ -> false
 
+let default_loopback_dev_mutation_origins =
+  [
+    "http://127.0.0.1:5173";
+    "http://localhost:5173";
+    "http://[::1]:5173";
+  ]
+
+let configured_loopback_dev_mutation_origins () =
+  match Sys.getenv_opt "MASC_HTTP_DEV_MUTATION_ORIGINS" with
+  | Some raw -> split_csv_nonempty raw
+  | None -> default_loopback_dev_mutation_origins
+
+let normalized_origin_key origin =
+  match host_port_scheme_of_origin origin with
+  | Some (host, port, scheme) ->
+      let default = default_port_of_scheme scheme in
+      Some
+        ( normalize_loopback_host host,
+          (match port with Some _ -> port | None -> default),
+          Option.map String.lowercase_ascii scheme )
+  | None -> None
+
+let is_allowlisted_loopback_dev_origin origin =
+  match normalized_origin_key origin with
+  | Some ((host, _, _) as candidate) when is_loopback_host host ->
+      configured_loopback_dev_mutation_origins ()
+      |> List.filter_map normalized_origin_key
+      |> List.exists (fun allowed -> allowed = candidate)
+  | _ -> false
+
 let ensure_same_origin_browser_request request :
     (unit, Types.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
@@ -203,17 +241,17 @@ let ensure_same_origin_browser_request request :
                (normalize_loopback_host request_host) ->
           let default = default_port_of_scheme scheme in
           let norm p = match p with Some _ -> p | None -> default in
-          (* Loopback relaxation: when both origin and host resolve to a
-             loopback address (localhost / 127.0.0.1 / ::1), cross-port
-             mutations are allowed. The dev proxy (vite 5173 → backend
-             8935) relies on this, and remote attackers cannot forge a
-             loopback Origin. For public hosts we still require an
-             exact port match. Restores the behaviour that
-             test_auth_coverage.test_same_origin_allows_different_
-             explicit_port_on_loopback expects after #6449. *)
-          if is_loopback_host (normalize_loopback_host origin_host) then
+          (* Loopback same-port remains allowed, but cross-port mutations now
+             require an explicit dev-origin allowlist instead of trusting any
+             localhost page. This preserves the default Vite dashboard proxy
+             flow (5173 -> backend) while shrinking the browser trust boundary. *)
+          if norm origin_port = norm request_port then
             Ok ()
-          else if norm origin_port = norm request_port then Ok ()
+          else if
+            is_loopback_host (normalize_loopback_host origin_host)
+            && is_allowlisted_loopback_dev_origin origin
+          then
+            Ok ()
           else (
             Log.Auth.debug
               "same-origin port mismatch: origin=%S host=%s"

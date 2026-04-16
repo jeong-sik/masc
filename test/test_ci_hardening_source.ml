@@ -208,7 +208,14 @@ let test_http_write_auth_contracts () =
        {|with_token_permission_auth ~permission:Types.CanAdmin|});
   check bool "provider runs route threads state net into dashboard single-run" true
     (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
-       "~net:state.Mcp_server.net")
+       "~net:state.Mcp_server.net");
+  check bool "loopback cross-port auth uses explicit dev origin allowlist" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "configured_loopback_dev_mutation_origins");
+  check bool "loopback cross-port auth no longer trusts any loopback origin" true
+    (not
+       (file_contains_pattern "lib/server/server_auth.ml"
+          "if is_loopback_host (normalize_loopback_host origin_host) then"))
 
 let test_keeper_direct_reply_contracts () =
   check bool "dashboard keeper direct messages request direct reply" true

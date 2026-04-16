@@ -500,6 +500,7 @@ Vite 설정:
 - `outDir: '../assets/dashboard'` (OCaml 서버가 서빙하는 위치)
 - `manualChunks: { vendor: ['preact', 'preact/hooks', 'htm', '@preact/signals'] }`
 - Dev proxy: `MASC_DASHBOARD_PROXY_TARGET` -> `/api/*`, `/sse/*` 프록시
+- 무토큰 loopback mutation은 기본적으로 `http://localhost:5173`, `http://127.0.0.1:5173`, `http://[::1]:5173`만 허용. 다른 dev origin/port를 쓰면 서버 프로세스에 `MASC_HTTP_DEV_MUTATION_ORIGINS`를 설정
 
 ## 5. HTTP API Endpoints
 
@@ -620,6 +621,7 @@ Vite 설정:
 |------|--------|------|
 | `MASC_ASSETS_ROOT` / `MASC_ASSETS_DIR` | `{exe_dir}/assets` | Static asset 루트 |
 | `MASC_DASHBOARD_PROXY_TARGET` | (필수, dev only) | Vite dev server API proxy 대상 |
+| `MASC_HTTP_DEV_MUTATION_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173` | 무토큰 loopback cross-port mutation을 허용할 dev origin 목록 (comma-separated) |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | `true` | Governance judge daemon 활성화 |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | `60` | Judge 갱신 간격 (최소 15s) |
 | `MASC_DASHBOARD_TOOL_CALL_WINDOW_HOURS` | `1.0` | Tool call health window (0.1~168h) |

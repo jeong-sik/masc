@@ -338,7 +338,21 @@ let test_same_origin_allows_loopback_alias_same_port () =
   | Ok () -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
-let test_same_origin_allows_different_explicit_port_on_loopback () =
+let test_same_origin_allows_allowlisted_dashboard_dev_origin () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list
+      [
+        ("host", "localhost:8935");
+        ("origin", "http://localhost:5173");
+      ]
+  in
+  let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+  match Server_auth.ensure_same_origin_browser_request request with
+  | Ok () -> ()
+  | Error e -> fail (Types.masc_error_to_string e)
+
+let test_same_origin_rejects_non_allowlisted_loopback_cross_port () =
   let module Server_auth = Masc_mcp.Server_auth in
   let headers =
     Httpun.Headers.of_list
@@ -349,7 +363,8 @@ let test_same_origin_allows_different_explicit_port_on_loopback () =
   in
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
-  | Ok () -> ()
+  | Ok () -> fail "expected non-allowlisted loopback cross-port request to be rejected"
+  | Error (Types.Forbidden _) -> ()
   | Error e -> fail (Types.masc_error_to_string e)
 
 let test_same_origin_rejects_different_explicit_port_on_public_host () =
@@ -586,6 +601,21 @@ let test_env_flag_overrides_all () =
         check bool "env flag forces strict regardless" true
           (SA.http_auth_strict_enabled ()))))
 
+let test_custom_dev_origin_allows_loopback_cross_port () =
+  let module SA = Masc_mcp.Server_auth in
+  with_env "MASC_HTTP_DEV_MUTATION_ORIGINS" "http://localhost:4317" (fun () ->
+    let headers =
+      Httpun.Headers.of_list
+        [
+          ("host", "localhost:9000");
+          ("origin", "http://localhost:4317");
+        ]
+    in
+    let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
+    match SA.ensure_same_origin_browser_request request with
+    | Ok () -> ()
+    | Error e -> fail (Types.masc_error_to_string e))
+
 let test_public_read_path_allows_generic_connector_status () =
   let module SA = Masc_mcp.Server_auth in
   check bool "generic connector status is public read" true
@@ -772,8 +802,10 @@ let () =
         test_same_origin_https_tunnel_same_host;
       test_case "same-origin allows loopback alias same port" `Quick
         test_same_origin_allows_loopback_alias_same_port;
-      test_case "same-origin allows different explicit port on loopback" `Quick
-        test_same_origin_allows_different_explicit_port_on_loopback;
+      test_case "same-origin allows allowlisted dashboard dev origin" `Quick
+        test_same_origin_allows_allowlisted_dashboard_dev_origin;
+      test_case "same-origin rejects non-allowlisted loopback cross-port" `Quick
+        test_same_origin_rejects_non_allowlisted_loopback_cross_port;
       test_case "same-origin rejects different explicit port on public host" `Quick
         test_same_origin_rejects_different_explicit_port_on_public_host;
       test_case "same-origin allows explicit default port https" `Quick
@@ -790,6 +822,8 @@ let () =
         test_base_url_unset_loopback_no_strict;
       test_case "env flag overrides all" `Quick
         test_env_flag_overrides_all;
+      test_case "custom dev origin allows loopback cross-port" `Quick
+        test_custom_dev_origin_allows_loopback_cross_port;
       test_case "generic connector status is public read" `Quick
         test_public_read_path_allows_generic_connector_status;
       test_case "generic connector bind is not public read" `Quick

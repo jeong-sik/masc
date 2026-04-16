@@ -238,7 +238,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   (* Board write APIs — used by dashboard + Bevy Viewer.
-     Uses with_tool_auth to allow localhost browser requests without token. *)
+     Uses with_tool_auth to allow same-origin or allowlisted local dev browser
+     requests without a bearer token. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_vote"
          (fun _state _req reqd ->

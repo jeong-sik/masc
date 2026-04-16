@@ -574,6 +574,11 @@
  (modules test_cascade_health_tracker)
  (libraries masc_test_deps))
 
+(test
+ (name test_cascade_strategy)
+ (modules test_cascade_strategy)
+ (libraries masc_test_deps))
+
 ; ── Tool_name variant roundtrip + coverage ──────────────
 (test
  (name test_tool_name)

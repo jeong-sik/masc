@@ -206,3 +206,40 @@ let resolve_api_key_env ~config_path ~name =
     match read_api_key_env_field json (name ^ "_api_key_env") with
     | [] -> read_api_key_env_field json "default_api_key_env"
     | overrides -> overrides
+
+(* ── Per-cascade pluggable-strategy override ──────────── *)
+
+type strategy_config = {
+  kind : string option;
+  max_cycles : int option;
+  backoff_base_ms : int option;
+  backoff_cap_ms : int option;
+  ollama_max_concurrent : int option;
+}
+
+let read_string_field json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `String s when String.trim s <> "" -> Some (String.trim s)
+  | _ -> None
+
+let empty_strategy_config = {
+  kind = None;
+  max_cycles = None;
+  backoff_base_ms = None;
+  backoff_cap_ms = None;
+  ollama_max_concurrent = None;
+}
+
+let resolve_strategy_config ~config_path ~name =
+  match load_json config_path with
+  | Error _ -> empty_strategy_config
+  | Ok json ->
+    {
+      kind = read_string_field json (name ^ "_strategy");
+      max_cycles = read_int_field json (name ^ "_max_cycles");
+      backoff_base_ms = read_int_field json (name ^ "_backoff_base_ms");
+      backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms");
+      ollama_max_concurrent =
+        read_int_field json (name ^ "_ollama_max_concurrent");
+    }

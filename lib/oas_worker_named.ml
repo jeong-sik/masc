@@ -511,10 +511,104 @@ let run_named
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
            Error sdk_err))
   in
+  (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
+
+     When no [<name>_strategy] is configured in cascade.json,
+     [Cascade_config.resolve_strategy] returns [Cascade_strategy.failover]
+     with [max_cycles = 1].  In that case [cycle_loop] invokes
+     [try_cascade] exactly once on the original [candidate_cfgs] —
+     bit-identical to the pre-strategy behaviour (linear failover). *)
+  let strategy =
+    Cascade_config.resolve_strategy
+      ?config_path:(default_config_path ())
+      ~name:cascade_name
+      ()
+  in
+  let ollama_max =
+    Cascade_config.resolve_ollama_max_concurrent
+      ?config_path:(default_config_path ())
+      ~name:cascade_name
+      ()
+  in
+  let candidate_base_urls =
+    List.map (fun (c : Llm_provider.Provider_config.t) -> c.base_url) candidate_cfgs
+  in
+  (match ollama_max with
+   | None ->
+     Cascade_client_capacity.auto_register_for_candidates
+       ~base_urls:candidate_base_urls
+   | Some n ->
+     Cascade_client_capacity.auto_register_ollama_with_override
+       ~base_urls:candidate_base_urls ~max_concurrent:n);
+  let adapter : Llm_provider.Provider_config.t Cascade_strategy.adapter = {
+    health_key = (fun (c : Llm_provider.Provider_config.t) -> c.model_id);
+    capacity_key = (fun (c : Llm_provider.Provider_config.t) -> c.base_url);
+    weight = (fun _ -> 1);
+  } in
+  let signal_ctx : Cascade_strategy.signal_ctx = {
+    health = Cascade_health_tracker.global;
+    capacity = (fun url ->
+      match Cascade_throttle.capacity url with
+      | Some _ as v -> v
+      | None -> Cascade_client_capacity.capacity url);
+    now = Unix.gettimeofday ();
+    rand_int = Random.int;
+  } in
+  let cycle_clock = Eio_context.get_clock_opt () in
+  let do_backoff cycle =
+    let ms = Cascade_strategy.backoff_ms strategy.cycle ~cycle in
+    if ms <= 0 then ()
+    else
+      let secs = float_of_int ms /. 1000. in
+      match cycle_clock with
+      | Some clock -> Eio.Time.sleep clock secs
+      | None -> Unix.sleepf secs
+  in
+  let cascade_exhausted_after_filter ~cycle =
+    let observation =
+      Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+        ~configured_labels ~candidate_cfgs ~selected_model_raw:None ~capture
+    in
+    Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure
+      ~observation:(Some observation);
+    let detail =
+      Printf.sprintf
+        "all candidates filtered after %d cycle(s) (strategy=%s)"
+        (cycle + 1) (Cascade_strategy.kind_to_string strategy.kind)
+    in
+    Error
+      (sdk_error_of_masc_internal_error
+         (Cascade_exhausted { cascade_name; detail = Some detail }))
+  in
+  let rec cycle_loop n =
+    let ordered =
+      Cascade_strategy.order_candidates strategy
+        ~adapter ~ctx:signal_ctx ~cycle:n candidate_cfgs
+    in
+    let last_cycle = n + 1 >= strategy.cycle.max_cycles in
+    match ordered with
+    | [] when last_cycle -> cascade_exhausted_after_filter ~cycle:n
+    | [] ->
+      Log.Misc.info
+        "cascade %s: cycle %d (%s) filtered all candidates, retrying"
+        cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+      do_backoff (n + 1);
+      cycle_loop (n + 1)
+    | _ ->
+      (match try_cascade ordered None with
+       | Ok _ as ok -> ok
+       | Error _ as err when last_cycle -> err
+       | Error _ ->
+         Log.Misc.info
+           "cascade %s: cycle %d exhausted, backoff before retry (strategy=%s)"
+           cascade_name n (Cascade_strategy.kind_to_string strategy.kind);
+         do_backoff (n + 1);
+         cycle_loop (n + 1))
+  in
   try
     Admission_queue.with_permit ?wait_timeout_sec
       ~priority:queue_priority ~keeper_name:name ~cascade_name
-      (fun () -> try_cascade candidate_cfgs None)
+      (fun () -> cycle_loop 0)
   with
   | Admission_queue.Wait_timeout wait_ms ->
       admission_wait_timeout_error ~keeper_name:name ~cascade_name

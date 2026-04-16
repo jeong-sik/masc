@@ -79,3 +79,36 @@ val resolve_inference_params :
     @since 0.122.0 *)
 val resolve_api_key_env :
   config_path:string -> name:string -> (string * string) list
+
+(** Per-cascade pluggable-strategy override.
+
+    All fields are optional.  Absent fields fall through to
+    {!Cascade_strategy.default_cycle_policy} or to the [Failover]
+    kind.  The loader returns the raw values; the caller (typically
+    [Cascade_config.resolve_strategy]) is responsible for parsing the
+    [kind] string and warn-and-fallback on unknown values.
+
+    @since 0.9.6 *)
+type strategy_config = {
+  kind : string option;
+  (** ["{name}_strategy"]. Recognized values: ["failover"],
+      ["capacity_aware"], ["weighted_random"],
+      ["circuit_breaker_cycling"]. *)
+
+  max_cycles : int option;
+  (** ["{name}_max_cycles"]. Defaults to 1. *)
+
+  backoff_base_ms : int option;
+  (** ["{name}_backoff_base_ms"]. Defaults to 500. *)
+
+  backoff_cap_ms : int option;
+  (** ["{name}_backoff_cap_ms"]. Defaults to 10_000. *)
+
+  ollama_max_concurrent : int option;
+  (** ["{name}_ollama_max_concurrent"]. When set, overrides the
+      ollama auto-registration default for any ollama-like base URL
+      in this cascade's candidate list. *)
+}
+
+val resolve_strategy_config :
+  config_path:string -> name:string -> strategy_config

@@ -25,6 +25,8 @@ import {
 import { openTaskDetail } from './task-detail-state'
 
 const deletingTaskId = signal<string | null>(null)
+const doneVisibleCount = signal(20)
+const DONE_PAGE_SIZE = 20
 const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
 
 function priorityToneClass(priority: number): string {
@@ -197,6 +199,14 @@ export function TaskBacklog() {
   const sortedTodo = [...todo].sort(sortByPriority)
   const sortedInProgress = [...inProgress].sort(sortByPriority)
   const sortedDone = [...done].sort(sortByTimeDesc)
+  const visibleDone = sortedDone.slice(0, doneVisibleCount.value)
+  const hasMoreDone = sortedDone.length > doneVisibleCount.value
+  const remainingDone = sortedDone.length - doneVisibleCount.value
+
+  // Reset pagination when data refreshes and count shrinks below current page
+  if (doneVisibleCount.value > sortedDone.length && doneVisibleCount.value > DONE_PAGE_SIZE) {
+    doneVisibleCount.value = Math.max(DONE_PAGE_SIZE, sortedDone.length)
+  }
 
   const isLoading = executionLoading.value && !executionLoaded.value
   const hasError = Boolean(executionError.value)
@@ -255,10 +265,16 @@ export function TaskBacklog() {
         >
           ${sortedDone.length === 0
             ? html`<${EmptyState} message="완료된 태스크가 없습니다" compact />`
-            : sortedDone.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
-          ${sortedDone.length > 20
-            ? html`<${EmptyState} message=${`...외 ${sortedDone.length - 20}개 더 있음`} compact />`
-            : null}
+            : visibleDone.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
+          ${hasMoreDone ? html`
+            <button
+              type="button"
+              class="w-full rounded-lg border border-card-border/60 bg-white/3 px-3 py-2 text-[12px] font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+              onClick=${() => { doneVisibleCount.value += DONE_PAGE_SIZE }}
+            >
+              완료 태스크 ${remainingDone}개 더 보기
+            </button>
+          ` : null}
         <//>
       </div>
     <//>

@@ -142,12 +142,14 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | float | 0.0 | 캐시 허용 최대 온도 |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | int | 512 | L1 인메모리 캐시 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | string | `"safe_only"` | Spawn 캐시 정책 (`off`/`safe_only`) |
-| `MASC_GLM_DEFAULT_MODEL` | string | `"glm-4.7"` | GLM 기본 모델 |
-| `MASC_GLM_FLASH_MODEL` | string | `"glm-4.7-flash"` | GLM flash 모델 |
-| `GEMINI_DEFAULT_MODEL` | string | `"gemini-3-flash-preview"` | Gemini 기본 모델 (cascade_model_resolve.ml 이 읽는 실제 env var 이름; 2026-04-16 이전 이 문서는 `MASC_GEMINI_DEFAULT_MODEL` 로 잘못 표기) |
-| `MASC_GEMINI_FLASH_MODEL` | string | `"gemini-2.5-flash"` | Gemini flash 모델 |
-| `MASC_CLAUDE_DEFAULT_MODEL` | string | `"claude-sonnet-4-6"` | Claude 기본 모델 |
-| `MASC_OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | OpenAI 기본 모델 |
+| `ZAI_DEFAULT_MODEL` | string | `"glm-5.1"` | `glm` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:38) |
+| `ZAI_CODING_DEFAULT_MODEL` | string | `"glm-4.7"` | `glm-coding` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:43) |
+| `GEMINI_DEFAULT_MODEL` | string | `"gemini-3-flash-preview"` | `gemini` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:67) |
+| `ANTHROPIC_DEFAULT_MODEL` | string | `"claude-sonnet-4-6-20250514"` | `claude` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:70) |
+| `OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | `openai` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:73) |
+| `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |
+| `LLAMA_DEFAULT_MODEL` | string | `"explicit-model-required"` | `llama` provider legacy local runtime 기본 모델 (lib/config/env_config_runtime.ml:150) |
+| `OPENROUTER_DEFAULT_MODEL` | string | (없음) | `openrouter` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:76) |
 
 **Keeper Autonomy (자율 에이전트)**: `MASC_AUTONOMY_*` prefix.
 
@@ -330,9 +332,12 @@ JSON 파일로 CASCADE별 모델 순서를 정의한다. 키 패턴: `{cascade_n
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
 | `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
-| `glm` | `Glm` | `MASC_GLM_DEFAULT_MODEL` |
+| `glm` | `Glm` | `ZAI_DEFAULT_MODEL` |
+| `glm-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
 | `gemini` | `Gemini` | `GEMINI_DEFAULT_MODEL` |
-| `claude` | `Claude` | `MASC_CLAUDE_DEFAULT_MODEL` |
+| `claude` | `Claude` | `ANTHROPIC_DEFAULT_MODEL` |
+| `openai` | `OpenAI` | `OPENAI_DEFAULT_MODEL` |
+| `openrouter` | `OpenRouter` | `OPENROUTER_DEFAULT_MODEL` |
 
 ### 7.3 Per-cascade 추론 파라미터
 

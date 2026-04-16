@@ -45,6 +45,13 @@ type model_stats = {
   avg_tok_per_sec : float;
   p50_tok_per_sec : float;
   p95_tok_per_sec : float;
+  (* Hardware decode rate (eval_count / eval_duration from Ollama), separate
+     from wall-clock tok_per_sec which includes queue wait + prefill + thinking.
+     None when no entry in the window carried timings (e.g. providers other
+     than Ollama or responses before OAS started emitting inference_timings). *)
+  hw_decode_avg_tok_per_sec : float option;
+  hw_decode_p50_tok_per_sec : float option;
+  hw_decode_p95_tok_per_sec : float option;
   avg_latency_ms : float;
   p50_latency_ms : float;
   p95_latency_ms : float;
@@ -89,6 +96,9 @@ type raw_entry = {
   model : string;
   ts_unix : float;
   tok_per_sec : float;
+  (* Hardware decode rate when present in telemetry; None for legacy entries
+     and non-Ollama providers whose backend doesn't populate inference_timings. *)
+  hw_decode_tok_per_sec : float option;
   latency_ms : float;
   input_tokens : int;
   output_tokens : int;
@@ -140,7 +150,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                  Keeper_cascade_profile.canonicalize s ^ " (cascade)"
                | _ -> "__error__"
            in
-           Some { model; ts_unix = ts; tok_per_sec = 0.0; latency_ms = 0.0;
+           Some { model; ts_unix = ts; tok_per_sec = 0.0;
+                  hw_decode_tok_per_sec = None;
+                  latency_ms = 0.0;
                   input_tokens = 0; output_tokens = 0;
                   cache_read_tokens = 0; reasoning_tokens = 0;
                   fallback_applied = false; cost_usd = 0.0;
@@ -160,6 +172,20 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
            let tok_per_sec =
              match List.assoc_opt "tokens_per_second" tfields with
              | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
+           in
+           (* hw_decode_tokens_per_second — preferred field; fall back to
+              provider_tokens_per_second for backward compat. Treat explicit
+              null as absent so backfill for older rows is clean. *)
+           let hw_decode_tok_per_sec =
+             let read key =
+               match List.assoc_opt key tfields with
+               | Some (`Float f) when f > 0.0 -> Some f
+               | Some (`Int n) when n > 0 -> Some (Float.of_int n)
+               | _ -> None
+             in
+             match read "hw_decode_tokens_per_second" with
+             | Some _ as v -> v
+             | None -> read "provider_tokens_per_second"
            in
            let latency_ms =
              match List.assoc_opt "request_latency_ms" tfields with
@@ -189,7 +215,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              match List.assoc_opt "cost_usd" tfields with
              | Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0
            in
-           Some { model; ts_unix = ts; tok_per_sec; latency_ms;
+           Some { model; ts_unix = ts; tok_per_sec;
+                  hw_decode_tok_per_sec;
+                  latency_ms;
                   input_tokens; output_tokens;
                   cache_read_tokens; reasoning_tokens; fallback_applied;
                   cost_usd; tool_call_count = outer_tool_call_count;
@@ -252,6 +280,9 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       if e.tok_per_sec > 0.0 then Some e.tok_per_sec else None
     ) entries |> Array.of_list in
     Array.sort Float.compare tok_vals;
+    let hw_vals = List.filter_map (fun e -> e.hw_decode_tok_per_sec) entries
+                  |> Array.of_list in
+    Array.sort Float.compare hw_vals;
     let lat_vals = List.filter_map (fun e ->
       if e.latency_ms > 0.0 then Some e.latency_ms else None
     ) entries |> Array.of_list in
@@ -264,12 +295,16 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
     let success_count = List.length (List.filter (fun e -> not e.is_error) entries) in
     let error_count = List.length (List.filter (fun e -> e.is_error) entries) in
     let total_tool_calls = List.fold_left (fun acc e -> acc + e.tool_call_count) 0 entries in
+    let opt_if_any arr f = if Array.length arr = 0 then None else Some (f arr) in
     let stats = {
       model_id;
       entry_count = n;
       avg_tok_per_sec = avg tok_vals;
       p50_tok_per_sec = percentile tok_vals 50.0;
       p95_tok_per_sec = percentile tok_vals 95.0;
+      hw_decode_avg_tok_per_sec = opt_if_any hw_vals avg;
+      hw_decode_p50_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 50.0);
+      hw_decode_p95_tok_per_sec = opt_if_any hw_vals (fun a -> percentile a 95.0);
       avg_latency_ms = avg lat_vals;
       p50_latency_ms = percentile lat_vals 50.0;
       p95_latency_ms = percentile lat_vals 95.0;
@@ -443,12 +478,16 @@ let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
     ]
 
 let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
+  let opt_float = function Some f -> `Float f | None -> `Null in
   `Assoc
     [ ("model_id", `String s.model_id)
     ; ("entry_count", `Int s.entry_count)
     ; ("avg_tok_per_sec", `Float s.avg_tok_per_sec)
     ; ("p50_tok_per_sec", `Float s.p50_tok_per_sec)
     ; ("p95_tok_per_sec", `Float s.p95_tok_per_sec)
+    ; ("hw_decode_avg_tok_per_sec", opt_float s.hw_decode_avg_tok_per_sec)
+    ; ("hw_decode_p50_tok_per_sec", opt_float s.hw_decode_p50_tok_per_sec)
+    ; ("hw_decode_p95_tok_per_sec", opt_float s.hw_decode_p95_tok_per_sec)
     ; ("avg_latency_ms", `Float s.avg_latency_ms)
     ; ("p50_latency_ms", `Float s.p50_latency_ms)
     ; ("p95_latency_ms", `Float s.p95_latency_ms)

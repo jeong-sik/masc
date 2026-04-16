@@ -43,6 +43,9 @@ type model_stats = {
   avg_tok_per_sec : float;
   p50_tok_per_sec : float;
   p95_tok_per_sec : float;
+  hw_decode_avg_tok_per_sec : float option;
+  hw_decode_p50_tok_per_sec : float option;
+  hw_decode_p95_tok_per_sec : float option;
   avg_latency_ms : float;
   p50_latency_ms : float;
   p95_latency_ms : float;

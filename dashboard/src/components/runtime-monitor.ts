@@ -234,18 +234,27 @@ export function RuntimeMonitor() {
                         tone=${modelMetricTone(metric)}
                       />
                       <${StatusChip}
-                        label=${`${fmtNumber(metric.avg_tok_per_sec, 1)} tok/s`}
+                        label=${`${fmtNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
                         tone=${'ok'}
                       />
+                      ${metric.hw_decode_avg_tok_per_sec != null
+                        ? html`<${StatusChip}
+                            label=${`${fmtNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
+                            tone=${'ok'}
+                          />`
+                        : null}
                     </div>
                   </div>
                   <div class="grid grid-cols-3 gap-3 text-[12px] text-text-body">
                     <div>latency avg/p95 · ${fmtNumber(metric.avg_latency_ms, 1)} / ${fmtNumber(metric.p95_latency_ms, 1)} ms</div>
-                    <div>tok/s p50/p95 · ${fmtNumber(metric.p50_tok_per_sec, 1)} / ${fmtNumber(metric.p95_tok_per_sec, 1)}</div>
+                    <div>wall tok/s p50/p95 · ${fmtNumber(metric.p50_tok_per_sec, 1)} / ${fmtNumber(metric.p95_tok_per_sec, 1)}</div>
                     <div>cost · ${fmtCost(metric.total_cost_usd)}</div>
                     <div>input/output · ${fmtNumber(metric.total_input_tokens)} / ${fmtNumber(metric.total_output_tokens)}</div>
                     <div>reasoning/cache · ${fmtNumber(metric.total_reasoning_tokens)} / ${fmtNumber(metric.total_cache_read_tokens)}</div>
                     <div>tools · ${fmtNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${fmtNumber(metric.total_tool_calls)})</div>
+                    ${metric.hw_decode_p50_tok_per_sec != null
+                      ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${fmtNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${fmtNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
+                      : null}
                   </div>
                   ${(metric.buckets ?? []).length >= 2
                     ? html`<div class="flex items-center gap-4 mt-1 text-[11px] text-[var(--text-muted)]">

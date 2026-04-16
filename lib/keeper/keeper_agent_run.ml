@@ -1128,8 +1128,50 @@ let run_turn
                   ~dynamic_context
                   ~current_budget:current_params.thinking_budget
               in
+              (* Per-turn enable_thinking boolean override: when the adaptive
+                 mode flag is on, classify the turn's intent from the last
+                 assistant message's tool calls + user message + retry state,
+                 and flip enable_thinking to false for mechanical dispatch
+                 (empirically 2-3x faster on qwen3.5-35b-a3b via Ollama).
+                 Left as [None] when the flag is off so the agent's static
+                 base config stays authoritative. *)
+              let adaptive_thinking_override =
+                if Keeper_config.keeper_adaptive_thinking_mode () then
+                  let last_tool_calls =
+                    let rev = List.rev messages in
+                    let rec scan = function
+                      | [] -> []
+                      | (msg : Agent_sdk.Types.message) :: rest ->
+                        let names =
+                          List.filter_map
+                            (function
+                              | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+                              | _ -> None)
+                            msg.content
+                        in
+                        if names <> [] then names else scan rest
+                    in
+                    scan rev
+                  in
+                  let retry_count = if is_retry then 1 else 0 in
+                  let intent =
+                    Keeper_turn_intent.classify
+                      ~last_tool_calls
+                      ~last_user_message:(Some user_message)
+                      ~retry_count
+                  in
+                  Some (Keeper_turn_intent.equal intent Keeper_turn_intent.Cognitive)
+                else
+                  None
+              in
               let current_params =
-                { current_params with thinking_budget = adaptive_thinking_budget }
+                { current_params with
+                  thinking_budget = adaptive_thinking_budget
+                ; enable_thinking =
+                    (match adaptive_thinking_override with
+                     | Some _ as v -> v
+                     | None -> current_params.enable_thinking)
+                }
               in
               (* 1. Dynamic context injection *)
               let ctx =
@@ -1497,6 +1539,16 @@ let run_turn
                   | Some Agent_sdk.Types.None_ -> "tool_disabled"
                   | _ -> "tool_optional")
               in
+              (* thinking_enabled reflects the actual per-turn decision: when
+                 adaptive mode flipped it, log that value so dashboards and
+                 decisions.jsonl show what was sent to the model rather than
+                 the static base config. Falls back to the static value when
+                 the adaptive override was [None]. *)
+              let thinking_enabled_effective =
+                match current_params.enable_thinking with
+                | Some b -> b
+                | None -> Keeper_config.keeper_enable_thinking ()
+              in
               Keeper_tool_call_log.set_turn_context
                 ~keeper_name:meta.name
                 ~lane
@@ -1505,7 +1557,7 @@ let run_turn
                     Yojson.Safe.to_string
                       (Agent_sdk.Types.tool_choice_to_json choice))
                   tool_choice)
-                ~thinking_enabled:(Keeper_config.keeper_enable_thinking ())
+                ~thinking_enabled:thinking_enabled_effective
                 ?thinking_budget:current_params.thinking_budget
                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                 ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

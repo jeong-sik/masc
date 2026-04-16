@@ -598,6 +598,16 @@ export interface DashboardRuntimeModelMetric {
   avg_tok_per_sec?: number | null
   p50_tok_per_sec?: number | null
   p95_tok_per_sec?: number | null
+  /**
+   * Hardware decode rate (eval_count / eval_duration from Ollama) aggregated
+   * across the telemetry window. Distinct from `avg_tok_per_sec` which is
+   * wall-clock (includes queue wait + prefill + thinking in the denominator).
+   * Null when no entry in the window carried timings (non-Ollama providers or
+   * legacy rows before OAS started emitting inference_timings).
+   */
+  hw_decode_avg_tok_per_sec?: number | null
+  hw_decode_p50_tok_per_sec?: number | null
+  hw_decode_p95_tok_per_sec?: number | null
   avg_latency_ms?: number | null
   p50_latency_ms?: number | null
   p95_latency_ms?: number | null
@@ -694,6 +704,9 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
     p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,
     p95_tok_per_sec: asNumber(raw.p95_tok_per_sec) ?? null,
+    hw_decode_avg_tok_per_sec: asNumber(raw.hw_decode_avg_tok_per_sec) ?? null,
+    hw_decode_p50_tok_per_sec: asNumber(raw.hw_decode_p50_tok_per_sec) ?? null,
+    hw_decode_p95_tok_per_sec: asNumber(raw.hw_decode_p95_tok_per_sec) ?? null,
     avg_latency_ms: asNumber(raw.avg_latency_ms) ?? null,
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
     p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,

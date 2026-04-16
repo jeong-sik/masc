@@ -210,6 +210,15 @@ val keeper_slot_id : string -> int option
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
 
+(** When true, each turn's [enable_thinking] boolean is chosen per turn by
+    [Keeper_turn_intent.classify] (Mechanical → false, Cognitive → true)
+    and injected via the [before_turn_params] hook. When false, the static
+    [keeper_enable_thinking ()] base is used for every turn.
+
+    Independent of [keeper_adaptive_thinking_enabled] (which only tunes
+    the thinking budget, not the on/off choice). *)
+val keeper_adaptive_thinking_mode : unit -> bool
+
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)

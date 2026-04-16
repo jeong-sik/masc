@@ -48,6 +48,7 @@ let key_to_env =
     "turn.llama_slots",                 "MASC_KEEPER_LLAMA_SLOTS";
     "turn.enable_thinking",             "MASC_KEEPER_ENABLE_THINKING";
     "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
+    "turn.adaptive_thinking_mode",      "MASC_KEEPER_ADAPTIVE_THINKING_MODE";
     (* [supervisor] *)
     "supervisor.max_restarts",          "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS";
     "supervisor.backoff_base_sec",      "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S";

@@ -794,3 +794,25 @@ let keeper_adaptive_thinking_enabled_rp =
 
 let keeper_adaptive_thinking_enabled () : bool =
   Runtime_params.get keeper_adaptive_thinking_enabled_rp
+
+(* Separate flag from [adaptive_thinking_enabled] (which only tunes the
+   thinking BUDGET via [adaptive_thinking_budget]). This flag toggles a
+   per-turn BOOLEAN override of [enable_thinking] based on turn intent
+   classification (see [Keeper_turn_intent]). When both are true, users
+   get dynamic budget AND dynamic on/off. When only this is true, the
+   budget stays static but on/off adapts.
+
+   Precedence: when this flag is on, per-turn classification can set
+   [enable_thinking = Some true/false] which overrides the static
+   [MASC_KEEPER_ENABLE_THINKING] base. When off, falls back to the
+   static base (unchanged legacy behavior). *)
+let keeper_adaptive_thinking_mode_rp =
+  _rp_bool ~key:"keeper.turn.adaptive_thinking_mode"
+    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ADAPTIVE_THINKING_MODE" ~default:false)
+    ~description:"Enable per-turn boolean enable_thinking override driven by \
+                  Keeper_turn_intent classification (Mechanical → false, \
+                  Cognitive → true). Independent of adaptive_thinking budget \
+                  flag." ()
+
+let keeper_adaptive_thinking_mode () : bool =
+  Runtime_params.get keeper_adaptive_thinking_mode_rp

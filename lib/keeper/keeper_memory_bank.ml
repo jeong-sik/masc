@@ -50,6 +50,9 @@ let normalize_memory_text_key (s : string) : string =
   |> String.lowercase_ascii
   |> Re.replace_string (Re.Pcre.re {re|[ \t\n\r!"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~]+|re} |> Re.compile) ~by:""
 
+let has_inflated_consensus_marker (s : string) : bool =
+  Re.execp (Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile) s
+
 let is_meaningful_memory_text (s : string) : bool =
   let key = normalize_memory_text_key s in
   let placeholders = [
@@ -68,6 +71,8 @@ let is_meaningful_memory_text (s : string) : bool =
   not (List.mem key placeholders)
   && not (String_util.contains_substring s "[SYNTHETIC]")
   && not (String.equal (String.trim s) "No tools used this generation")
+  && not (has_inflated_consensus_marker s)
+  && not (String_util.contains_substring s "[turn budget exhausted")
 
 let memory_candidates_from_snapshot
     (snapshot : keeper_state_snapshot) : (string * string * int) list =

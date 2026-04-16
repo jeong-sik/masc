@@ -36,7 +36,10 @@ let is_provider_parse_error (body : string) : bool =
 
 (** Decide whether an error should cascade to the next provider.
     Local resource exhaustion (port/FD limits) stops the cascade
-    because every subsequent provider will hit the same bottleneck. *)
+    because every subsequent provider will hit the same bottleneck.
+    Provider-specific error normalization (e.g. GLM quota → 429) is
+    handled upstream in OAS backend modules, so cascade only needs
+    to check HTTP codes, not body text. *)
 let should_cascade_to_next err =
   if Llm_provider.Http_client.is_local_resource_exhaustion err then false
   else match err with

@@ -26,7 +26,12 @@ import {
 } from '../api/keeper'
 import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
-import { deriveStateEntries, deriveSwimlaneSegments } from './fsm-hub'
+import {
+  deriveStateEntries,
+  deriveSwimlaneSegments,
+  isCompositeFetchNotFound,
+  shouldUseGateKeeperFallback,
+} from './fsm-hub'
 import type { CompositeObservation } from './fsm-hub-types'
 
 /** Server-shaped keeper composite snapshot matching the projected
@@ -218,6 +223,21 @@ describe('FSM Hub integration — API response shape', () => {
     it('normalizeKeepers ignores the count-only "configured_keepers" field the shell actually sends', () => {
       const shellShape: Record<string, unknown> = { configured_keepers: 12 }
       expect(normalizeKeepers(shellShape.keepers)).toEqual([])
+    })
+  })
+
+  describe('keeper selection fallback guards', () => {
+    it('uses gate fallback only before execution data has loaded', () => {
+      expect(shouldUseGateKeeperFallback(false, [])).toBe(true)
+      expect(shouldUseGateKeeperFallback(true, [])).toBe(false)
+      expect(shouldUseGateKeeperFallback(true, ['keeper-a'])).toBe(false)
+      expect(shouldUseGateKeeperFallback(false, ['keeper-a'])).toBe(false)
+    })
+
+    it('treats composite 404 as keeper disappearance, not generic schema failure', () => {
+      expect(isCompositeFetchNotFound(new Error('composite fetch failed: 404'))).toBe(true)
+      expect(isCompositeFetchNotFound(new Error('composite fetch failed: 500'))).toBe(false)
+      expect(isCompositeFetchNotFound(new Error('state-diagram fetch failed: 404'))).toBe(false)
     })
   })
 })

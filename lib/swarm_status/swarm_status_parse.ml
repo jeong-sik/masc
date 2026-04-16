@@ -67,7 +67,7 @@ let trace_of_json json =
   {
     event_id = get_string_default json "event_id" "";
     event_type = get_string_default json "event_type" "trace";
-    source = get_string_default json "source" "command_plane";
+    source = get_string_default json "source" "managed";
     trace_id = get_string_default json "trace_id" "";
     operation_id = get_string_opt json "operation_id";
     actor = get_string_opt json "actor";

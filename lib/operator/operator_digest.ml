@@ -73,7 +73,7 @@ let recent_tool_host_failures ~now () =
   Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
   |> dedup [] []
 
-let build_room_attention_items ?command_plane_summary:_ config =
+let build_room_attention_items config =
   let pending_confirms = read_pending_confirms config in
   let pending_items =
     if pending_confirms = [] then []
@@ -96,7 +96,7 @@ let build_room_attention_items ?command_plane_summary:_ config =
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items)
 
-let room_recommendations ?command_plane_summary:_ _config =
+let room_recommendations _config =
   dedup_recommendations []
 
 (* Re-export from Operator_digest_review_types without [include] to
@@ -487,7 +487,7 @@ let review_queue_json ~actor active deferred recent_json =
   ]
 
 let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers
-    ?command_plane_summary ?swarm_status (ctx : 'a context) :
+    (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
   if not (Coord.is_initialized config) then
@@ -504,8 +504,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("provenance_summary", operator_surface_contract_json);
           ("judgment", `Null);
           ("operator_judge_runtime", operator_judge_runtime_json config);
-          ("command_plane", `Assoc []);
-          ("swarm_status", Swarm_status.empty_json);
           ("attention_items", `List []);
           ("attention_summary", summary_of_attention_items []);
           ("pending_confirm_summary", pending_confirm_summary_json_of_scope (pending_confirm_scope_of_entries ?actor []));
@@ -528,27 +526,16 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
     let room_state_json = room_state_json config in
-    let command_plane_digest_json =
-      match command_plane_summary with
-      | Some summary -> summary
-      | None -> `Assoc []
-    in
-    let swarm_status_json =
-      match swarm_status with
-      | Some json -> json
-      | None ->
-          Swarm_status.build_json ~timeline_limit_override:6 config
-    in
     match target_type with
     | "root" ->
         let confirm_scope = pending_confirm_scope ?actor config in
         let attention_items =
-          build_room_attention_items ~command_plane_summary:command_plane_digest_json config
+          build_room_attention_items config
           |> List.sort compare_attention
         in
         let recommended_actions =
           dedup_recommendations
-            (room_recommendations ~command_plane_summary:command_plane_digest_json config)
+            (room_recommendations config)
         in
         let fallback_recommendation_summary =
           summary_of_recommendations ~actor:actor_name recommended_actions
@@ -582,8 +569,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
               ("operator_judge_runtime", operator_judge_runtime_json config);
-              ("command_plane", command_plane_digest_json);
-              ("swarm_status", swarm_status_json);
               ("role_census", `Assoc []);
               ("runtime_pools", `Assoc []);
               ("lane_census", `Assoc []);

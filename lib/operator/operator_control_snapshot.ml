@@ -796,16 +796,16 @@ let namespace_scope_cache_segment (_config : Coord_utils.config) = "default"
 
 let snapshot_json ?actor ?view ?(include_messages = true)
     ?(include_keepers = true) ?(include_summary_fields = true)
-    ?(include_command_plane = true) ?(lightweight_summary = false)
+    ?(lightweight_summary = false)
     (ctx : 'a context) : Yojson.Safe.t =
   let cache_key =
-    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b|%b"
+    Printf.sprintf "%s|%s|%s|%s|%b|%b|%b|%b"
       ctx.config.base_path
       (namespace_scope_cache_segment ctx.config)
       (Option.value ~default:"" actor)
       (Option.value ~default:"" view)
       include_messages include_keepers include_summary_fields
-      include_command_plane lightweight_summary
+      lightweight_summary
   in
   (* Singleflight cache lookup: check for fresh hit, in-flight compute,
      or start a new compute.  Uses Eio.Mutex for safe Hashtbl access.
@@ -916,23 +916,17 @@ let snapshot_json ?actor ?view ?(include_messages = true)
   in
   (* Team sessions removed — status_cache and session digests no longer needed. *)
   let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 0 in
-  let command_plane_summary =
-    if include_summary_fields && initialized then
-      timed "command_plane_summary" (fun () ->
-        Some (`Assoc []))
-    else None
-  in
   let summary_fields = timed "summary_fields" (fun () ->
     if include_summary_fields
        && initialized
        && (match view with Summary | Full -> true | _ -> false)
     then
       let room_attention =
-        build_room_attention_items ?command_plane_summary config
+        build_room_attention_items config
         |> List.sort compare_attention
       in
       let room_recommendation_items =
-        room_recommendations ?command_plane_summary config
+        room_recommendations config
       in
       [
         ("attention_summary", summary_of_attention_items room_attention);
@@ -963,17 +957,11 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          ("root", room_json config);
        ]
       @ (
-         (* Parallelize independent I/O: sessions, keepers, persistent_agents,
-            and command_plane + swarm_status.  command_plane_json was previously
-            computed sequentially before the fiber block, blocking the entire
-            snapshot when command plane generation was slow.  Now it runs as
-            a 4th fiber, overlapping with sessions/keepers I/O. *)
+         (* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
          let empty_section = `Assoc [ ("count", `Int 0); ("items", `List []) ] in
          let sessions_ref = ref empty_section in
          let keepers_ref = ref empty_section in
          let persistent_ref = ref empty_section in
-         let command_plane_ref = ref `Null in
-         let swarm_status_ref = ref `Null in
          Eio.Fiber.all [
            (fun () ->
              (* Team sessions removed — always empty *)
@@ -1002,20 +990,11 @@ let snapshot_json ?actor ?view ?(include_messages = true)
                    persistent_agents_json ~keeper_names:persistent_keeper_names
                      ~keeper_rows config
                  else empty_section));
-           (fun () ->
-             let cp = timed "command_plane_json" (fun () ->
-               let _ = initialized && include_command_plane in
-               `Null)
-             in
-             command_plane_ref := cp;
-             swarm_status_ref := `Null);
          ];
          [
            ("sessions", !sessions_ref);
            ("keepers", !keepers_ref);
            ("persistent_agents", !persistent_ref);
-           ("command_plane", !command_plane_ref);
-           ("swarm_status", !swarm_status_ref);
          ]
       )
       (* Team sessions removed — aggregate metrics are always empty. *)

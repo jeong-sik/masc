@@ -114,7 +114,7 @@ let lane_kind_string = function
   | Supervised -> "supervised"
 
 let source_of_truth = function
-  | Managed -> "managed_command_plane"
+  | Managed -> "managed"
   | Projected -> "projected_swarm_json"
   | Supervised -> "execution_session_operator"
 

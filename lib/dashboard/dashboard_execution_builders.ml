@@ -369,30 +369,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
           ]);
   }
 
-let detachment_index command_plane_json =
-  let table = Hashtbl.create 32 in
-  let detachments =
-    member_assoc "detachments" command_plane_json
-    |> member_assoc "detachments"
-    |> function
-    | `List items -> items
-    | _ -> []
-  in
-  List.iter
-    (fun detachment_card ->
-      let detachment = member_assoc "detachment" detachment_card in
-      let operation_id = string_field "operation_id" detachment in
-      if operation_id <> "" then
-        let session_id =
-          trim_to_option (string_field "session_id" detachment)
-        in
-        let detachment_id =
-          trim_to_option (string_field "detachment_id" detachment)
-        in
-        Hashtbl.replace table operation_id (session_id, detachment_id))
-    detachments;
-  table
-
 let operation_severity ~(status : string) ~blocker_summary =
   match status with
   | "failed" | "cancelled" -> Tone_bad
@@ -400,94 +376,8 @@ let operation_severity ~(status : string) ~blocker_summary =
   | _ when Option.is_some blocker_summary -> Tone_warn
   | _ -> Tone_ok
 
-let build_operation_contexts command_plane_json =
-  let operations =
-    member_assoc "operations" command_plane_json
-    |> member_assoc "operations"
-    |> function
-    | `List items -> items
-    | _ -> []
-  in
-  let detachments = detachment_index command_plane_json in
-  operations
-  |> List.filter_map (fun operation_card ->
-         let operation = member_assoc "operation" operation_card in
-         let operation_id = string_field "operation_id" operation in
-         if operation_id = "" then None
-         else
-           let search = member_assoc "search" operation_card in
-           let blockers = list_field "dependency_blockers" search in
-           let blocker_summary =
-             match blockers with
-             | blocker :: _ ->
-                 trim_to_option (string_field "reason" blocker)
-             | [] ->
-                 if string_field "readiness" search = "blocked" then
-                   Some "operation search is blocked"
-                 else
-                   None
-           in
-           let status_str = string_field ~default:"active" "status" operation in
-           let op_status = status_str in
-           let severity = operation_severity ~status:op_status ~blocker_summary in
-           let linked_session_id, linked_detachment_id =
-             match Hashtbl.find_opt detachments operation_id with
-             | Some (session_id, detachment_id) -> (session_id, detachment_id)
-             | None ->
-                 ( trim_to_option (string_field "detachment_session_id" operation),
-                   None )
-           in
-           let command_handoff =
-             handoff_json
-               ~surface:"command"
-               ~command_surface:"operations"
-               ~operation_id
-               ~label:"작전 원인 보기"
-               ~target_type:"operation"
-               ~target_id:operation_id
-               ~focus_kind:"operation"
-               ()
-           in
-           let updated_at =
-             trim_to_option (string_field "updated_at" operation)
-           in
-           Some
-             {
-               operation_id;
-               severity;
-               last_seen_ts =
-                 parse_iso_opt updated_at |> Option.value ~default:0.0;
-               linked_session_id;
-               linked_detachment_id;
-               json =
-                 `Assoc
-                   [
-                     ("operation_id", `String operation_id);
-                     ("objective", member_assoc "objective" operation);
-                     ("status", `String status_str);
-                     ("stage", member_assoc "stage" operation);
-                     ("assigned_unit_id", member_assoc "assigned_unit_id" operation);
-                     ("assigned_unit_label", member_assoc "assigned_unit_label" operation_card);
-                     ("linked_session_id", json_string_option linked_session_id);
-                     ("linked_detachment_id", json_string_option linked_detachment_id);
-                     ("blocker_summary", json_string_option blocker_summary);
-                     ("search_status", member_assoc "readiness" search);
-                     ( "next_tool",
-                       if Option.is_some blocker_summary then `String "masc_operation_status"
-                       else `String "masc_observe_operations" );
-                     ("updated_at", json_string_option updated_at);
-                     ("top_handoff", command_handoff);
-                     ("command_handoff", command_handoff);
-                   ];
-             })
-  |> List.sort (fun left right ->
-         let by_severity =
-           Int.compare
-             (tone_rank right.severity)
-             (tone_rank left.severity)
-         in
-         if by_severity <> 0 then by_severity
-         else Float.compare right.last_seen_ts left.last_seen_ts)
+let build_operation_contexts () =
+  []
 
 let build_worker_support_briefs ~(now_ts : float) ~(tasks : Types.task list)
     ~(agents : Types.agent list) ~(messages : Types.message list) session_contexts :

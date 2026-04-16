@@ -239,18 +239,10 @@ function normalizeSummary(raw: unknown): DashboardMissionSummary {
 
 function normalizeCommandFocus(raw: unknown): DashboardMissionCommandFocus {
   const root = isRecord(raw) ? raw : {}
-  const swarm = isRecord(root.swarm_overview) ? root.swarm_overview : {}
   return {
     health: asString(root.health),
     active_operations: asNumber(root.active_operations),
     pending_approvals: asNumber(root.pending_approvals),
-    swarm_overview: {
-      active_lanes: asNumber(swarm.active_lanes),
-      moving_lanes: asNumber(swarm.moving_lanes),
-      stalled_lanes: asNumber(swarm.stalled_lanes),
-      projected_lanes: asNumber(swarm.projected_lanes),
-      last_movement_at: asString(swarm.last_movement_at) ?? null,
-    },
     top_attention: normalizeAttentionItem(root.top_attention),
     top_action: normalizeRecommendedAction(root.top_action),
   }

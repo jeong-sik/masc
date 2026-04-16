@@ -95,9 +95,6 @@ let initialized_json_opt ?(allow_initializing = false) = function
       | _ -> Some json)
   | _ -> None
 
-let command_plane_summary_cache_parts ~allow_initializing:_ ~state:_ =
-  (None, None)
-
 let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
   let room_state = Coord.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -307,7 +304,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
               ~include_messages:true ~include_keepers:true
               ~include_summary_fields:false
               ~lightweight_summary:true
-              ~include_command_plane:false ctx
+              ctx
           in
           let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
           let dt_total = Unix.gettimeofday () -. started_at in
@@ -343,9 +340,6 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _operator_digest_cache;
     let started_at = Unix.gettimeofday () in
     try
-      let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:false ~state
-      in
       run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
         ~clock ~config
         (fun ~config ~sw ->
@@ -362,7 +356,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
           in
           match
             Operator_control.digest_json ~actor:"dashboard" ~target_type:"root"
-              ?command_plane_summary ?swarm_status ctx
+              ctx
           with
           | Ok json ->
               with_projection_diagnostics ~surface:"operator_digest" ~started_at
@@ -412,13 +406,13 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       | Some ("0" | "false" | "no") -> false
       | _ -> true
     in
-    let include_command_plane =
+    let lightweight_summary =
       match view with
-      | Some raw -> not (String.equal (String.lowercase_ascii (String.trim raw)) "summary")
-      | None -> true
+      | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
+      | None -> false
     in
     let mode =
-      if include_command_plane then Offloaded_readonly else Inline_shared
+      if lightweight_summary then Inline_shared else Offloaded_readonly
     in
     match Eio.Time.with_timeout clock _dashboard_request_timeout_s (fun () ->
       Ok
@@ -438,9 +432,9 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
              in
             Operator_control.snapshot_json ?actor ?view
                ~include_messages ~include_keepers
-               ~include_summary_fields:include_command_plane
-               ~lightweight_summary:(not include_command_plane)
-               ~include_command_plane ctx))
+               ~include_summary_fields:(not lightweight_summary)
+               ~lightweight_summary
+               ctx))
     ) with
     | Ok json ->
         with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
@@ -504,15 +498,9 @@ let operator_digest_http_json ~state ~sw ~clock request =
                  mcp_session_id = None;
                }
              in
-             let command_plane_summary, swarm_status =
-               if namespace_target_type (Some effective_target_type) then
-                 command_plane_summary_cache_parts ~allow_initializing:false ~state
-               else
-                 (None, None)
-             in
              match
                Operator_control.digest_json ?actor ~target_type:effective_target_type
-                 ?target_id ?include_workers ?command_plane_summary ?swarm_status
+                 ?target_id ?include_workers
                  ctx
              with
              | Ok json -> json
@@ -572,25 +560,20 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _mission_cache;
     let t0_mission = Unix.gettimeofday () in
     try
-      let t_cp = Unix.gettimeofday () in
-      let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:false ~state
-      in
       run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
         ~clock ~config:room_config
         |> fun run_compute ->
-        let dt_cp = Unix.gettimeofday () -. t_cp in
         let result =
           run_compute
           (fun ~config ~sw ->
-            Dashboard_mission.json ?command_plane_summary ?swarm_status ~config ~sw
+            Dashboard_mission.json ~config ~sw
               ~clock ~proc_mgr ())
         in
       let dt_total = Unix.gettimeofday () -. t0_mission in
       if dt_total >= 5.0 then
         Log.Dashboard.warn
-          "[mission profile] total=%.1fs cp_summary=%.1fs compute=%.1fs"
-          dt_total dt_cp (dt_total -. dt_cp);
+          "[mission profile] total=%.1fs"
+          dt_total;
       result
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -610,28 +593,15 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
-    let command_plane_started_at = Unix.gettimeofday () in
-    let command_plane_summary, swarm_status =
-      command_plane_summary_cache_parts ~allow_initializing:false ~state
-    in
-    let command_plane_summary_ms =
-      int_of_float
-        ((Unix.gettimeofday () -. command_plane_started_at) *. 1000.0)
-    in
     run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
       ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
-        Dashboard_mission.json ?actor ?command_plane_summary ?swarm_status
+        Dashboard_mission.json ?actor
           ~config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ())
     |> with_projection_diagnostics ~surface:"mission" ~started_at
-         ~extra:
-           [
-             ("command_plane_summary_ms", `Int command_plane_summary_ms);
-             ("has_command_plane_summary", `Bool (Option.is_some command_plane_summary));
-             ("has_swarm_status", `Bool (Option.is_some swarm_status));
-           ]
+         ~extra:[]
   in
   let full_json =
     match actor with
@@ -657,11 +627,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
   | Some session_id when String.trim session_id <> "" ->
-      let command_plane_summary, swarm_status =
-        command_plane_summary_cache_parts ~allow_initializing:false ~state
-      in
       Dashboard_mission.session_json ?actor:(operator_actor_hint request)
-        ?command_plane_summary ?swarm_status
         ~session_id:(String.trim session_id)
         ~config:state.Mcp_server.room_config ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ()

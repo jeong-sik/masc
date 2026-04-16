@@ -62,13 +62,6 @@ val with_projection_diagnostics :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
-(** {1 Command Plane Support} *)
-
-val command_plane_summary_cache_parts :
-  allow_initializing:bool ->
-  state:Mcp_server.server_state ->
-  Yojson.Safe.t option * Yojson.Safe.t option
-
 (** {1 Sanitization and Request Helpers} *)
 
 val operator_actor_hint : Httpun.Request.t -> string option

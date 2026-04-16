@@ -21,7 +21,6 @@ export interface DashboardMissionCommandFocus {
   health?: string
   active_operations?: number
   pending_approvals?: number
-  swarm_overview?: Record<string, unknown>
   top_attention?: OperatorAttentionItem | null
   top_action?: OperatorRecommendedAction | null
 }
@@ -354,8 +353,6 @@ export interface OperatorLinkedAutoresearch {
 
 export interface OperatorSessionSnapshot {
   session_id: string
-  command_plane_operation_id?: string
-  command_plane_detachment_id?: string
   status?: string
   progress_pct?: number
   elapsed_sec?: number
@@ -566,7 +563,6 @@ export interface OperatorDigest {
   active_recommendation_summary?: OperatorGuidanceSummary | null
   fallback_recommended_actions?: OperatorRecommendedAction[]
   recommendation_summary?: OperatorGuidanceSummary | null
-  swarm_status?: Record<string, unknown>
   root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
@@ -597,8 +593,6 @@ export interface OperatorSnapshot {
   keepers: OperatorKeeperSnapshot[]
   operator_judge_runtime?: OperatorJudgeRuntime | null
   persistent_agents?: OperatorKeeperSnapshot[]
-  command_plane?: Record<string, unknown>
-  swarm_status?: Record<string, unknown>
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]
   pending_confirm_envelope?: PendingConfirmEnvelope | null

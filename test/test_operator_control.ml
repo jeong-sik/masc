@@ -23,10 +23,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_pending_confirm_summary_tracks_actor_scope;
-          Alcotest.test_case "snapshot summary view can omit command plane"
+          Alcotest.test_case "snapshot summary view excludes retired command plane"
             `Quick
             Test_operator_control_snapshot
-            .test_snapshot_summary_view_can_omit_command_plane;
+            .test_snapshot_summary_view_excludes_retired_command_plane;
           Alcotest.test_case "snapshot lightweight summary omits heavy activity"
             `Quick
             Test_operator_control_snapshot

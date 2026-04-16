@@ -72,15 +72,9 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 val health_from_attention_items : attention_item list -> string
 val normalize_team_health : string -> string
 
-val build_room_attention_items :
-  ?command_plane_summary:Yojson.Safe.t ->
-  Coord.config ->
-  attention_item list
+val build_room_attention_items : Coord.config -> attention_item list
 
-val room_recommendations :
-  ?command_plane_summary:Yojson.Safe.t ->
-  Coord.config ->
-  recommended_action list
+val room_recommendations : Coord.config -> recommended_action list
 
 val normalize_digest_target_type :
   string option -> (string, string) result
@@ -90,7 +84,5 @@ val digest_json :
   ?target_type:string ->
   ?target_id:string ->
   ?include_workers:bool ->
-  ?command_plane_summary:Yojson.Safe.t ->
-  ?swarm_status:Yojson.Safe.t ->
   'a Operator_pending_confirm.context ->
   (Yojson.Safe.t, string) result

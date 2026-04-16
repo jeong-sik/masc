@@ -222,7 +222,7 @@ let bool_option_member json key =
   json |> U.member key |> U.to_bool_option
 
 let stale_of_updated_at updated_at =
-  match Types.parse_iso8601_opt updated_at with
+  match Gate_time_util.parse_iso8601_opt updated_at with
   | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
   | None -> true
 

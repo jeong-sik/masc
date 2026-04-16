@@ -15,6 +15,8 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  pauseKeeper,
+  resumeKeeper,
   shutdownKeeper,
   type KeeperCheckpointInventory,
   type KeeperCheckpointSummary,
@@ -133,6 +135,25 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
   if (!needsAttention && !keeper.last_autonomous_action_at) return null
 
+  const directiveLoading = signal(false)
+  const handleDirective = async (action: 'pause' | 'resume') => {
+    directiveLoading.value = true
+    try {
+      const fn = action === 'pause' ? pauseKeeper : resumeKeeper
+      const res = await fn(keeper.name)
+      if (res.ok) {
+        showToast(action === 'pause' ? `${keeper.name} 일시정지됨` : `${keeper.name} 재개됨`, 'success')
+        await refreshAfterRuntimeAction()
+      } else {
+        showToast(res.error ?? '실패', 'error')
+      }
+    } catch {
+      showToast('실패', 'error')
+    } finally {
+      directiveLoading.value = false
+    }
+  }
+
   const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)]'
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
@@ -152,8 +173,17 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     <div class="px-6 pt-4">
       <div class="rounded-xl border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[12px] text-[var(--text-body)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>`
-          : null}
+          ? html`<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-[rgba(251,191,36,0.14)] text-[var(--warn)]">일시정지</span>
+            <button
+              class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              disabled=${directiveLoading.value}
+              onClick=${() => handleDirective('resume')}
+            >재개</button>`
+          : html`<button
+              class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)] transition-colors disabled:opacity-50"
+              disabled=${directiveLoading.value}
+              onClick=${() => handleDirective('pause')}
+            >일시정지</button>`}
         ${keeper.paused && keeper.keepalive_running && continueGate
           ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
           : keeper.paused && keeper.keepalive_running

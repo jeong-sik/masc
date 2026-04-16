@@ -297,6 +297,37 @@ async function safeKeeperLifecycle(
   }
 }
 
+async function safeKeeperPostWithBody(
+  url: string,
+  body: Record<string, unknown>,
+  fallbackError: string,
+): Promise<KeeperLifecycleResponse> {
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(body),
+    })
+    const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
+    if (resp.ok) return payload
+
+    const error =
+      isRecord(payload) &&
+      typeof payload.error === 'string' &&
+      payload.error.trim() !== ''
+        ? payload.error
+        : `${fallbackError} (HTTP ${resp.status})`
+
+    if (isRecord(payload)) {
+      return { ...payload, ok: false, error }
+    }
+
+    return { ok: false, error }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : fallbackError }
+  }
+}
+
 export function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/boot`,
@@ -411,6 +442,21 @@ export async function deleteKeeperHistorySnapshots(
   return resp.json() as Promise<KeeperCheckpointDeleteResponse>
 }
 
+export function pauseKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperPostWithBody(
+    `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
+    { action: 'pause' },
+    `Failed to pause ${name}`,
+  )
+}
+
+export function resumeKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperPostWithBody(
+    `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
+    { action: 'resume' },
+    `Failed to resume ${name}`,
+  )
+}
 // --- Keeper tool policy editing ---
 
 export interface KeeperToolPolicyInput {

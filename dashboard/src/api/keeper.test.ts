@@ -19,6 +19,8 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  pauseKeeper,
+  resumeKeeper,
   sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
@@ -239,5 +241,56 @@ describe('keeper lifecycle', () => {
       snapshot_ids: ['oas-snapshot-1.json'],
     })
     expect(result.deleted_snapshot_ids).toEqual(['oas-snapshot-1.json'])
+  })
+
+  it('sends POST with action=pause via directive endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, action: 'pause', name: 'janitor' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await pauseKeeper('janitor')
+
+    expect(result.ok).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/keepers/janitor/directive')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ action: 'pause' })
+  })
+
+  it('sends POST with action=resume via directive endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, action: 'resume', name: 'janitor' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resumeKeeper('janitor')
+
+    expect(result.ok).toBe(true)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/keepers/janitor/directive')
+    expect(JSON.parse(init.body)).toEqual({ action: 'resume' })
+  })
+
+  it('returns error when pause directive fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: 'Keeper not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await pauseKeeper('nonexistent')
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('Keeper not found')
   })
 })

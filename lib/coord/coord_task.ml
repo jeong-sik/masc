@@ -236,12 +236,26 @@ let observe_task_transition config ~agent_name ~task_id ~transition ~details =
   !Coord_hooks.observe_task_transition_fn config ~agent_name
     ~task_id ~transition ~details
 
+(** Transition log event taxonomy. Variant instead of free-form string
+    (#7520 Step 4) so typos at call-sites fail to compile. The three
+    values correspond to the current fire points in this module — add
+    a variant when a new transition event is introduced. *)
+type transition_event_type =
+  | Task_transition
+  | Task_done
+  | Task_cancelled
+
+let transition_event_type_to_string = function
+  | Task_transition -> "task_transition"
+  | Task_done -> "task_done"
+  | Task_cancelled -> "task_cancelled"
+
 (** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
     with an envelope (type/agent/actor_kind/task/from_status/to_status/ts) so
     every transition log line carries the same schema. Optional [?action]
     preserves the legacy "action" field used by the unified transition path
     so existing dashboard readers do not break. *)
-let transition_log_event ~event_type ~agent_name ~task_id
+let transition_log_event ~(event_type : transition_event_type) ~agent_name ~task_id
     ~from_status ~to_status ?action ?notes ?reason ?duration_ms
     ?handoff_context ?(forced = false) ?(now = now_iso ()) () : Yojson.Safe.t =
   let optional_field name = function
@@ -250,7 +264,7 @@ let transition_log_event ~event_type ~agent_name ~task_id
   in
   `Assoc
     ([
-       ("type", `String event_type);
+       ("type", `String (transition_event_type_to_string event_type));
        ("agent", `String agent_name);
        ("actor_kind", `String (task_actor_kind agent_name));
        ("task", `String task_id);
@@ -851,7 +865,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                 agent);
         log_event config
           (Yojson.Safe.to_string
-             (transition_log_event ~event_type:"task_transition"
+             (transition_log_event ~event_type:Task_transition
                 ~agent_name ~task_id
                 ~from_status:task.task_status ~to_status:new_status
                 ~action:action_s ~forced:force
@@ -1040,7 +1054,7 @@ let complete_task config ~agent_name ~task_id ~notes =
                   ]);
               log_event config
                 (Yojson.Safe.to_string
-                   (transition_log_event ~event_type:"task_done"
+                   (transition_log_event ~event_type:Task_done
                       ~agent_name ~task_id
                       ~from_status:task.task_status
                       ~to_status:
@@ -1159,7 +1173,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                     ]);
               log_event config
                 (Yojson.Safe.to_string
-                   (transition_log_event ~event_type:"task_done"
+                   (transition_log_event ~event_type:Task_done
                       ~agent_name ~task_id
                       ~from_status:task.task_status
                       ~to_status:
@@ -1267,7 +1281,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                     ]);
               log_event config
                 (Yojson.Safe.to_string
-                   (transition_log_event ~event_type:"task_cancelled"
+                   (transition_log_event ~event_type:Task_cancelled
                       ~agent_name ~task_id
                       ~from_status:task.task_status
                       ~to_status:

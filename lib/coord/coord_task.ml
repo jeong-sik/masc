@@ -1120,7 +1120,18 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
             end
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error (Types.IoError (Printexc.to_string e))
+      | e ->
+          let snapshot =
+            `Assoc [
+              ("op", `String "complete_task_r");
+              ("agent_name", `String agent_name);
+              ("task_id", `String task_id);
+              ("error", `String (Printexc.to_string e));
+            ]
+          in
+          Log.RoomTask.warn "task op failed: %s"
+            (Yojson.Safe.to_string snapshot);
+          Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Cancel a task - A2A compatible *)

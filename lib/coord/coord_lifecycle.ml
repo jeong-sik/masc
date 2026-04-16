@@ -11,6 +11,24 @@ open Coord_broadcast
 (* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
    All coordination scoped by cluster basepath only. *)
 
+(** Bounded snapshot of a corrupt agent JSON file for error diagnostics.
+    Reads at most 200 bytes to avoid OOM on large/corrupt files. *)
+let agent_parse_error_snapshot ~agent_name ~agent_file =
+  let raw_head =
+    try
+      In_channel.with_open_text agent_file (fun ic ->
+        let buf = Bytes.create 200 in
+        let n = In_channel.input ic buf 0 200 in
+        Bytes.sub_string buf 0 n)
+    with _ -> ""
+  in
+  `Assoc [
+    ("agent_name", `String agent_name);
+    ("agent_file", `String agent_file);
+    ("raw_head",
+      if raw_head = "" then `Null else `String raw_head);
+  ]
+
 (** Join room - with auto-generated nickname and metadata *)
 let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
@@ -100,7 +118,13 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
                ]);
        end
      | Error e ->
-         Log.Coord.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
+         let snapshot =
+           agent_parse_error_snapshot ~agent_name:nickname
+             ~agent_file:agent_file_dedup
+         in
+         Log.Coord.warn
+           "agent rejoin: invalid agent JSON for %s: %s | snapshot=%s"
+           nickname e (Yojson.Safe.to_string snapshot));
     Printf.sprintf "✅ %s already in the namespace (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
@@ -185,7 +209,12 @@ let leave config ~agent_name =
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
        write_json config agent_file (agent_to_yojson updated)
      | Error e ->
-         Log.Coord.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
+         let snapshot =
+           agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
+         in
+         Log.Coord.warn
+           "agent leave: invalid agent JSON for %s: %s | snapshot=%s"
+           actual_name e (Yojson.Safe.to_string snapshot));
 
     (* Capture active agents before removal for relationship materialization *)
     let peers_before_leave = (read_state config).active_agents in

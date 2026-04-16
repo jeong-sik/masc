@@ -288,3 +288,32 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
     direction: 'LR',
   }
 }
+
+export function buildCompactionSpec(
+  activeStage: string,
+  currentPhase?: string | null,
+): FsmGraphSpec {
+  const normalizedPhase = currentPhase ?? null
+  const tone: 'active' | 'warn' | 'err' =
+    activeStage === 'compacting'
+      ? 'warn'
+      : normalizedPhase === 'Overflowed' || normalizedPhase === 'Failing'
+        ? 'err'
+        : 'active'
+
+  return {
+    nodes: KMC_STATES.map(state => ({
+      id: state,
+      label: state,
+      type: nodeType(state, activeStage, tone),
+    })),
+    edges: [
+      { source: 'accumulating', target: 'compacting', label: 'ratio_gate', type: 'cascade' },
+      { source: 'compacting', target: 'done', label: 'Compaction_completed', type: 'recovery' },
+      { source: 'compacting', target: 'accumulating', label: 'Compaction_failed', type: 'error' },
+    ],
+    activeNodeId: activeStage,
+    layout: 'breadthfirst',
+    direction: 'LR',
+  }
+}

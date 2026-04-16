@@ -2,15 +2,14 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 
 import {
-  fetchKeeperStateDiagram,
+  fetchKeeperComposite,
   fetchKeeperTransitions,
+  type KeeperCompositeSnapshot,
   type KeeperTransition,
-  type KeeperStateDiagramResponse,
 } from '../api/keeper'
 import { EmptyState } from './common/empty-state'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
-import { MermaidGraph } from './common/mermaid-graph'
-import { buildPhaseSpec, buildDecisionPipelineSpec, buildCascadeSpec } from './keeper-fsm-specs'
+import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 import type { KeeperPhase } from '../types'
 
 interface KeeperStateDiagramProps {
@@ -45,9 +44,16 @@ const PHASE_ID_MAP: Record<string, string> = {
   dead: 'Dead',
 }
 
+const INVARIANT_LABELS: Array<[keyof KeeperCompositeSnapshot['invariants'], string]> = [
+  ['phase_turn_alignment', 'Phase ⇔ Turn'],
+  ['no_cascade_before_measurement', 'Cascade ordering'],
+  ['compaction_atomicity', 'Compaction atomic'],
+  ['event_priority_monotone', 'Event priority'],
+]
+
 function normalizePhase(phase: string | null | undefined): string | null {
   if (!phase) return null
-  return PHASE_ID_MAP[phase] ?? null
+  return PHASE_ID_MAP[phase] ?? phase
 }
 
 function transitionType(selectedEvent: unknown): string {
@@ -60,18 +66,14 @@ function transitionType(selectedEvent: unknown): string {
   return 'event'
 }
 
-function formatPhaseBadgeLabel(phase: string | null | undefined): string {
-  return normalizePhase(phase) ?? phase ?? 'unknown'
-}
-
-// Check if API returned structured data for Cytoscape rendering
-function hasStructuredData(data: KeeperStateDiagramResponse): boolean {
-  return typeof data.thompson_alpha === 'number'
-    && Array.isArray(data.cascade_models)
+function badgeTone(ok: boolean): string {
+  return ok
+    ? 'border-[rgba(34,197,94,0.24)] bg-[rgba(34,197,94,0.08)] text-[var(--ok)]'
+    : 'border-[rgba(239,68,68,0.24)] bg-[rgba(239,68,68,0.10)] text-[var(--bad)]'
 }
 
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
-  const [diagramData, setDiagramData] = useState<KeeperStateDiagramResponse | null>(null)
+  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -82,16 +84,17 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
     setError(null)
 
     Promise.allSettled([
-      fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
+      fetchKeeperComposite(keeperName, { signal: controller.signal }),
       fetchKeeperTransitions(keeperName, 5, { signal: controller.signal }),
     ])
-      .then(([diagramResult, transitionsResult]) => {
+      .then(([snapshotResult, transitionsResult]) => {
         if (controller.signal.aborted) return
-        if (diagramResult.status === 'fulfilled') {
-          setDiagramData(diagramResult.value)
+
+        if (snapshotResult.status === 'fulfilled') {
+          setSnapshot(snapshotResult.value)
         } else {
-          setDiagramData(null)
-          setError(diagramResult.reason instanceof Error ? diagramResult.reason.message : 'state diagram fetch failed')
+          setSnapshot(null)
+          setError(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : 'composite fetch failed')
         }
 
         if (transitionsResult.status === 'fulfilled') {
@@ -104,160 +107,108 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       })
       .catch(err => {
         if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'state diagram fetch failed')
+        setError(err instanceof Error ? err.message : 'composite fetch failed')
         setLoading(false)
       })
 
     return () => { controller.abort() }
   }, [keeperName])
 
-  const livePhase = normalizePhase(currentPhase) ?? normalizePhase(diagramData?.current_phase)
-  const registryPhase = normalizePhase(diagramData?.current_phase)
-  const phaseMismatch = Boolean(livePhase && registryPhase && livePhase !== registryPhase)
-  const useCytoscape = diagramData != null && hasStructuredData(diagramData)
+  const keeperPhase = normalizePhase(currentPhase)
+  const compositePhase = normalizePhase(snapshot?.phase)
+  const phaseMismatch = Boolean(keeperPhase && compositePhase && keeperPhase !== compositePhase)
 
-  const phaseSpec = useMemo(
-    () => buildPhaseSpec(livePhase),
-    [livePhase],
-  )
-
-  const pipelineSpec = useMemo(
-    () => {
-      if (!diagramData || !useCytoscape) return null
-      return buildDecisionPipelineSpec({
-        phase: livePhase,
-        thompsonAlpha: diagramData.thompson_alpha ?? 1,
-        thompsonBeta: diagramData.thompson_beta ?? 1,
-        toolCount: diagramData.tool_count ?? 0,
-        recoveryFloorCount: diagramData.recovery_floor_count ?? 0,
-      })
-    },
-    [diagramData, livePhase, useCytoscape],
-  )
-
-  const cascadeSpec = useMemo(
-    () => {
-      if (!diagramData || !useCytoscape) return null
-      const models = diagramData.cascade_models
-      if (!models || models.length === 0) return null
-      return buildCascadeSpec({
-        models,
-        lastProviderResult: diagramData.last_provider_result ?? null,
-      })
-    },
-    [diagramData, useCytoscape],
+  const compositeSpec = useMemo(
+    () => snapshot
+      ? buildCompositeFsmSpec({
+          phase: snapshot.phase,
+          turnPhase: snapshot.turn_phase,
+          decisionStage: snapshot.decision.stage,
+          cascadeState: snapshot.cascade.state,
+          compactionStage: snapshot.compaction.stage,
+        })
+      : null,
+    [snapshot],
   )
 
   if (loading) {
     return html`
       <div class="flex items-center justify-center gap-2 py-6 text-[11px] text-[var(--text-dim)]">
         <span class="inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" aria-hidden="true"></span>
-        상태 다이어그램 로딩중
+        composite lifecycle 로딩중
       </div>
     `
   }
 
-  if (error || !diagramData) {
-    return html`<${EmptyState} message=${error ?? '다이어그램 없음'} compact />`
+  if (error || !snapshot || !compositeSpec) {
+    return html`<${EmptyState} message=${error ?? 'composite lifecycle 없음'} compact />`
   }
 
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-dim)]">
         <span class="inline-flex items-center rounded-full border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--accent)]">
-          live phase ${formatPhaseBadgeLabel(livePhase)}
+          composite ${snapshot.phase}
         </span>
-        ${registryPhase ? html`
+        ${keeperPhase ? html`
           <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-            registry ${formatPhaseBadgeLabel(registryPhase)}
+            keeper ${keeperPhase}
           </span>
         ` : null}
+        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          KTC ${snapshot.turn_phase}
+        </span>
+        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          KDP ${snapshot.decision.stage}
+        </span>
+        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          KCL ${snapshot.cascade.state}
+        </span>
+        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          KMC ${snapshot.compaction.stage}
+        </span>
         ${transitions.length > 0 ? html`
           <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
             observed ${transitions.length} transitions
-          </span>
-        ` : null}
-        ${useCytoscape ? html`
-          <span class="inline-flex items-center rounded-full border border-[rgba(99,102,241,0.3)] bg-[rgba(99,102,241,0.1)] px-2 py-0.5 text-[#818cf8]">
-            interactive
           </span>
         ` : null}
       </div>
 
       ${phaseMismatch ? html`
         <div class="rounded-xl border border-[rgba(251,191,36,0.24)] bg-[rgba(251,191,36,0.08)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
-          Live phase와 registry phase가 다릅니다. observed transition 기록을 참고하세요.
+          keeper row phase와 composite snapshot phase가 다릅니다. composite snapshot을 authoritative runtime-truth로 사용합니다.
         </div>
       ` : null}
 
-      <!-- Phase State Machine -->
       <div>
-        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Phase State Machine</div>
-        ${useCytoscape ? html`
-          <${CytoscapeFsm} spec=${phaseSpec} height="320px" />
-        ` : html`
-          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-            <${MermaidGraph}
-              source=${diagramData.mermaid}
-              prefix="keeper-state-diagram"
-              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
-              minHeightClass="min-h-[120px]"
-            />
-          </div>
-        `}
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Composite Lifecycle (KSM · KTC · KDP · KCL · KMC)</div>
+        <${CytoscapeFsm} spec=${compositeSpec} height="320px" />
       </div>
 
-      <!-- Decision Pipeline -->
-      ${pipelineSpec ? html`
-        <div class="mt-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Decision Pipeline (Guard → Thompson → ToolPolicy)</div>
-          <${CytoscapeFsm} spec=${pipelineSpec} height="240px" />
-        </div>
-      ` : diagramData.decision_pipeline_mermaid ? html`
-        <div class="mt-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Decision Pipeline (Guard → Thompson → ToolPolicy)</div>
-          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-            <${MermaidGraph}
-              source=${diagramData.decision_pipeline_mermaid}
-              prefix="decision-pipeline"
-              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
-              minHeightClass="min-h-[120px]"
-            />
-          </div>
-        </div>
-      ` : null}
+      <div class="grid gap-2 md:grid-cols-2">
+        ${INVARIANT_LABELS.map(([key, label]) => {
+          const ok = snapshot.invariants[key]
+          return html`
+            <div class=${`rounded-xl border px-3 py-2 text-[11px] leading-[1.5] ${badgeTone(ok)}`}>
+              <div class="font-semibold">${label}</div>
+              <div class="mt-1 font-mono">${ok ? 'ok' : 'violated'}</div>
+            </div>
+          `
+        })}
+      </div>
 
-      <!-- Cascade FSM -->
-      ${cascadeSpec ? html`
-        <div class="mt-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Cascade FSM (Provider Failover)</div>
-          <${CytoscapeFsm} spec=${cascadeSpec} height="280px" />
-        </div>
-      ` : diagramData.cascade_fsm_mermaid ? html`
-        <div class="mt-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">Cascade FSM (Provider Failover)</div>
-          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-            <${MermaidGraph}
-              source=${diagramData.cascade_fsm_mermaid}
-              prefix="cascade-fsm"
-              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
-              minHeightClass="min-h-[120px]"
-            />
-          </div>
-        </div>
-      ` : null}
-
-      <!-- Observed Transitions -->
       ${transitions.length > 0 ? html`
         <div class="grid gap-2">
           <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Observed transitions</div>
           ${transitions.map(transition => html`
             <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-[11px] leading-[1.5] text-[var(--text-body)]">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="font-mono text-[var(--text-strong)]">${formatPhaseBadgeLabel(transition.prev_phase)}</span>
+                <span class="font-mono text-[var(--text-strong)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--text-dim)]">→</span>
-                <span class="font-mono text-[var(--accent)]">${formatPhaseBadgeLabel(transition.new_phase)}</span>
-                <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${transitionType(transition.selected_event)}</span>
+                <span class="font-mono text-[var(--accent)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
+                <span class="rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                  ${transitionType(transition.selected_event)}
+                </span>
               </div>
             </div>
           `)}

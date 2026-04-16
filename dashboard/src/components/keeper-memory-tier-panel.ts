@@ -2,11 +2,14 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 
 import {
+  fetchKeeperComposite,
   fetchKeeperStateDiagram,
+  type KeeperCompositeSnapshot,
   type MemoryKindUsageEntry,
 } from '../api/keeper'
 import { EmptyState } from './common/empty-state'
-import { MermaidGraph } from './common/mermaid-graph'
+import { CytoscapeFsm } from './common/cytoscape-fsm'
+import { buildCompactionSpec } from './keeper-fsm-specs'
 
 interface KeeperMemoryTierPanelProps {
   keeperName: string
@@ -14,19 +17,19 @@ interface KeeperMemoryTierPanelProps {
 }
 
 /**
- * Memory tier saturation bars + optional Compaction sub-FSM.
+ * Memory tier saturation bars + compaction sub-FSM.
  *
- * Data source: `/api/v1/keepers/:name/state-diagram` — we reuse the same
- * endpoint the phase diagram consumes so a single round-trip hydrates
- * both panels. The [memory_kind_usage] field joins
- * [Keeper_memory_policy.kind_caps] with the live memory bank summary.
+ * Runtime-truth split:
+ * - `/composite` is authoritative for the current KSM/KMC lifecycle state.
+ * - `/state-diagram` is still used only for `memory_kind_usage`, because
+ *   that payload joins policy caps with live memory-bank counts.
  */
 export function KeeperMemoryTierPanel({
   keeperName,
   currentPhase,
 }: KeeperMemoryTierPanelProps) {
   const [usage, setUsage] = useState<MemoryKindUsageEntry[] | null>(null)
-  const [submachineMermaid, setSubmachineMermaid] = useState<string | null>(null)
+  const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -35,11 +38,31 @@ export function KeeperMemoryTierPanel({
     setLoading(true)
     setError(null)
 
-    fetchKeeperStateDiagram(keeperName, { signal: controller.signal })
-      .then(data => {
+    Promise.allSettled([
+      fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
+      fetchKeeperComposite(keeperName, { signal: controller.signal }),
+    ])
+      .then(([usageResult, compositeResult]) => {
         if (controller.signal.aborted) return
-        setUsage(data.memory_kind_usage ?? [])
-        setSubmachineMermaid(data.compaction_submachine_mermaid ?? null)
+        let nextError: string | null = null
+
+        if (usageResult.status === 'fulfilled') {
+          setUsage(usageResult.value.memory_kind_usage ?? [])
+        } else {
+          setUsage(null)
+          nextError = usageResult.reason instanceof Error ? usageResult.reason.message : 'memory tier fetch failed'
+        }
+
+        if (compositeResult.status === 'fulfilled') {
+          setSnapshot(compositeResult.value)
+        } else {
+          setSnapshot(null)
+          nextError ||= compositeResult.reason instanceof Error
+            ? compositeResult.reason.message
+            : 'composite fetch failed'
+        }
+
+        setError(nextError)
         setLoading(false)
       })
       .catch(err => {
@@ -66,7 +89,10 @@ export function KeeperMemoryTierPanel({
 
   const totalUsed = usage.reduce((sum, row) => sum + row.used, 0)
   const totalCap = usage.reduce((sum, row) => sum + row.cap, 0)
-  const isCompacting = currentPhase === 'Compacting' || currentPhase === 'compacting'
+  const phase = snapshot?.phase ?? currentPhase ?? null
+  const isCompacting = phase === 'Compacting' || phase === 'compacting'
+  const compactionStage = snapshot?.compaction.stage ?? (isCompacting ? 'compacting' : 'accumulating')
+  const compactionSpec = buildCompactionSpec(compactionStage, phase)
 
   return html`
     <div class="flex flex-col gap-3">
@@ -76,6 +102,9 @@ export function KeeperMemoryTierPanel({
         </span>
         <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
           ${usage.length} kinds
+        </span>
+        <span class="inline-flex items-center rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+          KMC ${compactionStage}
         </span>
         ${isCompacting ? html`
           <span class="inline-flex items-center rounded-full border border-[rgba(251,191,36,0.3)] bg-[rgba(251,191,36,0.1)] px-2 py-0.5 text-[#f59e0b]">
@@ -112,21 +141,12 @@ export function KeeperMemoryTierPanel({
         })}
       </div>
 
-      ${submachineMermaid ? html`
-        <div class="mt-2">
-          <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
-            Compaction sub-FSM (MemoryCompaction.tla)
-          </div>
-          <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] p-3">
-            <${MermaidGraph}
-              source=${submachineMermaid}
-              prefix="compaction-submachine"
-              diagramClass="[&_svg]:max-w-full [&_svg]:mx-auto"
-              minHeightClass="min-h-[120px]"
-            />
-          </div>
+      <div class="mt-2">
+        <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+          Compaction sub-FSM (KeeperCompactionLifecycle.tla)
         </div>
-      ` : null}
+        <${CytoscapeFsm} spec=${compactionSpec} height="200px" />
+      </div>
     </div>
   `
 }

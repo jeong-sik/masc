@@ -117,6 +117,8 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDecisionPipeline.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompactionLifecycle.tla"
+run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompositeLifecycle.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCompositeLifecycle.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 

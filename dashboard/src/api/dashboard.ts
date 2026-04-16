@@ -1924,3 +1924,61 @@ export function fetchCascadeClientCapacityHistory(opts?: {
     { signal: opts?.signal },
   )
 }
+
+// --- Verification requests (Mission detail table) ---
+// Backend: lib/dashboard/dashboard_verification.ml
+// Route:   GET /api/v1/verification/requests?task_id=&limit=
+// Shape is stable; status values match the Verification state machine's
+// user-visible mapping (pending → approved | rejected, plus a reserved
+// timed_out slot for the deadline watcher).
+
+export type VerificationRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'timed_out'
+
+export type VerificationRequestVerdict = 'pass' | 'fail' | 'partial' | null
+
+export interface VerificationRequest {
+  request_id: string
+  task_id: string
+  keeper: string | null
+  status: VerificationRequestStatus
+  created_at: string
+  submitted_by: string
+  approved_by: string | null
+  completion_contract: string[]
+  required_evidence: string[]
+  verdict: VerificationRequestVerdict
+  verdict_reason: string
+}
+
+export interface VerificationRequestsResponse {
+  updated_at: string
+  total: number
+  requests: VerificationRequest[]
+}
+
+export interface FetchVerificationRequestsOptions {
+  taskId?: string
+  limit?: number
+  signal?: AbortSignal
+}
+
+export function fetchVerificationRequests(
+  opts?: FetchVerificationRequestsOptions,
+): Promise<VerificationRequestsResponse> {
+  const params = new URLSearchParams()
+  if (opts?.taskId && opts.taskId.trim() !== '') {
+    params.set('task_id', opts.taskId.trim())
+  }
+  if (opts?.limit != null) {
+    params.set('limit', String(opts.limit))
+  }
+  const qs = params.toString()
+  const path = qs.length > 0
+    ? `/api/v1/verification/requests?${qs}`
+    : '/api/v1/verification/requests'
+  return get<VerificationRequestsResponse>(path, { signal: opts?.signal })
+}

@@ -244,9 +244,9 @@ let () = test "handle_add_task_persists_contract" (fun () ->
 )
 
 let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
-  (* Task_contract_gate removed — persisted_contract_rejection always returns
-     None, so handle_done succeeds immediately without the gate rejection.
-     Verify that completion works without the gate. *)
+  (* MASC_CDAL_GATE_ENABLED default flipped to [true] in v0.9.5 (PR #7579).
+     With gate enabled + strict contract + no persisted verdict, handle_done
+     must be blocked with a gate rejection message. *)
   let ctx = make_test_ctx () in
   let _ =
     Tool_task.handle_add_task ctx
@@ -272,8 +272,11 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
           ("notes", `String "deliverable-ready");
         ])
   in
-  (* With gate removed, completion succeeds directly *)
-  if not success_done then failwith result_done
+  if success_done then
+    failwith "expected gate to reject handle_done for strict task without verdict";
+  if not (str_contains result_done "CDAL verdict") then
+    failwith
+      (Printf.sprintf "expected CDAL gate rejection message, got: %s" result_done)
 )
 
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->

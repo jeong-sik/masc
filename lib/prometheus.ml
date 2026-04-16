@@ -265,7 +265,19 @@ let init () =
   add fd_threshold
     "Threshold above which open_fds triggers a one-shot WARN log." Gauge;
   set_gauge fd_threshold
-    (float_of_int (Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1))
+    (float_of_int (Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1));
+  (* Per-keeper turn outcome + token counters.  Labels are populated
+     dynamically via inc_counter; no upfront registration needed.
+     Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
+  add "masc_keeper_turns_total"
+    "Total keeper turns by outcome (labels: keeper_name, outcome=success|failure|budget_exhausted|mutation_boundary)"
+    Counter;
+  add "masc_keeper_input_tokens_total"
+    "Cumulative input tokens per keeper turn (labels: keeper_name, model)"
+    Counter;
+  add "masc_keeper_output_tokens_total"
+    "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
+    Counter
 
 let metric_open_fds = "masc_process_open_fds"
 

@@ -1921,6 +1921,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let is_server_parse_rejection = is_server_rejected_parse_error err in
           let is_auto_recoverable = is_auto_recoverable_turn_error err in
           let is_ambiguous_partial = is_ambiguous_side_effect_error err in
+          Prometheus.inc_counter "masc_keeper_turns_total"
+            ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d latency=%dms%s error=%s"
             meta.name effective_cascade_name max_context latency_ms
@@ -2247,22 +2249,40 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      ~turn_evidence)
                 ()
           | None -> ());
+          let model_used = Keeper_agent_run.surface_model_used result in
+          let outcome_str =
+            match result.stop_reason with
+            | Oas_worker.Completed -> "completed"
+            | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
+                Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
+            | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
+                (match tool_name with
+                 | Some tool ->
+                     Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
+                 | None ->
+                     Printf.sprintf "mutation_boundary(%d)" turns_used)
+          in
+          let outcome_label =
+            match result.stop_reason with
+            | Oas_worker.Completed -> "success"
+            | Oas_worker.TurnBudgetExhausted _ -> "budget_exhausted"
+            | Oas_worker.MutationBoundaryReached _ -> "mutation_boundary"
+          in
+          Prometheus.inc_counter "masc_keeper_turns_total"
+            ~labels:[("keeper_name", updated_meta.name); ("outcome", outcome_label)] ();
+          Prometheus.inc_counter "masc_keeper_input_tokens_total"
+            ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+            ~delta:(float_of_int result.usage.input_tokens) ();
+          Prometheus.inc_counter "masc_keeper_output_tokens_total"
+            ~labels:[("keeper_name", updated_meta.name); ("model", model_used)]
+            ~delta:(float_of_int result.usage.output_tokens) ();
           Log.Keeper.info
             "%s: keeper cycle OK model=%s tokens=%d latency=%dms mode=%s stop=%s"
-            updated_meta.name (Keeper_agent_run.surface_model_used result)
+            updated_meta.name model_used
             (result.usage.input_tokens + result.usage.output_tokens)
             latency_ms
             selected_mode
-            (match result.stop_reason with
-             | Oas_worker.Completed -> "completed"
-             | Oas_worker.TurnBudgetExhausted { turns_used; limit; _ } ->
-                 Printf.sprintf "budget_exhausted(%d/%d)" turns_used limit
-             | Oas_worker.MutationBoundaryReached { turns_used; tool_name } ->
-                 (match tool_name with
-                  | Some tool ->
-                      Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
-                  | None ->
-                      Printf.sprintf "mutation_boundary(%d)" turns_used));
+            outcome_str;
           (* 7. Persist updated meta *)
           (match write_meta config updated_meta with
            | Ok () -> ()

@@ -100,7 +100,32 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
                ]);
        end
      | Error e ->
-         Log.Coord.warn "agent rejoin: invalid agent JSON for %s: %s" nickname e);
+         let raw =
+           try
+             Some
+               (In_channel.with_open_text agent_file_dedup
+                  In_channel.input_all)
+           with _ -> None
+         in
+         let raw_head =
+           match raw with
+           | None -> `Null
+           | Some s ->
+             `String
+               (if String.length s > 200 then String.sub s 0 200 else s)
+         in
+         let snapshot =
+           `Assoc [
+             ("agent_name", `String nickname);
+             ("agent_file", `String agent_file_dedup);
+             ("raw_size",
+               `Int (Option.fold ~none:0 ~some:String.length raw));
+             ("raw_head", raw_head);
+           ]
+         in
+         Log.Coord.warn
+           "agent rejoin: invalid agent JSON for %s: %s | snapshot=%s"
+           nickname e (Yojson.Safe.to_string snapshot));
     Printf.sprintf "✅ %s already in the namespace (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
@@ -185,7 +210,30 @@ let leave config ~agent_name =
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
        write_json config agent_file (agent_to_yojson updated)
      | Error e ->
-         Log.Coord.warn "agent leave: invalid agent JSON for %s: %s" actual_name e);
+         let raw =
+           try
+             Some (In_channel.with_open_text agent_file In_channel.input_all)
+           with _ -> None
+         in
+         let raw_head =
+           match raw with
+           | None -> `Null
+           | Some s ->
+             `String
+               (if String.length s > 200 then String.sub s 0 200 else s)
+         in
+         let snapshot =
+           `Assoc [
+             ("agent_name", `String actual_name);
+             ("agent_file", `String agent_file);
+             ("raw_size",
+               `Int (Option.fold ~none:0 ~some:String.length raw));
+             ("raw_head", raw_head);
+           ]
+         in
+         Log.Coord.warn
+           "agent leave: invalid agent JSON for %s: %s | snapshot=%s"
+           actual_name e (Yojson.Safe.to_string snapshot));
 
     (* Capture active agents before removal for relationship materialization *)
     let peers_before_leave = (read_state config).active_agents in

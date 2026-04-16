@@ -54,6 +54,8 @@ let insert_sorted entry ws =
   in
   go [] ws
 
+exception Host_resource_saturated of string
+
 (* ── Core Queue ────────────────────────────────────────── *)
 
 let initial_max_concurrent_of_env getenv =
@@ -162,7 +164,19 @@ and _release_slot t =
 
 (* ── Public API ────────────────────────────────────────── *)
 
+let check_host_resources ~keeper_name =
+  let fd_count = Prometheus.approximate_open_fd_count () in
+  let threshold = Prometheus.fd_warn_threshold in
+  if fd_count >= threshold * 9 / 10 then begin
+    let msg =
+      Printf.sprintf "fd count %d >= 90%% of threshold %d" fd_count threshold
+    in
+    Log.Misc.warn "admission rejected for %s: %s" keeper_name msg;
+    raise (Host_resource_saturated msg)
+  end
+
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
+  check_host_resources ~keeper_name;
   (* Passthrough: provider-level throttling belongs in OAS (cascade),
      not in MASC.  The cascade distributes requests across providers
      and handles 429/timeout by falling to the next provider.
@@ -179,6 +193,7 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
     raise exn
 
 let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
+  check_host_resources ~keeper_name;
   Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0;
   match f () with
   | result ->

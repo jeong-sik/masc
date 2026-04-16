@@ -13,6 +13,7 @@ module S = Masc_mcp.Cascade_strategy
 module H = Masc_mcp.Cascade_health_tracker
 module C = Masc_mcp.Cascade_client_capacity
 module T = Masc_mcp.Cascade_throttle
+module Cascade_state = Masc_mcp.Cascade_state
 
 (* ── Test fixture ────────────────────────────────────────────── *)
 
@@ -49,8 +50,17 @@ let mk_ctx ?(health = H.create ())
            ?(capacity = fun _ -> None)
            ?(now = 0.0)
            ?(rand = fun _ -> 0)
+           ?(keeper_name = "")
+           ?(cascade_name = "")
            () : S.signal_ctx =
-  { health; capacity; now; rand_int = rand }
+  { health; capacity; now; rand_int = rand;
+    keeper_name; cascade_name }
+
+let mk_t ?(cycle = S.default_cycle_policy)
+         ?(tiers = [])
+         ?(sticky_ttl_ms = 0)
+         kind : S.t =
+  { kind; cycle; tiers; sticky_ttl_ms }
 
 (* ── S1 Failover ─────────────────────────────────────────────── *)
 
@@ -71,7 +81,7 @@ let test_capacity_aware_filters_busy () =
     (* "c" has no entry → unknown → kept (fail-open) *)
   ] in
   let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let strat = { S.kind = Capacity_aware; cycle = S.default_cycle_policy } in
+  let strat = mk_t S.Capacity_aware in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check (list string) "busy 'a' filtered, 'b' and 'c' (unknown) kept"
     ["b"; "c"] (names ordered)
@@ -83,14 +93,14 @@ let test_capacity_aware_all_busy_yields_empty () =
     (List.nth cands 1).url, mk_capacity_info ~total:1 ~active:1;
   ] in
   let ctx = mk_ctx ~capacity:(stub_capacity table) () in
-  let strat = { S.kind = Capacity_aware; cycle = S.default_cycle_policy } in
+  let strat = mk_t S.Capacity_aware in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check (list string) "all busy → empty list" [] (names ordered)
 
 let test_capacity_aware_unknown_passes () =
   let cands = [mk_cand "a"; mk_cand "b"] in
   let ctx = mk_ctx ~capacity:(fun _ -> None) () in
-  let strat = { S.kind = Capacity_aware; cycle = S.default_cycle_policy } in
+  let strat = mk_t S.Capacity_aware in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check (list string) "unknown capacity → all kept (fail-open)"
     ["a"; "b"] (names ordered)
@@ -107,7 +117,7 @@ let test_weighted_random_deterministic_with_rand0 () =
     mk_cand ~w:20 "c";
   ] in
   let ctx = mk_ctx ~rand:(fun _ -> 0) () in
-  let strat = { S.kind = Weighted_random; cycle = S.default_cycle_policy } in
+  let strat = mk_t S.Weighted_random in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check (list string) "rand=0 picks left-to-right"
     ["a"; "b"; "c"] (names ordered)
@@ -125,7 +135,7 @@ let test_weighted_random_starvation_guard () =
   cool_down "a"; cool_down "b";
   let cands = [mk_cand ~w:50 "a"; mk_cand ~w:30 "b"] in
   let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let strat = { S.kind = Weighted_random; cycle = S.default_cycle_policy } in
+  let strat = mk_t S.Weighted_random in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check int "all-cooldown → fallback picks at least 1"
     2 (List.length ordered)
@@ -143,10 +153,9 @@ let test_cb_cycling_excludes_cooldown_and_busy () =
     (* "c" unknown → kept *)
   ] in
   let ctx = mk_ctx ~health:h ~capacity:(stub_capacity table) () in
-  let strat = {
-    S.kind = Circuit_breaker_cycling;
-    cycle = { max_cycles = 3; backoff_base_ms = 100; backoff_cap_ms = 1000 };
-  } in
+  let strat = mk_t S.Circuit_breaker_cycling
+      ~cycle:{ max_cycles = 3; backoff_base_ms = 100; backoff_cap_ms = 1000 }
+  in
   let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
   check (list string) "cooldown 'a' + busy 'b' filtered, 'c' (unknown) kept"
     ["c"] (names ordered)
@@ -287,6 +296,151 @@ let test_ollama_register_with_override () =
   | Some info ->
     check int "override max=4" 4 info.total
 
+(* ── Phase B: Priority_tier (S5) ───────────────────────────── *)
+
+let test_priority_tier_picks_first_tier () =
+  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
+  let strat = mk_t S.Priority_tier
+      ~tiers:[["a"]; ["b"; "c"]]
+  in
+  let ctx = mk_ctx () in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "cycle 0 → tier 0 (a only)" ["a"] (names ordered)
+
+let test_priority_tier_advances_with_cycle () =
+  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
+  let strat = mk_t S.Priority_tier
+      ~tiers:[["a"]; ["b"; "c"]]
+  in
+  let ctx = mk_ctx () in
+  let cycle1 = S.order_candidates strat ~adapter ~ctx ~cycle:1 cands in
+  check (list string) "cycle 1 → tier 1 (b, c)" ["b"; "c"] (names cycle1)
+
+let test_priority_tier_clamps_overflow () =
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let strat = mk_t S.Priority_tier ~tiers:[["a"]; ["b"]] in
+  let ctx = mk_ctx () in
+  let cycle99 = S.order_candidates strat ~adapter ~ctx ~cycle:99 cands in
+  check (list string) "cycle ≥ tiers count → last tier" ["b"] (names cycle99)
+
+let test_priority_tier_capacity_filter () =
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let table = [
+    (List.nth cands 0).url, mk_capacity_info ~total:1 ~active:1;
+  ] in
+  let strat = mk_t S.Priority_tier ~tiers:[["a"; "b"]] in
+  let ctx = mk_ctx ~capacity:(stub_capacity table) () in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "tier 0 with 'a' busy → only 'b'" ["b"] (names ordered)
+
+(* ── Phase B: Sticky (S6) ──────────────────────────────────── *)
+
+let test_sticky_records_and_pins () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
+  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
+  let ctx = mk_ctx ~now:1000.0 ~keeper_name:"k1" ~cascade_name:"cas" () in
+  (* First call: no entry → returns full list *)
+  let first = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "no sticky → full list" ["a"; "b"; "c"] (names first);
+  (* Record success on 'b' *)
+  S.record_choice strat ~ctx ~provider_key:"b";
+  (* Second call: pinned to 'b' *)
+  let second = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "after record → pinned to 'b'" ["b"] (names second)
+
+let test_sticky_expires_after_ttl () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
+  let ctx_now = mk_ctx ~now:0.0 ~keeper_name:"k" ~cascade_name:"cas" () in
+  S.record_choice strat ~ctx:ctx_now ~provider_key:"a";
+  (* 60s + 1ms past expiry *)
+  let ctx_later = mk_ctx ~now:60.001 ~keeper_name:"k" ~cascade_name:"cas" () in
+  let ordered = S.order_candidates strat ~adapter ~ctx:ctx_later ~cycle:0 cands in
+  check (list string) "expired → fall back to full list"
+    ["a"; "b"] (names ordered)
+
+let test_sticky_pinned_provider_missing_falls_back () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
+  let ctx = mk_ctx ~now:0.0 ~keeper_name:"k" ~cascade_name:"cas" () in
+  (* Pin 'c' which doesn't exist in the candidate list *)
+  S.record_choice strat ~ctx ~provider_key:"c";
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "missing pin → fall back to full list"
+    ["a"; "b"] (names ordered)
+
+let test_sticky_per_keeper_isolation () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let strat = mk_t S.Sticky ~sticky_ttl_ms:60_000 in
+  let k1 = mk_ctx ~now:0.0 ~keeper_name:"k1" ~cascade_name:"cas" () in
+  let k2 = mk_ctx ~now:0.0 ~keeper_name:"k2" ~cascade_name:"cas" () in
+  S.record_choice strat ~ctx:k1 ~provider_key:"a";
+  S.record_choice strat ~ctx:k2 ~provider_key:"b";
+  let ordered_k1 = S.order_candidates strat ~adapter ~ctx:k1 ~cycle:0 cands in
+  let ordered_k2 = S.order_candidates strat ~adapter ~ctx:k2 ~cycle:0 cands in
+  check (list string) "k1 → 'a'" ["a"] (names ordered_k1);
+  check (list string) "k2 → 'b'" ["b"] (names ordered_k2)
+
+(* ── Phase B: Round_robin (S7) ─────────────────────────────── *)
+
+let test_round_robin_rotates_each_call () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "a"; mk_cand "b"; mk_cand "c"] in
+  let strat = mk_t S.Round_robin in
+  let ctx = mk_ctx ~cascade_name:"rr-test" () in
+  let r0 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  let r1 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  let r2 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  let r3 = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "call 0: cursor 0 → abc" ["a"; "b"; "c"] (names r0);
+  check (list string) "call 1: cursor 1 → bca" ["b"; "c"; "a"] (names r1);
+  check (list string) "call 2: cursor 2 → cab" ["c"; "a"; "b"] (names r2);
+  check (list string) "call 3: cursor 3 mod 3 = 0 → abc" ["a"; "b"; "c"] (names r3)
+
+let test_round_robin_singleton_no_op () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "only"] in
+  let strat = mk_t S.Round_robin in
+  let ctx = mk_ctx ~cascade_name:"singleton" () in
+  let r = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "singleton → unchanged" ["only"] (names r);
+  (* Cursor not advanced for singleton *)
+  check int "cursor stays at 0" 0
+    (Cascade_state.peek_round_robin ~cascade:"singleton")
+
+let test_round_robin_per_cascade_cursor () =
+  Cascade_state.clear_all ();
+  let cands = [mk_cand "a"; mk_cand "b"] in
+  let strat = mk_t S.Round_robin in
+  let ctx_x = mk_ctx ~cascade_name:"cas-x" () in
+  let ctx_y = mk_ctx ~cascade_name:"cas-y" () in
+  let _ = S.order_candidates strat ~adapter ~ctx:ctx_x ~cycle:0 cands in
+  let _ = S.order_candidates strat ~adapter ~ctx:ctx_x ~cycle:0 cands in
+  let r_y = S.order_candidates strat ~adapter ~ctx:ctx_y ~cycle:0 cands in
+  check (list string) "cas-y has its own cursor (still 0)"
+    ["a"; "b"] (names r_y)
+
+(* ── Phase B: cascade_state primitives ─────────────────────── *)
+
+let test_cascade_state_sticky_zero_ttl_no_record () =
+  Cascade_state.clear_all ();
+  Cascade_state.record_sticky_choice ~keeper:"k" ~cascade:"c"
+    ~provider:"p" ~ttl_ms:0 ~now:0.0;
+  match Cascade_state.lookup_sticky ~keeper:"k" ~cascade:"c" ~now:0.0 with
+  | None -> ()
+  | Some _ -> fail "ttl_ms=0 should not record"
+
+let test_cascade_state_round_robin_negative_bound () =
+  Cascade_state.clear_all ();
+  let v = Cascade_state.rotate_round_robin ~cascade:"x" ~bound:0 in
+  check int "bound<=0 → returns 0" 0 v;
+  let v2 = Cascade_state.rotate_round_robin ~cascade:"x" ~bound:(-3) in
+  check int "negative bound → returns 0" 0 v2
+
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -334,5 +488,39 @@ let () =
         test_ollama_auto_register;
       test_case "auto_register override sets max" `Quick
         test_ollama_register_with_override;
+    ];
+    "priority_tier", [
+      test_case "cycle 0 picks first tier" `Quick
+        test_priority_tier_picks_first_tier;
+      test_case "cycle advances with tier index" `Quick
+        test_priority_tier_advances_with_cycle;
+      test_case "cycle overflow clamps to last tier" `Quick
+        test_priority_tier_clamps_overflow;
+      test_case "tier respects capacity filter" `Quick
+        test_priority_tier_capacity_filter;
+    ];
+    "sticky", [
+      test_case "record_choice → pinned on next call" `Quick
+        test_sticky_records_and_pins;
+      test_case "expires after ttl" `Quick
+        test_sticky_expires_after_ttl;
+      test_case "missing pinned provider falls back" `Quick
+        test_sticky_pinned_provider_missing_falls_back;
+      test_case "per-keeper isolation" `Quick
+        test_sticky_per_keeper_isolation;
+    ];
+    "round_robin", [
+      test_case "rotates each call" `Quick
+        test_round_robin_rotates_each_call;
+      test_case "singleton list is no-op" `Quick
+        test_round_robin_singleton_no_op;
+      test_case "per-cascade cursor isolation" `Quick
+        test_round_robin_per_cascade_cursor;
+    ];
+    "cascade_state", [
+      test_case "sticky ttl_ms=0 does not record" `Quick
+        test_cascade_state_sticky_zero_ttl_no_record;
+      test_case "round_robin bound<=0 returns 0" `Quick
+        test_cascade_state_round_robin_negative_bound;
     ];
   ]

@@ -247,6 +247,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
     @since Phase 2 — MASC-driven cascade FSM *)
 let run_named
     ~cascade_name
+    ?(keeper_name = "")
     ?model_strings
     ~goal
     ?provider_filter
@@ -391,7 +392,9 @@ let run_named
     in
     (result, checkpoint_after)
   in
-  let rec try_cascade ?resume_checkpoint remaining last_err =
+  let rec try_cascade
+      ?(on_success = fun ~provider_key:_ -> ())
+      ?resume_checkpoint remaining last_err =
     match remaining with
     | [] ->
       let err_msg = match last_err with
@@ -439,6 +442,7 @@ let run_named
         in
         let result = { result with cascade_observation = Some observation } in
         Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+        on_success ~provider_key:provider_cfg.model_id;
         Ok result
       | Ok result ->
         Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id);
@@ -454,6 +458,7 @@ let run_named
            in
            let result = { result with cascade_observation = Some observation } in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+           on_success ~provider_key:provider_cfg.model_id;
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
            Log.Misc.warn "cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
@@ -482,6 +487,7 @@ let run_named
            in
            let result = { result with cascade_observation = Some observation } in
            Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+           on_success ~provider_key:provider_cfg.model_id;
            Ok result)
       | Error sdk_err ->
         Cascade_health_tracker.(record_failure global ~provider_key:provider_cfg.model_id);
@@ -553,6 +559,8 @@ let run_named
       | None -> Cascade_client_capacity.capacity url);
     now = Unix.gettimeofday ();
     rand_int = Random.int;
+    keeper_name;
+    cascade_name;
   } in
   let cycle_clock = Eio_context.get_clock_opt () in
   let do_backoff cycle =
@@ -600,7 +608,10 @@ let run_named
       do_backoff (n + 1);
       cycle_loop (n + 1)
     | _ ->
-      (match try_cascade ordered None with
+      let on_success ~provider_key =
+        Cascade_strategy.record_choice strategy ~ctx:signal_ctx ~provider_key
+      in
+      (match try_cascade ~on_success ordered None with
        | Ok _ as ok -> ok
        | Error _ as err when last_cycle -> err
        | Error _ ->

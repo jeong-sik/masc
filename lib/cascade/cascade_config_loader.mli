@@ -108,6 +108,21 @@ type strategy_config = {
   (** ["{name}_ollama_max_concurrent"]. When set, overrides the
       ollama auto-registration default for any ollama-like base URL
       in this cascade's candidate list. *)
+
+  tiers : string list list option;
+  (** ["{name}_tiers"]. Used by the [priority_tier] strategy.  Each
+      inner array is a tier of provider keys (matched against the
+      [model] field in [{name}_models]); outer order is tier order
+      (tier 0 = highest priority).  Example JSON:
+      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-2.5-flash"\]\]].
+      @since 0.9.7 *)
+
+  sticky_ttl_ms : int option;
+  (** ["{name}_sticky_ttl_ms"]. Used by the [sticky] strategy.
+      Defaults to {!Cascade_strategy.default_sticky_ttl_ms}
+      ([300_000]) when [kind] is [sticky] and this field is absent.
+      Values [<= 0] disable affinity entirely.
+      @since 0.9.7 *)
 }
 
 val resolve_strategy_config :

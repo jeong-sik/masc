@@ -215,6 +215,8 @@ type strategy_config = {
   backoff_base_ms : int option;
   backoff_cap_ms : int option;
   ollama_max_concurrent : int option;
+  tiers : string list list option;
+  sticky_ttl_ms : int option;
 }
 
 let read_string_field json key =
@@ -223,12 +225,38 @@ let read_string_field json key =
   | `String s when String.trim s <> "" -> Some (String.trim s)
   | _ -> None
 
+(* Read a [string list list] from a JSON [list of list of string].
+   Returns [None] when the key is missing or any element has the
+   wrong shape; tier configuration must be all-or-nothing to avoid
+   silent misroutes. *)
+let read_tiers_field json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `Null -> None
+  | `List outer ->
+    let parse_tier = function
+      | `List inner ->
+        let strs = List.filter_map (function
+            | `String s when String.trim s <> "" -> Some (String.trim s)
+            | _ -> None) inner
+        in
+        if List.length strs = List.length inner && strs <> [] then Some strs
+        else None
+      | _ -> None
+    in
+    let tiers = List.filter_map parse_tier outer in
+    if List.length tiers = List.length outer && tiers <> [] then Some tiers
+    else None
+  | _ -> None
+
 let empty_strategy_config = {
   kind = None;
   max_cycles = None;
   backoff_base_ms = None;
   backoff_cap_ms = None;
   ollama_max_concurrent = None;
+  tiers = None;
+  sticky_ttl_ms = None;
 }
 
 let resolve_strategy_config ~config_path ~name =
@@ -242,4 +270,6 @@ let resolve_strategy_config ~config_path ~name =
       backoff_cap_ms = read_int_field json (name ^ "_backoff_cap_ms");
       ollama_max_concurrent =
         read_int_field json (name ^ "_ollama_max_concurrent");
+      tiers = read_tiers_field json (name ^ "_tiers");
+      sticky_ttl_ms = read_int_field json (name ^ "_sticky_ttl_ms");
     }

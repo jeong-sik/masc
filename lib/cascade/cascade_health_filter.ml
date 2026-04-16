@@ -34,6 +34,17 @@ let contains_ci ?(max_scan = 512) ~haystack ~needle () =
 let is_provider_parse_error (body : string) : bool =
   contains_ci ~haystack:body ~needle:"can't find closing" ()
 
+(** Detect provider-level quota or usage-limit errors that arrive as
+    HTTP 400 instead of 429. GLM and some providers return 400 with a
+    body containing "usage limit", "quota", or "rate limit".
+    These are provider-specific, not request-specific — the next
+    cascade provider should be tried. *)
+let is_quota_or_limit_message (body : string) : bool =
+  contains_ci ~haystack:body ~needle:"usage limit" ()
+  || contains_ci ~haystack:body ~needle:"quota" ()
+  || contains_ci ~haystack:body ~needle:"rate limit" ()
+  || contains_ci ~haystack:body ~needle:"exceeded" ()
+
 (** Decide whether an error should cascade to the next provider.
     Local resource exhaustion (port/FD limits) stops the cascade
     because every subsequent provider will hit the same bottleneck. *)
@@ -43,7 +54,8 @@ let should_cascade_to_next err =
   | Llm_provider.Http_client.HttpError { code; body }
     when List.mem code [400; 422]
          && (Llm_provider.Retry.is_context_overflow_message body
-             || is_provider_parse_error body) ->
+             || is_provider_parse_error body
+             || is_quota_or_limit_message body) ->
     true
   | Llm_provider.Http_client.HttpError { code; _ } ->
     List.mem code Llm_provider.Constants.Http.cascadable_codes

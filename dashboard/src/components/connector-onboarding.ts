@@ -4,8 +4,8 @@
 // first instead of staring at a blank screen.
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { CopyableCode } from './common/copyable-code'
-import { ActionButton } from './common/button'
 import { SetupGuideCard } from './setup-guide-card'
 import {
   channelIcon,
@@ -18,8 +18,31 @@ import {
 } from './connector-status'
 import { ConnectorBulkActions } from './connector-overview-strip'
 
+/** Pure: map the onboarding Start button's inflight flag to the label
+    the operator sees. Reference — Vercel's Deploy button transition:
+    the static verb ("Deploy") swaps to a gerund ("Deploying…") the
+    moment work begins, so the operator never wonders whether the
+    click registered. Kept pure so tests can pin the string table. */
+export function onboardingStartLabel(starting: boolean): string {
+  return starting ? 'Starting…' : 'Start'
+}
+
 function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
   const cmds = sidecarCommands(connectorId)
+  const [starting, setStarting] = useState(false)
+  const onStart = async () => {
+    if (starting) return
+    setStarting(true)
+    try {
+      await startSidecar(connectorId)
+    } finally {
+      // startSidecar internally refreshes the snapshot; the card will
+      // typically unmount (grid → live panel transition) before we
+      // land here. Reset defensively in case the snapshot still shows
+      // no connector (e.g. backend error path, toast already shown).
+      setStarting(false)
+    }
+  }
   return html`
     <div class="rounded-xl border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="mb-2 flex items-center justify-between gap-2">
@@ -27,11 +50,14 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
           <span class="text-base leading-none" aria-hidden="true">${channelIcon(connectorId)}</span>
           <span class="text-sm font-semibold text-[var(--text-body)]">${CONNECTOR_DISPLAY_NAMES[connectorId]}</span>
         </div>
-        <${ActionButton}
-          variant="primary"
-          size="sm"
-          onClick=${() => { void startSidecar(connectorId) }}
-        >Start<//>
+        <button
+          type="button"
+          class=${`rounded-lg cursor-pointer transition-all duration-200 font-medium border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--text-strong)] hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] py-1 px-2 text-[10px] ${starting ? 'opacity-50 pointer-events-none' : 'active:scale-[0.97]'}`}
+          disabled=${starting}
+          aria-busy=${starting ? 'true' : 'false'}
+          data-onboarding-start=${connectorId}
+          onClick=${() => { void onStart() }}
+        >${onboardingStartLabel(starting)}</button>
       </div>
       <div class="text-[11px] text-[var(--text-dim)]">
         <strong>Start</strong>를 누르면 backend가 sidecar를 spawn합니다. 또는 명령을 복사해 새 터미널에서 직접 실행하세요.

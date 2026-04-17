@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { ConnectorOnboardingGrid } from './connector-onboarding'
+import { ConnectorOnboardingGrid, onboardingStartLabel } from './connector-onboarding'
 import { resetSetupGuideExpansionState } from './setup-guide-card'
 import { sidecarCommands } from './connector-status'
 import { _testResetBulkInflight } from './connector-overview-strip'
@@ -77,5 +77,32 @@ describe('ConnectorOnboardingGrid', () => {
   it('shows the cold-start heading explaining the empty state', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     expect(container.textContent ?? '').toContain('아직 연결된 sidecar가 없습니다')
+  })
+
+  it('renders a per-card Start button with data-onboarding-start matching each connector id', () => {
+    render(html`<${ConnectorOnboardingGrid} />`, container)
+    const buttons = container.querySelectorAll('[data-onboarding-start]')
+    expect(buttons.length).toBe(4)
+    const ids = Array.from(buttons).map(b => b.getAttribute('data-onboarding-start'))
+    expect(ids).toEqual(['discord', 'imessage', 'slack', 'telegram'])
+  })
+
+  it('per-card Start button starts in the idle "Start" label, not inflight', () => {
+    render(html`<${ConnectorOnboardingGrid} />`, container)
+    const discordBtn = container.querySelector('[data-onboarding-start="discord"]') as HTMLButtonElement
+    expect(discordBtn.textContent).toContain('Start')
+    expect(discordBtn.textContent).not.toContain('Starting')
+    expect(discordBtn.getAttribute('aria-busy')).toBe('false')
+    expect(discordBtn.disabled).toBe(false)
+  })
+})
+
+describe('onboardingStartLabel', () => {
+  it('returns "Start" when idle', () => {
+    expect(onboardingStartLabel(false)).toBe('Start')
+  })
+
+  it('returns "Starting…" when in flight (gerund, not imperative)', () => {
+    expect(onboardingStartLabel(true)).toBe('Starting…')
   })
 })

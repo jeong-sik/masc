@@ -5,8 +5,12 @@ import { html } from 'htm/preact'
 import {
   ConnectorOverviewStrip,
   _testResetBulkInflight,
+  _testResetStripMemory,
+  _testSetStripMemory,
   countConnectedSidecars,
   formatConnectorUptime,
+  updateStripMemory,
+  detectRecentDrops,
 } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
@@ -118,6 +122,31 @@ describe('ConnectorOverviewStrip', () => {
     expect(root.className).toContain('top-0')
   })
 
+  it('shows incident banner for ids that dropped within the last 5 minutes', () => {
+    _testResetStripMemory()
+    _testSetStripMemory({ lastSeenUp: { discord: Date.now() - 60_000 } })
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: false })]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const banner = container.querySelector('[data-incident-banner]')
+    expect(banner).toBeTruthy()
+    expect(banner?.textContent).toContain('Discord')
+    expect(banner?.textContent).toContain('최근 5분')
+  })
+
+  it('hides incident banner when no sidecar has dropped (baseline offline)', () => {
+    _testResetStripMemory()
+    render(
+      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
+      container,
+    )
+    expect(container.querySelector('[data-incident-banner]')).toBeNull()
+  })
+
   it('celebration banner hidden when fewer than 4 sidecars are up', () => {
     _testResetBulkInflight()
     const threeUp = ['discord', 'imessage', 'slack'].map(id => mkConnector({ connector_id: id, available: true }))
@@ -222,5 +251,55 @@ describe('countConnectedSidecars', () => {
       mkConnector({ connector_id: 'unknown-bridge', available: true }),
     ]
     expect(countConnectedSidecars(list)).toBe(1)
+  })
+})
+
+describe('stripMemory pure helpers', () => {
+  const NOW = 1_700_000_000_000
+
+  it('updateStripMemory records timestamp for each up sidecar, leaves down ones untouched', () => {
+    const prev = { lastSeenUp: { discord: NOW - 10_000 } }
+    const next = updateStripMemory(prev, [
+      mkConnector({ connector_id: 'discord', available: true }),
+      mkConnector({ connector_id: 'slack', available: false }),
+    ], NOW)
+    expect(next.lastSeenUp.discord).toBe(NOW)
+    expect(next.lastSeenUp.slack).toBeUndefined()
+  })
+
+  it('detectRecentDrops flags down ids whose last-up is inside the window', () => {
+    const memory = {
+      lastSeenUp: {
+        discord: NOW - 60_000,
+        slack: NOW - 10 * 60_000,
+        telegram: null,
+      },
+    }
+    const dropped = detectRecentDrops(memory, [
+      mkConnector({ connector_id: 'discord', available: false }),
+      mkConnector({ connector_id: 'slack', available: false }),
+      mkConnector({ connector_id: 'telegram', available: false }),
+      mkConnector({ connector_id: 'imessage', available: true }),
+    ], NOW)
+    expect(dropped).toEqual(['discord'])
+  })
+
+  it('detectRecentDrops excludes ids currently up even if they were recently up', () => {
+    const memory = { lastSeenUp: { discord: NOW - 30_000 } }
+    const dropped = detectRecentDrops(memory, [
+      mkConnector({ connector_id: 'discord', available: true }),
+    ], NOW)
+    expect(dropped).toEqual([])
+  })
+
+  it('detectRecentDrops respects custom window', () => {
+    const memory = { lastSeenUp: { discord: NOW - 2 * 60_000 } }
+    const dropped = detectRecentDrops(
+      memory,
+      [mkConnector({ connector_id: 'discord', available: false })],
+      NOW,
+      60_000,
+    )
+    expect(dropped).toEqual([])
   })
 })

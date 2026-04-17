@@ -9,6 +9,7 @@
 // at-a-glance strip on top.
 
 import { html } from 'htm/preact'
+import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
@@ -20,12 +21,7 @@ const bulkInflight = signal<{ start: boolean; stop: boolean }>({ start: false, s
 
 /** Pure: derive a compact "up X" string from the sidecar's last_ready_at
     timestamp. Returns null when the timestamp is empty/invalid/in the
-    future — the tile then hides the chip rather than rendering NaN.
-
-    Home Assistant 2024 badge redesign informs the style: tiny, muted,
-    sits adjacent to the primary status text. Not a loud signal — the
-    existing glyph already tells the operator the sidecar is up; this
-    chip only adds the time axis (how long). */
+    future — the tile then hides the chip rather than rendering NaN. */
 export function formatConnectorUptime(
   readyAtIso: string | null | undefined,
   now: number,
@@ -38,6 +34,45 @@ export function formatConnectorUptime(
   const elapsedSec = Math.floor((now - then) / 1000)
   if (elapsedSec < 0) return null
   return `up ${formatElapsedCompact(elapsedSec)}`
+}
+
+interface StripMemory {
+  lastSeenUp: Record<string, number | null>
+}
+
+const INCIDENT_WINDOW_MS = 5 * 60 * 1000
+
+const stripMemory = signal<StripMemory>({ lastSeenUp: {} })
+
+export function updateStripMemory(
+  prev: StripMemory,
+  connectors: GateConnectorInfo[],
+  now: number,
+): StripMemory {
+  const lastSeenUp = { ...prev.lastSeenUp }
+  for (const id of KNOWN_CONNECTOR_IDS) {
+    const up = connectors.find(c => c.connector_id === id)?.available === true
+    if (up) lastSeenUp[id] = now
+  }
+  return { lastSeenUp }
+}
+
+export function detectRecentDrops(
+  memory: StripMemory,
+  connectors: GateConnectorInfo[],
+  now: number,
+  windowMs: number = INCIDENT_WINDOW_MS,
+): string[] {
+  const dropped: string[] = []
+  for (const id of KNOWN_CONNECTOR_IDS) {
+    const up = connectors.find(c => c.connector_id === id)?.available === true
+    if (up) continue
+    const lastUp = memory.lastSeenUp[id]
+    if (lastUp === undefined || lastUp === null) continue
+    if (now - lastUp > windowMs) continue
+    dropped.push(id)
+  }
+  return dropped
 }
 
 async function runBulk(
@@ -179,8 +214,6 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   `
 }
 
-/** Pure: count of KNOWN sidecars currently up. Exposed for unit tests
-    so the celebration banner condition can be pinned without DOM. */
 export function countConnectedSidecars(connectors: GateConnectorInfo[]): number {
   return KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available === true).length
 }
@@ -199,17 +232,37 @@ function CelebrationBanner({ connectedCount }: { connectedCount: number }) {
   `
 }
 
+function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
+  if (droppedIds.length === 0) return null
+  const names = droppedIds
+    .map(id => CONNECTOR_DISPLAY_NAMES[id as KnownConnectorId] ?? id)
+    .join(', ')
+  return html`
+    <div
+      class="mb-2 flex items-center gap-2 rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-[11px] font-semibold text-rose-100"
+      data-incident-banner
+      role="alert"
+    >
+      <span aria-hidden="true">⚠</span>
+      <span>최근 5분 내 연결 끊김 — ${names}</span>
+      <span class="ml-auto text-[10px] font-normal text-rose-200/80">아래 Start 버튼으로 복구</span>
+    </div>
+  `
+}
+
 export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
-  // Sticky so the rail rows stay visible while the operator scrolls
-  // through the stacked detail panels — they can always see "what's
-  // broken" without scrolling back up. backdrop-blur keeps the strip
-  // legible when card content slides under it.
+  useEffect(() => {
+    stripMemory.value = updateStripMemory(stripMemory.value, connectors, Date.now())
+  }, [connectors])
+
+  const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
   const connectedCount = countConnectedSidecars(connectors)
   return html`
     <div
       class="sticky top-0 z-10 mb-4 -mx-4 border-b border-[var(--card-border)] bg-[var(--bg-0)]/95 px-4 pt-2 pb-3 backdrop-blur supports-[backdrop-filter]:bg-[var(--bg-0)]/80"
       data-overview-strip-root
     >
+      <${IncidentBanner} droppedIds=${droppedIds} />
       <${CelebrationBanner} connectedCount=${connectedCount} />
       <${BulkActions} connectors=${connectors} />
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -227,4 +280,12 @@ export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProp
 
 export function _testResetBulkInflight() {
   bulkInflight.value = { start: false, stop: false }
+}
+
+export function _testResetStripMemory() {
+  stripMemory.value = { lastSeenUp: {} }
+}
+
+export function _testSetStripMemory(memory: StripMemory) {
+  stripMemory.value = memory
 }

@@ -26,11 +26,12 @@ import {
   object,
   optional,
   picklist,
-  safeParse,
   string,
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+
+import { SchemaDriftError, parseOrThrow } from './drift-error'
 
 // The FSM enums below use `fallback` (not hard-rejection) because
 // Keeper state machines evolve asymmetrically: the OCaml backend
@@ -132,26 +133,12 @@ export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDec
 export type KeeperCompositeCascadeState = InferOutput<typeof KeeperCompositeCascadeStateSchema>
 export type KeeperCompositeCompactionStage = InferOutput<typeof KeeperCompositeCompactionStageSchema>
 
-export class CompositeSchemaDriftError extends Error {
-  readonly issues: readonly BaseIssue<unknown>[]
+export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .slice(0, 3)
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`composite schema drift: ${summary}`)
-    this.name = 'CompositeSchemaDriftError'
-    this.issues = issues
+    super('composite', issues)
   }
 }
 
 export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {
-  const result = safeParse(KeeperCompositeSnapshotSchema, data)
-  if (!result.success) {
-    throw new CompositeSchemaDriftError(result.issues)
-  }
-  return result.output
+  return parseOrThrow(CompositeSchemaDriftError, KeeperCompositeSnapshotSchema, data)
 }

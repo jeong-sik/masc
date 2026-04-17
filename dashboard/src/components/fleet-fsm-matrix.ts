@@ -170,6 +170,38 @@ export function pushObservation(
 }
 
 /**
+ * Pure filter for fleet keeper snapshots.
+ *
+ * Case-insensitive substring match on the keeper name (as derived
+ * from the canonical correlation_id) and on the current value of
+ * each of the six FSM axes so an operator can isolate a single
+ * keeper by name, or every keeper currently in a specific state
+ * (e.g. `trying`, `Overflowed`, `warning`).
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * useMemo callers keep identity for the non-filtering path and
+ * skip a downstream render pass.
+ *
+ * Input is never mutated.
+ */
+export function filterKeeperSnapshots(
+  snapshots: readonly KeeperCompositeSnapshot[],
+  query: string,
+): readonly KeeperCompositeSnapshot[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return snapshots
+  return snapshots.filter(snap => {
+    const name = inferKeeperNameFrom(snap)
+    if (name.toLowerCase().includes(needle)) return true
+    for (const axis of AXIS_KEYS) {
+      const value = extractLaneValue(snap, axis)
+      if (value && value.toLowerCase().includes(needle)) return true
+    }
+    return false
+  })
+}
+
+/**
  * Sum invariant violations across the fleet. Value is the number of
  * keepers where the invariant is currently failing; matches the
  * denominator the operator cares about ("how many keepers are bad?"),
@@ -206,6 +238,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const [data, setData] = useState<FleetCompositeSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
+  const [query, setQuery] = useState<string>('')
   // Observation ring. Ref rather than state because pushObservation
   // returns a fresh record per tick and we pair it with a setData call
   // which triggers the re-render — avoids a redundant state subscription.
@@ -249,6 +282,11 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
+  const visibleSnapshots = useMemo(
+    () => (data ? filterKeeperSnapshots(data.snapshots, query) : []),
+    [data, query],
+  )
+  const isFiltering = query.trim() !== ''
 
   if (loading) {
     return html`
@@ -293,6 +331,15 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         <span class="text-xs text-zinc-500">
           ${data.count} keepers · updated ${new Date(data.generated_at * 1000).toLocaleTimeString()}
         </span>
+        <input
+          type="search"
+          value=${query}
+          placeholder="name / 상태 필터 (예: gen12, trying)"
+          aria-label="Keeper 필터"
+          data-testid="fleet-fsm-matrix-filter"
+          onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+          class="min-w-[160px] max-w-[260px] rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none"
+        />
         ${tallies
           ? html`
               <div class="ml-auto flex flex-wrap gap-2" data-testid="invariant-strip">
@@ -315,6 +362,16 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
             `
           : null}
       </header>
+      ${isFiltering && visibleSnapshots.length === 0
+        ? html`
+            <div
+              data-testid="fleet-fsm-matrix-empty"
+              class="p-4 text-center text-xs text-zinc-500"
+            >
+              필터 결과 없음 (${data.snapshots.length} keepers)
+            </div>
+          `
+        : null}
       <div class="overflow-x-auto">
         <table class="min-w-full text-xs">
           <thead class="bg-zinc-900 text-zinc-300">
@@ -328,7 +385,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
             </tr>
           </thead>
           <tbody>
-            ${data.snapshots.map(snap => {
+            ${visibleSnapshots.map(snap => {
               const anyViolated = INVARIANT_KEYS.some(k => !snap.invariants[k])
               const rowTone = anyViolated ? 'border-l-2 border-red-500' : ''
               const name = inferKeeperNameFrom(snap)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { providerTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics } from './runtime-monitor'
+import { providerTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics, sortModelMetricsByUrgency } from './runtime-monitor'
 import type { DashboardRuntimeProviderSnapshot, DashboardRuntimeModelMetric } from '../api/dashboard'
 
 function makeProvider(overrides: Partial<DashboardRuntimeProviderSnapshot> = {}): DashboardRuntimeProviderSnapshot {
@@ -220,5 +220,57 @@ describe('filterModelMetrics', () => {
     ]
     const result = filterModelMetrics(data, 'x:y')
     expect(result).toHaveLength(1)
+  })
+})
+
+// ── sortModelMetricsByUrgency ──
+
+describe('sortModelMetricsByUrgency', () => {
+  it('puts models with more errors first', () => {
+    const sample = [
+      makeMetric({ model_id: 'healthy', entry_count: 50, success_count: 50, error_count: 0 }),
+      makeMetric({ model_id: 'broken', entry_count: 11, success_count: 0, error_count: 11 }),
+      makeMetric({ model_id: 'flaky', entry_count: 10, success_count: 7, error_count: 3 }),
+    ]
+    const result = sortModelMetricsByUrgency(sample)
+    expect(result.map(m => m.model_id)).toEqual(['broken', 'flaky', 'healthy'])
+  })
+
+  it('breaks ties on error_count by entry_count desc', () => {
+    const sample = [
+      makeMetric({ model_id: 'idle', entry_count: 0, error_count: 0 }),
+      makeMetric({ model_id: 'busy', entry_count: 100, success_count: 100, error_count: 0 }),
+      makeMetric({ model_id: 'medium', entry_count: 20, success_count: 20, error_count: 0 }),
+    ]
+    const result = sortModelMetricsByUrgency(sample)
+    expect(result.map(m => m.model_id)).toEqual(['busy', 'medium', 'idle'])
+  })
+
+  it('falls back to model_id alpha order when everything else is equal', () => {
+    const sample = [
+      makeMetric({ model_id: 'zebra', entry_count: 5, success_count: 5, error_count: 0 }),
+      makeMetric({ model_id: 'alpha', entry_count: 5, success_count: 5, error_count: 0 }),
+    ]
+    const result = sortModelMetricsByUrgency(sample)
+    expect(result.map(m => m.model_id)).toEqual(['alpha', 'zebra'])
+  })
+
+  it('does not mutate the input array', () => {
+    const sample: readonly DashboardRuntimeModelMetric[] = [
+      makeMetric({ model_id: 'a', error_count: 0 }),
+      makeMetric({ model_id: 'b', error_count: 10 }),
+    ]
+    const before = sample.map(m => m.model_id)
+    sortModelMetricsByUrgency(sample)
+    expect(sample.map(m => m.model_id)).toEqual(before)
+  })
+
+  it('treats undefined error_count / entry_count as 0', () => {
+    const sample = [
+      makeMetric({ model_id: 'unknown' }),
+      makeMetric({ model_id: 'with-errors', error_count: 1 }),
+    ]
+    const result = sortModelMetricsByUrgency(sample)
+    expect(result.map(m => m.model_id)).toEqual(['with-errors', 'unknown'])
   })
 })

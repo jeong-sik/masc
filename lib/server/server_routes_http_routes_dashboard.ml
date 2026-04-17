@@ -785,9 +785,8 @@ and add_autoresearch_routes router =
                    reqd
              | Ok () -> (
                  match
-                   Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id
-                 with
-                 | Ok result ->
+                   Dashboard_http_autoresearch.delete_loop_json ~base_path ~loop_id ~requester_agent:(agent_from_request request)
+                 with                 | Ok result ->
                      Http.Response.json ~compress:true ~request:req
                        (Yojson.Safe.to_string result) reqd
                  | Error message ->

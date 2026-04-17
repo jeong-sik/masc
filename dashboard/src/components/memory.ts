@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useCallback } from 'preact/hooks'
+import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -59,6 +59,33 @@ import {
   deleteBoardPost,
 } from './memory-state'
 import type { BoardPost, ContentCategory } from './memory-state'
+
+/**
+ * Pure filter for board posts.
+ *
+ * Case-insensitive substring match on `post.title` and `post.body` so the
+ * operator can locate a post by a keyword in the headline or anywhere in
+ * the content. Title is checked first (cheapest, strongest signal), then
+ * body. Existing server-side `boardAuthorFilter` handles the author axis,
+ * so this client-side filter is intentionally scoped to textual content.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated; BoardPost is treated as readonly.
+ */
+export function filterBoardPosts(
+  posts: readonly BoardPost[],
+  query: string,
+): readonly BoardPost[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return posts
+  return posts.filter(post => {
+    if (post.title && post.title.toLowerCase().includes(needle)) return true
+    if (post.body && post.body.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 // ── Scroll sentinel (IntersectionObserver auto-load) ──────────────
 function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
@@ -435,7 +462,14 @@ function PostCard({ post }: { post: BoardPost }) {
 // ── Main Memory component (public API) ─────────────────────────────
 export function Memory() {
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
-  const grouped = splitVisiblePosts(boardPosts.value)
+  const [contentQuery, setContentQuery] = useState('')
+  const rawPosts = boardPosts.value
+  const filteredPosts = useMemo(
+    () => filterBoardPosts(rawPosts, contentQuery),
+    [rawPosts, contentQuery],
+  )
+  const isFiltering = contentQuery.trim() !== ''
+  const grouped = splitVisiblePosts(filteredPosts as BoardPost[])
   const posts = grouped.groups.flatMap(g => g.posts)
   const hint = filterHint(grouped)
   const postId = route.value.params.post ?? null
@@ -479,16 +513,28 @@ export function Memory() {
       <div class="mb-4">
         <${NewPostForm} />
       </div>
-      ${posts.length === 0 && boardLoading.value
-        ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
-        : posts.length === 0
-          ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
-          : html`
-              ${boardLoading.value ? html`<div class="mb-2 text-[11px] text-[var(--text-muted)] animate-pulse">업데이트 중...</div>` : null}
-              ${grouped.groups.map(g => html`
-                <${CategorySection} key=${g.category} group=${g} />
-              `)}
-            `}
+      <div class="mb-3 flex items-center gap-2">
+        <input
+          type="search"
+          value=${contentQuery}
+          placeholder="제목/본문에서 검색"
+          aria-label="게시글 본문 필터"
+          onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
+          class="min-w-[180px] max-w-[320px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[12px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && posts.length === 0 && rawPosts.length > 0
+        ? html`<div class="py-4 text-center text-[12px] text-[var(--text-dim)]">필터 결과 없음 (${rawPosts.length} items)</div>`
+        : posts.length === 0 && boardLoading.value
+          ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
+          : posts.length === 0
+            ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
+            : html`
+                ${boardLoading.value ? html`<div class="mb-2 text-[11px] text-[var(--text-muted)] animate-pulse">업데이트 중...</div>` : null}
+                ${grouped.groups.map(g => html`
+                  <${CategorySection} key=${g.category} group=${g} />
+                `)}
+              `}
     </div>
   `
 }

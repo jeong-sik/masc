@@ -25,7 +25,89 @@ import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { showToast } from './common/toast'
+import { CopyableCode } from './common/copyable-code'
+import { SetupGuideCard } from './setup-guide-card'
+import { ConnectorOnboardingGrid } from './connector-onboarding'
+import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
+import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
+import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
+import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
+import { QuickBindForm } from './connector-quick-bind'
+import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
+import { route } from '../router'
+
+// Sub-section -> connector_id filter. `connector-status` (default) shows
+// all connectors; the per-connector sub-sections show just that one. Source
+// of truth: dashboard/src/config/navigation.ts DASHBOARD_SECTION_ITEMS.connectors.
+const SECTION_TO_CONNECTOR_ID: Record<string, string | null> = {
+  'connector-status': null,
+  'connector-discord': 'discord',
+  'connector-imessage': 'imessage',
+  'connector-slack': 'slack',
+  'connector-telegram': 'telegram',
+}
+
+function activeConnectorFilter(): string | null {
+  const section = route.value.params.section
+  if (!section) return null
+  return SECTION_TO_CONNECTOR_ID[section] ?? null
+}
+
+// Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
+// (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
+// Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
+export interface SidecarCommands {
+  start: string
+  tail: string
+  status: string
+  stop: string
+}
+
+// Known connectors with first-class onboarding/lifecycle support. Source of
+// truth: the four sidecars under /sidecars/ and config/navigation.ts.
+export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
+export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
+
+export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
+  discord: 'Discord',
+  imessage: 'iMessage',
+  slack: 'Slack',
+  telegram: 'Telegram',
+}
+
+const SIDECAR_DIRS: Record<string, string> = {
+  discord: 'sidecars/discord-bot',
+  imessage: 'sidecars/imessage-bot',
+  slack: 'sidecars/slack-bot',
+  telegram: 'sidecars/telegram-bot',
+}
+
+export function sidecarCommands(connectorId: string): SidecarCommands {
+  const dir = SIDECAR_DIRS[connectorId] ?? `sidecars/${connectorId}-bot`
+  return {
+    start: `cd ${dir} && ./run.sh`,
+    tail: `cd ${dir} && ./run.sh tail`,
+    status: `cd ${dir} && ./run.sh status`,
+    stop: `cd ${dir} && ./run.sh stop`,
+  }
+}
+
+// Brand accent RGB triplets per connector. Used as a subtle 135deg gradient
+// behind the panel header so an operator scanning many connectors can tell
+// them apart without reading the title. Values picked from each platform's
+// official brand palette, biased toward dark-theme legibility.
+const CONNECTOR_ACCENT_RGB: Record<string, string> = {
+  discord: '88,101,242',   // blurple
+  imessage: '48,209,88',   // iOS Messages bubble green
+  slack: '236,178,46',     // brand yellow (most distinctive vs telegram cyan)
+  telegram: '34,158,217',  // brand cyan
+}
+
+export function connectorAccentStyle(connectorId: string): string {
+  const rgb = CONNECTOR_ACCENT_RGB[connectorId] ?? '120,130,150'
+  return `background:linear-gradient(135deg,rgba(${rgb},0.16),rgba(${rgb},0.04))`
+}
 
 const actionLoading = signal(false)
 const channelDraft = signal('')
@@ -103,7 +185,7 @@ const CHANNEL_ICONS: Record<string, string> = {
   internal: '\u{2699}',
 }
 
-function channelIcon(ch: string): string {
+export function channelIcon(ch: string): string {
   return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
@@ -157,7 +239,7 @@ function truncateMiddle(value: string, limit = 18): string {
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 
-function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
+export function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
   if (!names) return ''
   const channelName = names.channel_names[channelId]
   const guildId = names.channel_to_guild[channelId]
@@ -249,7 +331,42 @@ function connectorStateTone(connector: GateConnectorInfo | null): string {
   return 'border-amber-400/30 bg-amber-500/12 text-amber-100'
 }
 
-async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
+// Native lifecycle hits the new /api/v1/sidecar/{start,stop} endpoints
+// (see lib/server/server_routes_http_routes_sidecar.ml). The endpoints
+// shell out to the same ./run.sh wrapper the operator would otherwise
+// run by hand, so the dashboard button and the copy-paste command are
+// behaviourally identical — only convenience differs.
+export async function startSidecar(connectorId: string) {
+  actionLoading.value = true
+  markStartAttempt(connectorId)
+  try {
+    await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
+    showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
+    await refresh()
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'start failed', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+export async function stopSidecar(connectorId: string) {
+  actionLoading.value = true
+  // Stop is the operator's signal that the previous start attempt is no
+  // longer relevant — the startup-warning would just be misleading.
+  clearStartAttempt(connectorId)
+  try {
+    await post(`/api/v1/sidecar/stop?name=${encodeURIComponent(connectorId)}`, {})
+    showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
+    await refresh()
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'stop failed', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+export async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
   const keeper = keeperName.trim()
   const channel = channelId.trim()
   if (!keeper || !channel) return
@@ -271,7 +388,7 @@ async function bindConnector(connectorId: string, keeperName: string, channelId:
   }
 }
 
-async function unbindConnector(connectorId: string, channelId: string) {
+export async function unbindConnector(connectorId: string, channelId: string) {
   const channel = channelId.trim()
   if (!channel) return
 
@@ -435,9 +552,12 @@ function ConnectorLivePanel({
   const showSidecarOffEmpty =
     !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
 
+  const headerIcon = channelIcon(connector?.channel ?? connectorId)
+
   return html`
-    <div class="mb-4 rounded-xl border border-[var(--card-border)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
+    <div id=${`connector-card-${connectorId}`} class="mb-4 scroll-mt-4 rounded-xl border border-[var(--card-border)] p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
+        <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
         ${connector?.bot_user_name
           ? html`<span class="text-[var(--text-dim)]">· ${connector.bot_user_name}</span>`
@@ -455,8 +575,21 @@ function ConnectorLivePanel({
           ? html`<span class="text-[var(--text-dim)]">· self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>`
           : null}
         <span class="ml-auto flex items-center gap-2">
+          ${connector?.available
+            ? html`
+                <button
+                  type="button"
+                  class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/12 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-rose-100 hover:bg-rose-500/20 disabled:opacity-50"
+                  disabled=${actionLoading.value}
+                  aria-label=${`stop ${connectorName} sidecar`}
+                  onClick=${() => { void stopSidecar(connectorId) }}
+                >${actionLoading.value ? '…' : 'Stop'}</button>
+              `
+            : null}
+          <${SidecarLogToggle} connectorId=${connectorId} />
+          <${ConnectorConfigToggle} connectorId=${connectorId} />
           ${sidecarLogPath
-            ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>logs↗</span>`
+            ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>↗</span>`
             : null}
           <button
             type="button"
@@ -466,6 +599,38 @@ function ConnectorLivePanel({
           >${headerExpanded.value ? '▴' : '▾'}</button>
         </span>
       </div>
+
+      <${ConnectorReadinessRail}
+        pills=${deriveRail(
+          {
+            sidecarUp: connector?.available === true,
+            gateHealthy: connector?.gate_healthy ?? null,
+            bindingCount: configuredBindings.length,
+            keeperCount: keepers.length,
+          },
+          {
+            openConfig: () => openConnectorConfig(connectorId),
+            toggleProcess: () => {
+              const isUp = connector?.available === true
+              void withRailInflight(connectorId, 'process', () =>
+                isUp ? stopSidecar(connectorId) : startSidecar(connectorId),
+              )
+            },
+            expandHeader: () => { headerExpanded.value = true },
+            scrollToBindings: () => {
+              const el = document.getElementById(`keepers-${connectorId}`)
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            },
+          },
+          getRailInflight(connectorId),
+        )}
+      />
+
+      <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
+
+      ${connector?.available === true && configuredBindings.length === 0 && keepers.length > 0
+        ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
+        : null}
 
       ${headerExpanded.value
         ? html`
@@ -500,6 +665,9 @@ function ConnectorLivePanel({
         ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">${connectorError ?? connector?.error}</div>`
         : null}
 
+      <${SidecarLogViewer} connectorId=${connectorId} />
+      <${ConnectorConfigForm} connectorId=${connectorId} />
+
       ${keeperDirectoryError && keepers.length === 0
         ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">keeper directory unavailable, manual entry only</div>`
         : null}
@@ -516,19 +684,40 @@ function ConnectorLivePanel({
         : null}
 
       ${showSidecarOffEmpty
-        ? html`
-            <div class="mt-3 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
-              <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
-              <div class="mt-1 text-[11px] text-[var(--text-dim)]">
-                Start: <code class="rounded bg-[var(--white-8)] px-1">cd sidecars/${connectorId}-bot && ./run.sh</code>
+        ? (() => {
+            const cmds = sidecarCommands(connectorId)
+            return html`
+              <div class="mt-3 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+                <div class="mb-1 flex items-center justify-between gap-2">
+                  <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
+                  <div class="flex items-center gap-2">
+                    <${ActionButton}
+                      variant="primary"
+                      size="sm"
+                      disabled=${actionLoading.value}
+                      onClick=${() => { void startSidecar(connectorId) }}
+                    >${actionLoading.value ? '...' : 'Start'}<//>
+                    <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
+                  </div>
+                </div>
+                <div class="text-[11px] text-[var(--text-dim)]">
+                  Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
+                </div>
+                <div class="mt-2 grid grid-cols-1 gap-1.5">
+                  <${CopyableCode} label="start" command=${cmds.start} />
+                  <${CopyableCode} label="tail logs" command=${cmds.tail} />
+                  <${CopyableCode} label="status" command=${cmds.status} />
+                  <${CopyableCode} label="stop" command=${cmds.stop} />
+                </div>
+                <${SetupGuideCard} connectorId=${connectorId} />
               </div>
-            </div>
-          `
+            `
+          })()
         : null}
 
       ${knownGroups.length > 0
         ? html`
-            <div class="mt-3 space-y-2">
+            <div class="mt-3 space-y-2" id=${`keepers-${connectorId}`}>
               ${knownGroups.map(group => {
                 const keeper = group.keeper
                 const expanded = expandedKeeperFor.value === group.name
@@ -897,33 +1086,72 @@ export function ConnectorStatusPanel() {
   const loading = connectorStatusResource.state.value.loading
   const d = snapshot.gate
   const allConnectors = snapshot.connectors?.connectors ?? []
+  const filterId = activeConnectorFilter()
+  const visibleConnectors = filterId
+    ? allConnectors.filter(c => c.connector_id === filterId)
+    : allConnectors
 
-  if (loading && !d && allConnectors.length === 0) {
+  if (loading && !d && visibleConnectors.length === 0) {
     return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
   }
 
-  if (snapshot.gateError && !d && allConnectors.length === 0) {
+  if (snapshot.gateError && !d && visibleConnectors.length === 0) {
     return html`<${ErrorState} message=${`Gate: ${snapshot.gateError}`} />`
   }
 
-  if (!d && allConnectors.length === 0) return null
+  if (filterId && allConnectors.length > 0 && visibleConnectors.length === 0) {
+    return html`
+      <div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-6 text-center text-xs text-[var(--text-dim)]">
+        ${filterId} sidecar가 아직 Gate에 등록되지 않았습니다. 시작 후 다시 확인하세요.
+      </div>
+    `
+  }
+
+  if (!d && visibleConnectors.length === 0) {
+    // Cold start: gate has not advertised any connector yet, and no per-bridge
+    // filter is active. Surface the 4-card onboarding grid so a new operator
+    // sees what bridges exist and how to start each one.
+    if (!filterId) return html`<${ConnectorOnboardingGrid} />`
+    return null
+  }
+
+  // Progress hint for the "전체" view: how many of the 4 known sidecars
+  // are currently advertising a 'connected' state. Hidden in single-bridge
+  // sub-sections — the per-panel status dot already conveys that.
+  const knownConnectedCount = allConnectors.filter(
+    c => (KNOWN_CONNECTOR_IDS as readonly string[]).includes(c.connector_id)
+      && connectorStateLabel(c) === 'connected',
+  ).length
 
   return html`
     <div>
       <div class="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h3 class="text-sm font-semibold text-[var(--text-body)]">Channel Gate Connectors</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-body)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
           <div class="mt-1 text-[11px] text-[var(--text-dim)]">
-            Gate advertises connector descriptors; traffic health comes from gate metrics.
+            ${filterId
+              ? `${CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? filterId} sidecar의 라이브 상태와 keeper 바인딩.`
+              : '4종 채널 sidecar(Discord, iMessage, Slack, Telegram)의 라이브 상태와 keeper 바인딩을 한 곳에서.'}
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          <div>${d ? `success ${d.success_rate_pct}%` : `${allConnectors.length} connector${allConnectors.length !== 1 ? 's' : ''}`}</div>
+          ${!filterId
+            ? (() => {
+                const allUp = knownConnectedCount === KNOWN_CONNECTOR_IDS.length
+                const tone = allUp ? 'text-emerald-300' : ''
+                return html`<div class=${tone}>${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length} connected</div>`
+              })()
+            : null}
+          <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
-      ${allConnectors.map(c => html`
+      ${!filterId
+        ? html`<${ConnectorOverviewStrip} connectors=${visibleConnectors} keeperCount=${snapshot.keepers.length} />`
+        : null}
+
+      ${visibleConnectors.map(c => html`
         <${ConnectorLivePanel}
           connector=${c}
           gate=${d}

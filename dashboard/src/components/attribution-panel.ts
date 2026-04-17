@@ -1,0 +1,300 @@
+// Attribution Panel — Layer 4 observation surface.
+//
+// 관찰 대시보드. 4-field per event: 누가(gate) / 어디서(origin) / 뭘(outcome) /
+// 왜(reason). Graph instead of sankey — actual events don't carry correlation
+// ids yet, so per-gate card + recent-event list is the honest view.
+
+import { html } from 'htm/preact'
+import { useEffect } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import {
+  fetchAttributionRecent,
+  fetchAttributionSummary,
+  type Attribution,
+  type AttributionEvent,
+  type AttributionSummaryResponse,
+  type GateSummary,
+} from '../api/attribution'
+import { SurfaceCard } from './common/card'
+import { ErrorState, LoadingState } from './common/feedback-state'
+import { EmptyState } from './common/empty-state'
+
+const POLL_INTERVAL_MS = 5_000
+const RECENT_LIMIT = 50
+
+// Known gates. Gates not yet wired (accountability, coord_task, etc.) will
+// show zero counts so the operator sees which sources are live.
+const KNOWN_GATES = [
+  'cdal_verdict',
+  'verification',
+  'keeper_fsm',
+  'worker_dev_tools',
+  'accountability',
+  'autoresearch',
+  'oas_completion',
+  'agent_lifecycle',
+] as const
+
+function outcomeLabel(a: Attribution): string {
+  switch (a.outcome.kind) {
+    case 'passed': return '통과'
+    case 'policy_failed': return '정책 실패'
+    case 'transition_blocked': return '전이 차단'
+    case 'partial_pass': return '부분 통과'
+  }
+}
+
+function outcomeToneClass(kind: Attribution['outcome']['kind']): string {
+  switch (kind) {
+    case 'passed': return 'text-emerald-400'
+    case 'policy_failed': return 'text-rose-400'
+    case 'transition_blocked': return 'text-rose-400'
+    case 'partial_pass': return 'text-amber-400'
+  }
+}
+
+function originBadgeClass(origin: Attribution['origin']): string {
+  return origin === 'det'
+    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+    : 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+}
+
+function formatTs(recordedAt: number): string {
+  const d = new Date(recordedAt * 1000)
+  return d.toLocaleTimeString('ko-KR', { hour12: false })
+}
+
+function reasonOf(a: Attribution): string {
+  switch (a.outcome.kind) {
+    case 'policy_failed': return a.outcome.reason
+    case 'transition_blocked':
+      return `${a.outcome.from_state} → ${a.outcome.to_state}: ${a.outcome.reason}`
+    case 'partial_pass': return a.outcome.rationale
+    case 'passed': return ''
+  }
+}
+
+function GateCard({
+  gate, summary, onSelect,
+}: {
+  gate: string
+  summary: GateSummary | null
+  onSelect: () => void
+}) {
+  const isLive = summary !== null && summary.total > 0
+  const toneClass = isLive ? '' : 'opacity-50'
+  const passed = summary?.passed ?? 0
+  const policyFailed = summary?.policy_failed ?? 0
+  const blocked = summary?.transition_blocked ?? 0
+  const partial = summary?.partial_pass ?? 0
+  const total = summary?.total ?? 0
+
+  return html`
+    <button
+      type="button"
+      class="text-left w-full focus:outline-none focus:ring-2 focus:ring-sky-500/50 rounded-xl ${toneClass}"
+      onClick=${onSelect}
+    >
+      <${SurfaceCard} variant="compact">
+        <div class="flex flex-col gap-2">
+          <div class="flex items-baseline justify-between">
+            <span class="text-[12px] font-semibold tracking-tight">${gate}</span>
+            <span class="text-[10px] text-[var(--text-muted)]">${total}건</span>
+          </div>
+          <div class="grid grid-cols-2 gap-1 text-[11px]">
+            <span class="text-emerald-400">✓ ${passed}</span>
+            <span class="text-amber-400">◐ ${partial}</span>
+            <span class="text-rose-400">✗ ${policyFailed}</span>
+            <span class="text-rose-400">⊘ ${blocked}</span>
+          </div>
+        </div>
+      </${SurfaceCard}>
+    </button>
+  `
+}
+
+function EventRow({
+  event, onSelect, active,
+}: {
+  event: AttributionEvent
+  onSelect: () => void
+  active: boolean
+}) {
+  const a = event.attribution
+  const rowBg = active
+    ? 'bg-white/5'
+    : 'hover:bg-white/5'
+  return html`
+    <button
+      type="button"
+      class="w-full text-left px-3 py-2 border-b border-[var(--card-border)] flex items-center gap-3 text-[12px] ${rowBg}"
+      onClick=${onSelect}
+    >
+      <span class="text-[11px] font-mono text-[var(--text-muted)] w-20 shrink-0">
+        ${formatTs(event.recorded_at)}
+      </span>
+      <span class="text-[10px] px-1.5 py-0.5 rounded ${originBadgeClass(a.origin)} shrink-0">
+        ${a.origin}
+      </span>
+      <span class="font-mono text-[11px] w-36 shrink-0">${a.gate}</span>
+      <span class="${outcomeToneClass(a.outcome.kind)} shrink-0 w-20">
+        ${outcomeLabel(a)}
+      </span>
+      <span class="text-[var(--text-muted)] truncate grow min-w-0">
+        ${reasonOf(a) || '—'}
+      </span>
+    </button>
+  `
+}
+
+function EvidenceDetail({ event }: { event: AttributionEvent | null }) {
+  if (!event) {
+    return html`
+      <${SurfaceCard} variant="light">
+        <${EmptyState} message="이벤트를 선택하면 evidence가 여기 표시됩니다." />
+      </${SurfaceCard}>
+    `
+  }
+  const a = event.attribution
+  const evidenceJson = JSON.stringify(a.evidence, null, 2)
+  return html`
+    <${SurfaceCard} variant="compact">
+      <div class="flex flex-col gap-3">
+        <div class="flex items-baseline gap-3 flex-wrap">
+          <span class="text-[11px] text-[var(--text-muted)]">${formatTs(event.recorded_at)}</span>
+          <span class="font-mono text-[13px] font-semibold">${a.gate}</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded ${originBadgeClass(a.origin)}">
+            ${a.origin}
+          </span>
+          <span class="${outcomeToneClass(a.outcome.kind)} text-[12px]">
+            ${outcomeLabel(a)}
+          </span>
+        </div>
+        ${reasonOf(a)
+          ? html`<div class="text-[12px] text-[var(--text-muted)]">${reasonOf(a)}</div>`
+          : null}
+        <pre class="text-[11px] font-mono bg-black/30 rounded p-3 overflow-x-auto max-h-64 whitespace-pre-wrap">${evidenceJson}</pre>
+      </div>
+    </${SurfaceCard}>
+  `
+}
+
+export function AttributionPanel() {
+  const summary = useSignal<AttributionSummaryResponse | null>(null)
+  const recent = useSignal<AttributionEvent[]>([])
+  const loading = useSignal(true)
+  const error = useSignal<string | null>(null)
+  const selectedEventIdx = useSignal<number | null>(null)
+  const filterGate = useSignal<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const ctl = new AbortController()
+
+    const load = async () => {
+      try {
+        const [s, r] = await Promise.all([
+          fetchAttributionSummary({ signal: ctl.signal }),
+          fetchAttributionRecent(
+            {
+              limit: RECENT_LIMIT,
+              ...(filterGate.value ? { gate: filterGate.value } : {}),
+            },
+            { signal: ctl.signal },
+          ),
+        ])
+        if (cancelled) return
+        summary.value = s
+        recent.value = r.events
+        error.value = null
+      } catch (e) {
+        if (cancelled || (e as Error).name === 'AbortError') return
+        error.value = (e as Error).message || 'attribution fetch failed'
+      } finally {
+        if (!cancelled) loading.value = false
+      }
+    }
+
+    load()
+    const iv = window.setInterval(load, POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      ctl.abort()
+      window.clearInterval(iv)
+    }
+  }, [filterGate.value])
+
+  if (loading.value && !summary.value) {
+    return html`<${LoadingState} message="attribution 로딩 중…" />`
+  }
+  if (error.value && !summary.value) {
+    return html`<${ErrorState} message=${error.value} />`
+  }
+
+  const byGate = new Map<string, GateSummary>()
+  for (const g of summary.value?.gates ?? []) byGate.set(g.gate, g)
+
+  const selected = selectedEventIdx.value !== null
+    ? recent.value[selectedEventIdx.value] ?? null
+    : null
+
+  return html`
+    <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-1">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          Attribution — gate chain 관찰
+        </div>
+        <p class="m-0 text-[12px] leading-[1.55] text-[var(--text-muted)]">
+          각 gate의 결과 카운트 + 최근 ${RECENT_LIMIT}건 이벤트. 5초마다 자동 갱신.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        ${KNOWN_GATES.map(gate => html`
+          <${GateCard}
+            gate=${gate}
+            summary=${byGate.get(gate) ?? null}
+            onSelect=${() => {
+              filterGate.value = filterGate.value === gate ? null : gate
+              selectedEventIdx.value = null
+            }}
+          />
+        `)}
+      </div>
+
+      ${filterGate.value
+        ? html`
+          <div class="text-[11px] text-[var(--text-muted)]">
+            필터: <span class="font-mono text-[var(--text-primary)]">${filterGate.value}</span>
+            <button
+              class="ml-2 underline"
+              onClick=${() => { filterGate.value = null }}
+            >
+              해제
+            </button>
+          </div>`
+        : null}
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <${SurfaceCard} variant="light">
+          <div class="flex flex-col">
+            <div class="px-3 py-2 border-b border-[var(--card-border)] text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              최근 이벤트 (${recent.value.length})
+            </div>
+            ${recent.value.length === 0
+              ? html`<${EmptyState} message="이벤트가 없습니다." />`
+              : recent.value.map((ev, idx) => html`
+                <${EventRow}
+                  event=${ev}
+                  active=${selectedEventIdx.value === idx}
+                  onSelect=${() => { selectedEventIdx.value = idx }}
+                />
+              `)}
+          </div>
+        </${SurfaceCard}>
+
+        <${EvidenceDetail} event=${selected} />
+      </div>
+    </div>
+  `
+}

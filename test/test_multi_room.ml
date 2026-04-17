@@ -90,12 +90,11 @@ let find_latest_event_log config =
 let test_join_uses_default_namespace () =
   with_config (fun config ->
       let captured_event_kind = ref None in
-      let previous_hook = !Coord_hooks.observe_agent_lifecycle_fn in
+      let previous_hook = (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) in
       Fun.protect
-        ~finally:(fun () -> Coord_hooks.observe_agent_lifecycle_fn := previous_hook)
+        ~finally:(fun () -> Atomic.set Coord_hooks.observe_agent_lifecycle_fn previous_hook)
         (fun () ->
-          Coord_hooks.observe_agent_lifecycle_fn :=
-            (fun _config ~agent_id:_ ~event_kind ~details:_ ->
+          Atomic.set Coord_hooks.observe_agent_lifecycle_fn (fun _config ~agent_id:_ ~event_kind ~details:_ ->
               captured_event_kind := Some event_kind);
           let result =
             Coord.join config ~agent_name:"claude"

@@ -2,7 +2,8 @@
 // Displays loop overview, keep/discard ratio, cycle history, insights, and warnings.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useEffect, useMemo } from 'preact/hooks'
 import { isLoaded } from '../lib/async-state'
 import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -66,6 +67,33 @@ function statusColor(status: string): string {
 
 function decisionLabel(decision: string): string {
   return decision === 'keep' ? '유지' : '삭제'
+}
+
+/**
+ * Pure filter for autoresearch cycle history rows.
+ *
+ * Case-insensitive substring match on `hypothesis`, the decision label
+ * (both the raw `keep`/`discard` token and the Korean label `유지`/`삭제`),
+ * and the `cycle` number coerced to a string so operators can locate a
+ * cycle by partial hypothesis text, by keep/discard verdict, or by index.
+ *
+ * Empty/whitespace query returns the input reference unchanged so a
+ * useMemo-wrapped consumer keeps referential equality for the non-
+ * filtering path. Input is never mutated.
+ */
+export function filterCycles(
+  cycles: readonly AutoresearchCycleRecord[],
+  query: string,
+): readonly AutoresearchCycleRecord[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return cycles
+  return cycles.filter(cycle => {
+    if (cycle.hypothesis.toLowerCase().includes(needle)) return true
+    if (cycle.decision.toLowerCase().includes(needle)) return true
+    if (decisionLabel(cycle.decision).includes(needle)) return true
+    if (String(cycle.cycle).includes(needle)) return true
+    return false
+  })
 }
 
 function liveLabel(loop: Pick<AutoresearchLoopSummary, 'live'>): string {
@@ -220,44 +248,67 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
 }
 
 function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
+  const query = useSignal('')
+  const visibleCycles = useMemo(
+    () => filterCycles(cycles, query.value),
+    [cycles, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
+
   if (cycles.length === 0) {
     return html`<${EmptyState} message="사이클 기록이 없습니다." compact />`
   }
 
   return html`
-    <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded-lg border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-[var(--white-10)]">
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">#</th>
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">가설</th>
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이전</th>
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이후</th>
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">변화</th>
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-center py-2.5 px-3 font-medium">판정</th>
-            <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${cycles.map(c => html`
-            <tr key=${c.cycle} class="border-b border-[var(--white-5)] hover:bg-[var(--white-4)] transition-colors duration-150">
-              <td class="py-2 px-3 font-mono text-[var(--text-muted)]">${c.cycle}</td>
-              <td class="py-2 px-3 text-[var(--text-body)] max-w-[200px] truncate" title=${c.hypothesis}>${c.hypothesis}</td>
-              <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
-              <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
-              <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${formatDelta(c.delta)}</td>
-              <td class="py-2 px-3 text-center">
-                <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                  c.decision === 'keep'
-                    ? 'bg-[var(--ok-soft)] text-[var(--ok)] border border-[var(--ok-20)]'
-                    : 'bg-[var(--bad-soft)] text-[var(--bad)] border border-[var(--bad-20)]'
-                }">${decisionLabel(c.decision)}</span>
-              </td>
-              <td class="py-2 px-3 text-right text-[var(--text-muted)] font-mono">${formatTimestampKo(c.timestamp)}</td>
-            </tr>
-          `)}
-        </tbody>
-      </table>
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center justify-end">
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="가설 / 판정 / # 필터"
+          aria-label="사이클 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && visibleCycles.length === 0
+        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
+        : html`
+          <div class="overflow-x-auto overflow-y-auto max-h-[400px] custom-scrollbar rounded-lg border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-[var(--text-muted)] text-[10px] uppercase tracking-wider border-b border-[var(--white-10)]">
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">#</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-left py-2.5 px-3 font-medium">가설</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이전</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">이후</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium">변화</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-center py-2.5 px-3 font-medium">판정</th>
+                  <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,18,34,0.95)] backdrop-blur-md text-right py-2.5 px-3 font-medium shadow-[1px_1px_2px_rgba(0,0,0,0.2)]">시간</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${visibleCycles.map(c => html`
+                  <tr key=${c.cycle} class="border-b border-[var(--white-5)] hover:bg-[var(--white-4)] transition-colors duration-150">
+                    <td class="py-2 px-3 font-mono text-[var(--text-muted)]">${c.cycle}</td>
+                    <td class="py-2 px-3 text-[var(--text-body)] max-w-[200px] truncate" title=${c.hypothesis}>${c.hypothesis}</td>
+                    <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
+                    <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
+                    <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${formatDelta(c.delta)}</td>
+                    <td class="py-2 px-3 text-center">
+                      <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                        c.decision === 'keep'
+                          ? 'bg-[var(--ok-soft)] text-[var(--ok)] border border-[var(--ok-20)]'
+                          : 'bg-[var(--bad-soft)] text-[var(--bad)] border border-[var(--bad-20)]'
+                      }">${decisionLabel(c.decision)}</span>
+                    </td>
+                    <td class="py-2 px-3 text-right text-[var(--text-muted)] font-mono">${formatTimestampKo(c.timestamp)}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+        `}
     </div>
   `
 }

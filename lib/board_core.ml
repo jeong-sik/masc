@@ -32,6 +32,7 @@ let create_store () = {
   dirty_posts = false;
   dirty_comments = false;
   last_flush = Time_compat.now ();
+  flusher_inbox = Eio.Stream.create 1000;
 }
 
 (** Remove [value] from the string list stored at [key] in [tbl].
@@ -145,16 +146,17 @@ let sweep store =
     - All board operations execute sequentially within the same domain
     - The ref is written exactly once at module load time (line ~939)
     If multi-domain becomes needed, replace with Domain.DLS or atomic ref. *)
-let deferred_flush_fn : (store -> unit) ref = ref (fun _ -> ())
-
-(** Auto-sweep if needed, also triggers deferred flush via callback *)
+(** Auto-sweep if needed, delegates to flusher actor inbox *)
 let maybe_sweep store =
   let now = Time_compat.now () in
-  if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
-    (try ignore (sweep store)
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.BoardLog.warn "sweep failed: %s" (Printexc.to_string exn));
-  if now -. store.last_flush > flush_interval_sec then
-    !deferred_flush_fn store
+  if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then begin
+    store.last_sweep <- now;
+    Eio.Stream.add store.flusher_inbox Sweep
+  end;
+  if now -. store.last_flush > flush_interval_sec then begin
+    store.last_flush <- now;
+    Eio.Stream.add store.flusher_inbox Flush
+  end
 
 (** {1 Persistence Paths} *)
 

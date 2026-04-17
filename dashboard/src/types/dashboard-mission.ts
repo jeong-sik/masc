@@ -573,17 +573,7 @@ export interface OperatorActionRequest {
   payload: Record<string, unknown>
 }
 
-export interface OperatorActionResult {
-  status: string
-  confirm_required?: boolean
-  confirm_token?: string
-  preview?: unknown
-  tool_name?: string
-  result?: unknown
-  /** @deprecated Use result instead. Kept for backward compat during migration. */
-  delegated_tool_result?: unknown
-  executed_action?: unknown
-}
+export type { OperatorActionResult } from '../api/schemas/operator-action'
 
 export interface OperatorActionLogEntry {
   id: number

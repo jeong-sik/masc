@@ -7,6 +7,7 @@ import type {
   OperatorDigest,
   OperatorSnapshot,
 } from '../types'
+import { parseOperatorActionResult } from './schemas/operator-action'
 import { resolveDashboardActorName, sanitizeDashboardActorName } from '../lib/dashboard-actor'
 
 // --- Auth ---
@@ -483,20 +484,27 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
   }
 }
 
-export function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
-  return post('/api/v1/operator/action', body, undefined, operatorActionTimeoutMs(body))
+export async function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
+  const raw = await post<unknown>(
+    '/api/v1/operator/action',
+    body,
+    undefined,
+    operatorActionTimeoutMs(body),
+  )
+  return parseOperatorActionResult(raw)
 }
 
-export function confirmOperatorAction(
+export async function confirmOperatorAction(
   actor: string,
   confirmToken: string,
   decision: 'confirm' | 'deny' = 'confirm',
 ): Promise<OperatorActionResult> {
-  return post('/api/v1/operator/confirm', {
+  const raw = await post<unknown>('/api/v1/operator/confirm', {
     actor,
     confirm_token: confirmToken,
     decision,
   })
+  return parseOperatorActionResult(raw)
 }
 
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {

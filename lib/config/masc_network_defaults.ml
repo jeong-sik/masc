@@ -20,6 +20,28 @@ let ollama_default_port = 11434
 let ollama_default_url =
   Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
 
+(** Substring used by Ollama URL heuristics: [":<port>"].  Keeps the
+    heuristic anchored to {!ollama_default_port} so changing the port
+    updates every classifier in one place. *)
+let ollama_port_needle =
+  Printf.sprintf ":%d" ollama_default_port
+
+(** [is_ollama_url url] returns [true] when [url] contains
+    {!ollama_port_needle}.  Permissive on scheme/host so it works for
+    [http://], [https://], [127.0.0.1], [localhost], or a bare
+    [host:port]. *)
+let is_ollama_url url =
+  let hlen = String.length url in
+  let nlen = String.length ollama_port_needle in
+  if nlen = 0 || nlen > hlen then false
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub url i nlen = ollama_port_needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
 (** Default URL for the local OpenAI-compatible runtime.
     Override order: OAS_LOCAL_LLM_URL -> OAS_LOCAL_QWEN_URL -> local runtime. *)
 let local_llm_default_url =

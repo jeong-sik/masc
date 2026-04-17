@@ -9,28 +9,16 @@ type event = {
   active_after : int;
 }
 
-(* ── Classifier (copy of Dashboard_cascade.classify_capacity_key) ─
-
-   We copy-paste instead of extracting into a shared helper because:
-   - Both copies are ~12 lines and unlikely to drift meaningfully
-     (the classifier is anchored to two literal substrings).
-   - The dashboard module would otherwise need to depend on this
-     module (for classify_key in JSON projections) or vice versa,
-     and neither direction feels natural.
-   Any drift here will be caught by the [test_snapshot_kind_filter]
-   coverage below + existing Dashboard_cascade tests. *)
+(* ── Classifier (shares [Masc_network_defaults.is_ollama_url] with
+      {!Dashboard_cascade.classify_capacity_key}).  The [cli:] prefix
+      is a local sentinel; classifier agreement between the two call
+      sites is anchored to the SSOT helper rather than a duplicated
+      substring literal.  [test_snapshot_kind_filter] below and the
+      existing [Dashboard_cascade] tests still cover the mapping. *)
 let classify_key url =
   if String.length url > 4 && String.sub url 0 4 = "cli:" then "cli"
-  else
-    let len = String.length url in
-    let needle = ":11434" in
-    let nlen = String.length needle in
-    let rec scan i =
-      if i + nlen > len then false
-      else if String.sub url i nlen = needle then true
-      else scan (i + 1)
-    in
-    if scan 0 then "ollama" else "other"
+  else if Masc_network_defaults.is_ollama_url url then "ollama"
+  else "other"
 
 (* ── Ring buffer configuration ─────────────────────────────── *)
 

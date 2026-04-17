@@ -150,21 +150,15 @@ let health_json () =
 (* ── Client capacity projection ─────────────────────── *)
 
 (** Classify a capacity registry key for the dashboard.  CLI sentinels
-    use the [cli:] prefix; ollama uses the well-known [:11434] port.
-    Everything else is reported as [other] so operators can spot
-    surprise registrations (e.g. a manually-registered HTTP slot). *)
+    use the [cli:] prefix; ollama URLs are detected by
+    {!Masc_network_defaults.is_ollama_url} (matches the well-known
+    port).  Everything else is reported as [other] so operators can
+    spot surprise registrations (e.g. a manually-registered HTTP
+    slot). *)
 let classify_capacity_key url =
   if String.length url > 4 && String.sub url 0 4 = "cli:" then "cli"
-  else
-    let len = String.length url in
-    let needle = ":11434" in
-    let nlen = String.length needle in
-    let rec scan i =
-      if i + nlen > len then false
-      else if String.sub url i nlen = needle then true
-      else scan (i + 1)
-    in
-    if scan 0 then "ollama" else "other"
+  else if Masc_network_defaults.is_ollama_url url then "ollama"
+  else "other"
 
 let client_capacity_entry_to_json (url, info : string * Cascade_throttle.capacity_info)
   : Yojson.Safe.t =

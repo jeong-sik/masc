@@ -10,6 +10,12 @@
 #       kind ∈ {ordered, filtered_empty, exhausted}
 #       See lib/cascade/cascade_strategy_trace.ml
 #
+#   - masc_keeper_invariant_violations_total{keeper, invariant}
+#       invariant ∈ {PhaseTurnAlignment, NoCascadeBeforeMeasurement,
+#                    CompactionAtomicity, EventPriorityMonotone}
+#       See lib/keeper/keeper_composite_observer.ml
+#       Spec:  specs/keeper-state-machine/KeeperCompositeLifecycle.tla
+#
 # Thresholds below are conservative starting points; tune per deployment.
 # Rate windows use 5m so a single transient event does not page; duration
 # guards (for:) require the condition to persist across two 5m windows.
@@ -130,3 +136,48 @@ groups:
             Cross-check /api/v1/cascade/client_capacity for the current
             snapshot — if that has entries but no events, the history
             ring buffer wiring regressed.
+
+  # Keeper composite lifecycle invariants (LT-13). Each counter tick is a
+  # per-snapshot violation of a KeeperCompositeLifecycle.tla safety
+  # property. Thresholds are conservative: any sustained violation pages.
+  - name: masc_keeper_composite_invariants
+    interval: 30s
+    rules:
+      - alert: KeeperCompositeInvariantViolationBurst
+        expr: |
+          sum by (invariant) (
+            increase(masc_keeper_invariant_violations_total[5m])
+          ) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: composite_lifecycle
+        annotations:
+          summary: "Composite invariant {{ $labels.invariant }} violated > 10x/5m"
+          description: |
+            KeeperCompositeLifecycle.tla safety property {{ $labels.invariant }}
+            is failing at more than 10 snapshots per 5 minutes fleet-wide.
+            This signals a cross-axis FSM inconsistency (phase disagrees
+            with turn, cascade starts without measurement, compaction
+            straddles turn boundaries, or event priority ordering broke).
+            Cross-check /api/v1/keepers/<name>/composite to identify the
+            offending keeper; attach the raw snapshot to any follow-up.
+
+      - alert: KeeperCompositeInvariantSingleKeeperStuck
+        expr: |
+          rate(masc_keeper_invariant_violations_total[5m]) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: composite_lifecycle
+        annotations:
+          summary: "Keeper {{ $labels.keeper }} stuck violating {{ $labels.invariant }}"
+          description: |
+            A single keeper has been violating {{ $labels.invariant }} at
+            > 0.1 samples/s for 15 minutes. Indicates a wedged FSM
+            composition on that keeper specifically — consider issuing
+            a supervised restart after capturing the snapshot for
+            post-mortem. Spec reference:
+            specs/keeper-state-machine/KeeperCompositeLifecycle.tla

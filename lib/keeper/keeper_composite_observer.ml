@@ -336,6 +336,26 @@ let compute_invariants
     event_priority_monotone = check_event_priority_monotone entry;
   }
 
+(* Prometheus bump — one counter tick per violated invariant per snapshot.
+   Called from [observe]. PromQL rate/increase distinguishes transient
+   from steady-state violations. Labels bounded: keeper × invariant (4)
+   ≤ ~200 series on a 50-keeper host. Mirrors the naming pattern in
+   [Cascade_strategy_trace.bump_prometheus_counter]. *)
+let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
+  let bump key satisfied =
+    if not satisfied then
+      Prometheus.inc_counter "masc_keeper_invariant_violations_total"
+        ~labels:[
+          ("keeper", keeper_name);
+          ("invariant", invariant_key_to_string key);
+        ]
+        ()
+  in
+  bump Invariant_phase_turn_alignment inv.phase_turn_alignment;
+  bump Invariant_no_cascade_before_measurement inv.no_cascade_before_measurement;
+  bump Invariant_compaction_atomicity inv.compaction_atomicity;
+  bump Invariant_event_priority_monotone inv.event_priority_monotone
+
 (* Public API *)
 
 let stable_correlation_id (entry : Keeper_registry.registry_entry) : string =
@@ -381,6 +401,7 @@ let observe
       ~compaction_stage
       ~measurement_captured
   in
+  bump_invariant_violations ~keeper_name:entry.name invariants;
   {
     correlation_id;
     run_id;

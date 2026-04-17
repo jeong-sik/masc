@@ -111,6 +111,13 @@ type invariants_check = {
   event_priority_monotone : bool;
 }
 
+(** Increment [masc_keeper_invariant_violations_total\{keeper, invariant\}]
+    once per violated invariant. No-op when all invariants hold. Called
+    automatically from [observe]; exposed so unit tests can assert the
+    counter bump without going through the full snapshot pipeline. *)
+val bump_invariant_violations :
+  keeper_name:string -> invariants_check -> unit
+
 (** Frozen outcome of the most recently completed turn (RFC-0003
     Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
     polluting the live sub-FSM fields. [None] until the first turn

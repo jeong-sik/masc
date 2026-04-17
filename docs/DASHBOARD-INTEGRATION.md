@@ -18,9 +18,8 @@ code_refs:
 - `execution`: workers, tasks, keepers, continuity pressure
 - `memory`: durable posts/comments only
 - `governance`: debates and voting only
-- `planning`: goals, MDAL loops, backlog posture
+- `planning`: goals, backlog posture
 - `intervene`: mutating operator actions
-- `command`: command-plane truth
 
 Experimental features such as TRPG live under `lab`.
 
@@ -48,7 +47,7 @@ Experimental features such as TRPG live under `lab`.
 - `GET /api/v1/dashboard/shell`
   - shell-only room status and top-level counts
 - `GET /api/v1/dashboard/mission`
-  - mission summary derived from operator + command truth
+  - mission summary derived from operator truth
 - `GET /api/v1/dashboard/execution`
   - `summary`, `execution_queue`, `operation_briefs`, `worker_support_briefs`, `continuity_briefs`, `offline_worker_briefs`
   - compatibility payloads remain: `agents`, `tasks`, `messages`, `keepers`
@@ -58,10 +57,10 @@ Experimental features such as TRPG live under `lab`.
 - `GET /api/v1/dashboard/governance`
   - `debates`, `sessions`, governance summary
 - `GET /api/v1/dashboard/planning`
-  - `goals`, `rollup`, `mdal`, `task_backlog`
+  - `goals`, `rollup`, `task_backlog`
 
 ## Raw Domain Endpoints
-- `/api/v1/board*`, `/api/v1/governance*`, `/api/v1/operator*`, `/api/v1/command-plane*`
+- `/api/v1/board*`, `/api/v1/governance*`, `/api/v1/operator*`
 - These may still exist for domain consumers or drill-down flows.
 - The dashboard client should prefer the canonical projection endpoints above.
 
@@ -78,8 +77,6 @@ Experimental features such as TRPG live under `lab`.
   - `board_post`
   - `board_comment`
   - `decision_*`
-  - `mdal_*`
-  - `command_plane_*`
   - `operator_*`
 
 ## Error Contract

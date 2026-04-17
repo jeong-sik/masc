@@ -3,8 +3,10 @@ import type { TelemetryEntry } from '../api/dashboard'
 import {
   A2A_EVENT_TYPES,
   CHIP_CLASS_BY_KIND,
+  deriveHandoffArcs,
   deriveTimelineRows,
   kindOfEventType,
+  type TimelineRow,
 } from './handoff-timeline'
 
 function makeEntry(overrides: Partial<TelemetryEntry>): TelemetryEntry {
@@ -147,5 +149,77 @@ describe('deriveTimelineRows', () => {
     ]
     const rows = deriveTimelineRows(entries, WIN_START_MS, WIN_END_MS)
     expect(rows[0]!.chips[0]!.kind).toBe('failure')
+  })
+})
+
+describe('deriveHandoffArcs', () => {
+  const WIN_START_MS = 1_000_000
+  const WIN_END_MS = 1_001_000
+
+  function row(keeper: string, chips: TimelineRow['chips']): TimelineRow {
+    return { keeper, chips }
+  }
+
+  it('returns empty when window is degenerate', () => {
+    expect(deriveHandoffArcs([], 100, 100)).toEqual([])
+    expect(deriveHandoffArcs([], 200, 100)).toEqual([])
+  })
+
+  it('produces one arc per handoff_requested with peer in rows', () => {
+    const rows: TimelineRow[] = [
+      row('alpha', [
+        { ts: WIN_START_MS + 200, eventType: 'handoff_requested', kind: 'handoff', peerAgent: 'beta' },
+      ]),
+      row('beta', [
+        { ts: WIN_START_MS + 400, eventType: 'handoff_completed', kind: 'handoff', peerAgent: 'alpha' },
+      ]),
+    ]
+    const arcs = deriveHandoffArcs(rows, WIN_START_MS, WIN_END_MS)
+    expect(arcs).toHaveLength(1)
+    expect(arcs[0]).toMatchObject({ fromIdx: 0, toIdx: 1, fromAgent: 'alpha', toAgent: 'beta' })
+    expect(arcs[0]!.xPct).toBeCloseTo(20, 2)
+  })
+
+  it('skips handoff_requested when peer is not in rows (peer drifted out of window)', () => {
+    const rows: TimelineRow[] = [
+      row('alpha', [
+        { ts: WIN_START_MS + 200, eventType: 'handoff_requested', kind: 'handoff', peerAgent: 'ghost' },
+      ]),
+    ]
+    expect(deriveHandoffArcs(rows, WIN_START_MS, WIN_END_MS)).toEqual([])
+  })
+
+  it('ignores handoff_completed — avoids double-drawing the mirror pair', () => {
+    const rows: TimelineRow[] = [
+      row('alpha', [
+        { ts: WIN_START_MS + 200, eventType: 'handoff_requested', kind: 'handoff', peerAgent: 'beta' },
+      ]),
+      row('beta', [
+        { ts: WIN_START_MS + 200, eventType: 'handoff_completed', kind: 'handoff', peerAgent: 'alpha' },
+      ]),
+    ]
+    const arcs = deriveHandoffArcs(rows, WIN_START_MS, WIN_END_MS)
+    expect(arcs).toHaveLength(1)
+  })
+
+  it('skips self-handoff (fromIdx == toIdx)', () => {
+    const rows: TimelineRow[] = [
+      row('alpha', [
+        { ts: WIN_START_MS + 200, eventType: 'handoff_requested', kind: 'handoff', peerAgent: 'alpha' },
+      ]),
+    ]
+    expect(deriveHandoffArcs(rows, WIN_START_MS, WIN_END_MS)).toEqual([])
+  })
+
+  it('ignores non-handoff chips on the same row', () => {
+    const rows: TimelineRow[] = [
+      row('alpha', [
+        { ts: WIN_START_MS + 100, eventType: 'tool_called',        kind: 'tool' },
+        { ts: WIN_START_MS + 200, eventType: 'handoff_requested', kind: 'handoff', peerAgent: 'beta' },
+      ]),
+      row('beta', []),
+    ]
+    const arcs = deriveHandoffArcs(rows, WIN_START_MS, WIN_END_MS)
+    expect(arcs).toHaveLength(1)
   })
 })

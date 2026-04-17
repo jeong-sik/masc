@@ -20,10 +20,10 @@
 //    matrix = "what state is entity E in?",
 //    timeline = "which events happened across entities, and when?".
 //
-// MVP scope: lifecycle chips per keeper row on a shared time axis.
-// Handoff arrow overlay (from_agent → to_agent) is out of scope for
-// this first iteration — the data flows through but renders as chips
-// on the relevant rows. Next iteration can add SVG arc overlays.
+// Iter 3: SVG arc overlay for `handoff_requested` chips. Each arc
+// links from_agent's row to to_agent's row at the handoff timestamp's
+// x-position. Dedup by requested-only (completed is the mirror pair).
+// `pointer-events: none` on the overlay so chips remain clickable.
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -139,6 +139,58 @@ export function deriveTimelineRows(
   return rows
 }
 
+export interface HandoffArc {
+  fromIdx: number
+  toIdx: number
+  xPct: number
+  ts: number
+  fromAgent: string
+  toAgent: string
+}
+
+// Pure arc deriver. Given the rendered rows (in their displayed order)
+// and the window, pick handoff_requested chips whose peerAgent exists
+// as another row, and return arcs with source/target row indices plus
+// the x% position. Single direction only (requested side) so each
+// logical handoff renders exactly once.
+export function deriveHandoffArcs(
+  rows: readonly TimelineRow[],
+  windowStart: number,
+  windowEnd: number,
+): HandoffArc[] {
+  const span = windowEnd - windowStart
+  if (span <= 0) return []
+  const idxByKeeper = new Map<string, number>()
+  rows.forEach((row, i) => idxByKeeper.set(row.keeper, i))
+  const arcs: HandoffArc[] = []
+  rows.forEach((row, fromIdx) => {
+    for (const chip of row.chips) {
+      if (chip.eventType !== 'handoff_requested') continue
+      const to = chip.peerAgent
+      if (!to) continue
+      const toIdx = idxByKeeper.get(to)
+      if (toIdx === undefined || toIdx === fromIdx) continue
+      arcs.push({
+        fromIdx,
+        toIdx,
+        xPct: ((chip.ts - windowStart) / span) * 100,
+        ts: chip.ts,
+        fromAgent: row.keeper,
+        toAgent: to,
+      })
+    }
+  })
+  return arcs
+}
+
+const ROW_HEIGHT_PX = 24
+const ROW_GAP_PX = 4
+const ROW_STRIDE_PX = ROW_HEIGHT_PX + ROW_GAP_PX
+
+function rowCenterY(idx: number): number {
+  return idx * ROW_STRIDE_PX + ROW_HEIGHT_PX / 2
+}
+
 interface Props {
   windowMs?: number
   pollMs?: number
@@ -226,7 +278,29 @@ export function HandoffTimeline({
         : rows.length === 0
           ? html`<p class="text-[11px] text-text-dim">이 시간 범위에 A2A 이벤트 없음.</p>`
           : html`
-              <div class="flex flex-col gap-1">
+              <div class="flex flex-col gap-1 relative">
+                ${(() => {
+                  const arcs = deriveHandoffArcs(rows, windowStart, windowEnd)
+                  if (arcs.length === 0) return null
+                  const totalH = rows.length * ROW_STRIDE_PX - ROW_GAP_PX
+                  return html`
+                    <svg
+                      class="absolute pointer-events-none"
+                      style=${`left: 140px; right: 0; top: 0; height: ${totalH}px`}
+                      preserveAspectRatio="none"
+                      aria-hidden="true"
+                    >
+                      ${arcs.map(a => html`
+                        <line
+                          x1=${`${a.xPct}%`} y1=${rowCenterY(a.fromIdx)}
+                          x2=${`${a.xPct}%`} y2=${rowCenterY(a.toIdx)}
+                          stroke="rgb(251 146 60)" stroke-width="1.5"
+                          stroke-dasharray="3,3" opacity="0.8"
+                        ><title>${`${a.fromAgent} → ${a.toAgent} · ${new Date(a.ts).toLocaleTimeString()}`}</title></line>
+                      `)}
+                    </svg>
+                  `
+                })()}
                 ${rows.map(row => {
                   const isSelected = selectedKeeper === row.keeper
                   const labelCls = isSelected

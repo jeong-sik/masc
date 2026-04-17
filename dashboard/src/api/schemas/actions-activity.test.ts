@@ -36,15 +36,14 @@ function validGraph(overrides: Record<string, unknown> = {}): Record<string, unk
     timeline: [
       {
         kind: 'task.done',
-        actor: { agent: 'claude' },
-        summary: 'finished something',
-        subject: { id: 'task:abc', type: 'task' },
-        ts: 1_712_000_000,
+        actor: { id: 'claude', kind: 'agent' },
+        subject: { id: 'task:abc', kind: 'task' },
+        ts_ms: 1_712_000_000,
         ts_iso: '2026-04-01T00:00:00Z',
         seq: 1,
         room_id: 'main',
         tags: ['done'],
-        payload: { note: 'ok' },
+        payload: { task_title: 'finished something', note: 'ok' },
       },
     ],
     generated_at: '2026-04-17T00:00:00Z',
@@ -78,6 +77,10 @@ describe('parseActivityGraphResponse', () => {
     expect(out.edges).toHaveLength(1)
     expect(out.stats.event_count).toBe(42)
     expect(out.stats_history).toBeUndefined()
+    expect(out.timeline[0]!.actor).toEqual({ id: 'claude', kind: 'agent' })
+    expect(out.timeline[0]!.subject).toEqual({ id: 'task:abc', type: 'task' })
+    expect(out.timeline[0]!.summary).toBe('finished something')
+    expect(out.timeline[0]!.ts).toBe(1_712_000_000)
   })
 
   it('accepts optional stats_history and node.semantic_weight', () => {
@@ -134,6 +137,30 @@ describe('parseActivityGraphResponse', () => {
       heatmap: { matrix: [['not-a-number']], max: 0, total: 0 },
     })
     expect(() => parseActivityGraphResponse(bad)).toThrow(ActionsActivitySchemaDriftError)
+  })
+
+  it('normalizes null actor and derives summary from payload', () => {
+    const out = parseActivityGraphResponse(
+      validGraph({
+        timeline: [
+          {
+            kind: 'tool.called',
+            actor: null,
+            subject: { id: 'keeper_shell', kind: 'tool' },
+            ts_ms: 1_712_100_000,
+            ts_iso: '2026-04-01T00:16:40Z',
+            seq: 2,
+            room_id: 'default',
+            tags: ['tool'],
+            payload: { tool_name: 'keeper_shell', cmd: 'pr create --draft' },
+          },
+        ],
+      }),
+    )
+    expect(out.timeline[0]!.actor).toEqual({})
+    expect(out.timeline[0]!.subject).toEqual({ id: 'keeper_shell', type: 'tool' })
+    expect(out.timeline[0]!.summary).toBe('pr create --draft')
+    expect(out.timeline[0]!.ts).toBe(1_712_100_000)
   })
 
   it('throws on non-object payload', () => {

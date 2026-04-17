@@ -4,6 +4,7 @@ import {
   buildCategoryCounts,
   buildRawCategoryCounts,
   categoryForActivityKind,
+  eventDetail,
 } from './activity-graph-groups'
 import type { ActivityGraphTimelineEvent } from '../types'
 
@@ -39,11 +40,27 @@ describe('categoryForActivityKind', () => {
     expect(categoryForActivityKind('message.broadcast')).toBe('message')
     expect(categoryForActivityKind('board.posted')).toBe('board')
     expect(categoryForActivityKind('policy.approved')).toBe('governance')
+    expect(categoryForActivityKind('keeper.contract_verdict')).toBe('governance')
     expect(categoryForActivityKind('agent.joined')).toBe('lifecycle')
   })
 
   it('falls back to other for unknown kinds', () => {
     expect(categoryForActivityKind('mystery.kind')).toBe('other')
+  })
+
+  it('surfaces tool and verification payload details in summaries', () => {
+    const toolEvent = makeEvent(1, 'tool.called', {
+      actor: 'claude',
+      payload: { tool_name: 'keeper_shell', cmd: 'gh pr create --draft' },
+    })
+    const verifyEvent = makeEvent(2, 'task.submit_for_verification', {
+      actor: 'claude',
+      subjectId: 'task-9',
+      payload: { verification_id: 'vrf-77' },
+    })
+
+    expect(eventDetail(toolEvent)).toBe('gh pr create --draft')
+    expect(eventDetail(verifyEvent)).toBe('vrf-77')
   })
 })
 

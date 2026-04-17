@@ -22,9 +22,11 @@ import {
   number,
   object,
   optional,
+  pipe,
   record,
   safeParse,
   string,
+  transform,
   unknown,
   type BaseIssue,
   type InferOutput,
@@ -61,23 +63,90 @@ export const ActivityGraphEdgeSchema = object({
 // `payload`, `tags` are passed through to renderers that treat them as
 // display-only / diagnostic. Enforcing a stricter shape would force
 // the schema to track every backend event variant.
-export const ActivityGraphTimelineEventSchema = object({
+const ActivityGraphTimelineEventRawSchema = object({
   kind: string(),
-  actor: record(string(), unknown()),
-  summary: string(),
-  subject: nullable(
-    object({
-      id: string(),
-      type: string(),
-    }),
-  ),
-  ts: number(),
+  actor: optional(nullable(record(string(), unknown()))),
+  summary: optional(string()),
+  subject: optional(nullable(record(string(), unknown()))),
+  ts: optional(number()),
+  ts_ms: optional(number()),
   ts_iso: string(),
   seq: number(),
   room_id: string(),
   tags: array(string()),
   payload: record(string(), unknown()),
 })
+
+function firstString(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return null
+}
+
+function normalizeActivitySubject(
+  value: Record<string, unknown> | null | undefined,
+): { id: string; type: string } | null {
+  if (!value) return null
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  if (id === '') return null
+  const type =
+    (typeof value.type === 'string' && value.type.trim() !== '' ? value.type.trim() : null)
+    ?? (typeof value.kind === 'string' && value.kind.trim() !== '' ? value.kind.trim() : null)
+    ?? 'entity'
+  return { id, type }
+}
+
+function deriveActivitySummary(
+  kind: string,
+  payload: Record<string, unknown>,
+  subject: { id: string; type: string } | null,
+): string {
+  return firstString(payload, [
+    'summary',
+    'message',
+    'content',
+    'task_title',
+    'title',
+    'reason',
+    'notes',
+    'cmd',
+    'tool_args_preview',
+    'tool_name',
+    'verification_id',
+    'contract_id',
+    'run_id',
+    'target_id',
+    'task_id',
+  ])
+    ?? subject?.id
+    ?? kind
+}
+
+export const ActivityGraphTimelineEventSchema = pipe(
+  ActivityGraphTimelineEventRawSchema,
+  transform((raw: InferOutput<typeof ActivityGraphTimelineEventRawSchema>) => {
+    const actor = raw.actor ?? {}
+    const subject = normalizeActivitySubject(raw.subject ?? null)
+    const payload = raw.payload
+    return {
+      kind: raw.kind,
+      actor,
+      summary: raw.summary?.trim() || deriveActivitySummary(raw.kind, payload, subject),
+      subject,
+      ts: raw.ts ?? raw.ts_ms ?? Date.parse(raw.ts_iso),
+      ts_iso: raw.ts_iso,
+      seq: raw.seq,
+      room_id: raw.room_id,
+      tags: raw.tags,
+      payload,
+    }
+  }),
+)
 
 // `stats` and `kind_counts` are open number-valued maps — the backend
 // adds new counters (per-tool, per-category) without coordinating the

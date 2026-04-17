@@ -21,7 +21,12 @@ let test_valid_trace_id () =
       check string "agent_name" "keeper-alice-agent" meta.agent_name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
-let test_legacy_keeper_cascade_alias_normalized () =
+let test_legacy_keeper_cascade_alias_preserved_raw () =
+  (* Parse should preserve the raw cascade_name as declared in JSON so the
+     dashboard can surface config drift between the declared value and its
+     canonicalized resolution.  Legacy aliases (e.g. "oas-keeper_unified")
+     still resolve to the canonical at point-of-use via
+     [Keeper_cascade_profile.canonicalize]. *)
   let json =
     `Assoc
       [
@@ -34,8 +39,37 @@ let test_legacy_keeper_cascade_alias_normalized () =
   in
   match Keeper_types.meta_of_json json with
   | Ok meta ->
-      check string "legacy alias normalized"
-        Keeper_config.default_cascade_name meta.cascade_name
+      check string "legacy alias preserved raw"
+        "oas-keeper_unified" meta.cascade_name;
+      check string "legacy alias canonicalizes to default"
+        Keeper_config.default_cascade_name
+        (Keeper_cascade_profile.canonicalize meta.cascade_name)
+  | Error e -> fail ("expected Ok, got Error: " ^ e)
+
+let test_unknown_cascade_name_preserved_raw () =
+  (* Genuinely unknown user-declared cascade names (typos, personal
+     playground profiles, vendor drift) must survive parse so the
+     dashboard [canonical] column can show the mismatch.  Prior
+     behaviour silently collapsed them to "keeper_unified", masking
+     config drift. *)
+  let json =
+    `Assoc
+      [
+        ("name", `String "cheolsu");
+        ("agent_name", `String "keeper-cheolsu-agent");
+        ("trace_id", `String "cheolsu-001");
+        ("goal", `String "test");
+        ("cascade_name", `String "playground_experiment_xyz");
+      ]
+  in
+  match Keeper_types.meta_of_json json with
+  | Ok meta ->
+      check string "raw user-declared cascade preserved"
+        "playground_experiment_xyz" meta.cascade_name;
+      (* Point-of-use canonicalize still maps unknown → default. *)
+      check string "unknown canonicalizes to default"
+        Keeper_config.default_cascade_name
+        (Keeper_cascade_profile.canonicalize meta.cascade_name)
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
 let test_missing_trace_id () =
@@ -79,8 +113,10 @@ let () =
   run "keeper_identity_parse"
     [ ( "parse_keeper_identity"
       , [ test_case "valid trace_id" `Quick test_valid_trace_id
-        ; test_case "legacy keeper cascade alias normalized" `Quick
-            test_legacy_keeper_cascade_alias_normalized
+        ; test_case "legacy keeper cascade alias preserved raw" `Quick
+            test_legacy_keeper_cascade_alias_preserved_raw
+        ; test_case "unknown cascade name preserved raw" `Quick
+            test_unknown_cascade_name_preserved_raw
         ; test_case "missing trace_id field" `Quick test_missing_trace_id
         ; test_case "empty trace_id" `Quick test_empty_trace_id
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id

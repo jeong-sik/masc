@@ -119,12 +119,19 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     cascade_name =
       (* TOML cascade_name takes precedence over runtime JSON when present.
          Without this, changing cascade_name in keepers/*.toml has no effect
-         until the runtime JSON is deleted.  See #6747. *)
+         until the runtime JSON is deleted.  See #6747.
+
+         Store the raw string as declared in TOML / state JSON.  Downstream
+         consumers ([Cascade_runtime], [Keeper_status_bridge],
+         [Admission_queue], ...) already canonicalize at point-of-use, so
+         preserving the raw value here lets the dashboard surface config
+         drift (keeper TOML referencing an unknown cascade name) via the
+         [canonical] column of [Dashboard_cascade.keeper_profile_json]. *)
       (match p.profile_defaults.cascade_name with
-       | Some name -> Keeper_cascade_profile.canonicalize name
+       | Some name -> name
        | None ->
          if String.trim old.cascade_name <> "" then
-           Keeper_cascade_profile.canonicalize old.cascade_name
+           old.cascade_name
          else Keeper_config.default_cascade_name);
     will =
       Option.value

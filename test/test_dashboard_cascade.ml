@@ -200,6 +200,67 @@ let test_slo_top_level_shape () =
   check bool "has status" true (List.mem_assoc "status" fs);
   check bool "has violations" true (List.mem_assoc "violations" fs)
 
+(* ── keeper_profile_json: raw vs canonical contract ──────────────── *)
+
+(* These tests exercise the pure [keeper_profile_json] projection directly
+   on a synthesized [Keeper_registry.registry_entry] shape.  They verify
+   the two-column contract the dashboard UI depends on:
+
+   - [cascade_name] = raw string from TOML / state JSON
+   - [canonical]   = [Keeper_cascade_profile.canonicalize] of the raw
+
+   When the two match (declared cascade is in the canonicalize variant),
+   the UI collapses the canonical cell to "—"; when they diverge (e.g.
+   TOML references an unknown cascade, or a legacy alias), the UI surfaces
+   the mismatch as config drift. *)
+
+let lookup fields key =
+  match List.assoc_opt key fields with
+  | Some (`String s) -> s
+  | Some _ -> fail (Printf.sprintf "%s should be string" key)
+  | None -> fail (Printf.sprintf "%s missing" key)
+
+let test_keeper_profile_preserves_raw_unknown_cascade () =
+  (* Genuinely unknown cascade — not in [Keeper_cascade_profile.t] and
+     not a registered legacy alias. Typical sources: typos, personal
+     playground profiles, vendor drift. The raw string must survive so
+     the dashboard [canonical] column renders the mismatch. *)
+  let fs =
+    Masc_mcp.Dashboard_cascade.keeper_profile_fields
+      ~keeper:"cheolsu" ~cascade_name:"playground_experiment_xyz"
+  in
+  check string "keeper name forwarded" "cheolsu" (lookup fs "keeper");
+  check string "cascade_name preserves raw TOML value"
+    "playground_experiment_xyz" (lookup fs "cascade_name");
+  check string "canonical collapses unknown → keeper_unified"
+    "keeper_unified" (lookup fs "canonical");
+  check bool "raw and canonical differ → UI shows drift"
+    true (lookup fs "cascade_name" <> lookup fs "canonical")
+
+let test_keeper_profile_preserves_raw_legacy_alias () =
+  let fs =
+    Masc_mcp.Dashboard_cascade.keeper_profile_fields
+      ~keeper:"alice" ~cascade_name:"oas-keeper_unified"
+  in
+  check string "legacy alias preserved as raw"
+    "oas-keeper_unified" (lookup fs "cascade_name");
+  check string "legacy alias canonicalizes to keeper_unified"
+    "keeper_unified" (lookup fs "canonical");
+  check bool "raw and canonical differ → UI shows drift"
+    true (lookup fs "cascade_name" <> lookup fs "canonical")
+
+let test_keeper_profile_canonical_matches_when_raw_is_canonical () =
+  let fs =
+    Masc_mcp.Dashboard_cascade.keeper_profile_fields
+      ~keeper:"verdict" ~cascade_name:"keeper_unified"
+  in
+  check string "cascade_name stays canonical"
+    "keeper_unified" (lookup fs "cascade_name");
+  check string "canonical matches"
+    "keeper_unified" (lookup fs "canonical");
+  check bool "raw == canonical → UI renders —"
+    true (lookup fs "cascade_name" = lookup fs "canonical")
+
 (* ── Suite ─────────────────────────────────────────── *)
 
 let () =
@@ -220,5 +281,13 @@ let () =
       test_case "partial filtered drops ratio" `Quick test_slo_partial_filtered;
       test_case "exhaustion > 10 → violated" `Quick test_slo_exhaustion_breach;
       test_case "burn_rate math" `Quick test_slo_burn_rate_math;
+    ];
+    "keeper_profile_json", [
+      test_case "unknown cascade preserves raw, canonical shows drift"
+        `Quick test_keeper_profile_preserves_raw_unknown_cascade;
+      test_case "legacy alias preserves raw, canonicalizes at point-of-use"
+        `Quick test_keeper_profile_preserves_raw_legacy_alias;
+      test_case "canonical cascade: raw == canonical (UI renders —)"
+        `Quick test_keeper_profile_canonical_matches_when_raw_is_canonical;
     ];
   ]

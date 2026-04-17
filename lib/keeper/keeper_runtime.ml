@@ -126,7 +126,15 @@ let ensure_keeper_meta config name =
     let signal_changed =
       meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
-    let cascade_changed = meta.cascade_name <> target_cascade_name in
+    (* [meta.cascade_name] may be a raw TOML/JSON value while
+       [target_cascade_name] is already canonicalized; canonicalize both
+       sides so a reload that only normalizes the spelling (e.g.
+       whitespace, historical aliases like "oas-keeper_unified") does not
+       register as a change. *)
+    let cascade_changed =
+      Keeper_cascade_profile.canonicalize meta.cascade_name
+      <> target_cascade_name
+    in
     let personality_changed =
       meta.goal <> target_goal
       || meta.short_goal <> target_short_goal
@@ -178,7 +186,14 @@ let ensure_keeper_meta config name =
         };
         room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
-        cascade_name = target_cascade_name;
+        (* Preserve raw [meta.cascade_name] when the cascade itself did
+           not change, even if another field (personality, policy, ...)
+           triggered a re-sync.  Otherwise a reconcile caused by an
+           unrelated field would silently canonicalize cascade_name and
+           hide drift from the dashboard [canonical] column. *)
+        cascade_name =
+          if cascade_changed then target_cascade_name
+          else meta.cascade_name;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;

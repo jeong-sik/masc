@@ -39,6 +39,19 @@
     @since 0.6.0 *)
 val config_json : unit -> Yojson.Safe.t
 
+(** Build the per-keeper row of [keeper_profiles] without a full
+    {!Keeper_registry.registry_entry}. Exposed so the raw-vs-canonical
+    contract can be exercised in tests directly.
+
+    The [cascade_name] argument is forwarded as-is (not canonicalized);
+    the [canonical] field is [Keeper_cascade_profile.canonicalize
+    cascade_name]. When the two match, the UI renders "—" in the
+    canonical column.
+
+    @since 0.9.9 *)
+val keeper_profile_fields :
+  keeper:string -> cascade_name:string -> (string * Yojson.Safe.t) list
+
 (** JSON snapshot of the cascade health tracker.
 
     Shape:

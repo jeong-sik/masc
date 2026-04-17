@@ -3,8 +3,6 @@
 // subscribing components re-render automatically.
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
-import { isOfflineStatus } from './lib/status-utils'
-import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import type {
   Agent,
   Task,
@@ -13,7 +11,6 @@ import type {
   BoardPost,
   ServerStatus,
   BoardSortMode,
-  KeeperLifecycleState,
   Goal,
   DashboardExecutionSessionBrief,
   DashboardExecutionWorkerSupportBrief,
@@ -33,7 +30,6 @@ import {
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import {
-  deriveLifecycleState,
   keeperFreshnessTs,
   normalizeKeepers,
 } from './keeper-store-normalize'
@@ -320,21 +316,6 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
         },
       ),
     )
-  }
-  return map
-})
-
-export const keeperLifecycles: ReadonlySignal<Map<string, KeeperLifecycleState>> = computed(() => {
-  const map = new Map<string, KeeperLifecycleState>()
-  for (const k of keepers.value) {
-    const status = k.status?.toLowerCase() ?? ''
-    if (isOfflineStatus(status)) {
-      const refined = keeperDisplayStatus(k) as KeeperLifecycleState
-      map.set(k.name, refined)
-      continue
-    }
-    if (!k.metrics_series || k.metrics_series.length === 0) continue
-    map.set(k.name, deriveLifecycleState(k))
   }
   return map
 })

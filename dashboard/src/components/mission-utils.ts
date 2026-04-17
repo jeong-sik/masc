@@ -1,9 +1,3 @@
-import type {
-  Agent,
-  DashboardMissionAgentBrief,
-  DashboardMissionKeeperBrief,
-  Keeper,
-} from '../types'
 import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
 import { toneClass } from '../lib/tone'
@@ -13,30 +7,6 @@ export { formatDuration, trimText, toneClass, statusLabel }
 
 export function relativeTime(iso?: string | null): string {
   return relativeTimeBase(iso, '방금')
-}
-
-export type EnrichedKeeperRow = {
-  brief: DashboardMissionKeeperBrief
-  keeper: Keeper | null
-  currentWork: string
-  recentInput: string | null
-  recentOutput: string | null
-  recentEvent: string | null
-  recentTools: string[]
-}
-
-export type EnrichedAgentRow = {
-  brief: DashboardMissionAgentBrief
-  agent: Agent | null
-  keeper: Keeper | null
-  where: string
-  withWhom: string[]
-  currentWork: string
-  how: string | null
-  recentInput: string | null
-  recentOutput: string | null
-  recentEvent: string | null
-  recentTools: string[]
 }
 
 export function missionTargetTypeLabel(value?: string | null): string {

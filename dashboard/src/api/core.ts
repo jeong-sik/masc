@@ -92,7 +92,7 @@ export {
 } from '../config/constants'
 const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
-class ApiRequestError extends Error {
+export class ApiRequestError extends Error {
   method: string
   path: string
   status?: number
@@ -120,6 +120,28 @@ class ApiRequestError extends Error {
     this.statusText = opts.statusText
     this.timeout = timeout
   }
+}
+
+export interface ApiErrorSummary {
+  message: string
+  status: number | null
+  path: string | null
+  timeout: boolean
+}
+
+export function extractApiError(err: unknown, fallbackMessage: string): ApiErrorSummary {
+  if (err instanceof ApiRequestError) {
+    return {
+      message: err.message,
+      status: err.status ?? null,
+      path: err.path,
+      timeout: err.timeout,
+    }
+  }
+  if (err instanceof Error) {
+    return { message: err.message, status: null, path: null, timeout: false }
+  }
+  return { message: fallbackMessage, status: null, path: null, timeout: false }
 }
 
 export async function fetchWithTimeout(path: string, init: RequestInit, timeoutMs: number): Promise<Response> {

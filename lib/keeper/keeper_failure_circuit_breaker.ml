@@ -187,3 +187,58 @@ let snapshot_json () : Yojson.Safe.t =
       ) states [])
   in
   `List entries
+
+(* ================================================================ *)
+(* Observable display state (LT-16-KCB Phase 1)                     *)
+(* ================================================================ *)
+
+type display_state =
+  | Clean
+  | Warning
+  | Cooling
+
+let derive_display_state ~consecutive_count ~total_tripped =
+  if consecutive_count > 0 then Warning
+  else if total_tripped > 0 then Cooling
+  else Clean
+
+let display_state_to_string = function
+  | Clean -> "clean"
+  | Warning -> "warning"
+  | Cooling -> "cooling"
+
+let classify_snapshot_json (json : Yojson.Safe.t)
+  : ((string * display_state) list, string) result =
+  match json with
+  | `List entries ->
+    let acc =
+      List.filter_map (fun entry ->
+        match entry with
+        | `Assoc fields ->
+          let name =
+            match List.assoc_opt "keeper" fields with
+            | Some (`String s) -> Some s
+            | _ -> None
+          in
+          let cc =
+            match List.assoc_opt "consecutive_count" fields with
+            | Some (`Int n) -> Some n
+            | _ -> None
+          in
+          let tt =
+            match List.assoc_opt "total_tripped" fields with
+            | Some (`Int n) -> Some n
+            | _ -> None
+          in
+          (match name, cc, tt with
+           | Some n, Some c, Some t ->
+             Some (n, derive_display_state
+                        ~consecutive_count:c
+                        ~total_tripped:t)
+           | _ -> None)
+        | _ -> None
+      ) entries
+    in
+    Ok acc
+  | _ ->
+    Error "classify_snapshot_json: expected top-level JSON array"

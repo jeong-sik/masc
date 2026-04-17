@@ -277,9 +277,12 @@ let _broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  (* Default keeps timeout < interval (60s) so Proactive_refresh's clamp
+     at start does not fire every boot. Env var override can still push
+     above interval; runtime clamp remains the safety net. *)
   let execution_refresh_timeout_s =
     float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
-      ~default:75.0 ~min_v:30.0 ~max_v:300.0
+      ~default:48.0 ~min_v:30.0 ~max_v:300.0
   in
   let compute () =
     mark_cached_surface_attempt _execution_cache;

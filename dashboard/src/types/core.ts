@@ -98,7 +98,7 @@ export interface Message {
 
 // --- Board ---
 
-export type BoardPostMeta = Record<string, unknown> & {
+type BoardPostMeta = Record<string, unknown> & {
   source?: string | null
   state_block?: string | null
   classification_reason?: string | null
@@ -363,7 +363,7 @@ export type PipelineStage =
 
 // Aggregated metrics computed by the backend over a sliding window.
 // Fields mirror dashboard_http_keeper_detail.ml summary output.
-export interface MetricsWindowTopItem {
+interface MetricsWindowTopItem {
   tool?: string
   kind?: string
   model?: string
@@ -720,7 +720,7 @@ export interface KeeperSupervisorCrashLogEntry {
   reason?: string
 }
 
-export interface KeeperSupervisorDiagnostics {
+interface KeeperSupervisorDiagnostics {
   restart_count?: number
   max_restarts?: number
   crash_log?: KeeperSupervisorCrashLogEntry[]
@@ -877,7 +877,7 @@ export interface KeeperHookSlot {
   features?: string[]
 }
 
-export interface KeeperHookIntrospection {
+interface KeeperHookIntrospection {
   slots: Record<string, KeeperHookSlot>
   deny_list: string[]
   deny_list_count: number

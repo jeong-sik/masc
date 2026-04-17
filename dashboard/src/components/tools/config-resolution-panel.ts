@@ -11,6 +11,19 @@ import type {
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { Card } from '../common/card'
 import { StatusChip } from '../common/status-chip'
+import { CopyIdButton } from '../common/copy-id-button'
+
+/** Pure: what string goes into the clipboard when the operator taps the
+    copy icon next to a path row? Always the absolute path — not the
+    ~-collapsed display string — because the dominant use case (copy →
+    paste into terminal `cd`, copy → paste into a Slack message for a
+    teammate on a different machine) requires the unambiguous form.
+    Reference UIs: GitHub file-breadcrumb copy, Vercel deployment path,
+    Datadog host path — all copy the canonical absolute form even when
+    the display is shortened. Exposed for tests. */
+export function copyablePath(item: Pick<DashboardConfigResolutionItem, 'path'>): string {
+  return item.path ?? ''
+}
 
 /**
  * Pure filter for runtime diagnostics entries.
@@ -161,7 +174,12 @@ function ConfigRow({
             `
           : null}
       </div>
-      <div class="break-all font-mono text-[12px] leading-relaxed text-[var(--text-body)]">${pathInfo.primary}</div>
+      <div class="flex items-start gap-1.5">
+        <div class="min-w-0 flex-1 break-all font-mono text-[12px] leading-relaxed text-[var(--text-body)]">${pathInfo.primary}</div>
+        ${item.path
+          ? html`<${CopyIdButton} value=${copyablePath(item)} label=${label} ariaLabel=${`${label} 경로 복사`} />`
+          : null}
+      </div>
       ${pathInfo.context
         ? html`
             <div class="mt-2 text-[11px] text-[var(--text-muted)]">${pathInfo.context}</div>

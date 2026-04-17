@@ -54,26 +54,4 @@ export function StatGrid({ cols = 2, class: cx, children }: StatGridProps) {
   `
 }
 
-// ── Field dictionary (alternating-row table) ──
-interface FieldDictEntry {
-  key: string
-  value: ComponentChildren
-}
 
-interface FieldDictProps {
-  entries: FieldDictEntry[]
-  class?: string
-}
-
-export function FieldDict({ entries, class: cx }: FieldDictProps) {
-  return html`
-    <div class="flex flex-col ${cx ?? ''}">
-      ${entries.map((e, i) => html`
-        <div class="flex items-start justify-between gap-4 py-1.5 px-2 text-[11px] ${i % 2 === 0 ? 'bg-[var(--white-3)]' : ''} rounded">
-          <span class="text-[var(--text-muted)] shrink-0">${e.key}</span>
-          <span class="text-[var(--text-body)] text-right break-all">${e.value}</span>
-        </div>
-      `)}
-    </div>
-  `
-}

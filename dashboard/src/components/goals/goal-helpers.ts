@@ -77,10 +77,6 @@ export function horizonColor(h: string): string {
   }
 }
 
-export function formatMetric(value: number): string {
-  return value.toFixed(4)
-}
-
 export function priorityLabel(p: number): string {
   switch (p) {
     case 1: return 'P1'

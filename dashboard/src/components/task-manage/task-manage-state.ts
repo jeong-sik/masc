@@ -27,23 +27,6 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
   }
 }
 
-export const taskClaiming = signal<Record<string, boolean>>({})
-
-export async function claimTask(taskId: string): Promise<void> {
-  taskClaiming.value = { ...taskClaiming.value, [taskId]: true }
-  try {
-    await callMcpTool('masc_claim_next', { task_id: taskId })
-    showToast(`태스크 ${taskId} 클레임 완료`, 'success')
-    await refreshExecution({ force: true })
-  } catch (err) {
-    showToast(`클레임 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  } finally {
-    const next = { ...taskClaiming.value }
-    delete next[taskId]
-    taskClaiming.value = next
-  }
-}
-
 export async function updateTaskPriority(taskId: string, priority: number): Promise<void> {
   try {
     await callMcpTool('masc_update_priority', { task_id: taskId, priority })

@@ -30,7 +30,7 @@ graph TB
     L6["Layer 6: Integration<br/>OAS bridge, autoresearch, research loop"]
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
-    L3["Layer 3: Engine<br/>chain, keeper, swarm, internal command_plane"]
+    L3["Layer 3: Engine<br/>chain, keeper, swarm"]
     L2["Layer 2: Domain<br/>room, board"]
     L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
     L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]

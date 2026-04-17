@@ -14,8 +14,7 @@ let allowed_actions =
     "team_note"; "team_broadcast"; "team_task_inject";
     "team_worker_spawn_batch"; "team_stop";
     "keeper_message"; "keeper_probe"; "keeper_recover";
-    "task_inject";
-    "review_resolve"; "review_defer" ]
+    "task_inject" ]
 
 let risk_of_action action_type : Oas.Approval.risk_level =
   if List.mem action_type high_risk_actions then High

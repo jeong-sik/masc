@@ -5,10 +5,18 @@ Companion to `CONNECTOR-CONFIG-SCHEMA.md` (data) and
 design rules the dashboard's `connectors` surface holds itself to, so
 future PRs don't drift back into menu-driven, click-heavy UX.
 
-**Audience**: anyone touching `dashboard/src/components/connector-*.ts`,
-`connector-status.ts`, `connector-overview-strip.ts`,
-`connector-readiness-rail.ts`, `connector-config-form.ts`, or
-`sidecar-log-viewer.ts`.
+**Audience**: anyone touching the connector surface, which today spans:
+
+- `connector-status.ts` — ConnectorLivePanel, ConnectorStatusPanel (root)
+- `connector-overview-strip.ts` — at-a-glance 4-tile strip + `ConnectorBulkActions`
+- `connector-readiness-rail.ts` — 4-pill status rail + per-pill inflight tracker
+- `connector-config-form.ts` — schema-driven form + Save + 🔄 Restart
+- `connector-quick-bind.ts` — inline channel↔keeper binding form
+- `connector-binding-summary.ts` — humanized bindings list + × unbind
+- `connector-onboarding.ts` — cold-start 4-card grid + bulk Start All
+- `sidecar-log-viewer.ts` — inline 📋 log tail per sidecar
+- `sidecar-startup-watch.ts` — "⚠ 기동 응답 없음" banner + log jump
+- `setup-guide-card.ts` + `connector-setup-guides.ts` — per-sidecar setup walkthrough
 
 **SSOT for the actual code**: the components named above. This doc
 explains *why* they look the way they do — code is the *what*.
@@ -170,6 +178,25 @@ PR (#7831) without breaking the live dashboard.
 - **Persist editor state to localStorage**. The form is operator
   workspace, not durable data. Reload should re-fetch from disk
   (current values = SSOT).
+
+---
+
+## Symmetric surfaces — every action has a reverse
+
+Components that introduce a forward action ship its inverse in the
+same spatial region so operators don't have to relearn where the
+undo lives:
+
+| Forward | Inverse | Location |
+|---------|---------|----------|
+| QuickBindForm (bind a channel) | × button in BindingSummary row | same card, 1 row apart |
+| Start All (bulk spawn) | Stop All (bulk SIGTERM) | OverviewStrip header + OnboardingGrid |
+| Save config | 🔄 Restart | ConfigForm, same row as Save |
+| Process pill click → Start | Process pill click → Stop | same pill, toggles by state |
+
+This is the "additive, never destructive" principle (§4) applied at
+the action level — discovering the undo shouldn't require a different
+mental model than discovering the do.
 
 ---
 

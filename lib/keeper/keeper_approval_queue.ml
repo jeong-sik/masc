@@ -243,9 +243,12 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
         created_entry := Some (`Created entry);
         SMap.add id entry map
   );
-  match Option.get !created_entry with
-  | `Existing id -> id
-  | `Created entry ->
+  (* The ref is always set inside the CAS body above (both branches assign),
+     so None is unreachable. *)
+  match !created_entry with
+  | None -> assert false
+  | Some (`Existing id) -> id
+  | Some (`Created entry) ->
     record_pending entry;
     entry.id
 

@@ -59,19 +59,14 @@ let option_first_some left right =
 (* ================================================================ *)
 
 let decision_to_string = Autoresearch_serde.decision_to_string
-let decision_of_string = Autoresearch_serde.decision_of_string
 let decision_of_string_result = Autoresearch_serde.decision_of_string_result
 let status_to_string = Autoresearch_serde.status_to_string
-let status_of_string = Autoresearch_serde.status_of_string
 let status_of_string_result = Autoresearch_serde.status_of_string_result
 let cycle_to_yojson = Autoresearch_serde.cycle_to_yojson
-let cycle_of_yojson = Autoresearch_serde.cycle_of_yojson
 let cycle_of_yojson_result = Autoresearch_serde.cycle_of_yojson_result
 let state_to_yojson = Autoresearch_serde.state_to_yojson
-let state_of_yojson = Autoresearch_serde.state_of_yojson
 let state_of_yojson_result = Autoresearch_serde.state_of_yojson_result
 let swarm_link_to_yojson = Autoresearch_serde.swarm_link_to_yojson
-let swarm_link_of_yojson = Autoresearch_serde.swarm_link_of_yojson
 let swarm_link_of_yojson_result = Autoresearch_serde.swarm_link_of_yojson_result
 
 (* ================================================================ *)

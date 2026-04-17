@@ -660,6 +660,49 @@ export interface Keeper {
   inventory?: string[]
   relationships?: Record<string, string>
   supervisor_diagnostics?: KeeperSupervisorDiagnostics
+  outcomes?: KeeperOutcomes
+}
+
+/** Outcomes rollup — aggregated successes / failures / validation
+ *  for the last 50-entry transition ring. Backed by
+ *  [Dashboard_http_keeper.compute_outcomes_rollup]. See
+ *  [specs/keeper-state-machine/KeeperOutcomesConservation.tla] for the
+ *  conservation invariant:
+ *    successes.substantive_turns + failures.turn_failed + failures.gate_rejected
+ *      = observed_turns
+ */
+export interface KeeperOutcomes {
+  window: string
+  observed_turns: number
+  successes: {
+    substantive_turns: number
+    compactions_ok: number
+    handoffs_ok: number
+  }
+  failures: {
+    turn_failed: number
+    gate_rejected: number
+    compaction_failed: number
+    handoff_failed: number
+    crashes: number
+    restarts: number
+    consecutive_fail_current: number
+  }
+  validation: {
+    oas_verdicts: {
+      pass: number
+      fail: number
+      unknown: number
+      top_failure_reasons: string[]
+    }
+    /** null until CDAL verdict gate (#7531) lands. */
+    cdal_gate: null | {
+      pass: number
+      reject: number
+      pending_verification: number
+    }
+    last_verdict_at: number | null
+  }
 }
 
 export interface KeeperSupervisorCrashLogEntry {

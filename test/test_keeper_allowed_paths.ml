@@ -206,6 +206,45 @@ let test_default_roots_use_playground_with_full_access () =
       ~allowed_paths:["*"] ~name:"keeper" () in
   check_default_roots_use_playground meta
 
+(* Error UX: rejection messages must teach the LLM why the path failed,
+   not just that it failed. The relative-path case is the common one — bare
+   "X not allowed" sends the keeper into a retry loop guessing alternatives.
+   See memory/feedback_tool-error-messages-teach-llm.md. *)
+
+let contains_substring ~haystack ~needle =
+  let h = String.length haystack and n = String.length needle in
+  if n = 0 then true
+  else if n > h then false
+  else
+    let rec scan i =
+      if i + n > h then false
+      else if String.sub haystack i n = needle then true
+      else scan (i + 1)
+    in
+    scan 0
+
+let test_path_rejection_explains_relative_anchor () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"ani1999" () in
+  with_temp_config (fun config ->
+    match KES.resolve_keeper_path ~config ~meta ~raw_path:"repos/masc-mcp" with
+    | Ok path -> fail ("expected rejection for repos/masc-mcp, got: " ^ path)
+    | Error err ->
+      check bool "preserves machine-readable prefix" true
+        (String.starts_with ~prefix:"path_not_in_allowed_paths:" err);
+      check bool "includes relative-anchor explanation" true
+        (contains_substring ~haystack:err
+           ~needle:"relative paths anchor at project root");
+      check bool "includes resolved candidate" true
+        (contains_substring ~haystack:err ~needle:"resolved="))
+
+let test_path_rejection_omits_resolved_for_absolute () =
+  let meta = make_meta ~execution_scope:"workspace" ~name:"ani1999" () in
+  with_temp_config (fun config ->
+    match KES.resolve_keeper_path ~config ~meta
+            ~raw_path:"/etc/passwd" with
+    | Ok path -> fail ("expected absolute path rejection, got: " ^ path)
+    | Error _ -> check bool "absolute path rejected" true true)
+
 let test_resolve_keeper_path_blocks_workspace_repo_write_default () =
   let meta = make_meta ~execution_scope:"workspace" ~name:"keeper" () in
   with_temp_config (fun config ->
@@ -429,6 +468,10 @@ let () =
             test_default_roots_use_playground_with_explicit_paths;
           test_case "default roots stay in playground with full access" `Quick
             test_default_roots_use_playground_with_full_access;
+          test_case "rejection explains relative-anchor + resolved candidate" `Quick
+            test_path_rejection_explains_relative_anchor;
+          test_case "absolute path rejection still works" `Quick
+            test_path_rejection_omits_resolved_for_absolute;
           test_case "workspace repo writes blocked by default" `Quick
             test_resolve_keeper_path_blocks_workspace_repo_write_default;
           test_case "bare writes default into playground" `Quick

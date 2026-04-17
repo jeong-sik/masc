@@ -59,6 +59,7 @@
         test_keeper_registry
         test_keeper_supervisor
         test_keeper_allowed_paths
+        test_keeper_pr_review
         test_keeper_execution_scope
         test_playground_paths
         test_keeper_llama_only
@@ -161,6 +162,7 @@
           test_keeper_registry
           test_keeper_supervisor
           test_keeper_allowed_paths
+          test_keeper_pr_review
           test_keeper_execution_scope
           test_playground_paths
           test_keeper_llama_only

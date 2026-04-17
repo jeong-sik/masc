@@ -170,6 +170,24 @@ let safe_persisted_entry_json ~(base_path : string)
         summary.loop_id (Printexc.to_string exn);
       None
 
+let persisted_summaries_cache : (string, float * Autoresearch_types.persisted_summary) Hashtbl.t = Hashtbl.create 1024
+
+let load_state_cached ~base_path loop_id =
+  let path = Autoresearch.state_file ~base_path loop_id in
+  try
+    let stats = Unix.stat path in
+    let mtime = stats.st_mtime in
+    match Hashtbl.find_opt persisted_summaries_cache loop_id with
+    | Some (cached_mtime, summary) when cached_mtime = mtime ->
+        Some summary
+    | _ ->
+        (match Autoresearch.load_state ~base_path loop_id with
+         | Some summary as result ->
+             Hashtbl.replace persisted_summaries_cache loop_id (mtime, summary);
+             result
+         | None -> None)
+  with _ -> None
+
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.
     Converts to JSON early to avoid polymorphic variant type mismatch. *)
@@ -195,7 +213,7 @@ let autoresearch_loops_json ~(base_path : string) ?(offset = 0) ?(limit = 100) (
   let persisted_entries =
     List.filter_map
       (fun loop_id ->
-        match Autoresearch.load_state ~base_path loop_id with
+        match load_state_cached ~base_path loop_id with
         | Some summary -> safe_persisted_entry_json ~base_path summary
         | None -> None)
       persisted_ids
@@ -269,7 +287,7 @@ let autoresearch_loops_csv ~(base_path : string) : string =
   let persisted_entries =
     List.filter_map
       (fun loop_id ->
-        match Autoresearch.load_state ~base_path loop_id with
+        match load_state_cached ~base_path loop_id with
         | Some summary -> safe_persisted_entry_json ~base_path summary
         | None -> None)
       persisted_ids
@@ -332,7 +350,7 @@ let autoresearch_loop_detail_json ~(base_path : string)
         in
         Ok (json, insights, history)
     | None -> (
-        match Autoresearch.load_state ~base_path loop_id with
+        match load_state_cached ~base_path loop_id with
         | Some summary ->
             let json = persisted_to_loop_summary_json base_path summary in
             let history =
@@ -418,7 +436,7 @@ let load_loop_state ~base_path loop_id =
   match Hashtbl.find_opt Autoresearch.active_loops loop_id with
   | Some state -> Ok state
   | None -> (
-      match Autoresearch.load_state ~base_path loop_id with
+      match load_state_cached ~base_path loop_id with
       | Some persisted ->
           let state = rehydrate_persisted_loop persisted in
           Hashtbl.replace Autoresearch.active_loops loop_id state;
@@ -561,7 +579,7 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) ~(requester_agent
         match requester_agent with
         | None | Some "dashboard" | Some "admin" -> true
         | Some requester ->
-            match Autoresearch.load_state ~base_path loop_id with
+            match load_state_cached ~base_path loop_id with
             | None -> true
             | Some state ->
                 match state.author with
@@ -580,7 +598,7 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) ~(requester_agent
           match active with
           | Some state -> Ok state
           | None -> (
-              match Autoresearch.load_state ~base_path loop_id with
+              match load_state_cached ~base_path loop_id with
               | Some persisted -> Ok (rehydrate_persisted_loop persisted)
               | None -> Error (Printf.sprintf "Loop %s not found" loop_id)))
       in

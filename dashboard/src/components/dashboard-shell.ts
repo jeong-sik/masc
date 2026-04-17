@@ -20,6 +20,7 @@ import { RouteLink } from './common/route-link'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
 import { CopyIdButton } from './common/copy-id-button'
+import { formatElapsedCompact } from '../lib/format-time'
 
 const buildIdentityOpen = signal(false)
 
@@ -96,6 +97,20 @@ export function githubCommitUrl(commit: string | null | undefined): string | nul
   return `https://github.com/${UPSTREAM_REPO}/commit/${value}`
 }
 
+/** Pure: render uptime seconds as a human-readable duration for the
+    build-identity dropdown. Delegates to formatElapsedCompact ("3s",
+    "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
+    \"알 수 없음\" so the dropdown never prints \"NaNs\" or \"-5s\". */
+export function formatUptimeSecondsHuman(
+  seconds: number | null | undefined,
+): string {
+  if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds < 0) {
+    return '알 수 없음'
+  }
+  return formatElapsedCompact(seconds)
+}
+
+
 export function BuildIdentityBadge() {
   const status = serverStatus.value
   const build = status?.build
@@ -148,7 +163,10 @@ export function BuildIdentityBadge() {
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>업타임</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
+                <strong
+                  class="text-[color:var(--text-strong)] text-right tabular-nums"
+                  title=${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s raw` : undefined}
+                >${formatUptimeSecondsHuman(build?.uptime_seconds)}</strong>
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>쉘 스냅샷</span>

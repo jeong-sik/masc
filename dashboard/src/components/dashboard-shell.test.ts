@@ -1,6 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { githubCommitUrl, currentSectionShareUrl } from './dashboard-shell'
+import {
+  githubCommitUrl,
+  currentSectionShareUrl,
+  formatUptimeSecondsHuman,
+} from './dashboard-shell'
 
 describe('githubCommitUrl (pure)', () => {
   it('returns null for null / undefined / empty string', () => {
@@ -98,5 +102,42 @@ describe('currentSectionShareUrl (pure)', () => {
     } finally {
       windowSpy.mockRestore()
     }
+  })
+})
+
+describe('formatUptimeSecondsHuman (pure)', () => {
+  it('null / undefined → "알 수 없음"', () => {
+    expect(formatUptimeSecondsHuman(null)).toBe('알 수 없음')
+    expect(formatUptimeSecondsHuman(undefined)).toBe('알 수 없음')
+  })
+
+  it('NaN → "알 수 없음" (no "NaNs" in the dropdown)', () => {
+    expect(formatUptimeSecondsHuman(Number.NaN)).toBe('알 수 없음')
+  })
+
+  it('negative → "알 수 없음" (no "-5s" — clock skew guard)', () => {
+    expect(formatUptimeSecondsHuman(-5)).toBe('알 수 없음')
+  })
+
+  it('sub-minute → "Xs" compact', () => {
+    expect(formatUptimeSecondsHuman(3)).toBe('3s')
+    expect(formatUptimeSecondsHuman(45)).toBe('45s')
+  })
+
+  it('sub-hour → "Xm Ys" compact', () => {
+    expect(formatUptimeSecondsHuman(125)).toBe('2m 5s')
+    expect(formatUptimeSecondsHuman(3599)).toBe('59m 59s')
+  })
+
+  it('hour+ → "Xh Ym" compact (regression over the raw "3600s" pre-fix)', () => {
+    // The whole point of this helper: 3600 stopped reading as
+    // "3600s" (cognitive load) and now reads as "1h 0m".
+    expect(formatUptimeSecondsHuman(3600)).toBe('1h 0m')
+    expect(formatUptimeSecondsHuman(9000)).toBe('2h 30m')
+    expect(formatUptimeSecondsHuman(86_400)).toBe('24h 0m')
+  })
+
+  it('zero seconds → "0s" (fresh boot, still valid)', () => {
+    expect(formatUptimeSecondsHuman(0)).toBe('0s')
   })
 })

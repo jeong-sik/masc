@@ -233,7 +233,7 @@ let test_loops_json_skips_invalid_persisted_state () =
   (* Valid JSON but missing required fields used by state_of_yojson. *)
   write_file state_path {|{"loop_id":"bad-loop","status":"running"}|};
   let json =
-    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
   in
   (* Partial state.json (only loop_id+status) is rejected by strict
      schema validation in load_state. Dashboard skips invalid entries. *)
@@ -252,7 +252,7 @@ let test_loops_json_skips_legacy_persisted_state () =
   in
   write_file state_path (legacy_state_json ~loop_id ());
   let json =
-    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
   in
   check int "legacy persisted loop is skipped" 0
     Yojson.Safe.Util.(json |> member "total" |> to_int);
@@ -283,7 +283,7 @@ let test_loops_json_tolerates_invalid_swarm_link_for_active_loop () =
   write_file swarm_path
     (Printf.sprintf {|{"loop_id":"%s","linked_at":0}|} state.loop_id);
   let json =
-    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
   in
   check int "active loop still listed" 1
     Yojson.Safe.Util.(json |> member "total" |> to_int);
@@ -319,7 +319,7 @@ let test_loops_json_orders_live_then_recent () =
   write_file older_persisted_path
     (persisted_state_json ~loop_id:"persisted-old" ~updated_at:100.0 ());
   let json =
-    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
   in
   let loops = Yojson.Safe.Util.(json |> member "loops" |> to_list) in
   check int "three loops" 3 (List.length loops);
@@ -344,7 +344,7 @@ let test_loops_json_uses_state_file_mtime_for_updated_at () =
   let expected_mtime = 1_717_171_717.0 in
   Unix.utimes state_path expected_mtime expected_mtime;
   let json =
-    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+    Lib.Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
   in
   let updated_at =
     Yojson.Safe.Util.(json |> member "loops" |> index 0 |> member "updated_at" |> to_float)

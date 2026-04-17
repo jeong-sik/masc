@@ -255,6 +255,43 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       in
       Some (wrap ~event_type:"context_compact_started" ~payload
               ~agent_name ())
+  | Agent_sdk.Event_bus.ContentReplacementReplaced
+      { tool_use_id; preview; original_chars; seen_count_after } ->
+      let payload =
+        `Assoc [
+          ("tool_use_id", `String tool_use_id);
+          ("preview", `String preview);
+          ("original_chars", `Int original_chars);
+          ("seen_count_after", `Int seen_count_after);
+        ]
+      in
+      Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
+  | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
+      let payload =
+        `Assoc [
+          ("tool_use_id", `String tool_use_id);
+          ("seen_count_after", `Int seen_count_after);
+        ]
+      in
+      Some (wrap ~event_type:"content_replacement_kept" ~payload ())
+  | Agent_sdk.Event_bus.SlotSchedulerObserved
+      { max_slots; active; available; queue_length; state } ->
+      let state_str =
+        match state with
+        | Agent_sdk.Event_bus.Idle -> "idle"
+        | Agent_sdk.Event_bus.Queued -> "queued"
+        | Agent_sdk.Event_bus.Saturated -> "saturated"
+      in
+      let payload =
+        `Assoc [
+          ("max_slots", `Int max_slots);
+          ("active", `Int active);
+          ("available", `Int available);
+          ("queue_length", `Int queue_length);
+          ("state", `String state_str);
+        ]
+      in
+      Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
       Some
         (wrap ~event_type:name ~payload

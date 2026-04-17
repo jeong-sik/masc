@@ -1,7 +1,7 @@
 # masc-mcp
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
-[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.153.0-blue.svg)](https://github.com/jeong-sik/oas)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.155.1-blue.svg)](https://github.com/jeong-sik/oas)
 
 > Personal project. No production SLA, no external support, no compatibility guarantees. The API surface, schema, and dashboard change on the author's schedule.
 >
@@ -54,11 +54,11 @@ Do not start with `masc-mcp` if you need:
 ┌─────────▼─────────────────▼──────────────────────┐
 │         OAS / agent_sdk  (agent runtime)          │
 │  Agent.run  Builder  Hooks  Checkpoint  Memory    │
-│  Context_reducer  Tool_selector  Cascade          │
+│  Context_reducer  Tool_selector  Structured       │
 └──────────────────────────────────────────────────┘
 ```
 
-**MASC** decides when, why, and which agent to run. **OAS** handles single-agent execution, tool dispatch, context management, and LLM provider cascading. MASC depends on OAS; OAS does not know about MASC.
+**MASC** decides when, why, and which provider/model chain to use. **OAS** handles single-agent execution, tool dispatch, context management, and the concrete single-provider request once MASC has selected it. MASC depends on OAS; OAS does not know about MASC.
 
 ### Transport
 
@@ -75,7 +75,7 @@ All protocols run concurrently from a single Eio fiber pool:
 ### Tech Stack
 
 - **OCaml 5.4+** with Eio structured concurrency (no Lwt)
-- **agent_sdk** >= 0.153.0 (OAS agent runtime; pinned floor in `masc_mcp.opam` and `dune-project`)
+- **agent_sdk** >= 0.155.1 (OAS agent runtime; pinned floor in `masc_mcp.opam` and `dune-project`)
 - **mcp_protocol** >= 1.3.0 (MCP JSON-RPC contract)
 - **h2-eio** (HTTP/2), **grpc-direct** (gRPC), **ocaml-webrtc** (WebRTC)
 - **caqti** + PostgreSQL (optional), **sqlite3** (fallback), **neo4j_bolt** (optional graph)
@@ -246,11 +246,11 @@ See [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) and
 
 ## Model Cascade
 
-- `config/cascade.json` follows the OAS cascade contract.
-- OAS owns cascade schema, parsing, and label semantics.
-- MASC uses that contract to choose repo-level checked-in defaults; each keeper can override via `cascade_name` in its TOML.
+- `config/cascade.json` is a MASC runtime contract.
+- MASC owns cascade schema, parsing, and selection policy; OAS only sees the resolved concrete provider/model choice passed per call.
+- Each keeper can override the repo default via `cascade_name` in its TOML.
 - For committed defaults, prefer explicit `provider:model_id` labels instead of convenience labels.
-- Checked-in defaults must stay limited to providers recognized by the currently pinned OAS parser.
+- Checked-in defaults must stay limited to providers that the currently pinned OAS runtime can actually execute once selected.
 - See [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md), [docs/spec/13-oas-integration.md](docs/spec/13-oas-integration.md), and [docs/spec/14-configuration.md](docs/spec/14-configuration.md).
 
 ## Safe Starting Paths

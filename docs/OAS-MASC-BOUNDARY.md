@@ -51,11 +51,11 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/cascade.json`은 **OAS cascade contract**를 따르는 설정 파일이다.
-- cascade schema, parsing, label semantics의 owner는 OAS다.
-- MASC는 그 contract를 재정의하지 않고, 이 저장소에 체크인할 repo-level default만 선택한다.
-- OAS가 소유한 설정 결과를 MASC가 소비하는 것은 허용된다. 다만 MASC는 provider allowlist, cascade parsing rule, proof-store layout 같은 OAS-owned shape를 자체 meta/profile schema로 다시 소유하면 안 된다.
-- 따라서 runtime convenience label(예: `provider:auto`)은 OAS 차원에서 존재할 수 있지만, checked-in repo defaults는 review 안정성을 위해 explicit `provider:model_id`를 선호한다.
+- `config/cascade.json`은 **MASC runtime contract**다.
+- cascade schema, parsing, label semantics, selection policy의 owner는 MASC다.
+- MASC는 repo-level default와 keeper별 `cascade_name` override를 해석해 concrete provider/model 후보를 고른다.
+- OAS는 MASC가 선택한 concrete provider/model config를 실행하는 단일-provider runtime으로 남는다.
+- 따라서 checked-in repo defaults는 review 안정성을 위해 explicit `provider:model_id`를 선호한다.
 - legacy `allowed_providers` keeper TOML/meta fields는 compatibility input일 뿐이며, active runtime policy로 취급하지 않는다.
 - persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
 
@@ -70,7 +70,7 @@ OAS  ──does not know──→ MASC
 | Checkpoint integration | Partial complete | OAS checkpoint is used in shared worker/runtime paths, and the public OAS worker API now keeps the extra JSON as a neutral checkpoint sidecar. Keeper runtime still persists its own `working_context` / serialized checkpoint path in `lib/keeper/keeper_exec_context.ml` |
 | Memory bridge | Partial complete | long-term + procedural + institution episodic are bridged; broader memory unification is still separate |
 | Team-session swarm | Removed | `lib/team_session/` module purged; MASC no longer owns a session orchestration surface. OAS Swarm Runner is the sole substrate; consumers drive swarm runs via OAS primitives directly. |
-| Provider selection ownership | Improved | MASC persists `cascade_name` only; provider allowlists remain OAS-owned and legacy `allowed_providers` inputs are ignored |
+| Provider selection ownership | MASC-owned | MASC resolves `cascade_name` and selects the concrete provider/model; legacy `allowed_providers` inputs are ignored |
 
 ## Boundary Audit Snapshot
 

@@ -311,7 +311,7 @@ let run_named
       let labels = Cascade_runtime.models_of_cascade_name cascade_name in
       (labels, resolve_cascade_providers ?provider_filter ~cascade_name ())
   in
-  let capture, metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
+  let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
   | [] ->
@@ -404,6 +404,8 @@ let run_named
           Printf.sprintf "HTTP %d: %s" code
             (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string)
         | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
+        | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
+          Printf.sprintf "%s provider requires a CLI transport" kind
         | Some (Llm_provider.Http_client.NetworkError { message }) -> message
         | None -> "no providers available"
       in
@@ -464,7 +466,8 @@ let run_named
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
            Log.Misc.warn "cascade %s: accept rejected %s (%s), trying next" cascade_name provider_cfg.model_id reason;
-           metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
+           Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
+             ~from_model:provider_cfg.model_id ~to_model:"next" ~reason;
            try_cascade ?resume_checkpoint:next_resume rest new_err
          | Cascade_fsm.Exhausted _ ->
            let observation =
@@ -499,7 +502,8 @@ let run_named
            (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
             | Cascade_fsm.Try_next { last_err = new_err } ->
               Log.Misc.warn "cascade %s: %s failed (%s), trying next" cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
-              metrics.on_cascade_fallback ~from_model:provider_cfg.model_id ~to_model:"next"
+              Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
+                ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(Oas.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->

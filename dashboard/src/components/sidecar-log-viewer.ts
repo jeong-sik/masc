@@ -11,7 +11,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
-import { LoadingState } from './common/feedback-state'
+import { SkeletonText } from './common/skeleton'
 
 interface LogResponse {
   ok: boolean
@@ -241,7 +241,11 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
       ${entry.error
         ? html`<div class="rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-100">${entry.error}</div>`
         : entry.loading && entry.lines.length === 0
-          ? html`<${LoadingState}>로그 불러오는 중...<//>`
+          ? html`
+              <div class="rounded bg-[var(--bg-0)] p-2">
+                <${SkeletonText} lines=${8} ariaLabel="로그 불러오는 중" />
+              </div>
+            `
           : entry.available
             ? filtered.length === 0 && hasFilter
               ? html`

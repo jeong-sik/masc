@@ -168,7 +168,7 @@ let all_entries =
       exposure_status = "main";
       hidden_from_nav = false;
       meets_main_gate = true;
-      rationale = "review queue, 추천 액션, 승인 대기를 한 화면에서 처리하는 canonical operator surface라 메인에 유지합니다.";
+      rationale = "QuickIntervene, 흐름 제어, 최근 운영 활동을 한 화면에서 다루는 canonical operator surface라 메인에 유지합니다. review queue · Live Judge · HITL 승인은 거버넌스 페이지 관할입니다.";
       route_hash = Some "#command?section=intervene";
       refs =
         {

@@ -9,6 +9,7 @@ import {
   fetchAutoresearchLoops,
   fetchAutoresearchLoopDetail,
   retryAutoresearchLoop,
+  type AutoresearchCycleRecord,
   type AutoresearchLoopsResponse,
   type AutoresearchLoopDetail,
   type AutoresearchLoopSummary,
@@ -34,6 +35,32 @@ let pendingRefreshDetail = false
 let detailRequestSeq = 0
 
 export const authorFilter = signal<string>('all')
+
+// --- Cycles table search ---
+
+export const cyclesSearchQuery = signal<string>('')
+
+function decisionLabelForFilter(decision: string): string {
+  return decision === 'keep' ? '유지' : '삭제'
+}
+
+export function filterCycles(
+  cycles: readonly AutoresearchCycleRecord[],
+  query: string,
+): readonly AutoresearchCycleRecord[] {
+  const normalized = query.trim().toLowerCase()
+  if (normalized.length === 0) return cycles
+  return cycles.filter(c => {
+    const hypothesis = c.hypothesis.toLowerCase()
+    const decisionRaw = c.decision.toLowerCase()
+    const decisionLocal = decisionLabelForFilter(c.decision)
+    return (
+      hypothesis.includes(normalized) ||
+      decisionRaw.includes(normalized) ||
+      decisionLocal.includes(normalized)
+    )
+  })
+}
 
 export const filteredLoops = computed<AutoresearchLoopSummary[]>(() => {
   const state = loopsResource.state.value
@@ -171,6 +198,8 @@ export function resetAutoresearchState(resetFormFields?: () => void): void {
   detailError.value = null
   loopActionBusy.value = false
   loopActionError.value = null
+  authorFilter.value = 'all'
+  cyclesSearchQuery.value = ''
   pendingRefreshDetail = false
   detailRequestSeq = 0
   if (resetFormFields) resetFormFields()

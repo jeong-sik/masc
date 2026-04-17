@@ -7,6 +7,7 @@ import type {
   AutoresearchLoopSummary,
   AutoresearchLoopsResponse,
 } from '../api/autoresearch'
+import { filterCycles, cyclesSearchQuery } from './autoresearch-state'
 
 void vi
 
@@ -23,6 +24,13 @@ function cycleRecord(cycle: number): AutoresearchCycleRecord {
     model_used: 'glm',
     timestamp: 1_717_171_717 + cycle,
   }
+}
+
+function cycleWith(
+  cycle: number,
+  overrides: Partial<AutoresearchCycleRecord> = {},
+): AutoresearchCycleRecord {
+  return { ...cycleRecord(cycle), ...overrides }
 }
 
 function loopSummary(
@@ -449,5 +457,74 @@ describe('Autoresearch surface refresh', () => {
     const settledRetryButton = Array.from(container.querySelectorAll('button'))
       .find(button => button.textContent?.includes('재시도')) as HTMLButtonElement | undefined
     expect(settledRetryButton?.disabled).toBe(false)
+  })
+})
+
+describe('filterCycles', () => {
+  afterEach(() => {
+    cyclesSearchQuery.value = ''
+  })
+
+  const cycles: readonly AutoresearchCycleRecord[] = [
+    cycleWith(1, { hypothesis: 'Reduce memory footprint', decision: 'keep' }),
+    cycleWith(2, { hypothesis: 'Try CUDA kernel fusion', decision: 'discard' }),
+    cycleWith(3, { hypothesis: 'Cache embeddings in LRU', decision: 'keep' }),
+  ]
+
+  it('returns the input reference unchanged for an empty query', () => {
+    const result = filterCycles(cycles, '')
+    expect(result).toBe(cycles)
+  })
+
+  it('returns the input reference unchanged for a whitespace-only query', () => {
+    const result = filterCycles(cycles, '   ')
+    expect(result).toBe(cycles)
+  })
+
+  it('matches hypothesis substring (case-insensitive)', () => {
+    const result = filterCycles(cycles, 'CUDA')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.cycle).toBe(2)
+  })
+
+  it('matches hypothesis substring with mixed case query', () => {
+    const result = filterCycles(cycles, 'MEMORY')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.cycle).toBe(1)
+  })
+
+  it('matches raw decision keyword `keep`', () => {
+    const result = filterCycles(cycles, 'keep')
+    expect(result.map(c => c.cycle)).toEqual([1, 3])
+  })
+
+  it('matches raw decision keyword `discard`', () => {
+    const result = filterCycles(cycles, 'discard')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.decision).toBe('discard')
+  })
+
+  it('matches localized decision label (유지 / 삭제)', () => {
+    expect(filterCycles(cycles, '유지').map(c => c.cycle)).toEqual([1, 3])
+    const discard = filterCycles(cycles, '삭제')
+    expect(discard).toHaveLength(1)
+    expect(discard[0]?.decision).toBe('discard')
+  })
+
+  it('trims leading and trailing whitespace before matching', () => {
+    const result = filterCycles(cycles, '   cache   ')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.cycle).toBe(3)
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    const result = filterCycles(cycles, 'nonexistent-term-zzz')
+    expect(result).toEqual([])
+  })
+
+  it('does not match numeric cycle or score fields', () => {
+    // cycle=1 exists, but "1" should not match as hypothesis/decision.
+    const result = filterCycles(cycles, '0.5')
+    expect(result).toEqual([])
   })
 })

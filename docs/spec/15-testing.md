@@ -127,7 +127,6 @@ Correctness gate가 아닌 orchestration/benchmark/behavior 실험. Runbook과 �
 | MDAL (`test_mdal_*`) | 3 | `test_mdal.ml`, `test_mdal_store.ml` |
 | Worker (`test_worker_*`) | 3 | `test_worker_runtime.ml`, `test_worker_dev_tools.ml` |
 | Verification (`test_verif*`) | 3 | `test_verifier_oas_bridge.ml` |
-| Team (`test_team_*`) | 2 | `test_team_session_oas_bridge.ml` |
 | Memory (`test_memory_*`) | 1 | `test_memory_oas_5tier.ml` |
 | 기타 | ~50+ | auth, encryption, spawn, bounded, etc. |
 

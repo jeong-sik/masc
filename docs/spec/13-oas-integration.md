@@ -481,16 +481,14 @@ Detailed implementation checklist lives in
 | `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about room/task semantics |
 | `context_compact_oas` | Acceptable but lossy | OAS reducer is authoritative, but MASC marker heuristics still influence scoring |
 | `memory_oas_bridge` | Acceptable but lossy | consumer adapter is correct; lifecycle is still seed/flush driven rather than hook-first |
-| `team_session_oas_bridge` | Acceptable but lossy | OAS Swarm runs the session, but metadata/projection gaps remain |
 | keeper context/checkpoint continuity path | Boundary violation | duplicate runtime ownership + raw text continuity markers remain |
 
 ### 12.3 Priority Order
 
 1. keeper runtime state ownership
 2. marker/text leakage
-3. team-session bridge fidelity
-4. memory bridge hardening
-5. doc truth alignment
+3. memory bridge hardening
+4. doc truth alignment
 
 ---
 

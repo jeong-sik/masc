@@ -2,7 +2,7 @@ import type { Keeper } from '../../types'
 import { isOfflineStatus } from '../../lib/status-utils'
 import { navigate } from '../../router'
 
-export type ToolAuditEmptyState =
+type ToolAuditEmptyState =
   | 'offline'
   | 'not_collected'
   | 'none_recent'

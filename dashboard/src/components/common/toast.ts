@@ -3,9 +3,9 @@ import { signal } from '@preact/signals'
 import type { ComponentChildren } from 'preact'
 import { CheckCircle2, AlertTriangle, XCircle, X } from 'lucide-preact'
 
-export type ToastType = 'success' | 'warning' | 'error'
+type ToastType = 'success' | 'warning' | 'error'
 
-export interface ToastAction {
+interface ToastAction {
   label: string
   onClick: () => void
 }

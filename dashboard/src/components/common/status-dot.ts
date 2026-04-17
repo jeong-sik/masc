@@ -21,7 +21,7 @@
 
 import { html } from 'htm/preact'
 
-export type StatusDotSize = 'xs' | 'sm' | 'md' | 'lg'
+type StatusDotSize = 'xs' | 'sm' | 'md' | 'lg'
 
 /** Pure: Tailwind size tokens for each named variant. Exposed so
     a caller that wraps its own <span> (legacy code in a hot render
@@ -50,7 +50,7 @@ export function statusDotClasses(
   return parts.join(' ')
 }
 
-export interface StatusDotProps {
+interface StatusDotProps {
   size?: StatusDotSize
   /** Additional Tailwind classes for tone, margin, etc. Caller-owned
       because per-file helpers (`statusDot(status)`, `verdictTone(v)`,

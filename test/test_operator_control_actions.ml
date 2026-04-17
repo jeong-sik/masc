@@ -116,10 +116,7 @@ let test_digest_defaults_to_namespace_target () =
       Alcotest.(check string) "default target_type" "root"
         Yojson.Safe.Util.(digest_json |> member "target_type" |> to_string))
 
-(* review_item_from_room_digest helper + test_cdal_review_requirement_appears_in_review_queue
-   + test_review_resolve_hides_matching_item + test_review_defer_moves_item_to_deferred_queue
-   removed: they asserted the review_queue / deferred_queue JSON fields whose
-   emission was dropped in this PR. The underlying review lifecycle
-   (split_review_items, pending_confirm_review_item producers, Operator_review_state
-   decision recording) is still exercised indirectly via recent_reviews assertions
-   elsewhere. *)
+(* review_queue / deferred_queue / review_summary fields were emitted for
+   a retired dashboard surface; the producers (split_review_items,
+   *_review_item) were also removed. Review decisions still reach the UI
+   via [recent_reviews]. *)

@@ -218,7 +218,6 @@
    operator_digest_event
    operator_digest_guidance
    operator_digest_types
-   operator_digest_review_types
    opentelemetry_client_cohttp_eio
    observability_redact
    ; risk_digest removed (team session cleanup)

@@ -388,6 +388,3 @@ let normalize_digest_target_type value =
       else Error "target_type must be root"
   | None -> Ok "root"
 
-(* review_item type + helpers are in Operator_digest_review_types
-   to avoid field name collision with attention_item in modules
-   that include Operator_digest_types *)

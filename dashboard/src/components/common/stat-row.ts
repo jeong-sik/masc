@@ -1,25 +1,7 @@
-// StatRow / KpiCard — data display primitives
-// Replaces 100+ inline label-value pair patterns
+// KpiCard / StatGrid — data display primitives
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-
-// ── Key-value row (horizontal) ──
-interface StatRowProps {
-  label: string
-  class?: string
-  children: ComponentChildren
-}
-
-/** Horizontal label → value row with muted label and strong value */
-export function StatRow({ label, class: cx, children }: StatRowProps) {
-  return html`
-    <div class="flex items-center justify-between ${cx ?? ''}">
-      <span class="text-[var(--text-muted)]">${label}</span>
-      <strong class="text-[var(--text-strong)] tabular-nums">${children}</strong>
-    </div>
-  `
-}
 
 // ── KPI card (vertical: label on top, big number, optional hint) ──
 interface KpiCardProps {

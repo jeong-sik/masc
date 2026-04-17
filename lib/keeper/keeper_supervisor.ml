@@ -147,34 +147,46 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                publish_lifecycle ~phase:Keeper_state_machine.Crashed
                  "crashed" meta.name reason ()))
       ~finally:(fun () ->
-        Keeper_registry.cleanup_tracking ~base_path meta.name;
-        if not !resolved then begin
-          if Shutdown.is_shutting_down_global () then begin
-            Log.Keeper.warn "%s: fiber unresolved during shutdown (not a crash)" meta.name;
-            Keeper_registry.mark_dead ~base_path meta.name
-              ~at:(Time_compat.now ());
-            ignore (resolve_done (`Crashed "shutdown"))
-          end else begin
-            let reason =
-              Keeper_registry.failure_reason_to_string
-                Keeper_registry.Fiber_unresolved in
-            Keeper_registry.set_failure_reason ~base_path meta.name
-              (Some Keeper_registry.Fiber_unresolved);
-            let ts = Time_compat.now () in
-            Keeper_registry.record_crash ~base_path
-              meta.name ts reason;
-            let rc = match Keeper_registry.get ~base_path meta.name with
-              | Some e -> e.restart_count | None -> 0 in
-            Keeper_crash_persistence.enqueue_record ~keepers_dir
-              ~name:meta.name ~ts ~reason ~restart_count:rc;
-            Keeper_registry.record_error ~base_path meta.name reason;
-            ignore (Keeper_registry.dispatch_event ~base_path meta.name
-              (Keeper_state_machine.Fiber_terminated { outcome = reason }));
-            if resolve_done (`Crashed reason) then
-              publish_lifecycle ~phase:Keeper_state_machine.Crashed
-                "crashed" meta.name reason ()
+        (* Finally runs best-effort. Any exception raised here (including
+           Eio.Cancel.Cancelled, which propagates during concurrent fiber
+           teardown) would be re-wrapped by [Fun.protect] as
+           [Fun.Finally_raised], masking the original body exception and
+           crashing the server (see masc-mcp crash 2026-04-17). Swallow
+           everything and log — cleanup is advisory, state-machine events
+           already fired on the body's happy/error paths. *)
+        try
+          Keeper_registry.cleanup_tracking ~base_path meta.name;
+          if not !resolved then begin
+            if Shutdown.is_shutting_down_global () then begin
+              Log.Keeper.warn "%s: fiber unresolved during shutdown (not a crash)" meta.name;
+              Keeper_registry.mark_dead ~base_path meta.name
+                ~at:(Time_compat.now ());
+              ignore (resolve_done (`Crashed "shutdown"))
+            end else begin
+              let reason =
+                Keeper_registry.failure_reason_to_string
+                  Keeper_registry.Fiber_unresolved in
+              Keeper_registry.set_failure_reason ~base_path meta.name
+                (Some Keeper_registry.Fiber_unresolved);
+              let ts = Time_compat.now () in
+              Keeper_registry.record_crash ~base_path
+                meta.name ts reason;
+              let rc = match Keeper_registry.get ~base_path meta.name with
+                | Some e -> e.restart_count | None -> 0 in
+              Keeper_crash_persistence.enqueue_record ~keepers_dir
+                ~name:meta.name ~ts ~reason ~restart_count:rc;
+              Keeper_registry.record_error ~base_path meta.name reason;
+              ignore (Keeper_registry.dispatch_event ~base_path meta.name
+                (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+              if resolve_done (`Crashed reason) then
+                publish_lifecycle ~phase:Keeper_state_machine.Crashed
+                  "crashed" meta.name reason ()
+            end
           end
-        end))
+        with exn ->
+          Log.Keeper.warn
+            "%s: supervisor finally cleanup failed (suppressed to avoid Fun.Finally_raised): %s"
+            meta.name (Printexc.to_string exn)))
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =

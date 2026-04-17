@@ -1,3 +1,16 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_memory_bank.ml
+  - lib/institution_eio.ml
+  - lib/procedural_memory.ml
+  - lib/auto_recall.ml
+  - lib/hebbian_eio.ml
+  - lib/memory_oas_bridge.ml
+  - lib/context_compact_oas.ml
+---
+
 # Memory Systems
 
 | 항목 | 값 |

@@ -15,7 +15,7 @@
 import { html } from 'htm/preact'
 
 type ProgressBarSize = 'xs' | 'sm' | 'md'
-export type ProgressBarTone =
+type ProgressBarTone =
   | 'accent' | 'ok' | 'warn' | 'bad'
   | 'emerald' | 'amber' | 'rose' | 'sky'
 
@@ -53,7 +53,7 @@ export function progressBarToneClass(tone: ProgressBarTone): string {
   }
 }
 
-export type ProgressBarTrackTone = 'default' | 'dim' | 'muted'
+type ProgressBarTrackTone = 'default' | 'dim' | 'muted'
 
 /** Pure: track (muted background) bg class for a given track tone.
     Default = --white-5 (most rows); dim = --white-6 (keeper detail);
@@ -67,7 +67,7 @@ export function progressBarTrackToneClass(tone: ProgressBarTrackTone = 'default'
   }
 }
 
-export interface ProgressBarProps {
+interface ProgressBarProps {
   /** Percentage 0–100; values outside are clamped (no throw). */
   pct: number
   size?: ProgressBarSize

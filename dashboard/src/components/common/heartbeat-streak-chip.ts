@@ -42,7 +42,7 @@ export function formatStreakLabel(streak: HeartbeatStreak | null): string {
   return `${STATE_LABEL[streak.state]} for ${streak.samples} ${unit}`
 }
 
-export interface HeartbeatStreakChipProps {
+interface HeartbeatStreakChipProps {
   history: HeartbeatState[]
   class?: string
   testId?: string

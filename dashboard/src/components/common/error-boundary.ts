@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { Component, type ComponentChildren } from 'preact'
 import { AlertOctagon, RefreshCcw } from 'lucide-preact'
 
-export interface ErrorBoundaryInfo {
+interface ErrorBoundaryInfo {
   componentStack?: string
 }
 

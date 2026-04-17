@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { AlertTriangle, AlertCircle, Info } from 'lucide-preact'
 
-export type ConfirmTone = 'danger' | 'warning' | 'info'
+type ConfirmTone = 'danger' | 'warning' | 'info'
 
 interface ConfirmState {
   isOpen: boolean

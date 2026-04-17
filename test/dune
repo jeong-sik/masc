@@ -96,8 +96,12 @@
         test_task_stage
         ; test_risk_digest removed (team session cleanup)
         test_artifact_store
-        test_keeper_context_core_dedup
         test_tool_blob_store
+        test_tool_bridge_externalize
+        test_keeper_artifact_hydrator
+        test_artifacts_endpoint
+        test_tool_output_washing_e2e
+        test_keeper_context_core_dedup
         test_golden_set
         test_golden_set_eval
         test_adversarial_eval
@@ -194,8 +198,12 @@
           test_task_stage
           ; test_risk_digest removed (team session cleanup)
           test_artifact_store
-          test_keeper_context_core_dedup
           test_tool_blob_store
+          test_tool_bridge_externalize
+          test_keeper_artifact_hydrator
+          test_artifacts_endpoint
+          test_tool_output_washing_e2e
+          test_keeper_context_core_dedup
           test_golden_set
           test_golden_set_eval
           test_adversarial_eval

@@ -19,5 +19,6 @@ let make_routes ~port ~host ~sw ~clock =
   |> Server_routes_http_routes_verification.add_routes
   |> Server_routes_http_routes_attribution.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
+  |> Server_routes_http_routes_artifacts.add_routes
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
   |> Server_routes_http_routes_sidecar.add_routes ~sw ~clock

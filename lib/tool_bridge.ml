@@ -7,14 +7,73 @@
     tool handlers keep their existing convention unchanged.
 
     @since 2.95.1 — result conversion
-    @since 2.110.0 — schema conversion + OAS Tool.t creation *)
+    @since 2.110.0 — schema conversion + OAS Tool.t creation
+    @since 2.??? — externalize large outputs via [Tool_blob_store] *)
+
+(** {1 Tool Output Externalization}
+
+    Tool outputs above [default_externalize_threshold_bytes] are stored
+    in the content-addressed blob store ([Tool_blob_store]) and the
+    OAS [content] field carries a sentinel marker
+    ([Tool_output.encode_for_oas (Stored {...})]). Smaller outputs flow
+    through unchanged.
+
+    The hydrator reducer (see [keeper_artifact_hydrator], PR 4) lazily
+    re-inflates the most recent stored refs before LLM dispatch; older
+    refs stay as markers in the message history.
+
+    Disabled when [MASC_BASE_PATH] is unset (no store root resolvable),
+    which keeps unit tests free from filesystem side effects unless they
+    explicitly opt in. *)
+
+let default_externalize_threshold_bytes = 2048
+
+let externalize_threshold_bytes () =
+  match Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" with
+  | None -> default_externalize_threshold_bytes
+  | Some s ->
+      (match int_of_string_opt (String.trim s) with
+       | Some n when n >= 0 -> n
+       | _ -> default_externalize_threshold_bytes)
+
+let externalization_disabled () =
+  match Sys.getenv_opt "MASC_TOOL_EXTERNALIZE" with
+  | Some ("0" | "false" | "no" | "off") -> true
+  | _ -> false
+
+(* Lazy singleton. Resolved once per process from [base_path_opt]; if no
+   base path is configured (typical in tests with [MASC_BASE_PATH ""]),
+   externalization is silently disabled. *)
+let blob_store_lazy : Tool_blob_store.t option Lazy.t =
+  lazy
+    (match Env_config_core.base_path_opt () with
+     | None -> None
+     | Some base_path -> Some (Tool_blob_store.create ~base_path))
+
+(** Externalize [msg] when it exceeds the threshold AND a blob store is
+    available; otherwise pass through unchanged. Best-effort — any
+    failure inside the store falls back to the original [msg] so the
+    keeper never loses tool output bytes due to a storage hiccup. *)
+let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
+  if externalization_disabled () then msg
+  else
+    let threshold = externalize_threshold_bytes () in
+    if String.length msg <= threshold then msg
+    else
+      match Lazy.force blob_store_lazy with
+      | None -> msg
+      | Some store ->
+          (try
+             let stored = Tool_blob_store.put store ~bytes:msg ~mime in
+             Tool_output.encode_for_oas stored
+           with _ -> msg)
 
 (** {1 Result Conversion} *)
 
 let to_oas_tool_result ?(recoverable = false) (success, msg)
   : Agent_sdk.Types.tool_result =
-  if success then Ok { Agent_sdk.Types.content = msg }
-  else Error { Agent_sdk.Types.message = msg; recoverable }
+  if success then Ok { Agent_sdk.Types.content = maybe_externalize msg }
+  else Error { Agent_sdk.Types.message = maybe_externalize msg; recoverable }
 
 let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
   | Ok { content } -> (true, content)

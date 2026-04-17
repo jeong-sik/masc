@@ -60,7 +60,7 @@ let get_tasks_safe config =
   else (read_backlog config).tasks
 
 let safe_yield () =
-  try Eio.Fiber.yield () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+  Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
 let take_first n xs =
   if n <= 0 then []

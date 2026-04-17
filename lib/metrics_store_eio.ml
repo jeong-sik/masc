@@ -181,7 +181,7 @@ let read_metrics_file file : task_metric list =
     ) lines
 
 let safe_yield () =
-  try Eio.Fiber.yield () with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+  Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
 let month_key ~year ~month =
   (year * 12) + (month - 1)

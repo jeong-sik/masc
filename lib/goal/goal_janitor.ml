@@ -33,7 +33,7 @@ let sweep_result_to_yojson r =
 
 (** Parse ISO 8601 timestamp to Unix epoch seconds. *)
 let parse_iso_ts s =
-  try
+  Safe_ops.protect ~default:None (fun () ->
     Scanf.sscanf s "%d-%d-%dT%d:%d:%d" (fun y mo d h mi se ->
       let tm = {
         Unix.tm_sec = se; tm_min = mi; tm_hour = h;
@@ -41,8 +41,7 @@ let parse_iso_ts s =
         tm_wday = 0; tm_yday = 0; tm_isdst = false;
       } in
       let epoch, _ = Unix.mktime tm in
-      Some epoch)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+      Some epoch))
 
 let days_since_update (goal : Goal_store.goal) ~now =
   match parse_iso_ts goal.updated_at with

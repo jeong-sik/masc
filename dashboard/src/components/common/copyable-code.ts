@@ -53,16 +53,29 @@ export function CopyableCode({ command, label, ariaLabel }: CopyableCodeProps) {
     }
   }
 
+  // Inline "Copied" confirmation — GitHub / VSCode gist pattern: the
+  // icon swap alone is too subtle when the operator's eyes are on the
+  // target terminal, so we flash a tiny text pill next to it for ~1.4s.
+  // aria-live="polite" makes screen readers announce the success even
+  // when they weren't focused on the button.
   return html`
-    <div class="group flex items-center gap-2 rounded-md border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1.5 transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)]">
+    <div
+      class="group flex items-center gap-2 rounded-md border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1.5 transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)]"
+      data-copyable-code
+      data-copied=${justCopied ? 'true' : 'false'}
+    >
       ${label
         ? html`<span class="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${label}</span>`
         : null}
       <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-[var(--text-body)]">${command}</code>
+      ${justCopied
+        ? html`<span class="shrink-0 text-[10px] font-semibold text-emerald-300" data-copied-badge aria-live="polite">✓ Copied</span>`
+        : null}
       <button
         type="button"
         class="shrink-0 cursor-pointer rounded border border-transparent p-1 text-[var(--text-dim)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--text-body)] focus-visible:opacity-100 group-hover:opacity-100"
         aria-label=${ariaLabel || (label ? `Copy ${label}` : 'Copy command')}
+        data-copy-button
         onClick=${onCopy}
       >
         ${justCopied ? html`<${Check} size=${14} />` : html`<${Copy} size=${14} />`}

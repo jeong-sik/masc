@@ -433,7 +433,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
   `
 }
 
-export function TabContent() {
+function TabContent() {
   const tab = route.value.tab
 
   switch (tab) {
@@ -506,7 +506,7 @@ export function currentSectionShareUrl(): string {
     opening a deep link had to infer the hierarchy. Every modern web
     app (GitHub / Linear / Notion / Vercel) renders the trail above
     the page title for exactly this reason. */
-export interface BreadcrumbCrumb {
+interface BreadcrumbCrumb {
   label: string
   navigableTab: string | null
 }

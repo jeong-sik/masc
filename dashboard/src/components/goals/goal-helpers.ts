@@ -8,10 +8,10 @@ import type { Goal, Task } from '../../types'
 
 // -- Filter state ------------------------------------------------
 
-export type HorizonFilter = 'all' | 'short' | 'mid' | 'long'
+type HorizonFilter = 'all' | 'short' | 'mid' | 'long'
 export type StatusFilter = 'all' | 'active' | 'completed' | 'paused'
 
-export const horizonFilter = signal<HorizonFilter>('all')
+const horizonFilter = signal<HorizonFilter>('all')
 export const statusFilter = signal<StatusFilter>('all')
 
 // -- Task-level search (case-insensitive, title + description + assignee) --
@@ -51,7 +51,7 @@ export function toggleTaskExpand(id: string) {
 
 // -- Derived data ------------------------------------------------
 
-export const filteredGoals = computed(() => {
+const filteredGoals = computed(() => {
   let list = goals.value
   if (horizonFilter.value !== 'all') {
     list = list.filter(g => g.horizon === horizonFilter.value)

@@ -71,7 +71,7 @@ function taskLink(task: Task): { href: string; label: string } {
   }
 }
 
-export function KanbanCard({ task }: { task: Task }) {
+function KanbanCard({ task }: { task: Task }) {
   const p = task.priority ?? 4
   const isExpanded = expandedTasks.value.has(task.id)
   const hasDescription = Boolean(task.description)

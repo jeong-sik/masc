@@ -91,6 +91,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 주요 필드 군:
 
 - **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
+- **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
 - **Model**: `cascade_name`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
@@ -102,6 +103,8 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
+
+Generation semantics are operational, not genealogical: a successful rollover keeps the same keeper identity but commits a new `trace_id`, increments `generation`, and appends the old trace to `trace_history`.
 
 ### 3.2 working_context
 
@@ -178,11 +181,12 @@ stateDiagram-v2
   AgentRun --> ToolExecution : Agent.run 내부 tool loop
   ToolExecution --> AgentRun : tool 결과 반환
   AgentRun --> UpdateMetrics : Agent.run 완료
-  UpdateMetrics --> Checkpoint : 메트릭 갱신
-  Checkpoint --> CompactCheck : checkpoint 저장
-  CompactCheck --> [*] : 아래 threshold
-  CompactCheck --> Compact : threshold 초과
-  Compact --> [*] : context 압축 후 종료
+  UpdateMetrics --> PostTurnLifecycle : 메트릭 갱신
+  PostTurnLifecycle --> Checkpoint : continuity / checkpoint 정리
+  Checkpoint --> CompactCheck : compaction gate
+  CompactCheck --> HandoffCheck : handoff gate
+  HandoffCheck --> MemoryWrite : memory bank / episode flush
+  MemoryWrite --> [*]
 ```
 
 단계 설명:
@@ -192,8 +196,20 @@ stateDiagram-v2
 3. **AgentRun**: `keeper_agent_run.run_turn`이 OAS `Agent.run`에 위임. tools + hooks + context_reducer + memory 전달
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `keeper_exec_tools.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영
-6. **Checkpoint**: `keeper_exec_context.save_checkpoint`로 working_context를 JSON 파일에 영속화
-7. **CompactCheck**: ratio/message/token gate 기준 초과 시 compaction 실행
+6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle`가 compaction, handoff rollover, continuity summary를 single-writer로 처리
+7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
+8. **MemoryWrite**: `keeper_agent_run` tail에서 memory bank note append와 episodic flush를 수행. hebbian은 task lifecycle에서만 기록
+
+### 4.1.1 Post-turn Persistence Matrix
+
+| 경계 | OCaml owner | 저장소 | TLA/FSM |
+|------|-------------|--------|---------|
+| compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | `KeeperContextLifecycle.tla` |
+| handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta lineage | `KeeperGenerationLineage.tla`, keeper FSM `Handoff_*` events |
+| continuity summary | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
+| memory bank | `keeper_agent_run.ml` | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction |
+| episode flush | `keeper_agent_run.ml` | `.masc/institution_episodes.jsonl` | episode schema / JSONL cap |
+| hebbian learning | `coord_task.ml` | `.masc/synapses/graph.json` | task lifecycle + hebbian rules |
 
 ### 4.2 Keeper Supervisor Lifecycle
 
@@ -319,7 +335,7 @@ Profile별 종류당 보존 상한:
 
 ### 6.5 OAS Memory Bridge
 
-`run_turn`에서 `Memory_oas_bridge.create_memory`로 5계층 seeding: institution(조직), procedures(절차), memory_bank(개별), episodes(에피소드), procedures_as_oas. 턴 후 `flush_all`로 영속화.
+`run_turn`에서 `Memory_oas_bridge.create_memory`로 institution / procedures / memory bank / episodes 계층을 seed한다. 턴 후 영속화는 분리된다: memory bank는 `append_memory_notes_from_reply`, episode는 `store_episode_from_snapshot` + `flush_incremental`, hebbian은 별도의 task lifecycle에서 기록된다.
 
 ---
 

@@ -22,8 +22,8 @@ const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }>
     off: 'No compaction pending — the context window still has room.',
   },
   handoff: {
-    on: 'Keeper will emit a handover capsule and pass state to the next generation.',
-    off: 'No handoff scheduled — this generation continues running.',
+    on: 'Keeper will roll over to a new trace/generation while preserving the same keeper identity.',
+    off: 'No handoff scheduled — the current generation keeps running on the same trace.',
   },
   guardrail: {
     on: 'A guardrail has tripped — the keeper will halt pending operator intervention.',

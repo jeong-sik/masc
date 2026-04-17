@@ -387,7 +387,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           <${KpiCard}
             label="세대"
             value=${keeper.generation ?? '-'}
-            hint="승계 횟수"
+            hint="같은 keeper의 trace 교체 횟수"
           />
           <${KpiCard}
             label="턴"
@@ -397,7 +397,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
           <${KpiCard}
             label="인계"
             value=${keeper.handoff_count_total ?? '-'}
-            hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : undefined}
+            hint=${(keeper.handoff_count_total ?? 0) === 0 ? '첫 인계 후 표시' : '누적 lineage 길이'}
           />
         </div>
       </${KpiSection}>

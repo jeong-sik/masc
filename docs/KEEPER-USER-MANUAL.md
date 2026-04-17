@@ -73,18 +73,18 @@ Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 
 ### 1.6 Generation (세대)
 
-Generation은 keeper의 context handoff 횟수를 나타내는 정수다. keeper가 처음 생성되면 generation=0이며, context가 handoff threshold(기본 85%)를 초과하여 successor에게 전달될 때마다 1씩 증가한다.
+Generation은 keeper의 context handoff 횟수를 나타내는 정수다. keeper가 처음 생성되면 `generation=0`이며, post-turn handoff rollover가 성공적으로 커밋될 때마다 1씩 증가한다.
 
-같은 keeper 이름이라도 generation이 다르면 다른 "세대"의 실행이다. trace_id로 각 세대를 고유하게 식별하며, trace_history에 이전 세대의 trace_id가 누적된다.
+같은 keeper 이름이라도 generation이 다르면 다른 "세대"의 실행이다. 다만 이것은 별도 child runtime이 아니라, **같은 keeper가 새 `trace_id`와 새 session 디렉터리로 옮겨간 versioned self**를 뜻한다. `trace_id`가 현재 세대를 고유하게 식별하고, `trace_history`에는 이전 세대의 `trace_id`가 append-only로 누적된다.
 
 ### 1.7 핵심 용어
 
-자세한 정의는 [GLOSSARY.md](./GLOSSARY.md) 참조. 코드와 이 매뉴얼에서 사용하는 주요 용어:
+자세한 정의는 [spec/00-glossary.md](./spec/00-glossary.md) 참조. 코드와 이 매뉴얼에서 사용하는 주요 용어:
 
 | 용어 | 의미 |
 |------|------|
-| **Handoff** | 한 에이전트에서 다른 에이전트로 실행 컨텍스트를 전달하는 과정 |
-| **Capsule** | handoff 시 전달되는 압축 컨텍스트 페이로드 |
+| **Handoff** | post-turn lifecycle에서 같은 keeper를 새 trace/session으로 이어붙이는 rollover |
+| **Capsule** | handoff 전후 continuity를 위해 유지되는 checkpoint/summary 단위. 현재 구현은 별도 child agent 생성보다 checkpoint rollover에 가깝다 |
 | **Compaction** | 컨텍스트 토큰을 줄이기 위한 압축 (tool output 정리, 메시지 병합 등) |
 | **Keepalive** | keeper의 heartbeat fiber, 주기적으로 Room 존재를 갱신 |
 | **Proactive** | 사용자 입력 없이 keeper가 자발적으로 메시지를 생성하는 행동 |
@@ -152,7 +152,7 @@ message 토큰 = (문자열 길이 / 4) + 4
 |--------|--------|------|
 | **Compact** | 50% (`compaction_ratio_gate`) | 오래된 메시지 요약, tool output 정리 |
 | **Prepare** | 70% | handoff용 capsule/checkpoint 준비 |
-| **Handoff** | 85% (`handoff_threshold`) | successor 에이전트로 context 전달, generation +1 |
+| **Handoff** | 85% (`handoff_threshold`) | 새 trace/session으로 rollover, generation +1 |
 
 Compaction 전략은 순서대로 적용:
 1. **PruneToolOutputs** --- 500자 초과 tool output을 앞뒤 100자로 축소
@@ -162,23 +162,35 @@ Compaction 전략은 순서대로 적용:
 
 ### 2.3 Handoff & Capsule 추출
 
-Handoff 시 보존되는 것과 사라지는 것:
+Handoff를 `same keeper, new trace`로 읽어야 한다. 코드상 성공 handoff는 `keeper_rollover.ml`이 새 session을 만들고, 새 session에 checkpoint를 저장한 뒤, 마지막에만 `trace_id`, `generation`, `trace_history`, `last_handoff_ts`를 교체하는 순서로 커밋된다.
 
-| 보존됨 | 사라짐 |
-|--------|--------|
-| goal | 개별 메시지 원문 (압축됨) |
-| progress_summary | tool output 상세 |
-| pending_actions | importance_scores |
-| key_decisions | 중간 대화 이력 |
-| warnings | 저중요도 정보 |
-| metrics (누적) | 현재 세대의 세부 통계 |
-| system_prompt (상속) | |
+OAS가 checkpoint/session commit truth를 담당하고, `.masc/traces/<trace_id>/generation_manifest.json` 및 `.masc/keepers/<name>.generation_index.jsonl`은 그 성공 commit 뒤에 MASC가 남기는 lineage telemetry artifact다.
+
+Handoff 후 경계는 다음처럼 읽는다.
+
+| 유지됨 | 바뀜 | 보장되지 않음 |
+|--------|------|---------------|
+| keeper 이름, goal/horizon, will/needs/desires, instructions | `trace_id`, session 디렉터리, checkpoint 저장 위치, `generation`, `last_handoff_ts` | 과거 전체 회상, 자유로운 cross-generation 검색, old/new generation 동시 실행 |
+| 현재 작업 continuity를 위한 checkpoint/context | `trace_history`에 이전 trace가 추가 | 세대별로 독립된 child keeper 존재 |
+| continuity_summary와 최신 상태 스냅샷 기반 작업 연속성 | | |
 
 **Generation 증가 메커니즘**:
-1. context_ratio가 handoff_threshold 초과
-2. `keeper_exec_context`가 checkpoint rollover를 준비하고 successor 세대 메타를 계산
-3. keeper metrics snapshot에 `handoff.performed`, `prev_trace_id`, `new_trace_id`, `new_generation`가 기록된다
-4. successor 세대가 새 `trace_id`와 `generation + 1`로 이어서 실행된다
+1. post-turn lifecycle가 compaction 뒤 handoff gate를 평가한다.
+2. 새 `trace_id`와 새 session 디렉터리를 준비한다.
+3. 현재 context를 새 session에 `next_generation` checkpoint로 저장한다.
+4. checkpoint 저장이 성공한 경우에만 `trace_id`, `generation`, `trace_history`, `last_handoff_ts`를 커밋한다.
+5. 실패하면 현재 generation을 유지한 채 handoff failure만 기록한다.
+
+### 2.3.1 기록 시점 / 저장소 / 검증자
+
+| 이벤트 경계 | 1차 owner | 저장되는 것 | 파일 시스템 표면 | 검증자 |
+|------------|-----------|-------------|------------------|--------|
+| turn 종료 | `keeper_unified_turn` | turn metrics, checkpoint 입력 | `.masc/traces/<trace>/...` | keeper state machine + unified turn path |
+| compaction 완료 | `keeper_post_turn` | 압축된 checkpoint, compaction metrics | 현재 trace session | `KeeperContextLifecycle.tla`, post-turn single-writer contract |
+| handoff 완료 | `keeper_post_turn` + `keeper_rollover` | 새 trace checkpoint, `generation + 1`, `trace_history` append | 새 trace session + keeper meta | `KeeperGenerationLineage.tla`, `Drift_guard.verify_handoff` |
+| memory bank write | `keeper_agent_run` | `[STATE]` 기반 note | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction policy |
+| episode flush | `keeper_agent_run` | snapshot 기반 episode | `.masc/institution_episodes.jsonl` | episode schema + JSONL cap |
+| task 완료/취소 | `coord_task` | hebbian strengthen/weaken | `.masc/synapses/graph.json` | task lifecycle + hebbian graph rules |
 
 ### 2.4 Heartbeat 시스템
 
@@ -201,6 +213,15 @@ Heartbeat fiber가 수행하는 작업 (매 주기):
 ## 3. 대시보드 필드 레퍼런스
 
 Keeper 상태 조회(`masc_keeper_status`)의 응답에 포함되는 필드들을 출처별로 분류한다.
+
+### 3.0 화면 읽는 법
+
+| 화면 | 뜻 | 포함하지 않는 것 |
+|------|----|------------------|
+| **FSM Hub** | keeper control-plane. phase, compaction, handoff 같은 런타임 전이 | memory bank 내용, episode 본문 |
+| **Memory Subsystems** | global memory surface. institution episodes + hebbian graph | keeper checkpoint/history, keeper memory bank |
+| **Keeper Detail > Memory Tier** | 개별 keeper memory bank, cap, compaction 상태 | institution episodes, hebbian graph 전체 |
+| **Keeper Detail > Trace / Handoff 관련 패널** | 현재 generation의 `trace_id`와 승계 흔적 | 장기 기억 전체 |
 
 ### 3.1 사용자 설정 필드 (User-Configured)
 
@@ -286,7 +307,7 @@ guardrail:
 | 필드 | 출처 레이어 | 계산 방법 | `-`/0일 때 의미 |
 |------|-----------|----------|----------------|
 | `status` | MASC | agent_status + health_state 결합 (surface_status) | keepalive 미실행 |
-| `generation` | OAS+MASC | handoff 마다 +1, 초기값 1 | 아직 handoff 없음 |
+| `generation` | OAS+MASC | handoff 마다 +1, 초기값 0 | 아직 handoff 없음 |
 | `turn_count` (`total_turns`) | MASC | JSONL 메트릭에서 `channel="turn"` 카운트 | 아직 대화 없음 |
 | `context_ratio` | OAS | `token_count / max_tokens` | context 미로드 또는 checkpoint 없음 |
 | `context_tokens` | OAS | `sum(msg_tokens)` 근사 합산 | context 미로드 |

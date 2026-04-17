@@ -583,11 +583,21 @@ let handle_keeper_status ctx args : tool_result =
          let metrics_store = keeper_metrics_store ctx.config m.name in
          let metrics_path = keeper_metrics_path ctx.config m.name in
          let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
+         let generation_index_path =
+           keeper_generation_index_path ctx.config m.name
+         in
          let session_dir = keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
+         let generation_manifest_path =
+           keeper_generation_manifest_path ctx.config
+             (Keeper_id.Trace_id.to_string m.runtime.trace_id)
+         in
          let history_path = keeper_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
          let internal_history_path =
            keeper_internal_history_path ctx.config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
+         in
+         let generation_lineage =
+           Keeper_generation_lineage.surface_json ctx.config m ~recent_limit:6
          in
 
          let metrics_tail =
@@ -1103,7 +1113,8 @@ let handle_keeper_status ctx args : tool_result =
            ("context", ctx_stats);
            ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
-	           ("memory_bank", memory_summary_to_json memory_bank_summary);
+           ("memory_bank", memory_summary_to_json memory_bank_summary);
+           ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
            ("history_tail_count",
@@ -1121,11 +1132,13 @@ let handle_keeper_status ctx args : tool_result =
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
              ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
+             ("generation_index", `String generation_index_path);
              ("decisions", `String (keeper_decision_log_path ctx.config m.name));
              ("policy", `String (keeper_policy_log_path ctx.config m.name));
              ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
              ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));
              ("session_dir", `String session_dir);
+             ("generation_manifest", `String generation_manifest_path);
              ("history", `String history_path);
              ("history_internal", `String internal_history_path);
              ("evidence_dir", `String

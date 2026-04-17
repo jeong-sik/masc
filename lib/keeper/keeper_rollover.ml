@@ -223,6 +223,20 @@ let maybe_rollover_oas_handoff
                    "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
                    base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
                    next_generation ratio trigger_reason;
+                 (* OAS owns checkpoint/session continuity.
+                    MASC lineage telemetry is appended only after the
+                    new trace is saved and meta commit has been derived. *)
+                 let lineage_config =
+                   Coord.default_config (Filename.dirname (Filename.dirname base_dir))
+                 in
+                 Keeper_generation_lineage.record_handoff_artifacts
+                   ~config:lineage_config
+                   ~parent:base_meta
+                   ~child:updated_meta
+                   ~parent_trace_id:(Keeper_id.Trace_id.to_string prev_trace_id)
+                   ~trigger_reason
+                   ~context_ratio:ratio
+                   ~model;
                  { rollover_base with
                    updated_meta;
                    handoff_json = Some handoff_json;

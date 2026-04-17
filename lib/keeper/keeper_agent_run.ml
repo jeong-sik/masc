@@ -2060,7 +2060,9 @@ let run_turn
              store_episode adds to Memory.t, then flush_incremental
              persists to institution_episodes.jsonl. The explicit flush
              is required because this runs AFTER Agent.run returns, so
-             the AfterTurn hook has already fired for the last turn. *)
+             the AfterTurn hook has already fired for the last turn.
+             Collaboration learning (Hebbian strengthen/weaken) is not
+             recorded here; it is owned by the task lifecycle path. *)
           (try
              (match
                 Keeper_memory_policy.parse_state_snapshot_from_reply

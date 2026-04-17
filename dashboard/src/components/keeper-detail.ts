@@ -810,6 +810,267 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   `
 }
 
+interface LineageJudgment {
+  verdict: string
+  similarity?: number | null
+}
+
+interface LineageDelta {
+  inherited_fields: string[]
+  changed_fields: string[]
+  dropped_fields: string[]
+}
+
+interface GenerationLineageManifest {
+  generation: number
+  trace_id: string
+  generation_id?: string
+  parent_generation?: number | null
+  parent_trace_id?: string | null
+  created_at?: string
+  trigger_reason?: string
+  context_ratio?: number
+  continuity_judgment?: LineageJudgment
+  inheritance_delta?: LineageDelta
+}
+
+interface GenerationLineageEntry {
+  generation: number
+  trace_id: string
+  generation_id?: string
+  parent_generation?: number | null
+  parent_trace_id?: string | null
+  created_at?: string
+  trigger_reason?: string
+  context_ratio?: number
+  continuity_verdict?: string
+  continuity_similarity?: number | null
+  identity_changed_fields?: string[]
+  identity_dropped_fields?: string[]
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+}
+
+function isLineageJudgment(value: unknown): value is LineageJudgment {
+  if (!isRecord(value)) return false
+  return typeof value.verdict === 'string'
+}
+
+function isLineageDelta(value: unknown): value is LineageDelta {
+  if (!isRecord(value)) return false
+  return isStringArray(value.inherited_fields)
+    && isStringArray(value.changed_fields)
+    && isStringArray(value.dropped_fields)
+}
+
+function isGenerationLineageManifest(value: unknown): value is GenerationLineageManifest {
+  if (!isRecord(value)) return false
+  return typeof value.generation === 'number'
+    && typeof value.trace_id === 'string'
+    && (value.parent_generation == null || typeof value.parent_generation === 'number')
+    && (value.parent_trace_id == null || typeof value.parent_trace_id === 'string')
+    && (value.created_at == null || typeof value.created_at === 'string')
+    && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
+    && (value.context_ratio == null || typeof value.context_ratio === 'number')
+    && (value.continuity_judgment == null || isLineageJudgment(value.continuity_judgment))
+    && (value.inheritance_delta == null || isLineageDelta(value.inheritance_delta))
+}
+
+function isGenerationLineageEntry(value: unknown): value is GenerationLineageEntry {
+  if (!isRecord(value)) return false
+  return typeof value.generation === 'number'
+    && typeof value.trace_id === 'string'
+    && (value.parent_generation == null || typeof value.parent_generation === 'number')
+    && (value.parent_trace_id == null || typeof value.parent_trace_id === 'string')
+    && (value.created_at == null || typeof value.created_at === 'string')
+    && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
+    && (value.context_ratio == null || typeof value.context_ratio === 'number')
+    && (value.continuity_verdict == null || typeof value.continuity_verdict === 'string')
+    && (value.continuity_similarity == null || typeof value.continuity_similarity === 'number')
+    && (value.identity_changed_fields == null || isStringArray(value.identity_changed_fields))
+    && (value.identity_dropped_fields == null || isStringArray(value.identity_dropped_fields))
+}
+
+function compactTraceId(traceId: string): string {
+  return traceId.length > 28
+    ? `${traceId.slice(0, 12)}…${traceId.slice(-8)}`
+    : traceId
+}
+
+function formatLineageRatio(value: number | undefined): string {
+  return typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '-'
+}
+
+function verdictBadgeClass(verdict: string | undefined): string {
+  switch (verdict) {
+    case 'verified':
+      return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+    case 'drift_detected':
+      return 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+    case 'unavailable':
+      return 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
+    default:
+      return 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
+  }
+}
+
+function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
+  const detail = keeperStatusDetails.value[keeperName]
+  if (!detail?.rawStatus) return null
+  const raw = detail.rawStatus
+  if (!isRecord(raw) || !isRecord(raw.generation_lineage)) return null
+
+  const lineage = raw.generation_lineage
+  const currentGeneration = typeof lineage.current_generation === 'number' ? lineage.current_generation : null
+  const currentTraceId = typeof lineage.current_trace_id === 'string' ? lineage.current_trace_id : null
+  const generationId = typeof lineage.generation_id === 'string' ? lineage.generation_id : null
+  const traceHistoryCount = typeof lineage.trace_history_count === 'number' ? lineage.trace_history_count : 0
+  const manifestPath = typeof lineage.manifest_path === 'string' ? lineage.manifest_path : null
+  const indexPath = typeof lineage.index_path === 'string' ? lineage.index_path : null
+  const manifest = isGenerationLineageManifest(lineage.manifest) ? lineage.manifest : null
+  const recent = (Array.isArray(lineage.recent) ? lineage.recent : []).filter(isGenerationLineageEntry)
+
+  if (currentGeneration == null && currentTraceId == null && recent.length === 0) return null
+
+  const delta = manifest?.inheritance_delta ?? null
+  const continuity = manifest?.continuity_judgment
+
+  return html`
+    <div class="md:col-span-2">
+      <${SectionCard} title="Generation Lineage">
+        <div class="text-[11px] text-[var(--text-muted)] mb-3">
+          handoff telemetry. same keeper identity, new trace.
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+          <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Gen</div>
+            <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${currentGeneration ?? '-'}</div>
+            ${generationId ? html`<div class="text-[10px] text-[var(--text-dim)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
+          </div>
+          <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Trace Lineage</div>
+            <div class="mt-1 text-lg font-semibold text-[var(--text-strong)]">${traceHistoryCount}</div>
+            <div class="text-[10px] text-[var(--text-dim)]">historical traces retained in meta.trace_history</div>
+          </div>
+          <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Trace</div>
+            <div class="mt-1 text-sm font-mono text-[var(--text-strong)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
+            <div class="text-[10px] text-[var(--text-dim)]">artifact appears after the first successful handoff</div>
+          </div>
+        </div>
+
+        ${manifest
+          ? html`
+            <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
+              <div class="flex flex-wrap items-center gap-2 mb-2">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Current Manifest</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${manifest.generation}</span>
+                ${continuity?.verdict
+                  ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuity.verdict}</span>`
+                  : null}
+                ${manifest.created_at
+                  ? html`<span class="text-[10px] text-[var(--text-dim)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
+                  : null}
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+                  <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Parent</div>
+                  <div class="text-[var(--text-strong)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
+                  ${manifest.parent_trace_id
+                    ? html`<div class="font-mono text-[var(--text-dim)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
+                    : null}
+                </div>
+                <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
+                  <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Trigger</div>
+                  <div class="text-[var(--text-strong)]">${manifest.trigger_reason ?? '-'}</div>
+                  <div class="text-[var(--text-dim)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
+                </div>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                ${delta
+                  ? html`
+                    <span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                      inherited ${delta.inherited_fields.length}
+                    </span>
+                    <span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                      changed ${delta.changed_fields.length}
+                    </span>
+                    <span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">
+                      dropped ${delta.dropped_fields.length}
+                    </span>
+                  `
+                  : null}
+                ${continuity?.similarity != null
+                  ? html`<span class="text-[10px] px-2 py-1 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
+                  : null}
+              </div>
+              ${delta && delta.changed_fields.length === 0 && delta.dropped_fields.length === 0
+                ? html`<div class="mt-2 text-[11px] text-[var(--text-dim)]">identity-only inheritance stayed intact across the rollover.</div>`
+                : null}
+            </div>
+          `
+          : html`
+            <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3 text-[11px] text-[var(--text-muted)]">
+              아직 handoff lineage manifest가 없습니다. generation 0에서는 현재 trace만 유지되고, 첫 successful handoff 이후부터 manifest/index가 생깁니다.
+            </div>
+          `}
+
+        <div>
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">Recent Handoffs</div>
+          ${recent.length > 0
+            ? html`
+              <div class="flex flex-col gap-2">
+                ${recent.map(entry => html`
+                  <div class="px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)]">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.15)]">gen ${entry.generation}</span>
+                      ${entry.continuity_verdict
+                        ? html`<span class="text-[10px] px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entry.continuity_verdict}</span>`
+                        : null}
+                      ${entry.created_at
+                        ? html`<span class="text-[10px] text-[var(--text-dim)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`
+                        : null}
+                    </div>
+                    <div class="mt-1 text-[11px] text-[var(--text-body)]">
+                      ${entry.parent_generation != null ? `gen ${entry.parent_generation}` : 'root'} -> gen ${entry.generation}
+                      ${entry.trigger_reason ? ` · ${entry.trigger_reason}` : ''}
+                      ${entry.context_ratio != null ? ` · ratio ${formatLineageRatio(entry.context_ratio)}` : ''}
+                    </div>
+                    <div class="mt-1 text-[10px] font-mono text-[var(--text-dim)] truncate" title=${entry.trace_id}>
+                      ${compactTraceId(entry.trace_id)}
+                    </div>
+                    ${(entry.identity_changed_fields?.length ?? 0) > 0 || (entry.identity_dropped_fields?.length ?? 0) > 0
+                      ? html`
+                        <div class="mt-1 text-[10px] text-[var(--text-dim)]">
+                          ${entry.identity_changed_fields && entry.identity_changed_fields.length > 0 ? `changed: ${entry.identity_changed_fields.join(', ')}` : ''}
+                          ${entry.identity_changed_fields && entry.identity_changed_fields.length > 0 && entry.identity_dropped_fields && entry.identity_dropped_fields.length > 0 ? ' · ' : ''}
+                          ${entry.identity_dropped_fields && entry.identity_dropped_fields.length > 0 ? `dropped: ${entry.identity_dropped_fields.join(', ')}` : ''}
+                        </div>
+                      `
+                      : null}
+                  </div>
+                `)}
+              </div>
+            `
+            : html`<div class="text-[11px] text-[var(--text-muted)]">No recorded handoff entries yet.</div>`}
+        </div>
+
+        ${manifestPath || indexPath
+          ? html`
+            <div class="mt-3 flex flex-col gap-1 text-[10px] text-[var(--text-dim)]">
+              ${manifestPath ? html`<div class="font-mono truncate" title=${manifestPath}>manifest ${manifestPath}</div>` : null}
+              ${indexPath ? html`<div class="font-mono truncate" title=${indexPath}>index ${indexPath}</div>` : null}
+            </div>
+          `
+          : null}
+      <//>
+    </div>
+  `
+}
+
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -1165,6 +1426,8 @@ export function KeeperDetailOverlay() {
               <//>
             `
             : null}
+
+          <${GenerationLineagePanel} keeperName=${keeper.name} />
 
           ${'' /* ── Activity Trace (promoted to main view) ── */}
           <div class="md:col-span-2">

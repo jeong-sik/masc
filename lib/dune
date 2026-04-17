@@ -256,6 +256,7 @@
    coord
    run_eio
    team_context
+   keeper_generation_lineage
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    ;; sdp removed — in ocaml-webrtc
    session

@@ -16,6 +16,7 @@ import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
+import { CompositeFsmFlowchart } from './composite-fsm-flowchart'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
 
@@ -114,16 +115,17 @@ export function AgentsUnified() {
 }
 
 /**
- * LT-16d: fleet matrix above, per-keeper FsmHub below. Clicking a row
- * in the matrix pins that keeper in the detail hub. Local state keeps
- * the two components loosely coupled — no new store signal is
- * introduced for this drill-through.
+ * LT-16d+e: matrix (live fleet state) → spec flowchart (structural
+ * reference) → FsmHub (per-keeper drill-down). Wide-to-narrow scan.
+ * Row-click in the matrix pins the keeper in the hub below. Local
+ * state keeps coupling minimal — no new store signal.
  */
 function FleetAndFsmHubPanel() {
   const [pinned, setPinned] = useState<string | null>(null)
   return html`
     <div class="flex flex-col gap-4">
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
+      <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />
     </div>
   `

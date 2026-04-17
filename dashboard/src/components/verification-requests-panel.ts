@@ -9,7 +9,7 @@
 // component-local state plumbing for a read-only table.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchVerificationRequests,
@@ -31,6 +31,34 @@ import {
 
 const AUTO_REFRESH_MS = 15_000
 const DEFAULT_LIMIT = 100
+
+/**
+ * Pure filter for verification requests.
+ *
+ * Case-insensitive substring match on `request_id`, `task_id`,
+ * `submitted_by`, and `approved_by` so operators can locate a request
+ * by partial id, by the owning task, or by the agent that submitted /
+ * approved it.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no
+ * new array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterVerificationRequests(
+  rows: readonly VerificationRequest[],
+  query: string,
+): readonly VerificationRequest[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter((row) => {
+    if (row.request_id.toLowerCase().includes(needle)) return true
+    if (row.task_id.toLowerCase().includes(needle)) return true
+    if (row.submitted_by.toLowerCase().includes(needle)) return true
+    if (row.approved_by && row.approved_by.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 type StatusFilter = VerificationRequestStatus | 'all'
 
@@ -203,14 +231,25 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
 
 // ── Table ─────────────────────────────────────────────
 
-function RequestsTable({ requests }: { requests: VerificationRequest[] }) {
+function RequestsTable({
+  requests,
+  totalBeforeFilter,
+}: {
+  requests: readonly VerificationRequest[]
+  totalBeforeFilter: number
+}) {
   if (requests.length === 0) {
-    const hasFilter = statusFilter.value !== 'all' || searchQuery.value
+    const hasFilter = statusFilter.value !== 'all' || searchQuery.value.trim() !== ''
+    if (hasFilter && totalBeforeFilter > 0) {
+      return html`
+        <${EmptyState}>
+          필터 결과 없음 (${totalBeforeFilter} items)
+        <//>
+      `
+    }
     return html`
       <${EmptyState}>
-        ${hasFilter
-          ? '조건에 맞는 검증 요청이 없습니다.'
-          : '현재 대기중이거나 완료된 검증 요청이 없습니다.'}
+        현재 대기중이거나 완료된 검증 요청이 없습니다.
       <//>
     `
   }
@@ -261,21 +300,14 @@ export function VerificationRequestsPanel() {
 
   const current = resource.state.value
   const data = current.data ?? null
-  const filtered = data
-    ? data.requests.filter((r) => {
-        if (statusFilter.value !== 'all' && r.status !== statusFilter.value) return false
-        if (searchQuery.value) {
-          const q = searchQuery.value.toLowerCase()
-          if (
-            !r.request_id.toLowerCase().includes(q) &&
-            !r.task_id.toLowerCase().includes(q) &&
-            !r.submitted_by.toLowerCase().includes(q) &&
-            !(r.approved_by ?? '').toLowerCase().includes(q)
-          ) return false
-        }
-        return true
-      })
-    : []
+  const rows = data?.requests ?? []
+  const filtered = useMemo(() => {
+    const byStatus =
+      statusFilter.value === 'all'
+        ? rows
+        : rows.filter((r) => r.status === statusFilter.value)
+    return filterVerificationRequests(byStatus, searchQuery.value)
+  }, [rows, statusFilter.value, searchQuery.value])
 
   return html`
     <div class="flex flex-col gap-4">
@@ -317,9 +349,10 @@ export function VerificationRequestsPanel() {
       />
 
       <${TextInput}
+        type="search"
         class="max-w-[260px]"
-        placeholder="검색 (request, task, 제출자...)"
-        ariaLabel="검증 요청 검색"
+        placeholder="request / task / 제출자 / 승인자 필터"
+        ariaLabel="검증 요청 필터"
         value=${searchQuery.value}
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
       />
@@ -331,7 +364,12 @@ export function VerificationRequestsPanel() {
         : null}
 
       <${Card} title="검증 요청">
-        ${data ? html`<${RequestsTable} requests=${filtered} />` : null}
+        ${data
+          ? html`<${RequestsTable}
+              requests=${filtered}
+              totalBeforeFilter=${data.requests.length}
+            />`
+          : null}
       <//>
     </div>
   `

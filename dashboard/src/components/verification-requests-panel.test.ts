@@ -88,7 +88,10 @@ vi.mock('./common/input', () => ({
 
 // ── Import after mocks ────────────────────────────────
 
-import { VerificationRequestsPanel } from './verification-requests-panel'
+import {
+  VerificationRequestsPanel,
+  filterVerificationRequests,
+} from './verification-requests-panel'
 
 function makeRequest(overrides: Partial<VerificationRequest> = {}): VerificationRequest {
   return {
@@ -232,7 +235,91 @@ describe('VerificationRequestsPanel', () => {
     const searchInput = screen.getByTestId('search-input')
     fireEvent.input(searchInput, { target: { value: 'nonexistent' } })
     await waitFor(() => {
-      expect(screen.getByTestId('empty-state')).toBeTruthy()
+      const empty = screen.getByTestId('empty-state')
+      expect(empty).toBeTruthy()
+      expect(empty.textContent).toContain('필터 결과 없음')
+      expect(empty.textContent).toContain('1 items')
     })
+  })
+})
+
+// ── filterVerificationRequests pure helper ─────────────
+
+describe('filterVerificationRequests', () => {
+  const r1 = makeRequest({
+    request_id: 'req-ALPHA',
+    task_id: 'task-001',
+    submitted_by: 'keeper-x',
+    approved_by: 'gatekeeper-9',
+  })
+  const r2 = makeRequest({
+    request_id: 'req-beta',
+    task_id: 'task-002',
+    submitted_by: 'agent-foo',
+    approved_by: null,
+  })
+  const r3 = makeRequest({
+    request_id: 'req-gamma',
+    task_id: 'task-003',
+    submitted_by: 'agent-bar',
+    approved_by: 'keeper-z',
+  })
+  const rows = [r1, r2, r3]
+
+  it('empty query returns input reference unchanged', () => {
+    const out = filterVerificationRequests(rows, '')
+    expect(out).toBe(rows)
+  })
+
+  it('whitespace-only query returns input reference unchanged', () => {
+    const out = filterVerificationRequests(rows, '   \t')
+    expect(out).toBe(rows)
+  })
+
+  it('trims surrounding whitespace before matching', () => {
+    const out = filterVerificationRequests(rows, '  alpha  ')
+    expect(out).toEqual([r1])
+  })
+
+  it('case-insensitive match on request_id', () => {
+    const out = filterVerificationRequests(rows, 'ALPHA')
+    expect(out).toEqual([r1])
+    const out2 = filterVerificationRequests(rows, 'alpha')
+    expect(out2).toEqual([r1])
+  })
+
+  it('matches on task_id substring', () => {
+    const out = filterVerificationRequests(rows, 'task-002')
+    expect(out).toEqual([r2])
+  })
+
+  it('matches on submitted_by substring', () => {
+    const out = filterVerificationRequests(rows, 'agent-')
+    expect(out).toEqual([r2, r3])
+  })
+
+  it('matches on approved_by substring', () => {
+    const out = filterVerificationRequests(rows, 'gatekeeper')
+    expect(out).toEqual([r1])
+  })
+
+  it('skips null approved_by without throwing', () => {
+    const out = filterVerificationRequests(rows, 'keeper')
+    // r1.approved_by=gatekeeper-9, r3.approved_by=keeper-z, r1 also has submitted_by=keeper-x
+    expect(out).toContain(r1)
+    expect(out).toContain(r3)
+    expect(out).not.toContain(r2)
+  })
+
+  it('no match returns empty array', () => {
+    const out = filterVerificationRequests(rows, 'nonexistent-needle')
+    expect(out).toEqual([])
+  })
+
+  it('does not mutate input array', () => {
+    const snapshot = [...rows]
+    filterVerificationRequests(rows, 'alpha')
+    expect(rows).toEqual(snapshot)
+    expect(rows.length).toBe(3)
   })
 })

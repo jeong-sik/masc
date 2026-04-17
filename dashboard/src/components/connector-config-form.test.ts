@@ -212,6 +212,60 @@ describe('ConnectorConfigForm', () => {
     expect(saveCall?.[1]?.body).toContain('GATE_BASE_URL')
   })
 
+  it('after Save success, restart button POSTs stop then start in order', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      // 1) schema GET
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            id: 'discord',
+            schema: {
+              properties: { GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' } },
+              required: [],
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      // 2) current-values GET
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
+      // 3) save POST
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      // 4) stop POST
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, signaled: true }), { status: 200 }))
+      // 5) start POST
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 }))
+
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    const saveBtn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Save') as HTMLButtonElement
+    saveBtn.click()
+    await flushUi()
+    await flushUi()
+
+    const restartBtn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.includes('재시작')) as HTMLButtonElement | undefined
+    expect(restartBtn).toBeTruthy()
+    restartBtn!.click()
+    // stop completes immediately, then 800ms delay, then start. Wait past it.
+    await new Promise(r => setTimeout(r, 1000))
+    await flushUi()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5)
+    expect(fetchSpy.mock.calls[3]?.[0]).toContain('/api/v1/sidecar/stop?name=discord')
+    expect(fetchSpy.mock.calls[4]?.[0]).toContain('/api/v1/sidecar/start?name=discord')
+  })
+
   it('after toggle + fetch, renders required field marker and password input for token', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(

@@ -60,6 +60,7 @@ interface FormEntry {
   open: boolean
   saving: boolean
   lastSavedAt: number | null
+  restarting: boolean
 }
 
 const formState = signal<Record<string, FormEntry>>({})
@@ -74,6 +75,7 @@ function emptyEntry(): FormEntry {
     open: false,
     saving: false,
     lastSavedAt: null,
+    restarting: false,
   }
 }
 
@@ -206,6 +208,31 @@ async function saveConfig(id: string) {
   } catch (err) {
     setEntry(id, { saving: false })
     showToast(err instanceof Error ? err.message : 'config save failed', 'error')
+  }
+}
+
+async function restartSidecar(id: string) {
+  setEntry(id, { restarting: true })
+  try {
+    const stopRes = await fetch(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    })
+    if (!stopRes.ok) throw new Error(`stop HTTP ${stopRes.status}`)
+    // Brief grace so the SIGTERM has a moment to land before we re-spawn —
+    // run.sh stop returns once it has signalled, not once the process has
+    // exited. 800ms is enough for a clean shutdown of the bridges we ship.
+    await new Promise(r => setTimeout(r, 800))
+    const startRes = await fetch(`/api/v1/sidecar/start?name=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    })
+    if (!startRes.ok) throw new Error(`start HTTP ${startRes.status}`)
+    showToast(`${id} 재시작 완료 — 새 config 적용됨`, 'success', 2400)
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'restart failed', 'error')
+  } finally {
+    setEntry(id, { restarting: false })
   }
 }
 
@@ -375,7 +402,18 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         <div class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
           ${entry.lastSavedAt
-            ? html`<span class="ml-2 text-emerald-300">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>`
+            ? html`
+                <span class="ml-2 text-emerald-300">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
+                <button
+                  type="button"
+                  class="ml-2 cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled=${entry.restarting}
+                  title="POST /sidecar/stop → 800ms → POST /sidecar/start"
+                  onClick=${() => { void restartSidecar(connectorId) }}
+                >
+                  ${entry.restarting ? '재시작 중...' : '🔄 재시작'}
+                </button>
+              `
             : null}
         </div>
         <${ActionButton}

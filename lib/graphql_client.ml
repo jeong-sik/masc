@@ -73,6 +73,8 @@ let request_curl ~timeout_sec body =
           else
             (* Unix fallback when Eio loop not started *)
             (try
+               Exec_tap.record
+                 ~kind:Exec_tap.Unix_open_process_args_in ~argv ();
                let ic = Unix.open_process_args_in "curl" (Array.of_list argv) in
                let output =
                  Fun.protect

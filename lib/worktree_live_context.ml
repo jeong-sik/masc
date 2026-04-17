@@ -5,9 +5,13 @@
 let run_git_capture_lines ~workdir args =
   let f () =
     try
+      let argv = "git" :: "-C" :: workdir :: args in
+      Exec_tap.record
+        ~kind:Exec_tap.Unix_open_process_args_in
+        ~argv ~cwd:workdir ();
       let ic =
         Unix.open_process_args_in "git"
-          (Array.of_list ("git" :: "-C" :: workdir :: args))
+          (Array.of_list argv)
       in
       let rec loop acc =
         match input_line ic with

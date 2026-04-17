@@ -315,6 +315,10 @@ let fork_with_cwd ~cmd_array ~stdin_content ~working_dir ~config_working_dir =
         let stdin_read, stdin_write = Unix.pipe ~cloexec:true () in
         let stderr_path, stderr_fd = create_stderr_tempfile () in
         try
+          Exec_tap.record
+            ~kind:Exec_tap.Unix_create_process
+            ~argv:(Array.to_list cmd_array)
+            ?cwd:target_dir ();
           let pid =
             Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
               stdout_write stderr_fd

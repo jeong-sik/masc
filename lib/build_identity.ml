@@ -40,9 +40,13 @@ let executable_dir () =
 (** Probe git commit via subprocess.
     Offloaded to system thread to avoid blocking Eio scheduler. *)
 let git_capture_output ~repo_root args =
+  let argv = "git" :: "-C" :: repo_root :: args in
+  Exec_tap.record
+    ~kind:Exec_tap.Unix_open_process_args_full
+    ~argv ~cwd:repo_root ();
   let channels =
     Unix.open_process_args_full "git"
-      (Array.of_list ("git" :: "-C" :: repo_root :: args))
+      (Array.of_list argv)
       (Unix.environment ())
   in
   let stdout, stdin, stderr = channels in

@@ -212,6 +212,7 @@ function OverviewTile({ id, connector, keeperCount }: {
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
+      <${TileErrorNotice} connector=${connector} />
       <${TileHeartbeatStrip} id=${id} />
     </div>
   `
@@ -301,6 +302,77 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
       data-tile-primary-action=${id}
       data-tile-primary-action-tone=${view.tone}
     >${view.label}</button>
+  `
+}
+
+/** Pure: derive a single notice view from the connector runtime state.
+    Returns null when nothing notable is happening. Priority:
+    error (non-empty) > stale (stale=true). Error beats stale because
+    an explicit error message is strictly more diagnostic than a
+    \"data is old\" flag; callers that want both must render both. */
+export interface TileNoticeView {
+  tone: 'error' | 'stale'
+  label: string
+  detail: string
+}
+export function deriveTileNotice(
+  connector: GateConnectorInfo | null,
+): TileNoticeView | null {
+  if (connector === null) return null
+  const err = connector.error?.trim() ?? ''
+  if (err !== '') {
+    return {
+      tone: 'error',
+      label: 'Error',
+      detail: err,
+    }
+  }
+  if (connector.stale === true) {
+    const secs = connector.stale_after_sec
+    const ageHint = secs > 0 ? ` (${secs}s threshold)` : ''
+    return {
+      tone: 'stale',
+      label: 'Stale',
+      detail: `데이터 오래됨${ageHint}`,
+    }
+  }
+  return null
+}
+
+const TILE_NOTICE_TONE_CLASS: Record<'error' | 'stale', string> = {
+  // Rose for hard errors (sidecar reported an explicit failure),
+  // amber for stale (data hasn't refreshed but no explicit error).
+  // Matches Sentry \"issue\" rose + Vercel \"warning\" amber convention.
+  error: 'border-rose-400/40 bg-rose-500/10 text-rose-100',
+  stale: 'border-amber-400/40 bg-amber-500/10 text-amber-100',
+}
+
+const TILE_NOTICE_GLYPH: Record<'error' | 'stale', string> = {
+  error: '⚠',
+  stale: '⧗',
+}
+
+/** Surfaces connector.error / connector.stale on the tile so operators
+    scanning the page see them without drilling into the detailed
+    panel. Currently these fields are only visible in the per-connector
+    live-panel below — easy to miss until you click into it. */
+function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null }) {
+  const notice = deriveTileNotice(connector)
+  if (notice === null) return null
+  const tone = TILE_NOTICE_TONE_CLASS[notice.tone]
+  const glyph = TILE_NOTICE_GLYPH[notice.tone]
+  return html`
+    <div
+      class=${`flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${tone}`}
+      role="alert"
+      aria-label=${`${notice.label}: ${notice.detail}`}
+      title=${notice.detail}
+      data-tile-notice=${notice.tone}
+    >
+      <span aria-hidden="true" class="shrink-0">${glyph}</span>
+      <span class="shrink-0 font-semibold uppercase tracking-[0.1em]">${notice.label}</span>
+      <span class="min-w-0 truncate font-normal normal-case tracking-normal opacity-80">${notice.detail}</span>
+    </div>
   `
 }
 

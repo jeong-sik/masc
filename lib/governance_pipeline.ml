@@ -441,7 +441,8 @@ let install ~config ~governance_level =
 
     When a tool exceeds the governance threshold, the agent fiber is
     suspended via [Keeper_approval_queue.submit_and_await] until an
-    operator resolves the approval via the command plane API.
+    operator resolves the approval via the dashboard approval HTTP
+    handler ([server_dashboard_http.ml]).
 
     Tools below the threshold are auto-approved. *)
 let to_oas_approval_callback

@@ -2,8 +2,9 @@
 
     When a keeper's OAS Agent invokes a tool that requires approval,
     the agent fiber is suspended via [Eio.Promise.await].  An operator
-    can then approve/reject via the command plane API, which resolves
-    the promise and resumes the agent.
+    can then approve/reject via the dashboard approval HTTP handler
+    ([server_dashboard_http.ml]), which resolves the promise and
+    resumes the agent.
 
     This replaces the manual "pending_approval" state machine with
     actual execution-level suspension using Eio structured concurrency.
@@ -248,7 +249,8 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
 (* ── Resolve (operator action) ────────────────────────────── *)
 
 (** Resolve a pending approval. Returns [Ok ()] if found, [Error msg] if not.
-    Called from the command plane HTTP handler. *)
+    Called from the dashboard approval HTTP handler
+    ([server_dashboard_http.ml]). *)
 let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) result =
   let result =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->

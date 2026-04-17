@@ -116,7 +116,8 @@ val to_oas_approval_callback :
 
     When a tool exceeds the governance threshold, the agent fiber
     suspends via [Keeper_approval_queue.submit_and_await]. An operator
-    resolves the approval via the command plane API, resuming the fiber.
+    resolves the approval via the dashboard approval HTTP handler
+    ([server_dashboard_http.ml]), resuming the fiber.
 
     Tools below the threshold are auto-approved.
 

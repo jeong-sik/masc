@@ -2,7 +2,17 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ConfigResolutionPanel } from './config-resolution-panel'
+import type { DashboardRuntimeDiagnostic } from '../../api/dashboard'
+import { ConfigResolutionPanel, filterDiagnostics } from './config-resolution-panel'
+
+function diag(
+  kind: string,
+  message: string,
+  signal?: string,
+  ts = '2026-04-17T00:00:00Z',
+): DashboardRuntimeDiagnostic {
+  return signal === undefined ? { ts, kind, message } : { ts, kind, message, signal }
+}
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
@@ -248,5 +258,67 @@ describe('ConfigResolutionPanel', () => {
 
     expect(container.textContent).toContain('local .masc')
     expect(container.textContent).toContain('/tmp/project/.masc/config')
+  })
+})
+
+describe('filterDiagnostics', () => {
+  const sample: readonly DashboardRuntimeDiagnostic[] = [
+    diag('external_signal', 'Received SIGTERM, shutting down server.', 'SIGTERM'),
+    diag('external_signal', 'Received SIGINT from operator.', 'SIGINT'),
+    diag('config_drift', 'Runtime build commit (deadbee) differs from workspace HEAD (cafef00d).'),
+    diag('keeper_heartbeat', 'keeper stale for 42s', 'heartbeat_stale'),
+  ]
+
+  it('returns the input reference when the query is empty', () => {
+    expect(filterDiagnostics(sample, '')).toBe(sample)
+  })
+
+  it('returns the input reference when the query is whitespace-only', () => {
+    expect(filterDiagnostics(sample, '   ')).toBe(sample)
+  })
+
+  it('trims the query before matching', () => {
+    const result = filterDiagnostics(sample, '  SIGTERM  ')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.signal).toBe('SIGTERM')
+  })
+
+  it('matches kind case-insensitively', () => {
+    const result = filterDiagnostics(sample, 'EXTERNAL_signal')
+    expect(result).toHaveLength(2)
+  })
+
+  it('matches signal case-insensitively', () => {
+    const result = filterDiagnostics(sample, 'sigint')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.signal).toBe('SIGINT')
+  })
+
+  it('matches substring in the message body', () => {
+    const result = filterDiagnostics(sample, 'deadbee')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.kind).toBe('config_drift')
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    expect(filterDiagnostics(sample, 'no-such-term-xyz')).toEqual([])
+  })
+
+  it('skips undefined signal fields without crashing', () => {
+    const result = filterDiagnostics(sample, 'heartbeat')
+    // kind match ("keeper_heartbeat") + signal match ("heartbeat_stale") on the same row
+    expect(result).toHaveLength(1)
+    expect(result[0]?.kind).toBe('keeper_heartbeat')
+  })
+
+  it('returns an empty array when the input is empty', () => {
+    expect(filterDiagnostics([], 'anything')).toEqual([])
+  })
+
+  it('does not mutate the input array', () => {
+    const before = sample.map(item => ({ ...item }))
+    filterDiagnostics(sample, 'sigterm')
+    expect(sample).toEqual(before)
+    expect(sample).toHaveLength(4)
   })
 })

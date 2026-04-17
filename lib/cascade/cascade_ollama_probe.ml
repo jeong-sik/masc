@@ -2,21 +2,10 @@
 
 (* ── URL classification ─────────────────────────────────────── *)
 
-(* Substring helper — duplicated from Cascade_client_capacity to
-   avoid a hard dependency on a sibling module's private function.
-   Both spellings agree on the [:11434] heuristic. *)
-let contains_substring haystack needle =
-  let hl = String.length haystack and nl = String.length needle in
-  if nl = 0 || nl > hl then false
-  else
-    let rec loop i =
-      if i + nl > hl then false
-      else if String.sub haystack i nl = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
-let is_ollama_url url = contains_substring url ":11434"
+(* Re-export the shared heuristic from [Masc_network_defaults].  Keeping
+   the symbol here preserves this module's public [.mli] surface while
+   eliminating the substring literal duplicated across cascade modules. *)
+let is_ollama_url = Masc_network_defaults.is_ollama_url
 
 (* ── Cache ──────────────────────────────────────────────────── *)
 

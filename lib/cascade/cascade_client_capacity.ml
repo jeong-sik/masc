@@ -203,24 +203,7 @@ let () =
 
 (* ── Heuristic auto-registration for ollama-like URLs ───────────── *)
 
-(* Fast substring check without pulling in [Re]. *)
-let contains_substring haystack needle =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen = 0 || nlen > hlen then false
-  else
-    let rec loop i =
-      if i + nlen > hlen then false
-      else if String.sub haystack i nlen = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
-let looks_like_ollama url =
-  (* Port 11434 is Ollama's well-known default port.  The string
-     match is intentionally permissive (works for http://, https://,
-     127.0.0.1, localhost, bare host:port). *)
-  contains_substring url ":11434"
+let looks_like_ollama = Masc_network_defaults.is_ollama_url
 
 let cli_sentinel_prefix = "cli:"
 

@@ -351,87 +351,13 @@ let lightweight_keeper_rows config =
 (* review_fingerprint, stale_sec_of_iso, review_action_copy
    — now in Operator_digest_review_types (available via include above) *)
 
-let urgency_rank = function
-  | "now" -> 1
-  | _ -> 0
-
-let target_rank value =
-  if Operator_digest_types.is_root_alias value then 3
-  else match value with
-  | "task" -> 2
-  | "keeper" -> 1
-  | _ -> 0
-
-let kind_rank = function
-  | "cdal_review_requirement" -> 5
-  | "pending_confirm" -> 4
-  | "session_risk" -> 3
-  | "namespace_gate" -> 2
-  | "keeper_pressure" -> 1
-  | _ -> 0
-
-let compare_review_item (left : review_item) (right : review_item) =
-  let by_severity = Int.compare (severity_rank right.severity) (severity_rank left.severity) in
-  if by_severity <> 0 then by_severity
-  else
-    let by_urgency = Int.compare (urgency_rank right.urgency) (urgency_rank left.urgency) in
-    if by_urgency <> 0 then by_urgency
-    else
-      let by_kind = Int.compare (kind_rank right.kind) (kind_rank left.kind) in
-      if by_kind <> 0 then by_kind
-      else
-        let by_confirm =
-          Bool.compare right.confirm_required left.confirm_required
-        in
-        if by_confirm <> 0 then by_confirm
-        else
-          let by_stale =
-            Int.compare
-              (Option.value ~default:(-1) right.stale_sec)
-              (Option.value ~default:(-1) left.stale_sec)
-          in
-          if by_stale <> 0 then by_stale
-          else
-            let by_target = Int.compare (target_rank right.target_type) (target_rank left.target_type) in
-            if by_target <> 0 then by_target
-            else String.compare left.id right.id
-
-let review_item_to_yojson ~actor (item : review_item) =
-  `Assoc
-    [
-      ("id", `String item.id);
-      ("kind", `String item.kind);
-      ("target_type", `String item.target_type);
-      ("target_id", string_option_to_json item.target_id);
-      ("severity", `String (operator_severity_to_string item.severity));
-      ("urgency", `String item.urgency);
-      ("summary", `String item.summary);
-      ("why_now", `String item.why_now);
-      ("source", `String item.source);
-      ("authoritative", `Bool item.authoritative);
-      ("fingerprint", `String item.fingerprint);
-      ("stale_sec", option_to_json (fun value -> `Int value) item.stale_sec);
-      ("confirm_required", `Bool item.confirm_required);
-      ( "recommended_action",
-        option_to_json (recommended_action_to_yojson ~actor) item.recommended_action );
-      ("truth_ref", item.truth_ref);
-      ("friction", item.friction);
-      ("advice", item.advice);
-    ]
-
-let review_summary_json ~actor active deferred recent =
-  let top_item =
-    match active with
-    | item :: _ -> Some item
-    | [] -> None
-  in
-  `Assoc
-    [
-      ("active_count", `Int (List.length active));
-      ("deferred_count", `Int (List.length deferred));
-      ("recent_count", `Int recent);
-      ("top_item", option_to_json (review_item_to_yojson ~actor) top_item);
-    ]
+(* urgency_rank / target_rank / kind_rank / compare_review_item /
+   review_item_to_yojson / review_summary_json removed: their only
+   consumers were the review_queue / deferred_queue / review_summary
+   JSON fields whose emission was dropped in this PR. The [review_item]
+   record type + split_review_items / *_review_item producers are still
+   populated by callers and will be cleaned up in a follow-up along with
+   [operator_digest_review_types.ml]. *)
 
 (* top_attention_item and top_recommended_action removed — team session cleanup *)
 
@@ -634,24 +560,11 @@ let split_review_items config items =
       | _ -> (item :: active, deferred))
     ([], []) items
 
-let review_queue_json ~actor active deferred recent_json =
-  let active =
-    active |> List.sort compare_review_item
-  in
-  let deferred =
-    deferred |> List.sort compare_review_item
-  in
-  let recent_count =
-    match recent_json with
-    | `List rows -> List.length rows
-    | _ -> 0
-  in
-  [
-    ("review_queue", `List (List.map (review_item_to_yojson ~actor) active));
-    ("deferred_queue", `List (List.map (review_item_to_yojson ~actor) deferred));
-    ("review_summary", review_summary_json ~actor active deferred recent_count);
-    ("recent_reviews", recent_json);
-  ]
+(* review_queue/deferred_queue/review_summary were emitted for a dashboard
+   surface that was removed in #7640; frontend parsing was dropped in #7693.
+   Only [recent_reviews] still has a rendering consumer (ops activity timeline). *)
+let review_queue_json ~actor:_actor _active _deferred recent_json =
+  [ ("recent_reviews", recent_json) ]
 
 let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers
     (ctx : 'a context) :
@@ -682,9 +595,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("active_recommendation_source", `String "fallback");
           ("active_recommendation_summary", summary_of_recommendations ~actor:"dashboard" []);
           ("fallback_recommended_actions", `List []);
-          ("review_queue", `List []);
-          ("deferred_queue", `List []);
-          ("review_summary", review_summary_json ~actor:"dashboard" [] [] 0);
           ("recent_reviews", recent_reviews);
           ("worker_cards", `List []);
         ])

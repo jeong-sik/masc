@@ -43,6 +43,19 @@ include Dashboard_http_keeper
 
 let dashboard_request_timeout_s = 30.0
 
+(** Track whether shell cache has been populated at least once.
+    Atomic.t for cross-domain visibility: read from executor pool
+    worker domains via namespace-truth and warmup helpers. *)
+let _shell_warmed : bool Atomic.t = Atomic.make false
+
+(** Track whether the startup shell pre-warm fiber is still building the
+    first payload. Cold HTTP requests use this to serve a bootstrap payload
+    instead of blocking on the same expensive shell projection. *)
+let _shell_warming : bool Atomic.t = Atomic.make false
+
+(** Last-known-good shell result for graceful degradation on timeout. *)
+let _last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
+
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =
@@ -780,6 +793,52 @@ let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
     ()
   |> Server_base_path_diagnostics.to_yojson
 
+let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
+  let generated_at = Types.now_iso () in
+  let started_at = Unix.gettimeofday () in
+  `Assoc
+    [
+      ("generated_at", `String generated_at);
+      ( "status",
+        `Assoc
+          [
+            ("project", `String "initializing");
+            ("generated_at", `String generated_at);
+          ] );
+      ("paths", dashboard_shell_paths_json config);
+      ( "counts",
+        `Assoc
+          [
+            ("agents", `Int 0);
+            ("tasks", `Int 0);
+            ("keepers", `Int 0);
+            ("total_runtimes", `Int 0);
+          ] );
+      ("configured_keepers", `Int 0);
+      ("providers", `Assoc []);
+      ("meta_cognition", `Null);
+      ("config_resolution", `Null);
+      ("runtime_resolution", `Null);
+    ]
+  |> with_projection_diagnostics ~surface:"shell" ~started_at
+       ~extra:
+         [
+           ("cache_state", `String "initializing");
+           ("bootstrap_source", `String "shell_prewarm");
+         ]
+
+let dashboard_shell_last_good_opt () =
+  match Atomic.get _last_good_shell with
+  | `Assoc [] -> None
+  | json -> Some json
+
+let is_dashboard_cache_timeout_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "error" fields with
+      | Some (`String "Compute timeout") -> true
+      | _ -> false)
+  | _ -> false
+
 let dashboard_shell_payload_json (config : Coord.config) : Yojson.Safe.t =
   let cluster = Env_config_core.cluster_name () in
   let started_at = Unix.gettimeofday () in
@@ -970,13 +1029,38 @@ let dashboard_shell_http_json ?clock ?request (config : Coord.config) : Yojson.S
     | Some clock -> Some clock
     | None -> Eio_context.get_clock_opt ()
   in
+  let fallback_payload () =
+    match dashboard_shell_last_good_opt () with
+    | Some json -> json
+    | None -> dashboard_shell_bootstrap_json config
+  in
+  let startup_shell_bootstrap_pending =
+    let current = Server_startup_state.(!state) in
+    (not (Atomic.get _shell_warmed))
+    && current.state_ready
+    && Server_startup_state.elapsed_since_start ()
+       < (dashboard_shell_timeout_s +. 10.0)
+  in
+  let startup_prewarm_pending =
+    (Atomic.get _shell_warming || startup_shell_bootstrap_pending)
+    && not (Atomic.get _shell_warmed)
+  in
   let payload =
-    match clock_opt with
-    | Some clock ->
-        Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0 ~clock
-          ~timeout_sec:dashboard_shell_timeout_s compute
-    | None ->
-        Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+    if startup_prewarm_pending then
+      fallback_payload ()
+    else
+      let computed =
+        match clock_opt with
+        | Some clock ->
+            Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0
+              ~clock ~timeout_sec:dashboard_shell_timeout_s compute
+        | None ->
+            Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+      in
+      if is_dashboard_cache_timeout_json computed then
+        fallback_payload ()
+      else
+        computed
   in
   match request with
   | None -> payload

@@ -4,34 +4,46 @@
 open Server_utils
 open Server_dashboard_http_core
 
-(** Track whether shell cache has been populated at least once.
-    Atomic.t for cross-domain visibility: read from executor pool
-    worker domain via [namespace_truth_snapshot_from_caches].
-    Monotonic false→true; stale false just picks the cold timeout. *)
-let _shell_warmed : bool Atomic.t = Atomic.make false
-
-(** Last-known-good shell result for graceful degradation on timeout.
-    Atomic.t for cross-domain visibility (same reason as [_shell_warmed]).
-    Each update swaps a fully-constructed Yojson.Safe.t value;
-    readers always see a complete snapshot. *)
-let _last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
+let shell_prewarm_timeout_s = 30.0
 
 let warm_shell_cache (state : Mcp_server.server_state) =
-  let t0 = Time_compat.now () in
-  (try
-     let result =
-       dashboard_shell_http_json ?clock:state.Mcp_server.clock
-         state.Mcp_server.room_config
-     in
-     Atomic.set _shell_warmed true;
-     Atomic.set _last_good_shell result;
-     Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
-       ((Time_compat.now () -. t0) *. 1000.0)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Dashboard.warn "shell cache pre-warm failed: %s"
-         (Printexc.to_string exn))
+  Atomic.set _shell_warming true;
+  Fun.protect
+    ~finally:(fun () -> Atomic.set _shell_warming false)
+    (fun () ->
+      let t0 = Time_compat.now () in
+      (try
+         let cache_key =
+           Printf.sprintf "shell:coord=%s:workspace=%s"
+             state.Mcp_server.room_config.base_path
+             state.Mcp_server.room_config.workspace_path
+         in
+         let compute () =
+           dashboard_shell_payload_json state.Mcp_server.room_config
+         in
+         let result =
+           match state.Mcp_server.clock with
+           | Some clock ->
+               Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0
+                 ~clock ~timeout_sec:shell_prewarm_timeout_s compute
+           | None ->
+               Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+         in
+         if is_dashboard_cache_timeout_json result then
+           Log.Dashboard.warn
+             "shell cache pre-warm timed out during compute (%.0fs)"
+             shell_prewarm_timeout_s
+         else begin
+           Atomic.set _shell_warmed true;
+           Atomic.set _last_good_shell result;
+           Log.Dashboard.info "shell cache pre-warmed (%.1fms)"
+             ((Time_compat.now () -. t0) *. 1000.0)
+         end
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Dashboard.warn "shell cache pre-warm failed: %s"
+             (Printexc.to_string exn)))
 
 (* Delta-push: track last broadcast hash per event_type to skip unchanged payloads. *)
 let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t =

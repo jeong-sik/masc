@@ -174,6 +174,59 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
     (json |> member "runtime_resolution" |> member "base_path" |> member "path"
    |> to_string)
 
+let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http._shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Lib.Server_dashboard_http._shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http._shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell original_last_good)
+    (fun () ->
+      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http._shell_warming true;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      check string "bootstrap status project" "initializing"
+        (json |> member "status" |> member "project" |> to_string);
+      check int "bootstrap zero agents" 0
+        (json |> member "counts" |> member "agents" |> to_int);
+      check string "bootstrap cache state" "initializing"
+        (json |> member "projection_diagnostics" |> member "cache_state"
+        |> to_string))
+
+let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http._shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
+  let last_good =
+    `Assoc
+      [
+        ("generated_at", `String "2026-04-17T00:00:00Z");
+        ("status", `Assoc [("project", `String "warm-room")]);
+        ("counts", `Assoc [("agents", `Int 7); ("tasks", `Int 11); ("keepers", `Int 3)]);
+      ]
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Lib.Server_dashboard_http._shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http._shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell original_last_good)
+    (fun () ->
+      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http._shell_warming true;
+      Atomic.set Lib.Server_dashboard_http._last_good_shell last_good;
+      let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+      let open Yojson.Safe.Util in
+      check string "last-good project reused" "warm-room"
+        (json |> member "status" |> member "project" |> to_string);
+      check int "last-good counts reused" 7
+        (json |> member "counts" |> member "agents" |> to_int))
+
 let () =
   run "dashboard_http_core"
     [
@@ -187,5 +240,9 @@ let () =
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick
             test_dashboard_shell_http_json_prefers_preserved_base_path_input;
+          test_case "shell bootstrap payload while prewarming" `Quick
+            test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
+          test_case "shell reuses last good payload while prewarming" `Quick
+            test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
         ] );
     ]

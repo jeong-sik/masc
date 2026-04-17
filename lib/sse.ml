@@ -36,6 +36,15 @@ let rec atomic_update_result atomic f =
   if Atomic.compare_and_set atomic old_state next_state then result
   else atomic_update_result atomic f
 
+(* Test-only hooks for forcing a CAS retry in white-box unit tests. *)
+let register_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None
+let buffer_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None
+
+let run_test_hook hook =
+  match Atomic.get hook with
+  | Some fn -> fn ()
+  | None -> ()
+
 type session_kind =
   | Observer     (** Dashboard / read-only viewers *)
   | Coordinator  (** MCP agent connections *)
@@ -184,8 +193,9 @@ let event_buffer : (int * string * float) list Atomic.t = Atomic.make []
 
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
-  let timestamp = Time_compat.now () in
   atomic_update_result event_buffer (fun lst ->
+    run_test_hook buffer_commit_test_hook;
+    let timestamp = Time_compat.now () in
     let next = (event_id, event_str, timestamp) :: lst in
     let trimmed =
       if List.length next > max_buffer_size then take max_buffer_size next
@@ -269,18 +279,21 @@ let next_id () =
     is linearized via CAS over the immutable registry state.
     [kind] defaults to [Coordinator] for backward compatibility. *)
 let register ?(kind = Coordinator) session_id ~push ~last_event_id =
-  let now = Time_compat.now () in
-  let client = {
-    id = Atomic.fetch_and_add client_id_counter 1 + 1;
+  let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
+  let last_event_id = Atomic.make last_event_id in
+  let event_stream = Eio.Stream.create stream_capacity in
+  let base_client = {
+    id = client_id;
     kind;
-    event_stream = Eio.Stream.create stream_capacity;
+    event_stream;
     push;
-    last_event_id = Atomic.make last_event_id;
-    created_at = now;
-    last_seen_at = Atomic.make now;
+    last_event_id;
+    created_at = 0.0;
+    last_seen_at = Atomic.make 0.0;
   } in
   let evicted =
     atomic_update_result clients (fun state ->
+      run_test_hook register_commit_test_hook;
       let evicted =
         if state.count >= max_clients && not (SMap.mem session_id state.entries) then
           let oldest =
@@ -303,6 +316,12 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
         | Some sid -> SMap.remove sid state.entries
         | None -> state.entries
       in
+      let install_time = Time_compat.now () in
+      let client = {
+        base_client with
+        created_at = install_time;
+        last_seen_at = Atomic.make install_time;
+      } in
       let next_entries = SMap.add session_id client entries_after_eviction in
       {
         next_state = {
@@ -318,7 +337,7 @@ let register ?(kind = Coordinator) session_id ~push ~last_event_id =
    | None ->
        ());
   sync_transport_snapshot ();
-  (client.id, client.event_stream, evicted)
+  (client_id, event_stream, evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =

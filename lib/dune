@@ -361,6 +361,7 @@
    trajectory
    eval_gate
    eval_harness
+   exec_core
    eval_calibration
    ;; Keeper contract
    keeper_schema

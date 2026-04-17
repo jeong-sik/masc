@@ -687,6 +687,27 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
+    case 'oas:agent_failed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
+      const taskId = asString(p.task_id)
+      const elapsed = asNumber(p.elapsed_s)
+      const error = asString(p.error)
+      addTypedJournalEntry(
+        agentName,
+        `OAS agent failed${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${error ? ` · ${error}` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(agentName)} OAS agent failed${taskId ? ` (${taskId})` : ''}${error ? `: ${error}` : ''}`,
+          preview: taskId ?? error,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
     case 'oas:tool_called':
     case 'oas:tool_completed': {
       const p = (event.payload ?? {}) as Record<string, unknown>
@@ -702,6 +723,29 @@ function handleEvent(event: SSEEvent): void {
           severity: event.severity,
           source: event.source,
           narrativeText: `${actorLabel(agentName)} OAS 도구 ${phase}: ${toolName}`,
+        },
+      )
+      break
+    }
+    case 'oas:handoff_requested':
+    case 'oas:handoff_completed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const fromAgent = asString(p.from_agent) ?? asString(event.agent_name) ?? agent
+      const toAgent = asString(p.to_agent) ?? 'unknown'
+      const elapsed = asNumber(p.elapsed_s)
+      const reason = asString(p.reason)
+      const phase = type === 'oas:handoff_requested' ? 'requested' : 'completed'
+      addTypedJournalEntry(
+        fromAgent,
+        `OAS handoff ${phase} · ${fromAgent}→${toAgent}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${reason ? ` · ${reason}` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `OAS handoff ${phase}: ${actorLabel(fromAgent)} → ${actorLabel(toAgent)}${reason ? ` (${reason})` : ''}`,
+          preview: `${fromAgent}→${toAgent}`,
+          ...envelopeFromEvent(event),
         },
       )
       break

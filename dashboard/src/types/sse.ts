@@ -47,10 +47,13 @@ export type SSEEventType =
   | 'oas:masc:reputation_changed'
   | 'oas:agent_started'
   | 'oas:agent_completed'
+  | 'oas:agent_failed'
   | 'oas:tool_called'
   | 'oas:tool_completed'
   | 'oas:turn_started'
   | 'oas:turn_completed'
+  | 'oas:handoff_requested'
+  | 'oas:handoff_completed'
   | 'oas:context_compacted'
   | 'oas:task_state_changed'
   // Harness observability events (#3165)

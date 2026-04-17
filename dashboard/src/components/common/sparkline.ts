@@ -31,7 +31,7 @@ interface SparklineProps {
 
 /** Stats derived from the series — exposed for callers that want to
     render their own trend badges AND for unit tests (no canvas needed). */
-export interface SparklineStats {
+interface SparklineStats {
   first: number
   latest: number
   min: number

@@ -13,9 +13,9 @@
 
 import { html } from 'htm/preact'
 
-export type LivePulseState = 'live' | 'stale' | 'idle'
+type LivePulseState = 'live' | 'stale' | 'idle'
 
-export interface LivePulseView {
+interface LivePulseView {
   state: LivePulseState
   /** Human-readable status tucked into title/aria so hover + AT both
       explain what the dot means without a separate tooltip chip. */
@@ -55,7 +55,7 @@ const DOT_TONE: Record<LivePulseState, string> = {
   idle: 'bg-[var(--white-10)]',
 }
 
-export interface LivePulseDotProps {
+interface LivePulseDotProps {
   lastTickMs: number | null
   nowMs: number
   sampleIntervalMs: number

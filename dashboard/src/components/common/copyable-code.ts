@@ -7,9 +7,9 @@ import { Copy, Check } from 'lucide-preact'
 import { useState } from 'preact/hooks'
 import { showToast } from './toast'
 
-export type CopyableVariant = 'primary' | 'secondary'
+type CopyableVariant = 'primary' | 'secondary'
 
-export interface CopyableCodeProps {
+interface CopyableCodeProps {
   command: string
   label?: string
   ariaLabel?: string

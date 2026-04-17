@@ -36,8 +36,8 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-export type SectionCapTone = 'muted' | 'dim'
-export type SectionCapWeight = 'normal' | 'semibold'
+type SectionCapTone = 'muted' | 'dim'
+type SectionCapWeight = 'normal' | 'semibold'
 
 const BASE = 'text-[10px] uppercase tracking-wider'
 
@@ -67,7 +67,7 @@ export function sectionCapClasses(
   return parts.join(' ')
 }
 
-export interface SectionCapProps {
+interface SectionCapProps {
   tone?: SectionCapTone
   weight?: SectionCapWeight
   /** Additional Tailwind classes for margin, inline-flex composition,

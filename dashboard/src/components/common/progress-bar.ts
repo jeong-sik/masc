@@ -14,7 +14,7 @@
 
 import { html } from 'htm/preact'
 
-export type ProgressBarSize = 'xs' | 'sm' | 'md'
+type ProgressBarSize = 'xs' | 'sm' | 'md'
 export type ProgressBarTone =
   | 'accent' | 'ok' | 'warn' | 'bad'
   | 'emerald' | 'amber' | 'rose' | 'sky'

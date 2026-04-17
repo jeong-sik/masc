@@ -76,7 +76,7 @@ function activeRail(data: HarnessHealthData): HarnessRailKey | null {
   }, null)
 }
 
-function escapeMermaidLabel(value: string): string {
+export function escapeMermaidLabel(value: string): string {
   return value
     .replace(/"/g, '\'')
     .replace(/[[\]{}()|#;]/g, ' ')
@@ -89,7 +89,7 @@ function flowNodeLabel(title: string, status: RailStatus, detail: string, freshn
   return escapeMermaidLabel(`${title}<br/>${railStatusLabel(status)}<br/>${detail}<br/>최근 ${freshness}`)
 }
 
-function flowStatusClass(status: RailStatus): string {
+export function flowStatusClass(status: RailStatus): string {
   switch (status) {
     case 'healthy':
       return 'healthyRail'

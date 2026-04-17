@@ -471,7 +471,7 @@ function JudgmentsSection() {
   `
 }
 
-function approvalRiskToneClass(riskLevel: string): string {
+export function approvalRiskToneClass(riskLevel: string): string {
   const normalized = riskLevel.trim().toLowerCase()
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
@@ -486,7 +486,7 @@ const RISK_RANK: Record<string, number> = {
   low: 1,
 }
 
-function maxApprovalRisk(items: readonly { risk_level?: string | null }[]): string | null {
+export function maxApprovalRisk(items: readonly { risk_level?: string | null }[]): string | null {
   let topRank = 0
   let topLabel: string | null = null
   for (const item of items) {

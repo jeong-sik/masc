@@ -24,7 +24,7 @@ let ensure_default_oas_cascade_timeout_env () =
 
 let project_root_from_executable () =
   let raw_exe =
-    try Sys.executable_name with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
+    Safe_ops.protect ~default:"" (fun () -> Sys.executable_name)
   in
   let exe =
     if String.equal raw_exe "" then ""
@@ -351,7 +351,7 @@ let legacy_room_candidates rooms_dir =
   if not (Sys.file_exists rooms_dir) then
     []
   else
-    try
+    Safe_ops.protect ~default:[] (fun () ->
       Sys.readdir rooms_dir
       |> Array.to_list
       |> List.filter_map (fun room_id ->
@@ -372,8 +372,7 @@ let legacy_room_candidates rooms_dir =
                    msg;
                    None
            else
-             None)
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+             None))
 
 let infer_current_room_from_legacy_dirs rooms_dir =
   match legacy_room_candidates rooms_dir with

@@ -3,16 +3,20 @@
 //
 // Consumes:
 //   GET /api/v1/verification/requests?task_id=&limit=
+//   POST /api/v1/verification/resolve
 //
 // Pattern mirrors CascadeConfigPanel: managed async resource + manual
 // refresh + 15s auto-tick. Row expansion uses <details> so we avoid
-// component-local state plumbing for a read-only table.
+// component-local state plumbing for a read-only table. Pending rows
+// expose approve/reject action buttons that call the resolve endpoint;
+// in-flight state is held in a per-row signal map.
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchVerificationRequests,
+  resolveVerificationRequest,
   type VerificationRequest,
   type VerificationRequestStatus,
   type VerificationRequestVerdict,
@@ -64,6 +68,23 @@ type StatusFilter = VerificationRequestStatus | 'all'
 
 const statusFilter = signal<StatusFilter>('all')
 const searchQuery = signal('')
+
+// Per-request mutation state. Signal-valued Map avoids component-local
+// state plumbing: the row reads `inFlight.value.get(request_id)` and the
+// action handler mutates a new Map to preserve signal identity semantics.
+type RowActionState =
+  | { kind: 'idle' }
+  | { kind: 'pending'; decision: 'approve' | 'reject' }
+  | { kind: 'error'; message: string }
+
+const rowActions = signal<ReadonlyMap<string, RowActionState>>(new Map())
+
+function setRowAction(requestId: string, state: RowActionState): void {
+  const next = new Map(rowActions.value)
+  if (state.kind === 'idle') next.delete(requestId)
+  else next.set(requestId, state)
+  rowActions.value = next
+}
 
 const FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: '전체' },
@@ -137,12 +158,46 @@ function relativeTime(ts: string): string {
   return `${Math.floor(delta / 86400)}일 전`
 }
 
+// ── Action handler ────────────────────────────────────
+
+async function handleResolve(
+  row: VerificationRequest,
+  decision: 'approve' | 'reject',
+  refresh: () => void,
+): Promise<void> {
+  let reason = ''
+  if (decision === 'reject') {
+    const answer = window.prompt('반려 사유를 입력하세요 (선택).')
+    if (answer === null) return
+    reason = answer
+  }
+  setRowAction(row.request_id, { kind: 'pending', decision })
+  try {
+    await resolveVerificationRequest({
+      task_id: row.task_id,
+      verification_id: row.request_id,
+      decision,
+      reason,
+    })
+    setRowAction(row.request_id, { kind: 'idle' })
+    refresh()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    setRowAction(row.request_id, { kind: 'error', message })
+  }
+}
+
 // ── Row ───────────────────────────────────────────────
 
-function VerificationRow({ row }: { row: VerificationRequest }) {
+function VerificationRow({
+  row,
+  refresh,
+}: { row: VerificationRequest; refresh: () => void }) {
   const hasContract = row.completion_contract.length > 0
   const hasEvidence = row.required_evidence.length > 0
   const hasDetails = hasContract || hasEvidence || row.verdict_reason !== ''
+  const actionState = rowActions.value.get(row.request_id) ?? { kind: 'idle' }
+  const disabled = actionState.kind === 'pending'
 
   return html`
     <tr class="border-b border-[var(--card-border)] last:border-b-0 align-top">
@@ -176,6 +231,37 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
           ? html`<${StatusChip} tone=${verdictTone(row.verdict)}>
               ${VERDICT_LABEL[row.verdict]}
             <//>`
+          : html`<span class="text-[var(--text-muted)]">—</span>`}
+      </td>
+      <td class="py-2 pr-2">
+        ${row.status === 'pending'
+          ? html`
+              <div class="flex items-center gap-1 flex-wrap">
+                <button
+                  class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-[11px] text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled=${disabled}
+                  onClick=${() => void handleResolve(row, 'approve', refresh)}
+                >
+                  ${actionState.kind === 'pending' && actionState.decision === 'approve'
+                    ? '승인 중…'
+                    : '승인'}
+                </button>
+                <button
+                  class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-[11px] text-[var(--text-body)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled=${disabled}
+                  onClick=${() => void handleResolve(row, 'reject', refresh)}
+                >
+                  ${actionState.kind === 'pending' && actionState.decision === 'reject'
+                    ? '반려 중…'
+                    : '반려'}
+                </button>
+                ${actionState.kind === 'error'
+                  ? html`<span class="text-[10px] text-[var(--text-bad)]" title=${actionState.message}>
+                      실패
+                    </span>`
+                  : null}
+              </div>
+            `
           : html`<span class="text-[var(--text-muted)]">—</span>`}
       </td>
       <td class="py-2">
@@ -234,9 +320,11 @@ function VerificationRow({ row }: { row: VerificationRequest }) {
 function RequestsTable({
   requests,
   totalBeforeFilter,
+  refresh,
 }: {
   requests: readonly VerificationRequest[]
   totalBeforeFilter: number
+  refresh: () => void
 }) {
   if (requests.length === 0) {
     const hasFilter = statusFilter.value !== 'all' || searchQuery.value.trim() !== ''
@@ -265,12 +353,17 @@ function RequestsTable({
             <th class="text-left py-1 pr-2">승인자</th>
             <th class="text-left py-1 pr-2">생성</th>
             <th class="text-left py-1 pr-2">Verdict</th>
+            <th class="text-left py-1 pr-2">액션</th>
             <th class="text-left py-1">세부</th>
           </tr>
         </thead>
         <tbody>
           ${requests.map(
-            (row) => html`<${VerificationRow} key=${row.request_id} row=${row} />`,
+            (row) => html`<${VerificationRow}
+              key=${row.request_id}
+              row=${row}
+              refresh=${refresh}
+            />`,
           )}
         </tbody>
       </table>
@@ -368,6 +461,7 @@ export function VerificationRequestsPanel() {
           ? html`<${RequestsTable}
               requests=${filtered}
               totalBeforeFilter=${data.requests.length}
+              refresh=${() => void loadData(resource)}
             />`
           : null}
       <//>

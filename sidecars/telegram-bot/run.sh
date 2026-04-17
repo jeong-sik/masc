@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Discord Gate Bot runner.
+# Telegram Gate Bot runner.
 #
-# Resolves MASC_BASE_PATH from the enclosing git repo root when unset,
-# verifies .env, and streams combined stdout+stderr to a dated log file
-# under $MASC_BASE_PATH/.masc/logs/.
+# Mirrors discord-bot/run.sh. Token is issued by @BotFather.
 #
 # Usage:
 #   ./run.sh              start the bot (foreground, tees to today's log)
 #   ./run.sh tail         tail -F today's log file
 #   ./run.sh status       pretty-print the current status.json
-#
-# Designed to be safe to copy-paste: no background launches, no pid files.
 
 set -euo pipefail
 
@@ -28,19 +24,19 @@ BASE_PATH="$(resolve_base_path)"
 export MASC_BASE_PATH="$BASE_PATH"
 
 LOG_DIR="$BASE_PATH/.masc/logs"
-LOG_FILE="$LOG_DIR/discord-sidecar-$(date +%Y%m%d).log"
-STATUS_FILE="$BASE_PATH/.gate/runtime/discord/status.json"
+LOG_FILE="$LOG_DIR/telegram-sidecar-$(date +%Y%m%d).log"
+STATUS_FILE="$BASE_PATH/.gate/runtime/telegram/status.json"
 
 cmd="${1:-start}"
 case "$cmd" in
   start)
     cd "$(script_dir)"
     if [[ ! -f .env ]]; then
-      echo "ERROR: .env missing. Copy .env.example and fill DISCORD_BOT_TOKEN." >&2
+      echo "ERROR: .env missing. Copy .env.example and fill TELEGRAM_BOT_TOKEN." >&2
       exit 1
     fi
     mkdir -p "$LOG_DIR"
-    printf 'Starting Discord sidecar\n  MASC_BASE_PATH=%s\n  log file:      %s\n' \
+    printf 'Starting Telegram sidecar\n  MASC_BASE_PATH=%s\n  log file:      %s\n' \
       "$BASE_PATH" "$LOG_FILE" >&2
     python -m src 2>&1 | tee -a "$LOG_FILE"
     ;;
@@ -68,9 +64,9 @@ case "$cmd" in
     # Match by absolute script_dir path so we never hit another sidecar.
     if pgrep -f "$(script_dir)/src" >/dev/null 2>&1; then
       pkill -TERM -f "$(script_dir)/src"
-      echo "Sent SIGTERM to discord-bot processes." >&2
+      echo "Sent SIGTERM to telegram-bot processes." >&2
     else
-      echo "discord-bot not running." >&2
+      echo "telegram-bot not running." >&2
     fi
     ;;
   *)

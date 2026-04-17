@@ -15,10 +15,7 @@ import type {
   BoardSortMode,
   KeeperLifecycleState,
   Goal,
-  DashboardExecutionSummary,
-  DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
-  DashboardExecutionOperationBrief,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
@@ -47,9 +44,7 @@ import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
-  normalizeExecutionSummary,
-  normalizeExecutionQueueItem,
-  normalizeExecutionOperationBrief, normalizeExecutionWorkerSupportBrief,
+  normalizeExecutionWorkerSupportBrief,
   normalizeExecutionContinuityBrief,
   mergeMessages,
   normalizeServerStatus, mergeServerStatus,
@@ -81,17 +76,12 @@ export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
-export const executionSummary = signal<DashboardExecutionSummary | null>(null)
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
-export const lastExecutionAttemptAt = signal<string | null>(null)
-export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
-export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
 export const executionWorkerSupportBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrief[]>([])
-export const executionOfflineWorkerBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 
 // --- Keeper heartbeat tracking (name -> last heartbeat timestamp ms) ---
 
@@ -277,13 +267,8 @@ export const boardLoading = signal(false)
 
 // --- Refresh timestamps ---
 
-export const lastDashboardRefreshAt = signal<string | null>(null)
 export const lastBoardRefreshAt = signal<string | null>(null)
 export const lastGoalsRefreshAt = signal<string | null>(null)
-
-// --- Execution TTL guard (Phase 1C) ---
-
-export const lastExecutionRefreshAt = signal<number>(0)
 
 export const tasksByStatus = computed(() => {
   const all = tasks.value
@@ -391,7 +376,6 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   inflightDashboardRefresh = (async () => {
     try {
       await Promise.all([refreshShell(opts), refreshExecution(opts)])
-      lastDashboardRefreshAt.value = new Date().toISOString()
     } catch (err) {
       console.warn('[Dashboard] refresh error:', err)
     } finally {
@@ -509,15 +493,6 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .filter((row): row is Message => row !== null)
   messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
   keepers.value = normalizeKeepers(data.keepers)
-  executionSummary.value = normalizeExecutionSummary(data.summary)
-  const normalizedQueue = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
-    .map(normalizeExecutionQueueItem)
-    .filter((row): row is DashboardExecutionQueueItem => row !== null)
-  setArrayByKeyIfChanged(executionQueue, normalizedQueue, q => q.id)
-  const normalizedOpBriefs = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
-    .map(normalizeExecutionOperationBrief)
-    .filter((row): row is DashboardExecutionOperationBrief => row !== null)
-  setArrayByKeyIfChanged(executionOperationBriefs, normalizedOpBriefs, o => o.operation_id)
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
@@ -526,19 +501,12 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .map(normalizeExecutionContinuityBrief)
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
   setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name)
-  const normalizedOfflineBriefs = (Array.isArray(data.offline_worker_briefs) ? data.offline_worker_briefs : [])
-    .map(normalizeExecutionWorkerSupportBrief)
-    .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
-  setArrayByKeyIfChanged(executionOfflineWorkerBriefs, normalizedOfflineBriefs, w => w.name)
   executionLoaded.value = true
-  lastExecutionRefreshAt.value = Date.now()
-  lastDashboardRefreshAt.value = new Date().toISOString()
 }
 
 async function doFetchExecution(): Promise<void> {
   executionLoading.value = true
   executionError.value = null
-  lastExecutionAttemptAt.value = new Date().toISOString()
   try {
     const data = await fetchDashboardExecution()
     hydrateExecutionSnapshot(data)

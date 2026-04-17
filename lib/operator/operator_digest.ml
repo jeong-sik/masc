@@ -185,14 +185,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("health", `String (health_from_attention_items attention_items));
               ("provenance_summary", operator_surface_contract_json);
               ("operator_judge_runtime", operator_judge_runtime_json config);
-              ("role_census", `Assoc []);
-              ("runtime_pools", `Assoc []);
-              ("lane_census", `Assoc []);
-              ("controller_census", `Assoc []);
-              ("control_domains", `Assoc []);
-              ("task_profiles", `Assoc []);
-              ("escalation_count", `Int 0);
-              ("local_runtime", `Null);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
               ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);

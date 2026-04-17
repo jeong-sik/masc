@@ -7,6 +7,8 @@ import {
   deriveBreadcrumbTrail,
   composeDocumentTitle,
   describeReconnecting,
+  summarizeAttentionPreview,
+  composeHealthIndicatorTitle,
 } from './dashboard-shell'
 
 describe('githubCommitUrl (pure)', () => {
@@ -296,5 +298,101 @@ describe('describeReconnecting (pure)', () => {
     })
     expect(r.label).toBe('재연결 중')
     expect(r.label).not.toContain('-')
+  })
+})
+
+describe('summarizeAttentionPreview (pure)', () => {
+  it('empty list → empty preview (health dot reads green with no tooltip clutter)', () => {
+    expect(summarizeAttentionPreview([])).toEqual([])
+  })
+
+  it('uses item.summary when available', () => {
+    const items = [
+      { summary: 'CI gate failed on main', kind: 'ci_failure' },
+      { summary: 'Session 42 blocker: network timeout', kind: 'session_blocker' },
+    ]
+    expect(summarizeAttentionPreview(items)).toEqual([
+      'CI gate failed on main',
+      'Session 42 blocker: network timeout',
+    ])
+  })
+
+  it('falls back to kind when summary is empty / null / undefined', () => {
+    // Backend occasionally sends a kind without a summary (e.g., a
+    // new attention_kind not yet narrativized). Showing the kind string
+    // is strictly better than dropping the item silently.
+    const items = [
+      { summary: null, kind: 'keeper_silence' },
+      { summary: '', kind: 'config_drift' },
+      { kind: 'untyped_event' },
+    ]
+    expect(summarizeAttentionPreview(items)).toEqual([
+      'keeper_silence',
+      'config_drift',
+      'untyped_event',
+    ])
+  })
+
+  it('skips items with no summary AND no kind (pure noise)', () => {
+    const items = [
+      { summary: 'Real issue', kind: 'real' },
+      { summary: null, kind: null },
+      { summary: '', kind: '' },
+      { summary: 'Another', kind: 'x' },
+    ]
+    expect(summarizeAttentionPreview(items)).toEqual(['Real issue', 'Another'])
+  })
+
+  it('truncates over-long lines at 60 chars with ellipsis', () => {
+    // Regression guard: a 500-char blocker_summary dumped into title
+    // would render as a wall of wrapped text in the native tooltip —
+    // operators want a hint, not an essay.
+    const long = 'x'.repeat(200)
+    const [line] = summarizeAttentionPreview([{ summary: long, kind: 'bulk' }])
+    expect(line).not.toBeUndefined()
+    expect(line!.length).toBeLessThanOrEqual(60)
+    expect(line!.endsWith('...')).toBe(true)
+  })
+
+  it('respects max=3 and appends a "외 Nbrought-over" tail when there are more', () => {
+    const items = Array.from({ length: 7 }, (_, i) => ({
+      summary: `item-${i}`,
+      kind: 'generic',
+    }))
+    const preview = summarizeAttentionPreview(items, 3)
+    expect(preview.slice(0, 3)).toEqual(['item-0', 'item-1', 'item-2'])
+    // 7 - 3 = 4 more
+    expect(preview[3]).toBe('… 외 4건')
+  })
+
+  it('no tail when we rendered every item (exact fit)', () => {
+    const items = [
+      { summary: 'a', kind: 'k' },
+      { summary: 'b', kind: 'k' },
+    ]
+    const preview = summarizeAttentionPreview(items, 3)
+    expect(preview).toEqual(['a', 'b'])
+    expect(preview.some(l => l.startsWith('… 외'))).toBe(false)
+  })
+})
+
+describe('composeHealthIndicatorTitle (pure)', () => {
+  it('no attention lines → bare label (tooltip stays terse when state is boring)', () => {
+    expect(composeHealthIndicatorTitle('정상', [])).toBe('정상')
+    expect(composeHealthIndicatorTitle('신호 없음', [])).toBe('신호 없음')
+  })
+
+  it('label on line 1, attention items indented beneath', () => {
+    const title = composeHealthIndicatorTitle('주의 2건', ['foo blocker', 'bar gate fail'])
+    expect(title).toBe('주의 2건\n  · foo blocker\n  · bar gate fail')
+  })
+
+  it('newlines (not <br>) — native title tooltips render \\n verbatim on Chrome/Safari/Firefox', () => {
+    // Regression guard: a well-meaning future refactor might swap \n
+    // for <br> thinking this is an HTML attribute. Title is plain text;
+    // <br> would render as literal "<br>" in the tooltip.
+    const title = composeHealthIndicatorTitle('주의 1건', ['x'])
+    expect(title.split('\n')).toHaveLength(2)
+    expect(title).not.toContain('<br>')
   })
 })

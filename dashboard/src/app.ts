@@ -24,6 +24,7 @@ import {
   DashboardMain,
   SideRail,
 } from './components/dashboard-shell'
+import { ThemeSwitch } from './components/theme-switch'
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { TaskDetailOverlay } from './components/goals/task-detail-overlay'
@@ -136,6 +137,7 @@ export function App() {
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <${AuthStatus} />
             <${ConnectionStatus} />
+            <${ThemeSwitch} />
             <${BuildIdentityBadge} />
           </div>
         </div>

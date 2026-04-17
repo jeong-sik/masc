@@ -215,6 +215,46 @@ spawn 시 인자로 직접 설정하는 필드.
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
+| `sandbox_profile` | string | `legacy_local` | 실행 샌드박스 프로필 | `masc_keeper_up`의 `sandbox_profile` 인자 |
+| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker_hardened`는 기본 `none` | `masc_keeper_up`의 `network_mode` 인자 |
+| `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
+
+### 3.1.1 Sandbox Core V1 사용법
+
+가장 보수적인 기본 패턴:
+
+```json
+{
+  "name": "analyst",
+  "goal": "Review incoming issues and prepare safe changes",
+  "execution_scope": "workspace",
+  "sandbox_profile": "docker_hardened",
+  "network_mode": "none",
+  "shared_memory_scope": "room",
+  "tool_access": { "kind": "preset", "preset": "coding", "also_allow": ["masc_team_memory_read", "masc_team_memory_write", "masc_team_memory_search"] }
+}
+```
+
+의미:
+
+- keeper shell write는 자기 playground 안에서만 허용된다.
+- `docker_hardened`는 별도 runtime slice가 적용되면 hardened execution path를 사용한다.
+- `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
+- team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
+
+typed team memory 사용 예시:
+
+```text
+masc_team_memory_write(room="default", key="handoff/summary.md", content="현재 상황 요약...")
+masc_team_memory_read(room="default", key="handoff/summary.md")
+masc_team_memory_search(room="default", query="요약")
+```
+
+guardrail:
+
+- path traversal / symlink escape는 차단된다.
+- secret-like payload는 team memory write에서 차단된다.
+- team memory는 keeper context에서만 허용되고, `room`은 항상 `default`여야 한다.
 
 ### 3.2 페르소나 로드 필드 (Profile-Loaded)
 

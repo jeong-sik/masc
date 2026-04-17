@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest'
 
 import {
   chipClassFor,
+  FLEET_HISTORY_LEN,
   inferKeeperNameFrom,
+  pushObservation,
+  sparkClassFor,
   tallyInvariantViolations,
+  type KeeperFleetHistory,
 } from './fleet-fsm-matrix'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 
@@ -96,5 +100,59 @@ describe('tallyInvariantViolations', () => {
       compaction_atomicity: 0,
       event_priority_monotone: 0,
     })
+  })
+})
+
+describe('sparkClassFor', () => {
+  it('extracts a single bg-* utility from the full chip class', () => {
+    expect(sparkClassFor('Running')).toMatch(/^bg-emerald-900/)
+    expect(sparkClassFor('Failing')).toMatch(/^bg-red-900/)
+  })
+
+  it('falls back to a grey shade on unknown states', () => {
+    // DEFAULT_CHIP carries `bg-zinc-800`; sparkClassFor preserves it.
+    expect(sparkClassFor('__not_a_state__')).toMatch(/^bg-zinc-(700|800)/)
+  })
+})
+
+describe('pushObservation', () => {
+  it('seeds a new keeper with one observation per axis', () => {
+    const next = pushObservation({}, [snapshot({ name: 'alpha' })])
+    const alpha = next.alpha!
+    expect(alpha.phase).toEqual(['Running'])
+    expect(alpha.turn).toEqual(['idle'])
+    expect(alpha.decision).toEqual(['undecided'])
+    expect(alpha.cascade).toEqual(['idle'])
+    expect(alpha.compaction).toEqual(['accumulating'])
+  })
+
+  it('appends new observations while preserving prior ones', () => {
+    const t1 = pushObservation({}, [snapshot({ name: 'alpha', phase: 'Running' })])
+    const t2 = pushObservation(t1, [snapshot({ name: 'alpha', phase: 'Failing' })])
+    expect(t2.alpha!.phase).toEqual(['Running', 'Failing'])
+  })
+
+  it('caps each axis series at the history window', () => {
+    let h: KeeperFleetHistory = {}
+    for (let i = 0; i < FLEET_HISTORY_LEN + 7; i++) {
+      h = pushObservation(h, [snapshot({ name: 'a' })], FLEET_HISTORY_LEN)
+    }
+    expect(h.a!.phase.length).toBe(FLEET_HISTORY_LEN)
+  })
+
+  it('drops keepers that disappear from the latest snapshot', () => {
+    const t1 = pushObservation({}, [
+      snapshot({ name: 'alpha' }),
+      snapshot({ name: 'beta' }),
+    ])
+    expect(Object.keys(t1).sort()).toEqual(['alpha', 'beta'])
+    const t2 = pushObservation(t1, [snapshot({ name: 'alpha' })])
+    expect(Object.keys(t2)).toEqual(['alpha'])
+  })
+
+  it('returns a fresh top-level object for identity-based re-renders', () => {
+    const prior = {}
+    const next = pushObservation(prior, [snapshot({ name: 'alpha' })])
+    expect(next).not.toBe(prior)
   })
 })

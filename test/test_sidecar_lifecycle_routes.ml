@@ -100,6 +100,82 @@ let test_clamp_lines_clamps_above_max () =
   check int "1001 → 1000" 1000 (Routes.clamp_lines (Some 1001));
   check int "100000 → 1000" 1000 (Routes.clamp_lines (Some 100000))
 
+(* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
+
+let test_escape_quotes_and_backslash () =
+  check string "double-quote escaped"
+    "abc\\\"def"
+    (Routes.escape_toml_string "abc\"def");
+  check string "backslash escaped"
+    "x\\\\y"
+    (Routes.escape_toml_string "x\\y")
+
+let test_escape_control_chars () =
+  check string "newline escaped"
+    "a\\nb"
+    (Routes.escape_toml_string "a\nb");
+  check string "tab escaped"
+    "a\\tb"
+    (Routes.escape_toml_string "a\tb")
+
+let test_render_value_quotes_strings () =
+  check string "string wrapped in quotes"
+    "\"hello\""
+    (Routes.render_value (Routes.Tstring "hello"));
+  check string "int rendered bare"
+    "120"
+    (Routes.render_value (Routes.Tint 120));
+  check string "true bare"
+    "true"
+    (Routes.render_value (Routes.Tbool true));
+  check string "false bare"
+    "false"
+    (Routes.render_value (Routes.Tbool false))
+
+let test_render_toml_sorts_keys () =
+  let body =
+    Routes.render_toml
+      [ ("Z_LAST", Routes.Tstring "z");
+        ("A_FIRST", Routes.Tstring "a");
+        ("M_MID", Routes.Tint 5);
+      ]
+  in
+  let lines = String.split_on_char '\n' body in
+  match lines with
+  | "A_FIRST = \"a\"" :: "M_MID = 5" :: "Z_LAST = \"z\"" :: _ -> ()
+  | _ -> failf "lines not in alpha order: %s" body
+
+let test_coerce_integer_accepts_and_rejects () =
+  (match Routes.coerce_value `Integer "120" with
+   | Ok (Routes.Tint 120) -> ()
+   | _ -> failf "120 should coerce to Tint 120");
+  (match Routes.coerce_value `Integer "  -5  " with
+   | Ok (Routes.Tint -5) -> ()
+   | _ -> failf "trimmed -5 should coerce");
+  (match Routes.coerce_value `Integer "abc" with
+   | Error _ -> ()
+   | _ -> failf "abc should NOT coerce to integer")
+
+let test_coerce_boolean_accepts_variants () =
+  (match Routes.coerce_value `Boolean "true" with
+   | Ok (Routes.Tbool true) -> ()
+   | _ -> failf "true should coerce");
+  (match Routes.coerce_value `Boolean "FALSE" with
+   | Ok (Routes.Tbool false) -> ()
+   | _ -> failf "FALSE (case) should coerce");
+  (match Routes.coerce_value `Boolean "1" with
+   | Ok (Routes.Tbool true) -> ()
+   | _ -> failf "1 should coerce as bool true");
+  (match Routes.coerce_value `Boolean "yes" with
+   | Error _ -> ()
+   | _ -> failf "yes should NOT coerce — only true/false/0/1")
+
+let test_coerce_rejects_oversized_value () =
+  let huge = String.make 9000 'x' in
+  match Routes.coerce_value `String huge with
+  | Error _ -> ()
+  | Ok _ -> failf "9000-byte value should be rejected by max_value_bytes guard"
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -121,5 +197,15 @@ let () =
       ( "invariants",
         [
           test_case "known_ids size = 4" `Quick test_known_ids_size_matches_dashboard;
+        ] );
+      ( "config_write_helpers",
+        [
+          test_case "escape: quotes + backslash"  `Quick test_escape_quotes_and_backslash;
+          test_case "escape: control chars"       `Quick test_escape_control_chars;
+          test_case "render_value: each variant"  `Quick test_render_value_quotes_strings;
+          test_case "render_toml: alpha-sort"     `Quick test_render_toml_sorts_keys;
+          test_case "coerce: integer ok/err"      `Quick test_coerce_integer_accepts_and_rejects;
+          test_case "coerce: boolean variants"    `Quick test_coerce_boolean_accepts_variants;
+          test_case "coerce: oversized rejected"  `Quick test_coerce_rejects_oversized_value;
         ] );
     ]

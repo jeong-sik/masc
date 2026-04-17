@@ -199,6 +199,208 @@ let fetch_schema id =
        | _ ->
            Error "schema_dump failed; ensure the sidecar's Python deps are installed (run `./run.sh start` once or `uv sync`)")
 
+(** ---- Config write (PUT) ----
+
+    The dashboard config form (ConnectorConfigForm) submits the editor
+    state as JSON. We whitelist keys against the sidecar's own schema
+    (so only BotConfig-known names reach disk), coerce each value to
+    its schema-declared TOML type, and atomically rewrite the runtime
+    TOML at [.gate/runtime/<id>/config.toml].
+
+    The sidecar picks this file up on next start (Pydantic
+    [TomlConfigSettingsSource] sits in the source priority list below
+    env but above field defaults). We do not hot-reload a running
+    sidecar — that is the operator's job. *)
+
+type toml_value =
+  | Tstring of string
+  | Tint of int
+  | Tfloat of float
+  | Tbool of bool
+
+(** Hard cap on any single value the dashboard can write, so a
+    runaway client can't balloon the TOML. Typical fields (tokens,
+    URLs, numeric knobs) are well under this. *)
+let max_value_bytes = 8192
+
+let escape_toml_string s =
+  let buf = Buffer.create (String.length s + 4) in
+  String.iter (fun c ->
+    match c with
+    | '\\' -> Buffer.add_string buf "\\\\"
+    | '"' -> Buffer.add_string buf "\\\""
+    | '\n' -> Buffer.add_string buf "\\n"
+    | '\r' -> Buffer.add_string buf "\\r"
+    | '\t' -> Buffer.add_string buf "\\t"
+    | c when Char.code c < 0x20 ->
+        Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.code c))
+    | c -> Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
+let render_value = function
+  | Tstring s -> Printf.sprintf "\"%s\"" (escape_toml_string s)
+  | Tint n -> string_of_int n
+  | Tfloat f -> Printf.sprintf "%g" f
+  | Tbool true -> "true"
+  | Tbool false -> "false"
+
+let render_toml (pairs : (string * toml_value) list) : string =
+  let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) pairs in
+  let lines = List.map (fun (k, v) -> Printf.sprintf "%s = %s" k (render_value v)) sorted in
+  String.concat "\n" lines ^ "\n"
+
+type declared_type = [ `String | `Integer | `Number | `Boolean ]
+
+let parse_declared_type json : declared_type =
+  match json with
+  | `Assoc _ ->
+      (match Yojson.Safe.Util.member "type" json with
+       | `String "integer" -> `Integer
+       | `String "number" -> `Number
+       | `String "boolean" -> `Boolean
+       | _ -> `String)
+  | _ -> `String
+
+let schema_field_types id : (string * declared_type) list =
+  match fetch_schema id with
+  | Error _ -> []
+  | Ok json_str ->
+      (match Yojson.Safe.from_string json_str with
+       | j ->
+           (match Yojson.Safe.Util.member "properties" j with
+            | `Assoc assoc -> List.map (fun (k, v) -> (k, parse_declared_type v)) assoc
+            | _ -> [])
+       | exception _ -> [])
+
+let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) result =
+  if String.length raw > max_value_bytes then
+    Error (Printf.sprintf "value too long (>%d bytes)" max_value_bytes)
+  else match typ with
+    | `String -> Ok (Tstring raw)
+    | `Integer ->
+        (match int_of_string_opt (String.trim raw) with
+         | Some n -> Ok (Tint n)
+         | None -> Error (Printf.sprintf "expected integer, got %S" raw))
+    | `Number ->
+        (match float_of_string_opt (String.trim raw) with
+         | Some n -> Ok (Tfloat n)
+         | None -> Error (Printf.sprintf "expected number, got %S" raw))
+    | `Boolean ->
+        (match String.lowercase_ascii (String.trim raw) with
+         | "true" | "1" -> Ok (Tbool true)
+         | "false" | "0" -> Ok (Tbool false)
+         | _ -> Error (Printf.sprintf "expected true/false, got %S" raw))
+
+let config_toml_path id =
+  Filename.concat (base_path ())
+    (Printf.sprintf ".gate/runtime/%s/config.toml" id)
+
+(** Atomic write: tmp file + rename. POSIX rename is atomic so a
+    concurrent reader sees either the old file or the new one, never a
+    half-written one. Inlined here rather than reaching into
+    Keeper_toml_loader (which keeps it as a private helper). *)
+let atomic_write_file ~(path : string) (content : string) : (unit, string) result =
+  let tmp = path ^ ".tmp" in
+  try
+    let oc = open_out tmp in
+    Fun.protect
+      ~finally:(fun () -> try close_out oc with _ -> ())
+      (fun () -> output_string oc content);
+    Sys.rename tmp path;
+    Ok ()
+  with exn ->
+    (try Sys.remove tmp with _ -> ());
+    Error (Printf.sprintf "atomic write failed: %s" (Printexc.to_string exn))
+
+(** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
+    tries to rename into it. *)
+let ensure_parent_dir path =
+  let dir = Filename.dirname path in
+  let rec mk d =
+    if Sys.file_exists d then ()
+    else begin
+      mk (Filename.dirname d);
+      try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  mk dir
+
+(** Parse a JSON body of the form [{"<KEY>": "<VALUE>", ...}] into a
+    list of pairs. All values are expected as JSON strings (the
+    dashboard form emits them that way) — richer JSON types are
+    converted to their string form so type coercion runs downstream
+    from the same path. *)
+let parse_body_pairs body_str : ((string * string) list, string) result =
+  match Yojson.Safe.from_string body_str with
+  | `Assoc assoc ->
+      let pairs = List.map (fun (k, v) ->
+        let s = match v with
+          | `String s -> s
+          | `Int i -> string_of_int i
+          | `Float f -> Printf.sprintf "%g" f
+          | `Bool b -> if b then "true" else "false"
+          | `Null -> ""
+          | _ -> Yojson.Safe.to_string v
+        in
+        (k, s)
+      ) assoc in
+      Ok pairs
+  | _ -> Error "body must be a JSON object"
+  | exception _ -> Error "body is not valid JSON"
+
+let handle_put_config _state request reqd =
+  match parse_name request with
+  | Error msg -> bad_request request reqd msg
+  | Ok id ->
+      Http.Request.read_body_async reqd (fun body_str ->
+        match parse_body_pairs body_str with
+        | Error msg -> bad_request request reqd msg
+        | Ok pairs ->
+            let types = schema_field_types id in
+            if types = [] then
+              respond_json request reqd ~status:`Service_unavailable
+                (`Assoc [
+                   ("ok", `Bool false);
+                   ("error", `String "schema unavailable; run `./run.sh start` once so the form knows which fields exist");
+                 ])
+            else
+              let type_of k = List.assoc_opt k types in
+              let rec collect acc rejected = function
+                | [] -> Ok (List.rev acc, List.rev rejected)
+                | (k, v) :: rest ->
+                    (match type_of k with
+                     | None -> collect acc (k :: rejected) rest
+                     | Some typ ->
+                         (match coerce_value typ v with
+                          | Ok tv -> collect ((k, tv) :: acc) rejected rest
+                          | Error msg ->
+                              Error (Printf.sprintf "%s: %s" k msg)))
+              in
+              (match collect [] [] pairs with
+               | Error msg -> bad_request request reqd msg
+               | Ok (accepted, rejected) ->
+                   let path = config_toml_path id in
+                   ensure_parent_dir path;
+                   let toml_str = render_toml accepted in
+                   (match atomic_write_file ~path toml_str with
+                    | Error e ->
+                        respond_json request reqd ~status:`Internal_server_error
+                          (`Assoc [
+                             ("ok", `Bool false);
+                             ("error", `String e);
+                           ])
+                    | Ok () ->
+                        respond_json request reqd ~status:`OK
+                          (`Assoc [
+                             ("ok", `Bool true);
+                             ("id", `String id);
+                             ("path", `String path);
+                             ("written_fields", `Int (List.length accepted));
+                             ("rejected_fields", `List (List.map (fun s -> `String s) rejected));
+                           ])))
+      )
+
 let handle_schema _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
@@ -276,4 +478,12 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.post "/api/v1/sidecar/stop" (fun request reqd ->
        with_tool_auth ~tool_name:"sidecar" (fun state _req reqd ->
          handle_stop state request reqd
+       ) request reqd)
+
+  (* Writes user-supplied values (potentially containing tokens) to disk,
+     so [tool_auth] not [public_read]. Whitelisting + type coercion runs
+     inside the handler — the auth gate just keeps unauth'd writers out. *)
+  |> Http.Router.post "/api/v1/sidecar/config" (fun request reqd ->
+       with_tool_auth ~tool_name:"sidecar" (fun state _req reqd ->
+         handle_put_config state request reqd
        ) request reqd)

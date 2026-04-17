@@ -10,6 +10,7 @@ import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { EmptyState } from './common/empty-state'
+import { Kbd } from './common/kbd'
 
 import {
   type HoveredSegment,
@@ -670,10 +671,7 @@ function StatusBar({
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">FSM Hub</span>
-          <kbd
-            class="hidden md:inline-flex items-center font-mono text-[9px] px-1 py-0 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)]"
-            title="단축키 목록 (?)"
-          >?</kbd>
+          <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
             class=${`text-[10px] font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
               refreshFlash

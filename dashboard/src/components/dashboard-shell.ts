@@ -72,6 +72,29 @@ function shortCommit(commit: string | null | undefined): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
+/** Canonical upstream repo. Used to resolve commit-hash text into a
+    clickable GitHub permalink. Hard-coded because this is the only
+    origin the dashboard is ever built from — a future fork would
+    override this via a build-time constant, not a runtime flag. */
+const UPSTREAM_REPO = 'jeong-sik/masc-mcp'
+
+/** Pure: turn a raw commit hash into a GitHub commit URL. Returns
+    null for empty / non-hex-looking input so the dropdown renders
+    the plain string for dev builds without creating a bogus link.
+    Reference: Vercel / Railway / Render deployment dashboards always
+    link commit hashes out to the source host — operators who land
+    on the build identity dropdown usually want the diff, not the
+    hash itself. */
+export function githubCommitUrl(commit: string | null | undefined): string | null {
+  const value = commit?.trim() ?? ''
+  if (value === '') return null
+  // Accept full (40-char) or short (≥ 7 char) hex SHAs only. Anything
+  // else (dev labels, semver, free text) gets rendered as plain text
+  // so we never produce a link to github.com/.../commit/dev.
+  if (!/^[0-9a-f]{7,40}$/i.test(value)) return null
+  return `https://github.com/${UPSTREAM_REPO}/commit/${value}`
+}
+
 export function BuildIdentityBadge() {
   const status = serverStatus.value
   const build = status?.build
@@ -103,7 +126,20 @@ export function BuildIdentityBadge() {
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>커밋</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
+                ${(() => {
+                  const url = githubCommitUrl(build?.commit)
+                  const text = build?.commit ?? 'git 미감지 (dev)'
+                  return url !== null
+                    ? html`<a
+                        href=${url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-right font-bold text-[color:var(--text-strong)] underline decoration-dotted underline-offset-2 decoration-[color:var(--text-dim)] hover:decoration-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        data-build-commit-link
+                        title="GitHub에서 이 커밋 보기"
+                      >${text} ↗</a>`
+                    : html`<strong class="text-[color:var(--text-strong)] text-right">${text}</strong>`
+                })()}
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>서버 시작</span>

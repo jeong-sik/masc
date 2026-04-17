@@ -191,7 +191,13 @@ let apply_to_result ~(meta : keeper_meta)
     if suppress_visible_text then { base_result with response_text = "" }
     else base_result
   in
-  (routed_result, state, transition_reason)
+  (* Gen13: Bdi.apply_to_result returned a capped state, but
+     overlay_ledger_state rewrote belief_summary / active_desire /
+     current_intention / blocker / need without passing through
+     Gen8's cap. Apply cap_social_state at the final emission point
+     so both speech models (BDI v1, Magentic v1) honour the same
+     bounded invariant. *)
+  (routed_result, Types.cap_social_state state, transition_reason)
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
@@ -208,17 +214,21 @@ let derive_failure_state ~(meta : keeper_meta)
       ~current:(Option.value ~default:Fsm.initial previous_snapshot)
       Fsm.Failure_observed
   in
-  ( { base_state with
-      social_model = model_name;
-      belief_summary =
-        belief_summary_of_snapshot ~snapshot ~event:Fsm.Failure_observed
-          ~observation ~tool_count:0;
-      active_desire = Some "recover_forward_motion";
-      current_intention = Some "repair_failed_turn";
-      blocker =
-        (match String.trim reason with
-        | "" -> Some "failed_without_detail"
-        | _ -> base_state.blocker);
-      need = Some "fresh_plan_or_operator_guidance";
-    },
+  (* Gen13: same as apply_to_result — cap the rewritten state before
+     it leaves the failure derivation, so Gen8's bound survives the
+     magentic overlay. *)
+  ( Types.cap_social_state
+      { base_state with
+        social_model = model_name;
+        belief_summary =
+          belief_summary_of_snapshot ~snapshot ~event:Fsm.Failure_observed
+            ~observation ~tool_count:0;
+        active_desire = Some "recover_forward_motion";
+        current_intention = Some "repair_failed_turn";
+        blocker =
+          (match String.trim reason with
+          | "" -> Some "failed_without_detail"
+          | _ -> base_state.blocker);
+        need = Some "fresh_plan_or_operator_guidance";
+      },
     transition_reason )

@@ -20,6 +20,7 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
+import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -60,55 +61,10 @@ export function fetchDashboardShell(opts?: AbortableRequestOptions): Promise<Das
 
 // --- System logs ---
 
-export interface LogEntry {
-  seq: number
-  ts: string
-  level: string
-  raw_level: string
-  normalized_level: string
-  source: string
-  legacy_classified: boolean
-  module: string
-  message: string
-  details?: Record<string, unknown> | null
-}
+export type { LogEntry, LogsResponse }
+export { LogsSchemaDriftError } from './schemas/logs'
 
-export interface LogsResponse {
-  total: number
-  entries: LogEntry[]
-}
-
-function decodeLogEntry(raw: unknown): LogEntry | null {
-  if (!isRecord(raw)) return null
-  const seq = asNumber(raw.seq)
-  const ts = asString(raw.ts)
-  const message = asString(raw.message)
-  if (seq === undefined || !ts || !message) return null
-  return {
-    seq,
-    ts,
-    level: asString(raw.level, 'INFO'),
-    raw_level: asString(raw.raw_level, asString(raw.level, 'INFO')),
-    normalized_level: asString(raw.normalized_level, asString(raw.level, 'INFO')),
-    source: asString(raw.source, 'structured'),
-    legacy_classified: asBoolean(raw.legacy_classified, false),
-    module: asString(raw.module, ''),
-    message,
-    details: isRecord(raw.details) ? raw.details : null,
-  }
-}
-
-function decodeLogsResponse(raw: unknown): LogsResponse | null {
-  if (!isRecord(raw)) return null
-  return {
-    total: asNumber(raw.total, 0),
-    entries: asRecordArray(raw.entries)
-      .map(decodeLogEntry)
-      .filter((entry): entry is LogEntry => entry !== null),
-  }
-}
-
-export function fetchLogs(opts?: {
+export async function fetchLogs(opts?: {
   limit?: number
   level?: string
   module?: string
@@ -122,12 +78,8 @@ export function fetchLogs(opts?: {
     params.set('since_seq', String(opts.since_seq))
   }
   const qs = params.toString()
-  return get<Record<string, unknown>>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
-    .then((raw) => {
-      const decoded = decodeLogsResponse(raw)
-      if (!decoded) throw new Error('invalid logs payload')
-      return decoded
-    })
+  const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+  return parseLogsResponse(raw)
 }
 
 export interface ToolHostFailureReport {

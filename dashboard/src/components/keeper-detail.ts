@@ -739,6 +739,12 @@ function SandboxSummaryPanel({ keeperName }: { keeperName: string }) {
 
         <div class="grid grid-cols-1 gap-2">
           <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Sandbox Image</div>
+            <div class="mt-1 text-[12px] font-mono break-all text-[var(--text-body)]">
+              ${config.effective_sandbox_image || '--'}
+            </div>
+          </div>
+          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
             <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Private Workspace</div>
             <div class="mt-1 text-[12px] font-mono break-all text-[var(--text-body)]">
               ${config.private_workspace_root || '--'}

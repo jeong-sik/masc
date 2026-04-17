@@ -971,6 +971,13 @@ let keeper_config_json (config : Coord.config) (name : string)
         | Some entry -> entry.last_error
         | None -> None
       in
+      let effective_sandbox_image =
+        if m.sandbox_profile = Keeper_types.Docker_hardened
+           || (m.sandbox_profile = Keeper_types.Legacy_local
+               && Env_config_keeper.DockerPlayground.enabled)
+        then Some Env_config_keeper.KeeperSandbox.docker_image
+        else None
+      in
       let private_workspace_root =
         Filename.concat
           (Keeper_alerting_path.project_root_of_config config)
@@ -985,6 +992,8 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("shared_memory_scope",
            `String (Keeper_types.shared_memory_scope_to_string m.shared_memory_scope));
          ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ("effective_sandbox_image",
+           Json_util.string_opt_to_json effective_sandbox_image);
          ("private_workspace_root", `String private_workspace_root);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));

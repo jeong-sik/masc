@@ -76,18 +76,20 @@ graph TB
   end
 ```
 
-### Module Size Distribution (상위 10)
+### Module Size Distribution (상위 10, `lib/coord/`)
 
 | Module | LOC | 역할 |
 |--------|-----|------|
-| `room_eio` | 783 | Eio 백엔드 구현 (direct-style async I/O) |
-| `room_task` | 686 | 태스크 CRUD + 상태 전이 |
-| `room_gc` | 491 | 좀비 정리, stale 아카이브, 메시지 정리 |
-| `room_state` | 409 | 상태 읽기/쓰기/갱신 (file lock + PG) |
-| `room_utils_backend_setup` | 348 | PG 백엔드 설정 |
-| `room_query` | 331 | 룸 내 에이전트/태스크 카운트 쿼리 |
-| `room_lifecycle` | 331 | join, rejoin, leave |
-| `room_task_schedule` | 291 | claim_next, starvation prevention |
+| `coord_task` | 1486 | 태스크 CRUD + 상태 전이 |
+| `coord_eio` | 670 | Eio 백엔드 구현 (direct-style async I/O) |
+| `coord_utils_ops` | 513 | file lock + PG 공통 연산 |
+| `coord_gc` | 413 | 좀비 정리, stale 아카이브, 메시지 정리 |
+| `coord_worktree` | 403 | task worktree 관리 |
+| `coord_utils_backend_setup` | 396 | PG 백엔드 설정 |
+| `coord_query` | 373 | 룸 내 에이전트/태스크 카운트 쿼리 |
+| `coord_task_schedule` | 337 | claim_next, starvation prevention |
+| `coord_utils_paths_backend` | 261 | 경로/백엔드 리졸버 |
+| `coord_portal` | 261 | 1:1 portal messaging |
 
 ---
 
@@ -640,12 +642,12 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 
 ## 17. References
 
-- `lib/room/dune`: sub-library 정의 (`masc_room`, wrapped=false)
-- `lib/room/room_utils.ml`, `room_utils_ops.ml`, `room_utils_paths_backend.ml`, `room_utils_backend_setup.ml`: 공통 유틸리티
-- `lib/room/room_hooks.ml`: 콜백 ref (GC, board, governance)
-- `lib/room/room_query.ml`: 룸 내 에이전트/태스크 카운트 쿼리
-- `lib/room/room_status.ml`: 상태 요약 출력
-- `lib/room/room_git.ml`: git 명령 래퍼 (base branch 해석, worktree 목록)
+- `lib/coord/dune`: sub-library 정의 (`masc_coord`, wrapped=false)
+- `lib/coord/coord_utils.ml`, `coord_utils_ops.ml`, `coord_utils_paths_backend.ml`, `coord_utils_backend_setup.ml`: 공통 유틸리티
+- `lib/coord/coord_hooks.ml`: 콜백 ref (GC, board, governance)
+- `lib/coord/coord_query.ml`: 룸 내 에이전트/태스크 카운트 쿼리
+- `lib/coord/coord_status.ml`: 상태 요약 출력
+- `lib/coord/coord_git.ml`: git 명령 래퍼 (base branch 해석, worktree 목록)
 - `lib/task_sandbox.ml`: 태스크별 worktree sandbox 고수준 API
 - 02-types-and-invariants: `agent_status`, `task_status`, `room_state` 타입 정의
 - 05-keeper-agent: Keeper가 Room GC와 태스크 해제에 관여하는 경로

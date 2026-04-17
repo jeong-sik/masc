@@ -279,10 +279,70 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                 ${matrix.rows.map(row => html`
                   <${MatrixRowRender} row=${row} />
                 `)}
+
+                <${MatrixColumnTotalsRow} matrix=${matrix} />
               </div>
             </div>
           `}
     </section>
+  `
+}
+
+/** Per-column totals footer — GitHub Actions matrix + Airflow DAG-grid
+    convention. The row lives INSIDE the same grid as the data rows so
+    its cells align pixel-for-pixel with the connector columns above.
+    Reads "N keepers" where N = bound (actively using this connector). */
+function MatrixColumnTotalsRow({ matrix }: { matrix: MatrixData }) {
+  const totalBound = matrix.rows.reduce(
+    (acc, row) => acc + row.cells.filter(c => c.state === 'bound').length,
+    0,
+  )
+  return html`
+    <div
+      class="col-span-full mt-1 border-t border-[var(--card-border)]"
+      aria-hidden="true"
+      data-matrix-column-totals-divider
+    ></div>
+    <div
+      class="flex items-center gap-1 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]"
+      data-matrix-column-totals-label
+    >Totals →</div>
+    ${matrix.columns.map((_, idx) => html`
+      <${ColumnTotalsCell} counts=${summarizeMatrixColumn(matrix, idx)} />
+    `)}
+    <div
+      class=${`flex items-center justify-end gap-1 px-1 py-1 text-[10px] tabular-nums ${totalBound > 0 ? 'text-emerald-200' : 'text-[var(--text-dim)]'}`}
+      title=${`Grand total: ${totalBound} bound cells across all keepers × connectors`}
+      data-matrix-grand-total
+      data-matrix-grand-total-bound=${totalBound}
+    >
+      <span aria-hidden="true">●</span>
+      <span>${totalBound}</span>
+    </div>
+  `
+}
+
+function ColumnTotalsCell({ counts }: { counts: MatrixStateCounts }) {
+  const { bound, unbound, unknown } = counts
+  // Show bound count primarily (the interesting one), plus amber badge
+  // when any unknowns exist. Empty column (0 bound, 0 unbound) → dash.
+  const hasAny = bound + unbound + unknown > 0
+  const tone =
+    unknown > 0 ? 'text-amber-200' :
+    bound > 0 ? 'text-emerald-200' :
+    'text-[var(--text-dim)]'
+  const label = hasAny ? `${bound}` : '—'
+  const title = `${bound} bound · ${unbound} unbound · ${unknown} unknown · ${counts.na} n/a`
+  return html`
+    <div
+      class=${`flex items-center justify-center gap-1 px-1 py-1 text-[10px] tabular-nums ${tone}`}
+      title=${title}
+      data-matrix-column-total-bound=${bound}
+      data-matrix-column-total-unknown=${unknown}
+    >
+      <span aria-hidden="true">●</span>
+      <span>${label}</span>
+    </div>
   `
 }
 

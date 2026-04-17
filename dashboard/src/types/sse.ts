@@ -72,10 +72,13 @@ export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 
 // Structured verdict metadata for gate decisions. Emitted alongside existing
 // reason/reason_code fields so dashboards can trace causality without breaking
 // consumers that don't understand the envelope.
-// OCaml SSOT: lib/attribution.mli (since 2.261.0)
+//
+// OCaml SSOT: lib/attribution.mli (since 2.261.0).
+// AttributionOutcome is a discriminated union on 'kind' — each variant
+// carries exactly the fields relevant to that outcome (no optional fields
+// shared across variants).
 
 export type AttributionOrigin = 'det' | 'nondet'
-export type AttributionVerdict = 'pass' | 'fail' | 'partial'
 
 // Known gate identifiers. Kept open ('string') so new gates can emit without
 // a client update, but enumerating canonical values gives us autocomplete and
@@ -91,14 +94,18 @@ export type AttributionGate =
   | 'worker_dev_tools'
   | string
 
+// Gate decision outcome. Discriminated union — exhaustive switch on 'kind'.
+export type AttributionOutcome =
+  | { kind: 'passed' }
+  | { kind: 'policy_failed'; reason: string }
+  | { kind: 'transition_blocked'; from_state: string; to_state: string; reason: string }
+  | { kind: 'partial_pass'; score: number; rationale: string }
+
 export interface Attribution {
   origin: AttributionOrigin
   gate: AttributionGate
-  verdict: AttributionVerdict
   evidence: Record<string, unknown>
-  blocked_from?: string
-  blocked_to?: string
-  rationale?: string
+  outcome: AttributionOutcome
 }
 
 export interface SSEEvent {

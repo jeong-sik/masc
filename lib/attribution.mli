@@ -10,8 +10,12 @@
     for backward compatibility. Emitters MAY additionally attach this
     typed envelope; consumers that don't understand it skip the field.
 
-    See [memory/audits/gate-attribution-baseline-2026-04-17.md] for
-    the per-gate evidence schema inventory this envelope targets.
+    Design note — sum types over products:
+    The outcome is a proper sum. Each case carries exactly the fields
+    relevant to that outcome (no optional / unused fields). A [Passed]
+    verdict cannot carry a [reason]; a [Transition_blocked] cannot omit
+    the from/to states. Illegal states are unrepresentable. See MEMORY
+    `parse-dont-validate`.
 
     @since 2.261.0 *)
 
@@ -25,70 +29,91 @@ type origin = Det | NonDet
 
     See MEMORY [deterministic-nondeterministic-boundary]. *)
 
-type verdict = Pass | Fail | Partial
-(** Decision outcome. [Partial] indicates a score-based gate where the
-    subject met some but not all criteria (score between fail and pass
-    thresholds). Detail lives in [evidence] and optionally [rationale]. *)
+type outcome =
+  | Passed
+      (** Gate allowed the subject through. [evidence] on the envelope
+          still captures what was checked (for audit). *)
+  | Policy_failed of { reason : string }
+      (** Non-transition gate rejection (content check, claim validity,
+          policy violation). The subject was not attempting a state
+          transition — it was proposing an action that got denied. *)
+  | Transition_blocked of {
+      from_state : string;
+      to_state : string;
+      reason : string;
+    }
+      (** Transition gate: the subject tried to move from [from_state]
+          to [to_state] and was blocked. Used by keeper_fsm,
+          agent_lifecycle, task_transition. *)
+  | Partial_pass of { score : float; rationale : string }
+      (** Score-based gate: the subject met some but not all criteria.
+          [score] is the gate's own scale (typically [[0.0, 1.0]]),
+          not normalized here. [rationale] explains the partial in
+          human-readable form. *)
 
 type t = {
-  origin: origin;
-  gate: string;
+  origin : origin;
+  gate : string;
       (** Gate identifier. One of [cdal_verdict], [verification],
           [accountability], [keeper_fsm], [oas_completion],
           [agent_lifecycle], [task_transition], [worker_dev_tools].
-          Future gates append to this list. *)
-  verdict: verdict;
-  evidence: Yojson.Safe.t;
-      (** Gate-specific structured evidence. Schema per gate defined in
-          the emitter; consumers treat as opaque JSON. *)
-  blocked_from: string option;
-      (** When [verdict = Fail] on a transition: the state the subject
-          was in before the block. [None] for non-transition gates. *)
-  blocked_to: string option;
-      (** When [verdict = Fail] on a transition: the state the subject
-          was trying to reach. [None] for non-transition gates. *)
-  rationale: string option;
-      (** Human-readable explanation. Primarily populated for
-          [NonDet] verdicts where the [evidence] alone is insufficient
-          to explain the decision. *)
+          Future gates append to this list.
+
+          Kept as [string] rather than a variant so new gates can emit
+          without a library-wide code change. Consumers that care about
+          the closed set should match on known values. *)
+  evidence : Yojson.Safe.t;
+      (** Gate-specific structured input data, always present regardless
+          of outcome (the gate saw something to decide on). Schema per
+          gate is defined in the emitter; consumers treat as opaque JSON
+          unless they know the gate. *)
+  outcome : outcome;
 }
 
 val to_yojson : t -> Yojson.Safe.t
-(** Serialize to JSON for SSE emission. Optional fields are omitted
-    (not emitted as [null]) to keep the wire format compact. *)
+(** Serialize to JSON for SSE emission.
+
+    Wire format: [outcome] is tagged by a ["kind"] field inside a nested
+    object:
+    - [Passed]             → [{"kind":"passed"}]
+    - [Policy_failed]      → [{"kind":"policy_failed","reason":"..."}]
+    - [Transition_blocked] → [{"kind":"transition_blocked",
+                               "from_state":"...","to_state":"...","reason":"..."}]
+    - [Partial_pass]       → [{"kind":"partial_pass",
+                               "score":0.85,"rationale":"..."}] *)
 
 val of_yojson : Yojson.Safe.t -> (t, string) result
 (** Parse from JSON. Returns [Error] with a human-readable message on
-    malformed input. Missing [evidence] defaults to [`Null]; other
-    required fields ([origin], [gate], [verdict]) must be present. *)
+    malformed input (missing field, unknown [kind], bad types).
+    Missing [evidence] defaults to [`Null]. *)
 
 val show : t -> string
 (** Single-line representation for debug logs. Elides [evidence] and
-    [rationale] to keep logs scannable. *)
+    long string fields to keep logs scannable. *)
 
-val pass : origin:origin -> gate:string -> evidence:Yojson.Safe.t -> t
-(** Smart constructor for a passing verdict. [blocked_from],
-    [blocked_to], [rationale] are [None]. *)
+(** {1 Smart constructors}
 
-val fail :
+    Prefer these over the raw record — they enforce the sum invariant
+    by construction (no way to build an illegal combination). *)
+
+val passed : origin:origin -> gate:string -> evidence:Yojson.Safe.t -> t
+
+val policy_failed :
+  origin:origin -> gate:string -> evidence:Yojson.Safe.t -> reason:string -> t
+
+val transition_blocked :
   origin:origin ->
   gate:string ->
   evidence:Yojson.Safe.t ->
-  ?blocked_from:string ->
-  ?blocked_to:string ->
-  ?rationale:string ->
-  unit ->
+  from_state:string ->
+  to_state:string ->
+  reason:string ->
   t
-(** Smart constructor for a failing verdict. All "why" fields are
-    optional — supply whichever apply to the gate in question. *)
 
-val partial :
+val partial_pass :
   origin:origin ->
   gate:string ->
   evidence:Yojson.Safe.t ->
-  ?rationale:string ->
-  unit ->
+  score:float ->
+  rationale:string ->
   t
-(** Smart constructor for a partial verdict (score-based gates).
-    [blocked_from] / [blocked_to] are [None] — partial verdicts don't
-    fit the block-on-transition model. *)

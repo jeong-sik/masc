@@ -11,6 +11,7 @@ import {
   withRailInflight,
   resetRailInflightState,
   railPillAriaLabel,
+  statToneGradient,
   type RailHandlers,
   type RailPill,
 } from './connector-readiness-rail'
@@ -101,7 +102,10 @@ describe('ConnectorReadinessRail rendering', () => {
     expect(bindingsPill?.getAttribute('data-rail-state')).toBe('warn')
   })
 
-  it('inflight=true pulses the pill, disables click, swaps detail to "진행 중..."', () => {
+  it('inflight=true pulses the pill, disables click, announces 진행 중 via aria-label', () => {
+    // Under the Grafana Stat-panel redesign the detail text no longer
+    // appears in the visible DOM — "진행 중" is reserved for the
+    // aria-label / title so AT users still hear the busy state.
     const pills = deriveRail(
       { sidecarUp: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
       noop,
@@ -112,7 +116,7 @@ describe('ConnectorReadinessRail rendering', () => {
     expect(processPill.getAttribute('data-rail-inflight')).toBe('true')
     expect(processPill.disabled).toBe(true)
     expect(processPill.className).toContain('animate-pulse')
-    expect(processPill.textContent).toContain('진행 중')
+    expect(processPill.getAttribute('aria-label') ?? '').toContain('진행 중')
   })
 
   it('withRailInflight marks then clears the key around an async op', async () => {
@@ -182,7 +186,7 @@ describe('ConnectorReadinessRail rendering', () => {
     expect(processPill.getAttribute('aria-busy')).toBe('true')
   })
 
-  it('decorative glyph spans are aria-hidden so AT does not read "dot dot dot"', () => {
+  it('decorative glyph + label spans are aria-hidden so AT only reads the aria-label', () => {
     const pills = deriveRail(
       { sidecarUp: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
       noop,
@@ -190,8 +194,45 @@ describe('ConnectorReadinessRail rendering', () => {
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
     const tokenPill = container.querySelector('[data-rail-pill="token"]')!
     const hidden = tokenPill.querySelectorAll('[aria-hidden="true"]')
-    // One for the glyph circle + one for uppercase label + one for detail line.
-    expect(hidden.length).toBeGreaterThanOrEqual(3)
+    // Stat-panel layout: one aria-hidden for the glyph circle + one for
+    // the uppercase label. Detail line is gone — it now lives only in
+    // title/aria-label so narrow tiles can't truncate it.
+    expect(hidden.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('detail text is NOT in the visible DOM (stat-panel layout — no truncation at narrow widths)', () => {
+    // Regression guard against the screenshot bug: under the old
+    // 2-row layout, detail text "설정됨 (sidecar 부팅 통과)" truncated
+    // to "설." at narrow column widths. The stat-panel redesign removes
+    // that visible text entirely — detail is available only to hover
+    // (title) and AT (aria-label). This test pins the invariant so a
+    // future regression re-introducing the detail <span> is caught.
+    const pills = deriveRail(
+      { sidecarUp: true, gateHealthy: true, bindingCount: 2, keeperCount: 3 },
+      noop,
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const tokenPill = container.querySelector('[data-rail-pill="token"]') as HTMLButtonElement
+    // Visible text should be the label only — no detail sentence.
+    const visibleText = tokenPill.textContent?.trim() ?? ''
+    expect(visibleText).not.toContain('설정됨 (sidecar 부팅 통과)')
+    // The detail IS available to AT + hover.
+    expect(tokenPill.getAttribute('aria-label')).toContain('설정됨 (sidecar 부팅 통과)')
+  })
+
+  it('each pill uses the stat-panel vertical layout + threshold-color gradient', () => {
+    const pills = deriveRail(
+      { sidecarUp: true, gateHealthy: true, bindingCount: 1, keeperCount: 1 },
+      noop,
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const tokenPill = container.querySelector('[data-rail-pill="token"]') as HTMLButtonElement
+    // Stat-tile layout marker.
+    expect(tokenPill.getAttribute('data-rail-layout')).toBe('stat-tile')
+    // flex-col = vertical stack (Grafana stat-panel). Not items-center horizontal.
+    expect(tokenPill.className).toContain('flex-col')
+    // Gradient background for threshold color zone.
+    expect(tokenPill.className).toContain('bg-gradient-to-b')
   })
 })
 
@@ -217,6 +258,23 @@ describe('railPillAriaLabel', () => {
   it('replaces detail with "진행 중" when inflight so AT announces the busy state', () => {
     const pill = { ...basePill, inflight: true }
     expect(railPillAriaLabel(pill)).toBe('Token — 진행 중')
+  })
+})
+
+describe('statToneGradient (pure)', () => {
+  it('returns a Grafana-style vertical gradient class string for each state', () => {
+    // Each state maps to a distinct emerald/amber/rose/muted gradient —
+    // exposing this helper lets callers outside the rail (setup guides,
+    // fleet tiles) reuse the same tone-to-gradient palette without
+    // forking the token list.
+    expect(statToneGradient('ok')).toContain('emerald')
+    expect(statToneGradient('warn')).toContain('amber')
+    expect(statToneGradient('bad')).toContain('rose')
+    // idle is intentionally muted — white-channel variables, no accent color.
+    expect(statToneGradient('idle')).toContain('white')
+    for (const s of ['ok', 'warn', 'bad', 'idle'] as const) {
+      expect(statToneGradient(s)).toContain('bg-gradient-to-b')
+    }
   })
 })
 

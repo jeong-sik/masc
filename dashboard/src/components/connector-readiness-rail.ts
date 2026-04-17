@@ -67,13 +67,17 @@ export interface RailPill {
   inflight?: boolean
 }
 
-const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string }> = {
+const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string; gradient: string }> = {
   ok: {
     bg: 'bg-emerald-500/10',
     border: 'border-emerald-400/40',
     text: 'text-emerald-100',
     dot: 'bg-emerald-400',
     icon: '✓',
+    // Grafana Stat panel "Background Gradient" mode — subtle vertical
+    // fade from the state's tone into the card surface so the pill
+    // reads as a threshold color zone, not a flat chip.
+    gradient: 'bg-gradient-to-b from-emerald-500/15 to-emerald-500/0',
   },
   warn: {
     bg: 'bg-amber-500/10',
@@ -81,6 +85,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     text: 'text-amber-100',
     dot: 'bg-amber-400',
     icon: '!',
+    gradient: 'bg-gradient-to-b from-amber-500/15 to-amber-500/0',
   },
   bad: {
     bg: 'bg-rose-500/10',
@@ -88,6 +93,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     text: 'text-rose-100',
     dot: 'bg-rose-400',
     icon: '⊘',
+    gradient: 'bg-gradient-to-b from-rose-500/15 to-rose-500/0',
   },
   idle: {
     bg: 'bg-[var(--white-3)]',
@@ -95,7 +101,16 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
     text: 'text-[var(--text-dim)]',
     dot: 'bg-[var(--white-10)]',
     icon: '·',
+    gradient: 'bg-gradient-to-b from-[var(--white-4)] to-[var(--white-2)]',
   },
+}
+
+/** Pure: map a rail state to the Grafana Stat panel style "threshold
+    color zone" gradient class. Exposed so callers outside the rail
+    (e.g. setup-guide cards, fleet tiles) can reuse the exact same
+    tone-to-gradient mapping without forking the palette. */
+export function statToneGradient(state: RailState): string {
+  return TONE[state].gradient
 }
 
 /** Pure: compose a screen-reader label for the pill so assistive
@@ -113,15 +128,18 @@ export function railPillAriaLabel(pill: RailPill): string {
 function Pill({ pill }: { pill: RailPill }) {
   const tone = TONE[pill.state]
   const inflight = pill.inflight === true
-  // Focus ring uses the same accent token as the rest of the dashboard's
-  // interactive focus states (PatternFly AA target: visible 2px ring on
-  // keyboard-only focus, :focus-visible so mouse clicks don't light up).
-  // aria-busy announces the pulsing "진행 중…" state to AT without needing
-  // a separate visually-hidden <span>.
+  // Grafana Stat panel layout — vertical stack (icon dominates, label
+  // secondary) with a threshold-color gradient background. Detail moves
+  // entirely to `title` + aria-label so a narrow tile can never render
+  // "BINDIN k.." or "TOKEN 설." — the label is always the full word and
+  // the detail is always the full sentence, no matter the column width.
+  // Keyboard focus ring uses the accent token (PatternFly AA target:
+  // visible 2px ring on :focus-visible only). aria-busy announces
+  // "진행 중…" to AT without a separate visually-hidden span.
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.bg} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-md border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
       aria-label=${railPillAriaLabel(pill)}
       aria-busy=${inflight ? 'true' : 'false'}
@@ -129,18 +147,19 @@ function Pill({ pill }: { pill: RailPill }) {
       data-rail-pill=${pill.key}
       data-rail-state=${pill.state}
       data-rail-inflight=${inflight ? 'true' : 'false'}
+      data-rail-layout="stat-tile"
       disabled=${inflight}
     >
       <span
         aria-hidden="true"
-        class=${`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
       >
         ${inflight ? '…' : tone.icon}
       </span>
-      <span class="min-w-0 flex-1">
-        <span aria-hidden="true" class=${`block text-[10px] uppercase tracking-[0.14em] ${tone.text}`}>${pill.label}</span>
-        <span aria-hidden="true" class="block truncate text-[11px] text-[var(--text-body)]">${inflight ? '진행 중...' : pill.detail}</span>
-      </span>
+      <span
+        aria-hidden="true"
+        class=${`block text-[10px] uppercase tracking-[0.14em] ${tone.text}`}
+      >${pill.label}</span>
     </button>
   `
 }

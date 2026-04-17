@@ -117,17 +117,9 @@ code_refs:
 | Event Trace | Append-only events.jsonl | IMPL | 58KB, 1000+ entries |
 | Intent Tools | create/status/update/forecast | IMPL | MCP tool registry 등록 + dispatch 연결 완료 |
 
-### 07-Team Session (94% IMPL)
+### 07-Team Session (RETIRED)
 
-| Section | Feature | Status | Evidence |
-|---------|---------|--------|----------|
-| 47-field Session Record | Identity+Config+Runtime+Timestamps+Proof | IMPL | team_session_types.ml 697 LOC |
-| 3 Orchestration Modes | Manual/Assist/Auto | IMPL | Engine handles all 3 |
-| OAS Bridge | session→swarm_config, worker→agent_entry | IMPL | team_session_oas_bridge.ml 414 LOC |
-| Swarm Runner | Load→convert→callbacks→run→apply | IMPL | team_session_swarm_runner.ml |
-| Report/Proof | Markdown/JSON, Standard/Strong | IMPL | team_session_report_proof.ml 419 LOC |
-| Tool Surface | 9 handler modules, 4.5K LOC | IMPL | God file 분할 완료 |
-| Session Bridge Fidelity | `worker_specs` projection + prompt context, no `collaboration_context` | Architectural | fidelity gap remains by design |
+전체 `team_session_*` 모듈과 OAS Swarm bridge는 retired surface이며 runtime에서 제거됐다. 역사적 맥락은 `docs/spec/00-glossary.md`의 "Team Session (retired)" 항목과 `docs/OAS-MASC-BOUNDARY.md`의 "Team-session swarm | Removed" 항목을 참고한다.
 
 ### 08-Governance (100% IMPL)
 

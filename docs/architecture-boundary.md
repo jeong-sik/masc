@@ -44,7 +44,6 @@ Modules where Agent_sdk usage is the core purpose. These are not MASC violations
 | Runtime | `worker_oas`, `oas_worker`, `oas_worker_exec`, `worker_run_once` |
 | Evaluation | `eval_calibration`, `eval_oas_probe` |
 | Memory | `memory_oas_bridge` |
-| Session | `team_session_oas_bridge`, `team_session_plan` |
 
 ### Bridge Files (connection points)
 
@@ -53,7 +52,6 @@ Files that explicitly bridge MASC and OAS. Named with `_oas` or `_oas_adapter` s
 | File | Purpose |
 |---|---|
 | `verifier_oas.ml` | Verification verdict to OAS Hooks/Guardrails |
-| `team_session_oas_bridge.ml` | MASC session / planned_worker projection into OAS Swarm config and agent entries (`collaboration_context` omitted by design) |
 | `context_compact_oas.ml` | Context compaction via OAS Context_reducer |
 | `keeper_hooks_oas.ml` | Keeper lifecycle hooks to OAS hooks |
 

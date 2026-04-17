@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
@@ -101,6 +101,67 @@ function sparklineSvg(values: number[], color: string, w = 80, h = 20): string {
   return `<svg width="${w}" height="${h}" class="inline-block align-middle" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg"><polyline fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" points="${points}"/></svg>`
 }
 
+/**
+ * Pure filter for runtime provider snapshots.
+ *
+ * Case-insensitive substring match on the provider's natural text fields
+ * (provider name, runtime_kind, auth_kind, status, source, default_model,
+ * endpoint_url, note, and any catalog model id).
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterProviders(
+  items: readonly DashboardRuntimeProviderSnapshot[],
+  query: string,
+): readonly DashboardRuntimeProviderSnapshot[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return items
+  return items.filter(provider => {
+    if (provider.provider.toLowerCase().includes(needle)) return true
+    if (provider.runtime_kind && provider.runtime_kind.toLowerCase().includes(needle)) return true
+    if (provider.auth_kind && provider.auth_kind.toLowerCase().includes(needle)) return true
+    if (provider.status && provider.status.toLowerCase().includes(needle)) return true
+    if (provider.source && provider.source.toLowerCase().includes(needle)) return true
+    if (provider.default_model && provider.default_model.toLowerCase().includes(needle)) return true
+    if (provider.endpoint_url && provider.endpoint_url.toLowerCase().includes(needle)) return true
+    if (provider.note && provider.note.toLowerCase().includes(needle)) return true
+    for (const model of provider.models) {
+      if (model.toLowerCase().includes(needle)) return true
+    }
+    return false
+  })
+}
+
+/**
+ * Pure filter for runtime model metrics.
+ *
+ * Case-insensitive substring match on `model_id` and any `top_tools[].tool`
+ * name, letting operators locate a model by partial id or by the tools it
+ * most recently invoked.
+ *
+ * Empty/whitespace query returns the input reference unchanged.
+ * Input is never mutated.
+ */
+export function filterModels(
+  items: readonly DashboardRuntimeModelMetric[],
+  query: string,
+): readonly DashboardRuntimeModelMetric[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return items
+  return items.filter(metric => {
+    if (metric.model_id.toLowerCase().includes(needle)) return true
+    if (metric.top_tools) {
+      for (const t of metric.top_tools) {
+        if (t.tool.toLowerCase().includes(needle)) return true
+      }
+    }
+    return false
+  })
+}
+
 export function RuntimeMonitor() {
   const resourceRef = useRef<ManagedAsyncResource<RuntimeData> | null>(null)
   if (resourceRef.current === null) {
@@ -109,6 +170,7 @@ export function RuntimeMonitor() {
   const resource = resourceRef.current
   const windowMinutes = useSignal(30)
   const expandedModel = useSignal<string | null>(null)
+  const query = useSignal('')
 
   const load = () => loadRuntimeData(resource, windowMinutes.value)
 
@@ -122,53 +184,26 @@ export function RuntimeMonitor() {
   const current = resource.state.value
   const providers = current.data?.providers ?? null
   const metrics = current.data?.metrics ?? null
+  const providerList = useMemo(() => providers?.providers ?? [], [providers])
+  const modelList = useMemo(() => metrics?.models ?? [], [metrics])
+  const visibleProviders = useMemo(
+    () => filterProviders(providerList, query.value),
+    [providerList, query.value],
+  )
+  const visibleModels = useMemo(
+    () => filterModels(modelList, query.value),
+    [modelList, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
 
-  return html`
-    <div class="flex flex-col gap-4">
-      <div class="flex items-center gap-3 flex-wrap">
-        <select
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
-          value=${String(windowMinutes.value)}
-          onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
-        >
-          <option value="15">15분</option>
-          <option value="30">30분</option>
-          <option value="60">60분</option>
-          <option value="180">180분</option>
-        </select>
-        <button
-          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
-          onClick=${() => void load()}
-        >
-          새로고침
-        </button>
-        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
-      </div>
-
-      ${current.error
-        ? html`<${ErrorState} message=${current.error} />`
-        : null}
-
-      ${current.loading && !providers && !metrics
-        ? html`<${LoadingState}>runtime snapshot 불러오는 중...<//>`
-        : null}
-
-      <${Card} title="Provider Runtime">
-        <div class="grid grid-cols-2 gap-3 mb-4">
-          <${StatCell}
-            label="Providers"
-            value=${providers?.summary?.providers ?? providers?.providers.length ?? 0}
-            detail=${providers?.updated_at ?? 'updated_at 없음'}
-          />
-          <${StatCell}
-            label="Local Models"
-            value=${providers?.summary?.local_models ?? 0}
-            detail=${`Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}`}
-          />
-        </div>
-        <div class="flex flex-col gap-3">
-          ${(providers?.providers ?? []).length > 0
-            ? providers?.providers.map(provider => html`
+  function renderProviderList() {
+    if (providerList.length === 0) {
+      return html`<${EmptyState} message="provider runtime snapshot이 없습니다." compact />`
+    }
+    if (visibleProviders.length === 0) {
+      return html`<${EmptyState} message=${`"${query.value}"와 일치하는 provider가 없습니다.`} compact />`
+    }
+    return visibleProviders.map(provider => html`
                 <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
@@ -197,7 +232,65 @@ export function RuntimeMonitor() {
                   ${provider.note ? html`<div class="text-[12px] text-text-muted">${provider.note}</div>` : null}
                 </article>
               `)
-            : html`<${EmptyState} message="provider runtime snapshot이 없습니다." compact />`}
+  }
+
+  return html`
+    <div class="flex flex-col gap-4">
+      <div class="flex items-center gap-3 flex-wrap">
+        <select
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
+          value=${String(windowMinutes.value)}
+          onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
+        >
+          <option value="15">15분</option>
+          <option value="30">30분</option>
+          <option value="60">60분</option>
+          <option value="180">180분</option>
+        </select>
+        <button
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          onClick=${() => void load()}
+        >
+          새로고침
+        </button>
+        <input
+          type="search"
+          class="flex-1 min-w-[180px] rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] placeholder:text-[var(--text-muted)]"
+          placeholder="provider/model 검색 (provider id, runtime, model id, tool…)"
+          value=${query.value}
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+        />
+        ${isFiltering
+          ? html`<span class="text-xs text-[var(--text-muted)]">
+              providers ${visibleProviders.length}/${providerList.length} · models ${visibleModels.length}/${modelList.length}
+            </span>`
+          : null}
+        ${current.loading ? html`<span class="text-xs text-[var(--text-muted)]">로딩 중...</span>` : null}
+      </div>
+
+      ${current.error
+        ? html`<${ErrorState} message=${current.error} />`
+        : null}
+
+      ${current.loading && !providers && !metrics
+        ? html`<${LoadingState}>runtime snapshot 불러오는 중...<//>`
+        : null}
+
+      <${Card} title="Provider Runtime">
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <${StatCell}
+            label="Providers"
+            value=${providers?.summary?.providers ?? providers?.providers.length ?? 0}
+            detail=${providers?.updated_at ?? 'updated_at 없음'}
+          />
+          <${StatCell}
+            label="Local Models"
+            value=${providers?.summary?.local_models ?? 0}
+            detail=${`Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}`}
+          />
+        </div>
+        <div class="flex flex-col gap-3">
+          ${renderProviderList()}
         </div>
       <//>
 
@@ -220,8 +313,20 @@ export function RuntimeMonitor() {
           />
         </div>
         <div class="flex flex-col gap-3">
-          ${(metrics?.models ?? []).length > 0
-            ? metrics?.models.map(metric => html`
+          ${renderModelList()}
+        </div>
+      <//>
+    </div>
+  `
+
+  function renderModelList() {
+    if (modelList.length === 0) {
+      return html`<${EmptyState} message="최근 model inference metrics가 없습니다." compact />`
+    }
+    if (visibleModels.length === 0) {
+      return html`<${EmptyState} message=${`"${query.value}"와 일치하는 model이 없습니다.`} compact />`
+    }
+    return visibleModels.map(metric => html`
                 <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
@@ -319,9 +424,5 @@ export function RuntimeMonitor() {
                     : null}
                 </article>
               `)
-            : html`<${EmptyState} message="최근 model inference metrics가 없습니다." compact />`}
-        </div>
-      <//>
-    </div>
-  `
+  }
 }

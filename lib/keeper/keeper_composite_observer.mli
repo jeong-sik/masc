@@ -167,6 +167,11 @@ val observe :
   Keeper_registry.registry_entry ->
   snapshot
 
+(** Observe every registered keeper under [base_path] once. Used by
+    [GET /api/v1/keepers/composite] to render fleet-level matrices
+    (LT-16a). Preserves registry iteration order. *)
+val all_snapshots : base_path:string -> unit -> snapshot list
+
 (** Stringify [turn_phase] for JSON serialisation. Mirrors the lowercase
     edge labels used in KeeperTurnCycle.tla. *)
 val ksm_phase_to_string : ksm_phase -> string

@@ -122,14 +122,3 @@ export function prettyArgs(args: Record<string, unknown> | string): string {
   try { return JSON.stringify(args, null, 2) } catch { return String(args) }
 }
 
-const RESULT_PREVIEW_MAX_CHARS = 80
-
-export function formatResult(
-  result: string | null,
-  error: string | null,
-  maxLen: number = RESULT_PREVIEW_MAX_CHARS,
-): string {
-  if (error) return `err: ${error}`
-  if (result == null) return '-'
-  return truncate(result, maxLen)
-}

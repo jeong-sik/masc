@@ -1,7 +1,7 @@
 // MASC Dashboard — Hash-based router
 // Reads location.hash for canonical dashboard routes.
 
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { signal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 import { normalizeRouteParams, sectionItemsForTab } from './config/navigation'
@@ -182,21 +182,6 @@ export function navigate(tab: TabId, params?: Record<string, string>): void {
 
 export function navigateToPost(postId: string): void {
   window.location.hash = `#workspace?section=board&post=${encodeURIComponent(postId)}`
-}
-
-export function navigateBack(): void {
-  const current = route.value
-  window.location.hash = toHash({
-    tab: current.tab,
-    params: normalizeRouteParams(current.tab, {}),
-    postId: null,
-  })
-}
-
-// --- Hook for components ---
-
-export function useRoute(): ReadonlySignal<RouteState> {
-  return route
 }
 
 export function initRouter(): void {

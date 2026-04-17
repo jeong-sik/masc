@@ -15,20 +15,6 @@ export interface AnomalyResult {
 
 const DEFAULT_THRESHOLD = 2.0
 
-export interface AnomalySummary {
-  count: number
-  worstDrop: AnomalyResult | null
-}
-
-export function anomalySummary(results: AnomalyResult[]): AnomalySummary {
-  const anomalies = results.filter(r => r.isAnomaly)
-  const drops = anomalies.filter(r => r.zScore < 0)
-  const worstDrop = drops.length > 0
-    ? drops.reduce((worst, cur) => cur.zScore < worst.zScore ? cur : worst)
-    : null
-  return { count: anomalies.length, worstDrop }
-}
-
 export function detectAnomalies(
   windowed: Array<{ point: ToolQualityHourlyPoint; ts: number }>,
   threshold: number = DEFAULT_THRESHOLD,

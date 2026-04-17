@@ -27,12 +27,3 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
   }
 }
 
-export async function updateTaskPriority(taskId: string, priority: number): Promise<void> {
-  try {
-    await callMcpTool('masc_update_priority', { task_id: taskId, priority })
-    showToast(`우선순위 변경: ${priority}`, 'success')
-    await refreshExecution({ force: true })
-  } catch (err) {
-    showToast(`우선순위 변경 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
-  }
-}

@@ -1,12 +1,10 @@
 import { signal } from '@preact/signals'
 import { navigate } from '../router'
-import { missionSnapshot } from '../mission-store'
 import type {
   Agent,
   DashboardMissionAttentionQueueItem,
   DashboardMissionAgentBrief,
   DashboardMissionKeeperBrief,
-  DashboardMissionSessionBrief,
   Keeper,
   OperatorAttentionItem,
   OperatorRecommendedAction,
@@ -149,12 +147,6 @@ export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): O
 }
 
 
-export function sessionLookupById() {
-  const mission = missionSnapshot.value
-  if (!mission) return new Map<string, DashboardMissionSessionBrief>()
-  return new Map(mission.sessions.map(item => [item.session_id, item]))
-}
-
 export function toggleAttention(id: string): void {
   selectedAttentionId.value = selectedAttentionId.value === id ? null : id
   selectedSessionId.value = null
@@ -163,11 +155,6 @@ export function toggleAttention(id: string): void {
 export function toggleSession(id: string): void {
   selectedSessionId.value = selectedSessionId.value === id ? null : id
   selectedAttentionId.value = null
-}
-
-export function clearMissionSelection(): void {
-  selectedAttentionId.value = null
-  selectedSessionId.value = null
 }
 
 export function liveStateClass(status?: string | null, health?: string | null): string {

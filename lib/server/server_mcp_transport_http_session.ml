@@ -1,18 +1,20 @@
 open Result_syntax
 
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
 let mcp_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
 
 let mcp_protocol_version_default = Mcp_transport_protocol.default_protocol_version
 
-let protocol_version_by_session : (string, string) Hashtbl.t =
-  Hashtbl.create 128
+let protocol_version_by_session : string SMap.t Atomic.t = Atomic.make SMap.empty
 
-let mcp_profile_by_session : (string, Server_mcp_transport_http_types.tool_profile) Hashtbl.t =
-  Hashtbl.create 128
-
-(** Eio-cooperative mutex protecting both Hashtbl tables above.
-    Concurrent HTTP request fibers can race on Hashtbl read/write. *)
-let session_mutex = Eio.Mutex.create ()
+let mcp_profile_by_session : Server_mcp_transport_http_types.tool_profile SMap.t Atomic.t = Atomic.make SMap.empty
 
 let default_base_path () =
   (* Match the launcher guard: a direct binary launch from a checkout with its
@@ -34,33 +36,33 @@ let is_valid_protocol_version version =
 
 let remember_protocol_version session_id version =
   if is_valid_protocol_version version then
-    Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
-        Hashtbl.replace protocol_version_by_session session_id version)
+    atomic_update protocol_version_by_session (fun map -> SMap.add session_id version map)
 
 let remember_mcp_profile session_id profile =
-  Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
-      Hashtbl.replace mcp_profile_by_session session_id profile)
+  atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map)
 
 let forget_mcp_session session_id =
-  Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
-      Hashtbl.remove protocol_version_by_session session_id;
-      Hashtbl.remove mcp_profile_by_session session_id)
+  atomic_update protocol_version_by_session (fun map -> SMap.remove session_id map);
+  atomic_update mcp_profile_by_session (fun map -> SMap.remove session_id map)
 
 (** Reap session entries whose session_id has no active SSE connection.
     Call periodically from the cleanup loop. Returns number of reaped entries. *)
 let reap_stale_sessions ~is_active_session =
-  Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
-    let stale =
-      Hashtbl.fold (fun sid _ acc ->
-        if not (is_active_session sid) then sid :: acc
-        else acc
-      ) protocol_version_by_session []
-    in
-    List.iter (fun sid ->
-      Hashtbl.remove protocol_version_by_session sid;
-      Hashtbl.remove mcp_profile_by_session sid
-    ) stale;
-    List.length stale)
+  let stale =
+    SMap.fold (fun sid _ acc ->
+      if not (is_active_session sid) then sid :: acc
+      else acc
+    ) (Atomic.get protocol_version_by_session) []
+  in
+  if stale <> [] then begin
+    atomic_update protocol_version_by_session (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map stale
+    );
+    atomic_update mcp_profile_by_session (fun map ->
+      List.fold_left (fun m sid -> SMap.remove sid m) map stale
+    )
+  end;
+  List.length stale
 
 let profile_label = function
   | Server_mcp_transport_http_types.Full -> "/mcp"
@@ -68,29 +70,27 @@ let profile_label = function
   | Server_mcp_transport_http_types.Operator_remote -> "/mcp/operator"
 
 let validate_mcp_session_profile ~profile session_id =
-  Eio.Mutex.use_ro session_mutex (fun () ->
-      match Hashtbl.find_opt mcp_profile_by_session session_id with
-      | None -> Ok ()
-      | Some existing when existing = profile -> Ok ()
-      | Some existing ->
-          Error
-            (Printf.sprintf "Session %s belongs to %s, not %s." session_id
-               (profile_label existing) (profile_label profile)))
+  match SMap.find_opt session_id (Atomic.get mcp_profile_by_session) with
+  | None -> Ok ()
+  | Some existing when existing = profile -> Ok ()
+  | Some existing ->
+      Error
+        (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+           (profile_label existing) (profile_label profile))
 
 let validate_mcp_session_delete_profile ~profile session_id =
   match profile with
   | Server_mcp_transport_http_types.Operator_remote ->
-      Eio.Mutex.use_ro session_mutex (fun () ->
-          match Hashtbl.find_opt mcp_profile_by_session session_id with
-          | Some Server_mcp_transport_http_types.Operator_remote -> Ok ()
-          | Some existing ->
-              Error
-                (Printf.sprintf "Session %s belongs to %s, not %s." session_id
-                   (profile_label existing) (profile_label profile))
-          | None ->
-              Error
-                (Printf.sprintf "Session %s is not registered on %s." session_id
-                   (profile_label profile)))
+      (match SMap.find_opt session_id (Atomic.get mcp_profile_by_session) with
+       | Some Server_mcp_transport_http_types.Operator_remote -> Ok ()
+       | Some existing ->
+           Error
+             (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+                (profile_label existing) (profile_label profile))
+       | None ->
+           Error
+             (Printf.sprintf "Session %s is not registered on %s." session_id
+                (profile_label profile)))
   | Server_mcp_transport_http_types.Full
   | Server_mcp_transport_http_types.Managed_agent ->
       validate_mcp_session_profile ~profile session_id
@@ -190,33 +190,31 @@ let validate_protocol_version_continuity ~session_id request =
       Error (Printf.sprintf "Unsupported MCP-Protocol-Version: %s" version)
   in
   let provided = get_protocol_version_header_opt request in
-  Eio.Mutex.use_ro session_mutex (fun () ->
-      match Hashtbl.find_opt protocol_version_by_session session_id with
-      | Some expected -> (
-          match provided with
-          | None -> Ok ()
-          | Some version ->
-              let* () = validate_supported version in
-              if String.equal version expected then
-                Ok ()
-              else
-                Error
-                  (Printf.sprintf
-                     "MCP-Protocol-Version mismatch for session %s: expected %s, \
-                      got %s."
-                     session_id expected version))
-      | None -> (
-          match provided with
-          | Some version -> validate_supported version
-          | None -> Ok ()))
+  match SMap.find_opt session_id (Atomic.get protocol_version_by_session) with
+  | Some expected -> (
+      match provided with
+      | None -> Ok ()
+      | Some version ->
+          let* () = validate_supported version in
+          if String.equal version expected then
+            Ok ()
+          else
+            Error
+              (Printf.sprintf
+                 "MCP-Protocol-Version mismatch for session %s: expected %s, \
+                  got %s."
+                 session_id expected version))
+  | None -> (
+      match provided with
+      | Some version -> validate_supported version
+      | None -> Ok ())
 
 let get_protocol_version_for_session ?session_id request =
   match session_id with
   | Some id ->
-      Eio.Mutex.use_ro session_mutex (fun () ->
-          match Hashtbl.find_opt protocol_version_by_session id with
-          | Some v -> v
-          | None -> get_protocol_version request)
+      (match SMap.find_opt id (Atomic.get protocol_version_by_session) with
+       | Some v -> v
+       | None -> get_protocol_version request)
   | None -> get_protocol_version request
 
 let query_param request key =

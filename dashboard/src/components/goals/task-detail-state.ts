@@ -5,7 +5,8 @@ import { fetchTaskHistory } from '../../api/actions'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
 import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/session-trace-state'
 import { findKeeper } from '../../lib/keeper-utils'
-import type { Task } from '../../types'
+import { goalById } from './goal-helpers'
+import type { Goal, Task } from '../../types'
 
 // -- Activity filter (owned here, consumed by task-activity-list) ---
 
@@ -75,6 +76,37 @@ export function filterTaskEvents(
   })
 }
 
+/**
+ * Pure filter for goal relation rows (the assignee keeper's active goals).
+ *
+ * - `query` is case-insensitive substring match across the goal's `id`,
+ *   resolved `title`, `status`, and `metric` (trimmed). Unresolved goal
+ *   ids still match on the raw id so operators can search by identifier
+ *   even when the goal store has not loaded that entry yet.
+ * - Empty/whitespace-only query returns the input reference unchanged
+ *   (zero-allocation fast path, preserves identity for memoisation).
+ * - `resolve` defaults to `goalById` so the filter stays pure in tests
+ *   when the caller provides an injected lookup.
+ * - Does not mutate the input array.
+ */
+export function filterGoalRelations(
+  ids: readonly string[],
+  query: string,
+  resolve: (id: string) => Goal | undefined = goalById,
+): readonly string[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return ids
+  return ids.filter(id => {
+    if (id.toLowerCase().includes(needle)) return true
+    const goal = resolve(id)
+    if (!goal) return false
+    if (goal.title.toLowerCase().includes(needle)) return true
+    if (goal.status.toLowerCase().includes(needle)) return true
+    if (goal.metric && goal.metric.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 // -- Overlay signals ------------------------------------------------
 
 export const selectedTask = signal<Task | null>(null)
@@ -82,6 +114,7 @@ export const taskEvents = signal<NormalizedTaskEvent[]>([])
 export const taskEventsLoading = signal(false)
 export const taskEventsError = signal<string | null>(null)
 export const taskEventsSearchQuery = signal('')
+export const goalRelationSearchQuery = signal('')
 
 export type TaskDetailTab = 'overview' | 'activity'
 export const activeTab = signal<TaskDetailTab>('overview')
@@ -100,6 +133,7 @@ function resetState(): void {
   taskEventsLoading.value = false
   taskEventsError.value = null
   taskEventsSearchQuery.value = ''
+  goalRelationSearchQuery.value = ''
   activityEvents.value = []
   activityLoading.value = false
   activityError.value = null

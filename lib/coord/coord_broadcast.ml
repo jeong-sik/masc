@@ -36,7 +36,7 @@ let emit_message_activity config ~from_agent ~content ~mention
   let actor = Coord_hooks.{ kind = "agent"; id = from_agent } in
   let emit ?subject ~kind ~tags () =
     try
-      !Coord_hooks.activity_emit_fn config
+      (Atomic.get Coord_hooks.activity_emit_fn) config
         ~actor ?subject ~kind ~payload ~tags ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

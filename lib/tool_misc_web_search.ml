@@ -94,7 +94,7 @@ let decode_html_entities text =
   let buf = Buffer.create len in
   let decode_numeric entity =
     let body = String.sub entity 2 (String.length entity - 3) in
-    try
+    Safe_ops.protect ~default:None (fun () ->
       if String.length body > 1
          && (body.[0] = 'x' || body.[0] = 'X')
       then
@@ -108,8 +108,7 @@ let decode_html_entities text =
           (int_of_string body
            |> Uchar.of_int
            |> Buffer.add_utf_8_uchar buf;
-           "")
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+           ""))
   in
   let rec loop index =
     if index >= len then
@@ -197,20 +196,21 @@ let parse_ddg_html payload =
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
   let open Yojson.Safe.Util in
   let str_of item key =
-    try Option.bind (member key item |> to_string_option) trim_nonempty
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
+    Safe_ops.protect ~default:None (fun () ->
+      Option.bind (member key item |> to_string_option) trim_nonempty)
   in
-  try
+  Safe_ops.protect ~default:[] (fun () ->
     let root = Yojson.Safe.from_string payload in
-    let items = try results_path root |> to_list with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [] in
+    let items =
+      Safe_ops.protect ~default:[] (fun () -> results_path root |> to_list)
+    in
     items
     |> List.filter_map (fun item ->
            match str_of item title_field, str_of item "url" with
            | Some title, Some url when valid_search_result_url url ->
                let snippet = str_of item snippet_field |> Option.value ~default:"" in
                Some (title, url, snippet)
-           | _ -> None)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+           | _ -> None))
 
 let parse_searxng_json payload =
   parse_json_search_results
@@ -547,15 +547,16 @@ let fetch_brave ~timeout_sec ~query ~limit =
       with
       | Error detail ->
           Error (endpoint_error ~fallback:"provider request failed" detail)
-      | Ok (Some 200, payload) -> (
-          try
-            let hits =
-              parse_brave_json payload
-              |> take_results limit
-              |> normalize_hits ~source:(provider_to_string Brave)
-            in
-            Ok { engine = provider_to_string Brave; search_url; hits }
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
+      | Ok (Some 200, payload) ->
+          Safe_ops.protect
+            ~default:(Error "provider returned invalid JSON")
+            (fun () ->
+              let hits =
+                parse_brave_json payload
+                |> take_results limit
+                |> normalize_hits ~source:(provider_to_string Brave)
+              in
+              Ok { engine = provider_to_string Brave; search_url; hits })
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
@@ -586,15 +587,16 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       with
       | Error detail ->
           Error (endpoint_error ~fallback:"provider request failed" detail)
-      | Ok (Some 200, payload) -> (
-          try
-            let hits =
-              parse_tavily_json payload
-              |> take_results limit
-              |> normalize_hits ~source:(provider_to_string Tavily)
-            in
-            Ok { engine = provider_to_string Tavily; search_url; hits }
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
+      | Ok (Some 200, payload) ->
+          Safe_ops.protect
+            ~default:(Error "provider returned invalid JSON")
+            (fun () ->
+              let hits =
+                parse_tavily_json payload
+                |> take_results limit
+                |> normalize_hits ~source:(provider_to_string Tavily)
+              in
+              Ok { engine = provider_to_string Tavily; search_url; hits })
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
@@ -622,15 +624,16 @@ let fetch_exa ~timeout_sec ~query ~limit =
       with
       | Error detail ->
           Error (endpoint_error ~fallback:"provider request failed" detail)
-      | Ok (Some 200, payload) -> (
-          try
-            let hits =
-              parse_exa_json payload
-              |> take_results limit
-              |> normalize_hits ~source:(provider_to_string Exa)
-            in
-            Ok { engine = provider_to_string Exa; search_url; hits }
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
+      | Ok (Some 200, payload) ->
+          Safe_ops.protect
+            ~default:(Error "provider returned invalid JSON")
+            (fun () ->
+              let hits =
+                parse_exa_json payload
+                |> take_results limit
+                |> normalize_hits ~source:(provider_to_string Exa)
+              in
+              Ok { engine = provider_to_string Exa; search_url; hits })
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
@@ -660,15 +663,16 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
       with
       | Error detail ->
           Error (endpoint_error ~fallback:"provider request failed" detail)
-      | Ok (Some 200, payload) -> (
-          try
-            let hits =
-              parse_bing_search_json payload
-              |> take_results limit
-              |> normalize_hits ~source:(provider_to_string Bing_api)
-            in
-            Ok { engine = provider_to_string Bing_api; search_url; hits }
-          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> Error "provider returned invalid JSON")
+      | Ok (Some 200, payload) ->
+          Safe_ops.protect
+            ~default:(Error "provider returned invalid JSON")
+            (fun () ->
+              let hits =
+                parse_bing_search_json payload
+                |> take_results limit
+                |> normalize_hits ~source:(provider_to_string Bing_api)
+              in
+              Ok { engine = provider_to_string Bing_api; search_url; hits })
       | Ok (Some status, _) -> Error (Printf.sprintf "provider returned HTTP %d" status)
       | Ok (None, _) -> Error "provider returned no HTTP status"
 

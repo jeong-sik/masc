@@ -49,16 +49,38 @@ command -v jq >/dev/null 2>&1 || { echo "jq required" >&2; exit 1; }
 resolve_source_dir() {
   local out_var="$1"
 
+  # Candidate local repo paths, checked in order:
+  #   1. $AGENT_SDK_LOCAL_REPO (explicit opt-in)
+  #   2. Sibling checkout: <masc-mcp-parent>/oas
+  #   3. Workspace convention: $HOME/me/workspace/yousleepwhen/oas
+  # Each must be a git checkout at the pinned SHA to qualify.
+  local masc_parent
+  masc_parent="$(cd "${REPO_ROOT}/.." && pwd)"
+  local -a candidates=(
+    "${AGENT_SDK_LOCAL_REPO:-}"
+    "${masc_parent}/oas"
+    "${HOME}/me/workspace/yousleepwhen/oas"
+  )
+  local candidate head
+  for candidate in "${candidates[@]}"; do
+    [[ -n "${candidate}" && -d "${candidate}" ]] || continue
+    git -C "${candidate}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+    head="$(git -C "${candidate}" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "${head}" == "${OAS_AGENT_SDK_SHA}" ]]; then
+      printf -v "${out_var}" '%s' "${candidate}"
+      return 0
+    fi
+  done
+
+  # If $AGENT_SDK_LOCAL_REPO was set but at the wrong SHA, that's a
+  # deliberate override — surface it so the user can fix the checkout
+  # rather than silently falling through to network fetch.
   if [[ -n "${AGENT_SDK_LOCAL_REPO:-}" ]] \
      && git -C "${AGENT_SDK_LOCAL_REPO}" rev-parse --is-inside-work-tree \
         >/dev/null 2>&1; then
-    local head
-    head="$(git -C "${AGENT_SDK_LOCAL_REPO}" rev-parse HEAD 2>/dev/null || true)"
-    if [[ "${head}" == "${OAS_AGENT_SDK_SHA}" ]]; then
-      printf -v "${out_var}" '%s' "${AGENT_SDK_LOCAL_REPO}"
-      return 0
-    fi
-    echo "AGENT_SDK_LOCAL_REPO=${AGENT_SDK_LOCAL_REPO} is at ${head:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
+    local wrong_head
+    wrong_head="$(git -C "${AGENT_SDK_LOCAL_REPO}" rev-parse HEAD 2>/dev/null || true)"
+    echo "AGENT_SDK_LOCAL_REPO=${AGENT_SDK_LOCAL_REPO} is at ${wrong_head:-unknown}, expected ${OAS_AGENT_SDK_SHA}" >&2
     return 1
   fi
 
@@ -245,11 +267,13 @@ case "${MODE}" in
     echo
     echo "OAS API surface drift detected against ${FINGERPRINT_FILE}." >&2
     echo "  Review the delta above against MASC consumer sites:" >&2
-    echo "    lib/oas_sse_bridge.ml             (Event_bus payload matches)" >&2
-    echo "    lib/cascade/cascade_health_filter.ml  (http_error matches)" >&2
-    echo "    lib/oas_worker_cascade.ml         (Metrics.t literals)" >&2
-    echo "  After consumer changes land:" >&2
+    echo "    lib/oas_compat/oas_compat.ml      (Http_client + Metrics — single source)" >&2
+    echo "    lib/oas_sse_bridge.ml             (Event_bus payload matches — until adapter covers it)" >&2
+    echo
+    echo "  Repair flow (after consumer changes compile clean):" >&2
     echo "    bash scripts/oas-drift-check.sh --regenerate" >&2
+    echo "    git add scripts/oas-api-surface.json" >&2
+    echo "    git commit -m 'chore(oas): refresh API surface fingerprint'" >&2
     echo "    and commit the updated fingerprint." >&2
     exit 2
     ;;

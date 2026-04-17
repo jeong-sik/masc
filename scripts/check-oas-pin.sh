@@ -210,3 +210,24 @@ if [[ "${pin_source}" == "${default_pin_source}" ]]; then
 else
   echo "OAS pin verified via override: ${pin_source}"
 fi
+
+# API surface summary (non-fatal). A full drift diff with repair
+# guidance is available via `make doctor-oas-drift` or
+# `bash scripts/oas-drift-check.sh`. Here we emit one line so that
+# every doctor-oas-pin run surfaces surface-level drift without
+# requiring the operator to remember a second command.
+if [[ -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
+  if drift_output="$(bash "${SCRIPT_DIR}/oas-drift-check.sh" 2>&1)"; then
+    echo "OAS API surface: ✓ matches fingerprint"
+  else
+    drift_exit=$?
+    if [[ "${drift_exit}" -eq 2 ]]; then
+      # Count delta entries across all sections for a one-line summary.
+      added_n="$(printf '%s\n' "${drift_output}" | grep -c '^      + ' || true)"
+      removed_n="$(printf '%s\n' "${drift_output}" | grep -c '^      - ' || true)"
+      echo "OAS API surface: ⚠ drift (added ${added_n}, removed ${removed_n}) — run 'make doctor-oas-drift' for detail"
+    else
+      echo "OAS API surface: (could not compute — ${drift_exit}; run 'bash scripts/oas-drift-check.sh' for detail)"
+    fi
+  fi
+fi

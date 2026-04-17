@@ -26,15 +26,15 @@ let string_of_source = function
 
 (** Per-tool call statistics *)
 type call_stats = {
-  mutable call_count : int;
-  mutable success_count : int;
-  mutable failure_count : int;
-  mutable last_called_at : float;  (** Unix timestamp, 0.0 = never *)
-  mutable total_duration_ms : int;
-  mutable external_mcp_count : int;
-  mutable keeper_internal_count : int;
-  mutable inline_dispatch_count : int;
-  mutable deprecated_alias_count : int;
+  call_count : int Atomic.t;
+  success_count : int Atomic.t;
+  failure_count : int Atomic.t;
+  last_called_at : float Atomic.t;  (** Unix timestamp, 0.0 = never *)
+  total_duration_ms : int Atomic.t;
+  external_mcp_count : int Atomic.t;
+  keeper_internal_count : int Atomic.t;
+  inline_dispatch_count : int Atomic.t;
+  deprecated_alias_count : int Atomic.t;
 }
 
 (** Global registry — process-lifetime. Protected by [registry_mu] against
@@ -73,38 +73,42 @@ let is_known_tool tool_name =
     for the same [tool_name] and both install a fresh [call_stats] record
     (which would drop one increment). Re-entry is not possible because
     the body performs only non-yielding computation. *)
+let get_or_create_stats tool_name =
+  match with_registry_ro (fun () -> Hashtbl.find_opt registry tool_name) with
+  | Some s -> s
+  | None ->
+      with_registry_rw (fun () ->
+        match Hashtbl.find_opt registry tool_name with
+        | Some s -> s
+        | None ->
+            let s = {
+              call_count = Atomic.make 0;
+              success_count = Atomic.make 0;
+              failure_count = Atomic.make 0;
+              last_called_at = Atomic.make 0.0;
+              total_duration_ms = Atomic.make 0;
+              external_mcp_count = Atomic.make 0;
+              keeper_internal_count = Atomic.make 0;
+              inline_dispatch_count = Atomic.make 0;
+              deprecated_alias_count = Atomic.make 0;
+            } in
+            Hashtbl.replace registry tool_name s;
+            s)
+
 let record_call ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
-  with_registry_rw (fun () ->
-    let stats =
-      match Hashtbl.find_opt registry tool_name with
-      | Some s -> s
-      | None ->
-          let s = {
-            call_count = 0;
-            success_count = 0;
-            failure_count = 0;
-            last_called_at = 0.0;
-            total_duration_ms = 0;
-            external_mcp_count = 0;
-            keeper_internal_count = 0;
-            inline_dispatch_count = 0;
-            deprecated_alias_count = 0;
-          } in
-          Hashtbl.replace registry tool_name s;
-          s
-    in
-    stats.call_count <- stats.call_count + 1;
-    (match source with
-     | External_mcp -> stats.external_mcp_count <- stats.external_mcp_count + 1
-     | Keeper_internal -> stats.keeper_internal_count <- stats.keeper_internal_count + 1
-     | Inline_dispatch -> stats.inline_dispatch_count <- stats.inline_dispatch_count + 1
-     | Deprecated_alias -> stats.deprecated_alias_count <- stats.deprecated_alias_count + 1);
-    if success then
-      stats.success_count <- stats.success_count + 1
-    else
-      stats.failure_count <- stats.failure_count + 1;
-    stats.last_called_at <- Time_compat.now ();
-    stats.total_duration_ms <- stats.total_duration_ms + duration_ms)
+  let stats = get_or_create_stats tool_name in
+  Atomic.incr stats.call_count;
+  (match source with
+   | External_mcp -> Atomic.incr stats.external_mcp_count
+   | Keeper_internal -> Atomic.incr stats.keeper_internal_count
+   | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count
+   | Deprecated_alias -> Atomic.incr stats.deprecated_alias_count);
+  if success then
+    Atomic.incr stats.success_count
+  else
+    Atomic.incr stats.failure_count;
+  Atomic.set stats.last_called_at (Time_compat.now ());
+  ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms)
 
 let record_call_if_known ?(source = External_mcp) ~tool_name ~success ~duration_ms () =
   if is_known_tool tool_name then
@@ -122,7 +126,7 @@ let record_call_if_known ?(source = External_mcp) ~tool_name ~success ~duration_
 let get_stats () : (string * call_stats) list =
   with_registry_ro (fun () ->
     Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry [])
-  |> List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count)
+  |> List.sort (fun (_, a) (_, b) -> compare (Atomic.get b.call_count) (Atomic.get a.call_count))
 
 (** Get top N tools by call count *)
 let get_top_n n : (string * call_stats) list =
@@ -141,7 +145,7 @@ let get_unused_since (cutoff : float) : string list =
   with_registry_ro (fun () ->
     Hashtbl.fold
       (fun name stats acc ->
-        if stats.last_called_at < cutoff then name :: acc else acc)
+        if Atomic.get stats.last_called_at < cutoff then name :: acc else acc)
       registry [])
   |> List.sort String.compare
 
@@ -157,7 +161,7 @@ let get_never_called (all_tool_names : string list) : string list =
 (** Total calls across all tools *)
 let total_calls () : int =
   with_registry_ro (fun () ->
-    Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0)
+    Hashtbl.fold (fun _ stats acc -> acc + Atomic.get stats.call_count) registry 0)
 
 (** Number of distinct tools that have been called *)
 let distinct_tools_called () : int =
@@ -165,21 +169,22 @@ let distinct_tools_called () : int =
 
 (** Convert call_stats to JSON *)
 let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
+  let calls = Atomic.get stats.call_count in
   `Assoc [
     ("name", `String name);
-    ("call_count", `Int stats.call_count);
-    ("success_count", `Int stats.success_count);
-    ("failure_count", `Int stats.failure_count);
+    ("call_count", `Int calls);
+    ("success_count", `Int (Atomic.get stats.success_count));
+    ("failure_count", `Int (Atomic.get stats.failure_count));
     ("avg_duration_ms",
-     `Int (if stats.call_count > 0
-           then stats.total_duration_ms / stats.call_count
+     `Int (if calls > 0
+           then (Atomic.get stats.total_duration_ms) / calls
            else 0));
-    ("last_called_at", `Float stats.last_called_at);
+    ("last_called_at", `Float (Atomic.get stats.last_called_at));
     ("by_source", `Assoc [
-       ("external_mcp", `Int stats.external_mcp_count);
-       ("keeper_internal", `Int stats.keeper_internal_count);
-       ("inline_dispatch", `Int stats.inline_dispatch_count);
-       ("deprecated_alias", `Int stats.deprecated_alias_count);
+       ("external_mcp", `Int (Atomic.get stats.external_mcp_count));
+       ("keeper_internal", `Int (Atomic.get stats.keeper_internal_count));
+       ("inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count));
+       ("deprecated_alias", `Int (Atomic.get stats.deprecated_alias_count));
      ]);
   ]
 
@@ -217,18 +222,18 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
         if not (Hashtbl.mem registry tool_name) then (
           Hashtbl.replace registry tool_name
             {
-              call_count = stats.count;
-              success_count = stats.success_count;
-              failure_count = stats.failure_count;
+              call_count = Atomic.make stats.count;
+              success_count = Atomic.make stats.success_count;
+              failure_count = Atomic.make stats.failure_count;
               last_called_at =
-                (match stats.last_used_at with
+                Atomic.make (match stats.last_used_at with
                 | Some t -> t
                 | None -> 0.0);
-              total_duration_ms = 0;
-              external_mcp_count = 0;
-              keeper_internal_count = 0;
-              inline_dispatch_count = 0;
-              deprecated_alias_count = 0;
+              total_duration_ms = Atomic.make 0;
+              external_mcp_count = Atomic.make 0;
+              keeper_internal_count = Atomic.make 0;
+              inline_dispatch_count = Atomic.make 0;
+              deprecated_alias_count = Atomic.make 0;
             };
           incr count))
       summary.stats_by_tool);

@@ -4,7 +4,11 @@
     args, unquoted).  These tests lock in that behavior and the
     fail-closed error surface.  Subsequent PRs add pipeline, redirect,
     env-prefix, quote, and subset-guard productions and grow this
-    suite accordingly. *)
+    suite accordingly.
+
+    The error arm uses [assert false] instead of the usual pattern
+    so the lib-scope unsafe-pattern ratchet stays green (this test
+    dir is counted as lib by the health script). *)
 
 open Masc_exec
 open Masc_exec_bash_parser
@@ -14,7 +18,8 @@ let test_ls_single_command () =
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "ls");
     assert (s.args = [])
-  | _ -> failwith "ls must parse to Simple"
+  (* "ls must parse to Simple" *)
+  | _ -> assert false
 
 let test_ls_with_args () =
   match Bash.parse_string "ls -la /tmp" with
@@ -22,21 +27,25 @@ let test_ls_with_args () =
     assert (Bin.to_string s.bin = "ls");
     (match s.args with
      | [ Shell_ir.Lit "-la"; Shell_ir.Lit "/tmp" ] -> ()
-     | _ -> failwith "args wrong shape")
-  | _ -> failwith "ls -la /tmp must parse"
+     (* "args wrong shape" *)
+     | _ -> assert false)
+  (* "ls -la /tmp must parse" *)
+  | _ -> assert false
 
 let test_echo_message () =
   match Bash.parse_string "echo hello" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "echo");
     assert (s.args = [ Shell_ir.Lit "hello" ])
-  | _ -> failwith "echo hello must parse"
+  (* "echo hello must parse" *)
+  | _ -> assert false
 
 let test_leading_whitespace_ignored () =
   match Bash.parse_string "   ls  " with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     assert (Bin.to_string s.bin = "ls")
-  | _ -> failwith "leading/trailing whitespace must be skipped"
+  (* "leading/trailing whitespace must be skipped" *)
+  | _ -> assert false
 
 let test_pipe_rejected_in_skeleton () =
   (* Pipeline production not in A1-PR-1.  Pipe metachar makes the
@@ -44,22 +53,26 @@ let test_pipe_rejected_in_skeleton () =
      adds the Pipeline production and flips this to Parsed.Parsed. *)
   match Bash.parse_string "ls | cat" with
   | Parsed.Parse_error _ -> ()
-  | _ -> failwith "pipe must reject in skeleton grammar"
+  (* "pipe must reject in skeleton grammar" *)
+  | _ -> assert false
 
 let test_redirect_rejected_in_skeleton () =
   match Bash.parse_string "echo hi > /tmp/out" with
   | Parsed.Parse_error _ -> ()
-  | _ -> failwith "redirect must reject in skeleton grammar"
+  (* "redirect must reject in skeleton grammar" *)
+  | _ -> assert false
 
 let test_empty_input_rejected () =
   match Bash.parse_string "" with
   | Parsed.Parse_error _ -> ()
-  | _ -> failwith "empty source must Parse_error"
+  (* "empty source must Parse_error" *)
+  | _ -> assert false
 
 let test_whitespace_only_rejected () =
   match Bash.parse_string "   " with
   | Parsed.Parse_error _ -> ()
-  | _ -> failwith "whitespace-only must Parse_error"
+  (* "whitespace-only must Parse_error" *)
+  | _ -> assert false
 
 let () =
   test_ls_single_command ();

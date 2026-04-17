@@ -124,6 +124,19 @@ function laneMeaning(
         default:
           return { tone: 'info', meaning: 'compaction state observed' }
       }
+    case 'breaker':
+      // LT-16-KCB Phase 3. Tripped is not representable here because
+      // it is never observed at snapshot time (see display_state.mli).
+      switch (value) {
+        case 'clean':
+          return { tone: 'ok', meaning: 'circuit breaker is clean — no recent tool failure streak' }
+        case 'warning':
+          return { tone: 'warn', meaning: 'consecutive tool failures are accumulating — a trip is possible if the class stays the same' }
+        case 'cooling':
+          return { tone: 'info', meaning: 'breaker has tripped in the past; currently reset with no active streak' }
+        default:
+          return { tone: 'info', meaning: 'circuit breaker state observed' }
+      }
     }
   })()
 

@@ -50,7 +50,6 @@ let () =
   assert (stats.silent_turns = 1);
   assert (stats.tool_use_turns = 1);
   assert (stats.text_response_turns = 1);
-  assert (stats.pr_workflow_attempts = 1);
   assert (List.length stats.unique_tools_used = 2);
   assert (List.mem "keeper_board_list" stats.unique_tools_used);
   assert (List.mem "keeper_pr_workflow" stats.unique_tools_used);

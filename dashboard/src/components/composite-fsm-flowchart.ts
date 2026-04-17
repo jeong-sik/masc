@@ -1,7 +1,7 @@
 /**
- * CompositeFsmFlowchart (LT-16e)
+ * CompositeFsmFlowchart (LT-16e + LT-16-KCB Phase 3)
  *
- * Static Mermaid rendering of the 5 orthogonal keeper FSM axes from
+ * Static Mermaid rendering of the 6 orthogonal keeper FSM axes from
  * KeeperCompositeLifecycle.tla, side by side. Each subgraph is one
  * region (Harel parallel region); the subgraphs do not share edges
  * because the axes are orthogonal by design — the invariants that
@@ -92,15 +92,31 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     kmc_done --> kmc_accumulating
   end
 
+  %% ─ KCB (Circuit breaker, 3 observable states) ──────────
+  %% Tripped is deliberately absent — see display_state.mli: the
+  %% mutator resets consecutive_count on trip, so no snapshot taken
+  %% between tool calls can observe Tripped. The dashed arrow is a
+  %% reminder that the unobservable transition exists inside the
+  %% counter's read-modify-write, not that it's a state we render.
+  subgraph KCB ["Circuit breaker · KCB"]
+    direction LR
+    kcb_clean["clean"] --> kcb_warning["warning"]
+    kcb_warning --> kcb_clean
+    kcb_warning -.-> kcb_cooling["cooling"]
+    kcb_cooling --> kcb_warning
+    kcb_cooling --> kcb_clean
+  end
+
   classDef terminal fill:#1f0f0f,stroke:#7f1d1d,color:#fca5a5
   classDef stable   fill:#0f1a0f,stroke:#166534,color:#86efac
   classDef motion   fill:#1a1305,stroke:#a16207,color:#fde68a
   classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fca5a5
 
   class ksm_stopped,ksm_dead terminal
-  class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating stable
-  class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
+  class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating,kcb_clean stable
+  class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting,kcb_warning motion
   class ksm_failing,ksm_crashed,kdp_gate_rejected,kcl_exhausted error
+  class kcb_cooling motion
 `
 
 /**
@@ -128,7 +144,7 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
           Composite FSM flowchart (TLA+ spec)
         </h2>
         <p class="mt-1 text-xs text-zinc-400">
-          5 orthogonal axes rendered as Harel parallel regions. Source:
+          6 orthogonal axes rendered as Harel parallel regions. Source:
           <code class="text-zinc-300">specs/keeper-state-machine/*.tla</code>.
           Transitions here are the common-case edges; the TLA+
           model-checker owns the exhaustive enumeration.

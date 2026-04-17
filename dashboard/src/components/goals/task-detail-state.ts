@@ -51,12 +51,37 @@ function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
   }))
 }
 
+/**
+ * Pure filter for task event rows.
+ *
+ * - `query` is case-insensitive substring match across `label`, `agent`,
+ *   `actorKind`, and `notes` (trimmed).
+ * - Empty/whitespace-only query returns the input reference unchanged
+ *   (zero-allocation fast path).
+ * - Does not mutate the input array.
+ */
+export function filterTaskEvents(
+  rows: readonly NormalizedTaskEvent[],
+  query: string,
+): readonly NormalizedTaskEvent[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(e => {
+    if (e.label.toLowerCase().includes(needle)) return true
+    if (e.agent && e.agent.toLowerCase().includes(needle)) return true
+    if (e.actorKind && e.actorKind.toLowerCase().includes(needle)) return true
+    if (e.notes && e.notes.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 // -- Overlay signals ------------------------------------------------
 
 export const selectedTask = signal<Task | null>(null)
 export const taskEvents = signal<NormalizedTaskEvent[]>([])
 export const taskEventsLoading = signal(false)
 export const taskEventsError = signal<string | null>(null)
+export const taskEventsSearchQuery = signal('')
 
 export type TaskDetailTab = 'overview' | 'activity'
 export const activeTab = signal<TaskDetailTab>('overview')
@@ -74,6 +99,7 @@ function resetState(): void {
   taskEvents.value = []
   taskEventsLoading.value = false
   taskEventsError.value = null
+  taskEventsSearchQuery.value = ''
   activityEvents.value = []
   activityLoading.value = false
   activityError.value = null

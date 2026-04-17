@@ -199,16 +199,45 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           ]
       in
       Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
-  | Agent_sdk.Event_bus.TaskStateChanged { task_id; from_state; to_state } ->
+  (* TaskStateChanged match arm removed: OAS refactor!
+     (d3434799 "remove dead Event_bus.TaskStateChanged variant") dropped
+     the constructor entirely — it was declared in OAS#104 as a future
+     bridge point that was never implemented, with zero emit sites and
+     zero subscribers. Re-adding A2a task lifecycle to the SSE stream
+     is a deliberate forward-looking change, not an incidental fix. *)
+  | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
       let payload =
         `Assoc
           [
+            ("agent_name", `String agent_name);
             ("task_id", `String task_id);
-            ("from_state", `String from_state);
-            ("to_state", `String to_state);
+            ("error", `String (Agent_sdk.Error.to_string error));
+            ("elapsed", `Float elapsed);
           ]
       in
-      Some (wrap ~event_type:"task_state_changed" ~payload ~task_id ())
+      Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
+  | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
+      let payload =
+        `Assoc
+          [
+            ("from_agent", `String from_agent);
+            ("to_agent", `String to_agent);
+            ("reason", `String reason);
+          ]
+      in
+      Some (wrap ~event_type:"handoff_requested" ~payload
+              ~agent_name:from_agent ())
+  | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
+      let payload =
+        `Assoc
+          [
+            ("from_agent", `String from_agent);
+            ("to_agent", `String to_agent);
+            ("elapsed", `Float elapsed);
+          ]
+      in
+      Some (wrap ~event_type:"handoff_completed" ~payload
+              ~agent_name:to_agent ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ ->
     None  (* Internal; no SSE relay needed *)
   | Agent_sdk.Event_bus.ContextOverflowImminent

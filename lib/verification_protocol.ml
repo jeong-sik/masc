@@ -61,7 +61,9 @@ let on_approve_verification ~(config : Coord.config)
     match Verification.submit_verdict ~base_path
             ~req_id:verification_id ~verifier
             ~verdict:Verification.Pass with
-    | Ok _ -> ()
+    | Ok updated ->
+      Verification.attribution_of_request updated
+      |> Option.iter Dashboard_attribution.record
     | Error e ->
       Log.Task.error
         "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"
@@ -101,7 +103,9 @@ let on_reject_verification ~(config : Coord.config)
     match Verification.submit_verdict ~base_path
             ~req_id:verification_id ~verifier
             ~verdict:(Verification.Fail reason) with
-    | Ok _ -> ()
+    | Ok updated ->
+      Verification.attribution_of_request updated
+      |> Option.iter Dashboard_attribution.record
     | Error e ->
       Log.Task.error
         "verification submit_verdict failed (task=%s vrf=%s verifier=%s): %s"

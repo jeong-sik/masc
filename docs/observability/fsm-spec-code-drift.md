@@ -1,9 +1,10 @@
 # FSM Spec ↔ Code Drift Audit (LT-15)
 
-Neutral diff between TLA+ specs, OCaml types, and the composite observer projection for the 5 keeper FSM axes, plus disposition of unpaired specs.
+Neutral diff between TLA+ specs, OCaml types, and the composite observer projection for the keeper FSM axes, plus disposition of unpaired specs.
 
-**Scope**: `specs/keeper-state-machine/` vs `lib/keeper/` as of commit `886abd2cc`.
-**Verdict**: 4 of 5 axes align exactly. 1 axis (KSM) carries a **documented lossy projection** at the observer layer. 4 specs are unpaired in code; 2 deserve a fate decision in-session.
+**Scope**: `specs/keeper-state-machine/` vs `lib/keeper/` as of commit `886abd2cc`. Post-audit update on 2026-04-17 folds in LT-16-KCB Phases 1–3 and promotes the circuit-breaker candidate to a landed 6th axis.
+
+**Verdict**: 4 of 5 original axes align exactly. 1 axis (KSM) carries a **documented lossy projection** at the observer layer. The newly admitted 6th axis (KCB) has its **own kind of drift** — snapshot-observability does not match the spec's classical state set — and the landed implementation renders the 3 observable states only (see §3 and §5). 4 specs are unpaired in code; 2 have disposition decisions.
 
 ---
 
@@ -87,11 +88,11 @@ Neutral diff between TLA+ specs, OCaml types, and the composite observer project
 
 ## 3. Candidate axes not currently on the matrix
 
-Spec+code pair exists, but `KeeperCompositeLifecycle.tla` does not cross them with the 5 core axes. Evaluate for admission as a 6th / 7th matrix column.
+Spec+code pair exists, but `KeeperCompositeLifecycle.tla` does not cross them with the core axes. Evaluate for admission as an additional matrix column.
 
 | Candidate                      | Spec                                | Code                                                | States                                          | Verdict                                                                  |
 | ------------------------------ | ----------------------------------- | --------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
-| KCB — Circuit breaker          | `KeeperCircuitBreaker.tla`          | `keeper_failure_circuit_breaker.ml`                 | Closed, Open, Half_open                         | **Admit as column 6.** Orthogonal to all 5, cheap to observe, directly actionable (open breaker = stop trying). |
+| KCB — Circuit breaker          | `KeeperCircuitBreaker.tla`          | `keeper_failure_circuit_breaker.ml`                 | **Observable: clean, warning, cooling.** `tripped` is unobservable because the mutator resets `consecutive_count` during the trip transition. The spec's `Closed / Open / Half_open` triple does not survive the counter-based implementation as-is — `Open` is a transient step inside `record_failure`, not a stable state. | **Admitted as column 6** (LT-16-KCB Phase 1–3, 2026-04-17). Matrix, flowchart, and drift-audit all updated to the 3 observable states. `tripped` is marked with a dashed edge in the Mermaid panel to acknowledge the unobservable transition. |
 | KCF — Campaign lifecycle       | `KeeperCampaignLifecycle.tla`       | `keeper_campaign_fsm.mli`                           | Bootstrapping, Claiming_task, Advancing, …      | **Defer.** Redundant with KDP for most operational decisions; matrix is already wide.       |
 | KSM-Ledger — Magentic ledger   | `KeeperSocialModelMagenticLedger.tla` | `keeper_social_model_magentic_ledger_fsm.ml`      | Advancing, Reactive, …                          | **Defer.** Social-model signal, not an operational one; separate panel, not a core axis.   |
 
@@ -114,10 +115,16 @@ A CI rule enforcing this is out of scope for LT-15 but is the right follow-up (D
 
 ## 5. Conclusion
 
-- **4 of 5 axes are clean.** KTC/KDP/KCL/KMC are 1:1 between TLA+ and OCaml; the JSON schema handles prefix normalization.
+- **4 of 5 core axes are clean.** KTC/KDP/KCL/KMC are 1:1 between TLA+ and OCaml; the JSON schema handles prefix normalization.
 - **1 axis carries a documented lossy projection.** `ksm_phase` collapses 6 OCaml phases into `Ksm_stable`. This is **not** a bug, but it is a UX constraint: the matrix should bypass the observer projection for KSM and consume `Keeper_state_machine.phase` directly (12 states with semantic color grouping).
 - **4 unpaired specs** resolved: 2 retire, 1 formalize later, 1 demote to property test.
-- **1 candidate axis** (circuit breaker) admitted as matrix column 6 for LT-16.
+- **1 candidate axis** (circuit breaker) admitted as matrix column 6 and landed end-to-end through LT-16-KCB Phases 1–3 (#7793 / #7801 / #7822).
+
+### Post-audit update (2026-04-17)
+
+LT-16-KCB Phase 1 discovered that the KCB spec does not translate 1:1 to the implementation: the classical `Closed / Open / Half_open` triple names states that are either *unobservable at snapshot time* (`Open` = `tripped`, reset in the same critical section) or do not exist in the counter-based OCaml model. The landed axis therefore uses the **observable state set** (`clean / warning / cooling`) and the Mermaid flowchart notes the unobservable transition with a dashed edge.
+
+This is the first axis in the matrix where the spec **state set disagreed with what a fleet-level observer can actually see**, and the drift audit checklist should be extended in the next iteration to include a "snapshot-observability" column per state, so the same trap does not hide inside future admissions (KCF, KSM-Ledger).
 
 No code change in this PR. Next tick (T+3) is **LT-13**: wire `InvariantViolationCounts` to a Prometheus counter + alert rule + Grafana panel.
 

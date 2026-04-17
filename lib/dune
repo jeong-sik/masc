@@ -17,6 +17,7 @@
    anti_rationalization
    attribution
    attribution_tagged
+   autoresearch_result_bridge
    auto_recall
    auto_responder
    auth
@@ -54,6 +55,7 @@
    dashboard_labels
    dashboard_agent_relations
    dashboard_attention
+   dashboard_attribution
    dashboard_cache
    dashboard_tool_host_events
    dashboard_governance
@@ -118,6 +120,7 @@
    server_routes_http_routes_provider_runs
    server_routes_http_routes_cascade
    server_routes_http_routes_verification
+   server_routes_http_routes_attribution
    server_routes_http_routes_activity
    server_routes_http_routes_channel_gate
    server_h2_gateway

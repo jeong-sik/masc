@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/
+  - bin/main_eio.ml
+---
+
 # H3: API Versioning Design
 
 > Status: Draft

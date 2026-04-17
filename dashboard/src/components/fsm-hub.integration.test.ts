@@ -188,6 +188,7 @@ describe('FSM Hub integration — API response shape', () => {
       decision: snap.decision.stage,
       cascade: snap.cascade.state,
       compaction: snap.compaction.stage,
+      breaker: snap.circuit_breaker?.state ?? 'clean',
     })
 
     it('deriveStateEntries returns a structure when given real-shape data', () => {

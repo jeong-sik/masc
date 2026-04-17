@@ -116,4 +116,30 @@ describe('parseKeeperCompositeSnapshot', () => {
       expect((e as CompositeSchemaDriftError).message).toContain('schema drift')
     }
   })
+
+  // LT-16-KCB Phase 3 — 6th axis parsing
+  it('accepts snapshot with circuit_breaker.state = warning', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      circuit_breaker: { state: 'warning' },
+    })
+    expect(result.circuit_breaker).toBeDefined()
+    expect(result.circuit_breaker!.state).toBe('warning')
+  })
+
+  it('falls back unknown circuit_breaker.state to clean', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      circuit_breaker: { state: 'completely-new-future-variant' },
+    })
+    expect(result.circuit_breaker!.state).toBe('clean')
+  })
+
+  it('tolerates missing circuit_breaker during Phase 2 → 3 rollout', () => {
+    // Pinned backends that have not yet picked up LT-16-KCB Phase 2
+    // emit snapshots without the key. The dashboard must keep
+    // rendering instead of hard-failing the parse.
+    const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
+    expect(result.circuit_breaker).toBeUndefined()
+  })
 })

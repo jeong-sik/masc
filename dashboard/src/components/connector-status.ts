@@ -133,7 +133,7 @@ function healthTone(health: string): { dot: string; badge: string; label: string
     default:
       return {
         dot: 'var(--text-dim)',
-        badge: 'border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]',
+        badge: 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-dim)]',
         label: health || 'idle',
       }
   }
@@ -436,7 +436,7 @@ function ConnectorLivePanel({
     !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
 
   return html`
-    <div class="mb-4 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
+    <div class="mb-4 rounded-xl border border-[var(--card-border)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
         ${connector?.bot_user_name
@@ -460,7 +460,7 @@ function ConnectorLivePanel({
             : null}
           <button
             type="button"
-            class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
             aria-label="toggle header details"
             onClick=${() => { headerExpanded.value = !headerExpanded.value }}
           >${headerExpanded.value ? '▴' : '▾'}</button>
@@ -469,7 +469,7 @@ function ConnectorLivePanel({
 
       ${headerExpanded.value
         ? html`
-            <div class="mt-2 rounded-md border border-[var(--white-8)] bg-[var(--white-4)] p-3 text-[11px]">
+            <div class="mt-2 rounded-md border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-[11px]">
               <div class="space-y-1.5">
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -506,7 +506,7 @@ function ConnectorLivePanel({
 
       ${showNoKeeperEmpty
         ? html`
-            <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+            <div class="mt-3 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
               <div class="font-medium text-[var(--text-body)]">No keepers configured</div>
               <div class="mt-1 text-[10px] text-[var(--text-dim)]">
                 Add keeper config files under config/keepers/ and restart the server.
@@ -517,7 +517,7 @@ function ConnectorLivePanel({
 
       ${showSidecarOffEmpty
         ? html`
-            <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
+            <div class="mt-3 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
               <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
               <div class="mt-1 text-[11px] text-[var(--text-dim)]">
                 Start: <code class="rounded bg-[var(--white-8)] px-1">cd sidecars/${connectorId}-bot && ./run.sh</code>
@@ -541,7 +541,7 @@ function ConnectorLivePanel({
                   }
                 }
                 return html`
-                  <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2" data-keeper=${group.name}>
+                  <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" data-keeper=${group.name}>
                     <div class="flex flex-wrap items-baseline gap-3">
                       <div class="text-sm font-medium text-[var(--text-body)]">${group.name}</div>
                       ${keeper
@@ -599,7 +599,7 @@ function ConnectorLivePanel({
                           </div>
                           ${expanded
                             ? html`
-                                <div class="mt-2 rounded border border-dashed border-[var(--white-8)] bg-[var(--white-2)] p-2">
+                                <div class="mt-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] p-2">
                                   <${TextInput}
                                     value=${channelDraft.value}
                                     placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
@@ -617,7 +617,7 @@ function ConnectorLivePanel({
                                             return html`
                                               <button
                                                 type="button"
-                                                class="cursor-pointer rounded-full border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
+                                                class="cursor-pointer rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
                                                 title=${roomId}
                                                 onClick=${() => { channelDraft.value = roomId }}
                                               >${humanized
@@ -714,7 +714,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
   const lastError = shortText(ch.last_error)
 
   return html`
-    <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-4)] p-3">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-lg">${channelIcon(ch.channel)}</span>
@@ -798,7 +798,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
   const lastError = shortText(binding.last_error, 72)
 
   return html`
-    <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+    <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--text-body)]">
@@ -841,10 +841,10 @@ function EventRow({ event }: { event: GateEventInfo }) {
   const isError = Boolean(event.error)
   const badgeClass = isError
     ? 'border border-rose-400/30 bg-rose-500/12 text-rose-100'
-    : 'border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
+    : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-dim)]'
 
   return html`
-    <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+    <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-[11px] text-[var(--text-dim)]">
           <div class="font-medium text-[var(--text-body)]">
@@ -944,7 +944,7 @@ export function ConnectorStatusPanel() {
 
       ${!d
         ? html`
-            <div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">
+            <div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
               Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
             </div>
           `
@@ -958,11 +958,11 @@ export function ConnectorStatusPanel() {
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
-                <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
                   duplicate suppressions
                   <span class="ml-2 font-mono text-[var(--text-body)]">${d.total_duplicates}</span>
                 </div>
-                <div class="rounded-md border border-[var(--white-8)] bg-[var(--white-4)] px-3 py-2">
+                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
                   active connectors
                   <span class="ml-2 font-mono text-[var(--text-body)]">${d.channels.length}</span>
                 </div>
@@ -974,7 +974,7 @@ export function ConnectorStatusPanel() {
                     Observed room bindings
                   </div>
                   ${d.bindings.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
+                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${d.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
@@ -987,7 +987,7 @@ export function ConnectorStatusPanel() {
                     Recent gate events
                   </div>
                   ${d.recent_events.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
+                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
                     : html`
                         <div class="space-y-2">
                           ${d.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}

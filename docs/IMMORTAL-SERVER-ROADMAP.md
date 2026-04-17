@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/supervisor.ml
+  - lib/keeper/keeper_keepalive.ml
+  - lib/keeper/keeper_supervisor.ml
+---
+
 # MASC 고가용성 서버 로드맵
 
 > 목표: 장애 복구와 운영 안정성을 강화하는 MCP 서버

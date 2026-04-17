@@ -18,7 +18,7 @@ interface KeeperMemoryTierPanelProps {
   currentPhase?: string | null
 }
 
-export type MemoryTierFilter = 'all' | 'saturated'
+type MemoryTierFilter = 'all' | 'saturated'
 
 /**
  * Pure filter for memory-tier rows.

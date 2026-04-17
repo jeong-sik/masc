@@ -3,6 +3,16 @@
 
 ## [0.9.13] - 2026-04-17
 
+### Changed
+
+- **Dashboard — form control whitelists + new semantic components.**
+  - `Select` prop whitelist expanded (id/name/aria/required/blur/testId) + tests 0 → 14 (#8007).
+  - `TimeAgo` renders as semantic `<time>` with `aria-label` + `mode` prop + tests 0 → 19 (#8011).
+- **Dashboard — highlight-on-match helper wired into 2 panels** (#8012).
+- **Keeper — team memory scope enforcement** [codex] (#8016). Keeper team-memory writes now fail closed when the keeper does not own the scope.
+- **CI — lib_option_get baseline naturalized 0 → 3** after the lockfree cache refactor in #7953 exposed 3 legitimate call sites (#8022).
+- **Docs/design — CDAL PHASE1A rename.** `cdal_eval` references renamed to `cdal_eval_v1`; successor modules clarified (#8020).
+
 ### Deprecated
 - **Spec sync — board + testing dead refs retired (#8008).**
   - `docs/spec/11-board.md` Maps-to row: dropped `lib/tool_vote.ml` and

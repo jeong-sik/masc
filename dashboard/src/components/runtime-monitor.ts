@@ -15,7 +15,29 @@ import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
+import { TextInput } from './common/input'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+
+/**
+ * Filters model metrics by case-insensitive substring match against
+ * `model_id` and any `top_tools[].tool` name. Empty/whitespace query
+ * returns the input reference unchanged (ref-equal). No mutation.
+ */
+export function filterModelMetrics(
+  models: readonly DashboardRuntimeModelMetric[],
+  query: string,
+): readonly DashboardRuntimeModelMetric[] {
+  const trimmed = query.trim().toLowerCase()
+  if (trimmed.length === 0) return models
+  return models.filter(m => {
+    if (m.model_id.toLowerCase().includes(trimmed)) return true
+    const tools = m.top_tools ?? []
+    for (const t of tools) {
+      if (t.tool.toLowerCase().includes(trimmed)) return true
+    }
+    return false
+  })
+}
 
 interface RuntimeData {
   providers: DashboardRuntimeProvidersResponse | null
@@ -109,6 +131,7 @@ export function RuntimeMonitor() {
   const resource = resourceRef.current
   const windowMinutes = useSignal(30)
   const expandedModel = useSignal<string | null>(null)
+  const modelSearch = useSignal('')
 
   const load = () => loadRuntimeData(resource, windowMinutes.value)
 
@@ -219,10 +242,23 @@ export function RuntimeMonitor() {
             detail=${`${fmtNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls`}
           />
         </div>
+        <div class="flex items-center justify-end mb-2">
+          <${TextInput}
+            type="search"
+            ariaLabel="모델 ID 검색"
+            placeholder="model_id 또는 도구 이름"
+            class="min-w-[220px] flex-1 !py-1 !text-[11px]"
+            value=${modelSearch.value}
+            onInput=${(e: Event) => { modelSearch.value = (e.target as HTMLInputElement).value }}
+          />
+        </div>
+        ${(metrics?.models ?? []).length > 0 && filterModelMetrics(metrics?.models ?? [], modelSearch.value).length === 0
+          ? html`<div class="text-[11px] text-[var(--text-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
+          : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
-            ? metrics?.models.map(metric => html`
-                <article class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2">
+            ? filterModelMetrics(metrics?.models ?? [], modelSearch.value).map(metric => html`
+                <article key=${metric.model_id} class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-[13px] text-text-strong">${metric.model_id}</strong>

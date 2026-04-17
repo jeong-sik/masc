@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { providerTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber } from './runtime-monitor'
+import { providerTone, modelMetricTone, fmtCost, fmtSuccessRate, fmtNumber, filterModelMetrics } from './runtime-monitor'
 import type { DashboardRuntimeProviderSnapshot, DashboardRuntimeModelMetric } from '../api/dashboard'
 
 function makeProvider(overrides: Partial<DashboardRuntimeProviderSnapshot> = {}): DashboardRuntimeProviderSnapshot {
@@ -160,5 +160,65 @@ describe('fmtNumber', () => {
   it('formats with custom digits', () => {
     const result = fmtNumber(1234.567, 2)
     expect(result).toContain('1,234.57')
+  })
+})
+
+// ── filterModelMetrics ──
+
+describe('filterModelMetrics', () => {
+  const sample: readonly DashboardRuntimeModelMetric[] = [
+    makeMetric({ model_id: 'groq:openai/gpt-oss-120b', top_tools: [{ tool: 'read_file', count: 3 }] }),
+    makeMetric({ model_id: 'anthropic:claude-opus-4', top_tools: [{ tool: 'Bash', count: 5 }] }),
+    makeMetric({ model_id: 'ollama:qwen3-coder-30b', top_tools: [] }),
+  ]
+
+  it('returns input reference unchanged for empty query', () => {
+    const result = filterModelMetrics(sample, '')
+    expect(result).toBe(sample)
+  })
+
+  it('returns input reference unchanged for whitespace-only query', () => {
+    const result = filterModelMetrics(sample, '   ')
+    expect(result).toBe(sample)
+  })
+
+  it('matches on model_id substring', () => {
+    const result = filterModelMetrics(sample, 'gpt-oss')
+    expect(result.map(m => m.model_id)).toEqual(['groq:openai/gpt-oss-120b'])
+  })
+
+  it('matches on top_tools[].tool name substring', () => {
+    const result = filterModelMetrics(sample, 'read_file')
+    expect(result.map(m => m.model_id)).toEqual(['groq:openai/gpt-oss-120b'])
+  })
+
+  it('is case-insensitive', () => {
+    const result = filterModelMetrics(sample, 'BASH')
+    expect(result.map(m => m.model_id)).toEqual(['anthropic:claude-opus-4'])
+  })
+
+  it('trims leading/trailing whitespace from query', () => {
+    const result = filterModelMetrics(sample, '  qwen3  ')
+    expect(result.map(m => m.model_id)).toEqual(['ollama:qwen3-coder-30b'])
+  })
+
+  it('returns empty array when no match', () => {
+    const result = filterModelMetrics(sample, 'nonexistent-xyz')
+    expect(result).toHaveLength(0)
+  })
+
+  it('does not mutate input array', () => {
+    const before = sample.map(m => m.model_id)
+    filterModelMetrics(sample, 'groq')
+    const after = sample.map(m => m.model_id)
+    expect(after).toEqual(before)
+  })
+
+  it('handles null top_tools safely', () => {
+    const data: readonly DashboardRuntimeModelMetric[] = [
+      makeMetric({ model_id: 'x:y', top_tools: null }),
+    ]
+    const result = filterModelMetrics(data, 'x:y')
+    expect(result).toHaveLength(1)
   })
 })

@@ -20,7 +20,6 @@ code_refs:
 - `docs/rfc/RFC-0002-keeper-state-machine.md` — 11-state parent phase FSM
 - `specs/keeper-state-machine/KeeperCompositeLifecycle.tla` — 5 joint invariants + 3 bug models
 - `docs/tla-audit/state-fsm-gap-2026-04-13.md` — Bug #1, P1~P5 제안
-- `docs/design/keeper-detail-source-ownership.md` — Keeper detail 페이지 소유 경계
 
 ## 1. 현 상태 분석
 

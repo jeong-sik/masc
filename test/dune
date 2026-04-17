@@ -27,12 +27,13 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_attribution test_attribution_tagged test_dashboard_attribution test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
+ (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
         test_subscriptions test_session test_progress test_spawn
         test_validation test_response
         test_channel_gate_connector_routes
+        test_sidecar_lifecycle_routes
         test_channel_gate_imessage_state
         test_dashboard
         test_dashboard_perf
@@ -117,12 +118,13 @@
         test_warn_root_causes
         test_memory_hooks
         test_mid_turn_resume)
- (modules test_attribution test_attribution_tagged test_dashboard_attribution test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
+ (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_room test_room_state_recovery test_types test_auth test_audit_log test_http_negotiation
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint
           test_subscriptions test_session test_progress test_spawn
           test_validation test_response
           test_channel_gate_connector_routes
+        test_sidecar_lifecycle_routes
           test_channel_gate_imessage_state
           test_dashboard
           test_dashboard_perf
@@ -706,6 +708,7 @@
 ; Round-trip, envelope, patch_checkpoint, dual-source read.
 (test
  (name test_keeper_state_snapshot_json)
+ (modules test_keeper_state_snapshot_json)
  (libraries masc_test_deps))
 
 ; RFC-MASC-001 Phase 1 prose echo guard: prompt-time summary filter
@@ -713,6 +716,7 @@
 ; preserving forward-looking ones (Goal, Next plan, Next, etc.).
 (test
  (name test_continuity_forward_filter)
+ (modules test_continuity_forward_filter)
  (libraries masc_test_deps))
 
 ; Gen4 compaction-layer [STATE] guard: keeper_summarizer scrubs
@@ -720,6 +724,7 @@
 ; summarization. Registered via Builder.with_summarizer (OAS 0.152.0).
 (test
  (name test_keeper_summarizer)
+ (modules test_keeper_summarizer)
  (libraries masc_test_deps))
 
 ; Gen7 persistence-layer guard: cap_snapshot bounds string/list
@@ -727,6 +732,7 @@
 ; monotonic growth when the LLM produces ever-longer [STATE] blocks.
 (test
  (name test_snapshot_size_cap)
+ (modules test_snapshot_size_cap)
  (libraries masc_test_deps))
 
 ; Gen8 persistence-layer guard: cap_social_state bounds the BDI
@@ -761,16 +767,19 @@
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)
 (test
  (name test_keeper_checkpoint_classify)
+ (modules test_keeper_checkpoint_classify)
  (libraries masc_test_deps))
 
 ; Keeper autonomous semaphore fairness cooldown (#6810)
 (test
  (name test_keeper_semaphore_fairness)
+ (modules test_keeper_semaphore_fairness)
  (libraries masc_test_deps))
 
 ; Dashboard_governance_metrics — tool rejection ring + approval queue
 (test
  (name test_dashboard_governance_metrics)
+ (modules test_dashboard_governance_metrics)
  (libraries masc_test_deps))
 ; Operator Control (7 modules)
 (test

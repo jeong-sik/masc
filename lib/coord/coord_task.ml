@@ -167,7 +167,7 @@ let emit_task_activity ?correlation_id ?run_id
     merge_envelope_into_payload ?correlation_id ?run_id payload
   in
   try
-    !Coord_hooks.activity_emit_fn config
+    (Atomic.get Coord_hooks.activity_emit_fn) config
       ~actor:Coord_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
       ~subject:Coord_hooks.{ kind = "task"; id = task_id }
       ~kind
@@ -233,7 +233,7 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
         (Option.map (fun value -> `Int value) duration_ms))
 
 let observe_task_transition config ~agent_name ~task_id ~transition ~details =
-  !Coord_hooks.observe_task_transition_fn config ~agent_name
+  (Atomic.get Coord_hooks.observe_task_transition_fn) config ~agent_name
     ~task_id ~transition ~details
 
 (** Transition log event taxonomy. Variant instead of free-form string
@@ -361,7 +361,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
                   | None -> false) );
             ]);
 
-      !Coord_hooks.on_task_mutation_fn ();
+      (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
       Printf.sprintf "✅ Added %s: %s" task_id title))
   with
@@ -489,7 +489,7 @@ let batch_add_tasks_internal config tasks =
                 ]))
         added_tasks;
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
-      !Coord_hooks.on_task_mutation_fn ();
+      (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
@@ -524,10 +524,16 @@ let claim_task config ~agent_name ~task_id =
       let backlog = read_backlog_or_raise config in
       let found = ref false in
       let already_claimed = ref None in
+      let blocked_reason = ref None in
       let new_tasks = List.map (fun task ->
         if task.id = task_id then begin
           found := true;
+          (* Cycle-prevention gate: see _r variant below for rationale. *)
+          (match task.do_not_reclaim_reason with
+           | Some r -> blocked_reason := Some r
+           | None -> ());
           match task.task_status with
+          | _ when !blocked_reason <> None -> task
           | Todo ->
               { task with task_status = Claimed { assignee = agent_name; claimed_at = now_iso () } }
           | Claimed { assignee; _ } | InProgress { assignee; _ } | Done { assignee; _ }
@@ -538,7 +544,10 @@ let claim_task config ~agent_name ~task_id =
       ) backlog.tasks in
       if not !found then
         Printf.sprintf "❌ Task %s not found" task_id
-      else match !already_claimed with
+      else match !blocked_reason with
+        | Some r -> Printf.sprintf "🚫 Task %s blocked from re-claim: %s" task_id r
+        | None ->
+      (match !already_claimed with
         | Some other -> Printf.sprintf "⚠ Task %s is already claimed by %s" task_id other
         | None ->
             let new_backlog = {
@@ -570,7 +579,7 @@ let claim_task config ~agent_name ~task_id =
                      (Types.Claimed
                         { assignee = agent_name; claimed_at = now_iso () })
                    ());
-            Printf.sprintf "✅ %s claimed %s" agent_name task_id
+            Printf.sprintf "✅ %s claimed %s" agent_name task_id)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
@@ -619,6 +628,17 @@ let claim_task_r config ~agent_name ~task_id
             actual = Types_core.role_to_string agent_role;
           })
         else Ok ()
+      in
+      (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
+         The reason is populated by the cancel hook (3+ cancels or hard-stop
+         keywords) or by the operator directly. See PRs #7794 (schema),
+         #7798 (cancel hook). *)
+      let* () =
+        match task.do_not_reclaim_reason with
+        | None -> Ok ()
+        | Some r ->
+            Error (Types.TaskInvalidState
+              (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r))
       in
       (* fold_left to find+transform in a single pass without mutable refs.
          Uses polymorphic variants for inline state tracking. *)
@@ -964,11 +984,11 @@ let transition_task_r config ~agent_name ~task_id ~action
          | Types.Done_action ->
            (try
               let active = (Coord_state.read_state config).active_agents in
-              !Coord_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+              (Atomic.get Coord_hooks.relation_on_task_done_fn) ~assignee:agent_name ~active_agents:active;
               (* Hebbian: strengthen only against agents with active tasks,
                  not the full room. See working_agents doc for rationale. *)
               let workers = working_agents config in
-              !Coord_hooks.hebbian_on_task_done_fn config
+              (Atomic.get Coord_hooks.hebbian_on_task_done_fn) config
                 ~assignee:agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition relation/hebbian done hook: %s"
@@ -976,7 +996,7 @@ let transition_task_r config ~agent_name ~task_id ~action
          | Types.Cancel ->
            (try
               let workers = working_agents config in
-              !Coord_hooks.hebbian_on_task_cancelled_fn config
+              (Atomic.get Coord_hooks.hebbian_on_task_cancelled_fn) config
                 ~agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition hebbian cancel hook: %s"
@@ -1093,10 +1113,10 @@ let complete_task config ~agent_name ~task_id ~notes =
             (* Record task collaboration via hook (async, non-blocking) *)
             (try
                let active = (Coord_state.read_state config).active_agents in
-               !Coord_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+               (Atomic.get Coord_hooks.relation_on_task_done_fn) ~assignee:agent_name ~active_agents:active;
                (* Hebbian: strengthen only against agents with active tasks *)
                let workers = working_agents config in
-               !Coord_hooks.hebbian_on_task_done_fn config
+               (Atomic.get Coord_hooks.hebbian_on_task_done_fn) config
                  ~assignee:agent_name ~active_agents:workers
              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.RoomTask.error "relation/hebbian task hook error: %s"
@@ -1210,7 +1230,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                              *. 1000.0)))
                      ());
               (* Agent Economy: earn credits via hook *)
-              !Coord_hooks.agent_economy_earn_fn
+              (Atomic.get Coord_hooks.agent_economy_earn_fn)
                 ~base_path:config.base_path ~agent_name
                 ~reason:(Printf.sprintf "completed %s" task_id);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
@@ -1256,11 +1276,32 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
             else begin
               let new_tasks = List.map (fun t ->
                 if t.id = task_id then
-                  { t with task_status = Types.Cancelled {
-                    cancelled_by = agent_name;
-                    cancelled_at = now_iso ();
-                    reason = if reason = "" then None else Some reason
-                  }}
+                  let new_cycle = t.cycle_count + 1 in
+                  (* Auto-set do_not_reclaim_reason when the operator flags
+                     a hard stop in the cancel reason, or after 3 cycles. *)
+                  let auto_dnr =
+                    match t.do_not_reclaim_reason with
+                    | Some _ as existing -> existing
+                    | None ->
+                        let lower = String.lowercase_ascii reason in
+                        let flagged =
+                          String_util.contains_substring lower "do not reclaim"
+                          || String_util.contains_substring lower "scope mismatch"
+                        in
+                        if flagged && reason <> "" then Some reason
+                        else if new_cycle >= 3 then
+                          Some (Printf.sprintf "auto: %d cancellations" new_cycle)
+                        else None
+                  in
+                  { t with
+                    task_status = Types.Cancelled {
+                      cancelled_by = agent_name;
+                      cancelled_at = now_iso ();
+                      reason = if reason = "" then None else Some reason
+                    };
+                    cycle_count = new_cycle;
+                    do_not_reclaim_reason = auto_dnr;
+                  }
                 else t
               ) backlog.tasks in
               let new_backlog = {
@@ -1320,7 +1361,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               (* Hebbian: weaken only against agents with active tasks *)
               (try
                  let workers = working_agents config in
-                 !Coord_hooks.hebbian_on_task_cancelled_fn config
+                 (Atomic.get Coord_hooks.hebbian_on_task_cancelled_fn) config
                    ~agent_name ~active_agents:workers
                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                  Log.RoomTask.error "hebbian task_cancelled hook error: %s"

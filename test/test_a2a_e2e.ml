@@ -16,7 +16,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 (* Wire Coord_hooks for subscribe — needed because Coord module side-effects
    may not execute in test binaries that don't reference Coord directly. *)
-let () = Coord_hooks.subscribe_messages_fn := (fun ~subscriber ->
+let () = Atomic.set Coord_hooks.subscribe_messages_fn (fun ~subscriber ->
   let _ = Subscriptions.SubscriptionStore.subscribe
     ~subscriber ~resource:Subscriptions.Messages () in ())
 

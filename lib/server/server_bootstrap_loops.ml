@@ -11,7 +11,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   Progress.set_sse_callback Sse.broadcast;
   Sse.set_clock clock;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Coord_hooks.stop_keeper_fn := Keeper_keepalive.stop_keepalive;
+  Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.

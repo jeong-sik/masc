@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { fetchDashboardGoalsTree } from '../../api/dashboard'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
@@ -16,12 +16,77 @@ import type {
 } from '../../types'
 import { horizonLabel, horizonColor, priorityStars } from './goal-helpers'
 
+/**
+ * Pure hierarchy filter for goal tree nodes.
+ *
+ * Case-insensitive substring match on `node.title` and on `task.title` for
+ * any task attached to the node. Ancestors of matching nodes are preserved
+ * so the operator retains context (parent goal, horizon) — the tree shape
+ * is never broken by the filter.
+ *
+ * Pruning rules:
+ * - If a node's own title matches, the node and ALL its descendants / tasks
+ *   are kept verbatim (treat the match as "show me this subtree").
+ * - Otherwise, the node is kept only if any descendant matches, and only
+ *   those matching descendants (recursively pruned) are retained. Tasks
+ *   attached directly to this node are filtered down to matching tasks.
+ *
+ * Empty / whitespace query returns the input reference unchanged so
+ * memoisation preserves referential equality for the non-filtering path.
+ * Input is never mutated.
+ */
+export function filterGoalTree(
+  nodes: readonly GoalTreeNode[],
+  query: string,
+): readonly GoalTreeNode[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return nodes
+
+  const result: GoalTreeNode[] = []
+  for (const node of nodes) {
+    const pruned = pruneNode(node, needle)
+    if (pruned !== null) result.push(pruned)
+  }
+  return result
+}
+
+function pruneNode(node: GoalTreeNode, needle: string): GoalTreeNode | null {
+  const title = node.title ?? ''
+  const nodeMatches = title.toLowerCase().includes(needle)
+  if (nodeMatches) {
+    // Self match: keep the whole subtree as-is.
+    return node
+  }
+
+  const matchingTasks = node.tasks.filter(t =>
+    (t.title ?? '').toLowerCase().includes(needle),
+  )
+  const prunedChildren: GoalTreeNode[] = []
+  for (const child of node.children) {
+    const prunedChild = pruneNode(child, needle)
+    if (prunedChild !== null) prunedChildren.push(prunedChild)
+  }
+
+  if (matchingTasks.length === 0 && prunedChildren.length === 0) {
+    return null
+  }
+
+  // Ancestor retained for context: return a shallow copy with the pruned
+  // children / tasks so we never mutate the input node.
+  return {
+    ...node,
+    tasks: matchingTasks,
+    children: prunedChildren,
+  }
+}
+
 // --- State ---
 
 const treeData = signal<DashboardGoalsTreeResponse | null>(null)
 const treeLoading = signal(false)
 const treeError = signal<string | null>(null)
 const expandedNodes = signal<Set<string>>(new Set())
+const filterQuery = signal('')
 
 function toggleNode(id: string) {
   const next = new Set(expandedNodes.value)
@@ -210,6 +275,13 @@ export function GoalTree() {
   const data = treeData.value
   const loading = treeLoading.value
   const error = treeError.value
+  const query = filterQuery.value
+
+  const visibleTree = useMemo(
+    () => (data ? filterGoalTree(data.tree, query) : []),
+    [data, query],
+  )
+  const isFiltering = query.trim() !== ''
 
   return html`
     <div class="flex flex-col gap-5">
@@ -224,6 +296,14 @@ export function GoalTree() {
           </div>
           <div class="flex items-center gap-2">
             ${data && data.tree.length > 0 ? html`
+              <input
+                type="search"
+                value=${query}
+                placeholder="목표 / 태스크 제목 필터"
+                aria-label="목표 트리 필터"
+                onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
+                class="min-w-[180px] max-w-[260px] rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[12px] text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+              />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기
               <//>
@@ -251,9 +331,13 @@ export function GoalTree() {
         <${LoadingState}>목표 트리 불러오는 중...<//>
       ` : data && data.tree.length === 0 ? html`
         <${EmptyState} message="등록된 목표가 없습니다. masc_goal_upsert 도구로 목표를 등록하세요." />
+      ` : data && isFiltering && visibleTree.length === 0 ? html`
+        <section class="py-4 text-center text-[12px] text-text-dim">
+          필터 결과 없음 (${data.tree.length} 목표)
+        </section>
       ` : data ? html`
         <section class="flex flex-col gap-2">
-          ${data.tree.map(node => html`<${TreeNode} key=${node.id} node=${node} depth=${0} />`)}
+          ${visibleTree.map(node => html`<${TreeNode} key=${node.id} node=${node} depth=${0} />`)}
         </section>
       ` : null}
     </div>

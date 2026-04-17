@@ -149,6 +149,7 @@ describe('fetchKeeperConfig', () => {
       network_mode: 'none',
       shared_memory_scope: 'room',
       sandbox_last_error: 'network disabled by policy',
+      effective_sandbox_image: 'ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff',
       private_workspace_root: '.masc/playground/keeper-sangsu',
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
@@ -284,6 +285,9 @@ describe('fetchKeeperConfig', () => {
     expect(result.network_mode).toBe('none')
     expect(result.shared_memory_scope).toBe('room')
     expect(result.sandbox_last_error).toBe('network disabled by policy')
+    expect(result.effective_sandbox_image).toBe(
+      'ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff',
+    )
     expect(result.private_workspace_root).toBe('.masc/playground/keeper-sangsu')
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)

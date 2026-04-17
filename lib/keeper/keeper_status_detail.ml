@@ -904,6 +904,13 @@ let handle_keeper_status ctx args : tool_result =
            | Some entry -> entry.last_error
            | None -> None
          in
+         let effective_sandbox_image =
+           if m.sandbox_profile = Docker_hardened
+              || (m.sandbox_profile = Legacy_local
+                  && Env_config_keeper.DockerPlayground.enabled)
+           then Some Env_config_keeper.KeeperSandbox.docker_image
+           else None
+         in
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m
          in
@@ -959,6 +966,8 @@ let handle_keeper_status ctx args : tool_result =
              `String (shared_memory_scope_to_string m.shared_memory_scope));
            ("sandbox_last_error",
              Json_util.string_opt_to_json sandbox_last_error);
+           ("effective_sandbox_image",
+             Json_util.string_opt_to_json effective_sandbox_image);
            ("tool_policy_mode",
              `String
                (match Keeper_types.tool_access_custom_allowlist m.tool_access with
@@ -1020,6 +1029,8 @@ let handle_keeper_status ctx args : tool_result =
                `String (network_mode_to_string m.network_mode));
              ("shared_memory_scope",
                `String (shared_memory_scope_to_string m.shared_memory_scope));
+             ("effective_sandbox_image",
+               Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);
            ("allowed_tools", string_list_to_json allowed_tools);
             ("available_internal_tools", string_list_to_json all_internal_tools);
@@ -1136,6 +1147,8 @@ let handle_keeper_status ctx args : tool_result =
                `String (shared_memory_scope_to_string m.shared_memory_scope));
              ("sandbox_last_error",
                Json_util.string_opt_to_json sandbox_last_error);
+             ("effective_sandbox_image",
+               Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
                let cache_path = Filename.concat playground_abs

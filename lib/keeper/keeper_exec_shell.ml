@@ -381,6 +381,93 @@ let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
   else
     (meta.sandbox_profile, meta.network_mode)
 
+let nested_container_runtime_tokens =
+  [ "docker"; "podman"; "nerdctl"; "buildah" ]
+
+let sandbox_socket_markers =
+  [
+    "/var/run/docker.sock";
+    "/run/docker.sock";
+    "/run/podman/podman.sock";
+    "podman.sock";
+    "containerd.sock";
+    "buildkitd.sock";
+  ]
+
+let command_uses_nested_container_runtime cmd =
+  let lowered_words = lowercase_shell_words cmd in
+  let lowered_cmd = String.lowercase_ascii cmd in
+  List.exists (fun token -> List.mem token nested_container_runtime_tokens)
+    lowered_words
+  || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
+
+let docker_info_security_options ~timeout_sec =
+  let st, out =
+    Process_eio.run_argv_with_status
+      ~cwd:(Sys.getcwd ())
+      ~timeout_sec
+      [ "docker"; "info"; "--format"; "{{json .SecurityOptions}}" ]
+  in
+  if st <> Unix.WEXITED 0 then
+    Error
+      (Printf.sprintf "docker info failed while validating sandbox runtime: %s"
+         (Worker_dev_tools.truncate_for_log out))
+  else
+    try
+      match Yojson.Safe.from_string (String.trim out) with
+      | `List items ->
+          Ok
+            (List.filter_map Yojson.Safe.Util.to_string_option items
+            |> List.map String.lowercase_ascii)
+      | `Null -> Ok []
+      | _ ->
+          Error
+            "docker info returned unexpected SecurityOptions payload while validating sandbox runtime"
+    with
+    | Yojson.Json_error err ->
+        Error
+          (Printf.sprintf
+             "failed to parse docker info SecurityOptions JSON: %s"
+             err)
+
+let ensure_keeper_sandbox_runtime ~timeout_sec =
+  let seccomp_profile = String.trim Env_config_keeper.KeeperSandbox.seccomp_profile in
+  let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless in
+  let require_userns = Env_config_keeper.KeeperSandbox.require_userns in
+  let seccomp_args =
+    if seccomp_profile = "" then
+      Ok []
+    else if Sys.file_exists seccomp_profile then
+      Ok [ "--security-opt"; "seccomp=" ^ seccomp_profile ]
+    else
+      Error
+        (Printf.sprintf
+           "sandbox seccomp profile not found: %s"
+           seccomp_profile)
+  in
+  match seccomp_args with
+  | Error _ as err -> err
+  | Ok seccomp_args ->
+      if not require_rootless && not require_userns then
+        Ok seccomp_args
+      else
+        match docker_info_security_options ~timeout_sec:(min 20.0 (max 5.0 timeout_sec)) with
+        | Error _ as err -> err
+        | Ok security_options ->
+            let has needle =
+              List.exists
+                (fun option_text -> String_util.contains_substring option_text needle)
+                security_options
+            in
+            if require_rootless && not (has "rootless") then
+              Error
+                "sandbox runtime requires Docker rootless mode (set MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false to disable this check)"
+            else if require_userns && not (has "userns") then
+              Error
+                "sandbox runtime requires Docker userns support (set MASC_KEEPER_SANDBOX_REQUIRE_USERNS=false to disable this check)"
+            else
+              Ok seccomp_args
+
 let run_docker_hardened_bash
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -389,9 +476,19 @@ let run_docker_hardened_bash
     ~(cmd : string)
     ~(network_mode : network_mode) =
   let image = Env_config_keeper.KeeperSandbox.docker_image in
+  let sandbox_error_json message =
+    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    error_json message
+  in
   if String.trim image = "" then
-    error_json "keeper sandbox docker image is not configured"
+    sandbox_error_json "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd then
+    sandbox_error_json
+      "docker_hardened blocks nested container runtimes and host socket references"
   else
+    match ensure_keeper_sandbox_runtime ~timeout_sec with
+    | Error err -> sandbox_error_json err
+    | Ok seccomp_args ->
     let host_root =
       keeper_playground_root ~config ~meta
       |> Keeper_alerting_path.normalize_path_for_check
@@ -424,6 +521,9 @@ let run_docker_hardened_bash
         "--cap-drop=ALL";
         "--security-opt";
         "no-new-privileges";
+      ]
+      @ seccomp_args
+      @ [
         "--pids-limit";
         string_of_int Env_config_keeper.KeeperSandbox.pids_limit;
         "--memory";
@@ -444,7 +544,9 @@ let run_docker_hardened_bash
       Keeper_registry.record_error ~base_path:config.base_path meta.name
         (Printf.sprintf "sandbox docker exec failed (%s): %s"
            image
-           (Worker_dev_tools.truncate_for_log out));
+           (Worker_dev_tools.truncate_for_log out))
+    else
+      Keeper_registry.clear_error ~base_path:config.base_path meta.name;
     Yojson.Safe.to_string
       (`Assoc
          [
@@ -452,6 +554,7 @@ let run_docker_hardened_bash
            ("cwd", `String cwd);
            ("sandbox_profile", `String "docker_hardened");
            ("network_mode", `String (network_mode_to_string network_mode));
+           ("effective_sandbox_image", `String image);
            ("status", Keeper_alerting_path.process_status_to_json st);
            ("output", `String out);
          ])

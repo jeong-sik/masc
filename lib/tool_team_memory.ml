@@ -2,7 +2,7 @@ module Sg = Agent_sdk.Tool_schema_gen
 
 let room_field =
   Sg.string_field "room" ~required:true
-    ~desc:"Room-scoped shared memory namespace" ()
+    ~desc:"Flattened shared-memory namespace placeholder. Must be 'default'." ()
 
 let key_field =
   Sg.string_field "key" ~required:true
@@ -39,19 +39,69 @@ let schemas =
     schema_to_tool_schema
       ~name:"masc_team_memory_read"
       ~description:
-        "Read room-scoped shared team memory by key. Uses a typed shared lane instead of exposing a shared writable shell directory."
+        "Read shared team memory by key from the flattened default namespace. Uses a typed lane instead of exposing a shared writable shell directory."
       read_schema;
     schema_to_tool_schema
       ~name:"masc_team_memory_write"
       ~description:
-        "Write room-scoped shared team memory by key. Traversal, symlink escape, and secret-like payloads are blocked."
+        "Write shared team memory by key in the flattened default namespace. Traversal, symlink escape, and secret-like payloads are blocked."
       write_schema;
     schema_to_tool_schema
       ~name:"masc_team_memory_search"
       ~description:
-        "Search room-scoped shared team memory by filename or content substring."
+        "Search shared team memory in the flattened default namespace by filename or content substring."
       search_schema;
   ]
+
+let default_namespace = "default"
+
+let validate_team_memory_room room =
+  let trimmed = String.trim room in
+  if trimmed = "" then
+    Error "room is required"
+  else if String.equal (String.lowercase_ascii trimmed) default_namespace then
+    Ok default_namespace
+  else
+    Error
+      (Printf.sprintf
+         "team memory uses the flattened default namespace; room must be '%s'"
+         default_namespace)
+
+let resolve_keeper_access ~(config : Coord.config) ~(agent_name : string) =
+  let trimmed = String.trim agent_name in
+  if trimmed = "" then
+    Error "team memory tools require keeper agent context"
+  else
+    match Keeper_types.keeper_name_from_agent_name trimmed with
+    | None ->
+        Error
+          (Printf.sprintf
+             "team memory tools are keeper-only; agent '%s' is not a keeper agent"
+             trimmed)
+    | Some keeper_name -> (
+        match Keeper_types.read_meta_resolved config keeper_name with
+        | Error err -> Error err
+        | Ok None ->
+            Error
+              (Printf.sprintf
+                 "keeper context not found for team memory agent '%s'"
+                 trimmed)
+        | Ok (Some (_resolved_name, meta)) ->
+            Ok (keeper_name, meta))
+
+let authorize_team_memory ~(config : Coord.config) ~(agent_name : string)
+    ~room =
+  match resolve_keeper_access ~config ~agent_name with
+  | Error err -> Error err
+  | Ok (keeper_name, meta) -> (
+      match meta.shared_memory_scope with
+      | Keeper_types.Shared_memory_disabled ->
+          Error
+            (Printf.sprintf
+               "team memory is disabled for keeper '%s'; set shared_memory_scope=room to enable the flattened default namespace"
+               keeper_name)
+      | Keeper_types.Shared_memory_room ->
+          validate_team_memory_room room)
 
 let team_memory_root ~(config : Coord.config) room =
   Filename.concat config.base_path
@@ -103,7 +153,7 @@ let validate_team_memory_key key =
     Validation.Safe_path.validate_relative trimmed
 
 let resolve_key_path ~(config : Coord.config) ~room ~key =
-  match Coord_utils.validate_room_id room with
+  match validate_team_memory_room room with
   | Error err -> Error err
   | Ok room_id -> (
       match validate_team_memory_key key with
@@ -257,7 +307,7 @@ let rec collect_files acc dir =
     acc entries
 
 let search_json ~config (room, query) =
-  match Coord_utils.validate_room_id room with
+  match validate_team_memory_room room with
   | Error err -> (false, err)
   | Ok room_id ->
       let normalized_query = String.trim query in
@@ -324,19 +374,29 @@ let search_json ~config (room, query) =
                    ("matches", `List matches);
                  ]))
 
-let dispatch ~(config : Coord.config) ~name ~args : Keeper_types.tool_result option =
+let dispatch ~(config : Coord.config) ~(agent_name : string) ~name ~args
+    : Keeper_types.tool_result option =
   match name with
   | "masc_team_memory_read" -> (
       match parse read_schema ~tool_name:name args with
-      | Ok parsed -> Some (read_json ~config parsed)
+      | Ok ((room, _key) as parsed) -> (
+          match authorize_team_memory ~config ~agent_name ~room with
+          | Error err -> Some (false, err)
+          | Ok _room_id -> Some (read_json ~config parsed))
       | Error err -> Some (false, err))
   | "masc_team_memory_write" -> (
       match parse write_schema ~tool_name:name args with
-      | Ok parsed -> Some (write_json ~config parsed)
+      | Ok ((room, _key, _content) as parsed) -> (
+          match authorize_team_memory ~config ~agent_name ~room with
+          | Error err -> Some (false, err)
+          | Ok _room_id -> Some (write_json ~config parsed))
       | Error err -> Some (false, err))
   | "masc_team_memory_search" -> (
       match parse search_schema ~tool_name:name args with
-      | Ok parsed -> Some (search_json ~config parsed)
+      | Ok ((room, _query) as parsed) -> (
+          match authorize_team_memory ~config ~agent_name ~room with
+          | Error err -> Some (false, err)
+          | Ok _room_id -> Some (search_json ~config parsed))
       | Error err -> Some (false, err))
   | _ -> None
 

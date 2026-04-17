@@ -137,7 +137,7 @@ Source: `ROADMAP.md` Long-term
 | Direction | Trigger | Source |
 |-----------|---------|--------|
 | Keeper Autonomy identity v2 Tier 2-3 (ToM, archetypes) | Tier 1이 가치 증명 | docs/archive/keeper-autonomy-identity-v2/ |
-| Figma-MCP 통합 (visual heartbeat) | figma-mcp 안정화 | docs/archive/EVOLUTION-PLAN-FIGMA-MCP.md |
+| Figma-MCP 통합 (visual heartbeat) | figma-mcp 안정화 | — |
 | Cluster mode / multi-node HA | 단일 노드 한계 도달 | IMMORTAL-SERVER-ROADMAP Phase 3 |
 | Chaos engineering framework | Production 장애 패턴 확인 | IMMORTAL-SERVER-ROADMAP Phase 3 |
 | Adaptive orchestration (dynamic org) | Agent 30+ | archive/IMPROVEMENT-PLAN P3 |
@@ -258,7 +258,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 
 | Gap | 현재 상태 | 필요한 spec |
 |-----|----------|-------------|
-| **Memory system** | AGENT-MEMORY-SYSTEM.md (design phase, 811 lines) | Memory tier 계약 (OAS 5-tier 포함) |
+| **Memory system** | 없음 (design draft removed 2026-04-17) | Memory tier 계약 (OAS 5-tier 포함) |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
 | **Keeper Autonomy identity** | docs/archive/keeper-autonomy-identity-v2/ (3 files) | 구현 후 spec 추가 |
@@ -266,7 +266,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 | **Operational runbook** | COMMAND-PLANE-RUNBOOK, BENCHMARK-RUNBOOK | 운영 절차 통합 spec |
 | **Config reference** | 없음 (env var 50+ 산재) | 환경변수/설정 SSOT |
 | **Error catalog** | 없음 | MCP error code + 복구 절차 |
-| **Migration guide** | OAS-MIGRATION-NEXT-STEPS.md | 버전 간 breaking change + migration path |
+| **Migration guide** | 없음 (next-steps draft removed 2026-04-17) | 버전 간 breaking change + migration path |
 | **Security model** | PRODUCT-REVIEW.md에서 지적 | Auth, trust boundary, threat model |
 
 ### docs/spec/ 현재 구성 (참고)

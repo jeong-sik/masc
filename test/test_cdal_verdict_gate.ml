@@ -210,6 +210,113 @@ let test_gate_latest_verdict_wins () =
       Alcotest.fail (Printf.sprintf "Latest Satisfied should allow, got: %s" msg))
 
 (* ================================================================ *)
+(* Attribution conversion tests                                      *)
+(* ================================================================ *)
+
+module A = Masc_mcp.Attribution
+
+let assert_gate_is_cdal_verdict (attr : A.t) =
+  Alcotest.(check string) "gate" "cdal_verdict" attr.gate;
+  Alcotest.(check bool) "origin=Det" true (attr.origin = A.Det)
+
+let evidence_int_field attr key : int option =
+  match attr.A.evidence with
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`Int n) -> Some n
+    | _ -> None)
+  | _ -> None
+
+let evidence_string_field attr key : string option =
+  match attr.A.evidence with
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`String s) -> Some s
+    | _ -> None)
+  | _ -> None
+
+let test_to_attribution_satisfied_is_passed () =
+  let v = make_verdict ~status:CT.Satisfied () in
+  let attr = CVG.to_attribution v in
+  assert_gate_is_cdal_verdict attr;
+  Alcotest.(check bool)
+    "outcome=Passed" true
+    (match attr.outcome with A.Passed -> true | _ -> false);
+  Alcotest.(check (option string))
+    "evidence.status" (Some "satisfied")
+    (evidence_string_field attr "status")
+
+let test_to_attribution_violated_is_policy_failed () =
+  let finding = make_finding ~check_id:"execution_mode" () in
+  let v = make_verdict ~status:CT.Violated ~findings:[ finding ] () in
+  let attr = CVG.to_attribution v in
+  assert_gate_is_cdal_verdict attr;
+  (match attr.outcome with
+   | A.Policy_failed { reason } ->
+     Alcotest.(check bool)
+       "reason mentions finding" true
+       (Astring.String.is_infix ~affix:"execution_mode" reason)
+   | other ->
+     let kind =
+       match other with
+       | A.Passed -> "passed"
+       | A.Transition_blocked _ -> "transition_blocked"
+       | A.Partial_pass _ -> "partial_pass"
+       | _ -> "?"
+     in
+     Alcotest.fail ("expected Policy_failed, got " ^ kind));
+  Alcotest.(check (option int))
+    "evidence.findings_count" (Some 1)
+    (evidence_int_field attr "findings_count")
+
+let test_to_attribution_inconclusive_blocking_is_policy_failed () =
+  let gap = make_gap ~impact:CT.Blocks_verdict () in
+  let v = make_verdict ~status:CT.Inconclusive ~gaps:[ gap ] () in
+  let attr = CVG.to_attribution v in
+  Alcotest.(check bool)
+    "outcome=Policy_failed" true
+    (match attr.outcome with A.Policy_failed _ -> true | _ -> false);
+  Alcotest.(check (option int))
+    "evidence.blocking_gaps_count" (Some 1)
+    (evidence_int_field attr "blocking_gaps_count")
+
+let test_to_attribution_inconclusive_no_gaps_is_passed () =
+  let v = make_verdict ~status:CT.Inconclusive ~gaps:[] () in
+  let attr = CVG.to_attribution v in
+  Alcotest.(check bool)
+    "outcome=Passed" true
+    (match attr.outcome with A.Passed -> true | _ -> false)
+
+let test_attribution_missing_verdict () =
+  let attr = CVG.attribution_for_missing_verdict ~task_id:"T-999" in
+  assert_gate_is_cdal_verdict attr;
+  (match attr.outcome with
+   | A.Policy_failed { reason } ->
+     Alcotest.(check bool)
+       "reason mentions task_id" true
+       (Astring.String.is_infix ~affix:"T-999" reason)
+   | _ -> Alcotest.fail "expected Policy_failed");
+  Alcotest.(check (option string))
+    "evidence.task_id" (Some "T-999")
+    (evidence_string_field attr "task_id")
+
+let test_attribution_roundtrips_to_json () =
+  (* Ensure the generated attribution serializes through Attribution.to_yojson
+     without loss (any validation bugs in our evidence shape show up here). *)
+  let v = make_verdict ~status:CT.Violated ~findings:[ make_finding () ] () in
+  let attr = CVG.to_attribution v in
+  let json = A.to_yojson attr in
+  match A.of_yojson json with
+  | Ok attr' ->
+    Alcotest.(check string) "gate" attr.gate attr'.gate;
+    Alcotest.(check bool)
+      "outcome kind preserved" true
+      (match (attr.outcome, attr'.outcome) with
+       | A.Policy_failed a, A.Policy_failed b -> a.reason = b.reason
+       | _ -> false)
+  | Error msg -> Alcotest.fail ("roundtrip failed: " ^ msg)
+
+(* ================================================================ *)
 (* Test suite                                                        *)
 (* ================================================================ *)
 
@@ -231,5 +338,19 @@ let () =
       Alcotest.test_case "violated verdict rejects" `Quick test_gate_violated_verdict_rejects;
       Alcotest.test_case "different task_id not found" `Quick test_gate_different_task_id_not_found;
       Alcotest.test_case "latest verdict wins" `Quick test_gate_latest_verdict_wins;
+    ]);
+    ("attribution", [
+      Alcotest.test_case "satisfied → Passed" `Quick
+        test_to_attribution_satisfied_is_passed;
+      Alcotest.test_case "violated → Policy_failed with reason" `Quick
+        test_to_attribution_violated_is_policy_failed;
+      Alcotest.test_case "inconclusive+blocking → Policy_failed" `Quick
+        test_to_attribution_inconclusive_blocking_is_policy_failed;
+      Alcotest.test_case "inconclusive+no-gaps → Passed" `Quick
+        test_to_attribution_inconclusive_no_gaps_is_passed;
+      Alcotest.test_case "missing verdict envelope" `Quick
+        test_attribution_missing_verdict;
+      Alcotest.test_case "yojson roundtrip" `Quick
+        test_attribution_roundtrips_to_json;
     ]);
   ]

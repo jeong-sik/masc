@@ -94,6 +94,8 @@ export const AutoresearchLoopSummarySchema = object({
 export const AutoresearchLoopsResponseSchema = object({
   loops: array(AutoresearchLoopSummarySchema),
   total: number(),
+  offset: number(),
+  limit: number(),
 })
 
 export const AutoresearchLoopDetailSchema = object({

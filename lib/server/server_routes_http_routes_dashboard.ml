@@ -653,8 +653,16 @@ and add_autoresearch_routes router =
   |> Http.Router.get "/api/v1/autoresearch/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
+         let offset =
+           Server_utils.int_query_param req "offset" ~default:0
+           |> Server_utils.clamp ~min_v:0 ~max_v:1000000
+         in
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:100
+           |> Server_utils.clamp ~min_v:1 ~max_v:1000
+         in
          let json =
-           Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+           Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ~offset ~limit ()
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd

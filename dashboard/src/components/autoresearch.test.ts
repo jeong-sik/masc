@@ -126,9 +126,9 @@ describe('Autoresearch surface refresh', () => {
     const loopA1 = loopSummary('loop-a111', { current_cycle: 1 })
     const loopA2 = loopSummary('loop-a111', { current_cycle: 2, best_score: 0.8 })
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>(async () => {
-      return { loops: [loopA2], total: 1 }
+      return { loops: [loopA2], total: 1, offset: 0, limit: 100 }
     })
-      .mockResolvedValueOnce({ loops: [loopA1], total: 1 })
+      .mockResolvedValueOnce({ loops: [loopA1], total: 1, offset: 0, limit: 100 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>(async () =>
       loopDetail(loopA2, { history: [cycleRecord(0), cycleRecord(1)], history_count: 2 }),
     )
@@ -167,9 +167,9 @@ describe('Autoresearch surface refresh', () => {
     const loopB = loopSummary('loop-b222', { target_file: 'target-b.ml', current_cycle: 3 })
     const refreshedLoopB = { ...loopB, best_score: 0.9 }
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>(async () => {
-      return { loops: [loopA, refreshedLoopB], total: 2 }
+      return { loops: [loopA, refreshedLoopB], total: 2, offset: 0, limit: 100 }
     })
-      .mockResolvedValueOnce({ loops: [loopA, loopB], total: 2 })
+      .mockResolvedValueOnce({ loops: [loopA, loopB], total: 2, offset: 0, limit: 100 })
     let loopBDetailCalls = 0
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>(async loopId => {
       if (loopId === 'loop-a111') return loopDetail(loopA)
@@ -206,9 +206,9 @@ describe('Autoresearch surface refresh', () => {
     const loopB = loopSummary('loop-b222', { target_file: 'target-b.ml' })
     const refreshedLoopA = loopDetail(loopA, { best_score: 0.95 })
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>(async () => {
-      return { loops: [loopA], total: 1 }
+      return { loops: [loopA], total: 1, offset: 0, limit: 100 }
     })
-      .mockResolvedValueOnce({ loops: [loopA, loopB], total: 2 })
+      .mockResolvedValueOnce({ loops: [loopA, loopB], total: 2, offset: 0, limit: 100 })
     let loopADetailCalls = 0
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>(async loopId => {
       if (loopId === 'loop-b222') return loopDetail(loopB)
@@ -255,8 +255,8 @@ describe('Autoresearch surface refresh', () => {
       error: null,
     }
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
-      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
-      .mockResolvedValueOnce({ loops: [recoveredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1, offset: 0, limit: 100 })
+      .mockResolvedValueOnce({ loops: [recoveredLoop], total: 1, offset: 0, limit: 100 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
       .mockResolvedValueOnce(loopDetail(erroredLoop))
       .mockResolvedValueOnce(loopDetail(recoveredLoop))
@@ -297,8 +297,8 @@ describe('Autoresearch surface refresh', () => {
       max_cycles: 1,
     })
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
-      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
-      .mockResolvedValueOnce({ loops: [], total: 0 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1, offset: 0, limit: 100 })
+      .mockResolvedValueOnce({ loops: [], total: 0, offset: 0, limit: 100 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
       .mockResolvedValueOnce(loopDetail(erroredLoop))
     const deleteLoop = vi.fn<(loopId: string) => Promise<unknown>>()
@@ -334,7 +334,7 @@ describe('Autoresearch surface refresh', () => {
       max_cycles: 1,
     })
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
-      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1, offset: 0, limit: 100 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
       .mockResolvedValueOnce(loopDetail(erroredLoop))
     const deleteLoop = vi.fn<(loopId: string) => Promise<unknown>>()
@@ -369,7 +369,7 @@ describe('Autoresearch surface refresh', () => {
       max_cycles: 1,
     })
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
-      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1, offset: 0, limit: 100 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
       .mockResolvedValueOnce(loopDetail(erroredLoop))
     const retryLoop = vi.fn<(loopId: string) => Promise<unknown>>()
@@ -407,8 +407,8 @@ describe('Autoresearch surface refresh', () => {
       max_cycles: 1,
     })
     const fetchLoops = vi.fn<() => Promise<AutoresearchLoopsResponse>>()
-      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
-      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1, offset: 0, limit: 100 })
+      .mockResolvedValueOnce({ loops: [erroredLoop], total: 1, offset: 0, limit: 100 })
     const fetchDetail = vi.fn<(loopId: string) => Promise<AutoresearchLoopDetail>>()
       .mockResolvedValueOnce(loopDetail(erroredLoop))
       .mockResolvedValueOnce(loopDetail(erroredLoop))

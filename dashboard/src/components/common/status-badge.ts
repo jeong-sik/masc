@@ -8,7 +8,7 @@ interface StatusBadgeProps {
   label?: string
 }
 
-function statusDotColor(status: string): string {
+export function statusDotColor(status: string): string {
   switch (status) {
     case 'in_progress':
     case 'running':

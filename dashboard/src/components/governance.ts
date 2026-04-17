@@ -52,14 +52,25 @@ function GovernanceSummaryStrip() {
         </div>
       </div>
     ` : null}
-    <div class="mb-2.5 flex items-center justify-between px-0.5">
-      <div class="flex items-center gap-3">
-        <h2 class="text-lg font-bold text-text-strong tracking-wide">거버넌스</h2>
+    <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
+      <div class="flex items-center gap-3 min-w-0">
+        <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judge</h2>
         <span class="rounded-md border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-[11px] font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>
       </div>
-      ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}
+      <div class="flex items-center gap-3 shrink-0">
+        ${data?.generated_at ? html`<span class="text-[11px] text-text-dim font-mono">${data.generated_at}</span>` : null}
+        <${ActionButton}
+          variant="ghost"
+          size="sm"
+          class="rounded-lg border-transparent bg-[var(--white-3)] px-2.5 py-1 text-[12px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+          onClick=${refreshGovernance}
+          disabled=${governanceLoading.value}
+        >
+          ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
+        <//>
+      </div>
     </div>
     <div class="mb-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
       <${KpiCard} label="Judge 상태" value=${liveJudgeState} hint=${judge?.keeper_name?.trim() || 'live judge'} />
@@ -68,6 +79,7 @@ function GovernanceSummaryStrip() {
       <${KpiCard} label="관리자 승인 대기" value=${approvalCount} hint="live" />
     </div>
     <${JudgeStatusBar} />
+    ${governanceError.value ? html`<div class="mb-5 rounded-lg border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}
   `
 }
 
@@ -98,29 +110,6 @@ function JudgeStatusBar() {
             </span>
           `
         : null}
-    </div>
-  `
-}
-
-function LiveGovernanceToolbar() {
-  return html`
-    <div class="mb-5">
-      <${Card} title="Live Judge" variant="compact">
-        <div class="flex flex-col gap-3">
-          <div class="flex flex-wrap items-center justify-end gap-3">
-            <${ActionButton}
-              variant="ghost"
-              size="lg"
-              class="rounded-xl border-transparent bg-[var(--white-3)] px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
-              onClick=${refreshGovernance}
-              disabled=${governanceLoading.value}
-            >
-              ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
-            <//>
-          </div>
-          ${governanceError.value ? html`<div class="rounded-lg border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}
-        </div>
-      <//>
     </div>
   `
 }
@@ -490,7 +479,6 @@ export function Governance() {
     <div class="flex flex-col gap-0.5">
       <${KeeperApprovalAlertBanner} />
       <${GovernanceSummaryStrip} />
-      <${LiveGovernanceToolbar} />
       <${KeeperApprovalQueueSection} />
       <${JudgmentsSection} />
     </div>

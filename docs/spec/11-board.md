@@ -13,7 +13,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Room |
-| Maps to | `lib/board/` (sub-library), `lib/board.ml`, `lib/tool_board.ml`, `lib/tool_vote.ml`, `lib/tool_social.ml` |
+| Maps to | `lib/board_types/` (sub-library), `lib/board.ml`, `lib/tool_board.ml` (successor to former `lib/tool_vote.ml` + `lib/tool_social.ml`, both folded into `tool_board.ml` — see that file's header "Replaces tool_social.ml for new installations") |
 | Dependencies | 09-server-transport |
 | LOC | ~4.1K |
 

@@ -11,6 +11,7 @@ import {
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
+import { highlightMatch } from '../lib/highlight-match'
 
 interface Props {
   agentName: string
@@ -237,12 +238,12 @@ export function AgentDetailMemory({ agentName }: Props) {
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
-                                <span class="truncate text-zinc-300">${ep.summary}</span>
+                                <span class="truncate text-zinc-300">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
                               <span class="text-[10px] text-zinc-500 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-[11px] text-zinc-400 pl-3 border-l border-zinc-700">${ep.learnings[0]}</div>`
+                              ? html`<div class="mt-1 text-[11px] text-zinc-400 pl-3 border-l border-zinc-700">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

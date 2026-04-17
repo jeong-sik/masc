@@ -13,6 +13,7 @@ import {
 import { resetKeeper } from '../api/keeper'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
@@ -353,7 +354,7 @@ export function FleetTelemetryPanel() {
   const latestRequestId = useRef(0)
   const activeController = useRef<AbortController | null>(null)
   const state = useSignal<FleetTelemetryState>(emptyState())
-  const query = useSignal('')
+  const [query] = useSavedSignal('dash:filter:fleet-telemetry:query', '')
 
   const loadFleetTelemetry = async () => {
     activeController.current?.abort()

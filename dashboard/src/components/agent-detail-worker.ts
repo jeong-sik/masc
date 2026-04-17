@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
+import { CopyIdButton } from './common/copy-id-button'
 import { workerBriefForAgent } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
 
@@ -33,7 +34,8 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
         ${worker.related_session_id ? html`
           <div class="flex items-baseline gap-2 text-[13px]">
             <span class="text-[11px] text-[var(--text-muted)] min-w-[60px] shrink-0">세션</span>
-            <span class="font-mono" style="font-size: 11px">${worker.related_session_id}</span>
+            <span class="font-mono truncate" style="font-size: 11px" title=${worker.related_session_id}>${worker.related_session_id}</span>
+            <${CopyIdButton} value=${worker.related_session_id} label="session_id" size=${10} />
           </div>
         ` : null}
         ${worker.last_signal_at ? html`

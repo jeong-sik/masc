@@ -18,6 +18,7 @@ import {
 import { SurfaceCard } from './common/card'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { EmptyState } from './common/empty-state'
+import { highlightMatch } from '../lib/highlight-match'
 
 const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
@@ -154,16 +155,18 @@ function GateCard({
 }
 
 function EventRow({
-  event, onSelect, active,
+  event, onSelect, active, query,
 }: {
   event: AttributionEvent
   onSelect: () => void
   active: boolean
+  query: string
 }) {
   const a = event.attribution
   const rowBg = active
     ? 'bg-white/5'
     : 'hover:bg-white/5'
+  const reasonText = reasonOf(a)
   return html`
     <button
       type="button"
@@ -174,14 +177,14 @@ function EventRow({
         ${formatTs(event.recorded_at)}
       </span>
       <span class="text-[10px] px-1.5 py-0.5 rounded ${originBadgeClass(a.origin)} shrink-0">
-        ${a.origin}
+        ${highlightMatch(a.origin, query)}
       </span>
-      <span class="font-mono text-[11px] w-36 shrink-0">${a.gate}</span>
+      <span class="font-mono text-[11px] w-36 shrink-0">${highlightMatch(a.gate, query)}</span>
       <span class="${outcomeToneClass(a.outcome.kind)} shrink-0 w-20">
         ${outcomeLabel(a)}
       </span>
       <span class="text-[var(--text-muted)] truncate grow min-w-0">
-        ${reasonOf(a) || '—'}
+        ${reasonText ? highlightMatch(reasonText, query) : '—'}
       </span>
     </button>
   `
@@ -356,6 +359,7 @@ export function AttributionPanel() {
                   <${EventRow}
                     event=${ev}
                     active=${selectedEventIdx.value === idx}
+                    query=${query.value}
                     onSelect=${() => { selectedEventIdx.value = idx }}
                   />
                 `)}

@@ -525,7 +525,7 @@ export interface OperatorSnapshot {
   available_actions: OperatorActionDescriptor[]
 }
 
-export type OperatorActionType =
+type OperatorActionType =
   | 'broadcast'
   | 'namespace_pause'
   | 'namespace_resume'
@@ -537,7 +537,7 @@ export type OperatorActionType =
   | 'keeper_probe'
   | 'keeper_recover'
 
-export type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper'
+type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper'
 
 export interface OperatorActionRequest {
   actor: string

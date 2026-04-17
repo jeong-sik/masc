@@ -1,13 +1,13 @@
 import type { DashboardNamespaceTruthResponse, DashboardShellResponse } from './types'
 
-export type RuntimeCountSource =
+type RuntimeCountSource =
   | 'execution'
   | 'namespace-truth'
   | 'shell'
   | 'partial'
   | 'unknown'
 
-export interface RuntimeCounts {
+interface RuntimeCounts {
   agents: number
   keepers: number
   tasks: number

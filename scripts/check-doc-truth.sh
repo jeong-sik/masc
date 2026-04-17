@@ -47,12 +47,8 @@ require_not_contains() {
 }
 
 # Like require_contains but silently skips when the file no longer exists.
-# Use for regression locks that pin retired-surface markers: if a later PR
-# chooses to delete the file entirely (rather than keep the archive banner),
-# the lock becomes a no-op instead of a CI blocker. Prior cases: PR #7790
-# (04-chain-engine.md archive banner) -> PR #7796 file deletion -> PR #7818
-# reactive drop. A file-existence precheck would have made that churn
-# unnecessary.
+# Use when a regression lock targets a file that may be legitimately
+# deleted by a later PR.
 require_contains_if_exists() {
   local file="$1"
   local needle="$2"

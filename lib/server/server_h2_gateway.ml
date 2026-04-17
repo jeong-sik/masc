@@ -588,6 +588,28 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 
+      | `GET, "/api/v1/dashboard/tasks/history" ->
+          let state = get_server_state () in
+          let task_id =
+            match Server_utils.query_param httpun_request "task_id" with
+            | Some value -> String.trim value
+            | None -> ""
+          in
+          if task_id = "" then
+            h2_respond_json h2_reqd {|{"error":"task_id is required"}|}
+              ~status:`Bad_request ~extra_headers:cors
+          else
+            let limit =
+              Server_utils.int_query_param httpun_request "limit" ~default:50
+              |> Server_utils.clamp ~min_v:1 ~max_v:200
+            in
+            let json =
+              Tool_task.task_history_events_json state.Mcp_server.room_config
+                ~task_id ~limit
+            in
+            h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+              ~extra_headers:cors
+
       | `GET, "/api/v1/dashboard/mission" ->
           let state = get_server_state () in
           let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in

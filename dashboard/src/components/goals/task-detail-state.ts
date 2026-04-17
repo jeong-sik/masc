@@ -1,7 +1,8 @@
 // Task detail overlay state — signals, fetch, normalization
 
 import { signal } from '@preact/signals'
-import { fetchTaskHistory } from '../../api/actions'
+import { fetchTaskEvents } from '../../api/actions'
+import { extractApiError } from '../../api/core'
 import { fetchAgentTimeline, fetchKeeperTrajectory } from '../../api/dashboard'
 import { buildTraceEvents, type UnifiedTraceEvent } from '../session-trace/session-trace-state'
 import { findKeeper } from '../../lib/keeper-utils'
@@ -74,6 +75,23 @@ export function filterTaskEvents(
     if (e.notes && e.notes.toLowerCase().includes(needle)) return true
     return false
   })
+}
+
+export function describeTaskEventsError(err: unknown): string {
+  const api = extractApiError(err, '태스크 이벤트를 불러오지 못했습니다')
+  if (api.timeout) {
+    return '태스크 이벤트 요청이 시간 초과되었습니다. 다시 시도해 주세요'
+  }
+  if (api.status === 403) {
+    return '태스크 이벤트를 읽을 권한이 없습니다'
+  }
+  if (api.status === 404) {
+    return '태스크 이벤트 경로를 찾지 못했습니다'
+  }
+  if (api.message && api.message !== '태스크 이벤트를 불러오지 못했습니다') {
+    return `태스크 이벤트를 불러오지 못했습니다: ${api.message}`
+  }
+  return '태스크 이벤트를 불러오지 못했습니다'
 }
 
 /**
@@ -169,13 +187,14 @@ async function loadTaskEvents(taskId: string): Promise<void> {
   taskEventsLoading.value = true
   taskEventsError.value = null
   try {
-    const raw = await fetchTaskHistory(taskId, 50)
+    const raw = await fetchTaskEvents(taskId, 50)
     if (eventsFetchToken.value !== token) return
-    const parsed: unknown = JSON.parse(raw)
-    const arr = Array.isArray(parsed) ? parsed : ((parsed as Record<string, unknown>).events ?? [])
+    const arr = Array.isArray(raw) ? raw : []
     taskEvents.value = normalizeTaskHistory(arr as TaskHistoryRow[])
-  } catch {
-    if (eventsFetchToken.value === token) taskEventsError.value = 'fetch failed'
+  } catch (err) {
+    if (eventsFetchToken.value === token) {
+      taskEventsError.value = describeTaskEventsError(err)
+    }
   } finally {
     if (eventsFetchToken.value === token) taskEventsLoading.value = false
   }

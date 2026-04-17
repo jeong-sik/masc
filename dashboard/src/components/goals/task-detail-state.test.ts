@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { filterGoalRelations, filterTaskEvents } from './task-detail-state'
+import { filterGoalRelations, filterTaskEvents, describeTaskEventsError } from './task-detail-state'
 import type { NormalizedTaskEvent } from './task-detail-state'
 import type { Goal } from '../../types'
+import { ApiRequestError } from '../../api/core'
 
 const sample: NormalizedTaskEvent[] = [
   {
@@ -97,6 +98,36 @@ describe('filterTaskEvents', () => {
   it('can match multiple rows when substring is shared', () => {
     const out = filterTaskEvents(sample, 'keeper')
     expect(out.map(e => e.label)).toEqual(['claim', 'done'])
+  })
+})
+
+describe('describeTaskEventsError', () => {
+  it('renders timeout as a Korean retry hint', () => {
+    const err = new ApiRequestError({
+      method: 'GET',
+      path: '/api/v1/dashboard/tasks/history',
+      timeout: true,
+      timeoutMs: 35000,
+    })
+    expect(describeTaskEventsError(err)).toBe(
+      '태스크 이벤트 요청이 시간 초과되었습니다. 다시 시도해 주세요',
+    )
+  })
+
+  it('maps 403 to a permission-specific message', () => {
+    const err = new ApiRequestError({
+      method: 'GET',
+      path: '/api/v1/dashboard/tasks/history',
+      status: 403,
+      statusText: 'Forbidden',
+    })
+    expect(describeTaskEventsError(err)).toBe('태스크 이벤트를 읽을 권한이 없습니다')
+  })
+
+  it('keeps useful non-empty detail for other failures', () => {
+    expect(describeTaskEventsError(new Error('network dropped'))).toBe(
+      '태스크 이벤트를 불러오지 못했습니다: network dropped',
+    )
   })
 })
 

@@ -90,6 +90,25 @@ let handle_dashboard_link_previews state req reqd body_str =
   with Yojson.Json_error message ->
     respond_error ("invalid json: " ^ message)
 
+let handle_dashboard_task_history state req reqd =
+  let task_id =
+    match Server_utils.query_param req "task_id" with
+    | Some value -> String.trim value
+    | None -> ""
+  in
+  if task_id = "" then
+    Http.Response.json ~status:`Bad_request ~request:req
+      {|{"error":"task_id is required"}|} reqd
+  else
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:50
+      |> Server_utils.clamp ~min_v:1 ~max_v:200
+    in
+    let json =
+      Tool_task.task_history_events_json state.Mcp_server.room_config ~task_id ~limit
+    in
+    Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+
 let rec add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
@@ -353,6 +372,10 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let json = dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/tasks/history" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         handle_dashboard_task_history state req reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
        with_public_read (fun state req reqd ->

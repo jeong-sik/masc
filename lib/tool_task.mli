@@ -19,6 +19,8 @@ val handle_transition : context -> Yojson.Safe.t -> tool_result
 val handle_update_priority : context -> Yojson.Safe.t -> tool_result
 val handle_tasks : context -> Yojson.Safe.t -> tool_result
 val handle_task_history : context -> Yojson.Safe.t -> tool_result
+val task_history_events_json :
+  Coord.config -> task_id:string -> limit:int -> Yojson.Safe.t
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> tool_result option
 

@@ -1922,6 +1922,109 @@ let test_setclear_coverage () =
   (* Print report on success for visibility *)
   Printf.printf "%s" report
 
+(* ── Attribution conversion ────────────────────────────── *)
+
+module A = Masc_mcp.Attribution
+
+let outcome_kind_of = function
+  | A.Passed -> "passed"
+  | A.Policy_failed _ -> "policy_failed"
+  | A.Transition_blocked _ -> "transition_blocked"
+  | A.Partial_pass _ -> "partial_pass"
+
+let test_attribution_ok_passed () =
+  let tr =
+    apply_ok ~current_phase:SM.Running ~conditions:running_conditions
+      ~event:SM.Turn_succeeded
+  in
+  let attr = SM.attribution_of_transition ~event:SM.Turn_succeeded (Ok tr) in
+  check string "gate" "keeper_fsm" attr.gate;
+  check bool "origin=Det" true (attr.origin = A.Det);
+  check string "outcome kind" "passed" (outcome_kind_of attr.outcome);
+  (* Evidence carries event + phase info. *)
+  (match attr.evidence with
+   | `Assoc fields ->
+     check bool "evidence has event"
+       true (List.mem_assoc "event" fields);
+     check bool "evidence has from_phase"
+       true (List.mem_assoc "from_phase" fields);
+     check bool "evidence has to_phase"
+       true (List.mem_assoc "to_phase" fields);
+     check bool "evidence has timestamp"
+       true (List.mem_assoc "timestamp" fields)
+   | _ -> Alcotest.fail "evidence must be object")
+
+let test_attribution_invalid_transition_blocked () =
+  (* Build a synthetic transition_error (no legitimate apply_event path
+     in this FSM emits Invalid_transition outside guard violations — we
+     test the converter directly). *)
+  let err =
+    SM.Invalid_transition
+      { from_phase = SM.Running;
+        to_phase = SM.Compacting;
+        reason = "guard violation: cannot compact while running" }
+  in
+  let attr =
+    SM.attribution_of_transition ~event:SM.Compaction_started (Error err)
+  in
+  (match attr.outcome with
+   | A.Transition_blocked { from_state; to_state; reason } ->
+     check string "from_state" "running" from_state;
+     check string "to_state" "compacting" to_state;
+     check string "reason" "guard violation: cannot compact while running"
+       reason
+   | other ->
+     Alcotest.fail ("expected Transition_blocked, got " ^ outcome_kind_of other))
+
+let test_attribution_terminal_policy_failed () =
+  let terminal_cond =
+    { SM.default_conditions with
+      stop_requested = true;
+      fiber_alive = false;
+      restart_budget_remaining = false;
+    }
+  in
+  let result =
+    SM.apply_event ~current_phase:SM.Stopped ~conditions:terminal_cond
+      ~event:SM.Heartbeat_ok ~now:0.0
+  in
+  let attr = SM.attribution_of_transition ~event:SM.Heartbeat_ok result in
+  (match result with
+   | Error (SM.Terminal_state _) -> ()
+   | _ -> Alcotest.fail "expected Terminal_state for event on Stopped phase");
+  (match attr.outcome with
+   | A.Policy_failed { reason } ->
+     check bool "reason mentions terminal" true
+       (Astring.String.is_infix ~affix:"terminal" reason);
+     check bool "reason mentions stopped phase" true
+       (Astring.String.is_infix ~affix:"stopped" reason)
+   | other ->
+     Alcotest.fail ("expected Policy_failed, got " ^ outcome_kind_of other))
+
+let test_attribution_gate_and_origin_invariant () =
+  (* Every attribution produced by this gate must carry gate="keeper_fsm"
+     and origin=Det, regardless of the outcome branch. *)
+  let cases : (SM.event * (SM.transition_result, SM.transition_error) result) list =
+    [
+      SM.Turn_succeeded,
+        Ok (apply_ok ~current_phase:SM.Running ~conditions:running_conditions
+              ~event:SM.Turn_succeeded);
+      SM.Compaction_started,
+        Error (SM.Invalid_transition
+                 { from_phase = SM.Running;
+                   to_phase = SM.Compacting;
+                   reason = "test" });
+      SM.Heartbeat_ok,
+        Error (SM.Terminal_state
+                 { current = SM.Dead; attempted_event = "Heartbeat_ok" });
+    ]
+  in
+  List.iter (fun (event, result) ->
+    let attr = SM.attribution_of_transition ~event result in
+    check string "gate invariant" "keeper_fsm" attr.gate;
+    check bool "origin=Det invariant" true (attr.origin = A.Det)
+  ) cases
+
 (* ── Test suite ────────────────────────────────────────── *)
 
 let () =
@@ -2054,5 +2157,15 @@ let () =
     "setclear_coverage", [
       test_case "every condition field has setter and clearer" `Quick
         test_setclear_coverage;
+    ];
+    "attribution", [
+      test_case "successful transition → Passed" `Quick
+        test_attribution_ok_passed;
+      test_case "Invalid_transition → Transition_blocked" `Quick
+        test_attribution_invalid_transition_blocked;
+      test_case "Terminal_state → Policy_failed" `Quick
+        test_attribution_terminal_policy_failed;
+      test_case "gate=keeper_fsm origin=Det invariant" `Quick
+        test_attribution_gate_and_origin_invariant;
     ];
   ]

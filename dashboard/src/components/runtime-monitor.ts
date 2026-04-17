@@ -32,14 +32,14 @@ async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, wind
   })
 }
 
-function providerTone(provider: DashboardRuntimeProviderSnapshot): string {
+export function providerTone(provider: DashboardRuntimeProviderSnapshot): string {
   if (provider.available === false) return 'bad'
   if (provider.discovery?.healthy === false) return 'warn'
   if (provider.available === true) return 'ok'
   return 'warn'
 }
 
-function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
+export function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
   if ((metric.entry_count ?? 0) <= 0) return 'warn'
   const success = metric.success_count ?? metric.entry_count ?? 0
   const errors = metric.error_count ?? 0
@@ -53,14 +53,14 @@ function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
   return 'ok'
 }
 
-function fmtCost(value?: number | null): string {
+export function fmtCost(value?: number | null): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '--'
   if (value === 0) return '$0'
   if (value < 0.01) return `$${value.toFixed(4)}`
   return `$${value.toFixed(2)}`
 }
 
-function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
+export function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   const success = metric.success_count ?? metric.entry_count ?? 0
   const errors = metric.error_count ?? 0
   const total = success + errors
@@ -69,7 +69,7 @@ function fmtSuccessRate(metric: DashboardRuntimeModelMetric): string {
   return `${pct.toFixed(1)}%`
 }
 
-function fmtNumber(value?: number | null, digits = 0): string {
+export function fmtNumber(value?: number | null, digits = 0): string {
   if (typeof value !== 'number' || Number.isNaN(value)) return '--'
   return value.toLocaleString('ko-KR', {
     minimumFractionDigits: digits,

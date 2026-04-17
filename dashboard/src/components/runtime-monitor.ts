@@ -39,6 +39,27 @@ export function filterModelMetrics(
   })
 }
 
+/**
+ * Sorts model metrics so failing providers surface first. Order:
+ * 1. error_count desc (a model with 11 errors appears before one with 0)
+ * 2. entry_count desc (more-exercised models appear above idle ones)
+ * 3. model_id asc (stable tiebreaker)
+ * Returns a new array; does not mutate the input.
+ */
+export function sortModelMetricsByUrgency(
+  models: readonly DashboardRuntimeModelMetric[],
+): readonly DashboardRuntimeModelMetric[] {
+  return [...models].sort((a, b) => {
+    const ae = a.error_count ?? 0
+    const be = b.error_count ?? 0
+    if (ae !== be) return be - ae
+    const ac = a.entry_count ?? 0
+    const bc = b.entry_count ?? 0
+    if (ac !== bc) return bc - ac
+    return a.model_id.localeCompare(b.model_id)
+  })
+}
+
 interface RuntimeData {
   providers: DashboardRuntimeProvidersResponse | null
   metrics: DashboardRuntimeModelMetricsResponse | null
@@ -257,8 +278,8 @@ export function RuntimeMonitor() {
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
-            ? filterModelMetrics(metrics?.models ?? [], modelSearch.value).map(metric => html`
-                <article key=${metric.model_id} class="p-4 rounded-xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2">
+            ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map(metric => html`
+                <article key=${metric.model_id} class=${`p-4 rounded-xl border bg-card/40 backdrop-blur-md shadow-sm flex flex-col gap-2 ${(metric.error_count ?? 0) > 0 ? 'border-[var(--status-bad)]' : 'border-card-border'}`}>
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-[13px] text-text-strong">${metric.model_id}</strong>

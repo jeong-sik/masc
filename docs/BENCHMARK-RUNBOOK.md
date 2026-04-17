@@ -157,7 +157,7 @@ scripts/harness_agent_swarm_live.sh
 
 ## session runtime local64 compat lane
 
-Removed. Team-session compat harnesses are retired; use managed-operation live proof and command-plane read models instead.
+Removed. Team-session compat harnesses and the command-plane HTTP lane are both retired; use board_posts + keeper FSM read models for coordination truth and the canonical dashboard projections (`/api/v1/dashboard/mission`, `/api/v1/dashboard/execution`, `/api/v1/dashboard/board`) for live proof.
 
 ## 최소 unit 예시
 

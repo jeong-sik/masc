@@ -20,7 +20,8 @@ import { HeartbeatStrip } from './common/heartbeat-strip'
 import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
 import { HeartbeatUptimeChip } from './common/heartbeat-uptime-chip'
 import { LivePulseDot } from './common/live-pulse-dot'
-import { recordHeartbeat, useHeartbeatHistory, lastHeartbeatTickMs, type HeartbeatState } from '../lib/heartbeat-history'
+import { Sparkline } from './common/sparkline'
+import { recordHeartbeat, useHeartbeatHistory, lastHeartbeatTickMs, rollingUptimeSeries, type HeartbeatState } from '../lib/heartbeat-history'
 
 /** Sampling cadence for the heartbeat ring buffer. Chosen so 45 bars
     cover ~22 minutes of history — matches Uptime Kuma's default
@@ -211,6 +212,12 @@ function OverviewTile({ id, connector, keeperCount }: {
     signal subscription. */
 function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
   const history = useHeartbeatHistory(id)
+  // Rolling 5-sample windows → uptime %. Complementary to HeartbeatStrip:
+  // strip = per-sample state (dense), sparkline = window-averaged trend
+  // (smooth). Stripe/Vercel convention of pairing a stat with its
+  // micro-graph so operator sees direction of change at a glance.
+  const uptimeSeries = rollingUptimeSeries(history, 5)
+  const trendColor = deriveTrendColor(uptimeSeries)
   return html`
     <div class="flex flex-col gap-1">
       <div class="flex items-center gap-1">
@@ -222,6 +229,17 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
           history=${history}
           testId=${`heartbeat-uptime-${id}`}
         />
+        ${uptimeSeries.length >= 2
+          ? html`<${Sparkline}
+              values=${uptimeSeries}
+              width=${52}
+              height=${12}
+              color=${trendColor}
+              class="ml-auto"
+              ariaHidden=${true}
+              testId=${`heartbeat-trend-${id}`}
+            />`
+          : null}
       </div>
       <${HeartbeatStrip}
         history=${history}
@@ -231,6 +249,22 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
       />
     </div>
   `
+}
+
+/** Pure: pick a sparkline color from the final uptime % — ties the
+    trend line's hue to its current reliability band so the row reads
+    coherent (same emerald/amber/rose vocabulary as the uptime chip).
+    Uses Tailwind's 400-weight hex literals for parity with the
+    chip border/bg tones. Returns muted token for empty/sparse
+    series so a new connector doesn't leak a stale hue. */
+export function deriveTrendColor(series: readonly number[]): string {
+  if (series.length === 0) return '#ffffff22'
+  const last = series[series.length - 1]!
+  // Tailwind emerald-400 / amber-400 / rose-400 hex codes — matches
+  // the border-*-400 tones used on HeartbeatUptimeChip.
+  if (last >= 99) return '#34d399'
+  if (last >= 95) return '#fbbf24'
+  return '#fb7185'
 }
 
 /** Standalone export of the bulk Start All / Stop All buttons so the

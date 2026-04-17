@@ -75,3 +75,35 @@ export function currentHeartbeatStreak(history: HeartbeatState[]): HeartbeatStre
   }
   return { state: last, samples }
 }
+
+/** Pure: produce a rolling-uptime series by chunking the history into
+    fixed-size windows and computing uptime (%) per window — each value
+    is `up / (up + down)` × 100, unknowns excluded (Uptime Kuma's
+    "ignore pending" convention). Windows with zero observed samples
+    inherit the previous window's value, or 100 when none came before,
+    so the sparkline stays continuous instead of dropping to 0 for an
+    all-unknown span.
+
+    Feeds the Sparkline primitive: 45 samples / windowSize 5 → 9 points,
+    small enough for a 60×12 inline chart next to the uptime chip. */
+export function rollingUptimeSeries(
+  history: HeartbeatState[],
+  windowSize: number,
+): number[] {
+  if (windowSize <= 0 || history.length < windowSize) return []
+  const out: number[] = []
+  let last = 100
+  for (let i = 0; i + windowSize <= history.length; i++) {
+    let up = 0
+    let observed = 0
+    for (let j = 0; j < windowSize; j++) {
+      const s = history[i + j]
+      if (s === 'up') { up++; observed++ }
+      else if (s === 'down') observed++
+    }
+    const pct = observed === 0 ? last : (up / observed) * 100
+    out.push(pct)
+    last = pct
+  }
+  return out
+}

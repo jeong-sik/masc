@@ -1,4 +1,4 @@
 (tests
  (names test_exec_types test_capability_check test_bash_parser
-        test_approval_policy test_approval_context)
+        test_approval_policy test_approval_context test_approval_config)
  (libraries masc_exec masc_exec_bash_parser))

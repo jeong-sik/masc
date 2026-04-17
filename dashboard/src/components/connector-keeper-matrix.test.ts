@@ -5,7 +5,10 @@ import { html } from 'htm/preact'
 import {
   ConnectorKeeperMatrix,
   deriveMatrix,
+  summarizeMatrixRow,
+  summarizeMatrixColumn,
   type MatrixData,
+  type MatrixRow,
 } from './connector-keeper-matrix'
 import type { GateConnectorInfo } from '../api/gate'
 import type { GateKeeperInfo } from '../api/schemas/gate-keepers'
@@ -120,5 +123,87 @@ describe('ConnectorKeeperMatrix', () => {
     // alpha × discord is bound
     const bound = container.querySelector('[data-matrix-cell="alpha:discord"]')!
     expect(bound.getAttribute('data-matrix-state')).toBe('bound')
+  })
+
+  it('renders a Coverage header in the trailing column', () => {
+    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')])
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
+    expect(container.querySelector('[data-matrix-coverage-header]')).toBeTruthy()
+  })
+
+  it('renders a per-row coverage chip per keeper (Airflow/GitHub matrix pattern)', () => {
+    const connectors = [
+      mkConnector('discord', { available: true, configured_bindings: [{ channel_id: 'c1', keeper_name: 'alpha' }] as never }),
+      mkConnector('slack', { available: true }),
+    ]
+    const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
+    const matrix = deriveMatrix(connectors, keepers)
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
+    const chips = container.querySelectorAll('[data-matrix-row-coverage]')
+    // One chip per keeper row.
+    expect(chips.length).toBe(2)
+    const alphaChip = container.querySelector('[data-matrix-row-coverage="alpha"]')!
+    // alpha: 1 bound (discord) + 1 unbound (slack) + 2 na (imessage, telegram).
+    // Live = bound + unbound + unknown = 2.
+    expect(alphaChip.getAttribute('data-matrix-row-bound')).toBe('1')
+    expect(alphaChip.getAttribute('data-matrix-row-total-live')).toBe('2')
+    expect(alphaChip.textContent).toContain('1/2')
+  })
+})
+
+describe('summarizeMatrixRow (pure)', () => {
+  const mkRow = (states: Array<'bound' | 'unbound' | 'na' | 'unknown'>): MatrixRow => ({
+    keeperName: 'test',
+    known: true,
+    cells: states.map((state, i) => ({
+      connectorId: (['discord', 'imessage', 'slack', 'telegram'] as const)[i]!,
+      keeperName: 'test',
+      state,
+      bindingCount: state === 'bound' ? 1 : 0,
+    })),
+  })
+
+  it('counts each state in the row', () => {
+    const row = mkRow(['bound', 'unbound', 'na', 'unknown'])
+    expect(summarizeMatrixRow(row)).toEqual({ bound: 1, unbound: 1, na: 1, unknown: 1 })
+  })
+
+  it('zero-fills states that do not appear', () => {
+    const row = mkRow(['bound', 'bound'])
+    expect(summarizeMatrixRow(row)).toEqual({ bound: 2, unbound: 0, na: 0, unknown: 0 })
+  })
+
+  it('handles an empty row (no cells → all zero)', () => {
+    const row: MatrixRow = { keeperName: 't', known: true, cells: [] }
+    expect(summarizeMatrixRow(row)).toEqual({ bound: 0, unbound: 0, na: 0, unknown: 0 })
+  })
+})
+
+describe('summarizeMatrixColumn (pure)', () => {
+  it('counts states across all rows for a column', () => {
+    const connectors = [
+      mkConnector('discord', {
+        available: true,
+        configured_bindings: [
+          { channel_id: 'c1', keeper_name: 'alpha' },
+          { channel_id: 'c2', keeper_name: 'gamma' }, // gamma unknown → directory mismatch
+        ] as never,
+      }),
+      mkConnector('slack', { available: true }),
+    ]
+    const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
+    const matrix = deriveMatrix(connectors, keepers)
+    // Discord column (idx 0): alpha=bound, beta=unbound, gamma=unknown
+    const discordCounts = summarizeMatrixColumn(matrix, 0)
+    expect(discordCounts.bound).toBe(1)
+    expect(discordCounts.unbound).toBe(1)
+    expect(discordCounts.unknown).toBe(1)
+    expect(discordCounts.na).toBe(0)
+  })
+
+  it('handles an out-of-range column index (returns all-zero, no crash)', () => {
+    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')])
+    // columnIdx 99 → no cell at that index in any row
+    expect(summarizeMatrixColumn(matrix, 99)).toEqual({ bound: 0, unbound: 0, na: 0, unknown: 0 })
   })
 })

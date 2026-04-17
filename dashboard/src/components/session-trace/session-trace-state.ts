@@ -23,7 +23,7 @@ export type TraceEventKind =
 
 export type TraceStatus = 'success' | 'failure' | 'gate_rejected'
 
-export type TraceSourceLane = 'masc' | 'oas'
+type TraceSourceLane = 'masc' | 'oas'
 
 export interface UnifiedTraceEvent {
   id: string
@@ -131,7 +131,7 @@ export function getTraceSearchQuery(agent: string): string {
 
 // ── Status classification ────────────────────────────────
 
-export function getEventStatus(e: UnifiedTraceEvent): TraceStatus | null {
+function getEventStatus(e: UnifiedTraceEvent): TraceStatus | null {
   if (e.gate?.status === 'reject') return 'gate_rejected'
   if (e.error) return 'failure'
   if (e.kind === 'tool_call' || e.kind === 'oas_tool') return 'success'
@@ -563,7 +563,7 @@ export function appendLiveOasEvent(
   })
 }
 
-export function appendLiveTraceEvent(agentName: string, event: UnifiedTraceEvent): void {
+function appendLiveTraceEvent(agentName: string, event: UnifiedTraceEvent): void {
   if (!traceSlots.value[agentName] && !liveTraceFeeds.value[agentName]) return
   const prev = liveTraceFeeds.value[agentName] ?? []
   const historical = traceSlots.value[agentName]?.events ?? []

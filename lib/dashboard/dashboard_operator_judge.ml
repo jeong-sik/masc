@@ -144,7 +144,6 @@ let build_recommended_action ~actor ~target_type ~target_id json =
                 ("suggested_payload", suggested_payload);
                 ("preview", preview);
                 ("provenance", `String "judgment");
-                ("decision_engine", `String "operator_judge");
                 ("authoritative", `Bool true);
               ])
       | _ -> None)

@@ -155,7 +155,6 @@ let attention_item_to_yojson (item : attention_item) =
       ("actor", string_option_to_json item.actor);
       ("evidence", item.evidence);
       ("provenance", `String "derived");
-      ("decision_engine", `String "deterministic_translation");
       ("authoritative", `Bool false);
     ]
 
@@ -183,7 +182,6 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
       ("suggested_payload", item.suggested_payload);
       ("preview", preview);
       ("provenance", `String "fallback");
-      ("decision_engine", `String "deterministic_rules");
       ("authoritative", `Bool false);
     ]
 

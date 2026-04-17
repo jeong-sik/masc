@@ -707,6 +707,127 @@ let test_oas_worker_exec_build_applies_priority () =
       Oas.Agent.close agent
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
+(* Resume parity: fields that [build] threads from [config] via the
+   Builder must also propagate through [resume_from_checkpoint]. Each
+   missing field used to fail silently — the run continued with
+   [default_options.<field>] (= [None]). The [approval] regression was
+   the loud signal: OAS logged "ApprovalRequired but no approval
+   callback — executing" on the first ApprovalRequired tool of a
+   resumed keeper. *)
+
+let test_resume_propagates_approval () =
+  let approval_called = ref false in
+  let approval : Oas.Hooks.approval_callback =
+    fun ~tool_name:_ ~input:_ ->
+      approval_called := true;
+      Oas.Hooks.Approve
+  in
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"resume-approval"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with approval = Some approval } in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run @@ fun sw ->
+  match
+    Oas_worker_exec.resume_from_checkpoint
+      ~sw ~net:(require_test_net ()) ~config ~checkpoint
+  with
+  | Ok agent ->
+      let approval_opt = (Oas.Agent.options agent).approval in
+      Alcotest.(check bool) "approval is propagated through resume" true
+        (Option.is_some approval_opt);
+      (match approval_opt with
+       | Some cb ->
+           let _ = cb ~tool_name:"x" ~input:`Null in
+           Alcotest.(check bool) "callback identity preserved" true
+             !approval_called
+       | None -> ());
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resume_propagates_slot_id () =
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"resume-slot-id"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with slot_id = Some 7 } in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run @@ fun sw ->
+  match
+    Oas_worker_exec.resume_from_checkpoint
+      ~sw ~net:(require_test_net ()) ~config ~checkpoint
+  with
+  | Ok agent ->
+      let slot = (Oas.Agent.options agent).slot_id in
+      Alcotest.(check (option int)) "slot_id is propagated" (Some 7) slot;
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resume_propagates_summarizer () =
+  let summarizer_called = ref false in
+  let summarizer (_msgs : Oas.Types.message list) =
+    summarizer_called := true;
+    "summary"
+  in
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"resume-summarizer"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with summarizer = Some summarizer } in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run @@ fun sw ->
+  match
+    Oas_worker_exec.resume_from_checkpoint
+      ~sw ~net:(require_test_net ()) ~config ~checkpoint
+  with
+  | Ok agent ->
+      let s = (Oas.Agent.options agent).summarizer in
+      Alcotest.(check bool) "summarizer is propagated" true (Option.is_some s);
+      (match s with
+       | Some f ->
+           let _ = f [] in
+           Alcotest.(check bool) "summarizer identity preserved" true
+             !summarizer_called
+       | None -> ());
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
+let test_resume_propagates_priority () =
+  let base_config =
+    Oas_worker_exec.default_config
+      ~name:"resume-priority"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config =
+    { base_config with priority = Some Llm_provider.Request_priority.Proactive }
+  in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run @@ fun sw ->
+  match
+    Oas_worker_exec.resume_from_checkpoint
+      ~sw ~net:(require_test_net ()) ~config ~checkpoint
+  with
+  | Ok agent ->
+      let priority = (Oas.Agent.state agent).config.priority in
+      Alcotest.(check bool) "priority propagated through resume" true
+        (match priority with
+         | Some Llm_provider.Request_priority.Proactive -> true
+         | _ -> false);
+      Oas.Agent.close agent
+  | Error err -> Alcotest.fail (Oas.Error.to_string err)
+
 let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
   match Oas_worker_exec.resolve_provider_config_of_label "not-a-model-label" with
   | Ok _ ->
@@ -1928,6 +2049,14 @@ let () =
         test_oas_worker_exec_build_default_priority_unset;
       Alcotest.test_case "oas_worker applies explicit priority" `Quick
         test_oas_worker_exec_build_applies_priority;
+      Alcotest.test_case "resume propagates approval (no silent ApprovalRequired drift)" `Quick
+        test_resume_propagates_approval;
+      Alcotest.test_case "resume propagates slot_id" `Quick
+        test_resume_propagates_slot_id;
+      Alcotest.test_case "resume propagates summarizer" `Quick
+        test_resume_propagates_summarizer;
+      Alcotest.test_case "resume propagates priority" `Quick
+        test_resume_propagates_priority;
       Alcotest.test_case "invalid explicit model label is rejected" `Quick
         test_resolve_provider_of_label_rejects_invalid_explicit_label;
       Alcotest.test_case "run_model_with_masc_tools rejects invalid explicit model label" `Quick

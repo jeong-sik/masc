@@ -149,14 +149,16 @@ let health_json () =
 
 (* ── Client capacity projection ─────────────────────── *)
 
-(** Classify a capacity registry key for the dashboard.  CLI sentinels
-    use the [cli:] prefix; ollama URLs are detected by
+(** Classify a capacity registry key for the dashboard.  Both sentinel
+    predicates come from {!Masc_network_defaults}: CLI transports via
+    {!Masc_network_defaults.is_cli_sentinel_url} (matches the [cli:]
+    prefix) and ollama endpoints via
     {!Masc_network_defaults.is_ollama_url} (matches the well-known
     port).  Everything else is reported as [other] so operators can
     spot surprise registrations (e.g. a manually-registered HTTP
     slot). *)
 let classify_capacity_key url =
-  if String.length url > 4 && String.sub url 0 4 = "cli:" then "cli"
+  if Masc_network_defaults.is_cli_sentinel_url url then "cli"
   else if Masc_network_defaults.is_ollama_url url then "ollama"
   else "other"
 

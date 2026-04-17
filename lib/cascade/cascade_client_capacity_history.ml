@@ -9,14 +9,14 @@ type event = {
   active_after : int;
 }
 
-(* ── Classifier (shares [Masc_network_defaults.is_ollama_url] with
-      {!Dashboard_cascade.classify_capacity_key}).  The [cli:] prefix
-      is a local sentinel; classifier agreement between the two call
-      sites is anchored to the SSOT helper rather than a duplicated
-      substring literal.  [test_snapshot_kind_filter] below and the
-      existing [Dashboard_cascade] tests still cover the mapping. *)
+(* ── Classifier (shares {!Masc_network_defaults.is_cli_sentinel_url}
+      and {!Masc_network_defaults.is_ollama_url} with
+      {!Dashboard_cascade.classify_capacity_key}).  Both call sites
+      resolve to the same SSOT predicates; [test_snapshot_kind_filter]
+      below and the existing [Dashboard_cascade] tests still cover the
+      mapping. *)
 let classify_key url =
-  if String.length url > 4 && String.sub url 0 4 = "cli:" then "cli"
+  if Masc_network_defaults.is_cli_sentinel_url url then "cli"
   else if Masc_network_defaults.is_ollama_url url then "ollama"
   else "other"
 

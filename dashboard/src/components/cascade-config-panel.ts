@@ -173,47 +173,94 @@ export function providerTone(p: CascadeHealthProvider): 'ok' | 'warn' | 'bad' {
   return 'ok'
 }
 
+/**
+ * Pure filter for Health Tracker provider rows.
+ *
+ * Case-insensitive substring match on `provider_key`. Also matches the
+ * literal keyword `cooldown` when `in_cooldown` is true so operators can
+ * isolate all providers currently being blocked.
+ *
+ * Empty/whitespace query returns the input reference unchanged so the
+ * non-filter path preserves referential equality (stable render).
+ *
+ * Input is never mutated.
+ */
+export function filterHealthProviders(
+  providers: readonly CascadeHealthProvider[],
+  query: string,
+): readonly CascadeHealthProvider[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return providers
+  return providers.filter(p => {
+    if (p.provider_key.toLowerCase().includes(needle)) return true
+    if (p.in_cooldown && 'cooldown'.includes(needle)) return true
+    return false
+  })
+}
+
 const TONE_DOT: Record<string, string> = {
   ok: 'bg-[var(--ok)]',
   warn: 'bg-[var(--warn)]',
   bad: 'bg-[var(--bad)]',
 }
 
-function HealthTable({ health }: { health: CascadeHealthResponse }) {
+function HealthTable({
+  health,
+  searchQuery,
+}: { health: CascadeHealthResponse; searchQuery: { value: string } }) {
   if (health.providers.length === 0) {
     return html`<${EmptyState}>아직 기록된 provider 이벤트가 없습니다.<//>`
   }
+  const filtered = filterHealthProviders(health.providers, searchQuery.value)
+  const isFiltering = searchQuery.value.trim() !== ''
   return html`
-    <table class="w-full text-xs">
-      <thead>
-        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1 w-4"></th>
-          <th class="text-left py-1">Provider</th>
-          <th class="text-right py-1">Success</th>
-          <th class="text-right py-1">Consec. fail</th>
-          <th class="text-right py-1">Events</th>
-          <th class="text-right py-1">Cooldown</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${health.providers.map((p: CascadeHealthProvider) => {
-          const tone = providerTone(p)
-          return html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
-            <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
-            <td class="py-1"><code class="text-[var(--text-strong)]">${p.provider_key}</code></td>
-            <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
-            <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
-            <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
-            <td class="py-1 text-right">
-              ${p.in_cooldown
-                ? html`<${StatusChip} tone="bad">${fmtCooldownExpiry(p.cooldown_expires_at)}<//>`
-                : html`<span class="text-[var(--text-muted)]">—</span>`}
-            </td>
-          </tr>
-        `})}
-      </tbody>
-    </table>
+    <div class="flex items-center gap-3 mb-2">
+      <${TextInput}
+        type="search"
+        class="max-w-[280px]"
+        placeholder="provider 필터 (key, cooldown...)"
+        ariaLabel="health provider 검색"
+        value=${searchQuery.value}
+        onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+      />
+      ${isFiltering
+        ? html`<span class="text-xs text-[var(--text-muted)]">${filtered.length}/${health.providers.length}건</span>`
+        : null}
+    </div>
+    ${isFiltering && filtered.length === 0
+      ? html`<div class="py-4 text-center text-[11px] text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
+      : html`
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
+              <th class="text-left py-1 w-4"></th>
+              <th class="text-left py-1">Provider</th>
+              <th class="text-right py-1">Success</th>
+              <th class="text-right py-1">Consec. fail</th>
+              <th class="text-right py-1">Events</th>
+              <th class="text-right py-1">Cooldown</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.map((p: CascadeHealthProvider) => {
+              const tone = providerTone(p)
+              return html`
+              <tr class="border-b border-[var(--card-border)] last:border-b-0">
+                <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
+                <td class="py-1"><code class="text-[var(--text-strong)]">${p.provider_key}</code></td>
+                <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
+                <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
+                <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
+                <td class="py-1 text-right">
+                  ${p.in_cooldown
+                    ? html`<${StatusChip} tone="bad">${fmtCooldownExpiry(p.cooldown_expires_at)}<//>`
+                    : html`<span class="text-[var(--text-muted)]">—</span>`}
+                </td>
+              </tr>
+            `})}
+          </tbody>
+        </table>
+      `}
   `
 }
 
@@ -454,6 +501,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
 
 export function CascadeConfigPanel() {
   const traceSearch = useSignal('')
+  const healthSearch = useSignal('')
   const resourceRef = useRef<ManagedAsyncResource<CascadeData> | null>(null)
   if (resourceRef.current === null) {
     resourceRef.current = createManagedAsyncResource<CascadeData>()
@@ -541,7 +589,7 @@ export function CascadeConfigPanel() {
                 detail="활성 시 차단 시간"
               />
             </div>
-            <${HealthTable} health=${health} />
+            <${HealthTable} health=${health} searchQuery=${healthSearch} />
           `
           : null}
       <//>

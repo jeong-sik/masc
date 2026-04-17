@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   traceEventMatchesSearch,
+  filterHealthProviders,
   fmtPct,
   candidateTone,
   sourceLabel,
@@ -244,5 +245,84 @@ describe('traceEventMatchesSearch', () => {
   it('returns true for empty query (no filtering)', () => {
     const e = makeTraceEvent()
     expect(traceEventMatchesSearch(e, '')).toBe(true)
+  })
+})
+
+describe('filterHealthProviders', () => {
+  it('returns input reference unchanged for empty query', () => {
+    const providers = [makeProvider({ provider_key: 'groq' })]
+    expect(filterHealthProviders(providers, '')).toBe(providers)
+  })
+
+  it('returns input reference unchanged for whitespace-only query', () => {
+    const providers = [makeProvider({ provider_key: 'groq' })]
+    expect(filterHealthProviders(providers, '   ')).toBe(providers)
+  })
+
+  it('trims the query before matching', () => {
+    const providers = [
+      makeProvider({ provider_key: 'groq-llama' }),
+      makeProvider({ provider_key: 'ollama-local' }),
+    ]
+    const result = filterHealthProviders(providers, '  groq  ')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.provider_key).toBe('groq-llama')
+  })
+
+  it('is case-insensitive on provider_key', () => {
+    const providers = [makeProvider({ provider_key: 'Groq-LLaMA' })]
+    expect(filterHealthProviders(providers, 'groq')).toHaveLength(1)
+    expect(filterHealthProviders(providers, 'LLAMA')).toHaveLength(1)
+  })
+
+  it('matches substring in provider_key', () => {
+    const providers = [
+      makeProvider({ provider_key: 'anthropic-claude' }),
+      makeProvider({ provider_key: 'openai-gpt4' }),
+      makeProvider({ provider_key: 'groq-llama' }),
+    ]
+    const result = filterHealthProviders(providers, 'gpt')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.provider_key).toBe('openai-gpt4')
+  })
+
+  it('matches "cooldown" keyword when provider is in cooldown', () => {
+    const providers = [
+      makeProvider({ provider_key: 'groq', in_cooldown: false }),
+      makeProvider({ provider_key: 'openai', in_cooldown: true }),
+    ]
+    const result = filterHealthProviders(providers, 'cooldown')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.provider_key).toBe('openai')
+  })
+
+  it('does not match "cooldown" keyword for providers not in cooldown', () => {
+    const providers = [
+      makeProvider({ provider_key: 'groq', in_cooldown: false }),
+    ]
+    expect(filterHealthProviders(providers, 'cooldown')).toHaveLength(0)
+  })
+
+  it('returns empty array when nothing matches', () => {
+    const providers = [
+      makeProvider({ provider_key: 'groq' }),
+      makeProvider({ provider_key: 'openai' }),
+    ]
+    expect(filterHealthProviders(providers, 'nonexistent-xyz')).toHaveLength(0)
+  })
+
+  it('returns empty array for empty input even with query', () => {
+    expect(filterHealthProviders([], 'groq')).toHaveLength(0)
+  })
+
+  it('does not mutate the input array', () => {
+    const providers = [
+      makeProvider({ provider_key: 'groq' }),
+      makeProvider({ provider_key: 'openai' }),
+    ]
+    const before = providers.map(p => p.provider_key)
+    filterHealthProviders(providers, 'groq')
+    expect(providers.map(p => p.provider_key)).toEqual(before)
+    expect(providers).toHaveLength(2)
   })
 })

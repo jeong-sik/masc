@@ -799,6 +799,10 @@
    ;; Team session types removed (Epic #6107)
    ;; MCP tool schema cluster (extracted sub-library)
    masc_mcp.tool_schemas
+   ;; Content-addressed blob store for externalizing large tool outputs.
+   ;; Used by tool_bridge to keep ToolResult.content compact while moving
+   ;; bytes into a sha256-addressed filesystem store.
+   masc_mcp.masc_tool_blob_store
    ;; Activity graph event/model cluster (extracted sub-library)
    masc_mcp.activity_graph
    ;; Prompt registry and override storage (extracted sub-library)

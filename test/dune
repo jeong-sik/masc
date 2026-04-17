@@ -97,6 +97,7 @@
         ; test_risk_digest removed (team session cleanup)
         test_artifact_store
         test_tool_blob_store
+        test_tool_bridge_externalize
         test_golden_set
         test_golden_set_eval
         test_adversarial_eval
@@ -193,6 +194,7 @@
           ; test_risk_digest removed (team session cleanup)
           test_artifact_store
           test_tool_blob_store
+          test_tool_bridge_externalize
           test_golden_set
           test_golden_set_eval
           test_adversarial_eval

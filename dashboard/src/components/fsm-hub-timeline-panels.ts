@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { DashedNotice } from './common/dashed-notice'
 
 import {
   type CompositeObservation,
@@ -127,9 +128,9 @@ export function SwimlaneTimeline({
 }) {
   if (observations.length === 0) {
     return html`
-      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+      <${DashedNotice} borderTone="subtle">
         30초 폴링 사이클에서 관측을 수집중 — 2회 이상 스냅샷이 쌓이면 5개 레인의 시간 흐름이 표시됩니다
-      </div>
+      <//>
     `
   }
   const first = observations[0]
@@ -376,9 +377,9 @@ export function TransitionTrail({
 
   if (history.length === 0) {
     return html`
-      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+      <${DashedNotice} borderTone="subtle">
         아직 상태 전이가 관측되지 않았습니다 — 키퍼가 턴을 시작하거나 phase가 변경되면 자동으로 기록됩니다
-      </div>
+      <//>
     `
   }
 
@@ -447,9 +448,9 @@ export function TopTransitionsPanel({
 }) {
   if (transitions.length === 0) {
     return html`
-      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+      <${DashedNotice} borderTone="subtle">
         반복되는 전이가 없습니다 — 관측이 더 쌓이거나 lane 변화가 발생하면 표시됩니다
-      </div>
+      <//>
     `
   }
 
@@ -513,9 +514,9 @@ export function DwellHistogramPanel({
 }) {
   if (histograms.length === 0) {
     return html`
-      <div class="rounded-lg border border-dashed border-[var(--white-8)] px-4 py-2 text-center text-[10px] text-[var(--text-dim)]">
+      <${DashedNotice} borderTone="subtle">
         관측 데이터가 아직 없습니다 — 키퍼가 상태를 유지하면 체류 시간이 표시됩니다
-      </div>
+      <//>
     `
   }
 

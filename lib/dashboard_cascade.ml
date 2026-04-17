@@ -46,12 +46,32 @@ let profile_json ~config_path name =
     ("candidates", `List (List.map candidate_to_json trace.candidates));
   ]
 
-let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t =
-  `Assoc [
-    ("keeper", `String entry.name);
-    ("cascade_name", `String entry.meta.cascade_name);
-    ("canonical", `String (Keeper_cascade_profile.canonicalize entry.meta.cascade_name));
+(* Two-column contract consumed by the dashboard's "Keeper → Cascade
+   Mapping" table:
+
+   - [cascade_name]: raw value from the keeper meta (TOML / state JSON
+     round-trip).  NOT canonicalized here — downstream call sites
+     canonicalize at point-of-use.
+   - [canonical]: the cascade actually used by [Cascade_runtime] for
+     model resolution.
+
+   When the two differ, the UI surfaces that the keeper's declared
+   cascade is not a recognized variant (classic parse-don't-validate
+   drift).  When they match, the UI renders "—" in the canonical column.
+
+   Exposed as a pure helper so the contract can be exercised without
+   synthesizing a full [Keeper_registry.registry_entry]. *)
+let keeper_profile_fields ~keeper ~cascade_name : (string * Yojson.Safe.t) list =
+  [ ("keeper", `String keeper);
+    ("cascade_name", `String cascade_name);
+    ("canonical", `String (Keeper_cascade_profile.canonicalize cascade_name));
   ]
+
+let keeper_profile_json (entry : Keeper_registry.registry_entry) : Yojson.Safe.t =
+  `Assoc
+    (keeper_profile_fields
+       ~keeper:entry.name
+       ~cascade_name:entry.meta.cascade_name)
 
 let config_json () =
   let config_path = Cascade_runtime.cascade_config_path () in

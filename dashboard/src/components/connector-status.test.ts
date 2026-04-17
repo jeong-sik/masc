@@ -3,6 +3,9 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ChannelInfo } from '../api/gate'
+import { filterGateChannels } from './connector-status'
+
 vi.setConfig({
   testTimeout: 40000,
   hookTimeout: 40000,
@@ -567,5 +570,100 @@ describe('ConnectorStatusPanel', () => {
     expect(novaText).toContain('status busy')
     expect(novaText).toContain('model gemini-2.5-flash')
     expect(novaText).toContain('runtime keeper-nova-agent')
+  })
+})
+
+function makeChannel(overrides: Partial<ChannelInfo> = {}): ChannelInfo {
+  return {
+    channel: 'discord',
+    message_count: 0,
+    success_count: 0,
+    error_count: 0,
+    duplicate_count: 0,
+    validation_error_count: 0,
+    keeper_error_count: 0,
+    dispatch_unavailable_count: 0,
+    internal_error_count: 0,
+    last_activity: '',
+    last_success: '',
+    last_error_at: '',
+    last_keeper: '',
+    last_room_id: '',
+    last_error: '',
+    last_error_kind: '',
+    last_outcome: '',
+    avg_duration_ms: 0,
+    max_duration_ms: 0,
+    slow_count: 0,
+    slow_rate_pct: 0,
+    success_rate_pct: 0,
+    room_count: 0,
+    health: 'idle',
+    ...overrides,
+  }
+}
+
+describe('filterGateChannels', () => {
+  const rows: ChannelInfo[] = [
+    makeChannel({ channel: 'discord', last_keeper: 'luna', last_room_id: '111111' }),
+    makeChannel({ channel: 'slack', last_keeper: 'nova', last_room_id: '222222' }),
+    makeChannel({ channel: 'telegram', last_keeper: 'orion', last_room_id: '333333' }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterGateChannels(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterGateChannels(rows, '   ')).toBe(rows)
+  })
+
+  it('matches by channel substring (case-insensitive)', () => {
+    const result = filterGateChannels(rows, 'DISC')
+    expect(result.map(r => r.channel)).toEqual(['discord'])
+  })
+
+  it('matches by last_keeper substring', () => {
+    const result = filterGateChannels(rows, 'nova')
+    expect(result.map(r => r.channel)).toEqual(['slack'])
+  })
+
+  it('matches by last_room_id substring', () => {
+    const result = filterGateChannels(rows, '33333')
+    expect(result.map(r => r.channel)).toEqual(['telegram'])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterGateChannels(rows, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterGateChannels(rows, '  luna  ').map(r => r.channel)).toEqual(['discord'])
+  })
+
+  it('safely handles rows with empty last_keeper / last_room_id fields', () => {
+    const sparse: ChannelInfo[] = [
+      makeChannel({ channel: 'imessage', last_keeper: '', last_room_id: '' }),
+      makeChannel({ channel: 'signal', last_keeper: '', last_room_id: '' }),
+    ]
+    expect(filterGateChannels(sparse, 'luna')).toHaveLength(0)
+    expect(filterGateChannels(sparse, 'signal').map(r => r.channel)).toEqual(['signal'])
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = rows.slice()
+    filterGateChannels(rows, 'luna')
+    expect(rows).toEqual(copy)
+    expect(rows).toHaveLength(3)
+  })
+
+  it('preserves source order when multiple rows match', () => {
+    const multi: ChannelInfo[] = [
+      makeChannel({ channel: 'discord', last_keeper: 'shared-keeper' }),
+      makeChannel({ channel: 'slack', last_keeper: 'other' }),
+      makeChannel({ channel: 'telegram', last_keeper: 'shared-keeper' }),
+    ]
+    const result = filterGateChannels(multi, 'shared')
+    expect(result.map(r => r.channel)).toEqual(['discord', 'telegram'])
   })
 })

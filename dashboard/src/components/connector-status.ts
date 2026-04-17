@@ -2,8 +2,8 @@
 // Keeper-first layout: each directory keeper is a primary section; bindings nest under.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { signal, useSignal } from '@preact/signals'
+import { useEffect, useMemo } from 'preact/hooks'
 import { post } from '../api/core'
 import {
   fetchGateConnectors,
@@ -51,6 +51,34 @@ const EMPTY_SNAPSHOT: ConnectorStatusSnapshot = {
 }
 
 const connectorStatusResource = createManagedAsyncResource<ConnectorStatusSnapshot>(EMPTY_SNAPSHOT)
+
+/**
+ * Pure filter for the gate-observed channel list.
+ *
+ * The `d.channels` list on a busy gate may hold one entry per active
+ * connector/channel tuple (discord, slack, imessage, telegram, ...).
+ * Operators scan this list to find the one throwing errors. Filter by
+ * the three human-readable fields an operator actually remembers:
+ * `channel`, `last_keeper`, `last_room_id`. First match wins.
+ *
+ * - Case-insensitive substring match on `query` (trimmed).
+ * - Empty/whitespace query returns the input reference unchanged so
+ *   `useMemo` keeps identity for the non-filtering path.
+ * - Input is never mutated; empty/missing fields are skipped safely.
+ */
+export function filterGateChannels(
+  rows: readonly ChannelInfo[],
+  query: string,
+): readonly ChannelInfo[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.channel && row.channel.toLowerCase().includes(needle)) return true
+    if (row.last_keeper && row.last_keeper.toLowerCase().includes(needle)) return true
+    if (row.last_room_id && row.last_room_id.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 async function refresh() {
   await connectorStatusResource.load(async (signal, previous) => {
@@ -872,7 +900,27 @@ function EventRow({ event }: { event: GateEventInfo }) {
   `
 }
 
+function renderGateChannelList(
+  gateChannels: readonly ChannelInfo[],
+  visibleChannels: readonly ChannelInfo[],
+  isFilteringChannels: boolean,
+) {
+  if (gateChannels.length === 0) {
+    return html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">활성 커넥터 없음</div>`
+  }
+  if (isFilteringChannels && visibleChannels.length === 0) {
+    return html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${gateChannels.length} channels)</div>`
+  }
+  return html`
+    <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
+      ${visibleChannels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
+    </div>
+  `
+}
+
 export function ConnectorStatusPanel() {
+  const channelQuery = useSignal('')
+
   useEffect(() => {
     void refresh()
     return () => { connectorStatusResource.cancel() }
@@ -897,6 +945,12 @@ export function ConnectorStatusPanel() {
   const loading = connectorStatusResource.state.value.loading
   const d = snapshot.gate
   const allConnectors = snapshot.connectors?.connectors ?? []
+  const gateChannels = useMemo(() => d?.channels ?? [], [d])
+  const visibleChannels = useMemo(
+    () => filterGateChannels(gateChannels, channelQuery.value),
+    [gateChannels, channelQuery.value],
+  )
+  const isFilteringChannels = channelQuery.value.trim() !== ''
 
   if (loading && !d && allConnectors.length === 0) {
     return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
@@ -996,13 +1050,19 @@ export function ConnectorStatusPanel() {
                 </div>
               </div>
 
-              ${d.channels.length === 0
-                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">활성 커넥터 없음</div>`
-                : html`
-                    <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
-                      ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
-                    </div>
-                  `}
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <div class="text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">채널 헬스</div>
+                <input
+                  type="search"
+                  value=${channelQuery.value}
+                  placeholder="channel / keeper / room 필터"
+                  aria-label="채널 필터"
+                  onInput=${(e: Event) => { channelQuery.value = (e.target as HTMLInputElement).value }}
+                  class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                />
+              </div>
+
+              ${renderGateChannelList(gateChannels, visibleChannels, isFilteringChannels)}
             </div>
           `}
     </div>

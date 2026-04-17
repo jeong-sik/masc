@@ -885,6 +885,8 @@ let dispatch_event_with_audit
         ~event
         ~now
     in
+    Dashboard_attribution.record
+      (Keeper_state_machine.attribution_of_transition ~event result);
     (match result with
      | Ok tr when tr.new_phase <> tr.prev_phase ->
        Log.Keeper.info "registry: phase transition name=%s old=%s new=%s event=%s"

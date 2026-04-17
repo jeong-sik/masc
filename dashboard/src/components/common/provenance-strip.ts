@@ -10,7 +10,7 @@ function normalizeProvenance(value?: string | null): string {
   return (value ?? '').trim().toLowerCase()
 }
 
-function provenanceTone(value?: string | null): string {
+export function provenanceTone(value?: string | null): string {
   switch (normalizeProvenance(value)) {
     case 'truth':
       return 'ok'
@@ -35,7 +35,7 @@ const PROVENANCE_LABELS: Record<string, string> = {
   recorded: '기록됨',
 }
 
-function provenanceLabel(item: ProvenanceItem): string {
+export function provenanceLabel(item: ProvenanceItem): string {
   const explicit = (item.label ?? '').trim()
   if (explicit) return explicit
   const kind = normalizeProvenance(item.kind)

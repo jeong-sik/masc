@@ -169,7 +169,7 @@ Client Request
 
 | Family | Examples |
 |--------|----------|
-| Room & Cluster | set_room, init, join, leave, status, pause/resume, reset, room_strategy_get/set, room current helper |
+| Room & Cluster | set_room, init, join, leave, status, pause/resume, reset, room current helper |
 | Agent & Discovery | who, agents, heartbeat, agent_update, register_capabilities, find_by_capability, agent_fitness, select_agent |
 | Task Operations | add_task, batch_add_tasks, claim, claim_next, transition, done, release, cancel_task, tasks, archive_view, task_history |
 | Communication & Locks | broadcast, messages, listen, lock, unlock, progress |

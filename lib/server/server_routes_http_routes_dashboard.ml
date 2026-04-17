@@ -660,6 +660,22 @@ and add_autoresearch_routes router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  (* Autoresearch loops CSV export *)
+  |> Http.Router.get "/api/v1/autoresearch/loops/csv" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let csv = Dashboard_http_autoresearch.autoresearch_loops_csv ~base_path in
+         let headers =
+           Httpun.Headers.of_list
+             [
+               ("content-type", "text/csv; charset=utf-8");
+               ("content-disposition", "attachment; filename=\"autoresearch_loops.csv\"");
+             ]
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         Httpun.Reqd.respond_with_string reqd response csv
+       ) request reqd)
+
   (* Autoresearch loop detail -- single loop with full cycle history *)
   |> Http.Router.prefix_get "/api/v1/autoresearch/loops/" (fun request reqd ->
        with_public_read (fun state req reqd ->

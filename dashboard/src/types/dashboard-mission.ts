@@ -563,7 +563,7 @@ export type OperatorActionType =
   | 'keeper_probe'
   | 'keeper_recover'
 
-export type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper' | 'review_item'
+export type OperatorTargetType = 'root' | 'namespace' | 'room' | 'keeper'
 
 export interface OperatorActionRequest {
   actor: string

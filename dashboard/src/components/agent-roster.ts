@@ -49,14 +49,14 @@ import {
 
 type StatusFilter = 'all' | RuntimeBand
 
-function runtimeBadgeClass(band: RuntimeBand): string {
+export function runtimeBadgeClass(band: RuntimeBand): string {
   if (band === 'active') return 'border-[rgba(52,211,153,0.2)] bg-[rgba(52,211,153,0.12)] text-[var(--ok)]'
   if (band === 'attention') return 'border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.12)] text-[var(--warn)]'
   if (band === 'paused') return 'border-[rgba(167,139,250,0.2)] bg-[rgba(167,139,250,0.12)] text-[#a78bfa]'
   return 'border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-dim)]'
 }
 
-function stageBadgeClass(stageKey: string): string {
+export function stageBadgeClass(stageKey: string): string {
   if (stageKey === 'tool_use') return 'border-[rgba(71,184,255,0.24)] bg-[rgba(71,184,255,0.12)] text-[var(--accent)]'
   if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[rgba(52,211,153,0.22)] bg-[rgba(52,211,153,0.1)] text-[var(--ok)]'
   if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[rgba(167,139,250,0.24)] bg-[rgba(167,139,250,0.12)] text-[#c4b5fd]'
@@ -65,7 +65,7 @@ function stageBadgeClass(stageKey: string): string {
   return 'border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]'
 }
 
-function compactModelLabel(model: string | null | undefined): string | null {
+export function compactModelLabel(model: string | null | undefined): string | null {
   const value = model?.trim()
   if (!value) return null
   const parts = value.split(':').map(part => part.trim()).filter(Boolean)
@@ -182,7 +182,7 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
   },
 }
 
-function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
+export function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
   const seen = new Set<string>()
   const names: string[] = []
   for (const group of groups) {
@@ -217,7 +217,7 @@ export function scopeAgentsByKeeperFilter(
     matchesKeeperFilter(agent.name, keeperList, keeperBriefs, keeperFilter))
 }
 
-function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'> | DashboardMissionKeeperBrief): string {
+export function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'> | DashboardMissionKeeperBrief): string {
   const runtimeName = source.agent_name?.trim()
   return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
 }
@@ -248,7 +248,7 @@ function synthesizeAgentFromKeeper(source: Keeper | DashboardMissionKeeperBrief)
   }
 }
 
-function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
+export function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
   if (!existing) return next
   return {
     ...existing,

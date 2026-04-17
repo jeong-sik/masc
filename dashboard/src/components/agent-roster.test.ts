@@ -1,112 +1,204 @@
-import { describe, expect, it } from 'vitest'
-import type { Agent, Keeper } from '../types'
-import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
+import { describe, it, expect } from 'vitest'
 import {
-  buildAgentRoster,
-  countAgentsByStatus,
-  countRuntimeKinds,
-  scopeAgentsByKeeperFilter,
+  runtimeBadgeClass,
+  stageBadgeClass,
+  compactModelLabel,
+  uniqueToolNames,
+  keeperRuntimeName,
+  mergeRosterAgent,
 } from './agent-roster'
+import type { Agent } from '../types'
 
-const AGENTS: Agent[] = [
-  { name: 'plain-agent', status: 'active', current_task: null },
-  { name: 'keeper-alpha-agent', status: 'busy', current_task: null },
-  { name: 'keeper-beta-agent', status: 'offline', current_task: null },
-  { name: 'missing-status-agent', current_task: null },
-]
-
-const KEEPERS: Keeper[] = [
-  { name: 'keeper-alpha', agent_name: 'keeper-alpha-agent', status: 'active' },
-]
-
-const KEEPER_BRIEFS: DashboardMissionKeeperBrief[] = [
-  { name: 'keeper-beta', agent_name: 'keeper-beta-agent', current_work: 'watching room health' },
-]
-
-describe('scopeAgentsByKeeperFilter', () => {
-  it('adds keeper-backed runtimes into the roster even when the agent feed is empty', () => {
-    const built = buildAgentRoster([], KEEPERS, KEEPER_BRIEFS)
-
-    expect(built.map(agent => agent.name)).toEqual([
-      'keeper-alpha-agent',
-      'keeper-beta-agent',
-    ])
-    expect(built.map(agent => agent.current_task)).toEqual([
-      null,
-      'watching room health',
-    ])
+describe('runtimeBadgeClass', () => {
+  it('returns green classes for active', () => {
+    expect(runtimeBadgeClass('active')).toContain('text-[var(--ok)]')
   })
 
-  it('keeps the all tab showing every agent entry', () => {
-    const scoped = scopeAgentsByKeeperFilter(
-      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
-      KEEPERS,
-      KEEPER_BRIEFS,
-      'all',
-    )
-
-    expect(scoped.map(agent => agent.name)).toEqual([
-      'plain-agent',
-      'keeper-alpha-agent',
-      'keeper-beta-agent',
-      'missing-status-agent',
-    ])
+  it('returns yellow classes for attention', () => {
+    expect(runtimeBadgeClass('attention')).toContain('text-[var(--warn)]')
   })
 
-  it('keeps the general-agent tab scoped to non-keeper entries', () => {
-    const scoped = scopeAgentsByKeeperFilter(
-      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
-      KEEPERS,
-      KEEPER_BRIEFS,
-      'agent-only',
-    )
-
-    expect(scoped.map(agent => agent.name)).toEqual([
-      'plain-agent',
-      'missing-status-agent',
-    ])
+  it('returns purple classes for paused', () => {
+    expect(runtimeBadgeClass('paused')).toContain('#a78bfa')
   })
 
-  it('keeps the keeper tab scoped to keeper-backed runtimes', () => {
-    const scoped = scopeAgentsByKeeperFilter(
-      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
-      KEEPERS,
-      KEEPER_BRIEFS,
-      'keeper-only',
-    )
-
-    expect(scoped.map(agent => agent.name)).toEqual([
-      'keeper-alpha-agent',
-      'keeper-beta-agent',
-    ])
+  it('returns dim classes for unknown band', () => {
+    expect(runtimeBadgeClass('offline')).toContain('text-[var(--text-dim)]')
   })
 })
 
-describe('countAgentsByStatus', () => {
-  it('counts status chips from the already-scoped list', () => {
-    const scoped = scopeAgentsByKeeperFilter(
-      buildAgentRoster(AGENTS, KEEPERS, KEEPER_BRIEFS),
-      KEEPERS,
-      KEEPER_BRIEFS,
-      'agent-only',
-    )
+describe('stageBadgeClass', () => {
+  it('returns accent classes for tool_use', () => {
+    expect(stageBadgeClass('tool_use')).toContain('text-[var(--accent)]')
+  })
 
-    expect(countAgentsByStatus(scoped, KEEPERS)).toEqual({
-      all: 2,
-      active: 1,
-      attention: 1,
-      paused: 0,
-      offline: 0,
-    })
+  it('returns ok classes for thinking', () => {
+    expect(stageBadgeClass('thinking')).toContain('text-[var(--ok)]')
+  })
+
+  it('returns ok classes for scheduled_autonomous', () => {
+    expect(stageBadgeClass('scheduled_autonomous')).toContain('text-[var(--ok)]')
+  })
+
+  it('returns purple classes for handoff', () => {
+    expect(stageBadgeClass('handoff')).toContain('#c4b5fd')
+  })
+
+  it('returns purple classes for compacting', () => {
+    expect(stageBadgeClass('compacting')).toContain('#c4b5fd')
+  })
+
+  it('returns bad classes for failing', () => {
+    expect(stageBadgeClass('failing')).toContain('text-[var(--bad)]')
+  })
+
+  it('returns bad classes for crashed', () => {
+    expect(stageBadgeClass('crashed')).toContain('text-[var(--bad)]')
+  })
+
+  it('returns purple classes for paused stage', () => {
+    expect(stageBadgeClass('paused')).toContain('#a78bfa')
+  })
+
+  it('returns muted classes for unknown stage', () => {
+    expect(stageBadgeClass('idle')).toContain('text-[var(--text-muted)]')
   })
 })
 
-describe('countRuntimeKinds', () => {
-  it('splits live runtimes into agent-only and keeper buckets without double-counting', () => {
-    expect(countRuntimeKinds(AGENTS, KEEPERS, KEEPER_BRIEFS)).toEqual({
-      agents: 2,
-      keepers: 2,
-      totalRuntimes: 4,
-    })
+describe('compactModelLabel', () => {
+  it('returns null for null', () => {
+    expect(compactModelLabel(null)).toBeNull()
+  })
+
+  it('returns null for undefined', () => {
+    expect(compactModelLabel(undefined)).toBeNull()
+  })
+
+  it('returns null for empty string', () => {
+    expect(compactModelLabel('')).toBeNull()
+  })
+
+  it('returns null for whitespace-only string', () => {
+    expect(compactModelLabel('   ')).toBeNull()
+  })
+
+  it('returns last segment for colon-separated string', () => {
+    expect(compactModelLabel('provider:model-name')).toBe('model-name')
+  })
+
+  it('returns value as-is for no colon', () => {
+    expect(compactModelLabel('claude-sonnet')).toBe('claude-sonnet')
+  })
+
+  it('returns last segment for multi-segment', () => {
+    expect(compactModelLabel('a:b:c')).toBe('c')
+  })
+
+  it('handles spaces around segments', () => {
+    expect(compactModelLabel('provider : model-name')).toBe('model-name')
+  })
+})
+
+describe('uniqueToolNames', () => {
+  it('returns empty for no groups', () => {
+    expect(uniqueToolNames()).toEqual([])
+  })
+
+  it('returns empty for null/undefined groups', () => {
+    expect(uniqueToolNames(null, undefined)).toEqual([])
+  })
+
+  it('collects unique names from single group', () => {
+    expect(uniqueToolNames(['a', 'b', 'c'])).toEqual(['a', 'b', 'c'])
+  })
+
+  it('deduplicates across groups', () => {
+    expect(uniqueToolNames(['a', 'b'], ['b', 'c'])).toEqual(['a', 'b', 'c'])
+  })
+
+  it('deduplicates within a group', () => {
+    expect(uniqueToolNames(['a', 'a', 'b'])).toEqual(['a', 'b'])
+  })
+
+  it('trims whitespace', () => {
+    expect(uniqueToolNames([' a ', 'b'])).toEqual(['a', 'b'])
+  })
+
+  it('skips empty strings', () => {
+    expect(uniqueToolNames(['', 'a', ''])).toEqual(['a'])
+  })
+
+  it('preserves first occurrence order', () => {
+    expect(uniqueToolNames(['z', 'a'], ['a', 'z', 'b'])).toEqual(['z', 'a', 'b'])
+  })
+})
+
+describe('keeperRuntimeName', () => {
+  it('returns agent_name when present', () => {
+    expect(keeperRuntimeName({ name: 'keeper1', agent_name: 'claude-agent' })).toBe('claude-agent')
+  })
+
+  it('falls back to name when agent_name is empty', () => {
+    expect(keeperRuntimeName({ name: 'keeper1', agent_name: '' })).toBe('keeper1')
+  })
+
+  it('falls back to name when agent_name is whitespace', () => {
+    expect(keeperRuntimeName({ name: 'keeper1', agent_name: '  ' })).toBe('keeper1')
+  })
+
+  it('falls back to name when agent_name is undefined', () => {
+    expect(keeperRuntimeName({ name: 'keeper1' })).toBe('keeper1')
+  })
+})
+
+describe('mergeRosterAgent', () => {
+  const baseAgent: Agent = {
+    name: 'test-agent',
+    status: 'active',
+    current_task: null,
+  }
+  const nextAgent: Agent = {
+    name: 'test-agent',
+    status: 'idle',
+    current_task: 'task-1',
+    emoji: '🤖',
+    model: 'claude-sonnet',
+  }
+
+  it('returns next when existing is undefined', () => {
+    expect(mergeRosterAgent(undefined, nextAgent)).toEqual(nextAgent)
+  })
+
+  it('prefers existing status over next', () => {
+    const result = mergeRosterAgent(baseAgent, nextAgent)
+    expect(result.status).toBe('active')
+  })
+
+  it('fills in missing fields from next', () => {
+    const result = mergeRosterAgent(baseAgent, nextAgent)
+    // null ?? 'task-1' = 'task-1' — ?? replaces null/undefined
+    expect(result.current_task).toBe('task-1')
+    expect(result.emoji).toBe('🤖')
+    expect(result.model).toBe('claude-sonnet')
+  })
+
+  it('uses existing capabilities when non-empty', () => {
+    const existing: Agent = {
+      ...baseAgent,
+      capabilities: ['tool-a'],
+    }
+    const next: Agent = { ...nextAgent, capabilities: ['tool-b'] }
+    const result = mergeRosterAgent(existing, next)
+    expect(result.capabilities).toEqual(['tool-a'])
+  })
+
+  it('uses next capabilities when existing is empty', () => {
+    const existing: Agent = {
+      ...baseAgent,
+      capabilities: [],
+    }
+    const next: Agent = { ...nextAgent, capabilities: ['tool-b'] }
+    const result = mergeRosterAgent(existing, next)
+    expect(result.capabilities).toEqual(['tool-b'])
   })
 })

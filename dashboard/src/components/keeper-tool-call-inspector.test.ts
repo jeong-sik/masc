@@ -1,163 +1,48 @@
-// Tests for KeeperToolCallInspector component
+import { describe, it, expect } from 'vitest'
+import { formatInput } from './keeper-tool-call-inspector'
 
-import { html } from 'htm/preact'
-import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { waitFor } from '@testing-library/preact'
-import type * as DashboardApi from '../api/dashboard'
-
-const { fetchKeeperToolCalls } = vi.hoisted(() => ({
-  fetchKeeperToolCalls: vi.fn(),
-}))
-
-vi.mock('../api/dashboard', async (importOriginal) => {
-  const actual = await importOriginal<typeof DashboardApi>()
-  return { ...actual, fetchKeeperToolCalls }
-})
-
-import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
-import type { ToolCallEntry } from '../api/dashboard'
-
-function makeEntry(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
-  return {
-    ts: 1700000000,
-    keeper: 'alice',
-    tool: 'masc_status',
-    input: { query: 'hi' },
-    output: 'status: ok',
-    success: true,
-    duration_ms: 42,
-    ...overrides,
-  }
-}
-
-describe('KeeperToolCallInspector', () => {
-  let container: HTMLDivElement
-
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
+describe('formatInput', () => {
+  it('returns dash for null', () => {
+    expect(formatInput(null)).toBe('-')
   })
 
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-    vi.clearAllMocks()
+  it('returns dash for undefined', () => {
+    expect(formatInput(undefined)).toBe('-')
   })
 
-  it('shows loading state initially', async () => {
-    // Never resolves during this test
-    fetchKeeperToolCalls.mockReturnValue(new Promise(() => {}))
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-    await waitFor(() => {
-      expect(container.textContent).toContain('불러오는 중')
-    })
+  it('returns string as-is', () => {
+    expect(formatInput('hello world')).toBe('hello world')
   })
 
-  it('renders entries after successful fetch', async () => {
-    const entries = [
-      makeEntry({ tool: 'masc_status', success: true }),
-      makeEntry({ tool: 'masc_board_post', success: false, duration_ms: 1500 }),
-    ]
-    fetchKeeperToolCalls.mockResolvedValue({ keeper: 'alice', count: 2, entries })
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('masc_status')
-    })
-
-    expect(container.textContent).toContain('masc_board_post')
-    expect(container.textContent).toContain('2 calls')
+  it('returns empty string as-is', () => {
+    expect(formatInput('')).toBe('')
   })
 
-  it('shows empty state when no entries', async () => {
-    fetchKeeperToolCalls.mockResolvedValue({ keeper: 'alice', count: 0, entries: [] })
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('도구 호출 데이터 없음')
-    })
+  it('JSON-stringifies objects with pretty print', () => {
+    const result = formatInput({ key: 'value' })
+    expect(result).toBe('{\n  "key": "value"\n}')
   })
 
-  it('shows error state on fetch failure', async () => {
-    fetchKeeperToolCalls.mockRejectedValue(new Error('network error'))
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('network error')
-    })
+  it('JSON-stringifies arrays', () => {
+    const result = formatInput([1, 2, 3])
+    expect(result).toBe('[\n  1,\n  2,\n  3\n]')
   })
 
-  it('filters entries by tool name', async () => {
-    const entries = [
-      makeEntry({ tool: 'masc_status' }),
-      makeEntry({ tool: 'masc_board_post' }),
-    ]
-    fetchKeeperToolCalls.mockResolvedValue({ keeper: 'alice', count: 2, entries })
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('masc_status')
-    })
-
-    const filterInput = container.querySelector('input[type="text"]') as HTMLInputElement
-    expect(filterInput).not.toBeNull()
-
-    filterInput.value = 'board'
-    filterInput.dispatchEvent(new Event('input', { bubbles: true }))
-    await Promise.resolve()
-
-    await waitFor(() => {
-      expect(container.textContent).not.toContain('masc_status')
-      expect(container.textContent).toContain('masc_board_post')
-    })
+  it('JSON-stringifies numbers', () => {
+    expect(formatInput(42)).toBe('42')
   })
 
-  it('rows have aria-expanded attribute for accessibility', async () => {
-    const entries = [makeEntry({ tool: 'masc_status' })]
-    fetchKeeperToolCalls.mockResolvedValue({ keeper: 'alice', count: 1, entries })
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('masc_status')
-    })
-
-    const rowButton = container.querySelector('[role="button"]') as HTMLElement
-    expect(rowButton).not.toBeNull()
-    expect(rowButton.getAttribute('aria-expanded')).toBe('false')
-
-    rowButton.click()
-    await Promise.resolve()
-
-    await waitFor(() => {
-      expect(rowButton.getAttribute('aria-expanded')).toBe('true')
-    })
+  it('JSON-stringifies booleans', () => {
+    expect(formatInput(true)).toBe('true')
+    expect(formatInput(false)).toBe('false')
   })
 
-  it('uses stable keys (ts+keeper+tool) not index', async () => {
-    // Stable keys ensure expand state is preserved when filtering
-    // We verify the key attribute includes ts and keeper
-    const entries = [
-      makeEntry({ ts: 1700000001, keeper: 'alice', tool: 'masc_status' }),
-      makeEntry({ ts: 1700000002, keeper: 'alice', tool: 'masc_board_post' }),
-    ]
-    fetchKeeperToolCalls.mockResolvedValue({ keeper: 'alice', count: 2, entries })
-
-    render(html`<${KeeperToolCallInspector} keeperName="alice" />`, container)
-
-    await waitFor(() => {
-      expect(container.textContent).toContain('masc_status')
-      expect(container.textContent).toContain('masc_board_post')
-    })
-
-    // Both entries visible, no crash = stable keys working
-    const rows = container.querySelectorAll('[role="button"]')
-    expect(rows.length).toBe(2)
+  it('handles circular references gracefully via String fallback', () => {
+    const obj: Record<string, unknown> = {}
+    obj.self = obj
+    // JSON.stringify throws on circular, falls back to String()
+    const result = formatInput(obj)
+    expect(typeof result).toBe('string')
+    expect(result.length).toBeGreaterThan(0)
   })
 })

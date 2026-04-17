@@ -19,27 +19,45 @@ let rec atomic_update atomic f =
   if Atomic.compare_and_set atomic old_val new_val then ()
   else atomic_update atomic f
 
+let rec atomic_update_with_result atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val, result = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then result
+  else atomic_update_with_result atomic f
+
 type lock_entry = {
   mu : Eio.Mutex.t;
   mutable last_used : float;
   active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
 }
 
+type table_state = {
+  version : int;
+  entries : lock_entry SMap.t;
+}
+
 let max_lock_entries = 512
 let stale_lock_seconds = 600.0
 
-let table : lock_entry SMap.t Atomic.t = Atomic.make SMap.empty
+let table : table_state Atomic.t = Atomic.make { version = 0; entries = SMap.empty }
+
+(* Bump the published version whenever the map shape changes so a structural
+   A -> B -> A cycle cannot satisfy a stale CAS with the old snapshot. *)
+let publish_entries state entries =
+  if entries == state.entries then state
+  else { version = state.version + 1; entries }
 
 (** Remove entries unused for [stale_lock_seconds] when table exceeds
-    [max_lock_entries].  Called under [table_mu]. *)
+    [max_lock_entries]. *)
 let prune_stale_entries () =
-  atomic_update table (fun map ->
-    if SMap.cardinal map > max_lock_entries then
+  atomic_update table (fun state ->
+    if SMap.cardinal state.entries > max_lock_entries then
       let now = Time_compat.now () in
-      SMap.filter (fun _path entry ->
+      let entries = SMap.filter (fun _path entry ->
         Atomic.get entry.active > 0 || now -. entry.last_used <= stale_lock_seconds
-      ) map
-    else map
+      ) state.entries in
+      publish_entries state entries
+    else state
   )
 
 (** Get or create a lock entry for the given file path.
@@ -49,31 +67,22 @@ let prune_stale_entries () =
     (e.g. in unit tests that don't use Eio_main.run). *)
 let get_entry path =
   prune_stale_entries ();
-  let entry_ref = ref None in
-  atomic_update table (fun map ->
-    let entry =
-      match SMap.find_opt path map with
-      | Some e ->
-        e.last_used <- Time_compat.now ();
-        e
+  let entry =
+    atomic_update_with_result table (fun state ->
+      match SMap.find_opt path state.entries with
+      | Some entry ->
+        entry.last_used <- Time_compat.now ();
+        (state, entry)
       | None ->
-        let e = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = Atomic.make 0 } in
-        e
-    in
-    entry_ref := Some entry;
-    SMap.add path entry map
-  );
-  let entry = Option.get !entry_ref in
+        let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = Atomic.make 0 } in
+        let entries = SMap.add path entry state.entries in
+        (publish_entries state entries, entry))
+  in
   Atomic.incr entry.active;
   entry
 
 let release_entry entry =
-  let rec decrement () =
-    let current = Atomic.get entry.active in
-    let next = max 0 (current - 1) in
-    if not (Atomic.compare_and_set entry.active current next) then decrement ()
-  in
-  decrement ()
+  ignore (Atomic.fetch_and_add entry.active (-1))
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
@@ -182,4 +191,4 @@ let with_lock ?clock path f =
   with_mutex path (fun () -> run_with_flock ())
 
 (** Number of tracked lock paths (for diagnostics). *)
-let lock_count () = SMap.cardinal (Atomic.get table)
+let lock_count () = SMap.cardinal (Atomic.get table).entries

@@ -5,6 +5,7 @@ import {
   CHIP_CLASS_BY_KIND,
   deriveHandoffArcs,
   deriveTimelineRows,
+  filterTimelineRows,
   kindOfEventType,
   type TimelineRow,
 } from './handoff-timeline'
@@ -221,5 +222,69 @@ describe('deriveHandoffArcs', () => {
     ]
     const arcs = deriveHandoffArcs(rows, WIN_START_MS, WIN_END_MS)
     expect(arcs).toHaveLength(1)
+  })
+})
+
+describe('filterTimelineRows', () => {
+  const sample: readonly TimelineRow[] = [
+    {
+      keeper: 'alpha',
+      chips: [
+        { ts: 1, eventType: 'agent_started', kind: 'lifecycle' },
+        { ts: 2, eventType: 'handoff_requested', kind: 'handoff', peerAgent: 'beta', taskId: 'T-100' },
+      ],
+    },
+    {
+      keeper: 'Beta',
+      chips: [
+        { ts: 3, eventType: 'tool_called', kind: 'tool', taskId: 'T-200' },
+      ],
+    },
+    {
+      keeper: 'gamma',
+      chips: [
+        { ts: 4, eventType: 'turn_completed', kind: 'lifecycle' },
+      ],
+    },
+  ]
+
+  it('returns the input reference unchanged on empty query', () => {
+    expect(filterTimelineRows(sample, '')).toBe(sample)
+  })
+
+  it('returns the input reference unchanged on whitespace-only query', () => {
+    expect(filterTimelineRows(sample, '   \t  ')).toBe(sample)
+  })
+
+  it('is case-insensitive on keeper match', () => {
+    // 'GAMMA' only matches the `gamma` keeper — no chip field contains it,
+    // so this isolates keeper-name case-insensitivity.
+    const out = filterTimelineRows(sample, 'GAMMA')
+    expect(out.map(r => r.keeper)).toEqual(['gamma'])
+  })
+
+  it('trims the query before matching', () => {
+    const out = filterTimelineRows(sample, '  alpha  ')
+    expect(out.map(r => r.keeper)).toEqual(['alpha'])
+  })
+
+  it('matches across keeper + chip.eventType + chip.taskId + chip.peerAgent', () => {
+    // event type across any chip on a row
+    expect(filterTimelineRows(sample, 'handoff_requested').map(r => r.keeper)).toEqual(['alpha'])
+    // taskId partial match
+    expect(filterTimelineRows(sample, 't-200').map(r => r.keeper)).toEqual(['Beta'])
+    // peerAgent match (on alpha's chip pointing at beta)
+    expect(filterTimelineRows(sample, 'beta').map(r => r.keeper).sort()).toEqual(['Beta', 'alpha'])
+  })
+
+  it('returns empty array when no row matches', () => {
+    expect(filterTimelineRows(sample, 'zzz-nope')).toEqual([])
+  })
+
+  it('does not mutate the input rows or their chips', () => {
+    const snapshot = JSON.stringify(sample)
+    void filterTimelineRows(sample, 'alpha')
+    void filterTimelineRows(sample, 'T-100')
+    expect(JSON.stringify(sample)).toBe(snapshot)
   })
 })

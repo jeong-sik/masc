@@ -167,7 +167,6 @@ export interface BoardMonitoring {
 
 export interface GovernanceMonitoring {
   alert_level?: 'ok' | 'warn' | 'bad' | string
-  case_tracking_available?: boolean
   note?: string
   cases_open?: number
   pending_ruling?: number

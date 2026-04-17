@@ -17,6 +17,7 @@
    anti_rationalization
    attribution
    attribution_tagged
+   autoresearch_result_bridge
    auto_recall
    auto_responder
    auth
@@ -122,6 +123,7 @@
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
    server_routes_http_routes_channel_gate
+   server_routes_http_routes_sidecar
    server_h2_gateway
    server_h2_gateway_helpers
    server_h2_gateway_routes_extra

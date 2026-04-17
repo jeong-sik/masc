@@ -7,6 +7,7 @@ import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types
 import {
   AllowlistPreview,
   RuntimeSignals,
+  filterSignalGroups,
   resolveAllowlistPreview,
   resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
@@ -329,5 +330,139 @@ describe('RuntimeSignals', () => {
     expect(screen.getByText('masc_board_post')).toBeInTheDocument()
     expect(screen.getByText('gpt-5')).toBeInTheDocument()
     expect(screen.getByText('planning')).toBeInTheDocument()
+  })
+
+  it('filters runtime signal rows by label via the search input', () => {
+    const keeper: Keeper = {
+      name: 'sangsu',
+      status: 'active',
+      metrics_window: {
+        fallback_rate: 0.12,
+        model_fallback_rate: 0.05,
+        memory_pass_rate: 0.88,
+        memory_avg_score: 0.73,
+      },
+    }
+
+    render(h(RuntimeSignals, { keeper }))
+
+    // Before filtering: labels from multiple groups are visible.
+    expect(screen.getByText('전체 폴백')).toBeInTheDocument()
+    expect(screen.getByText('메모리 통과율')).toBeInTheDocument()
+
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 메모리, 컴팩션)') as HTMLInputElement
+    fireEvent.input(input, { target: { value: '메모리' } })
+
+    // Non-matching labels are gone, matching ones remain.
+    expect(screen.queryByText('전체 폴백')).not.toBeInTheDocument()
+    expect(screen.getByText('메모리 통과율')).toBeInTheDocument()
+    expect(screen.getByText('메모리 평균 점수')).toBeInTheDocument()
+  })
+
+  it('shows the filter-specific empty state when no rows match', () => {
+    const keeper: Keeper = {
+      name: 'sangsu',
+      status: 'active',
+      metrics_window: {
+        fallback_rate: 0.12,
+      },
+    }
+
+    render(h(RuntimeSignals, { keeper }))
+
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 메모리, 컴팩션)') as HTMLInputElement
+    fireEvent.input(input, { target: { value: 'nonexistent-zzz' } })
+
+    expect(screen.getByText(/필터 결과 없음/)).toBeInTheDocument()
+  })
+})
+
+describe('filterSignalGroups', () => {
+  interface SampleGroup {
+    title: string
+    rows: Array<{ label: string; value: string | number }>
+  }
+  const sampleGroups: SampleGroup[] = [
+    {
+      title: '폴백',
+      rows: [
+        { label: '전체 폴백', value: '15.0%' },
+        { label: '모델 폴백', value: '5.0%' },
+      ],
+    },
+    {
+      title: 'LLM 응답 정렬',
+      rows: [
+        { label: '목표 일치도', value: '0.820' },
+        { label: '응답 일치도', value: '0.700' },
+      ],
+    },
+    {
+      title: '메모리 & 컴팩션',
+      rows: [
+        { label: '메모리 통과율', value: '88.0%' },
+        { label: '컴팩션 절감', value: '42.0%' },
+      ],
+    },
+  ]
+
+  it('returns the input reference when the query is empty', () => {
+    expect(filterSignalGroups(sampleGroups, '')).toBe(sampleGroups)
+  })
+
+  it('returns the input reference when the query is whitespace only', () => {
+    expect(filterSignalGroups(sampleGroups, '   \t ')).toBe(sampleGroups)
+  })
+
+  it('matches case-insensitive substrings on row labels', () => {
+    const result = filterSignalGroups(sampleGroups, '폴백')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.title).toBe('폴백')
+    expect(result[0]?.rows.map(r => r.label)).toEqual(['전체 폴백', '모델 폴백'])
+  })
+
+  it('preserves only the matching rows within a group', () => {
+    const result = filterSignalGroups(sampleGroups, '컴팩션')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.title).toBe('메모리 & 컴팩션')
+    expect(result[0]?.rows).toHaveLength(1)
+    expect(result[0]?.rows[0]?.label).toBe('컴팩션 절감')
+  })
+
+  it('drops groups that have zero matching rows', () => {
+    const result = filterSignalGroups(sampleGroups, '일치도')
+    expect(result.map(g => g.title)).toEqual(['LLM 응답 정렬'])
+  })
+
+  it('trims the query before matching', () => {
+    const result = filterSignalGroups(sampleGroups, '  메모리  ')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.rows.map(r => r.label)).toEqual(['메모리 통과율'])
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    const result = filterSignalGroups(sampleGroups, 'zzz-no-match')
+    expect(result).toEqual([])
+  })
+
+  it('does not mutate the input groups or their row arrays', () => {
+    const snapshot = JSON.parse(JSON.stringify(sampleGroups))
+    filterSignalGroups(sampleGroups, '폴백')
+    expect(sampleGroups).toEqual(snapshot)
+  })
+
+  it('matches Latin characters case-insensitively', () => {
+    const groups = [
+      {
+        title: 'Mixed',
+        rows: [
+          { label: 'CPU Saturation', value: 0.4 },
+          { label: 'Disk IO', value: 0.9 },
+        ],
+      },
+    ]
+    const result = filterSignalGroups(groups, 'cpu')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.rows.map(r => r.label)).toEqual(['CPU Saturation'])
   })
 })

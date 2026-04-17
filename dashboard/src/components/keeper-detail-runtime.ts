@@ -334,7 +334,35 @@ interface SignalGroup {
   rows: Array<{ label: string; value: string | number }>
 }
 
+/**
+ * Filter SignalGroups by a case-insensitive substring match on row labels.
+ * Empty/whitespace query returns the input reference unchanged (no allocation).
+ * Groups with no matching rows are dropped. Input is not mutated.
+ */
+export function filterSignalGroups(
+  groups: readonly SignalGroup[],
+  query: string,
+): readonly SignalGroup[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return groups
+  const out: SignalGroup[] = []
+  for (const group of groups) {
+    const matchedRows = group.rows.filter(r => r.label.toLowerCase().includes(needle))
+    if (matchedRows.length > 0) {
+      out.push({ title: group.title, rows: matchedRows })
+    }
+  }
+  return out
+}
+
+function countSignalRows(groups: readonly SignalGroup[]): number {
+  let total = 0
+  for (const group of groups) total += group.rows.length
+  return total
+}
+
 export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
+  const [signalQuery, setSignalQuery] = useState('')
   const mw = keeper.metrics_window
 
   // Quality/rate metrics only — raw counts (handoffs, compactions, turns)
@@ -412,9 +440,42 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 
   if (visibleGroups.length === 0 && topListSections.length === 0) return null
 
+  const filteredGroups = filterSignalGroups(visibleGroups, signalQuery)
+  const totalRows = countSignalRows(visibleGroups)
+  const matchedRows = countSignalRows(filteredGroups)
+  const isFiltering = signalQuery.trim() !== ''
+  const showEmptyState = isFiltering && matchedRows === 0
+
   return html`
     <div class="flex flex-col gap-3">
-      ${visibleGroups.map(g => html`
+      ${totalRows > 0
+        ? html`
+            <div class="flex items-center gap-2">
+              <input
+                type="search"
+                class="flex-1 min-w-0 py-1.5 px-2 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-30)]"
+                placeholder="신호 지표 필터 (예: 폴백, 메모리, 컴팩션)"
+                aria-label="런타임 신호 지표 필터"
+                value=${signalQuery}
+                onInput=${(event: Event) => {
+                  const target = event.currentTarget as HTMLInputElement | null
+                  setSignalQuery(target?.value ?? '')
+                }}
+              />
+              ${isFiltering
+                ? html`<span class="text-[10px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">${matchedRows}/${totalRows}</span>`
+                : null}
+            </div>
+          `
+        : null}
+      ${showEmptyState
+        ? html`
+            <div class="py-3 px-3 rounded-lg border border-dashed border-[var(--card-border)] text-[11px] text-[var(--text-muted)] italic">
+              필터 결과 없음 (${totalRows} items)
+            </div>
+          `
+        : null}
+      ${filteredGroups.map(g => html`
         <div class="flex flex-col gap-1">
           <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] px-1">${g.title}</span>
           <div class="flex flex-col gap-1">

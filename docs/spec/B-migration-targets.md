@@ -47,7 +47,6 @@ Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 coordination과
 
 | File | Lines | Problem |
 |------|-------|---------|
-| `tool_team_session.ml` | 4,412 | 5-module 분할 설계 완료, 미실행 |
 | `tool_trpg.ml` | 1,934 | Coordination과 무관. 별도 패키지 대상 |
 | `tool_protocol_game_view.ml` | 1,674 | TRPG와 동일 |
 | `tool_mdal.ml` | 1,092 | Metric loop 단독 모듈. 분리 가능 |
@@ -86,7 +85,6 @@ Source: `ROADMAP.md` Short-term + `ARCHITECTURE-COMPLEXITY-ANALYSIS.md` Phase 2-
 | TRPG + protocol_game_view -> `masc-games` | tool_trpg, tool_protocol_game_view | 3,600+ | Not started | High |
 | risc + autoresearch + experiment -> `masc-experiments` | 3 tool modules | 2,700+ | Not started | High |
 | dune optional library separation | dune, lib/ | -- | Not started | Medium |
-| tool_team_session split (5 modules) | tool_team_session | 4,412 | Design done | High |
 | TRPG dm-keeper -> on-demand | keeper_autonomy | -- | Not started | Medium |
 | Test noise cleanup: 32 duplicate files | test/ | ~12K lines | Audit done | Medium |
 | 5 hollow test files 삭제 | test/ | -- | TODO에 기록 | Low |
@@ -137,7 +135,7 @@ Source: `ROADMAP.md` Long-term
 | Direction | Trigger | Source |
 |-----------|---------|--------|
 | Keeper Autonomy identity v2 Tier 2-3 (ToM, archetypes) | Tier 1이 가치 증명 | docs/archive/keeper-autonomy-identity-v2/ |
-| Figma-MCP 통합 (visual heartbeat) | figma-mcp 안정화 | docs/archive/EVOLUTION-PLAN-FIGMA-MCP.md |
+| Figma-MCP 통합 (visual heartbeat) | figma-mcp 안정화 | — |
 | Cluster mode / multi-node HA | 단일 노드 한계 도달 | IMMORTAL-SERVER-ROADMAP Phase 3 |
 | Chaos engineering framework | Production 장애 패턴 확인 | IMMORTAL-SERVER-ROADMAP Phase 3 |
 | Adaptive orchestration (dynamic org) | Agent 30+ | archive/IMPROVEMENT-PLAN P3 |
@@ -198,7 +196,6 @@ lib/room/        lib/time_compat/ lib/types/
 
 | 대상 | 현재 | 목표 | 설계 상태 |
 |------|------|------|----------|
-| tool_team_session.ml | 4,412 LOC 단일 파일 | 5 modules (types/parse/spawn/handlers/dispatcher) | 설계 완료 (ARCHITECTURE-COMPLEXITY) |
 | lib/ flat files | 294개 | Sub-library 기반 조직 | 7-Team Design으로 매핑 완료 |
 | masc_mcp.ml facade | 전체 re-export | Team별 facade | drift 문제 해소 필요 |
 
@@ -209,7 +206,6 @@ lib/room/        lib/time_compat/ lib/types/
 | room.ml | High | Core lifecycle, 다른 모든 모듈이 의존 |
 | cascade.ml | High | OAS bridge의 핵심 계약 |
 | keeper_autonomy.ml | High | Keeper 자율 실행 계약 |
-| tool_team_session.ml | Medium | 분할 전 API 계약 고정 |
 | spawn.ml | Medium | 61 references, Swarm 핵심 |
 
 ---
@@ -258,7 +254,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 
 | Gap | 현재 상태 | 필요한 spec |
 |-----|----------|-------------|
-| **Memory system** | AGENT-MEMORY-SYSTEM.md (design phase, 811 lines) | Memory tier 계약 (OAS 5-tier 포함) |
+| **Memory system** | 없음 (design draft removed 2026-04-17) | Memory tier 계약 (OAS 5-tier 포함) |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
 | **Keeper Autonomy identity** | docs/archive/keeper-autonomy-identity-v2/ (3 files) | 구현 후 spec 추가 |
@@ -266,7 +262,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 | **Operational runbook** | COMMAND-PLANE-RUNBOOK, BENCHMARK-RUNBOOK | 운영 절차 통합 spec |
 | **Config reference** | 없음 (env var 50+ 산재) | 환경변수/설정 SSOT |
 | **Error catalog** | 없음 | MCP error code + 복구 절차 |
-| **Migration guide** | OAS-MIGRATION-NEXT-STEPS.md | 버전 간 breaking change + migration path |
+| **Migration guide** | 없음 (next-steps draft removed 2026-04-17) | 버전 간 breaking change + migration path |
 | **Security model** | PRODUCT-REVIEW.md에서 지적 | Auth, trust boundary, threat model |
 
 ### docs/spec/ 현재 구성 (참고)
@@ -294,7 +290,6 @@ SPEC-INDEX.md               -- Spec 목차
 | # | Target | Impact | Effort |
 |---|--------|--------|--------|
 | 1 | CI blocker 3건 해소 (#1980, #1981, #2186) | Feature 작업 재개 | Low (각 1-2 시간) |
-| 2 | tool_team_session 5-module 분할 | God file 해소, 테스트 격리 | Medium (설계 완료) |
-| 3 | masc-games + masc-experiments 패키지 분리 | Tier 4 코드 32% 격리 | Medium-High |
-| 4 | Mode/profile system 구현 | 에이전트 tool 노출 93% 감소 | Medium |
-| 5 | 32 duplicate test files 정리 | 빌드/CI 시간 절감, noise 제거 | Low |
+| 2 | masc-games + masc-experiments 패키지 분리 | Tier 4 코드 32% 격리 | Medium-High |
+| 3 | Mode/profile system 구현 | 에이전트 tool 노출 93% 감소 | Medium |
+| 4 | 32 duplicate test files 정리 | 빌드/CI 시간 절감, noise 제거 | Low |

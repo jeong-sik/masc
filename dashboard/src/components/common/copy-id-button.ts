@@ -8,7 +8,7 @@ import { useState } from 'preact/hooks'
 import { showToast } from './toast'
 import { copyToClipboard } from './copyable-code'
 
-export interface CopyIdButtonProps {
+interface CopyIdButtonProps {
   value: string
   label?: string
   ariaLabel?: string

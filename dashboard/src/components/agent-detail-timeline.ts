@@ -2,9 +2,12 @@
 // Includes tool_call events from Activity Graph integration.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
+import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import { agentTimeline } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
 import { toolCategory, durationColor, formatDuration, formatArgs } from './tool-call-shared'
@@ -30,6 +33,58 @@ export function timelineEventLabel(type: string): string {
     default: return type
   }
 }
+
+// ── Event categorization & filter (pure) ──────────────────────────
+// Used for FilterChips grouping and filtering. Categories are
+// deliberately coarse so chips stay compact even as new event types
+// are added server-side.
+
+export type TimelineEventCategory = 'all' | 'task' | 'tool_call' | 'broadcast' | 'joined' | 'other'
+
+export function timelineEventCategory(type: string): Exclude<TimelineEventCategory, 'all'> {
+  if (type.startsWith('task_')) return 'task'
+  if (type === 'tool_call') return 'tool_call'
+  if (type === 'broadcast') return 'broadcast'
+  if (type === 'joined') return 'joined'
+  return 'other'
+}
+
+export function timelineEventSearchText(evt: AgentTimelineEvent): string {
+  const parts: string[] = [evt.type, timelineEventLabel(evt.type)]
+  const d = evt.detail as Record<string, unknown> | undefined
+  if (d && typeof d === 'object') {
+    for (const key of ['title', 'content', 'tool_name', 'error']) {
+      const v = d[key]
+      if (typeof v === 'string' && v.length > 0) parts.push(v)
+    }
+  }
+  return parts.join(' ').toLowerCase()
+}
+
+export function filterTimelineEvents(
+  events: AgentTimelineEvent[],
+  category: TimelineEventCategory,
+  query: string,
+): AgentTimelineEvent[] {
+  const q = query.trim().toLowerCase()
+  if (category === 'all' && q === '') return events
+  return events.filter(evt => {
+    if (category !== 'all' && timelineEventCategory(evt.type) !== category) return false
+    if (q !== '' && !timelineEventSearchText(evt).includes(q)) return false
+    return true
+  })
+}
+
+export function timelineCategoryCounts(
+  events: AgentTimelineEvent[],
+): Record<Exclude<TimelineEventCategory, 'all'>, number> {
+  const counts = { task: 0, tool_call: 0, broadcast: 0, joined: 0, other: 0 }
+  for (const evt of events) counts[timelineEventCategory(evt.type)]++
+  return counts
+}
+
+const timelineCategoryFilter = signal<TimelineEventCategory>('all')
+const timelineSearchQuery = signal('')
 
 function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }) {
   const d = evt.detail as Record<string, unknown>
@@ -77,6 +132,11 @@ export function AgentTimelineSection() {
 
   const events = timeline.events ?? []
   const summary = timeline.summary
+  const counts = timelineCategoryCounts(events)
+  const activeCategory = timelineCategoryFilter.value
+  const query = timelineSearchQuery.value
+  const filtered = filterTimelineEvents(events, activeCategory, query)
+  const filterActive = activeCategory !== 'all' || query.trim() !== ''
 
   return html`
     <${Card} title="활동 타임라인 (${summary?.total_events ?? 0}건)">
@@ -92,23 +152,54 @@ export function AgentTimelineSection() {
       ${events.length === 0
         ? html`<${EmptyState} message="작업 기록이 아직 없습니다" compact />`
         : html`
-            <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
-              ${events.map((evt: AgentTimelineEvent, idx: number) => {
-                if (evt.type === 'tool_call') {
-                  return html`<${ToolCallEventRow} evt=${evt} idx=${idx} />`
-                }
-                const detail = evt.detail as Record<string, string | undefined>
-                const title = detail.title ?? detail.content ?? ''
-                return html`
-                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
-                    <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
-                    <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="agent-timeline-detail">${trimText(title, 80)}</span>` : null}
-                    ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
-                  </div>
-                `
-              })}
+            <div class="flex flex-wrap gap-2 items-center mb-2">
+              <${FilterChips}
+                chips=${[
+                  { key: 'all' as TimelineEventCategory, label: '전체', count: events.length },
+                  { key: 'task' as TimelineEventCategory, label: '태스크', count: counts.task },
+                  { key: 'tool_call' as TimelineEventCategory, label: '도구', count: counts.tool_call },
+                  { key: 'broadcast' as TimelineEventCategory, label: '공지', count: counts.broadcast },
+                  { key: 'joined' as TimelineEventCategory, label: '참가', count: counts.joined },
+                  { key: 'other' as TimelineEventCategory, label: '기타', count: counts.other },
+                ]}
+                active=${timelineCategoryFilter}
+                size="sm"
+                tone="accent"
+              />
+              <${TextInput}
+                class="max-w-[220px]"
+                name="agent_timeline_search"
+                ariaLabel="타임라인 검색"
+                autoComplete="off"
+                placeholder="내용·도구 검색..."
+                value=${query}
+                onInput=${(e: Event) => { timelineSearchQuery.value = (e.target as HTMLInputElement).value }}
+              />
+              ${filterActive
+                ? html`<span class="text-[10px] text-[var(--text-dim)] tabular-nums">${filtered.length} / ${events.length}</span>`
+                : null}
             </div>
+            ${filtered.length === 0
+              ? html`<${EmptyState} message="조건에 맞는 이벤트가 없습니다" compact />`
+              : html`
+                  <div class="flex flex-col gap-0.5 max-h-[400px] overflow-y-auto">
+                    ${filtered.map((evt: AgentTimelineEvent, idx: number) => {
+                      if (evt.type === 'tool_call') {
+                        return html`<${ToolCallEventRow} evt=${evt} idx=${idx} />`
+                      }
+                      const detail = evt.detail as Record<string, string | undefined>
+                      const title = detail.title ?? detail.content ?? ''
+                      return html`
+                        <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+                          <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
+                          <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
+                          ${title ? html`<span class="agent-timeline-detail">${trimText(title, 80)}</span>` : null}
+                          ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
+                        </div>
+                      `
+                    })}
+                  </div>
+                `}
           `}
     <//>
   `

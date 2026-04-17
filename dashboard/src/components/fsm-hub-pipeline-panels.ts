@@ -6,6 +6,7 @@ import type { KeeperCompositeSnapshot } from '../api/keeper'
 import {
   type CompositeObservation,
   type InsightTone,
+  type ObservedLaneSummary,
   type StateEntries,
   fmtDuration,
   displayState,
@@ -15,6 +16,36 @@ import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 import { deriveSwimlaneSegments } from './fsm-hub-derivations'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
+
+/**
+ * Pure filter for observed lane summaries shown in the Operator Meaning
+ * grid (KTC/KDP/KCL/KMC + phase lanes).
+ *
+ * Case-insensitive substring match on `lane.field`, `lane.label`,
+ * `lane.value`, and `lane.meaning` in that order so operators can isolate
+ * one sub-FSM by its short code (`KCL`), by its Korean label
+ * (`캐스케이드`), by the current state value (`trying`, `idle`), or by a
+ * keyword in the explanatory meaning.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * `useMemo` keeps referential equality for the non-filtering path.
+ *
+ * Input is never mutated.
+ */
+export function filterObservedLanes(
+  lanes: readonly ObservedLaneSummary[],
+  query: string,
+): readonly ObservedLaneSummary[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return lanes
+  return lanes.filter(lane => {
+    if (lane.field.toLowerCase().includes(needle)) return true
+    if (lane.label.toLowerCase().includes(needle)) return true
+    if (lane.value.toLowerCase().includes(needle)) return true
+    if (lane.meaning.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 const INSIGHT_BADGE_CLS: Record<InsightTone, string> = {
   ok: 'text-[#22c55e] border-[rgba(34,197,94,0.3)] bg-[rgba(34,197,94,0.08)]',
@@ -47,6 +78,13 @@ export function OperationalMeaningPanel({
   const panelCls = INSIGHT_PANEL_CLS[insight.tone]
   const isAlarm = insight.tone === 'warn' || insight.tone === 'error'
 
+  const [query, setQuery] = useState('')
+  const visibleLanes = useMemo(
+    () => filterObservedLanes(lanes, query),
+    [lanes, query],
+  )
+  const isFiltering = query.trim() !== ''
+
   return html`
     <div
       class=${`rounded-xl border p-4 transition-colors duration-300 ${panelCls}`}
@@ -76,24 +114,42 @@ export function OperationalMeaningPanel({
         `)}
       </div>
 
-      <div class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-        ${lanes.map(lane => html`
-          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
-              <span class=${`rounded-full border px-1.5 py-0.5 text-[8px] font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
-                ${fmtDuration(lane.observedForSec)}
-              </span>
-            </div>
-            <div class="mt-1 font-mono text-[13px] font-semibold text-[var(--text-strong)]">${lane.value}</div>
-            <div class="mt-0.5 text-[9px] text-[var(--text-dim)]">${lane.label}</div>
-            <div class="mt-1.5 text-[9px] leading-relaxed text-[var(--text-body)]">${lane.meaning}</div>
-            <div class="mt-1 text-[8px] font-mono text-[var(--text-dim)]">
-              ${lane.transitionCount} observed edge${lane.transitionCount === 1 ? '' : 's'}
-            </div>
-          </div>
-        `)}
+      <div class="mt-4 flex items-center justify-between gap-2">
+        <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          관찰 레인
+        </div>
+        <input
+          type="search"
+          value=${query}
+          placeholder="field / label / state / meaning 필터"
+          aria-label="관찰 레인 필터"
+          onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
       </div>
+
+      ${isFiltering && visibleLanes.length === 0 && lanes.length > 0
+        ? html`<div class="mt-2 py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${lanes.length} lanes)</div>`
+        : html`
+          <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+            ${visibleLanes.map(lane => html`
+              <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">${lane.field}</span>
+                  <span class=${`rounded-full border px-1.5 py-0.5 text-[8px] font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
+                    ${fmtDuration(lane.observedForSec)}
+                  </span>
+                </div>
+                <div class="mt-1 font-mono text-[13px] font-semibold text-[var(--text-strong)]">${lane.value}</div>
+                <div class="mt-0.5 text-[9px] text-[var(--text-dim)]">${lane.label}</div>
+                <div class="mt-1.5 text-[9px] leading-relaxed text-[var(--text-body)]">${lane.meaning}</div>
+                <div class="mt-1 text-[8px] font-mono text-[var(--text-dim)]">
+                  ${lane.transitionCount} observed edge${lane.transitionCount === 1 ? '' : 's'}
+                </div>
+              </div>
+            `)}
+          </div>
+        `}
     </div>
   `
 }

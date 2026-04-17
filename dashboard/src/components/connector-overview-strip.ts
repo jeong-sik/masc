@@ -144,9 +144,38 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   `
 }
 
-export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
+/** Pure: count of KNOWN sidecars currently up. Exposed for unit tests
+    so the celebration banner condition can be pinned without DOM. */
+export function countConnectedSidecars(connectors: GateConnectorInfo[]): number {
+  return KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available === true).length
+}
+
+function CelebrationBanner({ connectedCount }: { connectedCount: number }) {
+  if (connectedCount < KNOWN_CONNECTOR_IDS.length) return null
   return html`
-    <div class="mb-4">
+    <div
+      class="mb-2 flex items-center justify-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-100"
+      data-celebration="all-connected"
+    >
+      <span aria-hidden="true">✨</span>
+      <span>${connectedCount}/${KNOWN_CONNECTOR_IDS.length} 커넥터 모두 정상 — 운영 준비 완료</span>
+      <span aria-hidden="true">✨</span>
+    </div>
+  `
+}
+
+export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
+  // Sticky so the rail rows stay visible while the operator scrolls
+  // through the stacked detail panels — they can always see "what's
+  // broken" without scrolling back up. backdrop-blur keeps the strip
+  // legible when card content slides under it.
+  const connectedCount = countConnectedSidecars(connectors)
+  return html`
+    <div
+      class="sticky top-0 z-10 mb-4 -mx-4 border-b border-[var(--card-border)] bg-[var(--bg-0)]/95 px-4 pt-2 pb-3 backdrop-blur supports-[backdrop-filter]:bg-[var(--bg-0)]/80"
+      data-overview-strip-root
+    >
+      <${CelebrationBanner} connectedCount=${connectedCount} />
       <${BulkActions} connectors=${connectors} />
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         ${KNOWN_CONNECTOR_IDS.map(id => html`

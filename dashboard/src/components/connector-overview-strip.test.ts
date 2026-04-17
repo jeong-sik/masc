@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { ConnectorOverviewStrip, _testResetBulkInflight } from './connector-overview-strip'
+import { ConnectorOverviewStrip, _testResetBulkInflight, countConnectedSidecars } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
 const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
@@ -103,5 +103,44 @@ describe('ConnectorOverviewStrip', () => {
     const discordTile = container.querySelector('[data-overview-tile="discord"]')!
     const pills = discordTile.querySelectorAll('[data-rail-pill]')
     expect(pills.length).toBe(4)
+  })
+
+  it('strip root has sticky positioning so it stays visible while scrolling', () => {
+    render(html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`, container)
+    const root = container.querySelector('[data-overview-strip-root]') as HTMLElement
+    expect(root).toBeTruthy()
+    expect(root.className).toContain('sticky')
+    expect(root.className).toContain('top-0')
+  })
+
+  it('celebration banner hidden when fewer than 4 sidecars are up', () => {
+    _testResetBulkInflight()
+    const threeUp = ['discord', 'imessage', 'slack'].map(id => mkConnector({ connector_id: id, available: true }))
+    render(html`<${ConnectorOverviewStrip} connectors=${threeUp} keeperCount=${0} />`, container)
+    expect(container.querySelector('[data-celebration]')).toBeNull()
+  })
+
+  it('celebration banner shows when all 4 sidecars are up', () => {
+    _testResetBulkInflight()
+    const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id => mkConnector({ connector_id: id, available: true }))
+    render(html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`, container)
+    const banner = container.querySelector('[data-celebration="all-connected"]')
+    expect(banner).toBeTruthy()
+    expect(banner?.textContent).toContain('4/4')
+  })
+})
+
+describe('countConnectedSidecars', () => {
+  it('returns 0 for empty list', () => {
+    expect(countConnectedSidecars([])).toBe(0)
+  })
+
+  it('counts only available=true known sidecars', () => {
+    const list = [
+      mkConnector({ connector_id: 'discord', available: true }),
+      mkConnector({ connector_id: 'slack', available: false }),
+      mkConnector({ connector_id: 'unknown-bridge', available: true }),
+    ]
+    expect(countConnectedSidecars(list)).toBe(1)
   })
 })

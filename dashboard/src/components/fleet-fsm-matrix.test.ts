@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import {
   chipClassFor,
+  filterKeeperSnapshots,
   FLEET_HISTORY_LEN,
   inferKeeperNameFrom,
   pushObservation,
@@ -173,5 +174,70 @@ describe('pushObservation', () => {
     const t1 = pushObservation({}, [warn])
     const t2 = pushObservation(t1, [cool])
     expect(t2.beta!.breaker).toEqual(['warning', 'cooling'])
+  })
+})
+
+describe('filterKeeperSnapshots', () => {
+  const alpha = snapshot({ name: 'gen12-alpha' })
+  const beta = snapshot({
+    name: 'gen14-beta',
+    phase: 'Overflowed',
+    cascade: { state: 'trying' },
+  })
+  const gamma = snapshot({
+    name: 'gen12-gamma',
+    turn_phase: 'prompting',
+  })
+  const rows: readonly KeeperCompositeSnapshot[] = [alpha, beta, gamma]
+
+  it('returns the input reference unchanged on an empty query', () => {
+    expect(filterKeeperSnapshots(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference unchanged on a whitespace-only query', () => {
+    expect(filterKeeperSnapshots(rows, '   ')).toBe(rows)
+  })
+
+  it('matches keeper name substring case-insensitively', () => {
+    const out = filterKeeperSnapshots(rows, 'GEN12')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen12-alpha', 'gen12-gamma'])
+  })
+
+  it('matches phase (KSM) axis value', () => {
+    const out = filterKeeperSnapshots(rows, 'overflowed')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
+  })
+
+  it('matches cascade (KCL) axis value', () => {
+    const out = filterKeeperSnapshots(rows, 'trying')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
+  })
+
+  it('matches turn (KTC) axis value', () => {
+    const out = filterKeeperSnapshots(rows, 'prompting')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen12-gamma'])
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    expect(filterKeeperSnapshots(rows, 'nothing-here')).toEqual([])
+  })
+
+  it('does not mutate the input array', () => {
+    const input: KeeperCompositeSnapshot[] = [alpha, beta, gamma]
+    const before = input.slice()
+    filterKeeperSnapshots(input, 'gen12')
+    expect(input).toEqual(before)
+    expect(input.length).toBe(3)
+  })
+
+  it('trims the query before matching', () => {
+    const out = filterKeeperSnapshots(rows, '  gen14-beta  ')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
+  })
+
+  it('returns a new array (not input ref) when filtering actually runs', () => {
+    const out = filterKeeperSnapshots(rows, 'gen12')
+    expect(out).not.toBe(rows)
+    expect(out.length).toBe(2)
   })
 })

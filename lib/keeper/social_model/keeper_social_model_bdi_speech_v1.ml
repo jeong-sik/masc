@@ -46,16 +46,20 @@ let state_of_social_state (state : Types.social_state) : state =
   }
 
 let to_social_state (state : state) (output : output) : Types.social_state =
-  {
-    social_model = state.social_model;
-    belief_summary = state.belief_summary;
-    active_desire = state.active_desire;
-    current_intention = state.current_intention;
-    blocker = state.blocker;
-    need = state.need;
-    speech_act = output.speech_act;
-    delivery_surface = output.delivery_surface;
-  }
+  (* Gen8: cap narrative fields so previous_state on the next turn does
+     not keep growing when speech_act=Stay_silent preserves state across
+     turns. See Types.cap_social_state doc. *)
+  Types.cap_social_state
+    {
+      social_model = state.social_model;
+      belief_summary = state.belief_summary;
+      active_desire = state.active_desire;
+      current_intention = state.current_intention;
+      blocker = state.blocker;
+      need = state.need;
+      speech_act = output.speech_act;
+      delivery_surface = output.delivery_surface;
+    }
 
 let belief_summary_of_observation
     (observation : Keeper_world_observation.world_observation) : string =

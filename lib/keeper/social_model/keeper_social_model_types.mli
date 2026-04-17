@@ -60,3 +60,15 @@ val is_known_social_model : string -> bool
 val fallback_social_model : string -> string option
 val normalize_social_model : string -> string
 val transition_reason_to_string : transition_reason -> string
+
+val default_belief_summary_max_chars : int
+val default_option_field_max_chars : int
+
+(** Bound the narrative fields of a [social_state] before it leaves the
+    speech model. Caps [belief_summary] and each option field with an
+    ellipsis marker when they exceed the budget. Other fields pass
+    through unchanged. Idempotent. *)
+val cap_social_state :
+  ?belief_max_chars:int ->
+  ?option_max_chars:int ->
+  social_state -> social_state

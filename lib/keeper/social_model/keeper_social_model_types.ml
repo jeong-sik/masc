@@ -146,3 +146,44 @@ let transition_reason_to_string = function
   | Protocol_violation_no_tools_no_social_headers ->
       "protocol_violation:no_tool_calls_and_no_social_headers"
   | Failure_run_error -> "failure:run_error"
+
+(* Gen8 persistence-layer cap for social_state narrative fields.
+
+   Gen7 (#7676) capped keeper_state_snapshot before continuity_summary
+   rendering. The social_state record (belief_summary, active_desire,
+   current_intention, blocker, need) follows a parallel accumulation
+   path: BDI speech v1 carries these through previous_state into the
+   next turn's prompt. Without an explicit bound, a keeper repeating
+   "stay_silent" can still grow belief_summary monotonically because
+   speech_act=Stay_silent clears response_text but preserves state.
+
+   Same budget discipline as cap_snapshot (400 char primary, 200 char
+   option fields) kept as labeled-optional knobs so a cascade-level
+   policy can plug different budgets per speech model. *)
+let default_belief_summary_max_chars = 400
+let default_option_field_max_chars = 200
+
+let truncate_string ~max_chars s =
+  if String.length s <= max_chars then s
+  else String.sub s 0 max_chars ^ "…"
+
+let truncate_option ~max_chars = function
+  | None -> None
+  | Some s when String.length s <= max_chars -> Some s
+  | Some s -> Some (String.sub s 0 max_chars ^ "…")
+
+let cap_social_state
+    ?(belief_max_chars = default_belief_summary_max_chars)
+    ?(option_max_chars = default_option_field_max_chars)
+    (state : social_state) : social_state =
+  {
+    state with
+    belief_summary =
+      truncate_string ~max_chars:belief_max_chars state.belief_summary;
+    active_desire =
+      truncate_option ~max_chars:option_max_chars state.active_desire;
+    current_intention =
+      truncate_option ~max_chars:option_max_chars state.current_intention;
+    blocker = truncate_option ~max_chars:option_max_chars state.blocker;
+    need = truncate_option ~max_chars:option_max_chars state.need;
+  }

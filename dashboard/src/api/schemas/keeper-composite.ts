@@ -153,7 +153,6 @@ export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPha
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>
 export type KeeperCompositeCascadeState = InferOutput<typeof KeeperCompositeCascadeStateSchema>
 export type KeeperCompositeCompactionStage = InferOutput<typeof KeeperCompositeCompactionStageSchema>
-export type KeeperCompositeCircuitBreakerState = InferOutput<typeof KeeperCompositeCircuitBreakerStateSchema>
 
 export class CompositeSchemaDriftError extends SchemaDriftError {
   constructor(issues: readonly BaseIssue<unknown>[]) {

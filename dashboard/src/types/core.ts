@@ -136,18 +136,6 @@ export interface BoardComment {
   created_at: string
 }
 
-export interface BoardHearth {
-  post_id: string
-  agent: string
-  created_at: string
-}
-
-export interface BoardFlair {
-  name: string
-  emoji: string
-  color: string
-}
-
 // --- Keeper Metrics ---
 
 export interface InferenceTelemetry {

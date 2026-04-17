@@ -15,6 +15,7 @@
    agent_tool_surfaces
    agent_registry_eio
    anti_rationalization
+   attribution
    auto_recall
    auto_responder
    auth

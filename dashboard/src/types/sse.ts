@@ -68,6 +68,46 @@ export type SSEEventType =
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'
 
+// --- Attribution envelope ---
+// Structured verdict metadata for gate decisions. Emitted alongside existing
+// reason/reason_code fields so dashboards can trace causality without breaking
+// consumers that don't understand the envelope.
+//
+// OCaml SSOT: lib/attribution.mli (since 2.261.0).
+// AttributionOutcome is a discriminated union on 'kind' — each variant
+// carries exactly the fields relevant to that outcome (no optional fields
+// shared across variants).
+
+export type AttributionOrigin = 'det' | 'nondet'
+
+// Known gate identifiers. Kept open ('string') so new gates can emit without
+// a client update, but enumerating canonical values gives us autocomplete and
+// catches typos.
+export type AttributionGate =
+  | 'cdal_verdict'
+  | 'verification'
+  | 'accountability'
+  | 'keeper_fsm'
+  | 'oas_completion'
+  | 'agent_lifecycle'
+  | 'task_transition'
+  | 'worker_dev_tools'
+  | string
+
+// Gate decision outcome. Discriminated union — exhaustive switch on 'kind'.
+export type AttributionOutcome =
+  | { kind: 'passed' }
+  | { kind: 'policy_failed'; reason: string }
+  | { kind: 'transition_blocked'; from_state: string; to_state: string; reason: string }
+  | { kind: 'partial_pass'; score: number; rationale: string }
+
+export interface Attribution {
+  origin: AttributionOrigin
+  gate: AttributionGate
+  evidence: Record<string, unknown>
+  outcome: AttributionOutcome
+}
+
 export interface SSEEvent {
   type: SSEEventType
   severity?: JournalSeverity | string
@@ -134,6 +174,10 @@ export interface SSEEvent {
   correlation_id?: string
   // OAS envelope per-run identifier (one per Agent.run invocation).
   run_id?: string
+  // Gate attribution envelope — structured verdict metadata. Emitters
+  // attach this alongside existing reason/reason_code fields since 2.261.0.
+  // See lib/attribution.mli for OCaml SSOT and evidence schema per gate.
+  attribution?: Attribution
 }
 
 // --- Journal ---

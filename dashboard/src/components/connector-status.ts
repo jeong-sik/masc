@@ -83,7 +83,7 @@ export function sidecarCommands(connectorId: string): SidecarCommands {
     start: `cd ${dir} && ./run.sh`,
     tail: `cd ${dir} && ./run.sh tail`,
     status: `cd ${dir} && ./run.sh status`,
-    stop: `pkill -f '${dir}/src' # ${connectorId}-bot`,
+    stop: `cd ${dir} && ./run.sh stop`,
   }
 }
 

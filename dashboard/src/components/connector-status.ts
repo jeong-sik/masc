@@ -55,6 +55,22 @@ function sidecarCommands(connectorId: string): SidecarCommands {
   }
 }
 
+// Brand accent RGB triplets per connector. Used as a subtle 135deg gradient
+// behind the panel header so an operator scanning many connectors can tell
+// them apart without reading the title. Values picked from each platform's
+// official brand palette, biased toward dark-theme legibility.
+const CONNECTOR_ACCENT_RGB: Record<string, string> = {
+  discord: '88,101,242',   // blurple
+  imessage: '48,209,88',   // iOS Messages bubble green
+  slack: '236,178,46',     // brand yellow (most distinctive vs telegram cyan)
+  telegram: '34,158,217',  // brand cyan
+}
+
+function connectorAccentStyle(connectorId: string): string {
+  const rgb = CONNECTOR_ACCENT_RGB[connectorId] ?? '120,130,150'
+  return `background:linear-gradient(135deg,rgba(${rgb},0.16),rgba(${rgb},0.04))`
+}
+
 const actionLoading = signal(false)
 const channelDraft = signal('')
 const expandedKeeperFor = signal<string | null>(null)
@@ -464,7 +480,7 @@ function ConnectorLivePanel({
     !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
 
   return html`
-    <div class="mb-4 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(135deg,rgba(88,101,242,0.16),rgba(88,101,242,0.04))] p-4">
+    <div class="mb-4 rounded-xl border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
         ${connector?.bot_user_name

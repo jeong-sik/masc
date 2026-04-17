@@ -1,7 +1,7 @@
 import type { RouteState, TabId } from '../types'
 
-export type SurfaceId = TabId
-export type SurfaceSectionId =
+type SurfaceId = TabId
+type SurfaceSectionId =
   // monitoring
   | 'observatory'
   | 'agents'
@@ -28,7 +28,7 @@ export type SurfaceSectionId =
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
-export interface DashboardNavGroup {
+interface DashboardNavGroup {
   id: SurfaceId
   label: string
   icon: string
@@ -39,7 +39,7 @@ export interface DashboardNavGroup {
   hidden?: boolean
 }
 
-export interface DashboardNavItem {
+interface DashboardNavItem {
   id: TabId
   label: string
   icon: string
@@ -47,7 +47,7 @@ export interface DashboardNavItem {
   defaultParams?: Record<string, string>
 }
 
-export interface DashboardSectionNavItem {
+interface DashboardSectionNavItem {
   id: SurfaceSectionId
   label: string
   description: string
@@ -282,7 +282,7 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
  *   - Cross-surface redirects are not supported (normalizeRouteParams returns
  *     params for the same tab). Cross-surface routing lives in the router.
  */
-export interface SectionRedirect {
+interface SectionRedirect {
   section: string
   view?: string
 }

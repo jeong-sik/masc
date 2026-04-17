@@ -1,15 +1,19 @@
 // Feature Health panel — feature flag status and health monitoring.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { formatTimeAgo } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
+import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import { StatCard } from './common/stat-card'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
+type StatusFilter = FeatureStatus | 'all'
 
 interface FeatureHealthItem {
   env_name: string
@@ -46,6 +50,49 @@ interface FeatureHealthData {
 }
 
 const featureHealth: AsyncResource<FeatureHealthData> = createAsyncResource()
+
+// Filter state (module-scoped so filter survives re-renders / refreshes).
+const statusFilter = signal<StatusFilter>('all')
+const searchQuery = signal('')
+
+const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: '전체' },
+  { value: 'healthy', label: '정상' },
+  { value: 'warning', label: '실험적' },
+  { value: 'inactive', label: '비활성' },
+  { value: 'deprecated', label: '폐기 예정' },
+]
+
+// Pure filter helpers — exported for isolated testing.
+export function featureMatchesSearch(
+  item: Pick<FeatureHealthItem, 'env_name' | 'description'>,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase()
+  if (q === '') return true
+  return (
+    item.env_name.toLowerCase().includes(q) ||
+    item.description.toLowerCase().includes(q)
+  )
+}
+
+export function featureMatchesStatus(
+  item: Pick<FeatureHealthItem, 'status'>,
+  status: StatusFilter,
+): boolean {
+  if (status === 'all') return true
+  return item.status === status
+}
+
+export function filterFeatures<
+  T extends Pick<FeatureHealthItem, 'env_name' | 'description' | 'status'>,
+>(features: T[], query: string, status: StatusFilter): T[] {
+  const q = query.trim().toLowerCase()
+  if (q === '' && status === 'all') return features
+  return features.filter(
+    (f) => featureMatchesSearch(f, q) && featureMatchesStatus(f, status),
+  )
+}
 
 function loadFeatureHealth(): Promise<void> {
   return featureHealth.load(() => get<FeatureHealthData>('/api/v1/dashboard/feature-health'))
@@ -193,11 +240,65 @@ export function FeatureHealth() {
                   </div>
                 </div>
 
-                <div class="space-y-3">
-                  ${Object.entries(data.features_by_category).map(([category, categoryData]) => html`
-                    <${CategorySection} category=${category} categoryData=${categoryData} />
-                  `)}
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <${FilterChips}
+                    chips=${STATUS_FILTER_OPTIONS.map((opt) => ({
+                      key: opt.value,
+                      label: opt.label,
+                      count:
+                        opt.value === 'all'
+                          ? data.all_features.length
+                          : data.all_features.filter((f) => f.status === opt.value).length,
+                    }))}
+                    active=${statusFilter}
+                  />
+                  <${TextInput}
+                    class="sm:max-w-[260px]"
+                    name="feature_health_search"
+                    ariaLabel="기능 플래그 검색"
+                    autoComplete="off"
+                    placeholder="기능 이름 또는 설명 검색..."
+                    value=${searchQuery.value}
+                    onInput=${(e: Event) => {
+                      searchQuery.value = (e.target as HTMLInputElement).value
+                    }}
+                  />
                 </div>
+
+                ${(() => {
+                  const hasFilter = statusFilter.value !== 'all' || searchQuery.value.trim() !== ''
+                  if (!hasFilter) {
+                    return html`
+                      <div class="space-y-3">
+                        ${Object.entries(data.features_by_category).map(([category, categoryData]) => html`
+                          <${CategorySection} category=${category} categoryData=${categoryData} />
+                        `)}
+                      </div>
+                    `
+                  }
+                  const filtered = filterFeatures(
+                    data.all_features,
+                    searchQuery.value,
+                    statusFilter.value,
+                  )
+                  if (filtered.length === 0) {
+                    return html`
+                      <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]">
+                        조건에 맞는 기능이 없습니다.
+                      </div>
+                    `
+                  }
+                  return html`
+                    <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-3)] p-4">
+                      <div class="mb-3 text-xs text-[var(--text-muted)]">
+                        ${filtered.length} / ${data.all_features.length}개 기능
+                      </div>
+                      <div class="space-y-2">
+                        ${filtered.map((feature) => html`<${FeatureItem} item=${feature} />`)}
+                      </div>
+                    </div>
+                  `
+                })()}
               </div>
             `
           }}

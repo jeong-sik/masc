@@ -239,7 +239,7 @@ function truncateMiddle(value: string, limit = 18): string {
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 
-function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
+export function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
   if (!names) return ''
   const channelName = names.channel_names[channelId]
   const guildId = names.channel_to_guild[channelId]

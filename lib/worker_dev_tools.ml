@@ -667,8 +667,8 @@ let gh_allowed_commands =
       repo delete/archive/transfer/rename, release delete, secret
       delete, auth logout/token, ssh-key delete, workflow disable,
       api --method DELETE, graphql mutation delete*/remove*/transfer*.
-      Must route through a structured keeper tool (keeper_pr_submit,
-      etc.) that carries operator-approval semantics. *)
+      Must route through a structured keeper tool that carries
+      operator-approval semantics. *)
 type gh_reversibility =
   | R0_Read
   | R1_Reversible

@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - bin/main_stdio_eio.ml
+  - start-masc-mcp.sh
+---
+
 # MCP Config Template
 
 `~/.mcp.json`에 아래 항목을 추가하세요. 이미 `mcpServers`가 있으면 병합합니다.

@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - bin/masc_tui.ml
+  - bin/masc_tui_render.ml
+  - bin/masc_tui_loader.ml
+---
+
 # MASC TUI Guide
 
 Terminal UI for monitoring and interacting with MASC keepers.

@@ -133,7 +133,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
           ("authoritative_judgment_available", `Bool false);
-          ("provenance_summary", operator_surface_contract_json);
           ("judgment", `Null);
           ("operator_judge_runtime", operator_judge_runtime_json config);
           ("attention_items", `List []);
@@ -182,7 +181,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               ("target_type", `String "root");
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
-              ("provenance_summary", operator_surface_contract_json);
               ("operator_judge_runtime", operator_judge_runtime_json config);
               ("role_census", `Assoc []);
               ("runtime_pools", `Assoc []);

@@ -36,16 +36,6 @@ let normalized_actor ~context_actor = function
       let trimmed = String.trim context_actor in
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
-let operator_surface_contract_json =
-  `Assoc
-    [
-      ("judgment", `String "judgment");
-      ("attention_items", `String "derived");
-      ("recommended_actions", `String "fallback");
-      ("active_recommended_actions", `String "judgment_or_fallback");
-      ("recent_reviews", `String "operator_state");
-    ]
-
 let operator_judge_runtime_json (config : Coord.config) =
   let runtime = Dashboard_operator_judge.runtime_status config.base_path in
   `Assoc

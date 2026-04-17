@@ -323,7 +323,8 @@ module Reflection_bridge = struct
       let process_loop () =
         Eio.Switch.run @@ fun loop_sw ->
         Eio.Switch.on_release loop_sw (fun () ->
-            (try Grpc_eio.Stream.close response_stream with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()));
+            Safe_ops.protect ~default:() (fun () ->
+              Grpc_eio.Stream.close response_stream));
             let rec loop () =
               let request_bytes = Grpc_eio.Stream.take request_stream in
               let services = Grpc_eio.Server.list_services !server_ref in

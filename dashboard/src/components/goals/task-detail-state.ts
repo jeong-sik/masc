@@ -11,6 +11,7 @@ import type { Task } from '../../types'
 
 export type ActivityFilter = 'all' | 'tool_call' | 'broadcast' | 'task'
 export const activeFilter = signal<ActivityFilter>('all')
+export const activityListSearchQuery = signal<string>('')
 
 // -- Normalized task event (from masc_task_history raw JSON) --------
 
@@ -78,6 +79,7 @@ function resetState(): void {
   activityError.value = null
   activeTab.value = 'overview'
   activeFilter.value = 'all'
+  activityListSearchQuery.value = ''
 }
 
 export function openTaskDetail(task: Task): void {

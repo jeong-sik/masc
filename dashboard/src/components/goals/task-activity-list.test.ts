@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import type { UnifiedTraceEvent } from '../session-trace/session-trace-state'
-import { activeFilter } from './task-detail-state'
+import { activeFilter, activityListSearchQuery } from './task-detail-state'
 
 vi.mock('../common/json-viewer', async importOriginal => {
   const actual = await importOriginal<typeof import('../common/json-viewer')>()
@@ -17,7 +17,7 @@ vi.mock('../common/time-ago', () => ({
   TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
 }))
 
-import { TaskActivityList } from './task-activity-list'
+import { TaskActivityList, filterActivityEvents } from './task-activity-list'
 
 function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): UnifiedTraceEvent {
   return {
@@ -37,11 +37,13 @@ function sampleToolCallEvent(overrides: Partial<UnifiedTraceEvent> = {}): Unifie
 describe('TaskActivityList', () => {
   beforeEach(() => {
     activeFilter.value = 'all'
+    activityListSearchQuery.value = ''
   })
 
   afterEach(() => {
     cleanup()
     activeFilter.value = 'all'
+    activityListSearchQuery.value = ''
     vi.clearAllMocks()
   })
 
@@ -132,5 +134,88 @@ describe('TaskActivityList', () => {
     expect(icon).not.toBeNull()
     expect(icon).toHaveAttribute('aria-hidden', 'true')
     expect(icon).toHaveAttribute('focusable', 'false')
+  })
+
+  it('narrows events when search query is entered', () => {
+    const events = [
+      sampleToolCallEvent({ id: 'e1', summary: 'fetch_keeper_trajectory' }),
+      sampleToolCallEvent({ id: 'e2', summary: 'broadcast message', kind: 'broadcast', toolArgs: undefined, toolResult: null }),
+    ]
+    render(h(TaskActivityList, { events, loading: false, error: null, showToolCalls: true }))
+
+    // Initially both rows visible
+    expect(screen.getByText('fetch_keeper_trajectory')).toBeInTheDocument()
+    expect(screen.getByText('broadcast message')).toBeInTheDocument()
+
+    const input = screen.getByLabelText('활동 검색') as HTMLInputElement
+    fireEvent.input(input, { target: { value: 'broadcast' } })
+
+    expect(screen.queryByText('fetch_keeper_trajectory')).not.toBeInTheDocument()
+    expect(screen.getByText('broadcast message')).toBeInTheDocument()
+  })
+})
+
+describe('filterActivityEvents', () => {
+  const base: UnifiedTraceEvent = {
+    id: 'x',
+    ts: 0,
+    ts_iso: '2026-04-03T00:00:00Z',
+    kind: 'tool_call',
+    sourceLane: 'masc',
+    summary: 's',
+    detail: {},
+  }
+
+  it('returns all events when filter=all and query is empty', () => {
+    const evs = [{ ...base, id: 'a' }, { ...base, id: 'b', kind: 'broadcast' as const }]
+    expect(filterActivityEvents(evs, 'all', '')).toHaveLength(2)
+  })
+
+  it('filters by categorical kind', () => {
+    const evs = [
+      { ...base, id: 'a', kind: 'tool_call' as const },
+      { ...base, id: 'b', kind: 'broadcast' as const },
+      { ...base, id: 'c', kind: 'task' as const },
+    ]
+    const out = filterActivityEvents(evs, 'broadcast', '')
+    expect(out).toHaveLength(1)
+    expect(out[0]?.id).toBe('b')
+  })
+
+  it('matches free-text query against summary (case-insensitive)', () => {
+    const evs = [
+      { ...base, id: 'a', summary: 'Fetch Trajectory' },
+      { ...base, id: 'b', summary: 'broadcast' },
+    ]
+    const out = filterActivityEvents(evs, 'all', 'TRAJECTORY')
+    expect(out.map(e => e.id)).toEqual(['a'])
+  })
+
+  it('matches query against toolName, error, toolArgs (object), toolResult', () => {
+    const evs: UnifiedTraceEvent[] = [
+      { ...base, id: 'tool', toolName: 'masc_claim' },
+      { ...base, id: 'err', summary: 'x', error: 'permission denied' },
+      { ...base, id: 'args', summary: 'x', toolArgs: { room: 'alpha' } },
+      { ...base, id: 'res', summary: 'x', toolResult: '{"ok":true}' },
+      { ...base, id: 'none', summary: 'unrelated' },
+    ]
+    expect(filterActivityEvents(evs, 'all', 'masc_claim').map(e => e.id)).toEqual(['tool'])
+    expect(filterActivityEvents(evs, 'all', 'denied').map(e => e.id)).toEqual(['err'])
+    expect(filterActivityEvents(evs, 'all', 'alpha').map(e => e.id)).toEqual(['args'])
+    expect(filterActivityEvents(evs, 'all', '"ok":true').map(e => e.id)).toEqual(['res'])
+  })
+
+  it('ignores whitespace-only query', () => {
+    const evs = [{ ...base, id: 'a' }, { ...base, id: 'b' }]
+    expect(filterActivityEvents(evs, 'all', '   ')).toHaveLength(2)
+  })
+
+  it('combines kind filter and text query (AND semantics)', () => {
+    const evs: UnifiedTraceEvent[] = [
+      { ...base, id: 'a', kind: 'tool_call', summary: 'alpha call' },
+      { ...base, id: 'b', kind: 'broadcast', summary: 'alpha message' },
+    ]
+    const out = filterActivityEvents(evs, 'tool_call', 'alpha')
+    expect(out.map(e => e.id)).toEqual(['a'])
   })
 })

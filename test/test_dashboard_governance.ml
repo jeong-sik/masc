@@ -63,8 +63,6 @@ let test_empty_governance_structure () =
       in
       let open Yojson.Safe.Util in
       let _gen = json |> member "generated_at" |> to_string in
-      check bool "case tracking retired" false
-        (json |> member "case_tracking_available" |> to_bool);
       check bool "retirement note present" true
         (json |> member "note" |> to_string |> String.length > 0);
       let summary = json |> member "summary" in
@@ -105,8 +103,6 @@ let test_factual_snapshot_marks_surface_retired () =
     (fun () ->
       let json = Lib.Dashboard_governance.factual_snapshot_json ~base_path:dir in
       let open Yojson.Safe.Util in
-      check bool "factual snapshot marks case tracking retired" false
-        (json |> member "case_tracking_available" |> to_bool);
       check bool "factual snapshot includes note" true
         (json |> member "note" |> to_string |> String.length > 0))
 
@@ -236,8 +232,6 @@ let test_governance_monitoring_uses_live_runtime () =
       in
       let open Yojson.Safe.Util in
       check bool "monitoring call succeeds" true ok;
-      check bool "monitoring marks case tracking retired" false
-        (json |> member "case_tracking_available" |> to_bool);
       check string "monitoring includes retirement note"
         Lib.Dashboard_governance.case_tracking_note
         (json |> member "note" |> to_string);

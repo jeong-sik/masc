@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { formatPct, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
-import type { Keeper, KeeperMetricPoint } from '../types'
+import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
 const CTX_CRITICAL_PCT = 85
@@ -60,6 +60,30 @@ export function ctxSegmentLabel(key: string): string {
 
 export function ctxSegmentColor(key: string): string {
   return CTX_SEGMENT_COLORS[key] ?? '#94a3b8'
+}
+
+/**
+ * Pure filter for CTX composition "latest breakdown" entries.
+ *
+ * Case-insensitive substring match against either the raw segment key
+ * (e.g. `history_tool_result`) or its human label (e.g. `History · tool result`).
+ * This lets operators search by either form — raw key is what shows up in
+ * backend logs, label is what the dashboard renders.
+ *
+ * Empty/whitespace query returns the input reference unchanged so the
+ * default render path avoids an unnecessary array allocation. Does not
+ * mutate the input.
+ */
+export function filterCtxCompositionEntries(
+  entries: ReadonlyArray<readonly [string, PromptSegmentTelemetry]>,
+  query: string,
+): ReadonlyArray<readonly [string, PromptSegmentTelemetry]> {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return entries
+  return entries.filter(([key]) => {
+    if (key.toLowerCase().includes(needle)) return true
+    return ctxSegmentLabel(key).toLowerCase().includes(needle)
+  })
 }
 
 
@@ -552,6 +576,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
     .filter(([, segment]) => (segment?.estimated_tokens ?? 0) > 0)
     .sort(([, left], [, right]) => (right.estimated_tokens ?? 0) - (left.estimated_tokens ?? 0))
   if (latestEntries.length === 0 || latestTotal <= 0) return null
+  const visibleCtxEntries = filterCtxCompositionEntries(latestEntries, ctxCompositionSearch.value)
 
   const allKeys = Array.from(
     new Set(points.flatMap((point: KeeperMetricPoint) => Object.keys(point.ctx_composition?.segments ?? {}))),
@@ -651,9 +676,25 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         </div>
 
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2">latest breakdown</div>
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">latest breakdown</span>
+            <span class="text-[9px] font-mono text-[var(--text-dim)]">${visibleCtxEntries.length}/${latestEntries.length}</span>
+          </div>
+          <input
+            type="search"
+            value=${ctxCompositionSearch.value}
+            placeholder="세그먼트 필터 (예: history, memory)"
+            aria-label="context composition 세그먼트 필터"
+            onInput=${(e: Event) => { ctxCompositionSearch.value = (e.target as HTMLInputElement).value }}
+            class="mb-2 w-full rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
+          ${visibleCtxEntries.length === 0 ? html`
+            <div class="py-4 text-center text-[11px] text-[var(--text-dim)]">
+              필터 결과 없음 (${latestEntries.length} items)
+            </div>
+          ` : null}
           <div class="flex flex-col gap-1.5">
-            ${latestEntries.map(([key, segment]) => {
+            ${visibleCtxEntries.map(([key, segment]) => {
               const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
               return html`
                 <div class="flex items-center justify-between gap-2 text-[11px]">
@@ -878,6 +919,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
 // Primary display is handled by Header, KpiGrid, Profile, and Config sections.
 
 const fieldSearch = signal('')
+const ctxCompositionSearch = signal('')
 
 export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   const filter = fieldSearch.value.toLowerCase()

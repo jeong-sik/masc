@@ -17,6 +17,18 @@ import {
 // --- Loops list (deduplication via AsyncResource) ---
 
 export const loopsResource = createAsyncResource<AutoresearchLoopsResponse>()
+export const loopsLimit = signal(100)
+
+export const hasMoreLoops = computed(() => {
+  const state = loopsResource.state.value
+  if (state.status !== 'loaded') return false
+  return state.data.total > state.data.loops.length
+})
+
+export async function loadMoreLoops() {
+  loopsLimit.value += 100
+  await loadLoops()
+}
 
 // --- Detail (manual signals with sequence counter for race-condition guard) ---
 
@@ -87,7 +99,7 @@ export async function loadLoops({ refreshDetail = false }: { refreshDetail?: boo
   pendingRefreshDetail ||= refreshDetail
 
   await loopsResource.load(async () => {
-    const data = await fetchAutoresearchLoops()
+    const data = await fetchAutoresearchLoops(0, loopsLimit.value)
     if (pendingRefreshDetail) {
       pendingRefreshDetail = false
       await syncSelectedLoopDetail(data)

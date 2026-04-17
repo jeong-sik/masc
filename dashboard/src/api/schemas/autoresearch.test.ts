@@ -43,7 +43,7 @@ function validSummary(overrides: Record<string, unknown> = {}): Record<string, u
 
 describe('parseAutoresearchLoopsResponse', () => {
   it('accepts a well-formed response with zero loops', () => {
-    const out = parseAutoresearchLoopsResponse({ loops: [], total: 0 })
+    const out = parseAutoresearchLoopsResponse({ loops: [], total: 0, offset: 0, limit: 100 })
     expect(out.total).toBe(0)
     expect(out.loops).toHaveLength(0)
   })
@@ -52,6 +52,7 @@ describe('parseAutoresearchLoopsResponse', () => {
     const out = parseAutoresearchLoopsResponse({
       loops: [validSummary(), validSummary({ loop_id: 'loop-2', status: 'completed' })],
       total: 2,
+      offset: 0, limit: 100
     })
     expect(out.loops).toHaveLength(2)
     expect(out.loops[1]!.status).toBe('completed')
@@ -63,12 +64,13 @@ describe('parseAutoresearchLoopsResponse', () => {
     const out = parseAutoresearchLoopsResponse({
       loops: [validSummary({ status: 'defragmenting' })],
       total: 1,
+      offset: 0, limit: 100
     })
     expect(out.loops[0]!.status).toBe('error')
   })
 
   it('throws AutoresearchSchemaDriftError when a required field is missing', () => {
-    const bad = { loops: [validSummary({ loop_id: undefined })], total: 1 }
+    const bad = { loops: [validSummary({ loop_id: undefined })], total: 1, offset: 0, limit: 100 }
     expect(() => parseAutoresearchLoopsResponse(bad)).toThrow(AutoresearchSchemaDriftError)
   })
 

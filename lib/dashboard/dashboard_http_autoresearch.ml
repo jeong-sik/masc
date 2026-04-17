@@ -173,7 +173,7 @@ let safe_persisted_entry_json ~(base_path : string)
 (** Build the loops list JSON for GET /api/v1/autoresearch/loops.
     Merges in-memory active loops with persisted-only loops.
     Converts to JSON early to avoid polymorphic variant type mismatch. *)
-let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
+let autoresearch_loops_json ~(base_path : string) ?(offset = 0) ?(limit = 100) () : Yojson.Safe.t =
   (* 1. Collect in-memory active loops as (id, sort_key, json) *)
   let active_entries =
     Autoresearch.with_loops_ro (fun () ->
@@ -213,10 +213,17 @@ let autoresearch_loops_json ~(base_path : string) : Yojson.Safe.t =
         else Float.compare a.neg_updated_at b.neg_updated_at)
       all
   in
+  let total = List.length sorted in
+  let sliced =
+    sorted
+    |> List.filteri (fun i _ -> i >= offset && i < offset + limit)
+  in
   `Assoc
     [
-      ("loops", `List (List.map (fun (_, _, json) -> json) sorted));
-      ("total", `Int (List.length sorted));
+      ("loops", `List (List.map (fun (_, _, json) -> json) sliced));
+      ("total", `Int total);
+      ("offset", `Int offset);
+      ("limit", `Int limit);
     ]
 
 (** Build the loop detail JSON for GET /api/v1/autoresearch/loops/:loopId.

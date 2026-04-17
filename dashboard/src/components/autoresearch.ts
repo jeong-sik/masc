@@ -28,6 +28,8 @@ import {
   authorFilter,
   filteredLoops,
   availableAuthors,
+  hasMoreLoops,
+  loadMoreLoops,
   loadLoops,
   refreshAutoresearchSurface,
   selectLoop,
@@ -111,6 +113,13 @@ function LoopSelector() {
           `
         })}
         ${loops.length === 0 ? html`<div class="text-[var(--text-muted)] text-xs py-1.5">선택된 실행자의 루프가 없습니다.</div>` : null}
+        ${hasMoreLoops.value ? html`
+          <button type="button" 
+            class="px-3 py-1.5 rounded-lg text-xs font-medium border border-card-border bg-card/60 text-accent cursor-pointer hover:bg-[var(--accent-10)] hover:border-accent/40 transition-colors flex items-center gap-1" 
+            onClick=${() => { void loadMoreLoops() }}>
+            <span>더 불러오기</span>
+          </button>
+        ` : null}
       </div>
     </div>
   `

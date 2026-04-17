@@ -40,8 +40,9 @@ export interface StartAutoresearchLoopParams {
   build_verify_fn?: string
 }
 
-export async function fetchAutoresearchLoops(): Promise<AutoresearchLoopsResponse> {
-  const raw = await get<unknown>('/api/v1/autoresearch/loops')
+export async function fetchAutoresearchLoops(offset = 0, limit = 100): Promise<AutoresearchLoopsResponse> {
+  const url = `/api/v1/autoresearch/loops?offset=${offset}&limit=${limit}`
+  const raw = await get<unknown>(url)
   return parseAutoresearchLoopsResponse(raw)
 }
 

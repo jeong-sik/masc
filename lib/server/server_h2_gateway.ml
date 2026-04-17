@@ -623,7 +623,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           let state = get_server_state () in
           let base_path = state.Mcp_server.room_config.base_path in
           let json =
-            Dashboard_http_autoresearch.autoresearch_loops_json ~base_path
+            Dashboard_http_autoresearch.autoresearch_loops_json ~base_path ()
           in
           h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors
 

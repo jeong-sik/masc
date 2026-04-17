@@ -19,6 +19,7 @@ import {
 import { RouteLink } from './common/route-link'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { CopyIdButton } from './common/copy-id-button'
 
 const buildIdentityOpen = signal(false)
 
@@ -343,18 +344,43 @@ export function TabContent() {
   }
 }
 
+/** Pure: build the shareable URL for the current section. Uses
+    window.location as the truth source (the router writes to it
+    already) so we never diverge from what the browser address bar
+    shows. Returns empty string when window is unavailable
+    (SSR/happy-dom without location) so the caller can hide the
+    share affordance gracefully. */
+export function currentSectionShareUrl(): string {
+  if (typeof window === 'undefined' || window.location === undefined) {
+    return ''
+  }
+  return window.location.href
+}
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
 
   const description = currentSection?.description ?? currentView?.description ?? null
+  const title = currentSection?.label ?? currentView?.label ?? '홈'
+  const shareUrl = currentSectionShareUrl()
 
   return html`
     <div class="mb-3 flex flex-col gap-1.5">
-      <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
-        ${currentSection?.label ?? currentView?.label ?? '홈'}
-      </h2>
+      <div class="flex items-center gap-2">
+        <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
+          ${title}
+        </h2>
+        ${shareUrl !== ''
+          ? html`<${CopyIdButton}
+              value=${shareUrl}
+              label=${`섹션 링크 (${title})`}
+              ariaLabel="현재 섹션 URL 복사"
+              size=${14}
+            />`
+          : null}
+      </div>
       ${description ? html`<p class="m-0 text-[13px] leading-[1.5] text-[var(--text-dim)]">${description}</p>` : null}
     </div>
   `

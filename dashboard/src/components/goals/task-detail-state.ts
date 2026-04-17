@@ -98,6 +98,7 @@ function resetState(): void {
   taskEvents.value = []
   taskEventsLoading.value = false
   taskEventsError.value = null
+  taskEventsSearchQuery.value = ''
   activityEvents.value = []
   activityLoading.value = false
   activityError.value = null

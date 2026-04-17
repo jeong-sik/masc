@@ -17,6 +17,7 @@ type stop_reason =
 
 type config = {
   name : string;
+  provider_cfg : Llm_provider.Provider_config.t;
   provider : Oas.Provider.config;
   model_id : string;
   priority : Llm_provider.Request_priority.t option;
@@ -60,8 +61,14 @@ type config = {
           to scrub [STATE] blocks before the 100-char truncation. *)
 }
 
-let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
-  { name; provider; model_id; priority = None; system_prompt; tools;
+let default_config
+    ~name
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    ~system_prompt
+    ~tools : config =
+  let provider = Oas.Provider.config_of_provider_config provider_cfg in
+  { name; provider_cfg; provider; model_id = provider_cfg.model_id;
+    priority = None; system_prompt; tools;
     max_turns = 20;
     max_idle_turns = 3;
     max_tokens = Oas_worker_cascade.default_max_tokens;
@@ -144,15 +151,71 @@ let label_resolution_error_to_sdk_error err =
          detail = label_resolution_error_to_string err;
        })
 
-let resolve_provider_of_label (label : string) :
-    (Oas.Provider.config, label_resolution_error) result =
+let resolve_provider_config_of_label (label : string) :
+    (Llm_provider.Provider_config.t, label_resolution_error) result =
   match Cascade_config.parse_model_string label with
-  | Some pc -> Ok (Oas.Provider.config_of_provider_config pc)
+  | Some pc -> Ok pc
   | None ->
       Log.error ~ctx:"oas_worker_exec"
         "refusing unresolved explicit model label=%S; execution never falls back to discovery-only models"
         label;
       Error (Invalid_model_label label)
+
+let invalid_runtime_config field detail =
+  Oas.Error.Config
+    (Oas.Error.InvalidConfig { field; detail })
+
+let cli_model_override model_id =
+  match String.lowercase_ascii (String.trim model_id) with
+  | "" | "auto" -> None
+  | _ -> Some (String.trim model_id)
+
+let non_http_transport_of_provider
+    ~(sw : Eio.Switch.t)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+  : (Llm_provider.Llm_transport.t option, Oas.Error.sdk_error) result =
+  let proc_mgr_result () =
+    match Process_eio.get_proc_mgr () with
+    | Ok mgr -> Ok mgr
+    | Error detail -> Error (invalid_runtime_config "proc_mgr" detail)
+  in
+  match provider_cfg.kind with
+  | Llm_provider.Provider_config.Claude_code ->
+      (match proc_mgr_result () with
+       | Error _ as e -> e
+       | Ok mgr ->
+           let config =
+             {
+               Llm_provider.Transport_claude_code.default_config with
+               model = cli_model_override provider_cfg.model_id;
+             }
+           in
+           Ok
+             (Some
+                (Llm_provider.Transport_claude_code.create ~sw ~mgr ~config)))
+  | Llm_provider.Provider_config.Gemini_cli ->
+      (match proc_mgr_result () with
+       | Error _ as e -> e
+       | Ok mgr ->
+           let config =
+             {
+               Llm_provider.Transport_gemini_cli.default_config with
+               model = cli_model_override provider_cfg.model_id;
+             }
+           in
+           Ok
+             (Some
+                (Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config)))
+  | Llm_provider.Provider_config.Codex_cli ->
+      (match proc_mgr_result () with
+       | Error _ as e -> e
+       | Ok mgr ->
+           Ok
+             (Some
+                (Llm_provider.Transport_codex_cli.create ~sw ~mgr
+                   ~config:Llm_provider.Transport_codex_cli.default_config)))
+  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm ->
+      Ok None
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)
@@ -209,6 +272,7 @@ let partial_response_of_stop
 (* ================================================================ *)
 
 let build
+    ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Oas.Agent.t, Oas.Error.sdk_error) result =
@@ -332,6 +396,15 @@ let build
     | Some s -> Oas.Builder.with_summarizer s builder
     | None -> builder
   in
+  let builder =
+    match non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg with
+    | Ok (Some transport) -> Ok (Oas.Builder.with_transport transport builder)
+    | Ok None -> Ok builder
+    | Error _ as e -> e
+  in
+  match builder with
+  | Error _ as e -> e
+  | Ok builder ->
   Oas.Builder.build_safe builder
 
 (* ================================================================ *)
@@ -391,10 +464,11 @@ let enrich_idle_detail (detail : string) (messages : Oas.Types.message list) : s
       cumulative budgets); OAS must not override MASC model/temperature
       selection after resume. *)
 let resume_from_checkpoint
+    ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
     ~(checkpoint : Oas.Checkpoint.t)
-  : Oas.Agent.t =
+  : (Oas.Agent.t, Oas.Error.sdk_error) result =
   (* Adjust budgets: max_turns and max_cost_usd are per-call, but
      Agent.resume restores turn_count/usage from checkpoint. Without
      adjustment the loop guard fires immediately on resumed agents. *)
@@ -457,9 +531,14 @@ let resume_from_checkpoint
     allowed_paths = config.allowed_paths;
     description = config.description;
   } in
-  Oas.Agent.resume ~net ~checkpoint:patched_checkpoint ~tools:config.tools
-    ?context:config.context
-    ~options ~config:agent_config ()
+  match non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg with
+  | Error _ as e -> e
+  | Ok transport ->
+      let options = { options with transport } in
+      Ok
+        (Oas.Agent.resume ~net ~checkpoint:patched_checkpoint
+           ~tools:config.tools ?context:config.context
+           ~options ~config:agent_config ())
 
 (* ================================================================ *)
 (* Run                                                               *)
@@ -496,14 +575,14 @@ let run
   ) config.event_bus;
   let agent_result = match oas_checkpoint with
     | Some checkpoint ->
-      (try Ok (resume_from_checkpoint ~net ~config ~checkpoint)
+      (try resume_from_checkpoint ~sw ~net ~config ~checkpoint
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
            config.name (Printexc.to_string exn);
-         build ~net ~config)
-    | None -> build ~net ~config
+         build ~sw ~net ~config)
+    | None -> build ~sw ~net ~config
   in
   match agent_result with
   | Error e ->

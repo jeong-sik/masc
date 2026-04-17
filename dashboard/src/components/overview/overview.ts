@@ -7,6 +7,7 @@ import { useMemo } from 'preact/hooks'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
+import { StatusDot } from '../common/status-dot'
 import { missionLoading, missionSnapshot, refreshMissionSnapshot } from '../../mission-store'
 import { topActiveAgents } from '../../observatory-store'
 import { namespaceTruth, namespaceTruthLoading, refreshNamespaceTruth } from '../../namespace-truth-store'
@@ -34,6 +35,81 @@ import type {
 import type { ReadonlySignal } from '@preact/signals'
 
 const OVERVIEW_STALE_MS = 300_000
+/** Warn tier threshold: 1 minute. Matches Vercel deployment row "Last
+    updated" turn-amber gate. Picked by convention — most observability
+    dashboards use a ~60s boundary between "fresh" and "getting old". */
+const OVERVIEW_WARN_MS = 60_000
+
+export type FreshnessTier = 'unknown' | 'fresh' | 'warn' | 'stale'
+
+/** Pure: classify snapshot age into a 4-tier health reading that maps
+    1:1 to StatusDot tones (unknown=muted, fresh=ok, warn=amber, stale=bad).
+    Reference UIs: Vercel / Uptime Kuma / Linear cycle row dots all
+    use this same 4-tier pattern so operators can scan a grid of rows
+    for \"one of these is not like the others\" in sub-second time. */
+export function classifyFreshness(ageMs: number | null | undefined): FreshnessTier {
+  if (ageMs == null || Number.isNaN(ageMs)) return 'unknown'
+  if (ageMs < 0) return 'fresh' // clock-skew guard: treat future timestamps as fresh
+  if (ageMs < OVERVIEW_WARN_MS) return 'fresh'
+  if (ageMs < OVERVIEW_STALE_MS) return 'warn'
+  return 'stale'
+}
+
+/** Pure: Tailwind tone class for a freshness tier. Shared with any
+    caller that wants to render a consistent indicator (future dashboard
+    surfaces, log viewer header, etc.). */
+export function freshnessTierToneClass(tier: FreshnessTier): string {
+  switch (tier) {
+    case 'unknown': return 'bg-[var(--text-muted)]'
+    case 'fresh':   return 'bg-ok shadow-[0_0_6px_rgba(74,222,128,0.55)]'
+    case 'warn':    return 'bg-warn shadow-[0_0_6px_rgba(255,176,32,0.5)]'
+    case 'stale':   return 'bg-bad shadow-[0_0_6px_rgba(248,113,113,0.55)]'
+  }
+}
+
+/** Pure: aria-label for screen readers. The StatusDot itself is
+    aria-hidden by default, but we expose this so the caller can wrap
+    it in role=\"img\" when the dot appears standalone (no adjacent
+    text like the \"마지막 갱신\" line that already narrates the state). */
+export function freshnessTierAriaLabel(tier: FreshnessTier): string {
+  switch (tier) {
+    case 'unknown': return '상태 알 수 없음'
+    case 'fresh':   return '신선함'
+    case 'warn':    return '오래됨 (1분 이상)'
+    case 'stale':   return 'stale (5분 이상)'
+  }
+}
+
+/** Pure: is an Op Hub tile "active" (non-zero count, draws the eye)?
+    Single-seam helper so the tile style decisions below — number
+    color, border, footnote mute — share one truth source. Reference
+    UIs (Stripe dashboard "$0" customer cards, Linear backlog zero
+    counters, GitHub PR-review counters): when the count is zero the
+    whole tile dims; when non-zero it snaps back to full contrast.
+    The operator's eye then skips the quiet tiles without consciously
+    parsing them. */
+export function opHubTileIsActive(count: number): boolean {
+  return Number.isFinite(count) && count > 0
+}
+
+/** Pure: Tailwind class for the giant count number.
+    Active tile → full strong text; zero/idle → muted so three zero
+    tiles don't collectively shout. */
+export function opHubTileNumberClass(count: number): string {
+  return opHubTileIsActive(count)
+    ? 'mt-1 text-[24px] font-bold text-[var(--text-strong)]'
+    : 'mt-1 text-[24px] font-bold text-[var(--text-dim)]'
+}
+
+/** Pure: Tailwind class for the tile border + background. Active tile
+    gets a gentle accent ring so the eye catches the \"not like the
+    others\" without the tile screaming. Zero tile falls back to the
+    existing subdued card style. */
+export function opHubTileBorderClass(count: number): string {
+  return opHubTileIsActive(count)
+    ? 'rounded-lg border border-accent/30 bg-accent/5 p-3'
+    : 'rounded-lg border border-card-border/35 bg-card/55 p-3'
+}
 
 function timestampToMs(timestamp?: string | null): number | null {
   if (!timestamp) return null
@@ -57,7 +133,9 @@ function OverviewFreshnessStrip() {
     namespaceTruth.value?.generated_at ?? null,
   )
   const generatedMs = timestampToMs(generatedAt)
-  const isStale = generatedMs != null && Date.now() - generatedMs > OVERVIEW_STALE_MS
+  const ageMs = generatedMs != null ? Date.now() - generatedMs : null
+  const tier = classifyFreshness(ageMs)
+  const isStale = tier === 'stale'
   const refreshing = missionLoading.value || namespaceTruthLoading.value
 
   return html`
@@ -65,7 +143,16 @@ function OverviewFreshnessStrip() {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
+            <${StatusDot}
+              size="sm"
+              class=${freshnessTierToneClass(tier)}
+              ariaLabel=${freshnessTierAriaLabel(tier)}
+              testId="overview-freshness-dot"
+            />
             <span class="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview Freshness</span>
+            ${tier === 'warn'
+              ? html`<span class="rounded-full border border-warn/25 bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">1분 이상 경과</span>`
+              : null}
             ${isStale
               ? html`<span class="rounded-full border border-warn/30 bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn">5분 이상 stale</span>`
               : null}
@@ -584,19 +671,19 @@ function OperationsHubCard() {
               `
             : null}
           <div class="mt-4 grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
-            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+            <div class=${opHubTileBorderClass(pendingApprovals)}>
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">정책 승인</div>
-              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingApprovals}</div>
+              <div class=${opHubTileNumberClass(pendingApprovals)}>${pendingApprovals}</div>
               <div class="mt-1 text-[11px] text-[var(--text-muted)]">pending approvals</div>
             </div>
-            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+            <div class=${opHubTileBorderClass(pendingConfirms)}>
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">운영 확인</div>
-              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingConfirms}</div>
+              <div class=${opHubTileNumberClass(pendingConfirms)}>${pendingConfirms}</div>
               <div class="mt-1 text-[11px] text-[var(--text-muted)]">operator confirm queue</div>
             </div>
-            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+            <div class=${opHubTileBorderClass(attentionCount)}>
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">주의 신호</div>
-              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${attentionCount}</div>
+              <div class=${opHubTileNumberClass(attentionCount)}>${attentionCount}</div>
               <div class="mt-1 text-[11px] text-[var(--text-muted)]">operator attention summary</div>
             </div>
           </div>

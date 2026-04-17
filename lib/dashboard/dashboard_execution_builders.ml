@@ -213,6 +213,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       [
         trim_to_option (string_field "updated_at" keeper);
         trim_to_option (string_field "last_seen" agent);
+        trim_to_option (string_field "tool_audit_at" keeper);
         audit.tool_audit_at;
       ]
   in

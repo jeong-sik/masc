@@ -92,7 +92,7 @@ Spec+code pair exists, but `KeeperCompositeLifecycle.tla` does not cross them wi
 
 | Candidate                      | Spec                                | Code                                                | States                                          | Verdict                                                                  |
 | ------------------------------ | ----------------------------------- | --------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
-| KCB — Circuit breaker          | `KeeperCircuitBreaker.tla`          | `keeper_failure_circuit_breaker.ml`                 | **Observable: clean, warning, cooling.** `tripped` is unobservable because the mutator resets `consecutive_count` during the trip transition. The spec's `Closed / Open / Half_open` triple does not survive the counter-based implementation as-is — `Open` is a transient step inside `record_failure`, not a stable state. | **Admitted as column 6** (LT-16-KCB Phase 1–3, 2026-04-17). Matrix, flowchart, and drift-audit all updated to the 3 observable states. `tripped` is marked with a dashed edge in the Mermaid panel to acknowledge the unobservable transition. |
+| KCB — Circuit breaker          | `specs/keeper-state-machine/KeeperCircuitBreaker.tla` | `lib/keeper/keeper_failure_circuit_breaker.ml`      | Spec variables: `count / currentClass / tripped / totalTrips / classStreak / step` — counter-based, matching the OCaml implementation directly. No `Closed / Open / Half_open` triple in either layer. Dashboard axis surfaces the three **observable** derivations (`clean / warning / cooling`); `tripped` stays a same-step mutator flag per the spec's `RecordFailure` action. | **Admitted as column 6** (LT-16-KCB Phases 1–3, 2026-04-17). Spec + clean/buggy cfg pair relocated into `specs/keeper-state-machine/` and wired into `scripts/tla-check.sh` so the Bug Model (`TripOnlyWithStreak` invariant on `NextBuggy` with a class-change-no-reset mutation) now runs on every CI that triggers the `tla` job. |
 | KCF — Campaign lifecycle       | `KeeperCampaignLifecycle.tla`       | `keeper_campaign_fsm.mli`                           | Bootstrapping, Claiming_task, Advancing, …      | **Defer.** Redundant with KDP for most operational decisions; matrix is already wide.       |
 | KSM-Ledger — Magentic ledger   | `KeeperSocialModelMagenticLedger.tla` | `keeper_social_model_magentic_ledger_fsm.ml`      | Advancing, Reactive, …                          | **Defer.** Social-model signal, not an operational one; separate panel, not a core axis.   |
 
@@ -122,11 +122,19 @@ A CI rule enforcing this is out of scope for LT-15 but is the right follow-up (D
 
 ### Post-audit update (2026-04-17)
 
-LT-16-KCB Phase 1 discovered that the KCB spec does not translate 1:1 to the implementation: the classical `Closed / Open / Half_open` triple names states that are either *unobservable at snapshot time* (`Open` = `tripped`, reset in the same critical section) or do not exist in the counter-based OCaml model. The landed axis therefore uses the **observable state set** (`clean / warning / cooling`) and the Mermaid flowchart notes the unobservable transition with a dashed edge.
+LT-16-KCB Phases 1–3 (#7793 / #7801 / #7822) landed the circuit-breaker axis end-to-end. A subsequent neutral re-audit uncovered two earlier errors in this document itself:
 
-This is the first axis in the matrix where the spec **state set disagreed with what a fleet-level observer can actually see**, and the drift audit checklist should be extended in the next iteration to include a "snapshot-observability" column per state, so the same trap does not hide inside future admissions (KCF, KSM-Ledger).
+1. **Spec content was mis-described.** A previous iteration of this row claimed the spec defined a `Closed / Open / Half_open` triple that "does not survive the counter-based implementation." The actual spec (`specs/keeper-state-machine/KeeperCircuitBreaker.tla`) is **already counter-based** — variables are `count`, `currentClass`, `tripped`, `totalTrips`, `classStreak`, `step`. No `Closed / Open / Half_open` states exist in either the TLA+ module or the OCaml module. The "triple does not survive" framing was a hallucination carried forward without reading the actual `.tla`.
 
-No code change in this PR. Next tick (T+3) is **LT-13**: wire `InvariantViolationCounts` to a Prometheus counter + alert rule + Grafana panel.
+2. **Spec was not under CI.** The file lived at `specs/KeeperCircuitBreaker.tla` (repo top-level `specs/`), while every other axis lives in `specs/keeper-state-machine/`. `scripts/tla-check.sh` iterates only `specs/keeper-state-machine/`, `specs/boundary/`, `specs/bug-models/`, `specs/masc-ecosystem/`, and `tla/`. The KCB spec was therefore a **dead document** — present on disk but never model-checked, which is what allowed the mis-description above to persist.
+
+Both drifts are resolved in this PR: spec + both `.cfg`s relocated into `specs/keeper-state-machine/`, and `tla-check.sh` gained one clean + one buggy line for `KeeperCircuitBreaker.tla`. Local TLC confirms 334 distinct states under `Spec` (no violation) and exit code 12 (`Invariant TripOnlyWithStreak is violated`) under `SpecBuggy` — the Bug Model pattern from CLAUDE.md is now live on the KCB axis.
+
+### New drift class: "spec is present but unguarded"
+
+The earlier post-audit suggested a "snapshot-observability" column per state. That framing was itself driven by the mistaken spec reading. The real new drift class that this episode reveals is **documented but ungated**: a `.tla` exists, the drift-audit lists it, but no CI job ever runs TLC on it. The fix is structural — `tla-check.sh` should discover all `specs/**/*.tla` with a matching `.cfg` automatically, the same way it already discovers `specs/bug-models/` and `tla/`. That sweep is out of scope for this PR (would fold in ~20 other top-level specs at once) but is the right follow-up to close the general case.
+
+No runtime code change in this PR. Matrix, flowchart, schema, and dashboard are already on main through the LT-16 Phase series.
 
 ## 6. References
 

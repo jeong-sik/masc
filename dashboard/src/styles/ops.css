@@ -11,37 +11,5 @@
 /* ops-action-guide-item hover/tone variants: folded into @utility ops-action-guide-item above */
 /* ops-priority-card tone variants: folded into @utility ops-priority-card above */
 
-@utility ops-lane-panel {
-  background:
-    linear-gradient(180deg, rgba(13, 22, 40, 0.82), rgba(13, 22, 40, 0.65)),
-    radial-gradient(circle at top right, var(--accent-10), transparent 42%);
-  border: 1px solid var(--border-slate-12);
-  border-radius: var(--radius-md);
-  padding: 16px;
-}
-
-/* ops-stat tone variants: folded into @utility ops-stat above */
-
-.ops-control-summary::-webkit-details-marker {
-  display: none;
-}
-
-@utility ops-guidance-card {
-  border-radius: var(--radius-sm);
-  padding: 12px 14px;
-  transition: border-color 0.15s, background 0.15s;
-  &.ok { border-color: var(--ok-35); background: rgba(74, 222, 128, 0.06); border-left: 3px solid var(--ok); }
-  &.warn { border-color: var(--warn-30); background: rgba(251, 191, 36, 0.06); border-left: 3px solid var(--warn); }
-  &.bad { border-color: var(--bad-30); background: rgba(248, 113, 113, 0.06); border-left: 3px solid var(--bad-light); }
-}
-
-@utility ops-entity-card {
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-  &:hover, &.active {
-    border-color: rgba(71, 184, 255, 0.42);
-    background: var(--accent-8);
-    box-shadow: 0 0 0 1px rgba(71, 184, 255, 0.12);
-  }
-}
 
 /* Dead .ops-workbench and .ops-actor-input media queries removed — classes not in use. */

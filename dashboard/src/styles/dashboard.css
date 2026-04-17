@@ -21,11 +21,6 @@
 }
 
 /* ── Collapsible Sections ── */
-@utility mission-collapsible-summary {
-  transition: background 0.15s;
-  &:hover { background: var(--white-4); }
-}
-
 .overview-section-collapsible > summary {
   transition: background 0.15s;
 }
@@ -56,11 +51,6 @@
 }
 
 /* board-post content-visibility: folded into @utility board-post below */
-
-/* ── Mission Status Dot ── */
-@utility mission-status-dot {
-  &.mission-state-alive { background: var(--ok); box-shadow: 0 0 4px rgba(74, 222, 128, 0.5); }
-}
 
 /* ── Card-level dimming: compound selectors, kept as raw CSS ── */
 .mission-crew-card.mission-state-offline,

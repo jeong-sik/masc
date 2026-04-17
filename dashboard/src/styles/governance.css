@@ -8,17 +8,6 @@ button.governance-row.selected {
   background: var(--accent-14);
 }
 
-/* ── Governance Chips (multi-variant: ok, warn) ── */
-@utility governance-chip {
-  &.ok { border-color: var(--ok-40); background: var(--ok-12); color: #b4f5ca; }
-  &.warn { border-color: rgba(251, 191, 36, 0.4); background: var(--warn-12); color: #ffe09b; }
-}
-
-@utility governance-badge {
-  &.positive { border-color: var(--ok-40); background: var(--ok-12); color: #b4f5ca; }
-  &.negative { border-color: rgba(239, 68, 68, 0.44); background: var(--bad-12); color: #fecaca; }
-}
-
 /* ── Responsive ── */
 @media (max-width: 1200px) {
   .governance-layout {

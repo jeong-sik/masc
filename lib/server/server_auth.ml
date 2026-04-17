@@ -22,14 +22,7 @@ let ipaddr_is_unspecified = function
   | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
 
-let is_loopback_host host =
-  let normalized = String.trim host |> String.lowercase_ascii in
-  match normalized with
-  | "localhost" -> true
-  | _ -> (
-      match Ipaddr.of_string normalized with
-      | Ok ip -> ipaddr_is_loopback ip
-      | Error _ -> false)
+let is_loopback_host = Masc_network_defaults.is_loopback_host
 
 let is_unspecified_host host =
   match Ipaddr.of_string (String.trim host) with

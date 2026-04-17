@@ -160,14 +160,9 @@ let path_within ~root path =
 let host_is_linux () =
   Sys.os_type = "Unix" && Sys.file_exists "/proc/version"
 
-let is_loopback_host = function
-  | Some "localhost" | Some "127.0.0.1" -> true
-  | Some host when String.starts_with ~prefix:"127." host -> true
-  | _ -> false
-
 let rewrite_loopback_url value =
   let uri = Uri.of_string value in
-  if is_loopback_host (Uri.host uri) then
+  if Masc_network_defaults.is_loopback_host_opt (Uri.host uri) then
     Uri.with_host uri (Some docker_host_alias) |> Uri.to_string
   else value
 

@@ -1031,16 +1031,12 @@ let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider
   | Llm_provider.Provider_config.Codex_cli
   | Llm_provider.Provider_config.Ollama -> []
 
-let is_loopback_host = function
-  | Some "localhost" | Some "127.0.0.1" -> true
-  | Some host when String.starts_with ~prefix:"127." host -> true
-  | _ -> false
-
 let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t) : string list =
   match cfg.kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
     let uri = Uri.of_string cfg.base_url in
-    if is_loopback_host (Uri.host uri) then [] else auth_env_keys_of_provider_kind cfg.kind
+    if Masc_network_defaults.is_loopback_host_opt (Uri.host uri) then []
+    else auth_env_keys_of_provider_kind cfg.kind
   | Llm_provider.Provider_config.Gemini -> [ "GEMINI_API_KEY" ]
   | _ -> auth_env_keys_of_provider_kind cfg.kind
 

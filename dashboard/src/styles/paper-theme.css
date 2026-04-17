@@ -1,0 +1,115 @@
+/* =========================================================================
+   MASC Dashboard — Paper Theme (opt-in preview)
+   Activate with ?theme=paper or localStorage.dashboardTheme = "paper".
+
+   Source: Anyang Sleepers Design System (colors_and_type.css).
+   That spec calls itself "the paper inversion of MASC" and maps every
+   current semantic role to warm-paper tokens. This file scopes those
+   tokens under [data-theme="paper"] and bridges them to the existing
+   --color-* semantic variables that components already consume, so
+   enabling the theme swaps the palette with zero component edits.
+
+   Components whose classes (.btn, .card etc) collide with the design
+   system are NOT imported — only tokens. Component migration is a
+   follow-up phase.
+   ========================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+[data-theme="paper"] {
+  color-scheme: light;
+
+  /* ───── Paper & ink (design system source of truth) ──────── */
+  --paper:        #F5F2EA;
+  --paper-2:      #EFEBE0;
+  --paper-3:      #E5E0D1;
+  --paper-4:      #D8D2BF;
+
+  --ink:          #151515;
+  --ink-2:        #2E2E2C;
+  --ink-3:        #515049;
+  --ink-4:        #74726A;
+  --ink-5:        #9A978D;
+  --ink-6:        #BCB8AC;
+
+  /* ───── Accent scale ─────────────────────────────────────── */
+  --forest:       #2D5F4E;   --forest-fill:#CFDFD7;  --forest-line:#4E8773;
+  --brass:        #8C6A1E;   --brass-fill: #E9DDB8;  --brass-line: #B8933A;
+  --brick:        #8B3A3A;   --brick-fill: #E8CFCB;  --brick-line: #B45C5C;
+  --ember:        #B35A1F;   --ember-fill: #ECD5BD;  --ember-line: #D07A3A;
+  --slate:        #3E4A5C;   --slate-fill: #D6DBE2;  --slate-line: #6B7A8E;
+  --plum:         #5C3E56;   --plum-fill:  #E0D4DE;  --plum-line:  #855E7D;
+  --teal:         #236874;   --teal-fill:  #CEDEE2;  --teal-line:  #4C94A3;
+
+  /* ───── Borders ──────────────────────────────────────────── */
+  --border-1-paper: #1A1A1A;
+  --border-2-paper: rgba(21, 21, 21, 0.48);
+  --border-3-paper: rgba(21, 21, 21, 0.22);
+  --border-4-paper: rgba(21, 21, 21, 0.12);
+  --border-5-paper: rgba(21, 21, 21, 0.06);
+
+  /* ───── Typography ───────────────────────────────────────── */
+  --font-sans-paper: 'Noto Sans KR', 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono-paper: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* =====================================================================
+     Bridge to existing MASC semantic tokens.
+     Each line overrides a variable declared in tokens.css so every
+     component that reads --color-* or --color-ff-* picks up paper values
+     without edits.
+     ===================================================================== */
+
+  /* Cards / surfaces */
+  --color-card: var(--paper-2);
+  --color-card-border: var(--border-3-paper);
+  --color-ff-panel: var(--paper-2);
+  --color-ff-navy: var(--paper);
+  --color-ff-navy-light: var(--paper-2);
+  --color-ff-border: var(--border-2-paper);
+  --color-ff-border-subtle: var(--border-4-paper);
+  --color-ff-border-hover: var(--border-1-paper);
+
+  /* Text */
+  --color-text-strong: var(--ink);
+  --color-text-body: var(--ink-2);
+  --color-text-muted: var(--ink-4);
+
+  /* Accents (brass replaces FF gold per design system "selected" role) */
+  --color-accent: var(--forest);
+  --color-accent-soft: var(--forest-fill);
+  --color-ff-gold: var(--brass);
+  --color-ff-gold-bright: var(--brass-line);
+  --color-ff-gold-dim: var(--brass-fill);
+  --color-ff-crystal: var(--slate);
+
+  /* Status roles — keeper FSM mapping from design system */
+  --color-ok: var(--forest);
+  --color-warn: var(--ember);
+  --color-bad: var(--brick);
+  --color-agent-working: var(--forest);
+  --color-agent-idle: var(--ink-4);
+  --color-agent-offline: var(--ink-5);
+  --color-agent-busy: var(--brass);
+
+  --bad-light: var(--brick-line);
+  --warn-bright: var(--ember-line);
+}
+
+/* Base surface + text when paper theme is active.
+   Scoped to html[data-theme="paper"] so non-theme pages stay unaffected. */
+html[data-theme="paper"],
+html[data-theme="paper"] body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans-paper);
+}
+
+/* Mono elements in paper theme should use JetBrains Mono with
+   tabular-nums, per design system rule #5. */
+html[data-theme="paper"] code,
+html[data-theme="paper"] pre,
+html[data-theme="paper"] .tabular-nums,
+html[data-theme="paper"] [class*="font-mono"] {
+  font-family: var(--font-mono-paper);
+  font-variant-numeric: tabular-nums;
+}

@@ -146,6 +146,18 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   `
 }
 
+/** Open the log viewer for [connectorId] + kick off a fetch.
+    Exposed so other components (e.g. the startup-check banner) can
+    redirect an operator to "the logs explain why" without opening
+    the header toggle themselves. */
+export function openSidecarLogs(connectorId: string) {
+  const entry = getEntry(connectorId)
+  if (!entry.open) {
+    setEntry(connectorId, { open: true })
+    void fetchLogs(connectorId, entry.requestedLines)
+  }
+}
+
 export function resetSidecarLogState() {
   logsState.value = {}
 }

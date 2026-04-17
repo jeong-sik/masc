@@ -31,6 +31,7 @@ import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
+import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
@@ -336,6 +337,7 @@ function connectorStateTone(connector: GateConnectorInfo | null): string {
 // behaviourally identical — only convenience differs.
 export async function startSidecar(connectorId: string) {
   actionLoading.value = true
+  markStartAttempt(connectorId)
   try {
     await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
     showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
@@ -349,6 +351,9 @@ export async function startSidecar(connectorId: string) {
 
 export async function stopSidecar(connectorId: string) {
   actionLoading.value = true
+  // Stop is the operator's signal that the previous start attempt is no
+  // longer relevant — the startup-warning would just be misleading.
+  clearStartAttempt(connectorId)
   try {
     await post(`/api/v1/sidecar/stop?name=${encodeURIComponent(connectorId)}`, {})
     showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
@@ -619,6 +624,8 @@ function ConnectorLivePanel({
           getRailInflight(connectorId),
         )}
       />
+
+      <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
       ${headerExpanded.value
         ? html`

@@ -41,7 +41,7 @@ let prompt_defs =
     {
       name = "command_truth";
       title = "Command Truth";
-      description = "Summarize managed command-plane evidence for an operation or run.";
+      description = "Summarize managed command-plane evidence for an operation or run (deprecated: command plane layer removed).";
       icons = [ Mcp_server.themed_icon ~label:"CT" ~bg:"#9A3412" ~fg:"#FFF7ED" ];
       arguments =
         [
@@ -182,8 +182,9 @@ let command_truth_text ~config:_ ?operation_id ?run_id () =
   in
   String.concat "\n"
     [
-      "Summarize the managed execution truth from the command-plane evidence below.";
-      "Distinguish planned state from observed traces.";
+      "Command plane evidence is not available (command plane layer removed).";
+      "The summary and traces below reflect the stub state retained for";
+      "backward compatibility with pre-purge MCP clients; they carry no live data.";
       (match run_id with Some value -> "Focus run_id: " ^ value | None -> "");
       "";
       "Summary:";

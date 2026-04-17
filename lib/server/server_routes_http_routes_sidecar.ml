@@ -46,6 +46,25 @@ let script_path id =
 let status_file id =
   Filename.concat (base_path ()) (Printf.sprintf ".gate/runtime/%s/status.json" id)
 
+let today_yyyymmdd () =
+  let tm = Unix.localtime (Unix.time ()) in
+  Printf.sprintf "%04d%02d%02d"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+
+(** Today's log file path. Wrapper writes to this exact filename:
+    [LOG_DIR/<id>-sidecar-YYYYMMDD.log] (see sidecars/<id>-bot/run.sh).
+    If the operator started the sidecar yesterday and never rolled the
+    process, today's file may not exist yet — handled by the caller. *)
+let today_log_file id =
+  Filename.concat (base_path ())
+    (Printf.sprintf ".masc/logs/%s-sidecar-%s.log" id (today_yyyymmdd ()))
+
+(** Clamp the [?lines=N] query param to [1, 1000]. Pure so unit tests
+    can pin the upper bound without a request mock. *)
+let clamp_lines = function
+  | None -> 200
+  | Some n -> max 1 (min 1000 n)
+
 let respond_json request reqd ~status body =
   respond_json_with_cors ~status request reqd (Yojson.Safe.to_string body)
 
@@ -102,6 +121,42 @@ let handle_stop _state request reqd =
            ("note", `String trimmed);
          ])
 
+let handle_logs _state request reqd =
+  match parse_name request with
+  | Error msg -> bad_request request reqd msg
+  | Ok id ->
+      let lines =
+        clamp_lines (Server_utils.query_param request "lines"
+                     |> Option.map int_of_string_opt
+                     |> Option.join)
+      in
+      let path = today_log_file id in
+      if not (Sys.file_exists path) then
+        respond_json request reqd ~status:`OK
+          (`Assoc [
+             ("ok", `Bool true);
+             ("log_path", `String path);
+             ("available", `Bool false);
+             ("lines", `List []);
+           ])
+      else
+        let (_status, stdout) =
+          Process_eio.run_argv_with_status ~timeout_sec:5.0
+            [ "tail"; "-n"; string_of_int lines; path ]
+        in
+        let line_list =
+          String.split_on_char '\n' stdout
+          |> List.filter (fun l -> not (String.equal l ""))
+          |> List.map (fun l -> `String l)
+        in
+        respond_json request reqd ~status:`OK
+          (`Assoc [
+             ("ok", `Bool true);
+             ("log_path", `String path);
+             ("available", `Bool true);
+             ("lines", `List line_list);
+           ])
+
 let handle_start _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
@@ -129,6 +184,11 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.get "/api/v1/sidecar/status" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_status state request reqd
+       ) request reqd)
+
+  |> Http.Router.get "/api/v1/sidecar/logs" (fun request reqd ->
+       with_tool_auth ~tool_name:"sidecar" (fun state _req reqd ->
+         handle_logs state request reqd
        ) request reqd)
 
   |> Http.Router.post "/api/v1/sidecar/start" (fun request reqd ->

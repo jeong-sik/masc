@@ -83,6 +83,23 @@ let test_known_ids_size_matches_dashboard () =
   check int "exactly 4 known sidecars (matches dashboard KNOWN_CONNECTOR_IDS)"
     4 (List.length Routes.known_ids)
 
+(* ---- clamp_lines: bound the ?lines=N query param to [1, 1000] so a
+       client can't ask for unbounded log content. ---- *)
+
+let test_clamp_lines_default_when_missing () =
+  check int "missing → 200" 200 (Routes.clamp_lines None)
+
+let test_clamp_lines_passes_in_range () =
+  check int "300 → 300" 300 (Routes.clamp_lines (Some 300))
+
+let test_clamp_lines_clamps_below_one () =
+  check int "0 → 1" 1 (Routes.clamp_lines (Some 0));
+  check int "-50 → 1" 1 (Routes.clamp_lines (Some (-50)))
+
+let test_clamp_lines_clamps_above_max () =
+  check int "1001 → 1000" 1000 (Routes.clamp_lines (Some 1001));
+  check int "100000 → 1000" 1000 (Routes.clamp_lines (Some 100000))
+
 let () =
   run "sidecar_lifecycle_routes"
     [
@@ -93,6 +110,13 @@ let () =
           test_case "rejects unknown id"     `Quick test_validate_rejects_unknown_id;
           test_case "rejects shell meta"     `Quick test_validate_rejects_shell_meta;
           test_case "rejects path traversal" `Quick test_validate_rejects_path_traversal;
+        ] );
+      ( "clamp_lines",
+        [
+          test_case "default when missing" `Quick test_clamp_lines_default_when_missing;
+          test_case "passes in range"      `Quick test_clamp_lines_passes_in_range;
+          test_case "clamps below 1"       `Quick test_clamp_lines_clamps_below_one;
+          test_case "clamps above 1000"    `Quick test_clamp_lines_clamps_above_max;
         ] );
       ( "invariants",
         [

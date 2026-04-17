@@ -20,14 +20,26 @@ let default_lookback_days = 7
 let min_success_rate = 0.3
 let recency_lambda = 0.01
 
+(* [Safe_ops.int_of_string_with_default] is built on the
+   exception-free [int_of_string_opt], so these readers no longer need
+   a hand-rolled [try ... with Eio.Cancel.Cancelled -> raise | _ ->
+   default] block.  The clamp runs after parsing, so a malformed env
+   value returns [default] unmodified. *)
 let configured_max_k () =
   match Sys.getenv_opt "MASC_KEEPER_TOOL_AFFINITY_K" with
-  | Some s -> (try max 0 (min 20 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default_max_k)
+  | Some s ->
+    max 0
+      (min 20
+         (Safe_ops.int_of_string_with_default ~default:default_max_k s))
   | None -> default_max_k
 
 let configured_lookback_days () =
   match Sys.getenv_opt "MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS" with
-  | Some s -> (try max 1 (min 30 (int_of_string s)) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> default_lookback_days)
+  | Some s ->
+    max 1
+      (min 30
+         (Safe_ops.int_of_string_with_default
+            ~default:default_lookback_days s))
   | None -> default_lookback_days
 
 (* ================================================================ *)

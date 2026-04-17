@@ -63,7 +63,8 @@ let server_entries =
     entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" "MASC_BASE_PATH" "Base storage directory";
     entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
-    entry ~default:"127.0.0.1" "MASC_HTTP_HOST" "HTTP server listen host";
+    entry ~default:Masc_network_defaults.masc_http_default_host
+      "MASC_HTTP_HOST" "HTTP server listen host";
     entry ~default:"128" "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
   ]
 

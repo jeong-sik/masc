@@ -51,7 +51,7 @@ let is_canonical_loopback_alias host =
 let normalize_advertised_host host =
   let trimmed = String.trim host in
   if is_unspecified_host trimmed || is_canonical_loopback_alias trimmed then
-    "127.0.0.1"
+    Masc_network_defaults.masc_http_default_host
   else
     trimmed
 

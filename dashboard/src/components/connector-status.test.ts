@@ -577,3 +577,127 @@ describe('ConnectorStatusPanel', () => {
     expect(novaText).toContain('runtime keeper-nova-agent')
   })
 })
+
+describe('filterKeeperGroups', () => {
+  // Shape-compatible sample. `filterKeeperGroups` only reads `name` and
+  // `keeper.{active_model, model, primary_model, agent_name}` so bindings
+  // are allowed to be empty and `unknown` never matters.
+  type GroupLike = {
+    name: string
+    keeper: {
+      name: string
+      active_model?: string
+      model?: string
+      primary_model?: string
+      agent_name?: string
+    } | null
+    bindings: Array<{ channel_id: string; keeper_name: string }>
+    unknown: boolean
+  }
+
+  function group(
+    name: string,
+    keeper: GroupLike['keeper'] = { name },
+  ): GroupLike {
+    return { name, keeper, bindings: [], unknown: false }
+  }
+
+  async function loadFilter() {
+    // Fresh module — other tests may have mocked api/gate etc. We don't
+    // need any mocks here; a raw re-import is fine.
+    vi.resetModules()
+    const module = await import('./connector-status')
+    return module.filterKeeperGroups as (
+      groups: readonly GroupLike[],
+      query: string,
+    ) => readonly GroupLike[]
+  }
+
+  it('returns the input reference unchanged for empty query', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [group('nova'), group('luna')]
+    expect(filterKeeperGroups(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference unchanged for whitespace-only query', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [group('nova')]
+    expect(filterKeeperGroups(rows, '   ')).toBe(rows)
+  })
+
+  it('matches on name case-insensitively', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [group('Nova'), group('luna'), group('atlas')]
+    const filtered = filterKeeperGroups(rows, 'NOVA')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.name).toBe('Nova')
+  })
+
+  it('matches on active_model via substring', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [
+      group('nova', { name: 'nova', active_model: 'gemini-2.5-flash' }),
+      group('luna', { name: 'luna', active_model: 'claude-opus-4' }),
+    ]
+    const filtered = filterKeeperGroups(rows, 'gemini')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]!.name).toBe('nova')
+  })
+
+  it('falls back from active_model to model when active_model is empty', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [
+      group('nova', { name: 'nova', active_model: '   ', model: 'gemini-flash' }),
+    ]
+    const filtered = filterKeeperGroups(rows, 'gemini')
+    expect(filtered).toHaveLength(1)
+  })
+
+  it('matches on agent_name runtime label when distinct from keeper name', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [
+      group('nova', { name: 'nova', agent_name: 'keeper-nova-agent' }),
+    ]
+    expect(filterKeeperGroups(rows, 'keeper-nova-agent')).toHaveLength(1)
+  })
+
+  it('does not match agent_name when it equals the keeper name', async () => {
+    // Runtime label helper returns '' when agent_name === name, so the
+    // query should not match via the runtime field. It still matches on
+    // the name field itself.
+    const filterKeeperGroups = await loadFilter()
+    const rows = [group('nova', { name: 'nova', agent_name: 'nova' })]
+    expect(filterKeeperGroups(rows, 'nova')).toHaveLength(1)
+    // But a query targeting only the runtime label must miss when no
+    // fields contain it.
+    const onlyRuntime = [
+      group('nova', { name: 'nova', agent_name: 'nova' }),
+    ]
+    expect(filterKeeperGroups(onlyRuntime, 'keeper-nova-agent')).toEqual([])
+  })
+
+  it('returns an empty array when no rows match', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [group('nova'), group('luna')]
+    expect(filterKeeperGroups(rows, 'nonexistent-zzz')).toEqual([])
+  })
+
+  it('handles null keeper (unknown groups) without throwing', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows: GroupLike[] = [
+      { name: 'ghost', keeper: null, bindings: [], unknown: true },
+    ]
+    expect(filterKeeperGroups(rows, 'ghost')).toHaveLength(1)
+    // Model and runtime are empty for null keeper — only name matches.
+    expect(filterKeeperGroups(rows, 'gemini')).toEqual([])
+  })
+
+  it('does not mutate the input array', async () => {
+    const filterKeeperGroups = await loadFilter()
+    const rows = [group('nova'), group('luna'), group('atlas')]
+    const originalOrder = rows.map(r => r.name)
+    filterKeeperGroups(rows, 'luna')
+    expect(rows.map(r => r.name)).toEqual(originalOrder)
+    expect(rows).toHaveLength(3)
+  })
+})

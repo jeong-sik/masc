@@ -21,6 +21,19 @@ type t =
   | Local_only
   | Local_recovery
   | Tool_rerank
+  (* v1 active catalog (2026-04-17): keepers route through these via
+     [config/cascade.json] presets. Adding a profile here unlocks lookup
+     for [<name>_models]/[<name>_temperature]/[<name>_max_tokens] keys.
+     Without the variant, [canonicalize] silently collapses the name to
+     [Keeper_unified] and the runtime never reads the user's preset. *)
+  | Nick0cave
+  | Capacity_queue_trio
+  | Vendor_mix_balanced
+  | Cost_tier_ladder
+  | Oauth_cli_rotate
+  | Quality_sticky_glm51
+  | Tool_use_strict
+  | Resilient_breaker
 
 val all : t list
 (** [all] is exhaustive: every variant constructor of {!t} appears

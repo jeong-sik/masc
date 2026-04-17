@@ -20,6 +20,40 @@ let result_t = testable (Fmt.of_to_string result_of) ( = )
 
 let validate name = Routes.validate_name name
 
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop idx =
+    idx + nlen <= hlen
+    && (String.sub haystack idx nlen = needle || loop (idx + 1))
+  in
+  nlen = 0 || loop 0
+
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then
+    ()
+  else if Sys.file_exists path then
+    ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
 (* ---- Happy path: every known sidecar id is accepted verbatim. ---- *)
 
 let test_validate_accepts_each_known_id () =
@@ -99,6 +133,53 @@ let test_clamp_lines_clamps_below_one () =
 let test_clamp_lines_clamps_above_max () =
   check int "1001 → 1000" 1000 (Routes.clamp_lines (Some 1001));
   check int "100000 → 1000" 1000 (Routes.clamp_lines (Some 100000))
+
+let test_resolve_existing_sidecar_dir_prefers_explicit_sidecar_root () =
+  with_temp_dir "sidecar-root-override" (fun dir ->
+      let explicit_root = Filename.concat dir "explicit-root" in
+      let base_path = Filename.concat dir "base-path" in
+      let project_root = Filename.concat dir "project-root" in
+      let explicit_dir = Filename.concat explicit_root "sidecars/discord-bot" in
+      let base_dir = Filename.concat base_path "sidecars/discord-bot" in
+      let project_dir = Filename.concat project_root "sidecars/discord-bot" in
+      List.iter mkdir_p [ explicit_dir; base_dir; project_dir ];
+      check (option string) "explicit root wins"
+        (Some explicit_dir)
+        (Routes.resolve_existing_sidecar_dir
+           ~sidecar_root:explicit_root
+           ~project_root
+           ~base_path
+           "discord"))
+
+let test_resolve_existing_sidecar_dir_falls_back_to_project_root () =
+  with_temp_dir "sidecar-root-project-fallback" (fun dir ->
+      let base_path = Filename.concat dir "base-path" in
+      let project_root = Filename.concat dir "project-root" in
+      let project_dir = Filename.concat project_root "sidecars/discord-bot" in
+      mkdir_p base_path;
+      mkdir_p project_dir;
+      check (option string) "project root used when base path is missing sidecars"
+        (Some project_dir)
+        (Routes.resolve_existing_sidecar_dir
+           ~project_root
+           ~base_path
+           "discord"))
+
+let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
+  let message =
+    Routes.missing_sidecar_dir_message
+      ~base_path:"/tmp/runtime-root"
+      ~project_root:"/tmp/project-root"
+      "discord"
+  in
+  check bool "mentions explicit env hint" true
+    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc-mcp");
+  check bool "mentions launcher flag hint" true
+    (contains_substring message "--sidecar-root /path/to/masc-mcp");
+  check bool "includes searched runtime path" true
+    (contains_substring message "/tmp/runtime-root/sidecars/discord-bot");
+  check bool "includes searched project path" true
+    (contains_substring message "/tmp/project-root/sidecars/discord-bot")
 
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
@@ -193,6 +274,15 @@ let () =
           test_case "passes in range"      `Quick test_clamp_lines_passes_in_range;
           test_case "clamps below 1"       `Quick test_clamp_lines_clamps_below_one;
           test_case "clamps above 1000"    `Quick test_clamp_lines_clamps_above_max;
+        ] );
+      ( "sidecar_root_resolution",
+        [
+          test_case "explicit sidecar root wins" `Quick
+            test_resolve_existing_sidecar_dir_prefers_explicit_sidecar_root;
+          test_case "project root fallback when base path misses sidecars" `Quick
+            test_resolve_existing_sidecar_dir_falls_back_to_project_root;
+          test_case "missing directory message includes setup hint" `Quick
+            test_missing_sidecar_dir_message_mentions_sidecar_root_hint;
         ] );
       ( "invariants",
         [

@@ -63,8 +63,6 @@ let test_empty_governance_structure () =
       in
       let open Yojson.Safe.Util in
       let _gen = json |> member "generated_at" |> to_string in
-      check bool "retirement note present" true
-        (json |> member "note" |> to_string |> String.length > 0);
       let summary = json |> member "summary" in
       check int "cases_open is 0" 0 (summary |> member "cases_open" |> to_int);
       check int "pending_ruling is 0" 0 (summary |> member "pending_ruling" |> to_int);
@@ -95,16 +93,6 @@ let test_empty_governance_structure () =
       check int "judgments empty" 0 (List.length judgments);
       let pending = json |> member "pending_actions" |> to_list in
       check int "pending_actions empty" 0 (List.length pending))
-
-let test_factual_snapshot_marks_surface_retired () =
-  let dir = test_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      let json = Lib.Dashboard_governance.factual_snapshot_json ~base_path:dir in
-      let open Yojson.Safe.Util in
-      check bool "factual snapshot includes note" true
-        (json |> member "note" |> to_string |> String.length > 0))
 
 let test_runtime_status_and_judgments_are_live () =
   let dir = test_dir () in
@@ -232,9 +220,6 @@ let test_governance_monitoring_uses_live_runtime () =
       in
       let open Yojson.Safe.Util in
       check bool "monitoring call succeeds" true ok;
-      check string "monitoring includes retirement note"
-        Lib.Dashboard_governance.case_tracking_note
-        (json |> member "note" |> to_string);
       check bool "monitoring exposes live judge_online" true
         (json |> member "judge_online" |> to_bool))
 
@@ -329,8 +314,6 @@ let () =
         [
           test_case "empty governance structure" `Quick
             test_empty_governance_structure;
-          test_case "factual snapshot marks retired surface" `Quick
-            test_factual_snapshot_marks_surface_retired;
           test_case "runtime status and judgments are live" `Quick
             test_runtime_status_and_judgments_are_live;
           test_case "runtime timestamps fallback to unix values" `Quick

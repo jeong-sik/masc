@@ -6,11 +6,6 @@ import { filterApprovalQueue } from './governance'
 
 const { afterEach, beforeEach, describe, expect, it } = Vitest
 
-Vitest.vi.mock('./governance-panels', () => ({
-  DecisionDetail: () => html`<div data-testid="decision-detail-stub">decision detail</div>`,
-  GuardrailPane: () => html`<div data-testid="guardrail-pane-stub">guardrail pane</div>`,
-}))
-
 async function flushUi(): Promise<void> {
   for (let i = 0; i < 4; i += 1) {
     await Promise.resolve()
@@ -76,11 +71,9 @@ describe('Governance surface', () => {
     Vitest.vi.doUnmock('../sse-store')
   })
 
-  it('shows retired guidance when case tracking is disabled', async () => {
-    const serverNote = 'Server says governance case tracking is retired; only live judge signals remain.'
-    const retiredResponse: DashboardGovernanceResponse = {
+  it('renders live judge surface without retired banner or case tracking controls', async () => {
+    const response: DashboardGovernanceResponse = {
       generated_at: '2026-03-26T00:00:00Z',
-      note: serverNote,
       summary: {
         judge_online: false,
       },
@@ -92,7 +85,7 @@ describe('Governance surface', () => {
 
     const { Governance } = await loadComponentWithApi({
       decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
-      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(retiredResponse),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(response),
       fetchParamAudit: Vitest.vi.fn().mockResolvedValue({ entries: [] }),
       fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
       fetchRuntimeParams: Vitest.vi.fn().mockResolvedValue({ parameters: [], surfaces: [] }),
@@ -104,13 +97,14 @@ describe('Governance surface', () => {
     render(html`<${Governance} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain(serverNote)
     expect(container.textContent).toContain('judge-only / 최근 판단 0건')
     expect(container.textContent).toContain('Judge 상태')
     expect(container.textContent).toContain('Judge 모델')
     expect(container.textContent).toContain('Live Judge')
     expect(container.textContent).toContain('새로고침')
-    expect(container.textContent).not.toContain('keeper가 활동 중일 때 자동 생성됩니다')
+    expect(container.querySelector('[data-testid="governance-retired-banner"]')).toBeNull()
+    expect(container.textContent).not.toContain('retired')
+    expect(container.textContent).not.toContain('(retired)')
     expect(container.textContent).not.toContain('Case Load Visualized')
     expect(container.textContent).not.toContain('청원 콘솔')
     expect(container.textContent).not.toContain('사건 수신함')

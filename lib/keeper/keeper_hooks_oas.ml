@@ -41,10 +41,13 @@ let keeper_denied_tools =
     heuristic over known bare-name shapes. Returns [unknown] rather
     than guessing when no rule fits, so analysis queries can filter
     those rows out rather than miscount them. *)
+let known_providers = [
+  "glm-coding"; "glm"; "claude"; "claude_code";
+  "gemini"; "gemini_cli"; "codex_cli"; "ollama";
+]
+
 let provider_of_model (model : string) : string =
-  match String.index_opt model ':' with
-  | Some i -> String.sub model 0 i
-  | None ->
+  let bare_heuristic () =
     let starts_with prefix =
       String.length model >= String.length prefix
       && String.sub model 0 (String.length prefix) = prefix
@@ -55,6 +58,13 @@ let provider_of_model (model : string) : string =
     else if starts_with "gpt-" then "openai"
     else if starts_with "qwen" || starts_with "llama" then "ollama"
     else "unknown"
+  in
+  match String.index_opt model ':' with
+  | Some i ->
+    let prefix = String.sub model 0 i in
+    if List.mem prefix known_providers then prefix
+    else bare_heuristic ()
+  | None -> bare_heuristic ()
 
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to

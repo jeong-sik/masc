@@ -14,9 +14,9 @@ import { html } from 'htm/preact'
 import type { HeartbeatState } from '../../lib/heartbeat-history'
 import { summarizeHistory, type HeartbeatSummary } from './heartbeat-strip'
 
-export type UptimeTone = 'operational' | 'degraded' | 'unhealthy'
+type UptimeTone = 'operational' | 'degraded' | 'unhealthy'
 
-export interface UptimeChipView {
+interface UptimeChipView {
   /** Integer percent (0-100) as a string — 99.87 → "99.87", 100 → "100". */
   label: string
   tone: UptimeTone
@@ -43,7 +43,7 @@ const TONE_CLASS: Record<UptimeTone, string> = {
   unhealthy: 'text-rose-200 border-rose-400/30 bg-rose-500/10',
 }
 
-export interface HeartbeatUptimeChipProps {
+interface HeartbeatUptimeChipProps {
   history: HeartbeatState[]
   class?: string
   testId?: string

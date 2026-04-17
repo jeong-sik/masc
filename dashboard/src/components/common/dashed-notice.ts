@@ -17,8 +17,8 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-export type DashedNoticeSize = 'sm' | 'md'
-export type DashedNoticeBorderTone = 'card' | 'subtle'
+type DashedNoticeSize = 'sm' | 'md'
+type DashedNoticeBorderTone = 'card' | 'subtle'
 
 /** Pure: Tailwind size tokens. Exposed so callers in a hot render path
     (e.g. a repeated fsm-hub sub-panel) can pre-build the string once. */
@@ -42,7 +42,7 @@ export function dashedNoticeClasses(
   return parts.join(' ')
 }
 
-export interface DashedNoticeProps {
+interface DashedNoticeProps {
   children?: ComponentChildren
   size?: DashedNoticeSize
   borderTone?: DashedNoticeBorderTone

@@ -20,6 +20,25 @@ interface Toast {
 let _nextId = 0
 const toasts = signal<Toast[]>([])
 
+/** Sonner / react-hot-toast cap: more than ~5 visible at once degrades
+    into screen spam. When a sixth arrives we evict the oldest so the
+    new one lands without the stack growing unbounded.
+
+    Reference — Sonner's `visibleToasts` default is 3; react-hot-toast
+    doesn't cap out of the box but most teams wrap it with a cap. We
+    pick 5 here because masc-mcp often bursts 3-4 "sidecar started"
+    toasts on bulk Start All, and 5 leaves headroom for one incidental
+    toast on top. */
+export const MAX_VISIBLE_TOASTS = 5
+
+function enqueueToast(toast: Toast) {
+  const current = toasts.value
+  const next = current.length >= MAX_VISIBLE_TOASTS
+    ? [...current.slice(current.length - MAX_VISIBLE_TOASTS + 1), toast]
+    : [...current, toast]
+  toasts.value = next
+}
+
 const BORDER_COLOR: Record<ToastType, string> = {
   success: 'border-l-[var(--ok)]',
   warning: 'border-l-[var(--warn)]',
@@ -40,8 +59,7 @@ const ICON: Record<ToastType, () => ComponentChildren> = {
 
 export function showToast(message: string, type: ToastType = 'success', durationMs = 4000) {
   const id = ++_nextId
-  toasts.value = [...toasts.value, { id, message, type }]
-
+  enqueueToast({ id, message, type })
   setTimeout(() => {
     toasts.value = toasts.value.filter(t => t.id !== id)
   }, durationMs)
@@ -49,8 +67,7 @@ export function showToast(message: string, type: ToastType = 'success', duration
 
 export function showActionToast(message: string, action: ToastAction, type: ToastType = 'error', durationMs = 12000) {
   const id = ++_nextId
-  toasts.value = [...toasts.value, { id, message, type, action }]
-
+  enqueueToast({ id, message, type, action })
   setTimeout(() => {
     toasts.value = toasts.value.filter(t => t.id !== id)
   }, durationMs)
@@ -58,6 +75,19 @@ export function showActionToast(message: string, action: ToastAction, type: Toas
 
 function dismissToast(id: number) {
   toasts.value = toasts.value.filter(t => t.id !== id)
+}
+
+/** Test-only: wipe the toast queue so assertions don't see leftovers
+    from earlier tests. Not a public reset — the sequence id counter
+    is deliberately left intact so ids remain unique across tests. */
+export function _testResetToasts() {
+  toasts.value = []
+}
+
+/** Test-only: snapshot of the current toast queue. Keeps the signal
+    private while still letting tests assert on the stored shape. */
+export function _testGetToasts(): ReadonlyArray<{ id: number; message: string; type: ToastType }> {
+  return toasts.value.map(t => ({ id: t.id, message: t.message, type: t.type }))
 }
 
 export function ToastContainer() {

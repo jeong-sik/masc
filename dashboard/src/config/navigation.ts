@@ -9,7 +9,9 @@ export type SurfaceSectionId =
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'memory-subsystems'
   // command
-  | 'operations'     // Phase 1+6: absorbs intervene + governance + connectors + inspector
+  | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
+  // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
+  | 'connector-status'
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
@@ -74,6 +76,15 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     defaultTab: 'command',
     defaultParams: { section: 'operations' },
     tabs: ['command'],
+  },
+  {
+    id: 'connectors',
+    label: '커넥터',
+    icon: '🔌',
+    description: 'Discord, iMessage, Slack, Telegram 등 채널 sidecar 상태와 keeper 바인딩',
+    defaultTab: 'connectors',
+    defaultParams: { section: 'connector-status' },
+    tabs: ['connectors'],
   },
   {
     id: 'workspace',
@@ -148,8 +159,16 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'operations',
       label: '운영 행동',
-      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려, 커넥터, 인스펙터를 한 화면에서.',
+      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려, 인스펙터를 한 화면에서. 커넥터는 상위 메뉴 「커넥터」에서.',
       params: { section: 'operations' },
+    },
+  ],
+  connectors: [
+    {
+      id: 'connector-status',
+      label: '연결 상태',
+      description: '각 sidecar(Discord/iMessage/Slack/Telegram)의 라이브 상태, keeper 바인딩, 최근 이벤트.',
+      params: { section: 'connector-status' },
     },
   ],
   workspace: [

@@ -23,7 +23,7 @@ describe('lab navigation', () => {
 })
 
 describe('command navigation', () => {
-  it('has only operations section (Phase 6: connectors+inspector absorbed as sub-views)', () => {
+  it('has only operations section (Phase 6+7: inspector absorbed; connectors split out)', () => {
     expect(defaultParamsForTab('command')).toEqual({ section: 'operations' })
 
     const commandSections = visibleSectionItemsForTab('command')
@@ -35,6 +35,21 @@ describe('command navigation', () => {
     expect(commandSections.map(item => item.label)).toEqual([
       '운영 행동',
     ])
+  })
+})
+
+describe('connectors navigation (Phase 7)', () => {
+  it('exposes connectors as a top-level surface with single connector-status section', () => {
+    expect(defaultParamsForTab('connectors')).toEqual({ section: 'connector-status' })
+
+    const sections = visibleSectionItemsForTab('connectors')
+    expect(sections.map(item => item.id)).toEqual(['connector-status'])
+    expect(sections.map(item => item.label)).toEqual(['연결 상태'])
+  })
+
+  it('normalizes unknown connectors section to default', () => {
+    const result = normalizeRouteParams('connectors', { section: 'bogus' })
+    expect(result.section).toBe('connector-status')
   })
 })
 

@@ -163,7 +163,9 @@ let discover_processes () =
       Error (Printf.sprintf "ps stopped by signal %d" sig_num)
 
 let fetch_models_at base_url =
-  let url = String.trim base_url ^ "/v1/models" in
+  let url =
+    String.trim base_url ^ Masc_network_defaults.openai_models_path
+  in
   let status, body =
     Process_eio.run_argv_with_status ~timeout_sec:15.0
       [ "curl"; "-sS"; "--max-time"; "10"; url ]

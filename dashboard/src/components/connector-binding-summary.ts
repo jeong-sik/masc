@@ -10,10 +10,36 @@
 // doesn't blow out the card. The full list lives in the keeper section.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import type { DiscordConfiguredBinding, ConnectorNames } from '../api/gate'
-import { humanizeChannel } from './connector-status'
+import { humanizeChannel, unbindConnector } from './connector-status'
 
 const COLLAPSE_AFTER = 6
+
+// Per-(connectorId, channelId) unbind in-flight tracker so the row's ✕
+// can show a spinner without affecting siblings. Keyed `<id>::<channel>`.
+const unbindInflight = signal<Record<string, true>>({})
+
+function inflightKey(connectorId: string, channelId: string): string {
+  return `${connectorId}::${channelId}`
+}
+
+export function resetBindingSummaryState() {
+  unbindInflight.value = {}
+}
+
+async function performUnbind(connectorId: string, channelId: string) {
+  const key = inflightKey(connectorId, channelId)
+  if (unbindInflight.value[key]) return
+  unbindInflight.value = { ...unbindInflight.value, [key]: true }
+  try {
+    await unbindConnector(connectorId, channelId)
+  } finally {
+    const next = { ...unbindInflight.value }
+    delete next[key]
+    unbindInflight.value = next
+  }
+}
 
 export interface BindingSummaryProps {
   connectorId: string
@@ -41,20 +67,32 @@ export function ConnectorBindingSummary({ connectorId, bindings, names }: Bindin
       class="mt-2 space-y-1 rounded-md border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2 text-[11px]"
       data-binding-summary=${connectorId}
     >
-      ${visible.map(b => html`
-        <li class="flex min-w-0 items-center gap-2">
-          <button
-            type="button"
-            class="shrink-0 cursor-pointer text-[var(--text-dim)] hover:text-[var(--text-body)]"
-            title="keeper 섹션으로 이동"
-            aria-label=${`Jump to keeper section for ${b.keeper_name}`}
-            onClick=${onJump}
-          >🔗</button>
-          <span class="shrink-0 font-mono text-[var(--text-body)]">${b.keeper_name}</span>
-          <span class="shrink-0 text-[var(--text-dim)]">→</span>
-          <span class="min-w-0 truncate text-[var(--text-body)]" title=${b.channel_id}>${describeBinding(b, names)}</span>
-        </li>
-      `)}
+      ${visible.map(b => {
+        const inflight = unbindInflight.value[inflightKey(connectorId, b.channel_id)] === true
+        return html`
+          <li class="flex min-w-0 items-center gap-2" data-binding-row=${b.channel_id}>
+            <button
+              type="button"
+              class="shrink-0 cursor-pointer text-[var(--text-dim)] hover:text-[var(--text-body)]"
+              title="keeper 섹션으로 이동"
+              aria-label=${`Jump to keeper section for ${b.keeper_name}`}
+              onClick=${onJump}
+            >🔗</button>
+            <span class="shrink-0 font-mono text-[var(--text-body)]">${b.keeper_name}</span>
+            <span class="shrink-0 text-[var(--text-dim)]">→</span>
+            <span class="min-w-0 flex-1 truncate text-[var(--text-body)]" title=${b.channel_id}>${describeBinding(b, names)}</span>
+            <button
+              type="button"
+              class="shrink-0 cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-[10px] leading-none text-[var(--text-dim)] hover:border-rose-400/40 hover:bg-rose-500/10 hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+              title=${`unbind ${b.keeper_name} from this channel`}
+              aria-label=${`Unbind ${b.keeper_name}`}
+              disabled=${inflight}
+              data-unbind-action=${b.channel_id}
+              onClick=${() => { void performUnbind(connectorId, b.channel_id) }}
+            >${inflight ? '…' : '×'}</button>
+          </li>
+        `
+      })}
       ${overflow > 0
         ? html`
             <li class="pt-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">

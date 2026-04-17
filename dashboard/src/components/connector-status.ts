@@ -27,6 +27,24 @@ import { TextInput } from './common/input'
 import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
 import { createManagedAsyncResource } from '../lib/async-state'
+import { route } from '../router'
+
+// Sub-section -> connector_id filter. `connector-status` (default) shows
+// all connectors; the per-connector sub-sections show just that one. Source
+// of truth: dashboard/src/config/navigation.ts DASHBOARD_SECTION_ITEMS.connectors.
+const SECTION_TO_CONNECTOR_ID: Record<string, string | null> = {
+  'connector-status': null,
+  'connector-discord': 'discord',
+  'connector-imessage': 'imessage',
+  'connector-slack': 'slack',
+  'connector-telegram': 'telegram',
+}
+
+function activeConnectorFilter(): string | null {
+  const section = route.value.params.section
+  if (!section) return null
+  return SECTION_TO_CONNECTOR_ID[section] ?? null
+}
 
 // Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
 // (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
@@ -953,16 +971,28 @@ export function ConnectorStatusPanel() {
   const loading = connectorStatusResource.state.value.loading
   const d = snapshot.gate
   const allConnectors = snapshot.connectors?.connectors ?? []
+  const filterId = activeConnectorFilter()
+  const visibleConnectors = filterId
+    ? allConnectors.filter(c => c.connector_id === filterId)
+    : allConnectors
 
-  if (loading && !d && allConnectors.length === 0) {
+  if (loading && !d && visibleConnectors.length === 0) {
     return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
   }
 
-  if (snapshot.gateError && !d && allConnectors.length === 0) {
+  if (snapshot.gateError && !d && visibleConnectors.length === 0) {
     return html`<${ErrorState} message=${`Gate: ${snapshot.gateError}`} />`
   }
 
-  if (!d && allConnectors.length === 0) return null
+  if (filterId && allConnectors.length > 0 && visibleConnectors.length === 0) {
+    return html`
+      <div class="rounded-md border border-dashed border-[var(--white-8)] px-3 py-6 text-center text-xs text-[var(--text-dim)]">
+        ${filterId} sidecar가 아직 Gate에 등록되지 않았습니다. 시작 후 다시 확인하세요.
+      </div>
+    `
+  }
+
+  if (!d && visibleConnectors.length === 0) return null
 
   return html`
     <div>
@@ -974,12 +1004,12 @@ export function ConnectorStatusPanel() {
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          <div>${d ? `success ${d.success_rate_pct}%` : `${allConnectors.length} connector${allConnectors.length !== 1 ? 's' : ''}`}</div>
+          <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
-      ${allConnectors.map(c => html`
+      ${visibleConnectors.map(c => html`
         <${ConnectorLivePanel}
           connector=${c}
           gate=${d}

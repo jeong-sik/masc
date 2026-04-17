@@ -39,17 +39,34 @@ describe('command navigation', () => {
 })
 
 describe('connectors navigation (Phase 7)', () => {
-  it('exposes connectors as a top-level surface with single connector-status section', () => {
+  it('exposes connectors as a top-level surface with all + per-bridge sub-sections', () => {
     expect(defaultParamsForTab('connectors')).toEqual({ section: 'connector-status' })
 
     const sections = visibleSectionItemsForTab('connectors')
-    expect(sections.map(item => item.id)).toEqual(['connector-status'])
-    expect(sections.map(item => item.label)).toEqual(['연결 상태'])
+    expect(sections.map(item => item.id)).toEqual([
+      'connector-status',
+      'connector-discord',
+      'connector-imessage',
+      'connector-slack',
+      'connector-telegram',
+    ])
+    expect(sections.map(item => item.label)).toEqual([
+      '전체',
+      'Discord',
+      'iMessage',
+      'Slack',
+      'Telegram',
+    ])
   })
 
   it('normalizes unknown connectors section to default', () => {
     const result = normalizeRouteParams('connectors', { section: 'bogus' })
     expect(result.section).toBe('connector-status')
+  })
+
+  it('preserves a valid per-bridge section through normalize', () => {
+    const result = normalizeRouteParams('connectors', { section: 'connector-slack' })
+    expect(result.section).toBe('connector-slack')
   })
 })
 

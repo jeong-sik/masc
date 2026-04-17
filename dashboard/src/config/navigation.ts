@@ -11,7 +11,11 @@ export type SurfaceSectionId =
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
-  | 'connector-status'
+  | 'connector-status'      // all connectors (default)
+  | 'connector-discord'
+  | 'connector-imessage'
+  | 'connector-slack'
+  | 'connector-telegram'
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
@@ -166,9 +170,33 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   connectors: [
     {
       id: 'connector-status',
-      label: '연결 상태',
-      description: '각 sidecar(Discord/iMessage/Slack/Telegram)의 라이브 상태, keeper 바인딩, 최근 이벤트.',
+      label: '전체',
+      description: '4개 sidecar(Discord/iMessage/Slack/Telegram)를 한 화면에서.',
       params: { section: 'connector-status' },
+    },
+    {
+      id: 'connector-discord',
+      label: 'Discord',
+      description: 'Discord sidecar — 라이브 상태, keeper 바인딩, 채널, 최근 이벤트.',
+      params: { section: 'connector-discord' },
+    },
+    {
+      id: 'connector-imessage',
+      label: 'iMessage',
+      description: 'iMessage sidecar — chat.db 폴링, self-chat 모드, 라이브 상태.',
+      params: { section: 'connector-imessage' },
+    },
+    {
+      id: 'connector-slack',
+      label: 'Slack',
+      description: 'Slack sidecar — Socket Mode, bot/app 토큰, 라이브 상태.',
+      params: { section: 'connector-slack' },
+    },
+    {
+      id: 'connector-telegram',
+      label: 'Telegram',
+      description: 'Telegram sidecar — BotFather 토큰, admin user IDs, 라이브 상태.',
+      params: { section: 'connector-telegram' },
     },
   ],
   workspace: [

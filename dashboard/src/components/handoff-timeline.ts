@@ -26,7 +26,8 @@
 // `pointer-events: none` on the overlay so chips remain clickable.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { fetchTelemetry, type TelemetryEntry } from '../api/dashboard'
 
 export type A2aEventKind = 'lifecycle' | 'failure' | 'tool' | 'handoff' | 'context' | 'unknown'
@@ -183,6 +184,36 @@ export function deriveHandoffArcs(
   return arcs
 }
 
+/**
+ * Pure filter for timeline rows.
+ *
+ * Case-insensitive substring match on `row.keeper` and on each chip's
+ * `eventType`, `taskId`, and `peerAgent`. Operators can locate a row by
+ * partial keeper name, by an event type (e.g. "handoff_requested"), by
+ * a task identifier, or by the peer agent involved in a handoff.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterTimelineRows(
+  rows: readonly TimelineRow[],
+  query: string,
+): readonly TimelineRow[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.keeper.toLowerCase().includes(needle)) return true
+    for (const chip of row.chips) {
+      if (chip.eventType.toLowerCase().includes(needle)) return true
+      if (chip.taskId && chip.taskId.toLowerCase().includes(needle)) return true
+      if (chip.peerAgent && chip.peerAgent.toLowerCase().includes(needle)) return true
+    }
+    return false
+  })
+}
+
 const ROW_HEIGHT_PX = 24
 const ROW_GAP_PX = 4
 const ROW_STRIDE_PX = ROW_HEIGHT_PX + ROW_GAP_PX
@@ -210,6 +241,7 @@ export function HandoffTimeline({
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState<number>(() => Date.now())
   const latestRequestId = useRef(0)
+  const query = useSignal('')
 
   useEffect(() => {
     let cancelled = false
@@ -245,6 +277,11 @@ export function HandoffTimeline({
   const windowStart = now - windowMs
   const rows = deriveTimelineRows(entries, windowStart, windowEnd)
   const span = windowEnd - windowStart
+  const visibleRows = useMemo(
+    () => filterTimelineRows(rows, query.value),
+    [rows, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
 
   return html`
     <section class="rounded-xl border border-card-border bg-card-bg p-4 flex flex-col gap-3">
@@ -273,16 +310,28 @@ export function HandoffTimeline({
           </span>
         </div>
       </header>
+      <div class="flex items-center justify-end">
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="keeper / event / task / peer 필터"
+          aria-label="Handoff timeline 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-card-border bg-bg-1/40 px-2 py-1 text-[11px] text-text placeholder:text-text-dim focus:outline-none focus:border-accent"
+        />
+      </div>
       ${error !== null
         ? html`<p class="text-[11px] text-red-400">오류: ${error}</p>`
         : rows.length === 0
           ? html`<p class="text-[11px] text-text-dim">이 시간 범위에 A2A 이벤트 없음.</p>`
-          : html`
+          : isFiltering && visibleRows.length === 0
+            ? html`<p class="text-[11px] text-text-dim">필터 결과 없음 (${rows.length} handoffs)</p>`
+            : html`
               <div class="flex flex-col gap-1 relative">
                 ${(() => {
-                  const arcs = deriveHandoffArcs(rows, windowStart, windowEnd)
+                  const arcs = deriveHandoffArcs(visibleRows, windowStart, windowEnd)
                   if (arcs.length === 0) return null
-                  const totalH = rows.length * ROW_STRIDE_PX - ROW_GAP_PX
+                  const totalH = visibleRows.length * ROW_STRIDE_PX - ROW_GAP_PX
                   return html`
                     <svg
                       class="absolute pointer-events-none"
@@ -301,7 +350,7 @@ export function HandoffTimeline({
                     </svg>
                   `
                 })()}
-                ${rows.map(row => {
+                ${visibleRows.map(row => {
                   const isSelected = selectedKeeper === row.keeper
                   const labelCls = isSelected
                     ? 'text-text ring-1 ring-accent bg-accent/10'

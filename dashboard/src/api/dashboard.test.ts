@@ -145,6 +145,10 @@ describe('fetchKeeperConfig', () => {
     const rawResponse = {
       name: 'keeper-sangsu',
       execution_scope: 'workspace',
+      sandbox_profile: 'docker_hardened',
+      network_mode: 'none',
+      shared_memory_scope: 'room',
+      private_workspace_root: '.masc/playground/keeper-sangsu',
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
       prompt: {
@@ -275,6 +279,10 @@ describe('fetchKeeperConfig', () => {
     const result = await fetchKeeperConfig('keeper-sangsu')
 
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
+    expect(result.sandbox_profile).toBe('docker_hardened')
+    expect(result.network_mode).toBe('none')
+    expect(result.shared_memory_scope).toBe('room')
+    expect(result.private_workspace_root).toBe('.masc/playground/keeper-sangsu')
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])

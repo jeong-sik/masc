@@ -238,6 +238,21 @@ let keeper_schemas : tool_schema list = [
           ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
           ("description", `String "Execution scope. 'observe_only' blocks all writes. 'workspace'/'local' enable writes within playground (.masc/playground/<name>/). Extra paths must be listed explicitly in allowed_paths. Default: workspace.");
         ]);
+        ("sandbox_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy_local"; `String "docker_hardened"]);
+          ("description", `String "Filesystem/process sandbox profile. 'legacy_local' preserves current behavior. 'docker_hardened' reserves the hardened execution path.");
+        ]);
+        ("network_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "none"; `String "inherit"]);
+          ("description", `String "Network policy associated with the sandbox profile.");
+        ]);
+        ("shared_memory_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "disabled"; `String "room"]);
+          ("description", `String "Typed shared-memory lane policy. Runtime enforcement is introduced in follow-up slices.");
+        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);

@@ -31,6 +31,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_lightweight_summary_omits_heavy_activity;
+          Alcotest.test_case "snapshot lightweight summary keeps tool audit"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_lightweight_summary_keeps_tool_audit;
           Alcotest.test_case "snapshot waiters share inflight result" `Quick
             Test_operator_control_snapshot
             .test_snapshot_waiters_share_inflight_result;

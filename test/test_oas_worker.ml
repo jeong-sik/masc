@@ -57,6 +57,12 @@ let make_local_provider ?(model_id = "mock-model") () : Oas.Provider.config =
     api_key_env = "";
   }
 
+let make_local_provider_cfg ?(model_id = "mock-model") () :
+    Llm_provider.Provider_config.t =
+  match Oas.Provider_bridge.to_provider_config (make_local_provider ~model_id ()) with
+  | Ok cfg -> cfg
+  | Error err -> failwith (Oas.Error.to_string err)
+
 let make_noop_tool () =
   Oas.Tool.create
     ~name:"noop"
@@ -625,16 +631,15 @@ let test_resume_model_id_falls_back_to_meta_model () =
     (Worker_oas.resume_model_id_of_checkpoint meta checkpoint)
 
 let test_oas_worker_exec_build_defaults_without_retry_policy () =
-  let provider = make_local_provider () in
   let config =
     Oas_worker_exec.default_config
       ~name:"oas-worker-default"
-      ~provider
-      ~model_id:"mock-model"
+      ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
-  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let policy = (Oas.Agent.options agent).tool_retry_policy in
       Alcotest.(check bool) "default leaves retry disabled" true
@@ -643,12 +648,10 @@ let test_oas_worker_exec_build_defaults_without_retry_policy () =
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_retry_policy () =
-  let provider = make_local_provider () in
   let base_config =
     Oas_worker_exec.default_config
       ~name:"oas-worker-retry"
-      ~provider
-      ~model_id:"mock-model"
+      ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
@@ -656,7 +659,8 @@ let test_oas_worker_exec_build_applies_retry_policy () =
     { base_config with
       tool_retry_policy = Some Oas.Tool_retry_policy.default_internal }
   in
-  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let policy = (Oas.Agent.options agent).tool_retry_policy in
       check_policy_matches_default_internal "exec build opt-in" policy;
@@ -664,16 +668,15 @@ let test_oas_worker_exec_build_applies_retry_policy () =
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_oas_worker_exec_build_default_priority_unset () =
-  let provider = make_local_provider () in
   let config =
     Oas_worker_exec.default_config
       ~name:"oas-worker-default-priority"
-      ~provider
-      ~model_id:"mock-model"
+      ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
-  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let priority = (Oas.Agent.state agent).config.priority in
       Alcotest.(check bool) "default priority remains unset" true
@@ -682,12 +685,10 @@ let test_oas_worker_exec_build_default_priority_unset () =
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_oas_worker_exec_build_applies_priority () =
-  let provider = make_local_provider () in
   let base_config =
     Oas_worker_exec.default_config
       ~name:"oas-worker-priority"
-      ~provider
-      ~model_id:"mock-model"
+      ~provider_cfg:(make_local_provider_cfg ())
       ~system_prompt:"system"
       ~tools:[ make_noop_tool () ]
   in
@@ -695,7 +696,8 @@ let test_oas_worker_exec_build_applies_priority () =
     { base_config with
       priority = Some Llm_provider.Request_priority.Proactive }
   in
-  match Oas_worker_exec.build ~net:(require_test_net ()) ~config with
+  Eio.Switch.run @@ fun sw ->
+  match Oas_worker_exec.build ~sw ~net:(require_test_net ()) ~config with
   | Ok agent ->
       let priority = (Oas.Agent.state agent).config.priority in
       Alcotest.(check bool) "priority propagated to agent config" true
@@ -706,7 +708,7 @@ let test_oas_worker_exec_build_applies_priority () =
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
 let test_resolve_provider_of_label_rejects_invalid_explicit_label () =
-  match Oas_worker_exec.resolve_provider_of_label "not-a-model-label" with
+  match Oas_worker_exec.resolve_provider_config_of_label "not-a-model-label" with
   | Ok _ ->
       Alcotest.fail
         "expected invalid explicit model label to be rejected without fallback"
@@ -977,19 +979,16 @@ let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
       | Unix.Unix_error (Unix.EACCES, "bind", _) ->
           Alcotest.skip ()
     in
-    let provider : Oas.Provider.config =
-      {
-        provider = Oas.Provider.Local { base_url = url };
-        model_id = "mock-model";
-        api_key_env = "";
-      }
-    in
     let noop_tool = make_noop_tool () in
     let base_config =
       Oas_worker_exec.default_config
         ~name:"oas-worker-exit-condition"
-        ~provider
-        ~model_id:"mock-model"
+        ~provider_cfg:
+          (Llm_provider.Provider_config.make
+             ~kind:Llm_provider.Provider_config.OpenAI_compat
+             ~model_id:"mock-model"
+             ~base_url:url
+             ())
         ~system_prompt:"system"
         ~tools:[ noop_tool ]
     in

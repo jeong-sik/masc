@@ -7,52 +7,14 @@
 
 (* ── Cascade-level error classification ────────────────── *)
 
-(** Case-insensitive substring check. Scans at most [max_scan] bytes
-    of [haystack] to avoid O(n*m) on very large error bodies. *)
-let contains_ci ?(max_scan = 512) ~haystack ~needle () =
-  let h = String.lowercase_ascii
-    (if String.length haystack > max_scan
-     then String.sub haystack 0 max_scan else haystack)
-  in
-  let n = String.lowercase_ascii needle in
-  let nlen = String.length n in
-  let hlen = String.length h in
-  if nlen = 0 || nlen > hlen then false
-  else
-    let rec scan i =
-      if i > hlen - nlen then false
-      else if String.sub h i nlen = n then true
-      else scan (i + 1)
-    in
-    scan 0
-
-(** Workaround for Ollama failing on large request bodies (~175KB+).
-    Returns 400 with "can't find closing '}'". Root cause is oversized
-    context — the proper fix is context compaction before sending to any
-    provider. This cascade fallthrough is a temporary workaround so
-    keeper turns are not blocked while compaction is implemented. *)
-let is_provider_parse_error (body : string) : bool =
-  contains_ci ~haystack:body ~needle:"can't find closing" ()
-
 (** Decide whether an error should cascade to the next provider.
-    Local resource exhaustion (port/FD limits) stops the cascade
-    because every subsequent provider will hit the same bottleneck.
-    Provider-specific error normalization (e.g. GLM quota → 429) is
-    handled upstream in OAS backend modules, so cascade only needs
-    to check HTTP codes, not body text. *)
-let should_cascade_to_next err =
-  if Llm_provider.Http_client.is_local_resource_exhaustion err then false
-  else match err with
-  | Llm_provider.Http_client.HttpError { code; body }
-    when List.mem code [400; 422]
-         && (Llm_provider.Retry.is_context_overflow_message body
-             || is_provider_parse_error body) ->
-    true
-  | Llm_provider.Http_client.HttpError { code; _ } ->
-    List.mem code Llm_provider.Constants.Http.cascadable_codes
-  | Llm_provider.Http_client.AcceptRejected _ -> false
-  | Llm_provider.Http_client.CliTransportRequired _ -> true
-  | Llm_provider.Http_client.NetworkError _ -> true
+
+    Delegates to [Oas_compat.Http_client.should_cascade] so that the
+    exhaustive match over [Llm_provider.Http_client.http_error]
+    variants lives in exactly one place. When OAS adds a new error
+    variant, only [lib/oas_compat] fails to compile, not this module
+    and every other consumer. *)
+let should_cascade_to_next err = Oas_compat.Http_client.should_cascade err
 
 (* ── Local provider detection ──────────────────────────── *)
 

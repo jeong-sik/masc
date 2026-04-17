@@ -38,7 +38,7 @@ let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
 let flusher_started : bool Atomic.t = Atomic.make false
 
 let start_flusher_actor ~sw store =
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     Log.BoardLog.info "Board flusher actor started";
     while true do
       match Eio.Stream.take store.Board.flusher_inbox with
@@ -56,7 +56,14 @@ let ensure_flusher_actor store =
   | None -> ()
   | Some sw ->
       if Atomic.compare_and_set flusher_started false true then
-        start_flusher_actor ~sw store
+        try start_flusher_actor ~sw store
+        with exn ->
+          Atomic.set flusher_started false;
+          match exn with
+          | Invalid_argument msg when String.equal msg "Switch finished!" ->
+              Log.BoardLog.warn
+                "Skipping board flusher actor startup on finished switch"
+          | _ -> raise exn
 
 
 let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None

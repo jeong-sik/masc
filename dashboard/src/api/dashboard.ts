@@ -1042,6 +1042,10 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   return {
     name: asNullableString(data.name) ?? requestedName,
     execution_scope: asNullableString(data.execution_scope) ?? 'workspace',
+    sandbox_profile: asNullableString(data.sandbox_profile) ?? 'legacy_local',
+    network_mode: asNullableString(data.network_mode) ?? 'inherit',
+    shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
+    private_workspace_root: asNullableString(data.private_workspace_root),
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {

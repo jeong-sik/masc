@@ -205,11 +205,7 @@ let () =
 
 let looks_like_ollama = Masc_network_defaults.is_ollama_url
 
-let cli_sentinel_prefix = "cli:"
-
-let looks_like_cli_sentinel url =
-  let plen = String.length cli_sentinel_prefix in
-  String.length url > plen && String.sub url 0 plen = cli_sentinel_prefix
+let looks_like_cli_sentinel = Masc_network_defaults.is_cli_sentinel_url
 
 let auto_register_for_candidates ~base_urls =
   let max_concurrent = ollama_default_max () in

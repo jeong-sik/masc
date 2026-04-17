@@ -42,6 +42,20 @@ let is_ollama_url url =
     in
     loop 0
 
+(** Sentinel prefix marking a CLI-backed transport (e.g. [cli:codex]).
+    Used by capacity classifiers to distinguish CLI endpoints from HTTP
+    ones. *)
+let cli_sentinel_prefix = "cli:"
+
+(** [is_cli_sentinel_url url] returns [true] when [url] starts with
+    {!cli_sentinel_prefix}.  The check is a strict prefix match rather
+    than a substring scan because [cli:] is meaningful only at the
+    start of the sentinel string. *)
+let is_cli_sentinel_url url =
+  let plen = String.length cli_sentinel_prefix in
+  String.length url > plen
+  && String.sub url 0 plen = cli_sentinel_prefix
+
 (** Default URL for the local OpenAI-compatible runtime.
     Override order: OAS_LOCAL_LLM_URL -> OAS_LOCAL_QWEN_URL -> local runtime. *)
 let local_llm_default_url =

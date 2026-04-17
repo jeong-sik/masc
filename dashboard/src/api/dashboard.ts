@@ -11,6 +11,10 @@ import {
   normalizePendingConfirmation,
 } from './board'
 import { get, post, patch, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import {
+  parseAgentRelationsResponse,
+  type AgentRelationsResponse,
+} from './schemas/agent-relations'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -168,29 +172,16 @@ export function fetchAgentTimeline(
   return get(`/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`)
 }
 
-export type AgentCollaborator = {
-  name: string
-  collaborations: number
-  last_collab: string | null
-}
+export type {
+  AgentCollaborator,
+  AgentRelation,
+  AgentRelationsResponse,
+} from './schemas/agent-relations'
+export { AgentRelationsSchemaDriftError } from './schemas/agent-relations'
 
-export type AgentRelation = {
-  type: string
-  category: string | null
-  confidence: number | null
-  note: string | null
-  participants: { kind: string; display_name: string | null; role: string | null }[]
-}
-
-export type AgentRelationsResponse = {
-  agent_name: string
-  collaborators: AgentCollaborator[]
-  interests: string[]
-  relations: AgentRelation[]
-}
-
-export function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
-  return get(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+export async function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
+  const raw = await get<unknown>(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+  return parseAgentRelationsResponse(raw)
 }
 
 export interface ConfigEntry {

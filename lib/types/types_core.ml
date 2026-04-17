@@ -552,6 +552,8 @@ type task = {
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
+  cycle_count: int; [@default 0]
+  do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
 
 (* Manual yojson for task *)
@@ -598,7 +600,16 @@ let task_to_yojson t =
         [ ( "handoff_context",
             task_handoff_context_to_yojson handoff_context ) ]
   in
-  let with_role = with_handoff_context in
+  (* cycle_count omitted when 0 for backward-compat on existing backlogs. *)
+  let with_cycle_count =
+    if t.cycle_count = 0 then with_handoff_context
+    else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
+  in
+  let with_do_not_reclaim = match t.do_not_reclaim_reason with
+    | None -> with_cycle_count
+    | Some r -> with_cycle_count @ [("do_not_reclaim_reason", `String r)]
+  in
+  let with_role = with_do_not_reclaim in
   (* Merge status fields into task *)
   match status_json with
   | `Assoc status_fields -> `Assoc (with_role @ status_fields)
@@ -646,6 +657,12 @@ let task_of_yojson json =
            | Ok handoff_context -> Some handoff_context
            | Error _ -> None)
     in
+    let cycle_count =
+      json |> member "cycle_count" |> to_int_option |> Option.value ~default:0
+    in
+    let do_not_reclaim_reason =
+      json |> member "do_not_reclaim_reason" |> to_string_option
+    in
     match task_status_of_yojson json with
     | Ok task_status ->
         Ok
@@ -663,6 +680,8 @@ let task_of_yojson json =
             stage;
             contract;
             handoff_context;
+            cycle_count;
+            do_not_reclaim_reason;
           }
     | Error e -> Error e
   with e -> Error (Printexc.to_string e)

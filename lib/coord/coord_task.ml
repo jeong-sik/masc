@@ -337,6 +337,8 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
         stage = None;
         contract;
         handoff_context = None;
+        cycle_count = 0;
+        do_not_reclaim_reason = None;
       } in
 
       let new_backlog = {
@@ -398,6 +400,8 @@ let add_task_with_role ?contract config ~title ~priority ~description
         stage = None;
         contract;
         handoff_context = None;
+        cycle_count = 0;
+        do_not_reclaim_reason = None;
       } in
 
       let new_backlog = {
@@ -457,6 +461,8 @@ let batch_add_tasks_internal config tasks =
           stage = None;
           contract;
           handoff_context = None;
+          cycle_count = 0;
+          do_not_reclaim_reason = None;
         }
       ) tasks in
       let new_backlog = {

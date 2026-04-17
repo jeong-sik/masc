@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [0.9.11] - 2026-04-17
+
+### Changed
+- **Dashboard — Cascade Routing card merged (#7986).** Cascade Profiles and
+  Keeper Mapping collapsed into a single Cascade Routing card to reduce the
+  number of overlapping panels on the routing overview.
+- **Dashboard — visible toast cap (#7985).** At most 5 toasts are rendered
+  simultaneously; older toasts are dropped instead of stacking off-screen.
+  Test coverage 0 → 9.
+
+### Deprecated
+- **Capsule Execution Plan slices marked historical (#7984).**
+  `docs/design/masc-capsule-execution-plan.md` Slices A–C targeted the retired
+  `team_session` subsystem (9 dead `lib/team_session/*` and
+  `lib/tool_team_session_*` module refs). Slices preserved as migration context
+  for future `board_posts` + keeper-FSM coordination work. Product Thesis,
+  Boundary Rules, Execution Order, Social Runtime Invariants, and Review Gate
+  sections remain the current design stance.
+
 ## [0.9.10] - 2026-04-17
 
 ### Changed

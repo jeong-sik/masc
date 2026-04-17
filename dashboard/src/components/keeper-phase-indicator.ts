@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import type { KeeperPhase } from '../types'
+import { formatDuration } from '../lib/format-time'
 
 interface PhaseStyle {
   label: string
@@ -56,21 +57,38 @@ export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | str
   `
 }
 
-/** Dual indicator showing both phase (lifecycle) and pipeline_stage (activity). */
+/** Dual indicator showing both phase (lifecycle) and pipeline_stage (activity).
+ *
+ * When [phaseEnteredAtSec] is provided (unix seconds, e.g. the
+ * [wall_clock_at_decision] of the latest KeeperTransition), a dwell-time
+ * chip is rendered between the phase badge and the stage label — e.g.
+ * "● 실행중  · 2시간  executing".  The caller is responsible for fetching
+ * transitions; the indicator stays dumb and pure.  Dwell is recomputed on
+ * every render, so it refreshes along with the enclosing signal updates.
+ */
 export function KeeperPhaseAndStage({
   phase,
   pipelineStage,
+  phaseEnteredAtSec,
 }: {
   phase?: KeeperPhase | string | null
   pipelineStage?: string | null
+  phaseEnteredAtSec?: number | null
 }) {
   const stageLabel = pipelineStage && pipelineStage !== 'idle' && pipelineStage !== 'offline'
     ? pipelineStage.replace('_', ' ')
     : null
 
+  const dwellText = (typeof phaseEnteredAtSec === 'number' && Number.isFinite(phaseEnteredAtSec))
+    ? formatDuration(Math.max(0, Date.now() / 1000 - phaseEnteredAtSec))
+    : null
+
   return html`
     <div class="flex items-center gap-2">
       <${KeeperPhaseBadge} phase=${phase} />
+      ${dwellText ? html`
+        <span class="text-[10px] text-[var(--text-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간">· ${dwellText}</span>
+      ` : null}
       ${stageLabel ? html`
         <span class="text-[10px] text-[var(--text-dim)] font-mono tracking-tight opacity-80">${stageLabel}</span>
       ` : null}

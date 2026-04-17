@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
-import type { DashboardGovernanceResponse, GovernanceCaseBundle } from '../types'
+import type { DashboardGovernanceResponse, GovernanceCaseBundle, KeeperApprovalQueueItem } from '../types'
+import { filterApprovalQueue } from './governance'
 
 const { afterEach, beforeEach, describe, expect, it } = Vitest
 
@@ -419,4 +420,71 @@ describe('Governance surface', () => {
     expect(empty?.textContent).toContain('마지막 judge 활동')
     expect(empty?.textContent).not.toContain('오프라인')
   }, 20000)
+})
+
+describe('filterApprovalQueue', () => {
+  function makeItem(overrides: Partial<KeeperApprovalQueueItem> = {}): KeeperApprovalQueueItem {
+    return {
+      id: 'approval-x',
+      keeper_name: 'keeper-x',
+      tool_name: 'shell',
+      risk_level: 'medium',
+      requested_at: null,
+      waiting_s: 0,
+      ...overrides,
+    }
+  }
+
+  const items: readonly KeeperApprovalQueueItem[] = [
+    makeItem({ id: 'a', keeper_name: 'keeper-alpha', tool_name: 'shell', risk_level: 'critical' }),
+    makeItem({ id: 'b', keeper_name: 'keeper-beta', tool_name: 'fs_write', risk_level: 'high' }),
+    makeItem({ id: 'c', keeper_name: 'watcher-gamma', tool_name: 'shell', risk_level: 'medium' }),
+    makeItem({ id: 'd', keeper_name: 'watcher-delta', tool_name: 'http_fetch', risk_level: 'low' }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterApprovalQueue(items, '')).toBe(items)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterApprovalQueue(items, '   ')).toBe(items)
+  })
+
+  it('matches by keeper_name substring (case-insensitive)', () => {
+    const result = filterApprovalQueue(items, 'KEEPER')
+    expect(result.map(item => item.id)).toEqual(['a', 'b'])
+  })
+
+  it('matches by tool_name substring', () => {
+    const result = filterApprovalQueue(items, 'shell')
+    expect(result.map(item => item.id)).toEqual(['a', 'c'])
+  })
+
+  it('matches by risk_level substring', () => {
+    const result = filterApprovalQueue(items, 'critical')
+    expect(result.map(item => item.id)).toEqual(['a'])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterApprovalQueue(items, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterApprovalQueue(items, '  alpha  ')).toHaveLength(1)
+  })
+
+  it('matches high risk level without matching "high" in other fields', () => {
+    const result = filterApprovalQueue(items, 'high')
+    expect(result.map(item => item.id)).toEqual(['b'])
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = items.slice()
+    filterApprovalQueue(items, 'alpha')
+    expect(items).toEqual(copy)
+  })
+
+  it('returns empty array for empty input with any query', () => {
+    expect(filterApprovalQueue([], 'anything')).toHaveLength(0)
+  })
 })

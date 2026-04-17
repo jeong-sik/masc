@@ -198,6 +198,16 @@ function OverviewTile({ id, connector, keeperCount }: {
                 `
               : null}
           </span>
+          ${(() => {
+            const identity = formatTileIdentityLine(connector)
+            return identity !== null
+              ? html`<span
+                  class="block truncate text-[10px] text-[var(--text-dim)]"
+                  data-tile-identity=${id}
+                  title=${identity}
+                >${identity}</span>`
+              : null
+          })()}
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
@@ -205,6 +215,29 @@ function OverviewTile({ id, connector, keeperCount }: {
       <${TileHeartbeatStrip} id=${id} />
     </div>
   `
+}
+
+/** Pure: single-line identity summary for the tile — \"as @bot · N guilds\"
+    style. Composes bot_user_name + guild_count into one truncate-safe
+    string. Returns null when neither field has anything to show, so
+    the caller renders nothing instead of an empty row.
+
+    Why both on one line: tile vertical space is tight. A dedicated
+    \"reach\" chip would add a whole new visual band; a compact subtitle
+    line sits inside the existing header block. Reference: Stripe row
+    subtitle \"paid · \$12.50\" / Linear issue row \"in Backlog · 3h\". */
+export function formatTileIdentityLine(
+  connector: GateConnectorInfo | null,
+): string | null {
+  if (connector === null) return null
+  const parts: string[] = []
+  const bot = connector.bot_user_name?.trim() ?? ''
+  if (bot !== '') parts.push(`as @${bot}`)
+  const guilds = connector.guild_count ?? 0
+  if (guilds > 0) {
+    parts.push(`${guilds} ${guilds === 1 ? 'guild' : 'guilds'}`)
+  }
+  return parts.length === 0 ? null : parts.join(' · ')
 }
 
 /** Pure: derive the primary-action button label/tone from the sidecar

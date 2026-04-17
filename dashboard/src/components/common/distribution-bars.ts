@@ -49,7 +49,7 @@ const TONE_PALETTES: Record<DistributionTone, TonePalette> = {
   },
 }
 
-function paletteFor(tone?: DistributionTone): TonePalette {
+export function paletteFor(tone?: DistributionTone): TonePalette {
   return TONE_PALETTES[tone ?? 'accent']
 }
 

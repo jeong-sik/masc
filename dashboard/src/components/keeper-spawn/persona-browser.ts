@@ -6,6 +6,32 @@ import { ActionButton } from '../common/button'
 import { personas, personasLoading, personasError, loadPersonas, spawnKeeperFromPersona, spawning, spawnResult, type PersonaSummary } from './keeper-spawn-state'
 
 const confirmTarget = signal<string | null>(null)
+const searchQuery = signal('')
+
+/**
+ * Pure filter for persona rows.
+ *
+ * - `query` is case-insensitive substring match across `name`, `displayName`,
+ *   `role`, `mode`, and `description` (trimmed).
+ * - Empty/whitespace-only query returns the input reference unchanged
+ *   (zero-allocation fast path).
+ * - Does not mutate the input array.
+ */
+export function filterPersonas(
+  rows: readonly PersonaSummary[],
+  query: string,
+): readonly PersonaSummary[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(p => {
+    if (p.name.toLowerCase().includes(needle)) return true
+    if (p.displayName && p.displayName.toLowerCase().includes(needle)) return true
+    if (p.role && p.role.toLowerCase().includes(needle)) return true
+    if (p.mode && p.mode.toLowerCase().includes(needle)) return true
+    if (p.description && p.description.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 function PersonaCard({ persona }: { persona: PersonaSummary }) {
   const isConfirming = confirmTarget.value === persona.name
@@ -45,11 +71,31 @@ export function PersonaBrowser() {
       <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadPersonas()}>재시도<//>
     </div>`
   if (personas.value.length === 0) return html`<p class="text-[12px] text-[var(--text-muted)] py-4">등록된 페르소나가 없습니다.</p>`
+  const visible = filterPersonas(personas.value, searchQuery.value)
   return html`
     <div>
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-        ${personas.value.map(p => html`<${PersonaCard} key=${p.name} persona=${p} />`)}
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <input
+          type="search"
+          value=${searchQuery.value}
+          placeholder="페르소나 검색 (이름/역할/모드/설명)"
+          aria-label="페르소나 검색"
+          onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[180px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+        <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+          ${searchQuery.value.trim()
+            ? `${visible.length} / ${personas.value.length}`
+            : `${personas.value.length}개`}
+        </span>
       </div>
+      ${visible.length === 0
+        ? html`<p class="text-[12px] text-[var(--text-muted)] py-4">검색 조건에 맞는 페르소나가 없습니다.</p>`
+        : html`
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+            ${visible.map(p => html`<${PersonaCard} key=${p.name} persona=${p} />`)}
+          </div>
+        `}
       ${spawnResult.value ? html`
         <${SurfaceCard} class="mt-3" variant="compact">
           <pre class="text-[11px] font-mono overflow-x-auto max-h-[200px] overflow-y-auto

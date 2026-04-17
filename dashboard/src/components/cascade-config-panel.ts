@@ -318,12 +318,17 @@ function HealthTable({
               <th class="text-right py-1">Success</th>
               <th class="text-right py-1">Consec. fail</th>
               <th class="text-right py-1">Events</th>
+              <th
+                class="text-right py-1"
+                title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
+              >Rejected</th>
               <th class="text-right py-1">Cooldown</th>
             </tr>
           </thead>
           <tbody>
             ${filtered.map((p: CascadeHealthProvider) => {
               const tone = providerTone(p)
+              const rejected = p.rejected_in_window ?? 0
               return html`
               <tr class="border-b border-[var(--card-border)] last:border-b-0">
                 <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
@@ -331,6 +336,11 @@ function HealthTable({
                 <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
                 <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
                 <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
+                <td class="py-1 text-right tabular-nums">
+                  ${rejected > 0
+                    ? html`<span class="text-[var(--warn)]">${rejected}</span>`
+                    : html`<span class="text-[var(--text-muted)]">—</span>`}
+                </td>
                 <td class="py-1 text-right">
                   ${p.in_cooldown
                     ? html`<${StatusChip} tone="bad">${fmtCooldownExpiry(p.cooldown_expires_at)}<//>`

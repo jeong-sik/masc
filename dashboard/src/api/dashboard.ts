@@ -1778,6 +1778,12 @@ export interface CascadeHealthProvider {
   in_cooldown: boolean
   cooldown_expires_at: number | null
   events_in_window: number
+  /** Subset of [events_in_window] with outcome "rejected" — response
+   *  arrived but was rejected by the cascade's accept predicate. Split
+   *  so the dashboard can tell "provider down" from "provider returns
+   *  unusable output".
+   *  @since 0.160.0 — optional for backward compat with older servers. */
+  rejected_in_window?: number
 }
 
 export interface CascadeHealthResponse {

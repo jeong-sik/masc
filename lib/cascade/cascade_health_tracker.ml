@@ -102,7 +102,13 @@ let cooldown_sec =
 
 (* ── Types ────────────────────────────────────── *)
 
-type outcome = Success | Failure
+(* [Rejected] is the third outcome kind introduced in 0.160.0.  It
+   represents "response arrived but the cascade's accept predicate
+   rejected it" — behaviorally equivalent to [Failure] (same cooldown
+   trigger, same success-rate impact) but visible to the dashboard so
+   operators can tell a down provider apart from one whose outputs are
+   consistently unusable. *)
+type outcome = Success | Failure | Rejected
 
 type event = {
   time: float;  (* Unix timestamp *)
@@ -159,7 +165,13 @@ let record t ~provider_key ~outcome ~now =
       state.consecutive_failures <- 0;
       (* Clear cooldown on success — provider recovered *)
       state.cooldown_until <- 0.0
-    | Failure ->
+    | Failure | Rejected ->
+      (* Rejected responses indicate unusable output (gate reject, empty
+         body, schema miss).  Treat identically to Failure for cooldown
+         and consecutive-failure tracking — a provider whose responses
+         are consistently rejected is as useless as one that never
+         responds.  The outcome tag is preserved in [events] so
+         [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       if state.consecutive_failures >= cooldown_threshold then
         state.cooldown_until <- now +. cooldown_sec)
@@ -169,6 +181,9 @@ let record_success t ~provider_key =
 
 let record_failure t ~provider_key =
   record t ~provider_key ~outcome:Failure ~now:(Unix.gettimeofday ())
+
+let record_rejected t ~provider_key =
+  record t ~provider_key ~outcome:Rejected ~now:(Unix.gettimeofday ())
 
 (* ── Queries ──────────────────────────────────── *)
 
@@ -244,6 +259,7 @@ type provider_info = {
   in_cooldown : bool;
   cooldown_expires_at : float option;
   events_in_window : int;
+  rejected_in_window : int;
 }
 
 let build_info_locked ~now ~key state =
@@ -251,6 +267,8 @@ let build_info_locked ~now ~key state =
   let total = List.length recent in
   let successes = List.length
       (List.filter (fun e -> e.outcome = Success) recent) in
+  let rejected = List.length
+      (List.filter (fun e -> e.outcome = Rejected) recent) in
   let rate =
     if total = 0 then 1.0
     else float_of_int successes /. float_of_int total
@@ -263,6 +281,7 @@ let build_info_locked ~now ~key state =
     in_cooldown = in_cd;
     cooldown_expires_at = (if in_cd then Some state.cooldown_until else None);
     events_in_window = total;
+    rejected_in_window = rejected;
   }
 
 let provider_info t ~provider_key =
@@ -272,7 +291,32 @@ let provider_info t ~provider_key =
     | Some state ->
       Some (build_info_locked ~now:(Unix.gettimeofday ()) ~key:provider_key state))
 
+(** Evict tracker entries whose rolling window has fully aged out and
+    whose cooldown has expired — they carry no information but would
+    still appear on the dashboard as stale rows.  [consecutive_failures]
+    is intentionally ignored: without an active cooldown or recent
+    events, the counter is just a leftover that will be reset on the
+    next call anyway. *)
+let evict_idle t =
+  with_lock t (fun () ->
+    let now = Unix.gettimeofday () in
+    let to_remove =
+      Hashtbl.fold
+        (fun key state acc ->
+          let recent = prune_old_events now state.events in
+          if recent = [] && state.cooldown_until <= now then key :: acc
+          else acc)
+        t.providers
+        []
+    in
+    List.iter (Hashtbl.remove t.providers) to_remove;
+    List.length to_remove)
+
 let all_providers t =
+  (* Opportunistic maintenance: reaping aged-out entries here keeps the
+     dashboard's provider list stable without a separate maintenance
+     fiber.  Dashboard polls every 30s, so this is bounded. *)
+  let _ : int = evict_idle t in
   with_lock t (fun () ->
     let now = Unix.gettimeofday () in
     Hashtbl.fold

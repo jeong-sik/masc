@@ -449,7 +449,15 @@ let run_named
         on_success ~provider_key:provider_cfg.model_id;
         Ok result
       | Ok result ->
-        Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id);
+        (* Response arrived but failed the cascade's [accept] predicate
+           (empty body, schema gate, etc.).  Prior to 0.160.0 this
+           called [record_success] on the rationale that "the provider
+           answered"; that masked gate drift because provider health
+           stayed 100% while every call fell through to the next tier.
+           [record_rejected] behaves like a failure for cooldown /
+           weight but keeps the [Rejected] tag so the dashboard can
+           distinguish it from hard errors. *)
+        Cascade_health_tracker.(record_rejected global ~provider_key:provider_cfg.model_id);
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
         let outcome = Cascade_fsm.Accept_rejected

@@ -151,6 +151,17 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           @ usage_fields)
       in
       Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
+  | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
+      let payload =
+        `Assoc
+          [
+            ("agent_name", `String agent_name);
+            ("task_id", `String task_id);
+            ("elapsed_s", `Float elapsed);
+            ("error", `String (Agent_sdk.Error.to_string error));
+          ]
+      in
+      Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
       let payload =
         `Assoc
@@ -187,6 +198,28 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           ]
       in
       Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
+  | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
+      let payload =
+        `Assoc
+          [
+            ("from_agent", `String from_agent);
+            ("to_agent", `String to_agent);
+            ("reason", `String reason);
+          ]
+      in
+      Some
+        (wrap ~event_type:"handoff_requested" ~payload ~agent_name:from_agent ())
+  | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
+      let payload =
+        `Assoc
+          [
+            ("from_agent", `String from_agent);
+            ("to_agent", `String to_agent);
+            ("elapsed_s", `Float elapsed);
+          ]
+      in
+      Some
+        (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
   | Agent_sdk.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
       let payload =
@@ -199,39 +232,6 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
           ]
       in
       Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
-  | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
-      let payload =
-        `Assoc
-          [
-            ("agent_name", `String agent_name);
-            ("task_id", `String task_id);
-            ("error", `String (Agent_sdk.Error.to_string error));
-            ("elapsed", `Float elapsed);
-          ]
-      in
-      Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
-  | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
-      let payload =
-        `Assoc
-          [
-            ("from_agent", `String from_agent);
-            ("to_agent", `String to_agent);
-            ("reason", `String reason);
-          ]
-      in
-      Some (wrap ~event_type:"handoff_requested" ~payload
-              ~agent_name:from_agent ())
-  | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
-      let payload =
-        `Assoc
-          [
-            ("from_agent", `String from_agent);
-            ("to_agent", `String to_agent);
-            ("elapsed", `Float elapsed);
-          ]
-      in
-      Some (wrap ~event_type:"handoff_completed" ~payload
-              ~agent_name:to_agent ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ ->
     None  (* Internal; no SSE relay needed *)
   | Agent_sdk.Event_bus.ContextOverflowImminent

@@ -153,8 +153,8 @@ let compact_if_needed
       let messages =
           let msgs_after_compact =
             Context_compact_oas.compact
-              ~system_prompt:ctx.system_prompt
-              ~messages:ctx.messages
+              ~system_prompt:(system_prompt_of_context ctx)
+              ~messages:(messages_of_context ctx)
               ~strategies
               ()
           in
@@ -165,7 +165,11 @@ let compact_if_needed
           Keeper_context_core.repair_broken_tool_call_pairs msgs_after_fold
         in
         let compacted_ctx =
-          sync_oas_context { ctx with messages }
+          sync_oas_context
+            {
+              ctx with
+              checkpoint = { (checkpoint_of_context ctx) with messages };
+            }
         in
         let new_ratio = context_ratio compacted_ctx in
         let new_msg_count = message_count compacted_ctx in

@@ -338,7 +338,7 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
       `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
 
 let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =
-  ctx_work.messages
+  Keeper_exec_context.messages_of_context ctx_work
   |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
        if m.role = Agent_sdk.Types.User then
          let c = String.trim (Agent_sdk.Types.text_of_message m) in

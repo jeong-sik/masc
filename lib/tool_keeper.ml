@@ -776,18 +776,28 @@ let handle_keeper_clear ctx args : tool_result =
         match ctx_opt with
         | None -> 0
         | Some wctx ->
-          let msg_count = List.length wctx.messages in
+          let existing_messages = Keeper_exec_context.messages_of_context wctx in
+          let msg_count = List.length existing_messages in
           let cleared_messages =
             if preserve_system then
               (* Keep only system-role messages *)
               List.filter
                 (fun (m : Agent_sdk.Types.message) ->
                    m.role = Llm_provider.Types.System)
-                wctx.messages
+                existing_messages
             else
               []
           in
-          let cleared_ctx = { wctx with messages = cleared_messages } in
+          let cleared_ctx =
+            {
+              wctx with
+              checkpoint =
+                {
+                  (Keeper_exec_context.checkpoint_of_context wctx) with
+                  messages = cleared_messages;
+                };
+            }
+          in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
              — the keeper_unified_turn retry loop uses meta.runtime.generation

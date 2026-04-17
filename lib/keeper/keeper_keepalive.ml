@@ -596,7 +596,7 @@ let write_heartbeat_snapshot
      leave user-only entries and continuity_summary stays empty forever.
      Read is bounded to avoid large allocations during heartbeats. *)
   let messages_for_continuity = match ctx_opt with
-    | Some c -> c.messages
+    | Some c -> Keeper_exec_context.messages_of_context c
     | None ->
       let history_path =
         Keeper_types.keeper_history_path ctx.config
@@ -749,7 +749,8 @@ let write_heartbeat_snapshot
         ~context_ratio:context_ratio_v
         ~message_count:message_count_v
         ~token_count:token_count_v
-        ~max_tokens:(match ctx_opt with Some c -> c.max_tokens | None -> max_cascade_context)
+        ~max_tokens:
+          (match ctx_opt with Some c -> c.max_tokens | None -> max_cascade_context)
         ~repetition_risk
         ~goal_alignment
         ~response_alignment

@@ -288,8 +288,7 @@ type tool_call_entry = {
 (** {1 Working Context Types (moved from Keeper_working_context)} *)
 
 type working_context = {
-  system_prompt : string;
-  messages : Agent_sdk.Types.message list;
+  checkpoint : Agent_sdk.Checkpoint.t;
   max_tokens : int;
   context : Agent_sdk.Context.t;
 }

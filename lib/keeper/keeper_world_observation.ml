@@ -405,7 +405,7 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta)
         let snapshot =
           match structured_snapshot with
           | Some _ as s -> s
-          | None -> latest_state_snapshot_from_messages c.messages
+          | None -> latest_state_snapshot_from_messages (messages_of_context c)
         in
         (match snapshot with
          | Some s -> keeper_state_snapshot_to_summary_text s

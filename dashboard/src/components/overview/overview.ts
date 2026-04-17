@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useMemo } from 'preact/hooks'
-import { ChevronRight } from 'lucide-preact'
+import { ChevronRight, Users, Zap, Target } from 'lucide-preact'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
@@ -370,7 +370,10 @@ function MetaCognitionCard() {
         ? html`
             <div class="grid grid-cols-3 gap-3 max-[960px]:grid-cols-1">
               <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">공감대</div>
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  <${Users} size=${12} class="shrink-0" aria-hidden="true" />
+                  공감대
+                </div>
                 <div class="mt-2 text-[13px] font-medium leading-relaxed text-[var(--text-strong)]" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
                   ${belief?.claim ?? '아직 강한 belief가 드러나지 않았습니다.'}
                 </div>
@@ -380,7 +383,10 @@ function MetaCognitionCard() {
               </div>
 
               <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">긴장</div>
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  <${Zap} size=${12} class="shrink-0" aria-hidden="true" />
+                  긴장
+                </div>
                 <div class="mt-2 text-[13px] font-medium leading-relaxed text-[var(--text-strong)]" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
                   ${tension?.topic ?? '아직 우세한 tension이 없습니다.'}
                 </div>
@@ -392,7 +398,10 @@ function MetaCognitionCard() {
               </div>
 
               <div class="rounded-xl border border-card-border/50 bg-card/48 p-3">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">욕구</div>
+                <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  <${Target} size=${12} class="shrink-0" aria-hidden="true" />
+                  욕구
+                </div>
                 <div class="mt-2 text-[13px] font-medium leading-relaxed text-[var(--text-strong)]" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden">
                   ${desire?.desired_state ?? '아직 뚜렷한 collective desire가 없습니다.'}
                 </div>

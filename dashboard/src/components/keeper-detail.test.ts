@@ -24,9 +24,11 @@ vi.mock('../keeper-runtime', () => ({
 
 import {
   closeKeeperDetail,
+  filterCheckpointHistory,
   openKeeperDetail,
   selectedKeeper,
 } from './keeper-detail'
+import type { KeeperCheckpointSummary } from '../api/keeper'
 
 describe('openKeeperDetail', () => {
   beforeEach(() => {
@@ -60,5 +62,107 @@ describe('openKeeperDetail', () => {
 
     expect(selectedKeeper.value).toBeNull()
     expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)
+  })
+})
+
+function makeSummary(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckpointSummary {
+  return {
+    snapshot_id: 'snap-000',
+    source_kind: 'oas_history',
+    is_current: false,
+    path: '/tmp/snap-000.json',
+    created_at: 1_700_000_000,
+    generation: 1,
+    message_count: 10,
+    system_prompt_present: true,
+    latest_preview: null,
+    continuity_summary: null,
+    file_stat: null,
+    ...overrides,
+  }
+}
+
+describe('filterCheckpointHistory', () => {
+  const rows: readonly KeeperCheckpointSummary[] = [
+    makeSummary({
+      snapshot_id: 'snap-abc123',
+      source_kind: 'oas_history',
+      latest_preview: '유저 질문에 답변 완료',
+      continuity_summary: 'Keeper heartbeat stable',
+    }),
+    makeSummary({
+      snapshot_id: 'snap-def456',
+      source_kind: 'oas_current',
+      latest_preview: 'Compaction triggered',
+      continuity_summary: null,
+    }),
+    makeSummary({
+      snapshot_id: 'snap-ghi789',
+      source_kind: 'oas_history',
+      latest_preview: null,
+      continuity_summary: null,
+    }),
+  ]
+
+  it('returns the input reference for empty query (no allocation)', () => {
+    expect(filterCheckpointHistory(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterCheckpointHistory(rows, '   \t\n ')).toBe(rows)
+  })
+
+  it('matches by snapshot_id substring (case-insensitive)', () => {
+    const result = filterCheckpointHistory(rows, 'ABC')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.snapshot_id).toBe('snap-abc123')
+  })
+
+  it('matches by source_kind', () => {
+    const result = filterCheckpointHistory(rows, 'oas_current')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.snapshot_id).toBe('snap-def456')
+  })
+
+  it('matches by latest_preview text including Korean', () => {
+    const result = filterCheckpointHistory(rows, '답변')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.snapshot_id).toBe('snap-abc123')
+  })
+
+  it('matches by continuity_summary', () => {
+    const result = filterCheckpointHistory(rows, 'heartbeat')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.snapshot_id).toBe('snap-abc123')
+  })
+
+  it('trims the query before matching', () => {
+    const result = filterCheckpointHistory(rows, '  compaction  ')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.snapshot_id).toBe('snap-def456')
+  })
+
+  it('returns empty array when nothing matches', () => {
+    expect(filterCheckpointHistory(rows, 'no-such-token')).toEqual([])
+  })
+
+  it('does not mutate the input array or its elements', () => {
+    const snapshot = rows.map(r => ({ ...r }))
+    filterCheckpointHistory(rows, 'abc')
+    expect(rows.map(r => ({ ...r }))).toEqual(snapshot)
+  })
+
+  it('handles rows with null preview and null continuity_summary without throwing', () => {
+    const onlyNulls: readonly KeeperCheckpointSummary[] = [
+      makeSummary({ snapshot_id: 'snap-null', latest_preview: null, continuity_summary: null }),
+    ]
+    expect(() => filterCheckpointHistory(onlyNulls, 'missing')).not.toThrow()
+    expect(filterCheckpointHistory(onlyNulls, 'missing')).toEqual([])
+    expect(filterCheckpointHistory(onlyNulls, 'null')).toHaveLength(1)
+  })
+
+  it('preserves the original order of matching rows', () => {
+    const result = filterCheckpointHistory(rows, 'snap-')
+    expect(result.map(r => r.snapshot_id)).toEqual(['snap-abc123', 'snap-def456', 'snap-ghi789'])
   })
 })

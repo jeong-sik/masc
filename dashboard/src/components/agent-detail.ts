@@ -2,7 +2,8 @@
 // Sub-components: agent-detail-state, agent-detail-timeline, agent-detail-journal, agent-detail-worker
 
 import { html } from 'htm/preact'
-import { useRef } from 'preact/hooks'
+import { useSignal } from '@preact/signals'
+import { useMemo, useRef } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState, ErrorState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
@@ -57,6 +58,59 @@ setKeeperRedirect((agentName: string) => {
   return false
 })
 
+/**
+ * Pure filter for owned tasks.
+ *
+ * Case-insensitive substring match on `id`, `title`, `status`, and
+ * `description`. Operators locate a task by its short id, a keyword from
+ * the title, its lifecycle status (e.g. "done", "claimed"), or a phrase
+ * from the description.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterOwnedTasks(
+  tasks: readonly Task[],
+  query: string,
+): readonly Task[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return tasks
+  return tasks.filter(task => {
+    if (task.id.toLowerCase().includes(needle)) return true
+    if (task.title.toLowerCase().includes(needle)) return true
+    if (task.status && task.status.toLowerCase().includes(needle)) return true
+    if (task.description && task.description.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
+/**
+ * Pure filter for task history rows.
+ *
+ * Case-insensitive substring match on `taskId` and `text`. A history row
+ * is a rendered text blob plus the task it belongs to, so those are the
+ * two searchable fields.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterTaskHistories(
+  rows: readonly TaskHistoryRow[],
+  query: string,
+): readonly TaskHistoryRow[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.taskId.toLowerCase().includes(needle)) return true
+    if (row.text && row.text.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 function TaskSummary({ task }: { task: Task }) {
   return html`
     <div class="flex items-center gap-3 border border-card-border bg-card/40 hover:bg-card/60 transition-colors px-3 py-2.5 rounded-xl shadow-sm">
@@ -78,6 +132,34 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   `
 }
 
+function renderOwnedTasks(
+  allTasks: readonly Task[],
+  visibleTasks: readonly Task[],
+  isFiltering: boolean,
+) {
+  if (allTasks.length === 0) {
+    return html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
+  }
+  if (isFiltering && visibleTasks.length === 0) {
+    return html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allTasks.length} tasks)</div>`
+  }
+  return html`<div class="flex flex-col gap-3">${visibleTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`
+}
+
+function renderTaskHistories(
+  allRows: readonly TaskHistoryRow[],
+  visibleRows: readonly TaskHistoryRow[],
+  isFiltering: boolean,
+) {
+  if (allRows.length === 0) {
+    return html`<${EmptyState} message="작업 이력이 없습니다" compact />`
+  }
+  if (isFiltering && visibleRows.length === 0) {
+    return html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allRows.length} rows)</div>`
+  }
+  return html`<div class="flex flex-col gap-3">${visibleRows.map(row => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`
+}
+
 export function AgentDetailOverlay() {
   const agentName = selectedAgentName.value
   if (!agentName) return null
@@ -89,6 +171,17 @@ export function AgentDetailOverlay() {
   const missionBrief = missionAgentBrief(agentName)
   const ownedTasks = assignedTasks(agentName)
   const lines = namespaceActivity.value
+  const taskQuery = useSignal('')
+  const historyRows = taskHistories.value
+  const visibleOwnedTasks = useMemo(
+    () => filterOwnedTasks(ownedTasks, taskQuery.value),
+    [ownedTasks, taskQuery.value],
+  )
+  const visibleHistories = useMemo(
+    () => filterTaskHistories(historyRows, taskQuery.value),
+    [historyRows, taskQuery.value],
+  )
+  const isFilteringTasks = taskQuery.value.trim() !== ''
   const displayName = missionBrief?.display_name ?? keeper?.name ?? agentName
   const secondaryLabel = displayName !== agentName ? agentName : null
   const unified = resolveUnifiedStatus(keeper?.status, agent?.status, missionBrief?.signal_truth)
@@ -197,11 +290,26 @@ export function AgentDetailOverlay() {
           <${SessionTraceView} agentName=${agentName} isKeeper=${!!keeper} />
         <//>
 
+        <div class="flex items-center justify-between gap-2">
+          <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+            작업 필터
+            ${isFilteringTasks
+              ? html`<span class="ml-2 normal-case tracking-normal text-text-muted">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
+              : null}
+          </div>
+          <input
+            type="search"
+            value=${taskQuery.value}
+            placeholder="id / title / status 필터"
+            aria-label="작업 필터"
+            onInput=${(e: Event) => { taskQuery.value = (e.target as HTMLInputElement).value }}
+            class="min-w-[160px] max-w-[280px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+          />
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <${Card} title="할당된 작업">
-            ${ownedTasks.length === 0
-              ? html`<div class="h-full min-h-[120px]"><${EmptyState} message="할당된 작업이 없습니다" compact /></div>`
-              : html`<div class="flex flex-col gap-3">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
+            ${renderOwnedTasks(ownedTasks, visibleOwnedTasks, isFilteringTasks)}
           <//>
 
           <${Card} title="최근 활동">
@@ -235,9 +343,7 @@ export function AgentDetailOverlay() {
           ` : null}
 
           <${Card} title="작업 이력">
-            ${taskHistories.value.length === 0
-              ? html`<${EmptyState} message="작업 이력이 없습니다" compact />`
-              : html`<div class="flex flex-col gap-3">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
+            ${renderTaskHistories(historyRows, visibleHistories, isFilteringTasks)}
           <//>
 
           <${Card} title="직접 멘션">

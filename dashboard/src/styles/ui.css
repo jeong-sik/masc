@@ -94,16 +94,6 @@ button.agent-card {
   &:hover { background: var(--white-8); }
 }
 
-/* namespace-truth-strip: migrated to inline Tailwind */
-
-@utility namespace-truth-card {
-  background:
-    linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
-    var(--card);
-  & strong { color: #edf4ff; font-size: var(--fs-lg); line-height: 1.35; }
-  & p { margin: 0; color: #96add7; font-size: var(--fs-sm); line-height: 1.5; }
-}
-
 /* button.monitor-alert/row: element+class selector, kept as raw CSS */
 button.monitor-alert,
 button.monitor-row {

@@ -677,7 +677,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
-let _session_recent_event_limit = 3
 let _snapshot_session_window_seconds () =
   Dashboard_http_helpers.operator_snapshot_session_window_seconds ()
 

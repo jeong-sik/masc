@@ -44,7 +44,7 @@ export function statusChipClass(status: RailStatus): string {
   }
 }
 
-function statusCardClass(status: RailStatus): string {
+export function statusCardClass(status: RailStatus): string {
   switch (status) {
     case 'healthy':
       return 'border-[var(--ok-30)] bg-[var(--ok-12)]'
@@ -65,7 +65,7 @@ export function freshnessLabel(ts: number | null | undefined, fallback = '기록
   return formatTimeAgo(ts)
 }
 
-function emptyReasonText(reason?: string | null): string {
+export function emptyReasonText(reason?: string | null): string {
   switch (reason) {
     case 'window_empty':
       return '선택된 범위에는 신호가 없습니다.'
@@ -77,13 +77,13 @@ function emptyReasonText(reason?: string | null): string {
   }
 }
 
-function verdictTone(verdict: string): string {
+export function verdictTone(verdict: string): string {
   return verdict.startsWith('approve')
     ? 'bg-[var(--ok)]'
     : 'bg-[var(--bad)]'
 }
 
-function verdictSummary(verdict: string): string {
+export function verdictSummary(verdict: string): string {
   if (!verdict.startsWith('reject:')) return verdict
   return verdict.slice('reject:'.length).trim() || 'reject'
 }

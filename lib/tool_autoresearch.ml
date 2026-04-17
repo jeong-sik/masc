@@ -319,6 +319,20 @@ let handle_stop (ctx : context) args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
+      let can_stop =
+        match ctx.agent_name with
+        | None | Some "dashboard" | Some "admin" -> true
+        | Some requester ->
+            match Autoresearch.load_state ~base_path:ctx.base_path id with
+            | None -> true
+            | Some state ->
+                match state.author with
+                | Some a when a <> requester -> false
+                | _ -> true
+      in
+      if not can_stop then
+        `Assoc [("error", `String "Access denied: you can only stop loops that you started.")]
+      else
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->

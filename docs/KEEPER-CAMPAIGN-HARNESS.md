@@ -1,3 +1,11 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - scripts/harness_keeper_campaign.sh
+  - lib/keeper/
+---
+
 # Keeper Campaign Harness
 
 `keeper campaign harness`는 기존 keeper 하나가 장기 goal을 들고 task를 claim한 뒤,

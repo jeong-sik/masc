@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/config/
+  - lib/env_config.mli
+  - start-masc-mcp.sh
+---
+
 # Boot, Path, and Runtime State Inventory
 
 This document answers four operator questions:

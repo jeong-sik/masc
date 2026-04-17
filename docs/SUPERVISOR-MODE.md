@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/supervisor.ml
+  - bin/masc_tui.ml
+  - scripts/harness_supervisor_execution_session.sh
+---
+
 # Supervisor Mode
 
 Supervisor Mode is the interactive TUI operating model for steering a MASC supervised execution session through MCP.

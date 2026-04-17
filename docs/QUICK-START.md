@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - start-masc-mcp.sh
+  - bin/main_eio.ml
+  - bin/main_stdio_eio.ml
+---
+
 # MASC Quick Start
 
 이 문서는 `처음 띄우고`, `연결하고`, `첫 작업을 시작하는` 데 필요한 최소 절차만 모은다.

@@ -1,3 +1,11 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - config/
+---
+
 # MASC Keeper 사용자 매뉴얼
 
 **Version**: 1.0.0

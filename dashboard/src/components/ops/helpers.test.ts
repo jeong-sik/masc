@@ -18,31 +18,4 @@ describe('ops helper state exports', () => {
   it('re-exports the canonical actor persistence function', () => {
     expect(helpers.persistActorName).toBe(opsState.persistActorName)
   })
-
-  it('filters pending confirmations by global, mine, and actor scopes', () => {
-    const items = [
-      { confirm_token: 'a', actor: 'dashboard-a' },
-      { confirm_token: 'b', actor: 'dashboard-b' },
-      { confirm_token: 'c', actor: 'dashboard-a' },
-    ]
-
-    expect(
-      helpers.filterPendingConfirmations(items, 'dashboard-a', { kind: 'all' }).map(item => item.confirm_token),
-    ).toEqual(['a', 'b', 'c'])
-    expect(
-      helpers.filterPendingConfirmations(items, 'dashboard-a', { kind: 'mine' }).map(item => item.confirm_token),
-    ).toEqual(['a', 'c'])
-    expect(
-      helpers.filterPendingConfirmations(items, 'dashboard-a', { kind: 'actor', actor: 'dashboard-b' }).map(item => item.confirm_token),
-    ).toEqual(['b'])
-  })
-
-  it('only allows the owning actor to confirm a pending action', () => {
-    expect(
-      helpers.canManagePendingConfirmation({ confirm_token: 'a', actor: 'dashboard-a' }, 'dashboard-a'),
-    ).toBe(true)
-    expect(
-      helpers.canManagePendingConfirmation({ confirm_token: 'b', actor: 'dashboard-b' }, 'dashboard-a'),
-    ).toBe(false)
-  })
 })

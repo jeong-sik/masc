@@ -27,6 +27,7 @@ let word = word_char+
 rule token = parse
   | [' ' '\t']+    { token lexbuf }
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
+  | '|'            { incr_tokens (); PIPE }
   | word as w      { incr_tokens (); WORD w }
   | eof            { EOF }
   | _ as c         { raise (Failure (Printf.sprintf "unexpected char %c" c)) }

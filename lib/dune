@@ -16,6 +16,7 @@
    agent_registry_eio
    anti_rationalization
    attribution
+   attribution_tagged
    auto_recall
    auto_responder
    auth

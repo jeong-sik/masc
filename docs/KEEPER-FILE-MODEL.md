@@ -202,6 +202,7 @@ Operational intent:
 
 - private writable lane: `.masc/playground/<keeper>/...`
 - shared lane: `masc_team_memory_read/write/search` only, on flattened `room="default"`
+- default sandbox image is digest-pinned; stricter seccomp/rootless/userns checks come from `MASC_KEEPER_SANDBOX_*`
 - no arbitrary shared writable shell directory
 - `legacy_local` remains backward-compatible for old keepers
 

@@ -531,7 +531,10 @@ module KeeperSandbox = struct
   (** Ephemeral Docker image used by sandbox_profile=docker_hardened.
       Must contain bash and the CLI tools the keeper needs. *)
   let docker_image =
-    get_string ~default:"ubuntu:24.04" "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+    get_string
+      ~default:
+        "ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff"
+      "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
 
   (** pids limit for hardened keeper containers. *)
   let pids_limit =
@@ -544,6 +547,18 @@ module KeeperSandbox = struct
   (** Writable tmpfs size inside the read-only rootfs. *)
   let tmpfs_size =
     get_string ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
+
+  (** Optional seccomp profile path passed to [docker run --security-opt]. *)
+  let seccomp_profile =
+    get_string ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+
+  (** Fail closed unless Docker reports rootless mode support. *)
+  let require_rootless =
+    get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+
+  (** Fail closed unless Docker reports userns support. *)
+  let require_userns =
+    get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
 end
 
 module DashboardHealth = struct

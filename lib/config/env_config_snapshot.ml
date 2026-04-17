@@ -425,6 +425,27 @@ let docker_playground_entries =
       "Route keeper_bash through Docker container (feature flag)";
   ]
 
+let keeper_sandbox_entries =
+  [
+    entry
+      ~default:
+        "ubuntu:24.04@sha256:cdb5fd928fced577cfecf12c8966e830fcdf42ee481fb0b91904eeddc2fe5eff"
+      "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+      "Digest-pinned Docker image for sandbox_profile=docker_hardened";
+    entry ~default:"128" "MASC_KEEPER_SANDBOX_PIDS_LIMIT"
+      "PID limit for hardened keeper containers";
+    entry ~default:"2g" "MASC_KEEPER_SANDBOX_MEMORY"
+      "Memory limit for hardened keeper containers";
+    entry ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
+      "Writable /tmp tmpfs size for hardened keeper containers";
+    entry ~default:"(none)" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+      "Optional seccomp profile path for hardened keeper containers";
+    entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+      "Fail closed unless Docker reports rootless mode";
+    entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+      "Fail closed unless Docker reports userns support";
+  ]
+
 let economy_entries =
   [
     entry ~default:"false" "MASC_ECONOMY_ENABLED"
@@ -947,7 +968,8 @@ let all_categories () =
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries
        @ keeper_tool_entries @ keeper_cascade_entries
-       @ keeper_proactive_entries @ keeper_grpc_entries);
+       @ keeper_proactive_entries @ keeper_grpc_entries
+       @ keeper_sandbox_entries);
     category "keeper_guardrails" keeper_guardrail_entries;
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
     category "level2" level2_entries;

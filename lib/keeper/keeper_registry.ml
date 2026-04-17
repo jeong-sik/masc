@@ -360,6 +360,9 @@ let record_error ~base_path name err =
   Log.Keeper.error "registry: recording error name=%s error=%s" name err;
   update_entry ~base_path name (fun e -> { e with last_error = Some err })
 
+let clear_error ~base_path name =
+  update_entry ~base_path name (fun e -> { e with last_error = None })
+
 let set_failure_reason ~base_path name reason =
   update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
 

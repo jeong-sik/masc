@@ -1105,6 +1105,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     network_mode: asNullableString(data.network_mode) ?? 'inherit',
     shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
+    effective_sandbox_image: asNullableString(data.effective_sandbox_image),
     private_workspace_root: asNullableString(data.private_workspace_root),
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),

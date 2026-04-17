@@ -43,9 +43,6 @@ let operator_surface_contract_json =
       ("attention_items", `String "derived");
       ("recommended_actions", `String "fallback");
       ("active_recommended_actions", `String "judgment_or_fallback");
-      ("review_queue", `String "derived");
-      ("deferred_queue", `String "derived");
-      ("review_summary", `String "derived");
       ("recent_reviews", `String "operator_state");
       ("worker_cards", `String "truth");
     ]

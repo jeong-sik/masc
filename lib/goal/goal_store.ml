@@ -239,8 +239,13 @@ let delete_goal config ~goal_id =
   if not (List.exists (fun g -> g.id = goal_id) before.goals) then
     Error "Goal not found"
   else begin
+    (* Bump [version] so downstream replicas/snapshot consumers can detect
+       the change. The previous [{ st with ... }] form preserved [version]
+       unchanged, so 39 successive deletes all landed at v67 without a
+       single bump (Issue #7690). [refresh_all] and [review_goal] already
+       bump explicitly; match that convention here. *)
     ignore (update_state config (fun st ->
-      { st with
+      { version = st.version + 1;
         goals = List.filter (fun g -> g.id <> goal_id) st.goals;
         updated_at = Types.now_iso () }));
     Ok ()

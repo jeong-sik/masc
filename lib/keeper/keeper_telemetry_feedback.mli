@@ -16,7 +16,6 @@ type behavioral_stats = {
   unique_tools_used : string list;
   tool_utilization_rate : float;
   last_visible_action_age_sec : int;
-  pr_workflow_attempts : int;
   work_discovery_count : int;
 }
 

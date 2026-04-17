@@ -16,7 +16,6 @@ type behavioral_stats = {
   unique_tools_used : string list;
   tool_utilization_rate : float;
   last_visible_action_age_sec : int;
-  pr_workflow_attempts : int;
   work_discovery_count : int;
 }
 
@@ -30,7 +29,6 @@ let empty_stats ~window_hours =
     unique_tools_used = [];
     tool_utilization_rate = 0.0;
     last_visible_action_age_sec = 0;
-    pr_workflow_attempts = 0;
     work_discovery_count = 0;
   }
 
@@ -122,12 +120,6 @@ let compute_stats ~decision_log_path ~window_hours =
     let total_tool_calls =
       List.fold_left (fun acc d -> acc + d.tool_call_count) 0 decisions
     in
-    let pr_workflow_attempts =
-      List.length (List.filter (fun d ->
-        List.exists (fun t ->
-          String.lowercase_ascii t = "keeper_pr_workflow") d.tools_used
-      ) decisions)
-    in
     let last_visible_ts =
       decisions
       |> List.filter (fun d -> not (is_silent d))
@@ -159,7 +151,6 @@ let compute_stats ~decision_log_path ~window_hours =
       unique_tools_used = unique_tools;
       tool_utilization_rate;
       last_visible_action_age_sec;
-      pr_workflow_attempts;
       work_discovery_count = 0;
     }
 

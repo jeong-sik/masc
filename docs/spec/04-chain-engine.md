@@ -9,12 +9,11 @@
 
 ## Status
 
-- Classification: Historical
-- Runtime status: Removed
-- Replacement references:
-  - `docs/spec/05-keeper-agent.md`
-  - `docs/spec/13-oas-integration.md`
-  - `docs/spec/C-implementation-status.md`
+| Field | Value |
+| ----- | ----- |
+| Status | Archived |
+| Runtime | Removed |
+| Replacement | `docs/spec/05-keeper-agent.md`, `docs/spec/13-oas-integration.md`, `docs/spec/C-implementation-status.md` |
 
 ## Notes
 

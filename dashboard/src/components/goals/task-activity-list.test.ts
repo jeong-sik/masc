@@ -122,6 +122,36 @@ describe('TaskActivityList', () => {
     expect(text).toContain('"ok":true')
   })
 
+  it('renders event.detail when expanded for lifecycle events without toolArgs/toolResult', async () => {
+    const { container } = render(h(TaskActivityList, {
+      events: [sampleToolCallEvent({
+        kind: 'lifecycle',
+        toolArgs: undefined,
+        toolResult: null,
+        detail: { agent: 'keeper-sojin-agent', event: 'turn_completed', turn: 42 },
+      })],
+      loading: false,
+      error: null,
+      showToolCalls: true,
+    }))
+
+    const details = container.querySelector('details')
+    expect(details).not.toBeNull()
+    if (!details) return
+
+    details.open = true
+    fireEvent(details, new Event('toggle', { bubbles: true }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('json-viewer-card')).toBeInTheDocument()
+    })
+    const card = screen.getByTestId('json-viewer-card')
+    expect(card).toHaveAttribute('data-title', 'Detail')
+    const text = card.textContent ?? ''
+    expect(text).toContain('keeper-sojin-agent')
+    expect(text).toContain('turn_completed')
+  })
+
   it('marks decorative icons as hidden from assistive tech', () => {
     const { container } = render(h(TaskActivityList, {
       events: [sampleToolCallEvent({ toolArgs: undefined, toolResult: null })],

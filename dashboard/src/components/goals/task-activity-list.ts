@@ -106,6 +106,11 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
               <${JsonViewerCard} data=${parseJsonLikeData(event.toolResult)} title="Result" />
             </div>
           ` : null}
+          ${event.toolArgs == null && event.toolResult == null && event.detail && Object.keys(event.detail).length > 0 ? html`
+            <div class="mb-1">
+              <${JsonViewerCard} data=${event.detail} title="Detail" />
+            </div>
+          ` : null}
           ${event.error ? html`<div class="text-[11px] text-[var(--bad-light)] mt-1">${event.error}</div>` : null}
           ${event.cost_usd != null ? html`<div class="text-[10px] text-text-dim mt-1">cost: $${event.cost_usd.toFixed(4)}</div>` : null}
         </div>

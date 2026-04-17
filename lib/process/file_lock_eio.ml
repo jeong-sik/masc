@@ -11,29 +11,36 @@
     Distributed backend paths (Some key in room_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
 
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
 type lock_entry = {
   mu : Eio.Mutex.t;
   mutable last_used : float;
-  mutable active : int;   (** Number of fibers currently holding or waiting on this mutex *)
+  active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
 }
 
 let max_lock_entries = 512
 let stale_lock_seconds = 600.0
 
-let table : (string, lock_entry) Hashtbl.t = Hashtbl.create 64
-let table_mu = Eio.Mutex.create ()
+let table : lock_entry SMap.t Atomic.t = Atomic.make SMap.empty
 
 (** Remove entries unused for [stale_lock_seconds] when table exceeds
     [max_lock_entries].  Called under [table_mu]. *)
 let prune_stale_entries () =
-  if Hashtbl.length table > max_lock_entries then begin
-    let now = Time_compat.now () in
-    Hashtbl.filter_map_inplace (fun _path entry ->
-      if entry.active > 0 then Some entry  (* in use — never prune *)
-      else if now -. entry.last_used > stale_lock_seconds then None
-      else Some entry
-    ) table
-  end
+  atomic_update table (fun map ->
+    if SMap.cardinal map > max_lock_entries then
+      let now = Time_compat.now () in
+      SMap.filter (fun _path entry ->
+        Atomic.get entry.active > 0 || now -. entry.last_used <= stale_lock_seconds
+      ) map
+    else map
+  )
 
 (** Get or create a lock entry for the given file path.
     Increments [active] to prevent prune_stale_entries from removing
@@ -41,26 +48,32 @@ let prune_stale_entries () =
     Falls back to direct Hashtbl access when no Eio context is available
     (e.g. in unit tests that don't use Eio_main.run). *)
 let get_entry path =
-  let f () =
-    prune_stale_entries ();
+  prune_stale_entries ();
+  let entry_ref = ref None in
+  atomic_update table (fun map ->
     let entry =
-      match Hashtbl.find_opt table path with
-      | Some entry ->
-        entry.last_used <- Time_compat.now ();
-        entry
+      match SMap.find_opt path map with
+      | Some e ->
+        e.last_used <- Time_compat.now ();
+        e
       | None ->
-        let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = 0 } in
-        Hashtbl.replace table path entry;
-        entry
+        let e = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = Atomic.make 0 } in
+        e
     in
-    entry.active <- entry.active + 1;
-    entry
-  in
-  Eio_guard.with_mutex table_mu f
+    entry_ref := Some entry;
+    SMap.add path entry map
+  );
+  let entry = Option.get !entry_ref in
+  Atomic.incr entry.active;
+  entry
 
 let release_entry entry =
-  let f () = entry.active <- max 0 (entry.active - 1) in
-  Eio_guard.with_mutex table_mu f
+  let rec decrement () =
+    let current = Atomic.get entry.active in
+    let next = max 0 (current - 1) in
+    if not (Atomic.compare_and_set entry.active current next) then decrement ()
+  in
+  decrement ()
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread f
 
@@ -169,4 +182,4 @@ let with_lock ?clock path f =
   with_mutex path (fun () -> run_with_flock ())
 
 (** Number of tracked lock paths (for diagnostics). *)
-let lock_count () = Hashtbl.length table
+let lock_count () = SMap.cardinal (Atomic.get table)

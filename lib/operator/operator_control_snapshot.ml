@@ -953,7 +953,6 @@ let snapshot_json ?actor ?view ?(include_messages = true)
          ("operator_judge_runtime", operator_judge_runtime_json config);
          ("judgment_owner", `String "fallback_read_model");
          ("authoritative_judgment_available", `Bool false);
-         ("provenance_summary", operator_surface_contract_json);
          ("root", room_json config);
        ]
       @ (

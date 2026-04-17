@@ -9,6 +9,7 @@ import {
   _testParseSchema,
   _testBuildEnvBlock,
   _testIsSensitive,
+  _testGetFieldHint,
 } from './connector-config-form'
 
 const flushUi = async () => {
@@ -59,6 +60,22 @@ describe('connector-config-form pure helpers', () => {
 
     expect(block).toContain('DISCORD_BOT_TOKEN=')
     expect(block).not.toContain('GATE_TIMEOUT_SEC')
+  })
+
+  it('getFieldHint returns where-to-find guidance for known credentials, null otherwise', () => {
+    const discord = _testGetFieldHint('DISCORD_BOT_TOKEN')
+    expect(discord?.where).toContain('Discord Developer Portal')
+    expect(discord?.url).toBe('https://discord.com/developers/applications')
+
+    const slack = _testGetFieldHint('SLACK_BOT_TOKEN')
+    expect(slack?.where).toContain('xoxb')
+
+    const telegram = _testGetFieldHint('TELEGRAM_BOT_TOKEN')
+    expect(telegram?.url).toBe('https://t.me/BotFather')
+
+    // Unknown fields must not fabricate hints.
+    expect(_testGetFieldHint('GATE_BASE_URL')).toBeNull()
+    expect(_testGetFieldHint('STATUS_HEARTBEAT_SEC')).toBeNull()
   })
 
   it('isSensitive flags token/secret/password/api_key variants', () => {
@@ -264,6 +281,40 @@ describe('ConnectorConfigForm', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(5)
     expect(fetchSpy.mock.calls[3]?.[0]).toContain('/api/v1/sidecar/stop?name=discord')
     expect(fetchSpy.mock.calls[4]?.[0]).toContain('/api/v1/sidecar/start?name=discord')
+  })
+
+  it('renders where-to-find hint block for DISCORD_BOT_TOKEN when schema contains it', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          id: 'discord',
+          schema: {
+            properties: {
+              DISCORD_BOT_TOKEN: { type: 'string' },
+              GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
+            },
+            required: ['DISCORD_BOT_TOKEN'],
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    const hint = container.querySelector('[data-field-hint="DISCORD_BOT_TOKEN"]')
+    expect(hint).toBeTruthy()
+    expect(hint?.textContent).toContain('Discord Developer Portal')
+    // Unknown fields stay clean — hint must not leak to GATE_BASE_URL.
+    expect(container.querySelector('[data-field-hint="GATE_BASE_URL"]')).toBeNull()
   })
 
   it('after toggle + fetch, renders required field marker and password input for token', async () => {

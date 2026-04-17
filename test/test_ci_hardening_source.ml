@@ -388,21 +388,13 @@ let test_dashboard_component_split_contracts () =
   check bool "proof helpers export worker run evidence tone" true
     (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
        "export function workerRunEvidenceTone");
-  check bool "proof sections export worker run evidence row" true
-    (file_contains_pattern "dashboard/src/components/proof-sections.ts"
-       "export function WorkerRunEvidenceRow");
-  check bool "mission cards re-export briefing card" true
-    (file_contains_pattern "dashboard/src/components/mission-cards.ts"
-       "export { MissionBriefingCard } from './mission-briefing-card'");
-  check bool "mission cards re-export attention card" true
-    (file_contains_pattern "dashboard/src/components/mission-cards.ts"
-       "export { AttentionCard } from './mission-attention-card'");
+  (* #8081 (mission navigate cascade purge) removed proof-sections.ts,
+     mission-cards.ts, and mission-attention-card.ts. Ratchet assertions
+     for the removed files dropped; mission-briefing-card.ts is the
+     surviving split and keeps its export assertion. *)
   check bool "mission briefing card exported from split file" true
     (file_contains_pattern "dashboard/src/components/mission-briefing-card.ts"
        "export function MissionBriefingCard");
-  check bool "mission attention card exported from split file" true
-    (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
-       "export function AttentionCard");
   check bool "coord backend setup no longer references transaction companion after PG removal" true
     (file_not_contains_pattern "lib/coord/coord_utils_backend_setup.ml"
        "Transaction Pooler companion")

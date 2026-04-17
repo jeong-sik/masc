@@ -18,6 +18,7 @@ import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
 import { HeartbeatStrip } from './common/heartbeat-strip'
 import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
+import { HeartbeatUptimeChip } from './common/heartbeat-uptime-chip'
 import { recordHeartbeat, useHeartbeatHistory, type HeartbeatState } from '../lib/heartbeat-history'
 
 /** Sampling cadence for the heartbeat ring buffer. Chosen so 45 bars
@@ -202,11 +203,16 @@ function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
   const history = useHeartbeatHistory(id)
   return html`
     <div class="flex flex-col gap-1">
-      <${HeartbeatStreakChip}
-        history=${history}
-        class="self-start"
-        testId=${`heartbeat-streak-${id}`}
-      />
+      <div class="flex items-center gap-1">
+        <${HeartbeatStreakChip}
+          history=${history}
+          testId=${`heartbeat-streak-${id}`}
+        />
+        <${HeartbeatUptimeChip}
+          history=${history}
+          testId=${`heartbeat-uptime-${id}`}
+        />
+      </div>
       <${HeartbeatStrip}
         history=${history}
         slots=${45}

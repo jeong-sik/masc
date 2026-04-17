@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolQualityResponse } from '../api/dashboard'
+import { filterTools, toolMatchesSearch } from './tool-quality-panel'
 
 vi.setConfig({
   testTimeout: 40000,
@@ -271,5 +272,87 @@ describe('ToolQualityPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('request timeout (35s)')
+  })
+})
+
+describe('toolMatchesSearch', () => {
+  const tool = { name: 'keeper_task_claim' }
+
+  it('returns true for empty query (no filter)', () => {
+    expect(toolMatchesSearch(tool, '')).toBe(true)
+    expect(toolMatchesSearch(tool, '   ')).toBe(true)
+  })
+
+  it('matches substring in the middle of the name', () => {
+    expect(toolMatchesSearch(tool, 'task')).toBe(true)
+    expect(toolMatchesSearch(tool, 'r_t')).toBe(true)
+  })
+
+  it('matches prefix and suffix', () => {
+    expect(toolMatchesSearch(tool, 'keeper')).toBe(true)
+    expect(toolMatchesSearch(tool, 'claim')).toBe(true)
+  })
+
+  it('is case-insensitive', () => {
+    expect(toolMatchesSearch(tool, 'TASK')).toBe(true)
+    expect(toolMatchesSearch(tool, 'Keeper')).toBe(true)
+    expect(toolMatchesSearch({ name: 'MASC_ToolName' }, 'toolname')).toBe(true)
+  })
+
+  it('ignores surrounding whitespace in the query', () => {
+    expect(toolMatchesSearch(tool, '  task  ')).toBe(true)
+  })
+
+  it('returns false for non-matching substring', () => {
+    expect(toolMatchesSearch(tool, 'xyz')).toBe(false)
+    expect(toolMatchesSearch(tool, 'cascade')).toBe(false)
+  })
+})
+
+describe('filterTools', () => {
+  const tools = [
+    { name: 'keeper_task_claim' },
+    { name: 'keeper_task_done' },
+    { name: 'masc_broadcast' },
+    { name: 'cascade_route' },
+    { name: 'read_file' },
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterTools(tools, '')).toBe(tools)
+    expect(filterTools(tools, '   ')).toBe(tools)
+  })
+
+  it('returns only tools whose name contains the query', () => {
+    const result = filterTools(tools, 'task')
+    expect(result.map(t => t.name)).toEqual([
+      'keeper_task_claim',
+      'keeper_task_done',
+    ])
+  })
+
+  it('is case-insensitive', () => {
+    const result = filterTools(tools, 'KEEPER')
+    expect(result).toHaveLength(2)
+    expect(result.every(t => t.name.includes('keeper'))).toBe(true)
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    expect(filterTools(tools, 'zzz')).toEqual([])
+  })
+
+  it('does not mutate the source array', () => {
+    const snapshot = tools.map(t => t.name)
+    filterTools(tools, 'task')
+    expect(tools.map(t => t.name)).toEqual(snapshot)
+  })
+
+  it('preserves extra fields on the input objects', () => {
+    const rich = [
+      { name: 'alpha', calls: 10 },
+      { name: 'beta', calls: 20 },
+    ]
+    const result = filterTools(rich, 'alpha')
+    expect(result).toEqual([{ name: 'alpha', calls: 10 }])
   })
 })

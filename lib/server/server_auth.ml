@@ -187,11 +187,7 @@ let allow_anonymous_mutations =
   | _ -> false
 
 let default_loopback_dev_mutation_origins =
-  [
-    "http://127.0.0.1:5173";
-    "http://localhost:5173";
-    "http://[::1]:5173";
-  ]
+  Masc_network_defaults.vite_dev_default_origins
 
 let configured_loopback_dev_mutation_origins () =
   match Sys.getenv_opt "MASC_HTTP_DEV_MUTATION_ORIGINS" with

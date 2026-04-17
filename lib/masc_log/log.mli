@@ -14,7 +14,15 @@ val level_to_int : level -> int
 (** Convert level to integer for comparison. *)
 
 val level_of_string : string -> level
-(** Parse level from string. Defaults to Info for unrecognized input. *)
+(** Parse level from string. Defaults to [Info] for unrecognised input.
+    Kept for backward compatibility — prefer [level_of_string_opt] when
+    the input is user-supplied so typos surface instead of collapsing. *)
+
+val level_of_string_opt : string -> level option
+(** Parse level from string without a fallback.  Returns [None] for
+    unrecognised input.  Callers that originate from user input (env
+    vars, config files) should use this and warn on [None] rather than
+    relying on the silent [Info] default of [level_of_string]. *)
 
 val should_log : level -> bool
 (** Check if a message at the given level should be logged. *)

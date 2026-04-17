@@ -43,3 +43,26 @@ export function useHeartbeatHistory(connectorId: string): HeartbeatState[] {
 export function resetHeartbeatHistory(): void {
   history.value = {}
 }
+
+/** Current state + how many contiguous trailing samples share it.
+    Uptime Kuma / Statuspage convention — "Operational for 22 checks"
+    or "Down for 3 checks" answers the operator question "how long
+    has it been like this?" directly. */
+export interface HeartbeatStreak {
+  state: HeartbeatState
+  samples: number
+}
+
+/** Pure: scan the tail of the history for the current contiguous
+    same-state run. Returns null for an empty history so callers can
+    render "no data yet" instead of a fake zero streak. */
+export function currentHeartbeatStreak(history: HeartbeatState[]): HeartbeatStreak | null {
+  if (history.length === 0) return null
+  const last = history[history.length - 1]!
+  let samples = 1
+  for (let i = history.length - 2; i >= 0; i--) {
+    if (history[i] === last) samples++
+    else break
+  }
+  return { state: last, samples }
+}

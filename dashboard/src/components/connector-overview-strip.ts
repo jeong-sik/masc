@@ -17,6 +17,7 @@ import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAcc
 import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
 import { HeartbeatStrip } from './common/heartbeat-strip'
+import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
 import { recordHeartbeat, useHeartbeatHistory, type HeartbeatState } from '../lib/heartbeat-history'
 
 /** Sampling cadence for the heartbeat ring buffer. Chosen so 45 bars
@@ -199,12 +200,21 @@ function OverviewTile({ id, connector, keeperCount }: {
     signal subscription. */
 function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
   const history = useHeartbeatHistory(id)
-  return html`<${HeartbeatStrip}
-    history=${history}
-    slots=${45}
-    class="-ml-[1px]"
-    testId=${`heartbeat-strip-${id}`}
-  />`
+  return html`
+    <div class="flex flex-col gap-1">
+      <${HeartbeatStreakChip}
+        history=${history}
+        class="self-start"
+        testId=${`heartbeat-streak-${id}`}
+      />
+      <${HeartbeatStrip}
+        history=${history}
+        slots=${45}
+        class="-ml-[1px]"
+        testId=${`heartbeat-strip-${id}`}
+      />
+    </div>
+  `
 }
 
 /** Standalone export of the bulk Start All / Stop All buttons so the

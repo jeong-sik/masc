@@ -194,6 +194,7 @@ let cycle_of_yojson (json : Yojson.Safe.t) : cycle_record =
 let state_to_yojson (s : loop_state) : Yojson.Safe.t =
   `Assoc [
     ("loop_id", `String s.loop_id);
+    ("author", Json_util.string_opt_to_json s.author);
     ("goal", `String s.goal);
     ("metric_fn", `String s.metric_fn);
     ("model_model", `String s.model_model);
@@ -228,6 +229,7 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
 let state_of_yojson_result (json : Yojson.Safe.t) : (persisted_summary, string) result =
   let kind = "persisted_summary" in
   let* loop_id = required_string_field kind json "loop_id" in
+  let* author = optional_string_field json "author" in
   let* status =
     match Yojson.Safe.Util.member "status" json with
     | `String value -> status_of_string_result (String.trim value)
@@ -305,6 +307,7 @@ let state_of_yojson_result (json : Yojson.Safe.t) : (persisted_summary, string) 
   Ok
     {
       loop_id;
+      author;
       status;
       current_cycle;
       baseline;

@@ -290,6 +290,7 @@ let rehydrate_persisted_loop (persisted : Autoresearch_types.persisted_summary) 
   let now = Time_compat.now () in
   {
     Autoresearch_types.loop_id = persisted.loop_id;
+    author = persisted.author;
     goal = persisted.goal;
     metric_fn = persisted.metric_fn;
     model_model = persisted.model_model;

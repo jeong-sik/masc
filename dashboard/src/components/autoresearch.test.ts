@@ -31,6 +31,7 @@ function loopSummary(
 ): AutoresearchLoopSummary {
   return {
     loop_id,
+    author: null,
     goal: `Goal ${loop_id}`,
     metric_fn: 'echo 1',
     model_model: 'glm',

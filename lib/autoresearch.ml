@@ -147,7 +147,7 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?model_model ~target_file ?target_score
+let create_state ~goal ~metric_fn ?model_model ?author ~target_file ?target_score
     ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn
     ?(lower_is_better = false) ~workdir () =
   let model_model = match model_model with
@@ -161,6 +161,7 @@ let create_state ~goal ~metric_fn ?model_model ~target_file ?target_score
   in
   {
     loop_id = generate_loop_id ();
+    author;
     goal;
     metric_fn;
     model_model;
@@ -314,6 +315,7 @@ let stop_loop ~base_path ?reason loop_id =
             let state =
               {
                 loop_id = persisted.loop_id;
+                author = persisted.author;
                 goal = persisted.goal;
                 metric_fn = persisted.metric_fn;
                 model_model = persisted.model_model;

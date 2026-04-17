@@ -10,6 +10,7 @@ import {
 function validSummary(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     loop_id: 'loop-1',
+    author: null,
     goal: 'maximize coverage',
     metric_fn: 'coverage.sh',
     model_model: 'claude-opus-4-7',

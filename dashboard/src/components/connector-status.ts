@@ -36,6 +36,7 @@ import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeyboardShortcuts } from './connector-keyboard-shortcuts'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
+import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -1205,6 +1206,9 @@ export function ConnectorStatusPanel() {
         : null}
       ${!filterId
         ? html`<${ConnectorKeeperMatrix} matrix=${deriveMatrix(visibleConnectors, snapshot.keepers)} />`
+        : null}
+      ${!filterId
+        ? html`<${ConnectorPathsStrip} connectors=${visibleConnectors} />`
         : null}
       ${!filterId ? html`<${ConnectorKeyboardShortcuts} />` : null}
 

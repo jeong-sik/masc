@@ -39,7 +39,7 @@ export const mentionText = signal('')
 export const sendingMention = signal(false)
 
 // Agent fitness
-export type AgentFitness = {
+type AgentFitness = {
   completion_rate?: number
   reliability_score?: number
   speed_score?: number

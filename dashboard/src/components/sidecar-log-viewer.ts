@@ -20,7 +20,7 @@ interface LogResponse {
   lines: string[]
 }
 
-export type LogLevel = 'all' | 'debug' | 'info' | 'warn' | 'error'
+type LogLevel = 'all' | 'debug' | 'info' | 'warn' | 'error'
 
 const LEVEL_PATTERNS: Record<Exclude<LogLevel, 'all'>, RegExp> = {
   error: /\bERROR\b/i,

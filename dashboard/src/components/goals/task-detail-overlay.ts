@@ -16,6 +16,8 @@ import {
   taskEvents,
   taskEventsLoading,
   taskEventsError,
+  taskEventsSearchQuery,
+  filterTaskEvents,
   assigneeGoalIds,
   activeTab,
   switchToActivityTab,
@@ -56,14 +58,37 @@ function TaskEventsSection() {
   const events = taskEvents.value
   const loading = taskEventsLoading.value
   const error = taskEventsError.value
+  const query = taskEventsSearchQuery.value
 
   if (loading) return html`<${LoadingState}>이벤트 불러오는 중...<//>`
   if (error) return html`<${ErrorState} message=${error} />`
   if (events.length === 0) return html`<${EmptyState} message="기록된 이벤트가 없습니다" compact />`
 
+  const visible = filterTaskEvents(events, query)
+  const trimmed = query.trim()
+
   return html`
-    <div class="flex flex-col gap-0.5">
-      ${events.map((evt: NormalizedTaskEvent, i: number) => {
+    <div class="flex flex-col gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value=${query}
+          placeholder="이벤트 검색 (label/agent/notes)"
+          aria-label="이벤트 검색"
+          onInput=${(e: Event) => { taskEventsSearchQuery.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[180px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+        <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+          ${trimmed
+            ? `${visible.length} / ${events.length}`
+            : `${events.length}개`}
+        </span>
+      </div>
+      ${visible.length === 0
+        ? html`<${EmptyState} message="검색 조건에 맞는 이벤트가 없습니다" compact />`
+        : html`
+      <div class="flex flex-col gap-0.5">
+        ${visible.map((evt: NormalizedTaskEvent, i: number) => {
         const { icon, color } = eventBadge(evt.label)
         return html`
           <div key=${i} class="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-[var(--white-3)] transition-colors">
@@ -81,6 +106,8 @@ function TaskEventsSection() {
           </div>
         `
       })}
+      </div>
+        `}
     </div>
   `
 }

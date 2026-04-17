@@ -167,6 +167,7 @@
    llm_metric_bridge
    oas_log_bridge
    local_runtime_pool
+   lockfree_atomic
    retrieval_projection
    sdk_tool_contract
    worker_types

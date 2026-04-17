@@ -50,11 +50,7 @@ let get_registry_exn () =
 
 module SMap = Map.Make(String)
 
-let rec atomic_update atomic f =
-  let old_val = Atomic.get atomic in
-  let new_val = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then ()
-  else atomic_update atomic f
+let atomic_update atomic f = Lockfree_atomic.update atomic f
 
 (** MCP session to identity mapping for fast lookup *)
 let session_identity_map : string SMap.t Atomic.t = Atomic.make SMap.empty

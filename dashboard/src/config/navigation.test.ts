@@ -77,8 +77,12 @@ describe('monitoring navigation labels', () => {
 
     expect(labelFor('observatory')).toBe('관찰소 (beta)')
     expect(labelFor('fleet-health')).toBe('플릿 텔레메트리')
-    expect(labelFor('runtime')).toBe('런타임')
-    expect(labelFor('agents')).toBe('런타임 디렉터리')
+    // "캐스케이드" and "에이전트 디렉터리" replaced the duplicated
+    // "런타임" labels (one section renamed to cascade, the other to
+    // agent directory) so monitoring no longer has two sidebar items
+    // whose labels collide on the same word.
+    expect(labelFor('runtime')).toBe('캐스케이드')
+    expect(labelFor('agents')).toBe('에이전트 디렉터리')
   })
 
   it('does not expose sessions section (removed in Phase 0 of RFC-MASC-006)', () => {
@@ -102,6 +106,19 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('telemetry')
     expect(ids).not.toContain('metrics')
     expect(ids).not.toContain('governance')
+  })
+
+  it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {
+    const sections = visibleSectionItemsForTab('monitoring')
+    const labels = sections.map(item => item.label)
+    const uniq = new Set(labels)
+    expect(uniq.size).toBe(labels.length)
+    // Regression guard: the word "런타임" used to label both
+    // section[id=runtime] and section[id=agents], making it impossible
+    // to tell process-instance liveness apart from cascade routing by
+    // reading the sidebar alone.
+    const runtimeOccurrences = labels.filter(l => l === '런타임').length
+    expect(runtimeOccurrences).toBe(0)
   })
 })
 

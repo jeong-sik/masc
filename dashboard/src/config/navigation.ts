@@ -68,7 +68,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '런타임 디렉터리와 플릿 신호 관찰',
+    description: '에이전트 디렉터리와 플릿 신호 관찰',
     defaultTab: 'monitoring',
     defaultParams: { section: 'agents' },
     tabs: ['monitoring'],
@@ -137,14 +137,14 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'agents',
-      label: '런타임 디렉터리',
-      description: '누가 살아 있고 어떤 런타임인지 빠르게 훑어봅니다. 이벤트, 도구, 거버넌스는 플릿 텔레메트리에서 봅니다.',
+      label: '에이전트 디렉터리',
+      description: '누가 살아 있고 어떤 프로세스 위에 떠 있는지 빠르게 훑어봅니다. 이벤트, 도구, 거버넌스는 플릿 텔레메트리에서 봅니다.',
       params: { section: 'agents' },
     },
     {
       id: 'runtime',
-      label: '런타임',
-      description: 'provider health, 슬롯 용량, model inference snapshot.',
+      label: '캐스케이드',
+      description: 'Provider 건강도, 슬롯 용량, 모델 선택 스냅샷을 한 화면에서 봅니다.',
       params: { section: 'runtime' },
     },
     {
@@ -242,7 +242,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'harness',
       label: '세이프티 하네스',
-      description: '평가 모델, 압축 전 상태, 세대 교체 rail 감시 상태.',
+      description: '평가 모델, 압축 전 상태, 세대 교체 모니터링 상태.',
       params: { section: 'harness' },
     },
   ],

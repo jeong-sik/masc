@@ -692,7 +692,7 @@ export function CascadeConfigPanel() {
           : null}
       <//>
 
-      <${Card} title="Client Capacity — 최근 이벤트">
+      <${Card} title="Client Capacity · 최근 이벤트">
         ${history
           ? html`<${ClientCapacityHistoryTable} history=${history} />`
           : null}
@@ -704,7 +704,7 @@ export function CascadeConfigPanel() {
           : html`<${EmptyState}>SLO 데이터를 불러오는 중입니다.<//>`}
       <//>
 
-      <${Card} title="Strategy Decisions — cycle 추적">
+      <${Card} title="Strategy Decisions · 사이클 추적">
         ${trace
           ? html`
             <div class="flex items-center gap-3 mb-3">

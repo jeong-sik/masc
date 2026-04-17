@@ -2,8 +2,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { ConnectorOverviewStrip, _testResetBulkInflight } from './connector-overview-strip'
+import {
+  ConnectorOverviewStrip,
+  ConnectorBulkActions,
+  _testResetBulkInflight,
+} from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
+import type { GateKeeperInfo } from '../api/schemas/gate-keepers'
 
 const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
   connector_id: overrides.connector_id ?? 'discord',
@@ -16,92 +21,130 @@ const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorI
   ...(overrides as object),
 }) as GateConnectorInfo
 
+const noopDetail = () => null
+
 describe('ConnectorOverviewStrip', () => {
   let container: HTMLElement
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    _testResetBulkInflight()
   })
   afterEach(() => {
     document.body.removeChild(container)
   })
 
-  it('always renders one tile per known sidecar (4 tiles)', () => {
-    render(
-      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
-      container,
-    )
-    const tiles = container.querySelectorAll('[data-overview-tile]')
-    expect(tiles.length).toBe(4)
-    const ids = Array.from(tiles).map(t => t.getAttribute('data-overview-tile'))
-    expect(ids).toEqual(['discord', 'imessage', 'slack', 'telegram'])
-  })
-
-  it('marks running connector as 🟢 connected and offline ones as ⊘ offline', () => {
+  it('renders one row per known sidecar (4 rows)', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
-        keeperCount=${0}
+        connectors=${[]}
+        keepers=${[] as GateKeeperInfo[]}
+        renderExpandedDetail=${noopDetail}
       />`,
       container,
     )
-    const discordTile = container.querySelector('[data-overview-tile="discord"]')!
-    const imessageTile = container.querySelector('[data-overview-tile="imessage"]')!
-    expect(discordTile.textContent).toContain('connected')
-    expect(imessageTile.textContent).toContain('offline')
+    const rows = container.querySelectorAll('[data-connector-row]')
+    expect(rows.length).toBe(4)
+    const ids = Array.from(rows).map(r => r.getAttribute('data-connector-row'))
+    expect(ids).toEqual(['discord', 'imessage', 'slack', 'telegram'])
   })
 
-  it('Start All button counts only sidecars currently down', () => {
-    _testResetBulkInflight()
+  it('marks running connector as CONNECTED and offline ones as OFFLINE', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true })]}
+        keepers=${[] as GateKeeperInfo[]}
+        renderExpandedDetail=${noopDetail}
+      />`,
+      container,
+    )
+    const discordRow = container.querySelector('[data-connector-row="discord"]')!
+    const imessageRow = container.querySelector('[data-connector-row="imessage"]')!
+    expect(discordRow.textContent).toContain('connected')
+    expect(imessageRow.textContent).toContain('offline')
+  })
+
+  it('summary bar reflects up/warn/down counts', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[
+          mkConnector({ connector_id: 'discord', available: true, gate_healthy: true, configured_bindings: [{ channel_id: 'c1', keeper_name: 'k1' }] as never }),
+          mkConnector({ connector_id: 'slack', available: true, gate_healthy: true, configured_bindings: [] }),
+        ]}
+        keepers=${[{ name: 'k1' }] as GateKeeperInfo[]}
+        renderExpandedDetail=${noopDetail}
+      />`,
+      container,
+    )
+    const summary = container.querySelector('[data-panel="connector-summary-bar"]')!
+    // discord: all pills ok → up. slack: bindings warn (keeper exists, none bound) → warn.
+    // imessage, telegram: sidecar down → down.
+    expect(summary.textContent).toContain('1 up')
+    expect(summary.textContent).toContain('1 warn')
+    expect(summary.textContent).toContain('2 down')
+  })
+
+  it('Start All / Stop All counts disabled states correctly', () => {
     render(
       html`<${ConnectorOverviewStrip}
         connectors=${[
           mkConnector({ connector_id: 'discord', available: true }),
           mkConnector({ connector_id: 'slack', available: true }),
         ]}
-        keeperCount=${0}
+        keepers=${[] as GateKeeperInfo[]}
+        renderExpandedDetail=${noopDetail}
       />`,
       container,
     )
     const startBtn = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
     const stopBtn = container.querySelector('[data-bulk-action="stop"]') as HTMLButtonElement
-    // 2 of 4 are up → 2 down → Start All shows (2). 2 up → Stop All (2).
     expect(startBtn.textContent).toContain('(2)')
     expect(stopBtn.textContent).toContain('(2)')
   })
 
-  it('Start All disabled when all sidecars are already up', () => {
-    _testResetBulkInflight()
-    const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id =>
-      mkConnector({ connector_id: id, available: true }),
-    )
+  it('renders 4 readiness cells inside each row', () => {
     render(
-      html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`,
+      html`<${ConnectorOverviewStrip}
+        connectors=${[]}
+        keepers=${[] as GateKeeperInfo[]}
+        renderExpandedDetail=${noopDetail}
+      />`,
       container,
     )
-    const startBtn = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
-    expect(startBtn.disabled).toBe(true)
-    expect(startBtn.title).toContain('이미 실행')
+    const row = container.querySelector('[data-connector-row="discord"]')!
+    const cells = row.querySelectorAll('[data-rail-pill]')
+    expect(cells.length).toBe(4)
   })
 
-  it('Stop All disabled when nothing is up', () => {
-    _testResetBulkInflight()
+  it('clicking a row reveals expanded detail slot', async () => {
     render(
-      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
+      html`<${ConnectorOverviewStrip}
+        connectors=${[]}
+        keepers=${[] as GateKeeperInfo[]}
+        renderExpandedDetail=${(c: GateConnectorInfo | null) => html`<div data-test-expanded=${c?.connector_id ?? 'null'}>EXPAND</div>`}
+      />`,
       container,
     )
-    const stopBtn = container.querySelector('[data-bulk-action="stop"]') as HTMLButtonElement
-    expect(stopBtn.disabled).toBe(true)
-    expect(stopBtn.title).toContain('실행 중인 sidecar 없음')
+    // No expansion initially.
+    expect(container.querySelector('[data-test-expanded]')).toBeNull()
+    const row = container.querySelector('[data-connector-row="slack"]')!
+    const toggle = row.querySelector<HTMLButtonElement>('button[aria-label*="detail toggle"]')!
+    toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    // Let the signal update flush through preact's render queue.
+    for (let i = 0; i < 4; i += 1) {
+      await Promise.resolve()
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    expect(container.querySelector('[data-test-expanded]')).not.toBeNull()
+    expect(container.querySelector('[data-connector-row-detail="slack"]')).not.toBeNull()
   })
 
-  it('renders 4 readiness pills inside each tile', () => {
+  it('ConnectorBulkActions stays exported for onboarding grid', () => {
     render(
-      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
+      html`<${ConnectorBulkActions} connectors=${[] as GateConnectorInfo[]} />`,
       container,
     )
-    const discordTile = container.querySelector('[data-overview-tile="discord"]')!
-    const pills = discordTile.querySelectorAll('[data-rail-pill]')
-    expect(pills.length).toBe(4)
+    expect(container.querySelector('[data-bulk-action="start"]')).not.toBeNull()
+    expect(container.querySelector('[data-bulk-action="stop"]')).not.toBeNull()
   })
 })

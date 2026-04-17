@@ -34,6 +34,7 @@ import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight }
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
+import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -106,7 +107,9 @@ const CONNECTOR_ACCENT_RGB: Record<string, string> = {
 
 export function connectorAccentStyle(connectorId: string): string {
   const rgb = CONNECTOR_ACCENT_RGB[connectorId] ?? '120,130,150'
-  return `background:linear-gradient(135deg,rgba(${rgb},0.16),rgba(${rgb},0.04))`
+  // Dimmed from 0.16→0.08 so the dashboard overview doesn't flood the card
+  // area with brand colour when multiple connector cards stack vertically.
+  return `background:linear-gradient(135deg,rgba(${rgb},0.08),rgba(${rgb},0.02))`
 }
 
 const actionLoading = signal(false)
@@ -420,6 +423,7 @@ function ConnectorLivePanel({
   connectorError,
   keeperDirectoryError,
   loading,
+  chromeless = false,
 }: {
   connector: GateConnectorInfo | null
   gate: GateStatusData | null
@@ -427,6 +431,10 @@ function ConnectorLivePanel({
   connectorError: string | null
   keeperDirectoryError: string | null
   loading: boolean
+  /** When true, skip the outer card chrome (border/gradient/id/rounded).
+      Used inside the dense table row where the row already supplies its
+      own frame and brand accent bar. */
+  chromeless?: boolean
 }) {
   const configuredBindings = connector?.configured_bindings ?? []
   const names = connector?.names
@@ -554,8 +562,13 @@ function ConnectorLivePanel({
 
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
+  const outerClass = chromeless
+    ? 'text-[12px]'
+    : 'mb-4 scroll-mt-4 rounded-xl border border-[var(--card-border)] p-4'
+  const outerStyle = chromeless ? '' : connectorAccentStyle(connectorId)
+  const outerId = chromeless ? undefined : `connector-card-${connectorId}`
   return html`
-    <div id=${`connector-card-${connectorId}`} class="mb-4 scroll-mt-4 rounded-xl border border-[var(--card-border)] p-4" style=${connectorAccentStyle(connectorId)}>
+    <div id=${outerId} class=${outerClass} style=${outerStyle}>
       <div class="flex flex-wrap items-center gap-2 text-[12px]">
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--text-body)]">${connectorName}</span>
@@ -600,7 +613,7 @@ function ConnectorLivePanel({
         </span>
       </div>
 
-      <${ConnectorReadinessRail}
+      ${chromeless ? null : html`<${ConnectorReadinessRail}
         pills=${deriveRail(
           {
             sidecarUp: connector?.available === true,
@@ -624,7 +637,7 @@ function ConnectorLivePanel({
           },
           getRailInflight(connectorId),
         )}
-      />
+      />`}
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
@@ -632,7 +645,7 @@ function ConnectorLivePanel({
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
         : null}
 
-      ${headerExpanded.value
+      ${chromeless || headerExpanded.value
         ? html`
             <div class="mt-2 rounded-md border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-[11px]">
               <div class="space-y-1.5">
@@ -1115,14 +1128,6 @@ export function ConnectorStatusPanel() {
     return null
   }
 
-  // Progress hint for the "전체" view: how many of the 4 known sidecars
-  // are currently advertising a 'connected' state. Hidden in single-bridge
-  // sub-sections — the per-panel status dot already conveys that.
-  const knownConnectedCount = allConnectors.filter(
-    c => (KNOWN_CONNECTOR_IDS as readonly string[]).includes(c.connector_id)
-      && connectorStateLabel(c) === 'connected',
-  ).length
-
   return html`
     <div>
       <div class="mb-3 flex items-center justify-between gap-3">
@@ -1135,32 +1140,40 @@ export function ConnectorStatusPanel() {
           </div>
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-          ${!filterId
-            ? (() => {
-                const allUp = knownConnectedCount === KNOWN_CONNECTOR_IDS.length
-                const tone = allUp ? 'text-emerald-300' : ''
-                return html`<div class=${tone}>${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length} connected</div>`
-              })()
-            : null}
           <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
         </div>
       </div>
 
       ${!filterId
-        ? html`<${ConnectorOverviewStrip} connectors=${visibleConnectors} keeperCount=${snapshot.keepers.length} />`
-        : null}
-
-      ${visibleConnectors.map(c => html`
-        <${ConnectorLivePanel}
-          connector=${c}
-          gate=${d}
-          keepers=${snapshot.keepers}
-          connectorError=${snapshot.connectorError}
-          keeperDirectoryError=${snapshot.keeperError}
-          loading=${loading}
-        />
-      `)}
+        ? html`
+            <${ConnectorOverviewStrip}
+              connectors=${visibleConnectors}
+              keepers=${snapshot.keepers}
+              renderExpandedDetail=${(c: GateConnectorInfo | null) => html`
+                <${ConnectorLivePanel}
+                  connector=${c}
+                  gate=${d}
+                  keepers=${snapshot.keepers}
+                  connectorError=${snapshot.connectorError}
+                  keeperDirectoryError=${snapshot.keeperError}
+                  loading=${loading}
+                  chromeless=${true}
+                />
+              `}
+            />
+            <${ConnectorKeeperMatrix} matrix=${deriveMatrix(visibleConnectors, snapshot.keepers)} />
+          `
+        : visibleConnectors.map(c => html`
+            <${ConnectorLivePanel}
+              connector=${c}
+              gate=${d}
+              keepers=${snapshot.keepers}
+              connectorError=${snapshot.connectorError}
+              keeperDirectoryError=${snapshot.keeperError}
+              loading=${loading}
+            />
+          `)}
 
       ${snapshot.gateError
         ? html`

@@ -176,6 +176,19 @@ async function flushUi(): Promise<void> {
   }
 }
 
+/** Click the expand toggle for a connector row so the detail panel
+    (previously always-visible) renders its contents. Used by tests that
+    target fields now nested under the row-expand slot of the dense table. */
+async function expandRow(container: HTMLElement, connectorId: string): Promise<void> {
+  const row = container.querySelector(`[data-connector-row="${connectorId}"]`)
+  if (!row) return
+  const toggle = row.querySelector<HTMLButtonElement>(
+    `button[aria-label*="detail toggle"]`,
+  )
+  toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await flushUi()
+}
+
 async function loadComponentWithApi(api: {
   fetchGateStatus: () => Promise<unknown>
   fetchGateConnectors: () => Promise<unknown>
@@ -239,6 +252,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
     expect(fetchGateStatus).toHaveBeenCalled()
@@ -280,6 +294,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
     expect(text).toContain('Discord')
@@ -340,6 +355,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'imessage')
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 
     expect(text).toContain('reply self-chat')
@@ -377,6 +393,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
 
     const addChannelButton = container.querySelector<HTMLButtonElement>('button[aria-label="add channel to nova"]')
     expect(addChannelButton).not.toBeNull()
@@ -426,6 +443,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
 
     const lunaGroup = container.querySelector('[data-keeper="luna"]')
     const novaGroup = container.querySelector('[data-keeper="nova"]')
@@ -458,6 +476,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('⚠')
@@ -491,6 +510,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('Sidecar not started')
@@ -519,12 +539,13 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('No keepers configured')
   })
 
-  it('expands [▾] header toggle to show per-dot liveness and metadata', async () => {
+  it('row expand reveals per-dot liveness and metadata block', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
@@ -543,10 +564,7 @@ describe('ConnectorStatusPanel', () => {
     expect(beforeText).not.toContain('Browser → Server')
     expect(beforeText).not.toContain('keeper dir 2')
 
-    const toggleButton = container.querySelector<HTMLButtonElement>('button[aria-label="toggle header details"]')
-    expect(toggleButton).not.toBeNull()
-    toggleButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushUi()
+    await expandRow(container, 'discord')
 
     const afterText = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(afterText).toContain('Browser → Server')
@@ -568,6 +586,7 @@ describe('ConnectorStatusPanel', () => {
 
     render(html`<${ConnectorStatusPanel} />`, container)
     await flushUi()
+    await expandRow(container, 'discord')
 
     const novaGroup = container.querySelector('[data-keeper="nova"]')
     expect(novaGroup).not.toBeNull()

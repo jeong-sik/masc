@@ -119,6 +119,10 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
             <div class="text-[var(--text-body)] text-sm font-mono">${formatElapsedCompact(loop.elapsed_s)}</div>
           </div>
           <div>
+            <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">실행자</div>
+            <div class="text-[var(--text-body)] text-sm font-mono">${loop.author ?? '알 수 없음'}</div>
+          </div>
+          <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">모델</div>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.model_model}</div>
           </div>

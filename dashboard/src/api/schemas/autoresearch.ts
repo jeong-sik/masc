@@ -60,6 +60,7 @@ export const AutoresearchCycleRecordSchema = object({
 
 export const AutoresearchLoopSummarySchema = object({
   loop_id: string(),
+  author: nullable(string()),
   goal: string(),
   metric_fn: string(),
   model_model: string(),

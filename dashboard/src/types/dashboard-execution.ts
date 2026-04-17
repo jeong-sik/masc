@@ -189,9 +189,9 @@ export interface ServerBuildIdentity {
 }
 
 type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
-export type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
-export type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
-export type DashboardExecutionQueueKind = 'session' | 'operation'
+type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
+type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
+type DashboardExecutionQueueKind = 'session' | 'operation'
 
 export interface DashboardExecutionSummary {
   active_sessions?: number

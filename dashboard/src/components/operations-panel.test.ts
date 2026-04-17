@@ -80,19 +80,19 @@ describe('OperationsPanel', () => {
     expect(container.textContent).toContain('Governance')
   })
 
-  it('renders 5 FilterChips options (Phase 6: +connectors +inspector)', async () => {
+  it('renders 4 FilterChips options (Phase 7: connectors split out as top-level surface)', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
     const buttons = container.querySelectorAll('button[type="button"]')
-    expect(buttons.length).toBe(5)
+    expect(buttons.length).toBe(4)
     const labels = Array.from(buttons).map(b => b.textContent?.trim())
     expect(labels).toContain('전체')
     expect(labels).toContain('개입')
     expect(labels).toContain('거버넌스')
-    expect(labels).toContain('커넥터')
     expect(labels).toContain('인스펙터')
+    expect(labels).not.toContain('커넥터')
   })
 
   it('falls back to default for unknown view param', async () => {

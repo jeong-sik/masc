@@ -167,7 +167,7 @@ let emit_task_activity ?correlation_id ?run_id
     merge_envelope_into_payload ?correlation_id ?run_id payload
   in
   try
-    !Coord_hooks.activity_emit_fn config
+    (Atomic.get Coord_hooks.activity_emit_fn) config
       ~actor:Coord_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
       ~subject:Coord_hooks.{ kind = "task"; id = task_id }
       ~kind
@@ -233,7 +233,7 @@ let task_transition_details ~from_status ~to_status ?notes ?reason ?duration_ms
         (Option.map (fun value -> `Int value) duration_ms))
 
 let observe_task_transition config ~agent_name ~task_id ~transition ~details =
-  !Coord_hooks.observe_task_transition_fn config ~agent_name
+  (Atomic.get Coord_hooks.observe_task_transition_fn) config ~agent_name
     ~task_id ~transition ~details
 
 (** Transition log event taxonomy. Variant instead of free-form string
@@ -361,7 +361,7 @@ let add_task ?contract ?required_preset config ~title ~priority ~description =
                   | None -> false) );
             ]);
 
-      !Coord_hooks.on_task_mutation_fn ();
+      (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
       Printf.sprintf "✅ Added %s: %s" task_id title))
   with
@@ -489,7 +489,7 @@ let batch_add_tasks_internal config tasks =
                 ]))
         added_tasks;
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
-      !Coord_hooks.on_task_mutation_fn ();
+      (Atomic.get Coord_hooks.on_task_mutation_fn) ();
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
@@ -984,11 +984,11 @@ let transition_task_r config ~agent_name ~task_id ~action
          | Types.Done_action ->
            (try
               let active = (Coord_state.read_state config).active_agents in
-              !Coord_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+              (Atomic.get Coord_hooks.relation_on_task_done_fn) ~assignee:agent_name ~active_agents:active;
               (* Hebbian: strengthen only against agents with active tasks,
                  not the full room. See working_agents doc for rationale. *)
               let workers = working_agents config in
-              !Coord_hooks.hebbian_on_task_done_fn config
+              (Atomic.get Coord_hooks.hebbian_on_task_done_fn) config
                 ~assignee:agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition relation/hebbian done hook: %s"
@@ -996,7 +996,7 @@ let transition_task_r config ~agent_name ~task_id ~action
          | Types.Cancel ->
            (try
               let workers = working_agents config in
-              !Coord_hooks.hebbian_on_task_cancelled_fn config
+              (Atomic.get Coord_hooks.hebbian_on_task_cancelled_fn) config
                 ~agent_name ~active_agents:workers
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.RoomTask.error "transition hebbian cancel hook: %s"
@@ -1113,10 +1113,10 @@ let complete_task config ~agent_name ~task_id ~notes =
             (* Record task collaboration via hook (async, non-blocking) *)
             (try
                let active = (Coord_state.read_state config).active_agents in
-               !Coord_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active;
+               (Atomic.get Coord_hooks.relation_on_task_done_fn) ~assignee:agent_name ~active_agents:active;
                (* Hebbian: strengthen only against agents with active tasks *)
                let workers = working_agents config in
-               !Coord_hooks.hebbian_on_task_done_fn config
+               (Atomic.get Coord_hooks.hebbian_on_task_done_fn) config
                  ~assignee:agent_name ~active_agents:workers
              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.RoomTask.error "relation/hebbian task hook error: %s"
@@ -1230,7 +1230,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                              *. 1000.0)))
                      ());
               (* Agent Economy: earn credits via hook *)
-              !Coord_hooks.agent_economy_earn_fn
+              (Atomic.get Coord_hooks.agent_economy_earn_fn)
                 ~base_path:config.base_path ~agent_name
                 ~reason:(Printf.sprintf "completed %s" task_id);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
@@ -1361,7 +1361,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               (* Hebbian: weaken only against agents with active tasks *)
               (try
                  let workers = working_agents config in
-                 !Coord_hooks.hebbian_on_task_cancelled_fn config
+                 (Atomic.get Coord_hooks.hebbian_on_task_cancelled_fn) config
                    ~agent_name ~active_agents:workers
                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                  Log.RoomTask.error "hebbian task_cancelled hook error: %s"

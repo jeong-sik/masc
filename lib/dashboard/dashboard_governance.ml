@@ -9,7 +9,6 @@ let case_tracking_note =
 
 let retired_case_tracking_fields =
   [
-    ("case_tracking_available", `Bool false);
     ("note", `String case_tracking_note);
   ]
 

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 
 import {
@@ -308,20 +309,61 @@ export function isTransitionInSegment(
   return entry.ts >= segment.from && entry.ts <= segment.to
 }
 
+export type TransitionHistoryEntry = {
+  ts: number
+  from: string
+  to: string
+  field: string
+}
+
+/**
+ * Pure filter for transition history entries shown in the Transition
+ * History trail.
+ *
+ * Case-insensitive substring match on `entry.field`, `entry.from`, and
+ * `entry.to` in that order so operators can isolate one lane (e.g.
+ * `KCL`), or every transition that landed on / departed from a specific
+ * state (e.g. `trying`, `idle`, `Overflowed`).
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * `useMemo` keeps referential equality for the non-filtering path.
+ *
+ * Input is never mutated.
+ */
+export function filterTransitionHistory(
+  history: readonly TransitionHistoryEntry[],
+  query: string,
+): readonly TransitionHistoryEntry[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return history
+  return history.filter(entry => {
+    if (entry.field.toLowerCase().includes(needle)) return true
+    if (entry.from.toLowerCase().includes(needle)) return true
+    if (entry.to.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 export function TransitionTrail({
   history,
   now,
   hoveredSegment,
 }: {
-  history: { ts: number; from: string; to: string; field: string }[]
+  history: TransitionHistoryEntry[]
   now: number
   hoveredSegment: HoveredSegment | null
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const query = useSignal('')
+  const visibleHistory = useMemo(
+    () => filterTransitionHistory(history, query.value),
+    [history, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
   const firstMatchIndex = useMemo(() => {
     if (!hoveredSegment) return -1
-    return history.findIndex(entry => isTransitionInSegment(entry, hoveredSegment))
-  }, [history, hoveredSegment])
+    return visibleHistory.findIndex(entry => isTransitionInSegment(entry, hoveredSegment))
+  }, [visibleHistory, hoveredSegment])
 
   useEffect(() => {
     if (firstMatchIndex < 0) return
@@ -342,11 +384,24 @@ export function TransitionTrail({
 
   return html`
     <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-      <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-        Transition History (${history.length})
+      <div class="mb-1.5 flex items-center justify-between gap-2">
+        <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+          Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
+        </div>
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="field / from / to 필터"
+          aria-label="전이 이력 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[120px] max-w-[200px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
       </div>
+      ${isFiltering && visibleHistory.length === 0
+        ? html`<div class="py-3 text-center text-[10px] text-[var(--text-dim)]">필터 결과 없음 (${history.length} items)</div>`
+        : html`
       <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-[120px] overflow-y-auto">
-        ${history.map((entry, trailIndex) => {
+        ${visibleHistory.map((entry, trailIndex) => {
           const ago = fmtDuration(Math.max(0, now - entry.ts))
           const color = FIELD_COLOR[entry.field] ?? 'text-[var(--text-body)]'
           const inSegment = isTransitionInSegment(entry, hoveredSegment)
@@ -374,6 +429,7 @@ export function TransitionTrail({
           `
         })}
       </div>
+        `}
     </div>
   `
 }

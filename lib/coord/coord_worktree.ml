@@ -376,19 +376,27 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
               let exit_code = run_argv_exit ["git"; "-C"; root; "worktree"; "remove"; worktree_path] in
 
               if exit_code = 0 then begin
-                (* Try to delete the branch (may fail if not merged, which is ok) *)
-                let _ = run_argv_exit ["git"; "-C"; root; "branch"; "-d"; branch_name] in
+                (* Delete the branch — use -D to force-delete unmerged branches *)
+                let branch_exit = run_argv_exit ["git"; "-C"; root; "branch"; "-D"; branch_name] in
 
                 (* Prune stale worktrees *)
-                let _ = run_argv_exit ["git"; "-C"; root; "worktree"; "prune"] in
+                let prune_exit = run_argv_exit ["git"; "-C"; root; "worktree"; "prune"] in
 
-                (* Log event *)
+                (* Log event with post-processing status *)
+                let branch_status = if branch_exit = 0 then "ok" else "warn:branch_delete_failed" in
+                let prune_status = if prune_exit = 0 then "ok" else "warn:prune_failed" in
                 let event = Printf.sprintf
-                  "{\"type\":\"worktree_remove\",\"agent\":\"%s\",\"branch\":\"%s\",\"ts\":\"%s\"}"
-                  agent_name branch_name (now_iso ()) in
+                  "{\"type\":\"worktree_remove\",\"agent\":\"%s\",\"branch\":\"%s\",\"branch_delete\":\"%s\",\"prune\":\"%s\",\"ts\":\"%s\"}"
+                  agent_name branch_name branch_status prune_status (now_iso ()) in
                 log_event config event;
 
-                Ok (Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s" worktree_path branch_name)
+                (* Return result with post-processing status *)
+                let msg = Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"
+                  worktree_path branch_name branch_status prune_status in
+                if branch_exit <> 0 || prune_exit <> 0 then
+                  Error (IoError (msg ^ "\n   ⚠️ Post-processing had failures"))
+                else
+                  Ok msg
               end
               else
                 Error (IoError "Failed to remove worktree. It may have uncommitted changes.")

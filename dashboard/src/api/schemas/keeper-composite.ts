@@ -164,9 +164,5 @@ export const FleetCompositeSnapshotSchema = object({
 export type FleetCompositeSnapshot = InferOutput<typeof FleetCompositeSnapshotSchema>
 
 export function parseFleetCompositeSnapshot(data: unknown): FleetCompositeSnapshot {
-  const result = safeParse(FleetCompositeSnapshotSchema, data)
-  if (!result.success) {
-    throw new CompositeSchemaDriftError(result.issues)
-  }
-  return result.output
+  return parseOrThrow(CompositeSchemaDriftError, FleetCompositeSnapshotSchema, data)
 }

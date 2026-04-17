@@ -8,7 +8,7 @@
 
 import { signal } from '@preact/signals'
 
-export interface CompositeTickEnvelope {
+interface CompositeTickEnvelope {
   name: string
   ts_unix: number
 }

@@ -278,6 +278,42 @@ function entryPreview(e: TelemetryEntry): string {
   }
 }
 
+/**
+ * Case-insensitive substring search over the rendered telemetry display items.
+ *
+ * Matches against, in order (first match wins):
+ * - `entry.source` (for entry rows) or concatenated source keys (for groups)
+ * - `entryPreview(entry)` text (for entry rows) or `item.label` (for groups),
+ *   which already captures keeper/tool/agent identifiers
+ * - scope badges ("S ...", "OP ...", "WR ...") from session/operation/worker_run
+ *
+ * Empty or whitespace-only queries return the input reference unchanged so the
+ * non-filter path keeps reference identity (useMemo/inline-path friendly).
+ * Input is never mutated; items are treated as readonly.
+ */
+export function filterTelemetryDisplayItems(
+  items: readonly TelemetryDisplayItem[],
+  query: string,
+): readonly TelemetryDisplayItem[] {
+  const trimmed = query.trim()
+  if (trimmed === '') return items
+  const needle = trimmed.toLowerCase()
+
+  const haystackForItem = (item: TelemetryDisplayItem): string => {
+    if (item.kind === 'entry') {
+      const source = typeof item.entry.source === 'string' ? item.entry.source : ''
+      const preview = entryPreview(item.entry)
+      const badges = telemetryScopeBadges(item.entry).join(' ')
+      return `${source} ${preview} ${badges}`
+    }
+    const sources = item.sourceKeys.join(' ')
+    const badges = item.scopeBadges.join(' ')
+    return `${sources} ${item.label} ${badges}`
+  }
+
+  return items.filter(item => haystackForItem(item).toLowerCase().includes(needle))
+}
+
 export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): TelemetryDisplayItem[] {
   const items: TelemetryDisplayItem[] = []
   let nextItemId = 0
@@ -364,7 +400,7 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
   return items
 }
 
-function condensedStats(items: TelemetryDisplayItem[]) {
+function condensedStats(items: readonly TelemetryDisplayItem[]) {
   let groups = 0
   let groupedEntries = 0
   let collapsedEntries = 0
@@ -558,6 +594,7 @@ export function TelemetryUnified() {
   const operationFilter = useSignal(params.operation_id ?? '')
   const workerRunFilter = useSignal(params.worker_run_id ?? '')
   const limit = useSignal(100)
+  const entrySearch = useSignal('')
 
   useEffect(() => {
     sessionFilter.value = route.value.params.session_id ?? ''
@@ -676,7 +713,9 @@ export function TelemetryUnified() {
   }, [])
 
   const { entries, summary, totalEntries, store, loading, error } = state.value
-  const displayItems = buildTelemetryDisplayItems(entries)
+  const allDisplayItems = buildTelemetryDisplayItems(entries)
+  const displayItems = filterTelemetryDisplayItems(allDisplayItems, entrySearch.value)
+  const isFilteringEntries = entrySearch.value.trim() !== ''
   const condensed = condensedStats(displayItems)
 
   return html`
@@ -772,6 +811,14 @@ export function TelemetryUnified() {
           value=${workerRunFilter.value}
           onInput=${(e: Event) => { workerRunFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
+        <input
+          type="search"
+          placeholder="엔트리 검색..."
+          aria-label="엔트리 텍스트 검색"
+          class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] w-48"
+          value=${entrySearch.value}
+          onInput=${(e: Event) => { entrySearch.value = (e.target as HTMLInputElement).value }}
+        />
         <select
           aria-label="표시 개수 제한"
           class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
@@ -802,6 +849,9 @@ export function TelemetryUnified() {
       <div class="rounded-xl border border-[var(--card-border)] overflow-hidden">
         <div class="px-3 py-2 border-b border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
+          ${isFilteringEntries
+            ? ` · 검색 매치 ${displayItems.length.toLocaleString()}건`
+            : ''}
           ${condensed.groups > 0
             ? ` · 반복 그룹 ${condensed.groups.toLocaleString()}개 · 원본 ${condensed.groupedEntries.toLocaleString()}건`
             : ''}
@@ -825,7 +875,9 @@ export function TelemetryUnified() {
             ? displayItems.map(item => item.kind === 'group'
               ? html`<${GroupRow} key=${item.key} item=${item} />`
               : html`<${EntryRow} key=${item.key} entry=${item.entry} />`)
-            : html`<div class="px-4 py-6 text-sm text-[var(--text-muted)]">선택한 scope에 해당하는 MASC telemetry entry가 없습니다.</div>`}
+            : isFilteringEntries && allDisplayItems.length > 0
+              ? html`<div class="px-4 py-6 text-sm text-[var(--text-muted)]">필터 결과 없음 (${allDisplayItems.length} items)</div>`
+              : html`<div class="px-4 py-6 text-sm text-[var(--text-muted)]">선택한 scope에 해당하는 MASC telemetry entry가 없습니다.</div>`}
         </div>
       </div>
     </div>

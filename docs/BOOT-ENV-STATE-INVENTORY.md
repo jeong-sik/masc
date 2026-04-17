@@ -24,8 +24,8 @@ Scope:
 
 - Canonical behavior in this document is derived from code.
 - "Current host audit" is a dated snapshot of the machine inspected on 2026-04-09.
-- Primary runtime domains are `tasks`, `board`, `goals`, `governance`, `autoresearch`, `keepers`, and `command-plane`.
-- `team-sessions`, `local-workers`, and `oas-runtime` are documented only as compatibility or execution-artifact lanes, not as the primary product concept.
+- Primary runtime domains are `tasks`, `board`, `goals`, `governance`, `autoresearch`, and `keepers`.
+- `team-sessions`, `local-workers`, `oas-runtime`, and `command-plane` are documented only as compatibility, historical, or execution-artifact lanes, not as the primary product concept.
 
 ## 1. Boot Inputs and Precedence
 

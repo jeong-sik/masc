@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [0.9.13] - 2026-04-17
+
+### Deprecated
+- **Spec sync — board + testing dead refs retired (#8008).**
+  - `docs/spec/11-board.md` Maps-to row: dropped `lib/tool_vote.ml` and
+    `lib/tool_social.ml` (both folded into `lib/tool_board.ml` per that
+    file's own `Replaces tool_social.ml for new installations` header);
+    corrected sub-library path `lib/board/` → `lib/board_types/`.
+  - `docs/spec/15-testing.md`: §5.3 Anti-Fake and §5.6 Keeper Contract
+    collapsed into RETIRED paragraphs (`lib/anti_fake.ml`,
+    `lib/keeper/keeper_contract.ml` purged — 0 grep hits each).
+  - §5.5 Keeper Verifier rewritten to describe the 3-way successor
+    split: `lib/verifier_core.ml` + `lib/verifier_oas.ml` +
+    `lib/keeper/keeper_guards.ml` (`lib/keeper/keeper_verifier.ml`
+    removed in #2589). Maps-to row adjusted accordingly.
+  - Net: 47 lines of stale catalogs removed, 17 lines of retirement
+    records + successor pointers added.
+
 ## [0.9.12] - 2026-04-17
 
 ### Changed

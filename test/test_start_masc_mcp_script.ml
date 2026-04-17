@@ -72,6 +72,7 @@ let run_shell ?(env = []) ~cwd cmd =
       "MASC_MCP_PORT";
       "MASC_HOST";
       "MASC_BASE_PATH";
+      "MASC_SIDECAR_ROOT";
       "MASC_BASE_PATH_INPUT";
       "MASC_BASE_PATH_RESOLUTION_SOURCE";
       "MASC_CONFIG_DIR";
@@ -132,6 +133,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_STORAGE_TYPE=%%s\n' "${MASC_STORAGE_TYPE:-}"
   printf 'SUPABASE_DB_URL=%%s\n' "${SUPABASE_DB_URL:-}"
   printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
+  printf 'MASC_SIDECAR_ROOT=%%s\n' "${MASC_SIDECAR_ROOT:-}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
   printf 'MASC_KEEPER_BOOTSTRAP_ENABLED=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
   printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
@@ -381,6 +383,34 @@ let test_absolute_parent_project_base_path_is_preserved () =
       let expected_root = canonical_path parent in
       check bool "absolute parent root inheritance preserved" true
         (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
+
+let test_cli_sidecar_root_is_exported () =
+  with_temp_dir "start-masc-script-sidecar-root" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let base_path = Filename.concat dir "runtime-root" in
+      let sidecar_root = Filename.concat dir "workspace/yousleepwhen/masc-mcp" in
+      mkdir_p base_path;
+      mkdir_p sidecar_root;
+      let capture = Filename.concat dir "captured-sidecar-root.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", base_path);
+            ]
+          (Printf.sprintf "%s --http --port 9970 --base-path %s --sidecar-root %s"
+             (quote script) (quote base_path) (quote sidecar_root))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "sidecar root exported to server env" true
+        (contains_substring captured
+           ("MASC_SIDECAR_ROOT=" ^ canonical_path sidecar_root)))
 
 let test_zshenv_absolute_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -706,6 +736,8 @@ let () =
             "absolute parent project env base path is preserved"
             `Quick
             test_absolute_parent_project_base_path_is_preserved;
+          test_case "CLI sidecar root is exported" `Quick
+            test_cli_sidecar_root_is_exported;
           test_case "explicit base path execs from base path" `Quick
             test_explicit_base_path_execs_from_base_path;
           test_case

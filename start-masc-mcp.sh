@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC MCP Server (OCaml) - Shared/full-runtime start script (HTTP/SSE default)
-# Usage: ./start-masc-mcp.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]
+# Usage: ./start-masc-mcp.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH] [--sidecar-root PATH]
 # Note: Eio is the default runtime; --lwt exits with an error.
 # For dir-local local-dev startup, prefer scripts/run-local.sh.
 
@@ -369,6 +369,7 @@ for env_name in \
     MASC_MCP_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
+    MASC_SIDECAR_ROOT \
     MASC_CONFIG_DIR \
     MASC_PERSONAS_DIR \
     MASC_WS_ENABLED \
@@ -397,6 +398,7 @@ for env_name in \
     MASC_MCP_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
+    MASC_SIDECAR_ROOT \
     MASC_CONFIG_DIR \
     MASC_PERSONAS_DIR \
     MASC_WS_ENABLED \
@@ -463,6 +465,7 @@ PRINT_PORT_ONLY=0
 WORKTREE_PORT_HINT=""
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
 BASE_PATH="${MASC_BASE_PATH:-${HOME:-$SCRIPT_DIR}}"
+SIDECAR_ROOT="${MASC_SIDECAR_ROOT:-}"
 HOST="${MASC_HOST:-127.0.0.1}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
 EIO_MODE="true"
@@ -509,9 +512,13 @@ while [[ $# -gt 0 ]]; do
             BASE_PATH_EXPLICIT=1
             shift 2
             ;;
+        --sidecar-root)
+            SIDECAR_ROOT="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH]" >&2
+            echo "Usage: $0 [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH] [--sidecar-root PATH]" >&2
             echo "Dir-local local-dev launcher: scripts/run-local.sh" >&2
             echo "Note: Eio is the default runtime; --lwt exits with an error." >&2
             exit 1
@@ -687,6 +694,9 @@ RESOLVED_BASE_PATH="$(resolve_base_path "$BASE_PATH")"
 clear_repo_local_config_for_explicit_base_path "$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH="$RESOLVED_BASE_PATH"
 export MASC_BASE_PATH_RESOLUTION_SOURCE="$BASE_PATH_RESOLUTION_SOURCE"
+if [ -n "$SIDECAR_ROOT" ]; then
+    export MASC_SIDECAR_ROOT="$(resolve_base_path "$SIDECAR_ROOT")"
+fi
 bootstrap_base_path_config "$RESOLVED_BASE_PATH"
 if [ -z "${MASC_CONFIG_DIR:-}" ]; then
     export MASC_CONFIG_DIR="$RESOLVED_BASE_PATH/.masc/config"
@@ -798,6 +808,9 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
         echo "  Base path (input): $BASE_PATH" >&2
     fi
+    if [ -n "${MASC_SIDECAR_ROOT:-}" ]; then
+        echo "  Sidecar root: $MASC_SIDECAR_ROOT" >&2
+    fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
         echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
@@ -815,6 +828,9 @@ elif [ "$HTTP_MODE" = "true" ]; then
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
         echo "  Base path (input): $BASE_PATH" >&2
     fi
+    if [ -n "${MASC_SIDECAR_ROOT:-}" ]; then
+        echo "  Sidecar root: $MASC_SIDECAR_ROOT" >&2
+    fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
         echo "  MCP endpoint: ${MASC_HTTP_BASE_URL%/}/mcp" >&2
@@ -829,6 +845,9 @@ else
     echo "  Base path: $RESOLVED_BASE_PATH" >&2
     if [ "$RESOLVED_BASE_PATH" != "$BASE_PATH" ]; then
         echo "  Base path (input): $BASE_PATH" >&2
+    fi
+    if [ -n "${MASC_SIDECAR_ROOT:-}" ]; then
+        echo "  Sidecar root: $MASC_SIDECAR_ROOT" >&2
     fi
     echo "  MASC dir: $RESOLVED_BASE_PATH/.masc" >&2
     if [ "$EIO_MODE" = "true" ]; then

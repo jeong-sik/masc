@@ -35,16 +35,120 @@ let validate_name = function
 let parse_name request =
   validate_name (Server_utils.query_param request "name")
 
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
 let base_path () =
   match Sys.getenv_opt "MASC_BASE_PATH" with
   | Some p when String.length (String.trim p) > 0 -> String.trim p
   | _ -> Sys.getcwd ()
 
-let script_path id =
-  Filename.concat (base_path ()) (Printf.sprintf "sidecars/%s-bot/run.sh" id)
+let dir_exists path =
+  Sys.file_exists path && Sys.is_directory path
 
-let sidecar_dir id =
-  Filename.concat (base_path ()) (Printf.sprintf "sidecars/%s-bot" id)
+let dedupe_keep_order values =
+  let seen = Hashtbl.create (List.length values) in
+  List.filter
+    (fun value ->
+      if Hashtbl.mem seen value then
+        false
+      else (
+        Hashtbl.replace seen value ();
+        true))
+    values
+
+let project_root_from_executable () =
+  let raw_exe =
+    try Sys.executable_name with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> ""
+  in
+  let exe =
+    if raw_exe = "" then ""
+    else
+      try Unix.realpath raw_exe
+      with Unix.Unix_error _ | Sys_error _ | Invalid_argument _ -> raw_exe
+  in
+  if exe = "" then None
+  else
+    let rec walk dir =
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None
+      else if String.equal (Filename.basename dir) "_build" then Some parent
+      else walk parent
+    in
+    walk (Filename.dirname exe)
+
+let sidecar_root () =
+  trim_opt (Sys.getenv_opt "MASC_SIDECAR_ROOT")
+
+let sidecar_root_candidates ?sidecar_root ?project_root ~base_path () =
+  [ sidecar_root; Some base_path; project_root ]
+  |> List.filter_map (fun item -> item)
+  |> dedupe_keep_order
+
+let sidecar_dir_under root id =
+  Filename.concat root (Printf.sprintf "sidecars/%s-bot" id)
+
+let resolve_existing_sidecar_dir ?sidecar_root ?project_root ~base_path id =
+  sidecar_root_candidates ?sidecar_root ?project_root ~base_path ()
+  |> List.find_map (fun root ->
+         let dir = sidecar_dir_under root id in
+         if dir_exists dir then Some dir else None)
+
+let missing_sidecar_dir_message ?sidecar_root ?project_root ~base_path id =
+  let searched =
+    sidecar_root_candidates ?sidecar_root ?project_root ~base_path ()
+    |> List.map (fun root -> sidecar_dir_under root id)
+  in
+  let searched_text =
+    match searched with
+    | [] -> "no candidate roots"
+    | paths -> String.concat ", " paths
+  in
+  Printf.sprintf
+    "sidecar directory not found for %s; looked under %s. Set \
+     MASC_SIDECAR_ROOT=/path/to/masc-mcp or start the server with \
+     `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
+    id searched_text
+
+let runtime_sidecar_dir_result id =
+  let runtime_base_path = base_path () in
+  let configured_sidecar_root = sidecar_root () in
+  let project_root = project_root_from_executable () in
+  match
+    resolve_existing_sidecar_dir
+      ?sidecar_root:configured_sidecar_root
+      ?project_root
+      ~base_path:runtime_base_path
+      id
+  with
+  | Some dir -> Ok dir
+  | None ->
+      Error
+        (missing_sidecar_dir_message
+           ?sidecar_root:configured_sidecar_root
+           ?project_root
+           ~base_path:runtime_base_path
+           id)
+
+let runtime_sidecar_script_result id =
+  match runtime_sidecar_dir_result id with
+  | Error _ as error -> error
+  | Ok dir ->
+      let script = Filename.concat dir "run.sh" in
+      if Sys.file_exists script then
+        Ok script
+      else
+        Error
+          (Printf.sprintf
+             "sidecar run.sh not found for %s at %s. Set \
+              MASC_SIDECAR_ROOT=/path/to/masc-mcp or start the server with \
+              `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
+             id script)
 
 let status_file id =
   Filename.concat (base_path ()) (Printf.sprintf ".gate/runtime/%s/status.json" id)
@@ -100,29 +204,34 @@ let handle_stop _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
-      let (_status, stdout) =
-        Process_eio.run_argv_with_status ~timeout_sec:5.0
-          [ script_path id; "stop" ]
-      in
-      let trimmed = String.trim stdout in
-      let signaled_marker =
-        Printf.sprintf "Sent SIGTERM to %s-bot processes." id
-      in
-      let signaled =
-        let needle_len = String.length signaled_marker in
-        let rec contains i =
-          if i + needle_len > String.length trimmed then false
-          else if String.equal (String.sub trimmed i needle_len) signaled_marker then true
-          else contains (i + 1)
-        in
-        contains 0
-      in
-      respond_json request reqd ~status:`OK
-        (`Assoc [
-           ("ok", `Bool true);
-           ("signaled", `Bool signaled);
-           ("note", `String trimmed);
-         ])
+      (match runtime_sidecar_script_result id with
+       | Error msg ->
+           respond_json request reqd ~status:`Service_unavailable
+             (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
+       | Ok script ->
+           let (_status, stdout) =
+             Process_eio.run_argv_with_status ~timeout_sec:5.0
+               [ script; "stop" ]
+           in
+           let trimmed = String.trim stdout in
+           let signaled_marker =
+             Printf.sprintf "Sent SIGTERM to %s-bot processes." id
+           in
+           let signaled =
+             let needle_len = String.length signaled_marker in
+             let rec contains i =
+               if i + needle_len > String.length trimmed then false
+               else if String.equal (String.sub trimmed i needle_len) signaled_marker then true
+               else contains (i + 1)
+             in
+             contains 0
+           in
+           respond_json request reqd ~status:`OK
+             (`Assoc [
+                ("ok", `Bool true);
+                ("signaled", `Bool signaled);
+                ("note", `String trimmed);
+              ]))
 
 let handle_logs _state request reqd =
   match parse_name request with
@@ -175,29 +284,32 @@ let reset_schema_cache () = Hashtbl.reset schema_cache
     other 3 ship a hand-managed [.venv/]. We prefer the venv path when
     it exists because it sidesteps a [uv] dependency on the host running
     the backend. *)
-let python_argv_for id =
-  let venv_python = Filename.concat (sidecar_dir id) ".venv/bin/python" in
+let python_argv_for sidecar_dir =
+  let venv_python = Filename.concat sidecar_dir ".venv/bin/python" in
   if Sys.file_exists venv_python then
     [ venv_python; "-m"; "src.schema_dump" ]
   else
-    [ "uv"; "run"; "--directory"; sidecar_dir id; "python"; "-m"; "src.schema_dump" ]
+    [ "uv"; "run"; "--directory"; sidecar_dir; "python"; "-m"; "src.schema_dump" ]
 
 let fetch_schema id =
   match Hashtbl.find_opt schema_cache id with
   | Some cached -> Ok cached
   | None ->
-      let argv = python_argv_for id in
-      let cwd = sidecar_dir id in
-      let (status, stdout) =
-        Process_eio.run_argv_with_status ~timeout_sec:10.0 ~cwd argv
-      in
-      (match status with
-       | Unix.WEXITED 0 ->
-           let trimmed = String.trim stdout in
-           Hashtbl.replace schema_cache id trimmed;
-           Ok trimmed
-       | _ ->
-           Error "schema_dump failed; ensure the sidecar's Python deps are installed (run `./run.sh start` once or `uv sync`)")
+      (match runtime_sidecar_dir_result id with
+       | Error _ as error -> error
+       | Ok sidecar_dir ->
+           let argv = python_argv_for sidecar_dir in
+           let (status, stdout) =
+             Process_eio.run_argv_with_status ~timeout_sec:10.0 ~cwd:sidecar_dir argv
+           in
+           (match status with
+            | Unix.WEXITED 0 ->
+                let trimmed = String.trim stdout in
+                Hashtbl.replace schema_cache id trimmed;
+                Ok trimmed
+            | _ ->
+                Error
+                  "schema_dump failed; ensure the sidecar's Python deps are installed (run `./run.sh start` once or `uv sync`)"))
 
 (** ---- Config write (PUT) ----
 
@@ -486,22 +598,27 @@ let handle_start _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
   | Ok id ->
-      (* Detach: run via setsid + nohup so the sidecar survives backend
-         restart. Only [script_path id] is interpolated, and [id] is
-         already whitelisted, so [Filename.quote] gives a closed-shell
-         injection surface. *)
-      let cmd =
-        Printf.sprintf
-          "setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-          (Filename.quote (script_path id))
-      in
-      let _ = Sys.command cmd in
-      respond_json request reqd ~status:`Accepted
-        (`Assoc [
-           ("ok", `Bool true);
-           ("id", `String id);
-           ("note", `String "sidecar spawn requested; poll /api/v1/sidecar/status?name=...");
-         ])
+      (match runtime_sidecar_script_result id with
+       | Error msg ->
+           respond_json request reqd ~status:`Service_unavailable
+             (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
+       | Ok script ->
+           (* Detach: run via setsid + nohup so the sidecar survives backend
+              restart. Only [script] is interpolated, and the path comes from
+              a resolved directory + fixed filename, so [Filename.quote] gives
+              a closed-shell injection surface. *)
+           let cmd =
+             Printf.sprintf
+               "setsid nohup %s start </dev/null >/dev/null 2>&1 &"
+               (Filename.quote script)
+           in
+           let _ = Sys.command cmd in
+           respond_json request reqd ~status:`Accepted
+             (`Assoc [
+                ("ok", `Bool true);
+                ("id", `String id);
+                ("note", `String "sidecar spawn requested; poll /api/v1/sidecar/status?name=...");
+              ]))
 
 (** Register sidecar lifecycle routes on the router. *)
 let add_routes ~sw:_ ~clock:_ router =

@@ -14,6 +14,30 @@ export type StatusFilter = 'all' | 'active' | 'completed' | 'paused'
 export const horizonFilter = signal<HorizonFilter>('all')
 export const statusFilter = signal<StatusFilter>('all')
 
+// -- Task-level search (case-insensitive, title + description + assignee) --
+
+export const taskSearchQuery = signal<string>('')
+
+export function resetTaskSearch() {
+  taskSearchQuery.value = ''
+}
+
+export function filterTasksByQuery<T extends { title?: string; description?: string | null; assignee?: string | null }>(
+  tasks: readonly T[],
+  query: string,
+): T[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...tasks]
+  return tasks.filter(t => {
+    const title = (t.title ?? '').toLowerCase()
+    if (title.includes(q)) return true
+    const description = (t.description ?? '').toLowerCase()
+    if (description.includes(q)) return true
+    const assignee = (t.assignee ?? '').toLowerCase()
+    return assignee.includes(q)
+  })
+}
+
 // -- Expand state for task description previews ------------------
 
 export const expandedTasks = signal<Set<string>>(new Set())

@@ -8,6 +8,7 @@ import autoAnimate from '@formkit/auto-animate'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { Card } from '../common/card'
+import { TextInput } from '../common/input'
 import { TimeAgo } from '../common/time-ago'
 import { RichContent } from '../common/rich-content'
 import { showToast } from '../common/toast'
@@ -21,6 +22,9 @@ import {
   priorityLabel,
   sortByPriority,
   sortByTimeDesc,
+  taskSearchQuery,
+  resetTaskSearch,
+  filterTasksByQuery,
 } from './goal-helpers'
 import { openTaskDetail } from './task-detail-state'
 
@@ -196,16 +200,28 @@ function TaskColumn({
 export function TaskBacklog() {
   const { todo, inProgress, done } = tasksByStatus.value
   const totalTasks = todo.length + inProgress.length + done.length
-  const sortedTodo = [...todo].sort(sortByPriority)
-  const sortedInProgress = [...inProgress].sort(sortByPriority)
-  const sortedDone = [...done].sort(sortByTimeDesc)
+  const query = taskSearchQuery.value
+  const hasSearch = query.trim().length > 0
+  const filteredTodo = filterTasksByQuery(todo, query)
+  const filteredInProgress = filterTasksByQuery(inProgress, query)
+  const filteredDone = filterTasksByQuery(done, query)
+  const filteredTotal = filteredTodo.length + filteredInProgress.length + filteredDone.length
+  const sortedTodo = [...filteredTodo].sort(sortByPriority)
+  const sortedInProgress = [...filteredInProgress].sort(sortByPriority)
+  const sortedDone = [...filteredDone].sort(sortByTimeDesc)
   const visibleDone = sortedDone.slice(0, doneVisibleCount.value)
   const hasMoreDone = sortedDone.length > doneVisibleCount.value
   const remainingDone = sortedDone.length - doneVisibleCount.value
+  const emptyColumnMessage = hasSearch ? '검색 결과 없음' : null
 
-  // Reset pagination when data refreshes and count shrinks below current page
+  // Reset pagination when data (or filter) shrinks below current page
   if (doneVisibleCount.value > sortedDone.length && doneVisibleCount.value > DONE_PAGE_SIZE) {
     doneVisibleCount.value = Math.max(DONE_PAGE_SIZE, sortedDone.length)
+  }
+
+  function handleSearchInput(e: Event) {
+    const target = e.target as HTMLInputElement
+    taskSearchQuery.value = target.value
   }
 
   const isLoading = executionLoading.value && !executionLoaded.value
@@ -236,35 +252,53 @@ export function TaskBacklog() {
       ${hasError && hasData ? html`
         <div class="mb-3 rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[12px] text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}
+      <div class="mb-4 flex flex-wrap items-center gap-2">
+        <div class="min-w-[220px] flex-1">
+          <${TextInput}
+            value=${query}
+            placeholder="태스크 제목/설명/담당자 검색..."
+            ariaLabel="태스크 검색"
+            onInput=${handleSearchInput}
+          />
+        </div>
+        ${hasSearch ? html`
+          <button
+            type="button"
+            class="rounded-lg border border-card-border/70 bg-white/4 px-3 py-2 text-[12px] text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+            onClick=${() => resetTaskSearch()}
+          >검색 초기화</button>
+          <span class="text-[12px] text-text-muted">${filteredTotal}/${totalTasks}</span>
+        ` : null}
+      </div>
       <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4 items-start">
         <${TaskColumn}
           title="할 일"
-          count=${todo.length}
+          count=${sortedTodo.length}
           description="아직 claim되지 않은 태스크입니다. 우선순위가 높은 순서대로 위에 옵니다."
           badgeClass="border border-bad/25 bg-bad/10 text-bad"
         >
           ${sortedTodo.length === 0
-            ? html`<${EmptyState} message="대기 중인 태스크가 없습니다" compact />`
+            ? html`<${EmptyState} message=${emptyColumnMessage ?? '대기 중인 태스크가 없습니다'} compact />`
             : sortedTodo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         <//>
         <${TaskColumn}
           title="진행 중"
-          count=${inProgress.length}
+          count=${sortedInProgress.length}
           description="현재 어떤 작업이 실행 중인지 확인하는 칸입니다."
           badgeClass="border border-warn/25 bg-warn/10 text-warn"
         >
           ${sortedInProgress.length === 0
-            ? html`<${EmptyState} message="진행 중인 태스크가 없습니다" compact />`
+            ? html`<${EmptyState} message=${emptyColumnMessage ?? '진행 중인 태스크가 없습니다'} compact />`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         <//>
         <${TaskColumn}
           title="완료"
-          count=${done.length}
+          count=${sortedDone.length}
           description="최근 완료된 태스크만 우선 노출합니다."
           badgeClass="border border-ok/25 bg-ok/10 text-ok"
         >
           ${sortedDone.length === 0
-            ? html`<${EmptyState} message="완료된 태스크가 없습니다" compact />`
+            ? html`<${EmptyState} message=${emptyColumnMessage ?? '완료된 태스크가 없습니다'} compact />`
             : visibleDone.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${hasMoreDone ? html`
             <button

@@ -2,6 +2,7 @@
 // Absorbs: agent-roster + execution + keeper-roster + FSM hub into one view with chip toggle.
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
@@ -14,6 +15,7 @@ import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { FsmHub } from './fsm-hub'
+import { FleetFsmMatrix } from './fleet-fsm-matrix'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
 
@@ -97,7 +99,7 @@ export function AgentsUnified() {
       ` : null}
 
       ${currentView === 'fsm'
-        ? html`<${FsmHub} />`
+        ? html`<${FleetAndFsmHubPanel} />`
         : html`
           ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
 
@@ -107,6 +109,22 @@ export function AgentsUnified() {
               : 'all'}
           />
         `}
+    </div>
+  `
+}
+
+/**
+ * LT-16d: fleet matrix above, per-keeper FsmHub below. Clicking a row
+ * in the matrix pins that keeper in the detail hub. Local state keeps
+ * the two components loosely coupled — no new store signal is
+ * introduced for this drill-through.
+ */
+function FleetAndFsmHubPanel() {
+  const [pinned, setPinned] = useState<string | null>(null)
+  return html`
+    <div class="flex flex-col gap-4">
+      <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
+      <${FsmHub} selectedName=${pinned} />
     </div>
   `
 }

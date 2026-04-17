@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 
 import {
   fetchKeeperComposite,
@@ -9,11 +9,36 @@ import {
 } from '../api/keeper'
 import { EmptyState } from './common/empty-state'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
+import { FilterChips } from './common/filter-chips'
 import { buildCompactionSpec } from './keeper-fsm-specs'
 
 interface KeeperMemoryTierPanelProps {
   keeperName: string
   currentPhase?: string | null
+}
+
+export type MemoryTierFilter = 'all' | 'saturated'
+
+/**
+ * Pure filter for memory-tier rows.
+ *
+ * - `query` is case-insensitive substring match on `row.kind` (trimmed).
+ * - `filter === 'saturated'` keeps only rows where `used >= cap` (cap > 0).
+ *   Rows with `cap === 0` are never saturated (avoid div-by-zero framing).
+ * - Empty query + `filter === 'all'` returns the input reference unchanged.
+ */
+export function filterMemoryKindUsage(
+  rows: readonly MemoryKindUsageEntry[],
+  query: string,
+  filter: MemoryTierFilter = 'all',
+): readonly MemoryKindUsageEntry[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '' && filter === 'all') return rows
+  return rows.filter(row => {
+    if (filter === 'saturated' && !(row.cap > 0 && row.used >= row.cap)) return false
+    if (needle === '') return true
+    return row.kind.toLowerCase().includes(needle)
+  })
 }
 
 /**
@@ -32,6 +57,8 @@ export function KeeperMemoryTierPanel({
   const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<MemoryTierFilter>('all')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -89,6 +116,14 @@ export function KeeperMemoryTierPanel({
 
   const totalUsed = usage.reduce((sum, row) => sum + row.used, 0)
   const totalCap = usage.reduce((sum, row) => sum + row.cap, 0)
+  const saturatedCount = useMemo(
+    () => usage.filter(row => row.cap > 0 && row.used >= row.cap).length,
+    [usage],
+  )
+  const visible = useMemo(
+    () => filterMemoryKindUsage(usage, query, filter),
+    [usage, query, filter],
+  )
   const phase = snapshot?.phase ?? currentPhase ?? null
   const isCompacting = phase === 'Compacting' || phase === 'compacting'
   const compactionStage = snapshot?.compaction.stage ?? (isCompacting ? 'compacting' : 'accumulating')
@@ -113,8 +148,33 @@ export function KeeperMemoryTierPanel({
         ` : null}
       </div>
 
+      <div class="flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value=${query}
+          placeholder="kind 필터"
+          aria-label="memory kind 필터"
+          onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+          class="min-w-[120px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+        <${FilterChips}
+          chips=${[
+            { key: 'all', label: 'all', count: usage.length },
+            { key: 'saturated', label: 'saturated', count: saturatedCount },
+          ] as const}
+          value=${filter}
+          onChange=${(key: MemoryTierFilter) => setFilter(key)}
+        />
+      </div>
+
+      ${visible.length === 0 ? html`
+        <div class="py-4 text-center text-[11px] text-[var(--text-dim)]">
+          필터 결과 없음
+        </div>
+      ` : null}
+
       <div class="flex flex-col gap-1.5">
-        ${usage.map(row => {
+        ${visible.map(row => {
           const pct = row.cap > 0 ? Math.min(100, Math.round((row.used / row.cap) * 100)) : 0
           const saturated = row.used >= row.cap
           const barColor = saturated

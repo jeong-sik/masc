@@ -26,6 +26,7 @@ import {
   type CascadeConfigResponse,
   type CascadeHealthProvider,
   type CascadeHealthResponse,
+  type CascadeKeeperProfile,
   type CascadeProfile,
   type CascadeStrategyTraceEvent,
   type CascadeStrategyTraceKind,
@@ -101,18 +102,104 @@ function fmtCooldownExpiry(expiresAt: number | null): string {
   return `${Math.ceil(delta / 60)}분 후`
 }
 
-function ProfileCard({ profile }: { profile: CascadeProfile }) {
+export interface KeeperCascadeRow {
+  keeper: string
+  /** Declared cascade name from TOML / runtime JSON (pre-canonicalize). */
+  raw_cascade_name: string
+  /** True when the declared cascade differs from its canonical form. */
+  drift: boolean
+}
+
+/**
+ * Group keeper mapping rows by canonical cascade name.
+ *
+ * Pure. Returns a Map keyed on canonical name so the caller iterates
+ * in stable insertion order.  Input is never mutated.  Keepers whose
+ * canonical name does not match any declared profile still get a
+ * bucket — callers decide how to surface the orphan case.
+ */
+export function groupKeepersByCanonicalCascade(
+  keepers: readonly CascadeKeeperProfile[],
+): Map<string, KeeperCascadeRow[]> {
+  const map = new Map<string, KeeperCascadeRow[]>()
+  for (const k of keepers) {
+    const row: KeeperCascadeRow = {
+      keeper: k.keeper,
+      raw_cascade_name: k.cascade_name,
+      drift: k.cascade_name !== k.canonical,
+    }
+    const existing = map.get(k.canonical)
+    if (existing) existing.push(row)
+    else map.set(k.canonical, [row])
+  }
+  return map
+}
+
+/**
+ * Keepers whose canonical cascade is not declared in the current
+ * profile list.  Should be empty in steady state — if non-empty it
+ * indicates the dashboard's {@link CascadeConfigResponse.profiles}
+ * and {@link CascadeConfigResponse.keeper_profiles} drifted
+ * (e.g. a keeper registered a canonical we do not know about).
+ *
+ * Pure.  Uses a Set for O(1) membership checks against the (small)
+ * declared profile list.
+ */
+export function keepersWithUnknownCanonical(
+  profiles: readonly CascadeProfile[],
+  keepers: readonly CascadeKeeperProfile[],
+): CascadeKeeperProfile[] {
+  const known = new Set(profiles.map(p => p.name))
+  return keepers.filter(k => !known.has(k.canonical))
+}
+
+function KeeperChip({ row }: { row: KeeperCascadeRow }) {
+  const base = 'rounded border px-2 py-0.5 text-xs flex items-center gap-1'
+  const borderTone = row.drift
+    ? 'border-[var(--warn)] text-[var(--text-strong)]'
+    : 'border-[var(--card-border)] text-[var(--text-strong)]'
+  return html`
+    <span
+      class=${`${base} ${borderTone}`}
+      title=${row.drift
+        ? `declared: ${row.raw_cascade_name} (canonicalized here)`
+        : row.keeper}
+    >
+      <span class="font-semibold">${row.keeper}</span>
+      ${row.drift
+        ? html`<code class="text-[10px] text-[var(--text-muted)]">${row.raw_cascade_name}</code>`
+        : null}
+    </span>
+  `
+}
+
+function ProfileCard({
+  profile,
+  keepers,
+}: { profile: CascadeProfile; keepers: readonly KeeperCascadeRow[] }) {
+  const driftCount = keepers.reduce((n, k) => n + (k.drift ? 1 : 0), 0)
   return html`
     <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3">
-      <header class="flex items-center gap-2 mb-2">
+      <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--text-strong)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
           ${sourceLabel(profile.source)}
         <//>
         <span class="text-xs text-[var(--text-muted)]">
           ${profile.candidates.length} candidate${profile.candidates.length === 1 ? '' : 's'}
+          · ${keepers.length} keeper${keepers.length === 1 ? '' : 's'}
         </span>
+        ${driftCount > 0
+          ? html`<${StatusChip} tone="warn">${driftCount} drift<//>`
+          : null}
       </header>
+      ${keepers.length === 0
+        ? html`<div class="text-xs text-[var(--text-muted)] mb-2">no keepers assigned</div>`
+        : html`
+          <div class="flex flex-wrap gap-1 mb-2">
+            ${keepers.map(k => html`<${KeeperChip} row=${k} />`)}
+          </div>
+        `}
       ${profile.candidates.length === 0
         ? html`<div class="text-xs text-[var(--text-muted)]">no candidates resolved</div>`
         : html`
@@ -135,34 +222,27 @@ function ProfileCard({ profile }: { profile: CascadeProfile }) {
   `
 }
 
-function KeeperMapping({ config }: { config: CascadeConfigResponse }) {
-  const mapping = config.keeper_profiles
-  if (mapping.length === 0) {
-    return html`<${EmptyState}>활성 keeper 없음<//>`
-  }
+function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[] }) {
+  if (orphans.length === 0) return null
   return html`
-    <table class="w-full text-xs">
-      <thead>
-        <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
-          <th class="text-left py-1">Keeper</th>
-          <th class="text-left py-1">Cascade Name</th>
-          <th class="text-left py-1">Canonical</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${mapping.map(m => html`
-          <tr class="border-b border-[var(--card-border)] last:border-b-0">
-            <td class="py-1 font-semibold text-[var(--text-strong)]">${m.keeper}</td>
-            <td class="py-1"><code>${m.cascade_name}</code></td>
-            <td class="py-1">
-              ${m.cascade_name === m.canonical
-                ? html`<span class="text-[var(--text-muted)]">—</span>`
-                : html`<code>${m.canonical}</code>`}
-            </td>
-          </tr>
+    <div class="rounded border border-[var(--warn)] bg-[var(--bg-0)] p-3 text-xs">
+      <div class="font-semibold text-[var(--text-strong)] mb-1">
+        등록된 프로필 없음 (${orphans.length})
+      </div>
+      <div class="text-[var(--text-muted)] mb-2">
+        아래 keeper 는 canonical cascade 가 현재 profile 목록에 없어 해당 cascade 로 라우팅할 수 없습니다.
+      </div>
+      <ul class="flex flex-col gap-1">
+        ${orphans.map(o => html`
+          <li class="flex gap-2">
+            <span class="font-semibold text-[var(--text-strong)]">${o.keeper}</span>
+            <code>${o.cascade_name}</code>
+            <span class="text-[var(--text-muted)]">→</span>
+            <code class="text-[var(--warn)]">${o.canonical}</code>
+          </li>
         `)}
-      </tbody>
-    </table>
+      </ul>
+    </div>
   `
 }
 
@@ -543,30 +623,42 @@ export function CascadeConfigPanel() {
         ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Cascade Profiles">
+      <${Card} title="Cascade Routing">
         ${config
-          ? html`
-            <div class="grid grid-cols-2 gap-3 mb-3">
-              <${StatCell}
-                label="Profiles"
-                value=${config.profiles.length}
-                detail=${config.config_path ?? 'config 없음'}
-              />
-              <${StatCell}
-                label="Keepers"
-                value=${config.keeper_profiles.length}
-                detail="cascade_name 등록됨"
-              />
-            </div>
-            <div class="grid gap-3 md:grid-cols-2">
-              ${config.profiles.map(p => html`<${ProfileCard} profile=${p} />`)}
-            </div>
-          `
+          ? (() => {
+              const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
+              const orphans = keepersWithUnknownCanonical(config.profiles, config.keeper_profiles)
+              const driftTotal = config.keeper_profiles.reduce(
+                (n, k) => n + (k.cascade_name !== k.canonical ? 1 : 0),
+                0,
+              )
+              return html`
+                <div class="grid grid-cols-3 gap-3 mb-3">
+                  <${StatCell}
+                    label="Profiles"
+                    value=${config.profiles.length}
+                    detail=${config.config_path ?? 'config 없음'}
+                  />
+                  <${StatCell}
+                    label="Keepers"
+                    value=${config.keeper_profiles.length}
+                    detail="cascade_name 등록됨"
+                  />
+                  <${StatCell}
+                    label="Drift"
+                    value=${driftTotal}
+                    detail="raw ≠ canonical"
+                  />
+                </div>
+                <div class="grid gap-3 md:grid-cols-2 mb-3">
+                  ${config.profiles.map(p => html`
+                    <${ProfileCard} profile=${p} keepers=${keeperGroups.get(p.name) ?? []} />
+                  `)}
+                </div>
+                <${OrphanKeeperList} orphans=${orphans} />
+              `
+            })()
           : null}
-      <//>
-
-      <${Card} title="Keeper → Cascade Mapping">
-        ${config ? html`<${KeeperMapping} config=${config} />` : null}
       <//>
 
       <${Card} title="Health Tracker">

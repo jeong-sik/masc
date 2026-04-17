@@ -6,7 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { fetchKeeperConfig, patchKeeperConfig } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
-import type { KeeperConfig } from '../types'
+import type { KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens } from '../lib/format-number'
 import { showToast } from './common/toast'
@@ -35,6 +35,40 @@ type EditDraft = {
 }
 
 const editDraft = signal<EditDraft | null>(null)
+const hookFilterQuery = signal<string>('')
+
+// ── Hook slot filter ─────────────────────────────────────
+
+export type HookSlotEntry = readonly [name: string, slot: KeeperHookSlot]
+
+/**
+ * Pure filter for hook slot entries.
+ *
+ * Case-insensitive substring match against, in order:
+ * - slot name (the `Record<string, KeeperHookSlot>` key)
+ * - `slot.source`
+ * - any string in `slot.gates`, `slot.effects`, or `slot.features`
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * `useMemo` preserves referential equality when no filter is active.
+ * Input is never mutated.
+ */
+export function filterHookSlots(
+  entries: readonly HookSlotEntry[],
+  query: string,
+): readonly HookSlotEntry[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return entries
+  return entries.filter(([name, slot]) => {
+    if (name.toLowerCase().includes(needle)) return true
+    if (slot.source && slot.source.toLowerCase().includes(needle)) return true
+    const tags = slot.gates ?? slot.effects ?? slot.features ?? []
+    for (const tag of tags) {
+      if (tag && tag.toLowerCase().includes(needle)) return true
+    }
+    return false
+  })
+}
 
 function initDraftFromConfig(c: KeeperConfig): EditDraft {
   return {
@@ -146,6 +180,7 @@ export function resetKeeperConfig(): void {
   saveError.value = null
   runtimeDraft.value = null
   runtimeSaving.value = false
+  hookFilterQuery.value = ''
 }
 
 export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
@@ -683,30 +718,48 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         </div>
       ` : null}
 
-      ${c.hooks ? html`
-        <${SectionHeader} title="훅 슬롯" />
-        ${Object.entries(c.hooks.slots).map(([name, slot]) => html`
-          <div class="flex items-start gap-2 py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 mb-1.5">
-            <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}"></span>
-            <div class="flex-1 min-w-0">
-              <div class="flex justify-between">
-                <span class="text-[12px] font-semibold text-text-strong">${name}</span>
-                <span class="text-[10px] text-text-muted">${slot.source}</span>
-              </div>
-              ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
-                <div class="flex flex-wrap gap-1 mt-1">
-                  ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                    <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
-                  `)}
-                </div>
-              ` : null}
-            </div>
+      ${c.hooks ? (() => {
+        const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]
+        const visibleEntries = filterHookSlots(allEntries, hookFilterQuery.value)
+        const isFiltering = hookFilterQuery.value.trim() !== ''
+        return html`
+          <${SectionHeader} title="훅 슬롯" />
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-[10px] text-text-muted">${allEntries.length} slots</span>
+            <input
+              type="search"
+              value=${hookFilterQuery.value}
+              placeholder="슬롯 이름 / source / gate 필터"
+              aria-label="훅 슬롯 필터"
+              onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
+              class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+            />
           </div>
-        `)}
-        <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
-        <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
-        <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
-      ` : null}
+          ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
+            ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${allEntries.length} slots)</div>`
+            : visibleEntries.map(([name, slot]) => html`
+                <div class="flex items-start gap-2 py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 mb-1.5">
+                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex justify-between">
+                      <span class="text-[12px] font-semibold text-text-strong">${name}</span>
+                      <span class="text-[10px] text-text-muted">${slot.source}</span>
+                    </div>
+                    ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
+                      <div class="flex flex-wrap gap-1 mt-1">
+                        ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
+                          <span class="text-[9px] px-1.5 py-0.5 rounded-md ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
+                        `)}
+                      </div>
+                    ` : null}
+                  </div>
+                </div>
+              `)}
+          <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
+          <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
+          <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? '$' + (c.hooks.cost_budget.max_cost_usd ?? 0).toFixed(2) : '비활성'} />
+        `
+      })() : null}
 
       ${'' /* Metrics removed — duplicates KpiGrid, MetricsCharts, and header model badge */}
     </div>

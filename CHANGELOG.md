@@ -1,6 +1,33 @@
 # Changelog
 
 
+## [0.9.10] - 2026-04-17
+
+### Changed
+
+- **OAS pin floor `0.153.0` → `0.155.0`** — picks up the event system
+  cleanup from OAS v0.154.0 (removed `Event_bus.TaskStateChanged`,
+  renamed Custom durable namespace `durable:*` → `durable.*`, stripped
+  redundant `"custom."` prefix in `event_forward`) plus the verification
+  tests / examples shipped in v0.155.0.
+- **`lib/oas_sse_bridge.ml`** — removed the `TaskStateChanged` arm
+  (variant was deleted upstream) and added SSE relay payloads for the
+  three new native variants: `AgentFailed` (`agent_failed` event),
+  `HandoffRequested` (`handoff_requested`), `HandoffCompleted`
+  (`handoff_completed`). Carries full payload (error message, from/to
+  agent, reason, elapsed) so downstream SSE consumers don't have to
+  parse the OAS envelope.
+- **`lib/verifier_oas.ml`** — extended the hook match on
+  `Agent_sdk.Hooks.hook_event` to include the new
+  `OnContextCompacted` variant (no-op `Continue`; verifier only cares
+  about `PreToolUse`).
+
+No behavioural changes beyond the new-variant passthrough in
+`oas_sse_bridge.ml`. The full MASC-side event-boundary migration
+(masc_events_bus split for `masc:*` publishes, hook-based
+`keeper_compact_audit`, `correlation_id` plumbing) is still tracked as
+a separate follow-up and is NOT part of this PR.
+
 ## [0.9.9] - 2026-04-17
 
 ### Changed

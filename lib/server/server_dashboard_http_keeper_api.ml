@@ -1252,6 +1252,48 @@ let handle_keeper_get_subroutes state req request reqd =
          let json = Keeper_composite_observer.snapshot_to_json snapshot in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd)
+  else if req_path = prefix ^ "regime" then
+    (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
+       purity contract as the composite route above, uses the
+       [Keeper_behavioral_regime_observer] pure projection. *)
+    let base_path = state.Mcp_server.room_config.base_path in
+    let snapshots =
+      Keeper_behavioral_regime_observer.all_snapshots ~base_path ()
+    in
+    let json =
+      `Assoc [
+        "generated_at", `Float (Unix.gettimeofday ());
+        "count", `Int (List.length snapshots);
+        "snapshots",
+          `List
+            (List.map
+               Keeper_behavioral_regime_observer.snapshot_to_json
+               snapshots);
+      ]
+    in
+    Http.Response.json ~compress:true ~request:req
+      (Yojson.Safe.to_string json) reqd
+  else if ends_with "/regime" then
+    (* Per-keeper behavioral-regime snapshot. *)
+    let name = extract_name "/regime" in
+    if String.length name = 0 then
+      Http.Response.json ~status:`Bad_request
+        {|{"error":"keeper name is required"}|} reqd
+    else
+      let base_path = state.Mcp_server.room_config.base_path in
+      (match Keeper_registry.get ~base_path name with
+       | None ->
+         Http.Response.json ~status:`Not_found
+           (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
+       | Some entry ->
+         let snapshot =
+           Keeper_behavioral_regime_observer.observe entry
+         in
+         let json =
+           Keeper_behavioral_regime_observer.snapshot_to_json snapshot
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd)
   else
     Http.Response.json ~status:`Not_found
       {|{"error":"not found"}|} reqd

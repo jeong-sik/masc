@@ -388,9 +388,8 @@ let test_dashboard_component_split_contracts () =
   check bool "proof helpers export worker run evidence tone" true
     (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
        "export function workerRunEvidenceTone");
-  check bool "proof sections export worker run evidence row" true
-    (file_contains_pattern "dashboard/src/components/proof-sections.ts"
-       "export function WorkerRunEvidenceRow");
+  (* proof-sections.ts was removed in #8081; the surviving pure
+     helpers live in proof-helpers.ts (asserted above). *)
   check bool "mission cards re-export briefing card" true
     (file_contains_pattern "dashboard/src/components/mission-cards.ts"
        "export { MissionBriefingCard } from './mission-briefing-card'");

@@ -1366,3 +1366,45 @@ let make_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
 let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
   [ make_file_read ?workdir ?on_exec ();
     make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock ]
+
+(* --- Attribution envelope conversion (Layer 1) ---
+   Shell command validation is a Det policy gate. The 7 block_reason
+   variants map uniformly to Policy_failed (no transition involved —
+   this is a pre-execution allow/deny check). *)
+
+let block_reason_tag = function
+  | Empty_command -> "empty_command"
+  | Chain_or_redirect -> "chain_or_redirect"
+  | Injection -> "injection"
+  | Process_substitution -> "process_substitution"
+  | Unsafe_redirect -> "unsafe_redirect"
+  | Pipes_not_allowed -> "pipes_not_allowed"
+  | Command_not_allowed _ -> "command_not_allowed"
+
+let attribution_of_validation ~cmd
+    (result : (unit, block_reason) result) : Attribution.t =
+  match result with
+  | Ok () ->
+    let evidence : Yojson.Safe.t =
+      `Assoc [ ("cmd", `String cmd) ]
+    in
+    Attribution.passed ~origin:Det ~gate:"worker_dev_tools" ~evidence
+  | Error br ->
+    let command_name =
+      match br with
+      | Command_not_allowed name -> Some name
+      | _ -> None
+    in
+    let evidence : Yojson.Safe.t =
+      `Assoc
+        ([
+           ("cmd", `String cmd);
+           ("block_reason", `String (block_reason_tag br));
+         ]
+         @
+         match command_name with
+         | Some n -> [ ("command_name", `String n) ]
+         | None -> [])
+    in
+    Attribution.policy_failed ~origin:Det ~gate:"worker_dev_tools"
+      ~evidence ~reason:(block_reason_to_string br)

@@ -51,6 +51,7 @@ let should_cascade_to_next err =
   | Llm_provider.Http_client.HttpError { code; _ } ->
     List.mem code Llm_provider.Constants.Http.cascadable_codes
   | Llm_provider.Http_client.AcceptRejected _ -> false
+  | Llm_provider.Http_client.CliTransportRequired _ -> true
   | Llm_provider.Http_client.NetworkError _ -> true
 
 (* ── Local provider detection ──────────────────────────── *)
@@ -117,4 +118,3 @@ let filter_healthy ~sw ~net providers =
   fst (filter_healthy_internal ~sw ~net providers)
 
 (* ── Inline tests ──────────────────────────────────────── *)
-

@@ -121,20 +121,21 @@ let make_result ?(verdict = AR.Approve) ?(gate = AR.Structured_tool)
 let append_verdict_record ~timestamp ~agent_name ~task_id ~verdict ?fallback_reason () =
   Dated_jsonl.append (Cal.get_store ())
     (`Assoc
-      [
-        ("record_type", `String "verdict");
-        ("notes_hash", `String ("hash-" ^ task_id));
-        ("task_id", `String task_id);
-        ("task_title", `String ("Task " ^ task_id));
-        ("agent_name", `String agent_name);
-        ("verdict", `String verdict);
-        ("gate", `String "structured_tool");
-        ("evaluator_cascade", `String "cross_verifier");
-        ("timestamp", `Float timestamp);
-      ]
-      @ match fallback_reason with
-        | Some reason -> [ ("fallback_reason", `String reason) ]
-        | None -> [])
+      ([
+         ("record_type", `String "verdict");
+         ("notes_hash", `String ("hash-" ^ task_id));
+         ("task_id", `String task_id);
+         ("task_title", `String ("Task " ^ task_id));
+         ("agent_name", `String agent_name);
+         ("verdict", `String verdict);
+         ("gate", `String "structured_tool");
+         ("evaluator_cascade", `String "cross_verifier");
+         ("timestamp", `Float timestamp);
+       ]
+       @
+       match fallback_reason with
+       | Some reason -> [ ("fallback_reason", `String reason) ]
+       | None -> []))
 
 let test_runtime_signals_are_persisted () =
   with_test_stores @@ fun config ->
@@ -330,7 +331,7 @@ let test_agent_scoped_verdicts_filter_before_limit () =
     [ "schema_violation" ]
     Yojson.Safe.Util.(outcomes |> member "validation" |> member "oas_verdicts"
       |> member "top_failure_reasons" |> to_list |> filter_string);
-  check (option float) "last verdict timestamp preserved" (Some 101.0)
+  check (option (float 0.000_001)) "last verdict timestamp preserved" (Some 101.0)
     Yojson.Safe.Util.(outcomes |> member "validation" |> member "last_verdict_at" |> to_float_option)
 
 let () =

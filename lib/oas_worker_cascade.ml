@@ -377,10 +377,6 @@ let cascade_metrics_for_candidates
         (fun ~model_id ~error ->
           ensure_terminal_attempt capture ~candidate_cfgs ~model_id
             ~latency_ms:None ~error:(Some error));
-      on_cascade_fallback =
-        (fun ~from_model ~to_model ~reason ->
-          record_fallback_event capture ~candidate_cfgs ~from_model ~to_model
-            ~reason);
       (* Forward HTTP status to the Prometheus counter.  When callers
          pass this per-call metrics sink explicitly (cascade
          observation path), OAS does not consult the global

@@ -75,7 +75,7 @@ let emit_request_latency ~model_id ~latency_ms =
     - [on_request_end]   → masc_llm_provider_request_latency_seconds
 
     Other callbacks ([on_cache_hit/miss], [on_request_start], [on_error],
-    [on_cascade_fallback]) inherit the default no-op from
+    transport-independent extras) inherit the default no-op from
     [Llm_provider.Metrics.noop].  Add more relays here as their
     consuming dashboards land. *)
 let make_sink () : Llm_provider.Metrics.t =

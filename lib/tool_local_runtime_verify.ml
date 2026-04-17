@@ -121,6 +121,8 @@ let first_endpoint_url endpoints =
 let error_message_of_http_error = function
   | Llm_provider.Http_client.NetworkError { message } -> message
   | Llm_provider.Http_client.AcceptRejected { reason } -> reason
+  | Llm_provider.Http_client.CliTransportRequired { kind } ->
+      Printf.sprintf "%s provider requires a CLI transport" kind
   | Llm_provider.Http_client.HttpError { code; body } -> (
       try
         let json = Yojson.Safe.from_string body in

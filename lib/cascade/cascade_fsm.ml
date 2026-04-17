@@ -50,6 +50,8 @@ let format_exhausted_error last_err =
            ~suffix:"..." body
          |> String_util.to_string)
     | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
+    | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
+      Printf.sprintf "%s provider requires a CLI transport" kind
     | Some (Llm_provider.Http_client.NetworkError { message }) -> message
     | None -> "No providers available"
   in
@@ -61,4 +63,3 @@ let format_exhausted_error last_err =
     }
 
 (* ── Inline tests ───────────────────────────────── *)
-

@@ -406,63 +406,6 @@ export async function decideGovernanceExecutionOrder(
   throw governanceCasesRetiredError()
 }
 
-export interface RuntimeParamMeta {
-  description: string
-  value_type: string
-  min_value?: number
-  max_value?: number
-}
-
-export interface RuntimeParam {
-  key: string
-  current: unknown
-  default: unknown
-  has_override: boolean
-  meta?: RuntimeParamMeta | null
-}
-
-export interface RuntimeParamsSurface {
-  id: string
-  description: string
-  risk: string
-  param_keys: string[]
-}
-
-export interface RuntimeParamsResponse {
-  parameters: RuntimeParam[]
-  surfaces: RuntimeParamsSurface[]
-}
-
-export function fetchRuntimeParams(): Promise<RuntimeParamsResponse> {
-  return get('/api/v1/governance/params')
-}
-
-export function setRuntimeParam(paramKey: string, value: unknown, reason = ''): Promise<{ ok: boolean; message: string }> {
-  return post('/api/v1/governance/params/set', { param_key: paramKey, value, reason })
-}
-
-export function clearRuntimeParam(paramKey: string): Promise<{ ok: boolean; message: string }> {
-  return post('/api/v1/governance/params/clear', { param_key: paramKey })
-}
-
-export interface ParamAuditEntry {
-  timestamp: number
-  key: string
-  old_value: unknown
-  new_value: unknown
-  actor: string
-  case_id?: string
-}
-
-export interface ParamAuditResponse {
-  entries: ParamAuditEntry[]
-  count: number
-}
-
-export function fetchParamAudit(limit = 50): Promise<ParamAuditResponse> {
-  return get(`/api/v1/governance/params/audit?limit=${limit}`)
-}
-
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
   return get('/api/v1/dashboard/mission')
 }

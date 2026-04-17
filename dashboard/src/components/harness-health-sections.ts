@@ -8,6 +8,7 @@ import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { SurfaceCard } from './common/card'
 import { CopyIdButton } from './common/copy-id-button'
 import { SectionCap } from './common/section-cap'
+import { StatusChip } from './common/status-chip'
 import { StatusDot } from './common/status-dot'
 import type {
   RailStatus,
@@ -226,9 +227,7 @@ export function railFreshness(data: HarnessHealthData, rail: 'evaluator' | 'pre_
 
 export function StatusPill({ status }: { status: RailStatus }) {
   return html`
-    <span class=${`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
-      ${railStatusLabel(status)}
-    </span>
+    <${StatusChip} tone=${statusChipClass(status)} class="font-semibold">${railStatusLabel(status)}<//>
   `
 }
 

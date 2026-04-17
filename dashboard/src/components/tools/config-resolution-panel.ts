@@ -10,6 +10,7 @@ import type {
 } from '../../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { Card } from '../common/card'
+import { StatusChip } from '../common/status-chip'
 
 /**
  * Pure filter for runtime diagnostics entries.
@@ -144,9 +145,7 @@ function ConfigRow({
     <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">${label}</div>
-        <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}">
-          ${item.exists ? 'present' : 'missing'}
-        </span>
+        <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
         ${showSourceBadge
           ? html`
               <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
@@ -212,14 +211,10 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
   return html`
     <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3">
       <div class="mb-1 flex flex-wrap items-center gap-2">
-        <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
-          ${item.kind}
-        </span>
+        <${StatusChip} tone="neutral">${item.kind}<//>
         ${item.signal
           ? html`
-              <span class="rounded-full border border-[rgba(250,204,21,0.28)] bg-[rgba(250,204,21,0.10)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fde68a]">
-                ${item.signal}
-              </span>
+              <${StatusChip} tone="warn">${item.signal}<//>
             `
           : null}
         <span class="text-[11px] text-[var(--text-muted)]">${item.ts}</span>
@@ -310,9 +305,7 @@ function RuntimeProbePanel() {
     <div class="mt-4 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">ollama warm / kv probe</div>
-        <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${probeTone(signal, probe?.probe_ok)}">
-          ${probeSignalLabel(signal)}
-        </span>
+        <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
         ${state.value.data?.cache_hit !== undefined
           ? html`
               <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-muted)]">
@@ -441,9 +434,7 @@ export function ConfigResolutionPanel({
         ? html`
             <div class="mb-6">
               <div class="mb-3 flex flex-wrap items-center gap-2">
-                <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${toneClass(resolution.status)}">
-                  ${resolution.status}
-                </span>
+                <${StatusChip} tone=${toneClass(resolution.status)}>${resolution.status}<//>
                 <span class="rounded-full border border-[var(--card-border)] bg-[var(--white-6)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
                   ${sourceLabel(resolution.config_root.source)}
                 </span>
@@ -495,15 +486,11 @@ export function ConfigResolutionPanel({
         ? html`
             <div>
               <div class="mb-3 flex flex-wrap items-center gap-2">
-                <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${toneClass(runtimeResolution.status)}">
-                  ${runtimeResolution.status}
-                </span>
+                <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
                 <span class="text-[12px] text-[var(--text-muted)]">runtime path resolution</span>
                 ${runtimeResolution.source_mismatch
                   ? html`
-                      <span class="rounded-full border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.10)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fecdd3]">
-                        source mismatch
-                      </span>
+                      <${StatusChip} tone="bad">source mismatch<//>
                     `
                   : null}
               </div>

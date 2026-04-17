@@ -66,7 +66,7 @@ function TileSkeleton() {
   `
 }
 
-export interface ConnectorOverviewSkeletonProps {
+interface ConnectorOverviewSkeletonProps {
   class?: string
   testId?: string
 }

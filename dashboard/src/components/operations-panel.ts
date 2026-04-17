@@ -10,7 +10,7 @@ import { Governance } from './governance'
 import { LabInspector } from './lab-inspector'
 import { route } from '../router'
 
-export type OpsView = 'default' | 'ops' | 'governance' | 'inspector'
+type OpsView = 'default' | 'ops' | 'governance' | 'inspector'
 
 const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'inspector']
 

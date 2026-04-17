@@ -160,7 +160,7 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
 
 // ── Turn Budget ──────────────────────────────────────────
 
-export function hasTurnBudgetDivergence(keeper: Keeper): boolean {
+function hasTurnBudgetDivergence(keeper: Keeper): boolean {
   const b = keeper.turn_budget
   if (!b) return false
   return (
@@ -246,7 +246,7 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   `
 }
 
-export function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
+function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
   const budget = keeper.turn_budget
   if (!budget) {
     return html`

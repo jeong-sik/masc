@@ -5,7 +5,7 @@
 // ids yet, so per-gate card + recent-event list is the honest view.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchAttributionRecent,
@@ -72,6 +72,46 @@ function reasonOf(a: Attribution): string {
     case 'partial_pass': return a.outcome.rationale
     case 'passed': return ''
   }
+}
+
+/**
+ * Pure filter for attribution events.
+ *
+ * Case-insensitive substring match on `gate`, `origin`, and the outcome's
+ * textual fields (reason / rationale / from_state / to_state) so operators
+ * can locate an event by gate name, by det/nondet origin, or by a snippet
+ * of the failure reason.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterAttributionEvents(
+  events: readonly AttributionEvent[],
+  query: string,
+): readonly AttributionEvent[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return events
+  return events.filter(ev => {
+    const a = ev.attribution
+    if (a.gate.toLowerCase().includes(needle)) return true
+    if (a.origin.toLowerCase().includes(needle)) return true
+    const o = a.outcome
+    switch (o.kind) {
+      case 'passed':
+        return false
+      case 'policy_failed':
+        return o.reason.toLowerCase().includes(needle)
+      case 'transition_blocked':
+        if (o.reason.toLowerCase().includes(needle)) return true
+        if (o.from_state.toLowerCase().includes(needle)) return true
+        if (o.to_state.toLowerCase().includes(needle)) return true
+        return false
+      case 'partial_pass':
+        return o.rationale.toLowerCase().includes(needle)
+    }
+  })
 }
 
 function GateCard({
@@ -186,6 +226,7 @@ export function AttributionPanel() {
   const error = useSignal<string | null>(null)
   const selectedEventIdx = useSignal<number | null>(null)
   const filterGate = useSignal<string | null>(null)
+  const query = useSignal('')
 
   useEffect(() => {
     let cancelled = false
@@ -234,8 +275,17 @@ export function AttributionPanel() {
   const byGate = new Map<string, GateSummary>()
   for (const g of summary.value?.gates ?? []) byGate.set(g.gate, g)
 
+  // Gate filter runs server-side (see fetchAttributionRecent above), so
+  // `recent.value` is already gate-filtered. Text filter composes on top.
+  const gateFiltered = recent.value
+  const visibleEvents = useMemo(
+    () => filterAttributionEvents(gateFiltered, query.value),
+    [gateFiltered, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
+
   const selected = selectedEventIdx.value !== null
-    ? recent.value[selectedEventIdx.value] ?? null
+    ? visibleEvents[selectedEventIdx.value] ?? null
     : null
 
   return html`
@@ -262,34 +312,53 @@ export function AttributionPanel() {
         `)}
       </div>
 
-      ${filterGate.value
-        ? html`
-          <div class="text-[11px] text-[var(--text-muted)]">
-            필터: <span class="font-mono text-[var(--text-primary)]">${filterGate.value}</span>
-            <button
-              class="ml-2 underline"
-              onClick=${() => { filterGate.value = null }}
-            >
-              해제
-            </button>
-          </div>`
-        : null}
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        ${filterGate.value
+          ? html`
+            <div class="text-[11px] text-[var(--text-muted)]">
+              필터: <span class="font-mono text-[var(--text-primary)]">${filterGate.value}</span>
+              <button
+                class="ml-2 underline"
+                onClick=${() => { filterGate.value = null }}
+              >
+                해제
+              </button>
+            </div>`
+          : html`<div></div>`}
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="gate / origin / reason 필터"
+          aria-label="Attribution 이벤트 필터"
+          onInput=${(e: Event) => {
+            query.value = (e.target as HTMLInputElement).value
+            selectedEventIdx.value = null
+          }}
+          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--card-border)] bg-black/20 px-2 py-1 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+        />
+      </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <${SurfaceCard} variant="light">
           <div class="flex flex-col">
             <div class="px-3 py-2 border-b border-[var(--card-border)] text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-              최근 이벤트 (${recent.value.length})
+              최근 이벤트 (${isFiltering
+                ? `${visibleEvents.length}/${gateFiltered.length}`
+                : gateFiltered.length})
             </div>
-            ${recent.value.length === 0
-              ? html`<${EmptyState} message="이벤트가 없습니다." />`
-              : recent.value.map((ev, idx) => html`
-                <${EventRow}
-                  event=${ev}
-                  active=${selectedEventIdx.value === idx}
-                  onSelect=${() => { selectedEventIdx.value = idx }}
-                />
-              `)}
+            ${gateFiltered.length === 0
+              ? html`<${EmptyState} message=${filterGate.value
+                  ? `이 gate에 해당하는 이벤트가 없습니다 (${filterGate.value}).`
+                  : '이벤트가 없습니다.'} />`
+              : visibleEvents.length === 0
+                ? html`<${EmptyState} message=${`필터 결과 없음 (${gateFiltered.length}건 중)`} />`
+                : visibleEvents.map((ev, idx) => html`
+                  <${EventRow}
+                    event=${ev}
+                    active=${selectedEventIdx.value === idx}
+                    onSelect=${() => { selectedEventIdx.value = idx }}
+                  />
+                `)}
           </div>
         </${SurfaceCard}>
 

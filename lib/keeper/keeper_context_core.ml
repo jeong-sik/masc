@@ -232,9 +232,14 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
                m.content
          | _ -> None)
   in
+  (* SSOT: structured [content_blocks] only. The previous flat [content]
+     field was a duplicate of [text_of_message m] used by legacy
+     checkpoint readers; new readers reconstruct text from
+     [content_blocks] via [text_of_history_jsonl_line] (see below).
+     Old checkpoints written with both fields still load fine because
+     [message_of_json] keeps the legacy [content] fallback. *)
   let base = [
     ("role", `String (role_to_string m.role));
-    ("content", `String (text_of_message m));
     ("content_blocks", content_blocks_to_json m.content);
   ] in
   `Assoc
@@ -274,6 +279,29 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
         (json |> member "tool_call_id" |> to_string_option
          |> Option.map Inference_utils.sanitize_text_utf8);
     }
+
+(** Extract human-readable text from a single history.jsonl line that was
+    produced by [message_to_json].  Reads structured [content_blocks]
+    first (current SSOT), falls back to the legacy flat [content] field
+    for lines written before that field was retired.  Returns [""] when
+    neither shape is parseable. *)
+let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
+  let open Yojson.Safe.Util in
+  match content_blocks_of_json json with
+  | Some blocks when blocks <> [] ->
+      let msg : Agent_sdk.Types.message =
+        {
+          Agent_sdk.Types.role = Agent_sdk.Types.User;
+          content = blocks;
+          name = None;
+          tool_call_id = None;
+        }
+      in
+      Inference_utils.sanitize_text_utf8 (text_of_message msg)
+  | _ ->
+      (match json |> member "content" |> to_string_option with
+       | Some value -> Inference_utils.sanitize_text_utf8 value
+       | None -> "")
 
 let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
@@ -332,7 +360,17 @@ let tool_result_text_of_block
   if content <> "" then content
   else
     match json with
-    | Some value -> Yojson.Safe.to_string value
+    | Some value ->
+        (* Stringify json only when it fits the per-result cap. Larger
+           payloads collapse to a stub so a single orphan-repair pass
+           cannot inflate one Text block to multi-MB and trigger the same
+           escape-depth blow-up that motivated the artifact-store work
+           (see [tool_blob_store] and the tool-output-washing series). *)
+        let serialized = Yojson.Safe.to_string value in
+        let len = String.length serialized in
+        if len <= default_max_checkpoint_tool_result_chars then serialized
+        else
+          Printf.sprintf "[tool:json id:%s bytes:%d elided]" tool_use_id len
     | None -> Printf.sprintf "[tool result %s]" tool_use_id
 
 let tool_use_text_of_block
@@ -550,11 +588,7 @@ let classify_history_jsonl_line (line : string) : history_line_action option =
       |> Option.value ~default:""
       |> String.trim
     in
-    let content =
-      Yojson.Safe.Util.(json |> member "content" |> to_string_option)
-      |> Option.value ~default:""
-      |> String.trim
-    in
+    let content = String.trim (text_of_history_jsonl_json json) in
     Some (classify_history_entry ~source ~content)
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None

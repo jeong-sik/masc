@@ -561,8 +561,8 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
          in
          if role = "user" then
            let content =
-             Yojson.Safe.Util.(json |> member "content" |> to_string)
-             |> String.trim
+             String.trim
+               (Keeper_context_core.text_of_history_jsonl_json json)
            in
            if content = ""
               || Keeper_types.is_internal_history_source source

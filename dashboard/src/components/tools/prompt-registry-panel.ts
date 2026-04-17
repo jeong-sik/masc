@@ -16,7 +16,7 @@ import { TextArea, TextInput } from '../common/input'
 import { FilterChips } from '../common/filter-chips'
 import { StatusChip } from '../common/status-chip'
 
-export type PromptSourceFilter = 'all' | PromptSource
+type PromptSourceFilter = 'all' | PromptSource
 
 const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'default', 'missing']
 

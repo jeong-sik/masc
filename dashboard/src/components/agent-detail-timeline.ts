@@ -39,7 +39,7 @@ export function timelineEventLabel(type: string): string {
 // deliberately coarse so chips stay compact even as new event types
 // are added server-side.
 
-export type TimelineEventCategory = 'all' | 'task' | 'tool_call' | 'broadcast' | 'joined' | 'other'
+type TimelineEventCategory = 'all' | 'task' | 'tool_call' | 'broadcast' | 'joined' | 'other'
 
 export function timelineEventCategory(type: string): Exclude<TimelineEventCategory, 'all'> {
   if (type.startsWith('task_')) return 'task'

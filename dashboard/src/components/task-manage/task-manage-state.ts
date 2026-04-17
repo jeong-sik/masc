@@ -6,7 +6,7 @@ import { refreshExecution } from '../../store'
 export const showTaskCreate = signal(false)
 export const taskCreating = signal(false)
 
-export interface TaskCreateInput { title: string; description: string; priority?: number }
+interface TaskCreateInput { title: string; description: string; priority?: number }
 
 export async function createTask(input: TaskCreateInput): Promise<boolean> {
   if (!input.title.trim()) { showToast('제목을 입력하세요', 'error'); return false }

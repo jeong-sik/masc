@@ -1,4 +1,6 @@
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
+import { useMemo } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
@@ -14,6 +16,7 @@ import { WorkerRunEvidenceRow } from './proof-sections'
 import type {
   DashboardMissionSessionCard,
   DashboardMissionSessionDetailResponse,
+  DashboardProofWorkerRunEvidence,
 } from '../types'
 import {
   toneClass,
@@ -26,6 +29,34 @@ import {
   liveStateClass,
   dotStateBg,
 } from './mission-utils'
+
+/**
+ * Pure filter for worker-run evidence rows.
+ *
+ * Case-insensitive substring match over the human-readable identifier
+ * fields an operator would use to locate a run: `worker_run_id`,
+ * `worker_name`, `status`, and `requested_model`. Null/missing values
+ * are skipped safely.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * callers memoising on ref equality do not re-render.
+ *
+ * Input is never mutated.
+ */
+export function filterWorkerRuns(
+  runs: readonly DashboardProofWorkerRunEvidence[],
+  query: string,
+): readonly DashboardProofWorkerRunEvidence[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return runs
+  return runs.filter(run => {
+    if (run.worker_run_id.toLowerCase().includes(needle)) return true
+    if (run.worker_name && run.worker_name.toLowerCase().includes(needle)) return true
+    if (run.status && run.status.toLowerCase().includes(needle)) return true
+    if (run.requested_model && run.requested_model.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 export function SessionBriefCard({
   brief,
@@ -117,6 +148,13 @@ export function SessionDetailCard({
   loading: boolean
   error: string | null
 }) {
+  const workerRunsQuery = useSignal('')
+  const rawRecentRuns = detail?.worker_runs?.recent_runs ?? null
+  const filteredRecentRuns = useMemo(
+    () => (rawRecentRuns ? filterWorkerRuns(rawRecentRuns, workerRunsQuery.value) : null),
+    [rawRecentRuns, workerRunsQuery.value],
+  )
+
   if (loading && !detail) {
     return html`
       <${Card} title="세션 상세" class="mission-list-card rounded-xl">
@@ -139,6 +177,7 @@ export function SessionDetailCard({
 
   const session = detail.session
   const workerRuns = detail.worker_runs ?? null
+  const isFilteringWorkerRuns = workerRunsQuery.value.trim() !== ''
   return html`
     <${Card} title="세션 상세" class="mission-list-card rounded-xl">
       <div class="grid gap-1.5 mb-4">
@@ -230,12 +269,28 @@ export function SessionDetailCard({
               <div class="grid gap-3">
                 <div class="flex justify-between gap-3 items-start flex-wrap">
                   <strong>최근 워커 실행</strong>
-                  <${StatusChip} label=${String(workerRuns.recent_runs.length)} />
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="search"
+                      value=${workerRunsQuery.value}
+                      placeholder="run / worker / status / model 필터"
+                      aria-label="워커 실행 필터"
+                      onInput=${(e: Event) => { workerRunsQuery.value = (e.target as HTMLInputElement).value }}
+                      class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                    <${StatusChip}
+                      label=${isFilteringWorkerRuns && filteredRecentRuns
+                        ? `${filteredRecentRuns.length}/${workerRuns.recent_runs.length}`
+                        : String(workerRuns.recent_runs.length)}
+                    />
+                  </div>
                 </div>
                 <div class="flex flex-col gap-3">
-                  ${workerRuns.recent_runs.length > 0
-                    ? workerRuns.recent_runs.map(item => html`<${WorkerRunEvidenceRow} item=${item} />`)
-                    : html`<${EmptyState} message="최근 worker run 증거가 없습니다." compact />`}
+                  ${workerRuns.recent_runs.length === 0
+                    ? html`<${EmptyState} message="최근 worker run 증거가 없습니다." compact />`
+                    : filteredRecentRuns && filteredRecentRuns.length > 0
+                      ? filteredRecentRuns.map(item => html`<${WorkerRunEvidenceRow} item=${item} />`)
+                      : html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${workerRuns.recent_runs.length} runs)</div>`}
                 </div>
               </div>
             </div>

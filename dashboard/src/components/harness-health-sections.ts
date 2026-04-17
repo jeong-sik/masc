@@ -7,6 +7,7 @@ import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { SurfaceCard } from './common/card'
 import { CopyIdButton } from './common/copy-id-button'
+import { SectionCap } from './common/section-cap'
 import { StatusDot } from './common/status-dot'
 import type {
   RailStatus,
@@ -295,7 +296,7 @@ export function ScopePairing() {
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">실험 루프</div>
+              <${SectionCap}>실험 루프<//>
               <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">오토리서치가 답하는 것</div>
             </div>
             <button
@@ -312,7 +313,7 @@ export function ScopePairing() {
 
       <${SurfaceCard} variant="compact">
         <div class="flex flex-col gap-2">
-          <div class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">안전 감시</div>
+          <${SectionCap}>안전 감시<//>
           <div class="text-sm font-medium text-[var(--text-strong)]">하네스가 답하는 것</div>
           <div class="text-sm leading-[1.6] text-[var(--text-body)]">
             평가 모델이 건강한지, 장기 실행 중 압축이 정상인지, 세대 교체가 안전한지 봅니다.

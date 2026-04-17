@@ -10,6 +10,7 @@ import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
+import { SectionCap } from './common/section-cap'
 import { StatCard } from './common/stat-card'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -210,7 +211,7 @@ export function FeatureHealth() {
                 <div class="rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] p-4">
                   <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div class="max-w-3xl">
-                      <div class="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Feature Flags Health</div>
+                      <${SectionCap}>Feature Flags Health<//>
                       <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
                         ${overview.enabled_count} / ${overview.total_features} 기능 활성화
                       </div>

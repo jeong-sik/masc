@@ -8,6 +8,7 @@ import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
+import { SectionCap } from './common/section-cap'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       ${'' /* Hourly timeline sparkline */}
       ${s.timeline.length > 1 ? html`
         <div class="flex flex-col gap-1">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)] mb-1">시간대별 활동</div>
+          <${SectionCap} tone="dim" weight="semibold" class="mb-1">시간대별 활동<//>
           <div class="overflow-x-auto py-1">
             <${Sparkline} buckets=${s.timeline} height=${28} />
           </div>
@@ -215,7 +216,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       ${'' /* Per-tool bar chart */}
       <div class="flex flex-col gap-1">
         <div class="flex items-center justify-between gap-2 mb-1">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)]">호출 빈도</div>
+          <${SectionCap} tone="dim" weight="semibold">호출 빈도<//>
           <div class="flex items-center gap-2">
             <input
               type="search"
@@ -264,7 +265,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       ${'' /* Success rate table */}
       ${s.tools.some(st => st.failure_count > 0) ? html`
         <div class="flex flex-col gap-1.5">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)] mb-1">성공률</div>
+          <${SectionCap} tone="dim" weight="semibold" class="mb-1">성공률<//>
           ${s.tools.filter(st => st.failure_count > 0).map(stat => html`
             <div class="flex items-center gap-2">
               <span class="w-28 flex-shrink-0 text-[11px] font-mono text-[var(--text-muted)] truncate">
@@ -280,7 +281,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       ${'' /* P95 latency (slowest tools) */}
       ${slowest.length > 0 && slowest[0]!.p95_duration_ms > 500 ? html`
         <div class="flex flex-col gap-1.5">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-dim)] mb-1">P95 지연 시간</div>
+          <${SectionCap} tone="dim" weight="semibold" class="mb-1">P95 지연 시간<//>
           ${slowest.map(stat => html`
             <div class="flex items-center justify-between py-1 px-2 rounded bg-[var(--white-3)]">
               <span class="text-[11px] font-mono text-[var(--text-muted)]">${stat.name.replace(/^(keeper_|masc_)/, '')}</span>

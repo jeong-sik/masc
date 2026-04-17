@@ -10,7 +10,7 @@ import { trimText } from '../lib/truncate'
 import { toolCategory, durationColor, formatDuration, formatArgs } from './tool-call-shared'
 import type { AgentTimelineEvent } from '../api'
 
-function timelineEventIcon(type: string): string {
+export function timelineEventIcon(type: string): string {
   if (type === 'joined') return 'J'
   if (type.startsWith('task_')) return 'T'
   if (type === 'broadcast') return 'M'
@@ -18,7 +18,7 @@ function timelineEventIcon(type: string): string {
   return 'E'
 }
 
-function timelineEventLabel(type: string): string {
+export function timelineEventLabel(type: string): string {
   switch (type) {
     case 'joined': return '참가'
     case 'task_claimed': return '태스크 수임'

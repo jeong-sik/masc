@@ -815,6 +815,34 @@ let test_prompt_omits_empty_sections () =
        with Not_found -> false
      in found))
 
+let test_prompt_continuity_drops_inert_idle_directives () =
+  let obs =
+    {
+      base_observation with
+      continuity_summary =
+        "Goal: structural quality improvement\n\
+         Next plan: stay silent until new actionable work appears\n\
+         Next: 대기 유지; all non-destructive actions exhausted\n\
+         Constraints: repos/ empty";
+      unclaimed_task_count = 125;
+    }
+  in
+  let _sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  in
+  check bool "continuity section present" true
+    (contains_substring user "### Continuity");
+  check bool "advisory note present" true
+    (contains_substring user "ignore prior silence/wait directives");
+  check bool "idle next plan removed" false
+    (contains_substring user "stay silent until new actionable work appears");
+  check bool "idle next removed" false
+    (contains_substring user "대기 유지");
+  check bool "goal preserved" true
+    (contains_substring user "Goal: structural quality improvement");
+  check bool "constraints preserved" true
+    (contains_substring user "Constraints: repos/ empty")
+
 let test_prompt_includes_mentions_section () =
   let obs =
     { base_observation with
@@ -3193,6 +3221,8 @@ let () =
           test_case "omits autonomous trigger for reactive turn" `Quick
             test_prompt_omits_autonomous_trigger_for_reactive_turn;
           test_case "omits empty sections" `Quick test_prompt_omits_empty_sections;
+          test_case "continuity drops inert idle directives" `Quick
+            test_prompt_continuity_drops_inert_idle_directives;
           test_case "includes mentions" `Quick test_prompt_includes_mentions_section;
           test_case "includes board activity" `Quick
             test_prompt_includes_board_activity_section;

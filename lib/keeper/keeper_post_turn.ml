@@ -68,10 +68,10 @@ let apply_post_turn_lifecycle
         | None -> None)
       | None -> None
     in
-    let snapshot =
-      match structured_snapshot with
-      | Some _ as s -> s
-      | None -> latest_state_snapshot_from_messages ctx.messages
+      let snapshot =
+        match structured_snapshot with
+        | Some _ as s -> s
+      | None -> latest_state_snapshot_from_messages (messages_of_context ctx)
     in
     match snapshot with
     | None -> meta
@@ -166,8 +166,13 @@ let apply_post_turn_lifecycle
           let compacted_ctx =
             {
               compacted_ctx with
-              messages =
-                repair_orphan_tool_result_messages compacted_ctx.messages;
+              checkpoint =
+                {
+                  (checkpoint_of_context compacted_ctx) with
+                  messages =
+                    repair_orphan_tool_result_messages
+                      (messages_of_context compacted_ctx);
+                };
             }
           in
           (match save_oas_checkpoint
@@ -419,8 +424,13 @@ let recover_latest_checkpoint_for_overflow_retry
         let compacted_ctx =
           {
             compacted_ctx with
-            messages =
-              repair_orphan_tool_result_messages compacted_ctx.messages;
+            checkpoint =
+              {
+                (checkpoint_of_context compacted_ctx) with
+                messages =
+                  repair_orphan_tool_result_messages
+                    (messages_of_context compacted_ctx);
+              };
           }
         in
         try

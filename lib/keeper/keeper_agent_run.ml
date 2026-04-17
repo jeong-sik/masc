@@ -547,7 +547,9 @@ let run_turn
      Hard constraints stay in system_prompt; soft context is injected
      via OAS extra_system_context (prepended as User message after reduction). *)
   let { system_prompt = turn_system_prompt; dynamic_context } =
-    build_turn_prompt ~base_system_prompt ~messages:ctx_work.messages
+    build_turn_prompt
+      ~base_system_prompt
+      ~messages:(Keeper_exec_context.messages_of_context ctx_work)
   in
   let memory_episode_limit = 30 in
   let memory_procedure_limit = 10 in
@@ -586,7 +588,8 @@ let run_turn
      repair_broken_tool_call_pairs downgrades broken tool_use/tool_result
      pairs to plain Text before the provider validates adjacency. *)
   let history_messages =
-    Keeper_context_core.repair_broken_tool_call_pairs ctx_work.messages
+    Keeper_context_core.repair_broken_tool_call_pairs
+      (Keeper_exec_context.messages_of_context ctx_work)
   in
   let ctx_work = Keeper_exec_context.append ctx_work user_msg in
   if not is_retry

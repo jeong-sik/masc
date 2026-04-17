@@ -5,6 +5,9 @@ module Masc_log = Log
 open Agent_sdk
 open Masc_mcp
 
+let ctx_messages = Keeper_exec_context.messages_of_context
+let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
+
 let temp_counter = ref 0
 
 let tmpdir prefix =
@@ -248,10 +251,16 @@ let test_compact_syncs_oas_context () =
   let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
   let messages =
     Context_compact_oas.compact
-      ~system_prompt:ctx.system_prompt ~messages:ctx.messages
+      ~system_prompt:(ctx_system_prompt ctx)
+      ~messages:(ctx_messages ctx)
       ~strategies:[Context_compact_oas.MergeContiguous] () in
   let ctx = Keeper_exec_context.sync_oas_context
-    { ctx with messages } in
+    {
+      ctx with
+      checkpoint =
+        { (Keeper_exec_context.checkpoint_of_context ctx) with messages };
+    }
+  in
   let ratio =
     Context.get_scoped ctx.context Context.Session "context_ratio" in
   (match ratio with

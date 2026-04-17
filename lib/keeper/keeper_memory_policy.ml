@@ -375,6 +375,32 @@ let cap_snapshot
    Constraints). Persistence still retains the full summary. *)
 let filter_forward_looking_summary (summary : string) : string =
   let backward_labels = [ "Done"; "Progress"; "Decisions" ] in
+  let inert_next_markers =
+    [
+      "stay_silent";
+      "stay silent";
+      "wait for new actionable work";
+      "nothing to do";
+      "no actionable work";
+      "do nothing";
+      "all non-destructive actions exhausted";
+      "대기 유지";
+      "침묵";
+      "할 일 없음";
+      "아무것도 하지";
+    ]
+  in
+  let strip_labeled_value ~prefixes line =
+    let trimmed = String.trim line in
+    let rec loop = function
+      | [] -> None
+      | prefix :: rest -> (
+          match strip_prefix_ci ~prefix trimmed with
+          | Some value -> Some value
+          | None -> loop rest)
+    in
+    loop prefixes
+  in
   let is_backward_line line =
     let trimmed = String.trim line in
     List.exists
@@ -384,10 +410,21 @@ let filter_forward_looking_summary (summary : string) : string =
         && String.sub trimmed 0 (String.length prefix) = prefix)
       backward_labels
   in
+  let is_inert_next_line line =
+    match strip_labeled_value ~prefixes:[ "Next plan:"; "Next:" ] line with
+    | None -> false
+    | Some value ->
+        let payload = String.trim value in
+        payload <> ""
+        && List.exists
+             (fun marker -> String_util.contains_substring_ci payload marker)
+             inert_next_markers
+  in
   let kept =
     summary
     |> String.split_on_char '\n'
     |> List.filter (fun line -> not (is_backward_line line))
+    |> List.filter (fun line -> not (is_inert_next_line line))
     |> List.filter (fun line -> String.trim line <> "")
   in
   match kept with

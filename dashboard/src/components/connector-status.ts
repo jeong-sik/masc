@@ -19,7 +19,8 @@ import {
   type GateStatusData,
 } from '../api/gate'
 import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
-import { ErrorState, LoadingState } from './common/feedback-state'
+import { ErrorState } from './common/feedback-state'
+import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
 import { lastEvent } from '../sse'
 import { StatCard } from './common/stat-card'
 import { ActionButton } from './common/button'
@@ -1288,7 +1289,10 @@ export function ConnectorStatusPanel() {
     : allConnectors
 
   if (loading && !d && visibleConnectors.length === 0) {
-    return html`<${LoadingState}>커넥터 상태 불러오는 중...<//>`
+    // Shape-matched skeleton (Vercel / Linear convention) — shows the
+    // 4-tile grid layout so the operator can anticipate where content
+    // will land instead of staring at a generic spinner.
+    return html`<${ConnectorOverviewSkeleton} testId="connector-status-loading" />`
   }
 
   if (snapshot.gateError && !d && visibleConnectors.length === 0) {

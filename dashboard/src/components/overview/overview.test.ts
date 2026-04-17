@@ -512,3 +512,167 @@ describe('ToolCallHealthPanel', () => {
     expect(container.textContent).toContain('0.0%')
   }, 15000)
 })
+
+describe('filterAgentPulseRows', () => {
+  interface AgentLike {
+    name: string
+    koreanName: string | null
+    emoji: string | null
+    model: string | null
+    status: string
+    state: 'working' | 'watching' | 'quiet' | 'offline'
+    focus: string | null
+    currentTask: string | null
+    recentTools: string[]
+    recentOutputPreview: string | null
+    contextRatio: number | null
+    lastSignalAt: string | null
+    lastSignalAgeSec: number | null
+    signalTruth: string | null
+    relatedSessionId: string | null
+  }
+
+  function makeAgent(overrides: Partial<AgentLike>): AgentLike {
+    return {
+      name: 'dreamer',
+      koreanName: '몽상가',
+      emoji: null,
+      model: null,
+      status: 'ok',
+      state: 'working',
+      focus: null,
+      currentTask: null,
+      recentTools: [],
+      recentOutputPreview: null,
+      contextRatio: null,
+      lastSignalAt: null,
+      lastSignalAgeSec: null,
+      signalTruth: null,
+      relatedSessionId: null,
+      ...overrides,
+    }
+  }
+
+  async function loadFilter() {
+    vi.resetModules()
+    vi.doMock('../../mission-store', () => ({
+      missionSnapshot: { value: null },
+      missionLoading: { value: false },
+      refreshMissionSnapshot: vi.fn(),
+    }))
+    vi.doMock('../../namespace-truth-store', () => ({
+      namespaceTruth: { value: null },
+      namespaceTruthLoading: { value: false },
+      refreshNamespaceTruth: vi.fn(),
+    }))
+    vi.doMock('../../observatory-store', () => ({
+      topActiveAgents: { value: [] },
+    }))
+    vi.doMock('../../sse', () => ({
+      journal: [],
+      connected: { value: true },
+      eventCount: { value: 0 },
+      lastEvent: { value: null },
+    }))
+    vi.doMock('../../router', () => ({
+      navigate: vi.fn(),
+      hashForRoute: vi.fn().mockReturnValue('#'),
+    }))
+    vi.doMock('./situation-banner', () => ({ SituationBanner: () => null }))
+    vi.doMock('./attention-spotlight', () => ({ AttentionSpotlight: () => null }))
+    vi.doMock('./narrative-timeline', () => ({ NarrativeTimeline: () => null }))
+    vi.doMock('./agent-avatar', () => ({ AgentAvatar: () => null }))
+    vi.doMock('../transport-health', () => ({ TransportHealthPanel: () => null }))
+    vi.doMock('../perf-snapshot', () => ({ PerfSnapshotPanel: () => null }))
+    return import('./overview')
+  }
+
+  it('returns the input reference unchanged for an empty query', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
+    expect(filterAgentPulseRows(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference unchanged for a whitespace-only query', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [makeAgent({ name: 'dreamer' })]
+    expect(filterAgentPulseRows(rows, '   \t  ')).toBe(rows)
+  })
+
+  it('trims the query before matching', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
+    const filtered = filterAgentPulseRows(rows, '  dream  ')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.name).toBe('dreamer')
+  })
+
+  it('matches on name case-insensitively', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [makeAgent({ name: 'Dreamer' }), makeAgent({ name: 'Weaver' })]
+    const filtered = filterAgentPulseRows(rows, 'DREAM')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.name).toBe('Dreamer')
+  })
+
+  it('matches on koreanName substring', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [
+      makeAgent({ name: 'dreamer', koreanName: '몽상가' }),
+      makeAgent({ name: 'weaver', koreanName: '직조자' }),
+    ]
+    const filtered = filterAgentPulseRows(rows, '직조')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.name).toBe('weaver')
+  })
+
+  it('matches on state', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [
+      makeAgent({ name: 'dreamer', state: 'working' }),
+      makeAgent({ name: 'weaver', state: 'quiet' }),
+      makeAgent({ name: 'scribe', state: 'working' }),
+    ]
+    const filtered = filterAgentPulseRows(rows, 'working')
+    expect(filtered).toHaveLength(2)
+    expect(filtered.map(a => a.name)).toEqual(['dreamer', 'scribe'])
+  })
+
+  it('matches on focus substring', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [
+      makeAgent({ name: 'dreamer', focus: 'reviewing PR #7892' }),
+      makeAgent({ name: 'weaver', focus: 'drafting ADR' }),
+    ]
+    const filtered = filterAgentPulseRows(rows, 'pr #7892')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.name).toBe('dreamer')
+  })
+
+  it('returns an empty array when no row matches', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
+    const filtered = filterAgentPulseRows(rows, 'nonexistent')
+    expect(filtered).toEqual([])
+  })
+
+  it('handles null/missing optional fields without throwing', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [
+      makeAgent({ name: 'dreamer', koreanName: null, focus: null }),
+      makeAgent({ name: 'weaver', koreanName: null, focus: null }),
+    ]
+    const filtered = filterAgentPulseRows(rows, 'dream')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.name).toBe('dreamer')
+  })
+
+  it('does not mutate the input array', async () => {
+    const { filterAgentPulseRows } = await loadFilter()
+    const rows = [makeAgent({ name: 'dreamer' }), makeAgent({ name: 'weaver' })]
+    const snapshot = rows.map(a => a.name)
+    filterAgentPulseRows(rows, 'weaver')
+    expect(rows.map(a => a.name)).toEqual(snapshot)
+    expect(rows).toHaveLength(2)
+  })
+})

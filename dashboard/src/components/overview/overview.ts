@@ -2,6 +2,8 @@
 // "What's happening right now?" — answer in 1 second, no scroll.
 
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
+import { useMemo } from 'preact/hooks'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
 import { TimeAgo } from '../common/time-ago'
@@ -395,8 +397,43 @@ function agentStateDot(state: string): string {
   return 'bg-[#555]'
 }
 
+/**
+ * Pure filter for the Agent Pulse roster.
+ *
+ * Case-insensitive substring match on `name`, `koreanName`, `state`, and
+ * `focus` (in that order; first match wins) so operators can locate one
+ * agent by partial name, switch to everyone in a given state
+ * (e.g. `working`), or find agents whose current focus mentions a
+ * particular topic.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * useMemo preserves referential equality for the non-filtering path.
+ *
+ * Input is never mutated; ObservatoryAgent is treated as readonly.
+ */
+export function filterAgentPulseRows(
+  agents: readonly ObservatoryAgent[],
+  query: string,
+): readonly ObservatoryAgent[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return agents
+  return agents.filter(a => {
+    if (a.name && a.name.toLowerCase().includes(needle)) return true
+    if (a.koreanName && a.koreanName.toLowerCase().includes(needle)) return true
+    if (a.state && a.state.toLowerCase().includes(needle)) return true
+    if (a.focus && a.focus.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 function AgentPulse() {
   const agents = topActiveAgents.value
+  const query = useSignal('')
+  const visibleAgents = useMemo(
+    () => filterAgentPulseRows(agents, query.value),
+    [agents, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
   if (agents.length === 0) return null
 
   return html`
@@ -408,8 +445,24 @@ function AgentPulse() {
         linkTab="monitoring"
         linkParams=${{ section: 'agents' }}
       />
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <div class="text-[10px] uppercase tracking-wider text-[var(--text-dim)]">
+          ${isFiltering ? `${visibleAgents.length}/${agents.length}명` : `${agents.length}명`}
+        </div>
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="이름 / 상태 / focus 필터"
+          aria-label="에이전트 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && visibleAgents.length === 0
+        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${agents.length}명)</div>`
+        : null}
       <div class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-        ${agents.map((a: ObservatoryAgent) => html`
+        ${visibleAgents.map((a: ObservatoryAgent) => html`
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'agents', agent: a.name }}

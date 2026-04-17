@@ -1,3 +1,13 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/types/
+  - lib/tool_dispatch.ml
+  - lib/agent_identity.ml
+  - lib/agent_ecosystem.ml
+---
+
 # Types and Invariants
 
 | 항목 | 값 |

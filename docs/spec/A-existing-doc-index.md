@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - docs/
+  - docs/_audit/2026-04-17-doc-classification.md
+---
+
 # Appendix A: Existing Documentation Index
 
 > 목적: tracked 문서를 `front door / maintained reference / historical / archive / cleanup action`으로 다시 분류한다.

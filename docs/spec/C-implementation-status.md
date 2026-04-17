@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/
+  - dune-project
+  - lib/sdk_version.ml
+---
+
 # Appendix C: Implementation Status Report
 
 > Generated: 2026-03-23 | Updated: 2026-04-08 (sweep) | Baseline: v2.138.0

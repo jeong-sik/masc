@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - test/
+  - lib/eval_gate.ml
+  - lib/eval_harness.ml
+---
+
 # Testing
 
 | 항목 | 값 |

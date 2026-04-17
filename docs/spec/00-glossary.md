@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/types/
+  - lib/tool_dispatch.ml
+  - lib/agent_identity.ml
+---
+
 # MASC Glossary
 
 > Version 2.0.0 | Supersedes: docs/GLOSSARY.md (v1.0.0)

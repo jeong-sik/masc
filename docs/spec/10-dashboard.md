@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/dashboard/
+  - lib/dashboard.ml
+  - dashboard/
+---
+
 # Dashboard
 
 | 항목 | 값 |

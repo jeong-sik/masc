@@ -14,11 +14,15 @@ import {
   capacityKindLabel,
   traceKindTone,
   traceKindLabel,
+  groupKeepersByCanonicalCascade,
+  keepersWithUnknownCanonical,
 } from './cascade-config-panel'
 import type {
   CascadeCandidate,
   CascadeClientCapacityEntry,
   CascadeHealthProvider,
+  CascadeKeeperProfile,
+  CascadeProfile,
   CascadeStrategyTraceEvent,
 } from '../api/dashboard'
 
@@ -324,5 +328,93 @@ describe('filterHealthProviders', () => {
     filterHealthProviders(providers, 'groq')
     expect(providers.map(p => p.provider_key)).toEqual(before)
     expect(providers).toHaveLength(2)
+  })
+})
+
+describe('groupKeepersByCanonicalCascade', () => {
+  function makeKeeperProfile(overrides: Partial<CascadeKeeperProfile> = {}): CascadeKeeperProfile {
+    return {
+      keeper: 'alice',
+      cascade_name: 'keeper_unified',
+      canonical: 'keeper_unified',
+      ...overrides,
+    }
+  }
+
+  it('groups keepers by canonical name, collapsing legacy aliases', () => {
+    const keepers = [
+      makeKeeperProfile({ keeper: 'alice', cascade_name: 'keeper_unified' }),
+      makeKeeperProfile({
+        keeper: 'bob',
+        cascade_name: 'oas-keeper_unified',
+        canonical: 'keeper_unified',
+      }),
+      makeKeeperProfile({ keeper: 'carol', cascade_name: 'sangsu', canonical: 'sangsu' }),
+    ]
+    const groups = groupKeepersByCanonicalCascade(keepers)
+    expect(groups.get('keeper_unified')?.map(r => r.keeper)).toEqual(['alice', 'bob'])
+    expect(groups.get('sangsu')?.map(r => r.keeper)).toEqual(['carol'])
+  })
+
+  it('marks drift=true when raw differs from canonical', () => {
+    const keepers = [
+      makeKeeperProfile({
+        keeper: 'bob',
+        cascade_name: 'oas-keeper_unified',
+        canonical: 'keeper_unified',
+      }),
+      makeKeeperProfile({
+        keeper: 'alice',
+        cascade_name: 'keeper_unified',
+        canonical: 'keeper_unified',
+      }),
+    ]
+    const rows = groupKeepersByCanonicalCascade(keepers).get('keeper_unified') ?? []
+    expect(rows.find(r => r.keeper === 'bob')?.drift).toBe(true)
+    expect(rows.find(r => r.keeper === 'alice')?.drift).toBe(false)
+  })
+
+  it('returns an empty Map for empty input', () => {
+    expect(groupKeepersByCanonicalCascade([]).size).toBe(0)
+  })
+
+  it('does not mutate input array', () => {
+    const keepers = [makeKeeperProfile()]
+    const snapshot = JSON.stringify(keepers)
+    groupKeepersByCanonicalCascade(keepers)
+    expect(JSON.stringify(keepers)).toBe(snapshot)
+  })
+})
+
+describe('keepersWithUnknownCanonical', () => {
+  function makeProfile(name: string): CascadeProfile {
+    return { name, source: 'named', candidates: [] }
+  }
+  function makeKeeperProfile(overrides: Partial<CascadeKeeperProfile> = {}): CascadeKeeperProfile {
+    return {
+      keeper: 'alice',
+      cascade_name: 'keeper_unified',
+      canonical: 'keeper_unified',
+      ...overrides,
+    }
+  }
+
+  it('returns empty when every canonical maps to a declared profile', () => {
+    const profiles = [makeProfile('keeper_unified'), makeProfile('sangsu')]
+    const keepers = [
+      makeKeeperProfile({ keeper: 'alice', canonical: 'keeper_unified' }),
+      makeKeeperProfile({ keeper: 'bob', canonical: 'sangsu' }),
+    ]
+    expect(keepersWithUnknownCanonical(profiles, keepers)).toEqual([])
+  })
+
+  it('returns only orphans when some canonical is not declared', () => {
+    const profiles = [makeProfile('keeper_unified')]
+    const keepers = [
+      makeKeeperProfile({ keeper: 'alice', canonical: 'keeper_unified' }),
+      makeKeeperProfile({ keeper: 'bob', canonical: 'ghost_cascade' }),
+    ]
+    const orphans = keepersWithUnknownCanonical(profiles, keepers)
+    expect(orphans.map(o => o.keeper)).toEqual(['bob'])
   })
 })

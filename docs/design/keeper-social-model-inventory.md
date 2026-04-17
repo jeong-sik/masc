@@ -5,6 +5,7 @@ Status: active implementations + research inventory
 See also:
 
 - `docs/design/keeper-social-model-fsm.md`
+- `docs/design/keeper-social-state-bounded-invariant.md` — narrative-field budget every speech model must honour
 
 ## Active implementations
 

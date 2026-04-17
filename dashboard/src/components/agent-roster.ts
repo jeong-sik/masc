@@ -235,7 +235,7 @@ function matchesKeeperFilter(
   return keeperFilter === 'keeper-only' ? isKeeper : !isKeeper
 }
 
-export function scopeAgentsByKeeperFilter(
+function scopeAgentsByKeeperFilter(
   agentList: Agent[],
   keeperList: Keeper[],
   keeperBriefs: DashboardMissionKeeperBrief[],
@@ -296,7 +296,7 @@ export function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agen
   }
 }
 
-export function buildAgentRoster(
+function buildAgentRoster(
   agentList: Agent[],
   keeperList: Keeper[],
   keeperBriefs: DashboardMissionKeeperBrief[],
@@ -316,7 +316,7 @@ export function buildAgentRoster(
   return Array.from(roster.values())
 }
 
-export function countAgentsByStatus(
+function countAgentsByStatus(
   agentList: Agent[],
   keeperList: Keeper[],
 ): Record<StatusFilter, number> {

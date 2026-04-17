@@ -25,6 +25,17 @@
     that the table still holds its [cond].  This prevents an evicted
     fiber from clobbering a replacement slot. *)
 
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
+let token_counter = Atomic.make 0
+let next_token () = Atomic.fetch_and_add token_counter 1
+
 type entry = {
   value : Yojson.Safe.t;
   expires_at : float;
@@ -33,10 +44,9 @@ type entry = {
 
 type slot =
   | Ready of entry
-  | Computing of { cond : Eio.Condition.t; started_at : float; stale : Yojson.Safe.t option }
+  | Computing of { token : int; started_at : float; stale : Yojson.Safe.t option }
 
-let table : (string, slot) Hashtbl.t = Hashtbl.create 16
-let mu = Eio.Mutex.create ()
+let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
 
 (** Maximum cache entries before eviction kicks in.
     Evicts expired entries first, then oldest stale entries. *)
@@ -47,28 +57,26 @@ let max_entries =
 
 (** Evict one expired or stale entry when table exceeds max_entries.
     Must be called inside the mutex-guarded section. *)
-let maybe_evict () =
-  if Hashtbl.length table > max_entries then begin
+let maybe_evict map =
+  if SMap.cardinal map > max_entries then begin
     let now_ts = Time_compat.now () in
     let victim = ref None in
-    Hashtbl.iter (fun key slot ->
+    SMap.iter (fun key slot ->
       match slot with
       | Ready entry when entry.stale_until <= now_ts ->
-          (* Fully expired — best victim *)
           (match !victim with
-           | Some (_, true) -> ()  (* already found expired *)
+           | Some (_, true) -> ()
            | _ -> victim := Some (key, true))
       | Ready entry when entry.expires_at <= now_ts ->
-          (* Stale — second priority *)
           (match !victim with
-           | Some (_, true) -> ()  (* prefer expired *)
+           | Some (_, true) -> ()
            | _ -> victim := Some (key, false))
       | _ -> ()
-    ) table;
+    ) map;
     match !victim with
-    | Some (key, _) -> Hashtbl.remove table key
-    | None -> ()
-  end
+    | Some (key, _) -> SMap.remove key map
+    | None -> map
+  end else map
 
 let now () = Time_compat.now ()
 
@@ -116,245 +124,203 @@ let wait_poll_interval_sec = 0.25
     eviction of fresh slots. *)
 let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
   let stale_grace = ttl *. stale_factor in
-  let rec try_get ~waited ~watching_cond =
-    let action =
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        match Hashtbl.find_opt table key with
-        | Some (Ready entry) when entry.expires_at > now () ->
-          (* Case 1: fresh *)
-          `Hit entry.value
-        | Some (Ready entry) when entry.stale_until > now () ->
-          (* Case 2: stale but within grace — serve stale, trigger bg recompute *)
-          let cond = Eio.Condition.create () in
-          maybe_evict ();
-          Hashtbl.replace table key
-            (Computing { cond; started_at = now (); stale = Some entry.value });
-          `Stale (entry.value, cond)
-        | Some (Computing { stale = Some stale_value; _ }) ->
-          (* Another fiber is already recomputing; return stale *)
-          `Hit stale_value
-        | Some (Computing { cond; started_at; stale = None }) ->
-          (* Computing with no stale data — poll-retry with bounded wait.
-             Reset waiter budget when the slot was replaced (different cond)
-             to prevent cascading eviction of fresh slots. *)
-          let waited =
-            match watching_cond with
-            | Some c when c != cond -> 0.0
-            | _ -> waited
-          in
-          let elapsed = now () -. started_at in
-          let timed_out_waiter =
-            match wait_timeout_sec with
-            | Some timeout_sec -> waited >= timeout_sec
-            | None -> false
-          in
-          if timed_out_waiter then
-            `Timed_out
-          else if elapsed > max_wait_sec || waited > max_wait_sec then begin
-            Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)"
-              key elapsed;
-            Hashtbl.remove table key;
-            Eio.Condition.broadcast cond;
-            (* Fix D: cooldown after timeout eviction.
-               Instead of immediately starting a new Compute (which causes thrashing),
-               insert a short-lived Ready entry with error JSON.  Next request after
-               the cooldown_ttl will trigger a fresh compute. *)
-            let cooldown_ttl = 15.0 in
-            let ts = now () in
-            let error_value = `Assoc [
-              ("error", `String "computation_cooldown");
-              ("message", `String (Printf.sprintf
-                "Dashboard %s timed out (%.0fs). Cooling down for %.0fs."
-                key elapsed cooldown_ttl));
-              ("generated_at", `String (Types.now_iso ()));
-            ] in
-            maybe_evict ();
-            Hashtbl.replace table key
-              (Ready { value = error_value;
-                       expires_at = ts +. cooldown_ttl;
-                       stale_until = ts +. cooldown_ttl });
-            `Hit error_value
-          end else
-            `Wait cond
-        | _ ->
-          (* Case 3: expired or absent — must compute *)
-          let cond = Eio.Condition.create () in
-          maybe_evict ();
-          Hashtbl.replace table key
-            (Computing { cond; started_at = now (); stale = None });
-          `Compute cond)
-    in
-    match action with
+  let rec try_get ~waited ~watching_token =
+    let action = ref None in
+    atomic_update table (fun map ->
+      let map = maybe_evict map in
+      match SMap.find_opt key map with
+      | Some (Ready entry) when entry.expires_at > now () ->
+        action := Some (`Hit entry.value);
+        map
+      | Some (Ready entry) when entry.stale_until > now () ->
+        let token = next_token () in
+        action := Some (`Stale (entry.value, token));
+        SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map
+      | Some (Computing { stale = Some stale_value; _ }) ->
+        action := Some (`Hit stale_value);
+        map
+      | Some (Computing { token; started_at; stale = None }) ->
+        let waited =
+          match watching_token with
+          | Some t when t <> token -> 0.0
+          | _ -> waited
+        in
+        let elapsed = now () -. started_at in
+        let timed_out_waiter =
+          match wait_timeout_sec with
+          | Some timeout_sec -> waited >= timeout_sec
+          | None -> false
+        in
+        if timed_out_waiter then begin
+          action := Some `Timed_out;
+          map
+        end else if elapsed > max_wait_sec || waited > max_wait_sec then begin
+          Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
+          action := Some `Retry;
+          SMap.remove key map
+        end else begin
+          action := Some (`Wait token);
+          map
+        end
+      | Some (Ready _) | None ->
+        let token = next_token () in
+        action := Some (`Compute token);
+        SMap.add key (Computing { token; started_at = now (); stale = None }) map
+    );
+    match Option.get !action with
     | `Hit v -> v
     | `Timed_out -> raise (Compute_timeout (key, true))
-    | `Wait slot_cond ->
-      (* Sleep briefly outside the mutex — cooperative suspension point. *)
+    | `Wait token ->
       Time_compat.sleep wait_poll_interval_sec;
-      try_get ~waited:(waited +. wait_poll_interval_sec)
-        ~watching_cond:(Some slot_cond)
-    | `Stale (stale_value, cond) ->
+      try_get ~waited:(waited +. wait_poll_interval_sec) ~watching_token:(Some token)
+    | `Stale (stale_value, token) ->
       let do_bg_compute () =
         match compute () with
         | value ->
           let ts = now () in
-          Eio.Mutex.use_rw ~protect:true mu (fun () ->
-            (* Only write back if we still own the slot *)
-            match Hashtbl.find_opt table key with
-            | Some (Computing { cond = c; _ }) when c == cond ->
-              Hashtbl.replace table key
-                (Ready { value; expires_at = ts +. ttl;
-                         stale_until = ts +. ttl +. stale_grace })
+          atomic_update table (fun map ->
+            match SMap.find_opt key map with
+            | Some (Computing { token = c; _ }) when c = token ->
+              SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map
             | _ ->
-              Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)"
-                key);
-          Eio.Condition.broadcast cond
+              Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
+              map
+          )
         | exception exn ->
-          (* Compute_timeout was already logged by
-             [get_or_compute_with_timeout] at WARN; suppress the outer
-             duplicate so one timeout does not produce two WARN lines.
-             Other exceptions still surface here. *)
           (match exn with
            | Compute_timeout _ -> ()
-           | _ ->
-             Log.Dashboard.warn "cache bg-revalidate failed (%s): %s"
-               key (Printexc.to_string exn));
-          Eio.Mutex.use_rw ~protect:true mu (fun () ->
-            match Hashtbl.find_opt table key with
-            | Some (Computing { cond = c; _ }) when c == cond ->
-              (* Restore stale entry with extended grace to reduce retry
-                 pressure.  Without backoff, every request within the
-                 original stale_grace triggers another failing compute.
-                 #5402 *)
+           | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
+          atomic_update table (fun map ->
+            match SMap.find_opt key map with
+            | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              Hashtbl.replace table key
-                (Ready { value = stale_value;
-                         expires_at = ts;
-                         stale_until = ts +. backoff_grace })
-            | _ -> ());
-          Eio.Condition.broadcast cond
+              SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map
+            | _ -> map
+          )
       in
-      (* Background revalidation: fork on the main domain's switch if available.
-         When called from Executor_pool (different domain), fork would raise
-         "Switch accessed from wrong domain!" — fall back to inline compute. *)
       (match Eio_context.get_switch_opt () with
        | Some sw ->
            (try Eio.Fiber.fork ~sw (fun () ->
               try do_bg_compute ()
               with
               | Eio.Cancel.Cancelled _ as e ->
-                (* Fix: restore stale entry to prevent zombie Computing slot.
-                   Direct Hashtbl mutation — safe in single-domain Eio because
-                   the Cancelled handler runs synchronously with no suspension
-                   point. Eio.Mutex is unavailable (switch being torn down). *)
-                (match Hashtbl.find_opt table key with
-                 | Some (Computing { cond = c; _ }) when c == cond ->
-                   let ts = Time_compat.now () in
-                   let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                   Hashtbl.replace table key
-                     (Ready { value = stale_value;
-                              expires_at = ts;
-                              stale_until = ts +. backoff_grace })
-                 | _ -> ());
-                (try Eio.Condition.broadcast cond with _ -> ());
-                raise e
-              | exn ->
-                Log.Dashboard.error "cache revalidation failed: %s"
-                  (Printexc.to_string exn))
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | Invalid_argument _ -> do_bg_compute ())
-       | None -> do_bg_compute ());
+                atomic_update table (fun map ->
+                  match SMap.find_opt key map with
+                  | Some (Computing { token = c; _ }) when c = token ->
+                    let ts = now () in
+                    let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+                    SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map
+                  | _ -> map
+                );
+                raise e)
+            with Eio.Cancel.Cancelled _ -> ())
+       | None ->
+           Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
+           do_bg_compute ());
       stale_value
-    | `Compute cond ->
-      (match compute () with
-       | value ->
-         let ts = now () in
-         Eio.Mutex.use_rw ~protect:true mu (fun () ->
-           (* Only write back if we still own the slot *)
-           match Hashtbl.find_opt table key with
-           | Some (Computing { cond = c; _ }) when c == cond ->
-             Hashtbl.replace table key
-               (Ready { value; expires_at = ts +. ttl;
-                        stale_until = ts +. ttl +. stale_grace })
-           | _ ->
-             Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)"
-               key);
-         Eio.Condition.broadcast cond;
-         value
-       | exception exn ->
-         let bt = Printexc.get_raw_backtrace () in
-         Eio.Mutex.use_rw ~protect:true mu (fun () ->
-           (* Only remove if we still own the slot *)
-           match Hashtbl.find_opt table key with
-           | Some (Computing { cond = c; _ }) when c == cond ->
-             Hashtbl.remove table key
-           | _ -> ());
-         Eio.Condition.broadcast cond;
-         Printexc.raise_with_backtrace exn bt)
+    | `Compute token ->
+      let clock =
+        match Eio_context.get_clock_opt () with
+        | Some c -> c
+        | None -> failwith "Eio clock unavailable"
+      in
+      let compute_done = ref false in
+      let result_ref = ref None in
+      Eio.Fiber.first
+        (fun () ->
+           (try result_ref := Some (Ok (compute ()))
+            with exn -> result_ref := Some (Error exn));
+           compute_done := true)
+        (fun () ->
+           Eio.Time.sleep clock max_wait_sec;
+           if not !compute_done then
+             Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec);
+      let ts = now () in
+      (match !result_ref with
+       | Some (Ok value) ->
+           atomic_update table (fun map ->
+             match SMap.find_opt key map with
+             | Some (Computing { token = c; _ }) when c = token ->
+               SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map
+             | _ ->
+               Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
+               map
+           );
+           value
+       | Some (Error exn) ->
+           Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
+           atomic_update table (fun map ->
+             match SMap.find_opt key map with
+             | Some (Computing { token = c; _ }) when c = token -> SMap.remove key map
+             | _ -> map
+           );
+           raise exn
+       | None ->
+           let fallback_val = ref None in
+           atomic_update table (fun map ->
+             match SMap.find_opt key map with
+             | Some (Computing { token = c; stale; _ }) when c = token ->
+                 (match stale with
+                  | Some s ->
+                      fallback_val := Some s;
+                      let cooldown = { value = s; expires_at = ts +. 5.0; stale_until = ts +. 10.0 } in
+                      SMap.add key (Ready cooldown) map
+                  | None ->
+                      let err_json = `Assoc [("error", `String "Compute timeout");
+                                             ("timeout_sec", `Float max_wait_sec);
+                                             ("key", `String key)] in
+                      fallback_val := Some err_json;
+                      let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
+                      SMap.add key (Ready cooldown) map)
+             | _ -> map
+           );
+           (match !fallback_val with
+            | Some v -> v
+            | None -> `Assoc [("error", `String "Compute timeout")]))
+    | `Retry -> try_get ~waited ~watching_token
   in
-  try_get ~waited:0.0 ~watching_cond:None
+  try_get ~waited:0.0 ~watching_token:None
 
-(** Non-Eio fallback: no mutex, no concurrency. *)
 let get_or_compute_simple key ~ttl compute =
+  let ts = now () in
   let stale_grace = ttl *. stale_factor in
-  match Hashtbl.find_opt table key with
-  | Some (Ready entry) when entry.expires_at > now () -> entry.value
-  | Some (Ready entry) when entry.stale_until > now () ->
-    (* Stale but usable — recompute inline (no fibers available) *)
-    let value =
-      try compute ()
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Dashboard.warn "stale cache recompute failed for %s: %s"
-          key (Printexc.to_string exn);
-        entry.value
-    in
-    let ts = now () in
-    Hashtbl.replace table key
-      (Ready { value; expires_at = ts +. ttl;
-               stale_until = ts +. ttl +. stale_grace });
-    value
-  | _ ->
-    let value = compute () in
-    let ts = now () in
-    Hashtbl.replace table key
-      (Ready { value; expires_at = ts +. ttl;
-               stale_until = ts +. ttl +. stale_grace });
-    value
-
-let timeout_error_json ?(waiting = false) key timeout_sec =
-  let message =
-    if waiting then
-      Printf.sprintf
-        "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
-        key timeout_sec
-    else
-      Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
-  in
-  `Assoc
-    [
-      ("error", `String "computation_timeout");
-      ("message", `String message);
-      ("generated_at", `String (Types.now_iso ()));
-      ("timeout_kind", `String (if waiting then "waiter" else "owner"));
-    ]
+  let action = ref None in
+  atomic_update table (fun map ->
+    let map = maybe_evict map in
+    match SMap.find_opt key map with
+    | Some (Ready entry) when entry.stale_until > ts ->
+      action := Some (`Hit entry.value);
+      map
+    | _ ->
+      let token = next_token () in
+      action := Some (`Compute token);
+      SMap.add key (Computing { token; started_at = ts; stale = None }) map
+  );
+  match Option.get !action with
+  | `Hit v -> v
+  | `Compute token ->
+    (match compute () with
+     | value ->
+       let ts_after = now () in
+       atomic_update table (fun map ->
+         match SMap.find_opt key map with
+         | Some (Computing { token = c; _ }) when c = token ->
+           SMap.add key (Ready { value; expires_at = ts_after +. ttl; stale_until = ts_after +. ttl +. stale_grace }) map
+         | _ -> map
+       );
+       value
+     | exception exn ->
+       atomic_update table (fun map ->
+         match SMap.find_opt key map with
+         | Some (Computing { token = c; _ }) when c = token -> SMap.remove key map
+         | _ -> map
+       );
+       raise exn)
 
 let get_or_compute key ~ttl compute =
   if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
-
-(** Compute with Eio timeout.  Stale-while-revalidate applies here too:
-    if a stale value exists and the recompute times out, the stale value
-    was already returned to the caller by [get_or_compute_eio].
-
-    On timeout the inner compute raises [Compute_timeout] so that
-    [get_or_compute_eio]'s exception handler preserves the stale value
-    in the background-revalidation path (instead of overwriting it with
-    error JSON).  The outer [try] catches the exception for the no-stale
-    path and returns [timeout_error_json] to the caller without caching
-    it. *)
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   try
@@ -369,134 +335,42 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
           Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
           raise (Compute_timeout (key, false)))
     else
-      get_or_compute_simple key ~ttl (fun () ->
-        match
-          Eio.Time.with_timeout clock timeout_sec (fun () ->
-            Ok (compute ()))
-        with
-        | Ok value -> value
-        | Error `Timeout ->
-          Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-          raise (Compute_timeout (key, false)))
+      get_or_compute_simple key ~ttl compute
   with
-  | Compute_timeout (k, waiting) ->
-      timeout_error_json ~waiting k timeout_sec
+  | Compute_timeout (key, false) ->
+      Log.Dashboard.warn "cache: returning immediate timeout error for %s" key;
+      let err_json = `Assoc [("error", `String "Compute timeout");
+                             ("timeout_sec", `Float timeout_sec);
+                             ("key", `String key)] in
+      err_json
 
 let invalidate key =
-  if Eio_guard.is_ready () then
-    let cond_opt =
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        let c =
-          match Hashtbl.find_opt table key with
-          | Some (Computing { cond; _ }) -> Some cond
-          | _ -> None
-        in
-        Hashtbl.remove table key;
-        c)
-    in
-    Option.iter Eio.Condition.broadcast cond_opt
-  else Hashtbl.remove table key
+  atomic_update table (fun map -> SMap.remove key map)
 
 let invalidate_prefix prefix =
-  if String.trim prefix = "" then
-    if Eio_guard.is_ready () then
-      let conds =
-        Eio.Mutex.use_rw ~protect:true mu (fun () ->
-          let cs =
-            Hashtbl.fold
-              (fun _key slot acc ->
-                match slot with Computing { cond; _ } -> cond :: acc | _ -> acc)
-              table []
-          in
-          Hashtbl.clear table;
-          cs)
-      in
-      List.iter Eio.Condition.broadcast conds
-    else
-      Hashtbl.clear table
-  else if Eio_guard.is_ready () then
-    let conds =
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        let keys, conds =
-          Hashtbl.fold
-            (fun key slot (keys_acc, conds_acc) ->
-              if String.starts_with ~prefix key then
-                let conds_acc =
-                  match slot with
-                  | Computing { cond; _ } -> cond :: conds_acc
-                  | _ -> conds_acc
-                in
-                (key :: keys_acc, conds_acc)
-              else
-                (keys_acc, conds_acc))
-            table ([], [])
-        in
-        List.iter (fun key -> Hashtbl.remove table key) keys;
-        conds)
-    in
-    List.iter Eio.Condition.broadcast conds
-  else
-    (* Non-Eio fallback matches [get_or_compute_simple]: no fibers, no shared
-       concurrent mutation, so direct Hashtbl removal is sufficient. *)
-    let keys =
-      Hashtbl.fold
-        (fun key _ acc ->
-          if String.starts_with ~prefix key then key :: acc else acc)
-        table []
-    in
-    List.iter (fun key -> Hashtbl.remove table key) keys
+  atomic_update table (fun map ->
+    SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map)
 
 let invalidate_all () =
-  if Eio_guard.is_ready () then
-    let conds =
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        let cs =
-          Hashtbl.fold
-            (fun _key slot acc ->
-              match slot with Computing { cond; _ } -> cond :: acc | _ -> acc)
-            table []
-        in
-        Hashtbl.clear table;
-        cs)
-    in
-    List.iter Eio.Condition.broadcast conds
-  else Hashtbl.clear table
+  Atomic.set table SMap.empty
 
 let stats () =
-  let compute () =
-    let now_ts = now () in
-    let total = Hashtbl.length table in
-    let fresh =
-      Hashtbl.fold
-        (fun _key slot count ->
-          match slot with
-          | Ready entry when entry.expires_at > now_ts -> count + 1
-          | _ -> count)
-        table 0
-    in
-    let stale =
-      Hashtbl.fold
-        (fun _key slot count ->
-          match slot with
-          | Ready entry when entry.expires_at <= now_ts && entry.stale_until > now_ts ->
-            count + 1
-          | _ -> count)
-        table 0
-    in
-    let computing =
-      Hashtbl.fold
-        (fun _key slot count ->
-          match slot with Computing _ -> count + 1 | _ -> count)
-        table 0
-    in
-    `Assoc
-      [
-        ("entries", `Int total);
-        ("fresh", `Int fresh);
-        ("stale", `Int stale);
-        ("computing", `Int computing);
-        ("expired", `Int (total - fresh - stale - computing));
-      ]
-  in
-  if Eio_guard.is_ready () then Eio.Mutex.use_rw ~protect:true mu compute
-  else compute ()
+  let map = Atomic.get table in
+  let now_ts = Time_compat.now () in
+  let ready_fresh = ref 0 in
+  let ready_stale = ref 0 in
+  let computing = ref 0 in
+  SMap.iter (fun _ v ->
+    match v with
+    | Ready e ->
+        if now_ts <= e.expires_at then incr ready_fresh
+        else incr ready_stale
+    | Computing _ -> incr computing
+  ) map;
+  `Assoc [
+    ("entries", `Int (SMap.cardinal map));
+    ("ready_fresh", `Int !ready_fresh);
+    ("ready_stale", `Int !ready_stale);
+    ("computing", `Int !computing);
+    ("max_entries", `Int max_entries);
+  ]

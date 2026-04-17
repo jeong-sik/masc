@@ -98,26 +98,48 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   },
 }
 
+/** Pure: compose a screen-reader label for the pill so assistive
+    technology reads "Token — 설정됨 (sidecar 부팅 통과). 클릭하면 Config" instead
+    of just "Token" (which is what a button with only visible <span>
+    children would otherwise expose). Kept pure so tests can pin the
+    concatenation rules without mounting a DOM. */
+export function railPillAriaLabel(pill: RailPill): string {
+  const detail = pill.inflight === true ? '진행 중' : pill.detail
+  const parts = [pill.label, detail]
+  if (pill.hint !== null) parts.push(pill.hint)
+  return parts.join(' — ')
+}
+
 function Pill({ pill }: { pill: RailPill }) {
   const tone = TONE[pill.state]
   const inflight = pill.inflight === true
+  // Focus ring uses the same accent token as the rest of the dashboard's
+  // interactive focus states (PatternFly AA target: visible 2px ring on
+  // keyboard-only focus, :focus-visible so mouse clicks don't light up).
+  // aria-busy announces the pulsing "진행 중…" state to AT without needing
+  // a separate visually-hidden <span>.
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${tone.bg} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.bg} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
+      aria-label=${railPillAriaLabel(pill)}
+      aria-busy=${inflight ? 'true' : 'false'}
       onClick=${pill.onClick}
       data-rail-pill=${pill.key}
       data-rail-state=${pill.state}
       data-rail-inflight=${inflight ? 'true' : 'false'}
       disabled=${inflight}
     >
-      <span class=${`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}>
+      <span
+        aria-hidden="true"
+        class=${`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}
+      >
         ${inflight ? '…' : tone.icon}
       </span>
       <span class="min-w-0 flex-1">
-        <span class=${`block text-[10px] uppercase tracking-[0.14em] ${tone.text}`}>${pill.label}</span>
-        <span class="block truncate text-[11px] text-[var(--text-body)]">${inflight ? '진행 중...' : pill.detail}</span>
+        <span aria-hidden="true" class=${`block text-[10px] uppercase tracking-[0.14em] ${tone.text}`}>${pill.label}</span>
+        <span aria-hidden="true" class="block truncate text-[11px] text-[var(--text-body)]">${inflight ? '진행 중...' : pill.detail}</span>
       </span>
     </button>
   `

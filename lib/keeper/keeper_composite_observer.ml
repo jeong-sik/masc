@@ -111,6 +111,7 @@ type snapshot = {
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
+  kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
   is_live : bool;
@@ -402,6 +403,10 @@ let observe
       ~measurement_captured
   in
   bump_invariant_violations ~keeper_name:entry.name invariants;
+  let kcb_state =
+    Keeper_failure_circuit_breaker.display_state_of
+      ~keeper_name:entry.name
+  in
   {
     correlation_id;
     run_id;
@@ -411,6 +416,7 @@ let observe
     kdp_decision = decision_stage;
     kcl_cascade_state = cascade_state;
     kmc_compaction = compaction_stage;
+    kcb_state;
     shared_measurement = measurement;
     invariants;
     is_live;
@@ -473,6 +479,12 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ];
     "compaction", `Assoc [
       "stage", `String (compaction_stage_to_string s.kmc_compaction);
+    ];
+    "circuit_breaker", `Assoc [
+      "state",
+      `String
+        (Keeper_failure_circuit_breaker.display_state_to_string
+           s.kcb_state);
     ];
     "measurement", (match s.shared_measurement with
       | Some m -> `Assoc [

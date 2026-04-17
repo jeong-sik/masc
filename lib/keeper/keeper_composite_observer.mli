@@ -139,6 +139,11 @@ type snapshot = {
   kdp_decision : decision_stage;
   kcl_cascade_state : cascade_state;
   kmc_compaction : compaction_stage;
+  kcb_state : Keeper_failure_circuit_breaker.display_state;
+      (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
+          never [Tripped] because the mutator resets [consecutive_count]
+          before snapshots can see it. See
+          {!Keeper_failure_circuit_breaker.display_state}. *)
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
   is_live : bool;

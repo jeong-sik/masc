@@ -163,6 +163,38 @@ let test_classify_snapshot_round_trip () =
     check string "rt1=warning" "warning"
       (display_state_str (List.assoc "rt1" assoc))
 
+(* ── LT-16-KCB Phase 2: per-keeper display_state_of ─────────── *)
+
+let test_display_state_of_unknown_is_clean () =
+  (* A keeper that has never been touched must classify as Clean,
+     not raise. The composite observer relies on this to render newly
+     spawned keepers before their first tool call. *)
+  let s = CB.display_state_of ~keeper_name:"never-seen-prefix-xyz" in
+  check string "unknown keeper = clean" "clean" (display_state_str s)
+
+let test_display_state_of_matches_snapshot () =
+  let name = "p2-alpha" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /a");
+  let direct = CB.display_state_of ~keeper_name:name in
+  check string "direct lookup = warning" "warning" (display_state_str direct);
+  let json = CB.snapshot_json () in
+  match CB.classify_snapshot_json json with
+  | Error msg -> Alcotest.fail ("json classify: " ^ msg)
+  | Ok assoc ->
+    check string "json-path agrees" "warning"
+      (display_state_str (List.assoc name assoc))
+
+let test_display_state_of_clears_after_success () =
+  let name = "p2-beta" in
+  CB.record_success ~keeper_name:name;
+  ignore (CB.maybe_enrich_error
+            ~keeper_name:name ~error_msg:"path_not_found: /a");
+  CB.record_success ~keeper_name:name;
+  let s = CB.display_state_of ~keeper_name:name in
+  check string "after success, back to clean" "clean" (display_state_str s)
+
 let () =
   run "Circuit_breaker" [
     "classify", [
@@ -191,5 +223,13 @@ let () =
         `Quick test_classify_snapshot_not_a_list;
       test_case "round-trip via snapshot_json"
         `Quick test_classify_snapshot_round_trip;
+    ];
+    "display_state_of", [
+      test_case "unknown keeper = clean"
+        `Quick test_display_state_of_unknown_is_clean;
+      test_case "direct lookup matches json walk"
+        `Quick test_display_state_of_matches_snapshot;
+      test_case "success clears back to clean"
+        `Quick test_display_state_of_clears_after_success;
     ];
   ]

@@ -67,6 +67,17 @@ val derive_display_state :
 (** Lower-case string rendering ([clean | warning | cooling]). *)
 val display_state_to_string : display_state -> string
 
+(** Per-keeper display state lookup. Returns [Clean] for keepers that
+    have never entered the internal state table — matching the
+    "never failed" semantic. Safe to call from any fiber; acquires
+    the same read lock as {!snapshot_json}.
+
+    Single-keeper alternative to classifying a whole snapshot — used by
+    the composite observer so fleet snapshotting stays O(fleet). *)
+val display_state_of :
+  keeper_name:string ->
+  display_state
+
 (** Walk the JSON produced by {!snapshot_json} and return an association
     list from [keeper_name] to its display state. Returns [Error msg] if
     the JSON is not shaped as expected. Useful for composite observers

@@ -50,10 +50,12 @@ let normalize_ollama_server_url raw =
   strip_trailing_slashes trimmed
 
 let ollama_ps_url server_url =
-  normalize_ollama_server_url server_url ^ "/api/ps"
+  normalize_ollama_server_url server_url
+  ^ Masc_network_defaults.ollama_api_ps_path
 
 let ollama_generate_url server_url =
-  normalize_ollama_server_url server_url ^ "/api/generate"
+  normalize_ollama_server_url server_url
+  ^ Masc_network_defaults.ollama_api_generate_path
 
 let ollama_http_error operation http_status =
   match http_status with

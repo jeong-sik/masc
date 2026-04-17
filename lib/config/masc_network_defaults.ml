@@ -26,6 +26,17 @@ let ollama_default_url =
 let ollama_port_needle =
   Printf.sprintf ":%d" ollama_default_port
 
+(** Ollama native API path for the running-models ("process status")
+    endpoint.  Used by both {!Cascade_ollama_probe} (cascade-level
+    capacity probe) and {!Tool_local_runtime_probe} (tool-level KV
+    assessment); anchoring the suffix in one place prevents the two
+    call sites from drifting if Ollama ever renames the route. *)
+let ollama_api_ps_path = "/api/ps"
+
+(** Ollama native API path for text generation.  Used by the
+    tool-level probe path that exercises a model end-to-end. *)
+let ollama_api_generate_path = "/api/generate"
+
 (** [is_ollama_url url] returns [true] when [url] contains
     {!ollama_port_needle}.  Permissive on scheme/host so it works for
     [http://], [https://], [127.0.0.1], [localhost], or a bare

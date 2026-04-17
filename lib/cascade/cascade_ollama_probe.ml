@@ -89,7 +89,7 @@ let probe_endpoint_of base_url =
     then String.sub base_url 0 (String.length base_url - 1)
     else base_url
   in
-  stripped ^ "/api/ps"
+  stripped ^ Masc_network_defaults.ollama_api_ps_path
 
 let try_probe ~sw ~net ?(timeout_s = 0.5) ?now url =
   let _ = sw in

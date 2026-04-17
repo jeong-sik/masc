@@ -48,16 +48,6 @@ function normalizePayload(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null
 }
 
-function serializeContext(value: DashboardWorkflowContext | null): string | null {
-  if (!value) return null
-  try {
-    return JSON.stringify(value)
-  }
-  catch {
-    return null
-  }
-}
-
 function parseStoredContext(raw: string | null): DashboardWorkflowContext | null {
   if (!raw) return null
   try {
@@ -107,20 +97,6 @@ function initialContext(): DashboardWorkflowContext | null {
 }
 
 export const dashboardWorkflowContext = signal<DashboardWorkflowContext | null>(initialContext())
-
-export function persistWorkflowContext(context: DashboardWorkflowContext | null): void {
-  const freshContext = context && contextIsFresh(context) ? context : null
-  dashboardWorkflowContext.value = freshContext
-  const storage = safeStorage()
-  if (!storage) return
-  if (!freshContext) {
-    storage.removeItem(STORAGE_KEY)
-    return
-  }
-  const serialized = serializeContext(freshContext)
-  if (!serialized) return
-  storage.setItem(STORAGE_KEY, serialized)
-}
 
 export function extractActionPayload(
   action?: OperatorRecommendedAction | null,

@@ -325,6 +325,37 @@ function connectorStateTone(connector: GateConnectorInfo | null): string {
   return 'border-amber-400/30 bg-amber-500/12 text-amber-100'
 }
 
+// Native lifecycle hits the new /api/v1/sidecar/{start,stop} endpoints
+// (see lib/server/server_routes_http_routes_sidecar.ml). The endpoints
+// shell out to the same ./run.sh wrapper the operator would otherwise
+// run by hand, so the dashboard button and the copy-paste command are
+// behaviourally identical — only convenience differs.
+export async function startSidecar(connectorId: string) {
+  actionLoading.value = true
+  try {
+    await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
+    showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
+    await refresh()
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'start failed', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+export async function stopSidecar(connectorId: string) {
+  actionLoading.value = true
+  try {
+    await post(`/api/v1/sidecar/stop?name=${encodeURIComponent(connectorId)}`, {})
+    showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
+    await refresh()
+  } catch (err) {
+    showToast(err instanceof Error ? err.message : 'stop failed', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
 async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
   const keeper = keeperName.trim()
   const channel = channelId.trim()
@@ -534,6 +565,17 @@ function ConnectorLivePanel({
           ? html`<span class="text-[var(--text-dim)]">· self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>`
           : null}
         <span class="ml-auto flex items-center gap-2">
+          ${connector?.available
+            ? html`
+                <button
+                  type="button"
+                  class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/12 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-rose-100 hover:bg-rose-500/20 disabled:opacity-50"
+                  disabled=${actionLoading.value}
+                  aria-label=${`stop ${connectorName} sidecar`}
+                  onClick=${() => { void stopSidecar(connectorId) }}
+                >${actionLoading.value ? '…' : 'Stop'}</button>
+              `
+            : null}
           ${sidecarLogPath
             ? html`<span class="cursor-help text-[10px] text-[var(--text-dim)]" title=${sidecarLogPath}>logs↗</span>`
             : null}
@@ -601,10 +643,18 @@ function ConnectorLivePanel({
               <div class="mt-3 rounded-md border border-dashed border-[var(--white-8)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
                 <div class="mb-1 flex items-center justify-between gap-2">
                   <div class="font-medium text-[var(--text-body)]">Sidecar not started</div>
-                  <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
+                  <div class="flex items-center gap-2">
+                    <${ActionButton}
+                      variant="primary"
+                      size="sm"
+                      disabled=${actionLoading.value}
+                      onClick=${() => { void startSidecar(connectorId) }}
+                    >${actionLoading.value ? '...' : 'Start'}<//>
+                    <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
+                  </div>
                 </div>
                 <div class="text-[11px] text-[var(--text-dim)]">
-                  Run from repo root in a separate terminal. Click ⧉ to copy.
+                  Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
                   <${CopyableCode} label="start" command=${cmds.start} />

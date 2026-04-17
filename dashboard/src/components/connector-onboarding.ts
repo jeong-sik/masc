@@ -5,11 +5,13 @@
 
 import { html } from 'htm/preact'
 import { CopyableCode } from './common/copyable-code'
+import { ActionButton } from './common/button'
 import { SetupGuideCard } from './setup-guide-card'
 import {
   channelIcon,
   connectorAccentStyle,
   sidecarCommands,
+  startSidecar,
   CONNECTOR_DISPLAY_NAMES,
   KNOWN_CONNECTOR_IDS,
   type KnownConnectorId,
@@ -19,12 +21,19 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
   const cmds = sidecarCommands(connectorId)
   return html`
     <div class="rounded-xl border border-[var(--white-8)] p-4" style=${connectorAccentStyle(connectorId)}>
-      <div class="mb-2 flex items-center gap-2">
-        <span class="text-base leading-none" aria-hidden="true">${channelIcon(connectorId)}</span>
-        <span class="text-sm font-semibold text-[var(--text-body)]">${CONNECTOR_DISPLAY_NAMES[connectorId]}</span>
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-base leading-none" aria-hidden="true">${channelIcon(connectorId)}</span>
+          <span class="text-sm font-semibold text-[var(--text-body)]">${CONNECTOR_DISPLAY_NAMES[connectorId]}</span>
+        </div>
+        <${ActionButton}
+          variant="primary"
+          size="sm"
+          onClick=${() => { void startSidecar(connectorId) }}
+        >Start<//>
       </div>
       <div class="text-[11px] text-[var(--text-dim)]">
-        새 터미널에서 시작 명령을 실행하세요. 처음이라면 아래 가이드를 펼쳐 보세요.
+        <strong>Start</strong>를 누르면 backend가 sidecar를 spawn합니다. 또는 명령을 복사해 새 터미널에서 직접 실행하세요.
       </div>
       <div class="mt-2 grid grid-cols-1 gap-1.5">
         <${CopyableCode} label="start" command=${cmds.start} />

@@ -3,13 +3,15 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// 60s window absorbs cold-build transform overhead (observed up to ~100s on
-// first run) for the first/heaviest test in this file — render of a fully
-// populated gate + connectors + keepers sample. Hot-cache runs finish in
-// well under 1s, so the budget is effectively never reached in steady state.
+// 90s window absorbs cold-build transform overhead (observed 60-140s on
+// the first run) for the first/heaviest test in this file — render of a
+// fully populated gate + connectors + keepers sample. Hot-cache runs
+// finish in well under 1s, so the budget is effectively never reached in
+// steady state. Raised from 60s after C21 added two new helper imports
+// pushed the cold-transform path past the previous budget.
 vi.setConfig({
-  testTimeout: 60000,
-  hookTimeout: 60000,
+  testTimeout: 90000,
+  hookTimeout: 90000,
 })
 
 function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {

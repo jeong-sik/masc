@@ -6,6 +6,7 @@ import { useSignal } from '@preact/signals'
 import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { SurfaceCard } from './common/card'
+import { CopyIdButton } from './common/copy-id-button'
 import type {
   RailStatus,
   GateDistribution,
@@ -482,7 +483,10 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
             <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
               <span>${item.generation}세대</span>
               <span>다음 ${item.next_generation ?? '-'}세대</span>
-              <span class="font-mono">${item.trace_id.slice(0, 8)}</span>
+              <span class="inline-flex items-center gap-1">
+                <span class="font-mono" title=${item.trace_id}>${item.trace_id.slice(0, 8)}</span>
+                <${CopyIdButton} value=${item.trace_id} label="trace_id" size=${10} />
+              </span>
               <span>${item.to_model ?? '모델 미확인'}</span>
             </div>
             ${item.prev_trace_id ? html`

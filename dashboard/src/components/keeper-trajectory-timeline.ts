@@ -12,6 +12,7 @@ import { TimeAgo } from './common/time-ago'
 import { toolCategory, durationColor, formatArgs, prettyArgs, formatDuration, summarizeEntries } from './tool-call-shared'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
+import { CopyIdButton } from './common/copy-id-button'
 import { keeperHeartbeats } from '../store'
 import { isConnected } from '../sse'
 import { TRAJECTORY_HEARTBEAT_STALE_MS, LIVENESS_TICK_MS, CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN } from '../config/constants'
@@ -429,7 +430,10 @@ export function KeeperTrajectoryTimeline({ keeperName, keeper }: { keeperName: s
             : isOnline
               ? html`<span class="text-[10px] text-[var(--text-dim)]">online</span>`
               : null}
-          <span class="text-[10px] font-mono text-[var(--text-dim)]">trace: ${data.trace_id.slice(0, 8)}</span>
+          <span class="inline-flex items-center gap-1">
+            <span class="text-[10px] font-mono text-[var(--text-dim)]" title=${data.trace_id}>trace: ${data.trace_id.slice(0, 8)}</span>
+            <${CopyIdButton} value=${data.trace_id} label="trace_id" size=${10} />
+          </span>
           <span class="text-[10px] text-[var(--text-dim)]">gen ${data.generation}</span>
           ${contextRatio != null
             ? html`<span class="text-[10px] font-mono ${contextRatio > CONTEXT_RATIO_CRITICAL ? 'text-[var(--bad)]' : contextRatio > CONTEXT_RATIO_WARN ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]'}">ctx ${(contextRatio * 100).toFixed(0)}%</span>`

@@ -16,6 +16,7 @@ import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
+import { HandoffTimeline } from './handoff-timeline'
 import { CompositeFsmFlowchart } from './composite-fsm-flowchart'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
@@ -125,6 +126,7 @@ function FleetAndFsmHubPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
+      <${HandoffTimeline} />
       <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />
     </div>

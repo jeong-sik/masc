@@ -8,7 +8,9 @@ import { route } from '../../router'
 import {
   operatorActionLog,
   operatorDigestError,
+  operatorDigestErrorStatus,
   operatorError,
+  operatorErrorStatus,
   operatorRoomDigest,
   operatorSnapshot,
 } from '../../operator-store'
@@ -28,6 +30,29 @@ import {
   workflowTargetReady,
 } from './helpers'
 import { FlowControlPanel } from '../flow-control/flow-control-panel'
+
+const OPERATOR_ROUTE_MISSING_PATTERN = /\b(?:404|410)\s+Not\s+Found\b/i
+const OPERATOR_ROUTE_MISSING_STATUSES = new Set<number>([404, 410])
+
+export function operatorErrorHint(message: string, status: number | null): string | null {
+  const routeMissing = status != null
+    ? OPERATOR_ROUTE_MISSING_STATUSES.has(status)
+    : OPERATOR_ROUTE_MISSING_PATTERN.test(message)
+  if (routeMissing) {
+    return '서버 바이너리가 최신 API 라우트를 포함하지 않을 수 있습니다. 우측 상단 빌드 배지에서 커밋을 확인하고 필요하면 서버를 재시작하세요.'
+  }
+  return null
+}
+
+function OperatorErrorBanner({ message, status }: { message: string; status: number | null }) {
+  const hint = operatorErrorHint(message, status)
+  return html`
+    <section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error" data-testid="operator-error-banner">
+      <div class="leading-relaxed">${message}</div>
+      ${hint ? html`<div class="mt-1.5 text-[12px] opacity-85" data-testid="operator-error-hint">${hint}</div>` : null}
+    </section>
+  `
+}
 
 type ActivityTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
 
@@ -182,8 +207,8 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      ${operatorError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorDigestError.value}</section>` : null}
+      ${operatorError.value ? html`<${OperatorErrorBanner} message=${operatorError.value} status=${operatorErrorStatus.value} />` : null}
+      ${operatorDigestError.value ? html`<${OperatorErrorBanner} message=${operatorDigestError.value} status=${operatorDigestErrorStatus.value} />` : null}
 
       ${workflowContext ? html`
         <section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] ${workflowReady ? 'info' : 'warn'} grid gap-2">

@@ -5,8 +5,10 @@ export {
   operatorRoomDigest,
   operatorLoading,
   operatorError,
+  operatorErrorStatus,
   operatorDigestLoading,
   operatorDigestError,
+  operatorDigestErrorStatus,
   operatorActionBusy,
   operatorActionLog,
 } from './operator-signals'

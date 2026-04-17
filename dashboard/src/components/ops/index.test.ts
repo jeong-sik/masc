@@ -184,4 +184,104 @@ describe('Ops surface', () => {
     expect(container.textContent).not.toContain('운영 판단')
     expect(container.textContent).not.toContain('매뉴얼 처리')
   }, 120000)
+
+  it('appends stale-binary hint when operatorErrorStatus is 404 (structured)', async () => {
+    const operatorStore = await import('../../operator-store')
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = 'GET /api/v1/operator: 404 Not Found'
+    operatorStore.operatorErrorStatus.value = 404
+    operatorDigestError.value = null
+    operatorStore.operatorDigestErrorStatus.value = null
+    operatorSnapshot.value = null as unknown as OperatorSnapshot
+    operatorRoomDigest.value = null as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const banner = container.querySelector('[data-testid="operator-error-banner"]')
+    expect(banner).toBeTruthy()
+    const hint = container.querySelector('[data-testid="operator-error-hint"]')
+    expect(hint).toBeTruthy()
+    expect(hint?.textContent).toContain('서버 바이너리')
+
+    operatorStore.operatorErrorStatus.value = null
+  }, 60000)
+
+  it('falls back to message regex when status is null (legacy string error)', async () => {
+    const operatorStore = await import('../../operator-store')
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = 'GET /api/v1/operator: 404 Not Found'
+    operatorStore.operatorErrorStatus.value = null
+    operatorDigestError.value = null
+    operatorStore.operatorDigestErrorStatus.value = null
+    operatorSnapshot.value = null as unknown as OperatorSnapshot
+    operatorRoomDigest.value = null as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const hint = container.querySelector('[data-testid="operator-error-hint"]')
+    expect(hint).toBeTruthy()
+    expect(hint?.textContent).toContain('서버 바이너리')
+  }, 60000)
+
+  it('does not show the stale-binary hint for non-route errors', async () => {
+    const operatorStore = await import('../../operator-store')
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorRoomDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorStore.operatorErrorStatus.value = null
+    operatorDigestError.value = 'GET /api/v1/operator/digest: 500 Internal Server Error'
+    operatorStore.operatorDigestErrorStatus.value = 500
+    operatorSnapshot.value = null as unknown as OperatorSnapshot
+    operatorRoomDigest.value = null as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const banner = container.querySelector('[data-testid="operator-error-banner"]')
+    expect(banner).toBeTruthy()
+    expect(banner?.textContent).toContain('500')
+    expect(container.querySelector('[data-testid="operator-error-hint"]')).toBeNull()
+
+    operatorStore.operatorDigestErrorStatus.value = null
+  }, 60000)
 })

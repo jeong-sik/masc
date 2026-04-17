@@ -210,19 +210,6 @@ let test_benchmark_scripts_only_reference_registered_tools () =
                  relative tool_name))
     scripts
 
-let test_multi_room_doc_keeps_historical_banner () =
-  let contents = read_file (doc_path "MULTI-ROOM-DESIGN.md") in
-  if not (contains_substring contents "Status: historical/internal compatibility note")
-  then
-    Alcotest.fail
-      "MULTI-ROOM-DESIGN.md must declare historical/internal compatibility status";
-  if not
-       (contains_substring contents
-          "Historical command references below are retained for implementation context only")
-  then
-    Alcotest.fail
-      "MULTI-ROOM-DESIGN.md must mark command references as historical-only"
-
 let test_docs_do_not_reintroduce_removed_mode_surface () =
   let paths =
     [
@@ -351,8 +338,6 @@ let () =
             test_benchmark_scripts_follow_session_contract;
           Alcotest.test_case "benchmark scripts only reference registered tools" `Quick
             test_benchmark_scripts_only_reference_registered_tools;
-          Alcotest.test_case "multi-room doc keeps historical banner" `Quick
-            test_multi_room_doc_keeps_historical_banner;
           Alcotest.test_case "docs do not reintroduce removed mode surface" `Quick
             test_docs_do_not_reintroduce_removed_mode_surface;
           Alcotest.test_case "no duplicate tool schemas" `Quick

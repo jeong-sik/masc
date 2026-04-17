@@ -12,6 +12,10 @@ import {
 } from './connector-config-form'
 
 const flushUi = async () => {
+  // Three Promise.resolve cycles cover: schema fetch → JSON parse →
+  // current-values fetch → JSON parse → setEntry → render.
+  await Promise.resolve()
+  await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
 }
@@ -159,6 +163,7 @@ describe('ConnectorConfigForm', () => {
 
   it('Save button POSTs to /api/v1/sidecar/config when required field is filled', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      // 1) schema GET
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -174,6 +179,11 @@ describe('ConnectorConfigForm', () => {
           { status: 200 },
         ),
       )
+      // 2) current-values GET (no file yet)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }),
+      )
+      // 3) save POST
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ ok: true, id: 'discord', written_fields: 1 }), { status: 200 }),
       )
@@ -195,11 +205,11 @@ describe('ConnectorConfigForm', () => {
     await flushUi()
     await flushUi()
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2)
-    const lastCall = fetchSpy.mock.calls[1]
-    expect(lastCall?.[0]).toContain('/api/v1/sidecar/config?name=discord')
-    expect(lastCall?.[1]?.method).toBe('POST')
-    expect(lastCall?.[1]?.body).toContain('GATE_BASE_URL')
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    const saveCall = fetchSpy.mock.calls[2]
+    expect(saveCall?.[0]).toContain('/api/v1/sidecar/config?name=discord')
+    expect(saveCall?.[1]?.method).toBe('POST')
+    expect(saveCall?.[1]?.body).toContain('GATE_BASE_URL')
   })
 
   it('after toggle + fetch, renders required field marker and password input for token', async () => {

@@ -125,6 +125,29 @@ function parseSchema(payload: SchemaResponse): FieldShape[] {
     })
 }
 
+interface ConfigReadResponse {
+  ok: boolean
+  exists: boolean
+  values: Record<string, string>
+}
+
+async function fetchCurrentValues(id: string): Promise<Record<string, string>> {
+  // 4xx is fine here — most likely cause is "config.toml never written" or
+  // tool_auth not configured for the read. Either way the form should fall
+  // back to schema defaults rather than block on the prefill.
+  try {
+    const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
+      headers: { Accept: 'application/json' },
+    })
+    if (!res.ok) return {}
+    const data = (await res.json()) as ConfigReadResponse
+    if (!data.ok || !data.exists) return {}
+    return data.values ?? {}
+  } catch {
+    return {}
+  }
+}
+
 async function fetchSchema(id: string) {
   setEntry(id, { loading: true, error: null })
   try {
@@ -135,8 +158,13 @@ async function fetchSchema(id: string) {
     const data = (await res.json()) as SchemaResponse
     if (!data.ok) throw new Error('schema response missing ok=true')
     const fields = parseSchema(data)
+    const current = await fetchCurrentValues(id)
     const values: Record<string, string> = {}
-    for (const f of fields) values[f.name] = defaultToString(f.default)
+    for (const f of fields) {
+      // Operator's saved value wins over schema default; we keep the
+      // empty string only when the operator has explicitly cleared it.
+      values[f.name] = current[f.name] ?? defaultToString(f.default)
+    }
     setEntry(id, { fields, values, loading: false })
   } catch (err) {
     setEntry(id, {

@@ -508,6 +508,7 @@ let rec run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(base_path : string)
+    ~(auth_token : string option)
     ~(meta : Worker_container_types.worker_container_meta)
     ~(provider : Oas.Provider.config)
     ~(system_prompt : string)
@@ -520,9 +521,6 @@ let rec run_worker_via_oas
     () : (Worker_container_types.run_result, string) result =
   let session_id = meta.mcp_session_id in
   let worker_name = meta.worker_name in
-  let* auth_token =
-    Worker_container_types.worker_auth_token ~base_path ~worker_name
-  in
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in
@@ -562,6 +560,7 @@ and resume_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(base_path : string)
+    ~(auth_token : string option)
     ~(meta : Worker_container_types.worker_container_meta)
     ~(checkpoint : Oas.Checkpoint.t)
     ~(prompt : string)
@@ -572,9 +571,6 @@ and resume_worker_via_oas
     () : (Worker_container_types.run_result, string) result =
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
-  let* auth_token =
-    Worker_container_types.worker_auth_token ~base_path ~worker_name
-  in
   let heartbeat_cbs =
     make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name
   in

@@ -2,7 +2,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { ConnectorReadinessRail, deriveRail, type RailHandlers } from './connector-readiness-rail'
+import {
+  ConnectorReadinessRail,
+  deriveRail,
+  markRailInflight,
+  clearRailInflight,
+  getRailInflight,
+  withRailInflight,
+  resetRailInflightState,
+  type RailHandlers,
+} from './connector-readiness-rail'
 
 const noop: RailHandlers = {
   openConfig: () => {},
@@ -88,6 +97,44 @@ describe('ConnectorReadinessRail rendering', () => {
     const bindingsPill = container.querySelector('[data-rail-pill="bindings"]')
     expect(tokenPill?.getAttribute('data-rail-state')).toBe('ok')
     expect(bindingsPill?.getAttribute('data-rail-state')).toBe('warn')
+  })
+
+  it('inflight=true pulses the pill, disables click, swaps detail to "진행 중..."', () => {
+    const pills = deriveRail(
+      { sidecarUp: false, gateHealthy: null, bindingCount: 0, keeperCount: 0 },
+      noop,
+      { process: true },
+    )
+    render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    const processPill = container.querySelector('[data-rail-pill="process"]') as HTMLButtonElement
+    expect(processPill.getAttribute('data-rail-inflight')).toBe('true')
+    expect(processPill.disabled).toBe(true)
+    expect(processPill.className).toContain('animate-pulse')
+    expect(processPill.textContent).toContain('진행 중')
+  })
+
+  it('withRailInflight marks then clears the key around an async op', async () => {
+    resetRailInflightState()
+    const before = getRailInflight('discord').process
+    expect(before).toBeUndefined()
+
+    let observedDuringAwait: boolean | undefined
+    await withRailInflight('discord', 'process', async () => {
+      observedDuringAwait = getRailInflight('discord').process
+    })
+    expect(observedDuringAwait).toBe(true)
+    expect(getRailInflight('discord').process).toBeUndefined()
+  })
+
+  it('markRailInflight then clearRailInflight only mutates the targeted key', () => {
+    resetRailInflightState()
+    markRailInflight('discord', 'process')
+    markRailInflight('discord', 'token')
+    expect(getRailInflight('discord').process).toBe(true)
+    expect(getRailInflight('discord').token).toBe(true)
+    clearRailInflight('discord', 'process')
+    expect(getRailInflight('discord').process).toBeUndefined()
+    expect(getRailInflight('discord').token).toBe(true)
   })
 
   it('clicking a pill invokes its onClick', () => {

@@ -13,8 +13,47 @@
 //   idle  — unknown / not measured yet (gray)
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 
 export type RailState = 'ok' | 'warn' | 'bad' | 'idle'
+export type RailKey = 'token' | 'process' | 'gate' | 'bindings'
+
+/** Per-connector × per-pill in-flight tracker. Subscribed by deriveRail
+    callers so a click on the Process pill can flip the pill into a
+    pulsing "진행 중..." state until the underlying action settles. */
+const inflightState = signal<Record<string, Partial<Record<RailKey, boolean>>>>({})
+
+export function markRailInflight(connectorId: string, key: RailKey) {
+  const cur = inflightState.value[connectorId] ?? {}
+  inflightState.value = { ...inflightState.value, [connectorId]: { ...cur, [key]: true } }
+}
+
+export function clearRailInflight(connectorId: string, key: RailKey) {
+  const cur = inflightState.value[connectorId] ?? {}
+  if (!cur[key]) return
+  const next = { ...cur }
+  delete next[key]
+  inflightState.value = { ...inflightState.value, [connectorId]: next }
+}
+
+export function getRailInflight(connectorId: string): Partial<Record<RailKey, boolean>> {
+  return inflightState.value[connectorId] ?? {}
+}
+
+export function resetRailInflightState() {
+  inflightState.value = {}
+}
+
+/** Wrap an async action so the pill it backs pulses for its duration.
+    Helper for callers that don't want to remember mark/clear. */
+export async function withRailInflight<T>(connectorId: string, key: RailKey, fn: () => Promise<T>): Promise<T> {
+  markRailInflight(connectorId, key)
+  try {
+    return await fn()
+  } finally {
+    clearRailInflight(connectorId, key)
+  }
+}
 
 export interface RailPill {
   key: 'token' | 'process' | 'gate' | 'bindings'
@@ -23,6 +62,9 @@ export interface RailPill {
   detail: string
   hint: string | null
   onClick: () => void
+  /** Action triggered by clicking this pill is currently in flight.
+      Renders a muted pulse + spinner glyph instead of the state icon. */
+  inflight?: boolean
 }
 
 const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string }> = {
@@ -58,21 +100,24 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
 
 function Pill({ pill }: { pill: RailPill }) {
   const tone = TONE[pill.state]
+  const inflight = pill.inflight === true
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${tone.bg} ${tone.border} hover:brightness-125`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${tone.bg} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
       onClick=${pill.onClick}
       data-rail-pill=${pill.key}
       data-rail-state=${pill.state}
+      data-rail-inflight=${inflight ? 'true' : 'false'}
+      disabled=${inflight}
     >
-      <span class=${`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${tone.dot} text-[var(--bg-0)]`}>
-        ${tone.icon}
+      <span class=${`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${inflight ? 'bg-[var(--white-10)]' : tone.dot} text-[var(--bg-0)]`}>
+        ${inflight ? '…' : tone.icon}
       </span>
       <span class="min-w-0 flex-1">
         <span class=${`block text-[10px] uppercase tracking-[0.14em] ${tone.text}`}>${pill.label}</span>
-        <span class="block truncate text-[11px] text-[var(--text-body)]">${pill.detail}</span>
+        <span class="block truncate text-[11px] text-[var(--text-body)]">${inflight ? '진행 중...' : pill.detail}</span>
       </span>
     </button>
   `
@@ -110,7 +155,11 @@ export interface RailHandlers {
   scrollToBindings: () => void
 }
 
-export function deriveRail(input: RailInputs, on: RailHandlers): RailPill[] {
+export function deriveRail(
+  input: RailInputs,
+  on: RailHandlers,
+  inflight: Partial<Record<RailKey, boolean>> = {},
+): RailPill[] {
   // Token: heuristic — if the sidecar is running, the operator has set
   // a valid token (the bridge would have crashed at startup otherwise).
   // If it's down we can't know, so we suggest setting one.
@@ -157,6 +206,7 @@ export function deriveRail(input: RailInputs, on: RailHandlers): RailPill[] {
       detail: tokenDetail,
       hint: tokenState === 'bad' ? '클릭하면 ⚙ Config 가 열립니다' : null,
       onClick: on.openConfig,
+      inflight: inflight.token === true,
     },
     {
       key: 'process',
@@ -165,6 +215,7 @@ export function deriveRail(input: RailInputs, on: RailHandlers): RailPill[] {
       detail: processDetail,
       hint: processState === 'bad' ? '클릭하면 sidecar Start' : '클릭하면 sidecar Stop',
       onClick: on.toggleProcess,
+      inflight: inflight.process === true,
     },
     {
       key: 'gate',
@@ -173,6 +224,7 @@ export function deriveRail(input: RailInputs, on: RailHandlers): RailPill[] {
       detail: gateDetail,
       hint: '클릭하면 헤더 detail 펼침',
       onClick: on.expandHeader,
+      inflight: inflight.gate === true,
     },
     {
       key: 'bindings',
@@ -181,6 +233,7 @@ export function deriveRail(input: RailInputs, on: RailHandlers): RailPill[] {
       detail: bindingsDetail,
       hint: bindingsState !== 'ok' ? 'keeper 디렉토리로 스크롤' : null,
       onClick: on.scrollToBindings,
+      inflight: inflight.bindings === true,
     },
   ]
 }

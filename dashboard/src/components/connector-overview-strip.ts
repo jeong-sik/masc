@@ -10,7 +10,7 @@
 
 import { html } from 'htm/preact'
 import type { GateConnectorInfo } from '../api/gate'
-import { ConnectorReadinessRail, deriveRail } from './connector-readiness-rail'
+import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 
@@ -44,12 +44,14 @@ function OverviewTile({ id, connector, keeperCount }: {
     {
       openConfig: () => openConnectorConfig(id),
       toggleProcess: () => {
-        if (sidecarUp) void stopSidecar(id)
-        else void startSidecar(id)
+        void withRailInflight(id, 'process', () =>
+          sidecarUp ? stopSidecar(id) : startSidecar(id),
+        )
       },
       expandHeader: () => scrollToCard(id),
       scrollToBindings: () => scrollToCard(id),
     },
+    getRailInflight(id),
   )
   const accent = connectorAccentStyle(id)
   const displayName = CONNECTOR_DISPLAY_NAMES[id] ?? id

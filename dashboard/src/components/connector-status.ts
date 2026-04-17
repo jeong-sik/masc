@@ -30,7 +30,7 @@ import { SetupGuideCard } from './setup-guide-card'
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
-import { ConnectorReadinessRail, deriveRail } from './connector-readiness-rail'
+import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
@@ -605,11 +605,10 @@ function ConnectorLivePanel({
           {
             openConfig: () => openConnectorConfig(connectorId),
             toggleProcess: () => {
-              if (connector?.available === true) {
-                void stopSidecar(connectorId)
-              } else {
-                void startSidecar(connectorId)
-              }
+              const isUp = connector?.available === true
+              void withRailInflight(connectorId, 'process', () =>
+                isUp ? stopSidecar(connectorId) : startSidecar(connectorId),
+              )
             },
             expandHeader: () => { headerExpanded.value = true },
             scrollToBindings: () => {
@@ -617,6 +616,7 @@ function ConnectorLivePanel({
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
             },
           },
+          getRailInflight(connectorId),
         )}
       />
 

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { resetSetupGuideExpansionState } from './setup-guide-card'
+import { sidecarCommands } from './connector-status'
 
 describe('ConnectorOnboardingGrid', () => {
   let container: HTMLDivElement
@@ -41,6 +42,16 @@ describe('ConnectorOnboardingGrid', () => {
     expect(text).toContain('cd sidecars/imessage-bot && ./run.sh')
     expect(text).toContain('cd sidecars/slack-bot && ./run.sh')
     expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
+  })
+
+  // Pin the sidecarCommands() shape so a future refactor can't re-introduce
+  // the per-bridge pkill fork we just deleted.
+  it('uses ./run.sh stop for every bridge (no pkill)', () => {
+    for (const id of ['discord', 'imessage', 'slack', 'telegram']) {
+      const { stop } = sidecarCommands(id)
+      expect(stop).toBe(`cd sidecars/${id}-bot && ./run.sh stop`)
+      expect(stop).not.toContain('pkill')
+    }
   })
 
   it('embeds a collapsed SetupGuideCard per known connector', () => {

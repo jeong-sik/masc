@@ -68,6 +68,39 @@ export type SSEEventType =
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'
 
+// --- Attribution envelope ---
+// Structured verdict metadata for gate decisions. Emitted alongside existing
+// reason/reason_code fields so dashboards can trace causality without breaking
+// consumers that don't understand the envelope.
+// OCaml SSOT: lib/attribution.mli (since 2.261.0)
+
+export type AttributionOrigin = 'det' | 'nondet'
+export type AttributionVerdict = 'pass' | 'fail' | 'partial'
+
+// Known gate identifiers. Kept open ('string') so new gates can emit without
+// a client update, but enumerating canonical values gives us autocomplete and
+// catches typos.
+export type AttributionGate =
+  | 'cdal_verdict'
+  | 'verification'
+  | 'accountability'
+  | 'keeper_fsm'
+  | 'oas_completion'
+  | 'agent_lifecycle'
+  | 'task_transition'
+  | 'worker_dev_tools'
+  | string
+
+export interface Attribution {
+  origin: AttributionOrigin
+  gate: AttributionGate
+  verdict: AttributionVerdict
+  evidence: Record<string, unknown>
+  blocked_from?: string
+  blocked_to?: string
+  rationale?: string
+}
+
 export interface SSEEvent {
   type: SSEEventType
   severity?: JournalSeverity | string
@@ -134,6 +167,10 @@ export interface SSEEvent {
   correlation_id?: string
   // OAS envelope per-run identifier (one per Agent.run invocation).
   run_id?: string
+  // Gate attribution envelope — structured verdict metadata. Emitters
+  // attach this alongside existing reason/reason_code fields since 2.261.0.
+  // See lib/attribution.mli for OCaml SSOT and evidence schema per gate.
+  attribution?: Attribution
 }
 
 // --- Journal ---

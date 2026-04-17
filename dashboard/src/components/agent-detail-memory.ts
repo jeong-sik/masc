@@ -16,11 +16,11 @@ interface Props {
   agentName: string
 }
 
-function normalizeKeeperName(name: string): string {
+export function normalizeKeeperName(name: string): string {
   return name.replace(/^keeper-/, '').replace(/-agent$/, '')
 }
 
-function matchesKeeper(synapseAgent: string, keeperName: string): boolean {
+export function matchesKeeper(synapseAgent: string, keeperName: string): boolean {
   const a = normalizeKeeperName(synapseAgent)
   const b = normalizeKeeperName(keeperName)
   return a === b

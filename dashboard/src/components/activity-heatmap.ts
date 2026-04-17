@@ -35,7 +35,7 @@ interface HeatmapProps {
   data: ActivityGraphResponse
 }
 
-function intensityColor(count: number, max: number): string {
+export function intensityColor(count: number, max: number): string {
   if (count === 0) return COLORS[0]
   if (max === 0) return COLORS[0]
   const ratio = count / max
@@ -45,11 +45,11 @@ function intensityColor(count: number, max: number): string {
   return COLORS[4]
 }
 
-function canvasWidth(): number {
+export function canvasWidth(): number {
   return LEFT_MARGIN + 24 * (CELL + GAP) - GAP
 }
 
-function canvasHeight(): number {
+export function canvasHeight(): number {
   return TOP_PAD + 7 * (CELL + GAP) - GAP + LEGEND_HEIGHT
 }
 
@@ -145,7 +145,7 @@ function drawHeatmap(
   }
 }
 
-function hitTest(mx: number, my: number): HeatmapCell | null {
+export function hitTest(mx: number, my: number): HeatmapCell | null {
   for (let day = 0; day < 7; day++) {
     const cy = TOP_PAD + day * (CELL + GAP)
     if (my < cy || my > cy + CELL) continue

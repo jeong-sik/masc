@@ -45,8 +45,11 @@ import {
 // Re-export for consumers that import from './governance'
 export { refreshGovernance, loadRuntimeParams, loadParamAudit } from './governance-store'
 
+// Case tracking is permanently retired; the backend no longer emits
+// case_tracking_available. Helper retained so the existing retired
+// branches continue to read naturally.
 function governanceCaseTrackingRetired(): boolean {
-  return governanceData.value?.case_tracking_available === false
+  return true
 }
 
 function governanceRetiredMessage(): string {

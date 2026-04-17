@@ -9,15 +9,20 @@ import { RuntimePanel } from './runtime-panel'
 import { MemorySubsystems } from './memory-subsystems'
 import { FleetHealthPanel } from './fleet-health-panel'
 import { Observatory } from './observatory/observatory'
+import { AttributionPanel } from './attribution-panel'
 
-type StatusSection = 'observatory' | 'agents' | 'runtime' | 'fleet-health' | 'memory-subsystems'
+type StatusSection =
+  | 'observatory' | 'agents' | 'runtime' | 'fleet-health'
+  | 'memory-subsystems' | 'attribution'
 
 function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
     section === 'observatory'
     || section === 'runtime'
-    || section === 'fleet-health' || section === 'memory-subsystems'
+    || section === 'fleet-health'
+    || section === 'memory-subsystems'
+    || section === 'attribution'
   ) return section
   return 'agents'
 }
@@ -36,6 +41,8 @@ export function Status() {
             ? html`<${FleetHealthPanel} />`
           : section === 'memory-subsystems'
             ? html`<${MemorySubsystems} />`
+          : section === 'attribution'
+            ? html`<${AttributionPanel} />`
             : html`<${AgentsUnified} />`}
       </div>
     </div>

@@ -107,7 +107,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
          log_event config (Printf.sprintf
            "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
            nickname agent_type new_session_id (now_iso ()));
-         !Coord_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+         (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
            ~event_kind:"rejoin"
            ~details:
              (`Assoc
@@ -171,7 +171,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     session_id
     (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
     (now_iso ()));
-  !Coord_hooks.observe_agent_lifecycle_fn config ~agent_id:nickname
+  (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
     ~event_kind:"join"
     ~details:
       (`Assoc
@@ -229,12 +229,12 @@ let leave config ~agent_name =
     log_event config (Printf.sprintf
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
-    !Coord_hooks.observe_agent_lifecycle_fn config ~agent_id:actual_name
+    (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
       ~event_kind:"leave"
       ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)
-    (try !Coord_hooks.relation_on_leave_fn
+    (try (Atomic.get Coord_hooks.relation_on_leave_fn)
            ~leaving_agent:actual_name ~active_agents:peers_before_leave
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Coord.error "relation-materializer leave hook error: %s"

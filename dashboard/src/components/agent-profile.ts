@@ -63,6 +63,30 @@ const profileResource = createAsyncResource<ProfileData>()
 let profileLoadedName = ''
 const mentionText = signal('')
 const sendingMention = signal(false)
+const activityQuery = signal('')
+
+/**
+ * Pure filter for the "프로젝트 활동" (roomActivity) string list.
+ *
+ * Case-insensitive substring match on the full line. `fetchRoomMessages`
+ * returns rendered lines that already embed actor/target/text, so a
+ * substring pass is enough to isolate all lines mentioning a particular
+ * actor, task id, or keyword.
+ *
+ * Empty/whitespace query returns the input reference unchanged so the
+ * non-filtering render path preserves referential identity (no new
+ * array allocation).
+ *
+ * Input is never mutated; caller may pass a readonly array.
+ */
+export function filterRoomActivity(
+  lines: readonly string[],
+  query: string,
+): readonly string[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return lines
+  return lines.filter(line => line.toLowerCase().includes(needle))
+}
 
 function findAgent(name: string): Agent | null {
   return agents.value.find(a => a.name === name) ?? null
@@ -301,6 +325,9 @@ function CharacterPlate({ name }: { name: string }) {
 export function AgentProfile({ name }: { name: string }) {
   useEffect(() => {
     void loadProfile(name)
+    // Reset the activity filter when switching agents so a stale query
+    // from the previous profile does not leak into the new one.
+    activityQuery.value = ''
   }, [name])
 
   const ps = profileResource.state.value
@@ -405,8 +432,26 @@ export function AgentProfile({ name }: { name: string }) {
         <${Card} title="프로젝트 활동" class="ff-card rounded-xl">
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
-            : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) =>
-                html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[var(--text-body)] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
+            : (() => {
+                const visible = filterRoomActivity(lines, activityQuery.value)
+                const isFiltering = activityQuery.value.trim() !== ''
+                return html`
+                  <div class="flex flex-col gap-1.5">
+                    <input
+                      type="search"
+                      value=${activityQuery.value}
+                      placeholder="활동 필터 (메시지 본문)"
+                      aria-label="프로젝트 활동 필터"
+                      onInput=${(e: Event) => { activityQuery.value = (e.target as HTMLInputElement).value }}
+                      class="w-full rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                    ${isFiltering && visible.length === 0
+                      ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${lines.length} items)</div>`
+                      : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${visible.map((line: string, idx: number) =>
+                          html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[13px] text-[var(--text-body)] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
+                  </div>
+                `
+              })()}
         <//>
 
         ${(profileData?.taskHistories ?? []).length > 0 ? html`

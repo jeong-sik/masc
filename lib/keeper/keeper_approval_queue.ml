@@ -38,10 +38,17 @@ let risk_level_to_string = function
   | High -> "high"
   | Critical -> "critical"
 
-(* ── Global queue (Eio.Mutex-protected) ───────────────────── *)
+(* ── Global queue (Lock-free Atomic.t) ───────────────────── *)
 
-let mu = Eio.Mutex.create ()
-let pending : (string, pending_approval) Hashtbl.t = Hashtbl.create 8
+module SMap = Map.Make(String)
+
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
+let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
 
 (* ── Persistent audit log ────────────────────────────────── *)
 
@@ -176,8 +183,8 @@ let resolve_entry (entry : pending_approval) (decision : decision) =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> ()
 
-let find_pending_id_locked ~keeper_name ~tool_name =
-  Hashtbl.fold
+let find_pending_id ~keeper_name ~tool_name =
+  SMap.fold
     (fun id entry acc ->
       match acc with
       | Some _ -> acc
@@ -186,7 +193,7 @@ let find_pending_id_locked ~keeper_name ~tool_name =
            && String.equal entry.tool_name tool_name
         then Some id
         else None)
-    pending None
+    (Atomic.get pending) None
 
 let sort_entries_by_requested_at entries =
   List.sort
@@ -210,37 +217,33 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
       ~resolver:(Some resolver) ~on_resolution:None
   in
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
-    Hashtbl.replace pending id entry);
+  atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
-  (* SUSPEND the agent fiber until operator resolves.
-     Fun.protect ensures the pending entry is cleaned up if the fiber
-     is cancelled (e.g. keeper shutdown via Eio.Switch cancellation).
-     Without this, orphan entries accumulate in the hashtbl. (#5949) *)
   Fun.protect
     (fun () -> Eio.Promise.await promise)
     ~finally:(fun () ->
       (try
-         Eio.Mutex.use_rw ~protect:true mu (fun () ->
-           Hashtbl.remove pending id)
+         atomic_update pending (fun map -> SMap.remove id map)
        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()))
 
 let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
   : string =
-  let created_entry =
-    Eio.Mutex.use_rw ~protect:true mu (fun () ->
-      match find_pending_id_locked ~keeper_name ~tool_name with
-      | Some id -> (`Existing id)
-      | None ->
+  let created_entry = ref None in
+  atomic_update pending (fun map ->
+    match find_pending_id ~keeper_name ~tool_name with
+    | Some id -> 
+        created_entry := Some (`Existing id);
+        map
+    | None ->
         let id = generate_id () in
         let entry =
           create_entry ~id ~keeper_name ~tool_name ~input ~risk_level
             ~resolver:None ~on_resolution:(Some on_resolution)
         in
-        Hashtbl.replace pending id entry;
-        `Created entry)
-  in
-  match created_entry with
+        created_entry := Some (`Created entry);
+        SMap.add id entry map
+  );
+  match Option.get !created_entry with
   | `Existing id -> id
   | `Created entry ->
     record_pending entry;
@@ -252,15 +255,15 @@ let submit_pending ~keeper_name ~tool_name ~input ~risk_level ~on_resolution
     Called from the dashboard approval HTTP handler
     ([server_dashboard_http.ml]). *)
 let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) result =
-  let result =
-    Eio.Mutex.use_rw ~protect:true mu (fun () ->
-    match Hashtbl.find_opt pending id with
-    | None -> Error (Printf.sprintf "approval %s not found or already resolved" id)
+  let result = ref (Error (Printf.sprintf "approval %s not found or already resolved" id)) in
+  atomic_update pending (fun map ->
+    match SMap.find_opt id map with
+    | None -> map
     | Some entry ->
-      Hashtbl.remove pending id;
-      Ok entry)
-  in
-  match result with
+      result := Ok entry;
+      SMap.remove id map
+  );
+  match !result with
   | Error _ as err -> err
   | Ok entry ->
     resolve_entry entry decision;
@@ -270,45 +273,39 @@ let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, string) resul
 
 (** List all pending approvals as JSON. *)
 let list_pending_json () : Yojson.Safe.t =
-  Eio.Mutex.use_ro mu (fun () ->
-    let entries = Hashtbl.fold (fun _id entry acc ->
-      `Assoc [
-        ("id", `String entry.id);
-        ("keeper_name", `String entry.keeper_name);
-        ("tool_name", `String entry.tool_name);
-        ("risk_level", `String (risk_level_to_string entry.risk_level));
-        ("requested_at", `Float entry.requested_at);
-        ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
-      ] :: acc
-    ) pending [] in
-    `List (sort_entries_by_requested_at entries))
+  let entries = SMap.fold (fun _id entry acc ->
+    `Assoc [
+      ("id", `String entry.id);
+      ("keeper_name", `String entry.keeper_name);
+      ("tool_name", `String entry.tool_name);
+      ("risk_level", `String (risk_level_to_string entry.risk_level));
+      ("requested_at", `Float entry.requested_at);
+      ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+    ] :: acc
+  ) (Atomic.get pending) [] in
+  `List (sort_entries_by_requested_at entries)
 
 let list_pending_dashboard_json () : Yojson.Safe.t =
-  Eio.Mutex.use_ro mu (fun () ->
-    let entries = Hashtbl.fold (fun _id entry acc ->
-      `Assoc [
-        ("id", `String entry.id);
-        ("keeper_name", `String entry.keeper_name);
-        ("tool_name", `String entry.tool_name);
-        ("risk_level", `String (risk_level_to_string entry.risk_level));
-        ("requested_at", `Float entry.requested_at);
-        ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
-        ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
-        ("input", entry.input);
-        ("input_preview", `String (input_preview_of_json entry.input));
-      ] :: acc
-    ) pending [] in
-    `List (sort_entries_by_requested_at entries))
+  let entries = SMap.fold (fun _id entry acc ->
+    `Assoc [
+      ("id", `String entry.id);
+      ("keeper_name", `String entry.keeper_name);
+      ("tool_name", `String entry.tool_name);
+      ("risk_level", `String (risk_level_to_string entry.risk_level));
+      ("requested_at", `Float entry.requested_at);
+      ("requested_at_iso", `String (Types.iso8601_of_unix_seconds entry.requested_at));
+      ("waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at));
+      ("input", entry.input);
+      ("input_preview", `String (input_preview_of_json entry.input));
+    ] :: acc
+  ) (Atomic.get pending) [] in
+  `List (sort_entries_by_requested_at entries)
 
 let pending_count () : int =
-  Eio.Mutex.use_ro mu (fun () -> Hashtbl.length pending)
+  SMap.cardinal (Atomic.get pending)
 
 let has_pending_for_keeper ~keeper_name : bool =
-  Eio.Mutex.use_ro mu (fun () ->
-    Hashtbl.fold
-      (fun _ entry acc ->
-        acc || String.equal entry.keeper_name keeper_name)
-      pending false)
+  SMap.fold (fun _ entry acc -> acc || String.equal entry.keeper_name keeper_name) (Atomic.get pending) false
 
 (* ── Timeout cleanup ──────────────────────────────────────── *)
 
@@ -316,16 +313,17 @@ let has_pending_for_keeper ~keeper_name : bool =
     Call periodically from a health loop. *)
 let expire_stale ~max_wait_s =
   let now = Unix.gettimeofday () in
-  let stale =
-    Eio.Mutex.use_rw ~protect:true mu (fun () ->
-    let stale = Hashtbl.fold (fun id entry acc ->
+  let stale_ref = ref [] in
+  atomic_update pending (fun map ->
+    let stale = SMap.fold (fun id entry acc ->
       if now -. entry.requested_at > max_wait_s
       then (id, entry) :: acc
       else acc
-    ) pending [] in
-    List.iter (fun (id, _entry) -> Hashtbl.remove pending id) stale;
-    stale)
-  in
+    ) map [] in
+    stale_ref := stale;
+    List.fold_left (fun acc (id, _) -> SMap.remove id acc) map stale
+  );
+  let stale = !stale_ref in
   List.iter (fun (id, entry) ->
     let reason = Printf.sprintf
       "approval timed out after %.0fs" (now -. entry.requested_at) in

@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/oas_events.ml
+  - lib/oas_sse_bridge.ml
+  - lib/telemetry_unified.ml
+---
+
 # OAS Observability Truth Audit (2026-04-15)
 
 ## Scope

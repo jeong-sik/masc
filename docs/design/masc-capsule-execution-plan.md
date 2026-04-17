@@ -1,3 +1,12 @@
+---
+status: live
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - lib/keeper/keeper_turn_lifecycle.ml
+  - lib/mcp_server.ml
+---
+
 # MASC Capsule Execution Plan
 
 Updated: 2026-04-02

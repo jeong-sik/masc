@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/cdal/
+  - lib/keeper/
+  - lib/keeper/keeper_context_core.ml
+---
+
 # Contract-Driven Agent Loop RFC Review
 
 **Date**: 2026-03-27

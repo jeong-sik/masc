@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/cdal/
+  - lib/proof_artifact_reader.ml
+  - lib/keeper/keeper_agent_run.ml
+---
+
 # Cross-Run Loader and Window Spec
 
 **Status**: Draft (v2 — late-arrival, schema compat, API signatures added)

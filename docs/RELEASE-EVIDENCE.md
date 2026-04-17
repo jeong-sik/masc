@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/mcp_server.ml
+  - lib/keeper/
+  - lib/keeper/keeper_runtime.ml
+---
+
 # Release Evidence
 
 > Current package version: v0.9.4

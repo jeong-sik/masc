@@ -43,7 +43,6 @@ The MASC Dashboard CSS has been refactored from a single 2199-line `global.css` 
 - `governance.css` - Governance interfaces
 - `governance-agent.css` - Agent governance
 - `governance-keeper.css` - Keeper governance
-- `mission.css` - Mission management
 - `ops.css` - Operations tab
 - `roster.css` - Roster views
 - `tools.css` - Tool interfaces

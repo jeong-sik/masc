@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
@@ -9,10 +9,34 @@ import { StatusChip } from './common/status-chip'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
 import { get, type GetOptions } from '../api/core'
 
-interface ToolRejection {
+export interface ToolRejection {
   tool: string
   reason: string
   count: number
+}
+
+/**
+ * Pure filter for tool rejection rows.
+ *
+ * Case-insensitive substring match on `row.tool` and `row.reason`. The
+ * `count` field is numeric so it is not part of the text search.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no
+ * new array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterToolRejections(
+  rows: readonly ToolRejection[],
+  query: string,
+): readonly ToolRejection[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return rows
+  return rows.filter(row => {
+    if (row.tool.toLowerCase().includes(needle)) return true
+    if (row.reason.toLowerCase().includes(needle)) return true
+    return false
+  })
 }
 
 interface ApprovalQueue {
@@ -83,6 +107,7 @@ export function GovernanceMonitor() {
   }
   const resource = resourceRef.current
   const windowMinutes = useSignal(60)
+  const query = useSignal('')
 
   const load = () =>
     resource.load(async (signal) => fetchGovernanceToolEvents(windowMinutes.value, { signal }))
@@ -94,6 +119,12 @@ export function GovernanceMonitor() {
 
   const current = resource.state.value
   const data = current.data
+  const allRejections = data?.tool_rejections ?? []
+  const visibleRejections = useMemo(
+    () => filterToolRejections(allRejections, query.value),
+    [allRejections, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
 
   return html`
     <div class="flex flex-col gap-4">
@@ -151,32 +182,44 @@ export function GovernanceMonitor() {
       <//>
 
       <${Card} title="Tool Rejections (${data?.window_minutes ?? windowMinutes.value}m)">
-        ${(data?.tool_rejections ?? []).length > 0
-          ? html`
-            <div class="overflow-x-auto">
-              <table class="w-full text-[12px]">
-                <thead>
-                  <tr class="text-left text-[var(--text-muted)] border-b border-[var(--card-border)]">
-                    <th class="py-1.5 pr-4 font-medium">Tool</th>
-                    <th class="py-1.5 pr-4 font-medium">Reason</th>
-                    <th class="py-1.5 font-medium text-right">Count</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${data?.tool_rejections.map(r => html`
-                    <tr class="border-b border-[var(--card-border)]/30 text-[var(--text-body)]">
-                      <td class="py-1.5 pr-4 font-mono text-[11px]">${r.tool}</td>
-                      <td class="py-1.5 pr-4">
-                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-panel-hover)]">${r.reason}</span>
-                      </td>
-                      <td class="py-1.5 text-right font-medium text-[var(--text-strong)]">${r.count}</td>
-                    </tr>
-                  `)}
-                </tbody>
-              </table>
-            </div>
-          `
-          : html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`}
+        <div class="flex flex-col gap-2">
+          <input
+            type="search"
+            value=${query.value}
+            placeholder="tool / reason 필터"
+            aria-label="Tool rejection 필터"
+            onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+            class="min-w-[160px] max-w-[240px] rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)]"
+          />
+          ${allRejections.length === 0
+            ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`
+            : isFiltering && visibleRejections.length === 0
+              ? html`<div class="py-4 text-center text-[11px] text-[var(--text-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
+              : html`
+                <div class="overflow-x-auto">
+                  <table class="w-full text-[12px]">
+                    <thead>
+                      <tr class="text-left text-[var(--text-muted)] border-b border-[var(--card-border)]">
+                        <th class="py-1.5 pr-4 font-medium">Tool</th>
+                        <th class="py-1.5 pr-4 font-medium">Reason</th>
+                        <th class="py-1.5 font-medium text-right">Count</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${visibleRejections.map(r => html`
+                        <tr class="border-b border-[var(--card-border)]/30 text-[var(--text-body)]">
+                          <td class="py-1.5 pr-4 font-mono text-[11px]">${r.tool}</td>
+                          <td class="py-1.5 pr-4">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-panel-hover)]">${r.reason}</span>
+                          </td>
+                          <td class="py-1.5 text-right font-medium text-[var(--text-strong)]">${r.count}</td>
+                        </tr>
+                      `)}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+        </div>
       <//>
     </div>
   `

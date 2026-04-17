@@ -1,3 +1,11 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/provider_adapter.ml
+  - lib/provider_adapter.mli
+---
+
 # Provider Adapter Runbook
 
 이 문서는 `MASC`에서 provider/runtime/auth를 어떻게 나누는지에 대한 SSOT다.

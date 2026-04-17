@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/env_config.mli
+  - lib/config/
+---
+
 # Environment Variable Contract
 
 This document defines the operator-facing contract for environment variables in

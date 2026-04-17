@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - ROADMAP.md
+  - dune-project
+  - CHANGELOG.md
+---
+
 # masc-mcp Versioned Roadmap — Feature Trains First
 
 > Last updated: 2026-04-09

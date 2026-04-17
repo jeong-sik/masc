@@ -1,3 +1,13 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/oas.ml
+  - lib/oas_worker.ml
+  - lib/verifier_oas.ml
+  - lib/memory_oas_bridge.ml
+---
+
 # OAS-MASC Boundary Contract
 
 OAS (OCaml Agent SDK)와 MASC-MCP 사이의 역할 경계를 정의한다.

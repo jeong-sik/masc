@@ -1,3 +1,10 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/config/feature_flag_registry.ml
+---
+
 # ADR-003: Feature Flag Registry Management - 중복과 불일치 방지 전략
 
 **Status**: Accepted

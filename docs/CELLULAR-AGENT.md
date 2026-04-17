@@ -1,3 +1,10 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/handover_eio.ml
+---
+
 # Context Handoff Pattern
 
 **Legacy name**: Cellular Agent Pattern

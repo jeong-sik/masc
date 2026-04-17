@@ -1,3 +1,10 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/capability_registry.ml
+---
+
 # Capability Registry SSOT
 
 This document defines the canonical split between:

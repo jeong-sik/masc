@@ -899,6 +899,18 @@ let handle_keeper_status ctx args : tool_result =
           Keeper_types.tool_access_custom_allowlist m.tool_access
           |> Option.value ~default:[]
         in
+         let sandbox_last_error =
+           match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
+           | Some entry -> entry.last_error
+           | None -> None
+         in
+         let effective_sandbox_image =
+           if m.sandbox_profile = Docker_hardened
+              || (m.sandbox_profile = Legacy_local
+                  && Env_config_keeper.DockerPlayground.enabled)
+           then Some Env_config_keeper.KeeperSandbox.docker_image
+           else None
+         in
          let runtime_blocker_fields =
           runtime_blocker_fields_json ctx.config m
          in
@@ -946,6 +958,16 @@ let handle_keeper_status ctx args : tool_result =
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
            ("allowed_tool_count", `Int (List.length allowed_tools));
+           ("sandbox_profile",
+             `String (sandbox_profile_to_string m.sandbox_profile));
+           ("network_mode",
+             `String (network_mode_to_string m.network_mode));
+           ("shared_memory_scope",
+             `String (shared_memory_scope_to_string m.shared_memory_scope));
+           ("sandbox_last_error",
+             Json_util.string_opt_to_json sandbox_last_error);
+           ("effective_sandbox_image",
+             Json_util.string_opt_to_json effective_sandbox_image);
            ("tool_policy_mode",
              `String
                (match Keeper_types.tool_access_custom_allowlist m.tool_access with
@@ -1001,6 +1023,14 @@ let handle_keeper_status ctx args : tool_result =
            ("drift", drift_surface_json ());
            ("policy", `Assoc [
              ("voice_tools_available", `Bool (List.mem "keeper_voice_speak" allowed_tools));
+             ("sandbox_profile",
+               `String (sandbox_profile_to_string m.sandbox_profile));
+             ("network_mode",
+               `String (network_mode_to_string m.network_mode));
+             ("shared_memory_scope",
+               `String (shared_memory_scope_to_string m.shared_memory_scope));
+             ("effective_sandbox_image",
+               Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);
            ("allowed_tools", string_list_to_json allowed_tools);
             ("available_internal_tools", string_list_to_json all_internal_tools);
@@ -1109,7 +1139,16 @@ let handle_keeper_status ctx args : tool_result =
            "execution_context", `Assoc [
              ("playground_path", `String playground_rel);
              ("default_cwd", `String playground_abs);
+             ("private_workspace_root", `String playground_abs);
              ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
+             ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
+             ("network_mode", `String (network_mode_to_string m.network_mode));
+             ("shared_memory_scope",
+               `String (shared_memory_scope_to_string m.shared_memory_scope));
+             ("sandbox_last_error",
+               Json_util.string_opt_to_json sandbox_last_error);
+             ("effective_sandbox_image",
+               Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
                let cache_path = Filename.concat playground_abs

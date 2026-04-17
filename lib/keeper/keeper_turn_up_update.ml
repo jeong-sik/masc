@@ -226,9 +226,22 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     max_context_override = (match p.max_context_override_opt with Some _ as v -> v | None -> old.max_context_override);
     updated_at = now_iso ();
   } in
-  (match write_meta ctx.config updated with
-   | Error e -> (false, e)
-   | Ok () ->
-     stop_keepalive ~base_path:ctx.config.base_path updated.name;
-     start_keepalive ctx updated;
-     (true, Yojson.Safe.to_string (meta_to_json updated)))
+  match
+    validate_sandbox_settings
+      ~config:ctx.config
+      ~keeper_name:p.name
+      ~sandbox_profile
+      ~network_mode
+      ~allowed_paths
+  with
+  | Error err ->
+      Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
+        p.name err;
+      (false, err)
+  | Ok () ->
+      (match write_meta ctx.config updated with
+       | Error e -> (false, e)
+       | Ok () ->
+         stop_keepalive ~base_path:ctx.config.base_path updated.name;
+         start_keepalive ctx updated;
+         (true, Yojson.Safe.to_string (meta_to_json updated)))

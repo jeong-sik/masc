@@ -34,6 +34,7 @@ import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight }
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
+import { ConnectorKeyboardShortcuts } from './connector-keyboard-shortcuts'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -1201,6 +1202,7 @@ export function ConnectorStatusPanel() {
       ${!filterId
         ? html`<${ConnectorOverviewStrip} connectors=${visibleConnectors} keeperCount=${snapshot.keepers.length} />`
         : null}
+      ${!filterId ? html`<${ConnectorKeyboardShortcuts} />` : null}
 
       ${visibleConnectors.map(c => html`
         <${ConnectorLivePanel}

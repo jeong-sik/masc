@@ -11,6 +11,10 @@ import {
   parseKeeperCompositeSnapshot,
   type KeeperCompositeSnapshot,
 } from './schemas/keeper-composite'
+import {
+  safeParseKeeperChatHistoryMessage,
+  type KeeperChatHistoryMessage,
+} from './schemas/keeper-chat-history'
 
 export type {
   KeeperCompositeSnapshot,
@@ -28,6 +32,11 @@ export {
   parseKeeperCompositeSnapshot,
   CompositeSchemaDriftError,
 } from './schemas/keeper-composite'
+export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
+export {
+  KeeperChatHistoryMessageSchema,
+  safeParseKeeperChatHistoryMessage,
+} from './schemas/keeper-chat-history'
 
 // --- Types ---
 
@@ -206,12 +215,6 @@ export async function streamKeeperMessage(
 
 // --- Chat history ---
 
-export interface KeeperChatHistoryMessage {
-  role: string
-  content: string
-  ts: number
-}
-
 export async function fetchKeeperChatHistory(
   name: string,
 ): Promise<KeeperChatHistoryMessage[]> {
@@ -223,13 +226,12 @@ export async function fetchKeeperChatHistory(
     if (!resp.ok) return []
     const data: unknown = await resp.json()
     if (!Array.isArray(data)) return []
-    return data.filter(
-      (m): m is KeeperChatHistoryMessage =>
-        isRecord(m) &&
-        typeof m.role === 'string' &&
-        typeof m.content === 'string' &&
-        typeof m.ts === 'number',
-    )
+    // Per-item safeParse: drop invalid entries silently to match the prior
+    // hand-rolled type guard. Individual failures are non-fatal; operators
+    // keep seeing a clean transcript during backend drift windows.
+    return data
+      .map(safeParseKeeperChatHistoryMessage)
+      .filter((m): m is KeeperChatHistoryMessage => m !== null)
   } catch {
     return []
   }

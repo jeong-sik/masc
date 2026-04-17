@@ -114,10 +114,31 @@ let try_acquire url =
 
 (* ── Env parsing ────────────────────────────────────────────────── *)
 
-let int_of_env ?(default = 0) name =
+type env_int_value =
+  | Missing
+  | Blank
+  | Parsed of int
+  | Invalid of string
+
+let read_env_int name =
   match Sys.getenv_opt name with
-  | None | Some "" -> default
-  | Some s -> (try int_of_string (String.trim s) with _ -> default)
+  | None -> Missing
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then Blank
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some value -> Parsed value
+      | None -> Invalid raw
+
+let int_of_env ?(default = 0) name =
+  match read_env_int name with
+  | Missing
+  | Blank -> default
+  | Parsed value -> value
+  | Invalid raw ->
+    Log.Misc.warn "Invalid int for %s=%S, using default %d" name raw default;
+    default
 
 let ollama_default_max () =
   max 1 (int_of_env ~default:1 "MASC_OLLAMA_MAX_CONCURRENT")
@@ -126,23 +147,51 @@ let cli_default_max () =
   max 1 (int_of_env ~default:1 "MASC_CLI_MAX_CONCURRENT")
 
 (* Parse "url=max,url=max,..." from MASC_CLIENT_CAPACITY. *)
+type capacity_entry_error =
+  | Missing_separator of string
+  | Empty_url of string
+  | Invalid_capacity of string
+  | Non_positive_capacity of int
+
+let capacity_entry_error_message = function
+  | Missing_separator raw ->
+    Printf.sprintf "missing '=' in %S" raw
+  | Empty_url raw ->
+    Printf.sprintf "empty url in %S" raw
+  | Invalid_capacity raw ->
+    Printf.sprintf "invalid capacity %S" raw
+  | Non_positive_capacity value ->
+    Printf.sprintf "capacity must be >= 1 (got %d)" value
+
+let parse_capacity_entry raw_item =
+  let item = String.trim raw_item in
+  if item = "" then Ok None
+  else
+    match String.index_opt item '=' with
+    | None -> Error (Missing_separator item)
+    | Some idx ->
+      let url = String.trim (String.sub item 0 idx) in
+      let raw_capacity =
+        String.trim
+          (String.sub item (idx + 1) (String.length item - idx - 1))
+      in
+      if url = "" then Error (Empty_url item)
+      else
+        match Safe_ops.int_of_string_safe raw_capacity with
+        | Some n when n >= 1 -> Ok (Some (url, n))
+        | Some n -> Error (Non_positive_capacity n)
+        | None -> Error (Invalid_capacity raw_capacity)
+
 let parse_capacity_env s =
   String.split_on_char ',' s
   |> List.filter_map (fun item ->
-         let item = String.trim item in
-         if item = "" then None
-         else
-           match String.index_opt item '=' with
-           | None -> None
-           | Some idx ->
-             let url = String.trim (String.sub item 0 idx) in
-             let rest =
-               String.trim
-                 (String.sub item (idx + 1) (String.length item - idx - 1))
-             in
-             match int_of_string_opt rest with
-             | Some n when n >= 1 && url <> "" -> Some (url, n)
-             | _ -> None)
+         match parse_capacity_entry item with
+         | Ok (Some entry) -> Some entry
+         | Ok None -> None
+         | Error err ->
+           Log.Misc.warn "Ignoring invalid MASC_CLIENT_CAPACITY entry: %s"
+             (capacity_entry_error_message err);
+           None)
 
 let () =
   match Sys.getenv_opt "MASC_CLIENT_CAPACITY" with

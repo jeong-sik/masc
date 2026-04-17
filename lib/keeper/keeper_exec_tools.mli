@@ -129,6 +129,22 @@ val notify_tool_call_observers :
 val tool_search_fn :
   (query:string -> max_results:int -> Yojson.Safe.t) ref
 
+(** Classification of a keeper tool result payload for circuit-breaker
+    bookkeeping.
+
+    Plain text is treated as a valid success path because some keeper tools
+    intentionally return markdown/text on success. JSON-looking payloads
+    (leading [{] or [[] after whitespace) are parsed so malformed structured
+    output does not silently reset the breaker. *)
+type tool_result_payload =
+  | Structured_success
+  | Structured_error
+  | Plain_text
+  | Malformed_structured of string
+
+(** Inspect a keeper tool result payload without applying side effects. *)
+val classify_tool_result_payload : string -> tool_result_payload
+
 (** Tag-based dispatch callback for masc_* tools without handler registry entries.
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.
     See #4579. *)

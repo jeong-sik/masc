@@ -6,8 +6,18 @@ import {
   uniqueToolNames,
   keeperRuntimeName,
   mergeRosterAgent,
+  filterAgentRoster,
 } from './agent-roster'
 import type { Agent } from '../types'
+
+function makeAgent(overrides: Partial<Agent> = {}): Agent {
+  return {
+    name: 'agent-x',
+    status: 'active',
+    current_task: null,
+    ...overrides,
+  }
+}
 
 describe('runtimeBadgeClass', () => {
   it('returns green classes for active', () => {
@@ -200,5 +210,68 @@ describe('mergeRosterAgent', () => {
     const next: Agent = { ...nextAgent, capabilities: ['tool-b'] }
     const result = mergeRosterAgent(existing, next)
     expect(result.capabilities).toEqual(['tool-b'])
+  })
+})
+
+describe('filterAgentRoster', () => {
+  const rows: Agent[] = [
+    makeAgent({ name: 'keeper-alpha', model: 'gpt-5.4', current_task: 'review PR #42' }),
+    makeAgent({ name: 'keeper-beta', model: 'claude-sonnet-4-6', current_task: null, koreanName: '베타' }),
+    makeAgent({ name: 'watcher-gamma', current_task: 'compact memory' }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterAgentRoster(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterAgentRoster(rows, '   ')).toBe(rows)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterAgentRoster(rows, '  alpha  ')).toHaveLength(1)
+  })
+
+  it('matches by name substring (case-insensitive)', () => {
+    const result = filterAgentRoster(rows, 'KEEPER')
+    expect(result).toHaveLength(2)
+    expect(result.map(r => r.name)).toEqual(['keeper-alpha', 'keeper-beta'])
+  })
+
+  it('matches by model substring', () => {
+    const result = filterAgentRoster(rows, 'claude')
+    expect(result.map(r => r.name)).toEqual(['keeper-beta'])
+  })
+
+  it('matches by current_task substring', () => {
+    const result = filterAgentRoster(rows, 'compact')
+    expect(result.map(r => r.name)).toEqual(['watcher-gamma'])
+  })
+
+  it('matches by koreanName substring', () => {
+    const result = filterAgentRoster(rows, '베타')
+    expect(result.map(r => r.name)).toEqual(['keeper-beta'])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterAgentRoster(rows, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = rows.slice()
+    filterAgentRoster(rows, 'alpha')
+    expect(rows).toEqual(copy)
+  })
+
+  it('handles rows with null / missing optional fields safely', () => {
+    const input: Agent[] = [makeAgent({ name: 'orphan' })]
+    expect(filterAgentRoster(input, 'orphan')).toHaveLength(1)
+    expect(filterAgentRoster(input, 'anything-else')).toHaveLength(0)
+  })
+
+  it('handles empty rows array', () => {
+    const empty: Agent[] = []
+    expect(filterAgentRoster(empty, 'foo')).toHaveLength(0)
+    expect(filterAgentRoster(empty, '')).toBe(empty)
   })
 })

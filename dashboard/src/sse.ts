@@ -13,6 +13,7 @@ import {
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-state'
 import { applyOasRuntimeEvent } from './oas-runtime-store'
+import { parseSSEMessage } from './schemas/sse'
 
 import {
   RECONNECT_BASE_MS,
@@ -250,17 +251,29 @@ export function connectSSE(): void {
   }
 
   es.onmessage = (e: MessageEvent) => {
+    let raw: unknown
     try {
-      const raw = JSON.parse(e.data as string)
-      // Unwrap JSON-RPC notifications: extract params as the actual event.
-      // Server wraps events as {"jsonrpc":"2.0","method":"masc/event","params":{type,agent,...}}
-      const event: SSEEvent = (raw.jsonrpc && raw.params?.type) ? raw.params : raw
-      eventCount.value++
-      lastEvent.value = event
-      handleEvent(event)
+      raw = JSON.parse(e.data as string)
     } catch {
       // Non-JSON SSE data (e.g., heartbeat text)
+      return
     }
+    // Unwrap JSON-RPC notifications: extract params as the actual event.
+    // Server wraps events as {"jsonrpc":"2.0","method":"masc/event","params":{type,agent,...}}
+    const rawRecord = raw as { jsonrpc?: unknown; params?: { type?: unknown } }
+    const candidate: unknown =
+      rawRecord && rawRecord.jsonrpc && rawRecord.params?.type
+        ? rawRecord.params
+        : raw
+    const parsed = parseSSEMessage(candidate)
+    if (!parsed) return
+    // SSEMessage's field set is a superset of SSEEvent at runtime — the
+    // schema mirrors the interface. Cast here keeps downstream callers
+    // unchanged while Phase 2 migrates them to the schema-derived type.
+    const event = parsed as unknown as SSEEvent
+    eventCount.value++
+    lastEvent.value = event
+    handleEvent(event)
   }
 }
 

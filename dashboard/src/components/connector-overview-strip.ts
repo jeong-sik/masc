@@ -441,12 +441,48 @@ export function summarizeConnectorStrip(
   }
 }
 
-function StatusSummaryLine({ summary }: { summary: ConnectorStripSummary }) {
+/** Pure: list the display names of KNOWN connectors that are currently
+    offline, in the canonical tile order. Returns [] when everything is
+    up, or when a connector isn't advertised yet (we only mark
+    offline once we've observed the connector being non-available —
+    \"missing from the connectors array\" is ambiguous, could be
+    bootstrapping rather than offline).
+
+    Why this exists: StatusSummaryLine says \"3 of 4 sidecars running\"
+    but doesn't name the missing 1 — the operator has to scan four
+    tiles below to find it. This lets the summary line annotate which
+    specific connector(s) are offline, matching Statuspage's
+    \"2 components degraded: Payments, API\" convention. */
+export function offlineConnectorNames(
+  connectors: GateConnectorInfo[],
+): string[] {
+  const out: string[] = []
+  for (const id of KNOWN_CONNECTOR_IDS) {
+    const c = findConnector(connectors, id)
+    if (c === null) continue // not yet observed — don't assert \"offline\"
+    if (c.available === true) continue
+    out.push(CONNECTOR_DISPLAY_NAMES[id] ?? id)
+  }
+  return out
+}
+
+/** Pure: compact label for the offline-connector annotation. Returns
+    null when nothing to annotate. */
+export function formatOfflineConnectorLabel(
+  offlineNames: readonly string[],
+): string | null {
+  if (offlineNames.length === 0) return null
+  if (offlineNames.length <= 2) return `${offlineNames.join(' · ')} offline`
+  return `${offlineNames.slice(0, 2).join(' · ')} · +${offlineNames.length - 2} offline`
+}
+
+function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSummary; connectors: GateConnectorInfo[] }) {
   // One quiet aggregate sentence — always on, never loud. Sits between
   // the loud banners (celebration / incident) and the action row, so the
   // operator always has baseline numbers even when neither banner fires.
   const now = livePulseNowMs.value
   const lastTick = lastHeartbeatTickMs.value
+  const offlineLabel = formatOfflineConnectorLabel(offlineConnectorNames(connectors))
   return html`
     <div
       class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
@@ -461,6 +497,13 @@ function StatusSummaryLine({ summary }: { summary: ConnectorStripSummary }) {
       <span>
         <span class="font-semibold text-[var(--text-body)]" data-strip-summary-sidecars>${summary.sidecarUp} of ${summary.sidecarTotal}</span>
         <span> sidecars running</span>
+        ${offlineLabel !== null
+          ? html`<span
+              class="ml-1 text-rose-300/80"
+              data-strip-summary-offline-names
+              title="현재 offline인 커넥터 이름"
+            > · ${offlineLabel}</span>`
+          : null}
       </span>
       <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
       <span>
@@ -539,7 +582,7 @@ export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProp
     >
       <${IncidentBanner} droppedIds=${droppedIds} />
       <${CelebrationBanner} connectedCount=${connectedCount} />
-      <${StatusSummaryLine} summary=${summary} />
+      <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
       <${BulkActions} connectors=${connectors} />
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         ${KNOWN_CONNECTOR_IDS.map(id => html`

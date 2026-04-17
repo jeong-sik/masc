@@ -59,6 +59,8 @@ logs/
 # Dashboard SPA (Vite)
 dashboard/node_modules/
 dashboard/package-lock.json
+dashboard/bun.lock
+dashboard/bun.lockb
 dashboard/dist/
 assets/dashboard/
 viewer/dist-build/

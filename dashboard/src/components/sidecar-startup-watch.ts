@@ -15,7 +15,18 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useLayoutEffect, useState } from 'preact/hooks'
 import { openSidecarLogs } from './sidecar-log-viewer'
+
+/** How often the live counter in the banner re-renders. 1000ms matches
+    the unit the banner displays ("N초 경과"), so the counter ticks
+    precisely when the displayed seconds change.
+
+    Reference — Grafana live counter + Stripe Dashboard "processing for
+    N seconds" chrome: watching the number tick is how the operator
+    knows the system hasn't silently stalled on them. Cheap: setInterval
+    inside a component that only mounts during the 55s warning window. */
+const LIVE_TICK_MS = 1000
 
 const lastStartAt = signal<Record<string, number>>({})
 
@@ -64,7 +75,21 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
   sidecarUp: boolean
 }) {
   const startAt = lastStartAt.value[connectorId] ?? null
-  if (!shouldShowStartupWarning(startAt, sidecarUp)) return null
+  const visible = shouldShowStartupWarning(startAt, sidecarUp)
+
+  // Local tick — causes the counter line to re-render once a second
+  // while the banner is visible, independent of the parent's poll
+  // cadence. Layout-effect variant so the interval is already armed by
+  // the time a test dispatches a clock advance (keeps happy-dom tests
+  // deterministic without rAF juggling).
+  const [, setTick] = useState(0)
+  useLayoutEffect(() => {
+    if (!visible) return
+    const id = setInterval(() => setTick(t => t + 1), LIVE_TICK_MS)
+    return () => clearInterval(id)
+  }, [visible])
+
+  if (!visible) return null
 
   const elapsedSec = startAt !== null ? Math.floor((Date.now() - startAt) / 1000) : 0
 
@@ -75,7 +100,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
     >
       <span class="text-base leading-none" aria-hidden="true">⚠</span>
       <div class="min-w-0 flex-1">
-        <div class="font-semibold">기동 응답 없음 (${elapsedSec}s 경과)</div>
+        <div class="font-semibold" data-startup-warning-elapsed=${String(elapsedSec)}>기동 응답 없음 (${elapsedSec}s 경과)</div>
         <div class="text-[10px] opacity-90">
           Start 요청은 보냈지만 sidecar가 online으로 올라오지 않았습니다.
           토큰 검증 실패 / 의존성 누락이 가장 흔한 원인 — 로그를 확인하세요.

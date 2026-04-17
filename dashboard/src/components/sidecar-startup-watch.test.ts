@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import {
@@ -77,6 +77,55 @@ describe('StartupCheckBanner rendering', () => {
   it('renders nothing when no attempt has been marked', () => {
     render(html`<${StartupCheckBanner} connectorId="discord" sidecarUp=${false} />`, container)
     expect(container.querySelector('[data-startup-warning]')).toBeNull()
+  })
+
+  it('elapsed counter renders once past grace, pinned to startAt-based seconds', () => {
+    const t0 = 1_700_000_000_000
+    vi.useFakeTimers()
+    vi.setSystemTime(t0)
+    try {
+      markStartAttempt('discord')
+      vi.setSystemTime(t0 + 6_000) // 6s past grace (GRACE=5s)
+      render(html`<${StartupCheckBanner} connectorId="discord" sidecarUp=${false} />`, container)
+      const elapsed = container.querySelector('[data-startup-warning-elapsed]')
+      expect(elapsed).toBeTruthy()
+      expect(elapsed!.getAttribute('data-startup-warning-elapsed')).toBe('6')
+      expect(elapsed!.textContent).toContain('6s')
+    } finally {
+      vi.useRealTimers()
+      resetStartupWatchState()
+    }
+  })
+
+  it('live counter ticks every second while the banner is mounted', async () => {
+    const t0 = 1_700_000_000_000
+    vi.useFakeTimers()
+    vi.setSystemTime(t0)
+    try {
+      markStartAttempt('discord')
+      vi.setSystemTime(t0 + 6_000)
+      render(html`<${StartupCheckBanner} connectorId="discord" sidecarUp=${false} />`, container)
+      // Wait one microtask so layout-effect's setInterval is armed.
+      await Promise.resolve()
+      expect(
+        container.querySelector('[data-startup-warning-elapsed]')!.getAttribute('data-startup-warning-elapsed'),
+      ).toBe('6')
+
+      // advanceTimersByTimeAsync moves the fake system clock AND fires
+      // scheduled timers, so we don't need a separate setSystemTime.
+      await vi.advanceTimersByTimeAsync(2000) // now t0 + 8s
+      expect(
+        container.querySelector('[data-startup-warning-elapsed]')!.getAttribute('data-startup-warning-elapsed'),
+      ).toBe('8')
+
+      await vi.advanceTimersByTimeAsync(4000) // now t0 + 12s
+      expect(
+        container.querySelector('[data-startup-warning-elapsed]')!.getAttribute('data-startup-warning-elapsed'),
+      ).toBe('12')
+    } finally {
+      vi.useRealTimers()
+      resetStartupWatchState()
+    }
   })
 
   it('dismiss (×) button clears the attempt', () => {

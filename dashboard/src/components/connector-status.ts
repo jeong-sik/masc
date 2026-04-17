@@ -1039,7 +1039,11 @@ export function ConnectorStatusPanel() {
         </div>
         <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
           ${!filterId
-            ? html`<div>${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length} connected</div>`
+            ? (() => {
+                const allUp = knownConnectedCount === KNOWN_CONNECTOR_IDS.length
+                const tone = allUp ? 'text-emerald-300' : ''
+                return html`<div class=${tone}>${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length} connected</div>`
+              })()
             : null}
           <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
           <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>

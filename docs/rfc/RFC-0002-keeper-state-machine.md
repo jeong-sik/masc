@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_registry.ml
+  - lib/keeper/keeper_supervisor.ml
+---
+
 # RFC-0002: Keeper 11-State Machine + Det/NonDet Boundary Formalization
 
 **Status**: Draft

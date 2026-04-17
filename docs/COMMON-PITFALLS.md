@@ -1,3 +1,11 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/
+  - test/
+---
+
 # Common Pitfalls
 
 Recurring mistakes from commit history analysis. Check this before submitting PRs.

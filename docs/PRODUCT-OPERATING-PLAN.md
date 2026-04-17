@@ -1,3 +1,12 @@
+---
+status: live
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/
+  - lib/mcp_server.ml
+  - lib/keeper/keeper_supervisor.ml
+---
+
 # Product Operating Plan
 
 > Current package version: v0.9.9

@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_decision_audit.ml
+  - lib/server/
+  - dashboard/src/
+---
+
 # Dashboard FSM Visibility Redesign
 
 **Status**: Design (기획 단계)

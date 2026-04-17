@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/cdal/
+  - lib/keeper/
+  - lib/eval_gate.ml
+---
+
 # Error Handling and Operations Spec
 
 **Status**: Draft, production prerequisite

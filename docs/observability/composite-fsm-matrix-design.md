@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_composite_observer.ml
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_registry.ml
+---
+
 # Composite FSM Matrix — Design
 
 **Status**: Draft, iteration 1 (cron `cbf0ca92`, 20 min loop).

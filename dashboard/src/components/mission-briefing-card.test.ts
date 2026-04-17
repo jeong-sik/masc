@@ -366,3 +366,104 @@ describe('MissionBriefingCard', () => {
     expect(payload?.message).toContain('[상황 보고] mission-judge')
   }, 20000)
 })
+
+describe('filterMetadataGaps', () => {
+  type Gap = {
+    kind: string
+    summary: string
+    scope_type: 'session' | 'keeper' | 'agent'
+    scope_id?: string | null
+    severity: 'info' | 'watch'
+  }
+
+  const sampleGaps = (): Gap[] => [
+    {
+      kind: 'missing_model',
+      summary: '판단 키퍼 모델이 비어 있습니다.',
+      scope_type: 'keeper',
+      scope_id: 'live-judge',
+      severity: 'watch',
+    },
+    {
+      kind: 'stale_snapshot',
+      summary: '세션 스냅샷이 오래되었습니다.',
+      scope_type: 'session',
+      scope_id: 'ts-4242',
+      severity: 'info',
+    },
+    {
+      kind: 'no_briefing',
+      summary: 'Agent briefing has been missing for GraphRAG.',
+      scope_type: 'agent',
+      scope_id: null,
+      severity: 'info',
+    },
+  ]
+
+  it('returns the input reference when query is empty', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const gaps = sampleGaps()
+    expect(filterMetadataGaps(gaps, '')).toBe(gaps)
+  })
+
+  it('returns the input reference when query is whitespace only', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const gaps = sampleGaps()
+    expect(filterMetadataGaps(gaps, '   \t\n ')).toBe(gaps)
+  })
+
+  it('trims the query before matching', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const result = filterMetadataGaps(sampleGaps(), '  live-judge  ')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.scope_id).toBe('live-judge')
+  })
+
+  it('matches case-insensitively on summary', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const result = filterMetadataGaps(sampleGaps(), 'GRAPHRAG')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.kind).toBe('no_briefing')
+  })
+
+  it('matches a substring of scope_id', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const result = filterMetadataGaps(sampleGaps(), 'ts-42')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.scope_id).toBe('ts-4242')
+  })
+
+  it('matches a substring of kind', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const result = filterMetadataGaps(sampleGaps(), 'stale')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.kind).toBe('stale_snapshot')
+  })
+
+  it('matches severity exactly for watch keyword', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const result = filterMetadataGaps(sampleGaps(), 'watch')
+    expect(result).toHaveLength(1)
+    expect(result[0]?.severity).toBe('watch')
+  })
+
+  it('matches severity exactly for info keyword and returns both info gaps', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const result = filterMetadataGaps(sampleGaps(), 'info')
+    expect(result).toHaveLength(2)
+    expect(result.every(item => item.severity === 'info')).toBe(true)
+  })
+
+  it('returns an empty array when nothing matches', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    expect(filterMetadataGaps(sampleGaps(), 'zzzz-nonexistent')).toEqual([])
+  })
+
+  it('does not mutate the input array', async () => {
+    const { filterMetadataGaps } = await import('./mission-briefing-card')
+    const gaps = sampleGaps()
+    const snapshot = gaps.map(item => ({ ...item }))
+    filterMetadataGaps(gaps, 'live-judge')
+    expect(gaps).toEqual(snapshot)
+  })
+})

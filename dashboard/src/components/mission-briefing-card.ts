@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TagBadge } from './common/tag-badge'
@@ -29,12 +29,44 @@ import {
 } from '../workflow-context'
 import type { DashboardWorkflowContext } from '../workflow-context'
 import type {
+  DashboardMissionBriefingMetadataGap,
   DashboardMissionBriefingResponse,
   DashboardMissionKeeperBrief,
   DashboardMissionResponse,
   Keeper,
   OperatorSnapshot,
 } from '../types'
+
+/**
+ * Pure filter for mission briefing metadata gaps.
+ *
+ * Case-insensitive substring match on `summary`, `scope_id`, and `kind` so
+ * the operator can locate a gap by a keyword from either the description
+ * text, the scope identifier (session/keeper/agent id), or the gap kind
+ * string. Severity is matched exactly when the query equals `info` or
+ * `watch` — partial tokens like `wa` do not collapse severity matches,
+ * which keeps the keyword axis clear.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * `useMemo` keeps identity for the non-filtering path.
+ *
+ * Input is never mutated; the gap array is treated as readonly.
+ */
+export function filterMetadataGaps(
+  gaps: readonly DashboardMissionBriefingMetadataGap[],
+  query: string,
+): readonly DashboardMissionBriefingMetadataGap[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return gaps
+  const severityMatch = needle === 'info' || needle === 'watch'
+  return gaps.filter(gap => {
+    if (severityMatch && gap.severity === needle) return true
+    if (gap.summary && gap.summary.toLowerCase().includes(needle)) return true
+    if (gap.scope_id && gap.scope_id.toLowerCase().includes(needle)) return true
+    if (gap.kind && gap.kind.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 export interface LiveJudgeTarget {
   name: string
@@ -230,6 +262,14 @@ export function MissionBriefingCard() {
     briefing?.status === 'error'
     || (briefing?.status === 'unavailable' && !briefing?.cached)
 
+  const [gapQuery, setGapQuery] = useState('')
+  const rawGaps = briefing?.metadata_gaps ?? []
+  const filteredGaps = useMemo(
+    () => filterMetadataGaps(rawGaps, gapQuery),
+    [rawGaps, gapQuery],
+  )
+  const isFilteringGaps = gapQuery.trim() !== ''
+
   useEffect(() => {
     if (briefing || missionBriefingLoading.value || missionBriefingError.value) return
     const controller = new AbortController()
@@ -318,18 +358,34 @@ export function MissionBriefingCard() {
       ${briefing && briefing.metadata_gaps.length > 0
         ? html`
             <details class="pt-2 border-t border-[var(--white-6)] mt-4">
-              <summary>관측 공백 (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
-              <div class="flex flex-col gap-3 mt-3">
-                ${briefing.metadata_gaps.map(item => html`
-                  <article class="p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] grid gap-3 ${item.severity === 'watch' ? 'warn' : ''}">
-                    <div class="flex justify-between gap-3 items-start flex-wrap">
-                      <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
-                      <${StatusChip} label=${statusLabel(item.severity)} tone=${item.severity === 'watch' ? 'warn' : ''} />
-                    </div>
-                    <p class="m-0 text-[var(--text-body)] leading-snug">${item.summary}</p>
-                  </article>
-                `)}
+              <summary>관측 공백 (${isFilteringGaps
+                ? `${filteredGaps.length}/${briefing.metadata_gap_count ?? briefing.metadata_gaps.length}`
+                : (briefing.metadata_gap_count ?? briefing.metadata_gaps.length)})</summary>
+              <div class="mt-3">
+                <input
+                  type="search"
+                  value=${gapQuery}
+                  onInput=${(event: Event) => setGapQuery((event.currentTarget as HTMLInputElement).value)}
+                  placeholder="관측 공백 필터 (summary, scope, info/watch...)"
+                  class="w-full px-3 py-2 rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-body)] text-sm"
+                  aria-label="관측 공백 필터"
+                />
               </div>
+              ${filteredGaps.length === 0
+                ? html`<${EmptyState} message=${`필터 결과 없음 (${briefing.metadata_gaps.length} items)`} compact />`
+                : html`
+                    <div class="flex flex-col gap-3 mt-3">
+                      ${filteredGaps.map(item => html`
+                        <article class="p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] grid gap-3 ${item.severity === 'watch' ? 'warn' : ''}">
+                          <div class="flex justify-between gap-3 items-start flex-wrap">
+                            <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
+                            <${StatusChip} label=${statusLabel(item.severity)} tone=${item.severity === 'watch' ? 'warn' : ''} />
+                          </div>
+                          <p class="m-0 text-[var(--text-body)] leading-snug">${item.summary}</p>
+                        </article>
+                      `)}
+                    </div>
+                  `}
             </details>
           `
         : null}

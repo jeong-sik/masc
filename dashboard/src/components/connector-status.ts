@@ -27,6 +27,7 @@ import { TextInput } from './common/input'
 import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
+import { ConnectorOnboardingGrid } from './connector-onboarding'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -50,11 +51,23 @@ function activeConnectorFilter(): string | null {
 // Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
 // (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
-interface SidecarCommands {
+export interface SidecarCommands {
   start: string
   tail: string
   status: string
   stop: string
+}
+
+// Known connectors with first-class onboarding/lifecycle support. Source of
+// truth: the four sidecars under /sidecars/ and config/navigation.ts.
+export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
+export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
+
+export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
+  discord: 'Discord',
+  imessage: 'iMessage',
+  slack: 'Slack',
+  telegram: 'Telegram',
 }
 
 const SIDECAR_DIRS: Record<string, string> = {
@@ -64,7 +77,7 @@ const SIDECAR_DIRS: Record<string, string> = {
   telegram: 'sidecars/telegram-bot',
 }
 
-function sidecarCommands(connectorId: string): SidecarCommands {
+export function sidecarCommands(connectorId: string): SidecarCommands {
   const dir = SIDECAR_DIRS[connectorId] ?? `sidecars/${connectorId}-bot`
   return {
     start: `cd ${dir} && ./run.sh`,
@@ -85,7 +98,7 @@ const CONNECTOR_ACCENT_RGB: Record<string, string> = {
   telegram: '34,158,217',  // brand cyan
 }
 
-function connectorAccentStyle(connectorId: string): string {
+export function connectorAccentStyle(connectorId: string): string {
   const rgb = CONNECTOR_ACCENT_RGB[connectorId] ?? '120,130,150'
   return `background:linear-gradient(135deg,rgba(${rgb},0.16),rgba(${rgb},0.04))`
 }
@@ -166,7 +179,7 @@ const CHANNEL_ICONS: Record<string, string> = {
   internal: '\u{2699}',
 }
 
-function channelIcon(ch: string): string {
+export function channelIcon(ch: string): string {
   return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
 
@@ -997,7 +1010,13 @@ export function ConnectorStatusPanel() {
     `
   }
 
-  if (!d && visibleConnectors.length === 0) return null
+  if (!d && visibleConnectors.length === 0) {
+    // Cold start: gate has not advertised any connector yet, and no per-bridge
+    // filter is active. Surface the 4-card onboarding grid so a new operator
+    // sees what bridges exist and how to start each one.
+    if (!filterId) return html`<${ConnectorOnboardingGrid} />`
+    return null
+  }
 
   return html`
     <div>

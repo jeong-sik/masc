@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { RouteLink } from './common/route-link'
+import { CopyIdButton } from './common/copy-id-button'
 import { toolCategory } from './tool-call-shared'
 import type { DashboardProofWorkerRunEvidence } from '../types'
 import { relativeTime } from '../lib/format-time'
@@ -27,9 +28,18 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
         <div class="flex flex-col gap-1.5 min-w-0">
           <strong class="text-[13px] text-text-strong font-bold tracking-wide">${item.worker_name ?? item.worker_run_id}</strong>
           <div class="flex flex-wrap gap-2 text-[11px] text-text-muted font-medium items-center">
-            <span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">${item.worker_run_id}</span>
-            ${item.session_id ? html`<span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">S ${item.session_id}</span>` : null}
-            ${item.operation_id ? html`<span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">OP ${item.operation_id}</span>` : null}
+            <span class="inline-flex items-center gap-1">
+              <span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5" title=${item.worker_run_id}>${item.worker_run_id}</span>
+              <${CopyIdButton} value=${item.worker_run_id} label="worker_run_id" size=${10} />
+            </span>
+            ${item.session_id ? html`<span class="inline-flex items-center gap-1">
+              <span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5" title=${item.session_id}>S ${item.session_id}</span>
+              <${CopyIdButton} value=${item.session_id} label="session_id" size=${10} />
+            </span>` : null}
+            ${item.operation_id ? html`<span class="inline-flex items-center gap-1">
+              <span class="font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5" title=${item.operation_id}>OP ${item.operation_id}</span>
+              <${CopyIdButton} value=${item.operation_id} label="operation_id" size=${10} />
+            </span>` : null}
             <span class="text-text-dim/60">•</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>

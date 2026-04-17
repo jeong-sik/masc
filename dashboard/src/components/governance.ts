@@ -77,7 +77,13 @@ function GovernanceSummaryStrip() {
       <${KpiCard} label="Judge 상태" value=${liveJudgeState} hint=${judge?.keeper_name?.trim() || 'live judge'} />
       <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? 'runtime reported' : 'unknown'} />
       <${KpiCard} label="최근 판단" value=${judgmentCount} hint="live" />
-      <${KpiCard} label="관리자 승인 대기" value=${approvalCount} hint="live" />
+      <${KpiCard}
+        label="관리자 승인 대기"
+        value=${approvalCount}
+        hint=${approvalCount > 0 ? '검토 필요' : 'live'}
+        tone=${approvalCount > 0 ? 'text-warn' : undefined}
+        class=${approvalCount > 0 ? 'border-warn/40 bg-warn/5 ring-1 ring-warn/25' : ''}
+      />
     </div>
     <${JudgeStatusBar} />
     ${governanceError.value ? html`<div class="mb-5 rounded-lg border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-[12px] text-[#f7b6b6]">${governanceError.value}</div>` : null}

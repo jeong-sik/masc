@@ -63,8 +63,8 @@ let reset_for_testing () =
   ring := []
 
 let snapshot_ring () =
-  try Eio.Mutex.use_ro ring_mu (fun () -> !ring)
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+  Safe_ops.protect ~default:[] (fun () ->
+    Eio.Mutex.use_ro ring_mu (fun () -> !ring))
 
 let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
   let event = { ts; tool_name; reason_code; keeper_name } in

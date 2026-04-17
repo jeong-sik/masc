@@ -76,8 +76,8 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
   if not (Sys.file_exists keepers_dir) then []
   else
     let entries =
-      try Array.to_list (Sys.readdir keepers_dir)
-      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
+      Safe_ops.protect ~default:[] (fun () ->
+        Array.to_list (Sys.readdir keepers_dir))
     in
     List.filter_map (fun name ->
       let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in

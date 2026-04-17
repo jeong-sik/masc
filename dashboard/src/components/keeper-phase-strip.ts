@@ -12,8 +12,8 @@ import { getPhaseStyle } from './keeper-phase-indicator'
 const transitionData = signal<Map<string, KeeperTransitionsResponse>>(new Map())
 const loading = signal(false)
 
-// Server sends lowercase (e.g. "running", "handing_off"); PHASE_STYLES uses PascalCase
-function toPascalPhase(phase: string): string {
+/** Server sends lowercase (e.g. "running", "handing_off"); PHASE_STYLES uses PascalCase. */
+export function toPascalPhase(phase: string): string {
   return phase.toLowerCase()
     .replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
     .replace(/^./, s => s.toUpperCase())
@@ -28,8 +28,8 @@ function phaseInlineStyle(phase: string): string {
   return `color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border};`
 }
 
-// selected_event comes as object {type: "...", ...} from the server
-function eventLabel(event: unknown): string {
+/** selected_event comes as object {type: "...", ...} from the server */
+export function eventLabel(event: unknown): string {
   if (typeof event === 'string') return event
   if (event && typeof event === 'object' && 'type' in event) {
     const type = (event as Record<string, unknown>).type

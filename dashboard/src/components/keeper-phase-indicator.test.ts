@@ -24,7 +24,7 @@ describe('PHASE_STYLES', () => {
   })
 
   it('each phase has label, color, bg, border, glow, icon', () => {
-    for (const [key, style] of Object.entries(PHASE_STYLES)) {
+    for (const [_key, style] of Object.entries(PHASE_STYLES)) {
       expect(style).toHaveProperty('label')
       expect(style).toHaveProperty('color')
       expect(style).toHaveProperty('bg')

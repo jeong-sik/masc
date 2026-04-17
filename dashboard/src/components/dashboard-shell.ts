@@ -375,6 +375,45 @@ export function currentSectionShareUrl(): string {
   return window.location.href
 }
 
+/** Pure: derive the navigation trail rendered above the section title.
+    Each crumb is either a clickable ancestor (tab) or the terminal
+    leaf (current section label, non-navigable). Returns a flat array:
+    [] when both tab + section are absent (home / unknown),
+    [tab] when only tab is active (no section drilldown),
+    [tab, section] when the operator has drilled into a per-section view.
+
+    Why this exists: SurfaceLead previously rendered only the leaf
+    label (\"Discord\"). The parent tab (\"Connectors\") was implied by
+    the left nav but not surfaced in the content area — a newcomer
+    opening a deep link had to infer the hierarchy. Every modern web
+    app (GitHub / Linear / Notion / Vercel) renders the trail above
+    the page title for exactly this reason. */
+export interface BreadcrumbCrumb {
+  label: string
+  navigableTab: string | null
+}
+export function deriveBreadcrumbTrail(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+  tabId: string | null,
+): BreadcrumbCrumb[] {
+  if (tabLabel === null && sectionLabel === null) return []
+  if (sectionLabel === null) {
+    return tabLabel !== null ? [{ label: tabLabel, navigableTab: null }] : []
+  }
+  if (tabLabel === null) {
+    return [{ label: sectionLabel, navigableTab: null }]
+  }
+  // Drilldown view — tab becomes a clickable parent crumb, section is
+  // the non-navigable leaf (you're already there, clicking it would
+  // be a no-op).
+  return [
+    { label: tabLabel, navigableTab: tabId },
+    { label: sectionLabel, navigableTab: null },
+  ]
+}
+
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -383,9 +422,39 @@ function SurfaceLead() {
   const description = currentSection?.description ?? currentView?.description ?? null
   const title = currentSection?.label ?? currentView?.label ?? '홈'
   const shareUrl = currentSectionShareUrl()
+  // Only surface a trail when the operator has drilled into a section —
+  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
+  // title, pure duplication.
+  const trail = currentSection !== null
+    ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
+    : []
 
   return html`
     <div class="mb-3 flex flex-col gap-1.5">
+      ${trail.length > 0
+        ? html`<nav
+            class="flex items-center gap-1 text-[11px] text-[var(--text-dim)]"
+            aria-label="페이지 경로"
+            data-surface-breadcrumb
+          >
+            ${trail.map((crumb, i) => {
+              const isLast = i === trail.length - 1
+              const sep = i > 0
+                ? html`<span aria-hidden="true" class="text-[var(--white-10)]">›</span>`
+                : null
+              const crumbEl = crumb.navigableTab !== null && !isLast
+                ? html`<${RouteLink}
+                    tab=${crumb.navigableTab}
+                    class="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--white-5)] hover:text-[var(--text-body)]"
+                  >${crumb.label}<//>`
+                : html`<span
+                    class="px-1 py-0.5 ${isLast ? 'text-[var(--text-body)]' : ''}"
+                    aria-current=${isLast ? 'page' : undefined}
+                  >${crumb.label}</span>`
+              return html`${sep}${crumbEl}`
+            })}
+          </nav>`
+        : null}
       <div class="flex items-center gap-2">
         <h2 class="text-[22px] font-bold tracking-tight text-[var(--text-strong)]">
           ${title}

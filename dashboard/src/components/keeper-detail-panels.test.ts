@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import type { PromptSegmentTelemetry } from '../types'
 import {
   ctxColor,
   ctxSegmentLabel,
@@ -8,6 +9,7 @@ import {
   formatFingerprint,
   formatSegmentLabel,
   miniSparkline,
+  filterCtxCompositionEntries,
 } from './keeper-detail-panels'
 
 // ── ctxColor ──────────────────────────────────────────────────
@@ -204,5 +206,88 @@ describe('miniSparkline', () => {
     // Math.max(...data, 1) = 1, so y = H - pad - (0/1)*(H-2*pad) = H-pad
     expect(result).toBeTruthy()
     expect(result.split(' ')).toHaveLength(3)
+  })
+})
+
+// ── filterCtxCompositionEntries ───────────────────────────────
+
+function seg(tokens: number): PromptSegmentTelemetry {
+  return { bytes: tokens * 4, estimated_tokens: tokens, fingerprint: null }
+}
+
+const ctxSample: ReadonlyArray<readonly [string, PromptSegmentTelemetry]> = [
+  ['system_prompt', seg(500)],
+  ['memory_context', seg(1200)],
+  ['history_tool_use', seg(800)],
+  ['history_tool_result', seg(3400)],
+  ['history_assistant_text', seg(200)],
+  ['user_message', seg(150)],
+  ['unattributed', seg(90)],
+  ['some_new_segment', seg(40)],
+]
+
+describe('filterCtxCompositionEntries', () => {
+  it('returns the input reference when query is empty', () => {
+    expect(filterCtxCompositionEntries(ctxSample, '')).toBe(ctxSample)
+  })
+
+  it('returns the input reference when query is whitespace', () => {
+    expect(filterCtxCompositionEntries(ctxSample, '   ')).toBe(ctxSample)
+  })
+
+  it('matches case-insensitive substring on raw key', () => {
+    const out = filterCtxCompositionEntries(ctxSample, 'HISTORY')
+    expect(out.map(([k]) => k)).toEqual([
+      'history_tool_use',
+      'history_tool_result',
+      'history_assistant_text',
+    ])
+  })
+
+  it('trims the query before matching', () => {
+    const out = filterCtxCompositionEntries(ctxSample, '  memory  ')
+    expect(out.map(([k]) => k)).toEqual(['memory_context'])
+  })
+
+  it('matches human label when raw key misses', () => {
+    // Raw key is `system_prompt`, label is `System prompt`.
+    // Searching for exactly `system prompt` (with the space) only hits the label.
+    const out = filterCtxCompositionEntries(ctxSample, 'system prompt')
+    expect(out.map(([k]) => k)).toEqual(['system_prompt'])
+  })
+
+  it('matches label for unknown keys via underscore-to-space fallback', () => {
+    // `some_new_segment` label is `some new segment` after fallback.
+    const out = filterCtxCompositionEntries(ctxSample, 'new segment')
+    expect(out.map(([k]) => k)).toEqual(['some_new_segment'])
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    expect(filterCtxCompositionEntries(ctxSample, 'nonexistent_bucket')).toEqual([])
+  })
+
+  it('does not mutate the input array', () => {
+    const snapshot = ctxSample.slice()
+    filterCtxCompositionEntries(ctxSample, 'history')
+    expect(ctxSample).toEqual(snapshot)
+    expect(ctxSample).toHaveLength(snapshot.length)
+  })
+
+  it('preserves original order of matched entries', () => {
+    const out = filterCtxCompositionEntries(ctxSample, 'history')
+    expect(out[0]?.[0]).toBe('history_tool_use')
+    expect(out[out.length - 1]?.[0]).toBe('history_assistant_text')
+  })
+
+  it('matches entries with non-matching tokens when the key contains the needle', () => {
+    // `unattributed` segment value is low but key still matches `attrib`.
+    const out = filterCtxCompositionEntries(ctxSample, 'attrib')
+    expect(out.map(([k]) => k)).toEqual(['unattributed'])
+  })
+
+  it('handles an empty input list', () => {
+    const empty: ReadonlyArray<readonly [string, PromptSegmentTelemetry]> = []
+    expect(filterCtxCompositionEntries(empty, 'history')).toEqual([])
+    expect(filterCtxCompositionEntries(empty, '')).toBe(empty)
   })
 })

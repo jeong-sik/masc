@@ -5,7 +5,7 @@ import { ActionButton } from '../common/button'
 import { formatTimeHms } from '../../lib/format-time'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
-export type ChatTranscriptVariant = 'default' | 'messenger'
+type ChatTranscriptVariant = 'default' | 'messenger'
 
 function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
@@ -104,7 +104,7 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 
-export function ChatMessageBubble({
+function ChatMessageBubble({
   entry,
   showMetadata = true,
   variant = 'default',

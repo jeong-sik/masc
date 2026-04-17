@@ -1,6 +1,31 @@
 # Changelog
 
 
+## [0.9.12] - 2026-04-17
+
+### Changed
+
+Dashboard prop-whitelist expansion batch + structural cleanup. Autocoder-
+driven increments on top of the 0.9.11 release.
+
+- **Dashboard — form control prop whitelists.**
+  - `Checkbox` prop whitelist expanded (id/name/aria/value/testId) + tests 0 → 13 (#8000).
+  - `NumberInput` prop whitelist expanded (id/name/aria/autocomplete/keyboard/blur/testId) + tests 0 → 15 (#8005).
+
+- **Dashboard — copy affordance.**
+  - `CopyIdButton` placed next to truncated `trace_id` displays (#8001).
+
+- **Dashboard — connector/keeper views.**
+  - K×M `ConnectorKeeperMatrix` added under all-connectors view (#8002).
+
+- **Dashboard — cleanup / clarity.**
+  - Retired `runtime-params` / `param-audit` state cluster purged (#8003).
+  - `'runtime'` label overload disambiguated; card titles made KO-only (#8004).
+
+### Deprecated
+
+- None.
+
 ## [0.9.11] - 2026-04-17
 
 ### Changed

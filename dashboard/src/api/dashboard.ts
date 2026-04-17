@@ -15,6 +15,11 @@ import {
   parseAgentRelationsResponse,
   type AgentRelationsResponse,
 } from './schemas/agent-relations'
+import {
+  parseAgentTimelineResponse,
+  type AgentTimelineEvent,
+  type AgentTimelineResponse,
+} from './schemas/agent-timeline'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -144,32 +149,18 @@ export function reportToolHostFailure(
   return post('/api/v1/dashboard/logs/tool-host-failures', report, undefined, 3000)
 }
 
-export interface AgentTimelineEvent {
-  ts: string
-  type: string
-  detail: Record<string, unknown>
-}
+export type { AgentTimelineEvent, AgentTimelineResponse }
+export { AgentTimelineSchemaDriftError } from './schemas/agent-timeline'
 
-export interface AgentTimelineResponse {
-  agent: string
-  period: { from: string; to: string }
-  events: AgentTimelineEvent[]
-  summary: {
-    tasks_completed: number
-    tasks_claimed: number
-    messages_sent: number
-    tool_calls?: number
-    active_duration_minutes: number
-    total_events: number
-  }
-}
-
-export function fetchAgentTimeline(
+export async function fetchAgentTimeline(
   agentName: string,
   sinceHours = 4,
   limit = 20,
 ): Promise<AgentTimelineResponse> {
-  return get(`/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`)
+  const raw = await get<unknown>(
+    `/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`,
+  )
+  return parseAgentTimelineResponse(raw)
 }
 
 export type {

@@ -19,6 +19,7 @@
  */
 
 import {
+  array,
   boolean,
   fallback,
   nullable,
@@ -150,6 +151,33 @@ export class CompositeSchemaDriftError extends Error {
 
 export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnapshot {
   const result = safeParse(KeeperCompositeSnapshotSchema, data)
+  if (!result.success) {
+    throw new CompositeSchemaDriftError(result.issues)
+  }
+  return result.output
+}
+
+// ── Fleet composite (LT-16a) ─────────────────────────────
+//
+// Backend: GET /api/v1/keepers/composite returns every registered
+// keeper in one envelope. Reuses the per-keeper snapshot shape so the
+// matrix UI (LT-16b, dashboard/src/components/fleet-fsm-matrix.ts) can
+// share render logic between single-keeper detail and fleet views.
+//
+// Each poll bumps the masc_keeper_invariant_violations_total counter
+// for any violating keeper (documented poll-triggered behaviour,
+// docs/observability/cascade-metrics.md §masc_keeper_invariant_violations_total).
+
+export const FleetCompositeSnapshotSchema = object({
+  generated_at: number(),
+  count: number(),
+  snapshots: array(KeeperCompositeSnapshotSchema),
+})
+
+export type FleetCompositeSnapshot = InferOutput<typeof FleetCompositeSnapshotSchema>
+
+export function parseFleetCompositeSnapshot(data: unknown): FleetCompositeSnapshot {
+  const result = safeParse(FleetCompositeSnapshotSchema, data)
   if (!result.success) {
     throw new CompositeSchemaDriftError(result.issues)
   }

@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import type {
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
@@ -10,6 +10,32 @@ import type {
 } from '../../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { Card } from '../common/card'
+
+/**
+ * Pure filter for runtime diagnostics entries.
+ *
+ * Case-insensitive substring match on `kind`, `signal`, and `message` in
+ * that order (first match wins). Operators can isolate a single class of
+ * runtime warning (e.g. `external_signal`), a specific POSIX signal
+ * (`SIGTERM`), or search free text in the message body.
+ *
+ * Empty/whitespace query returns the input reference unchanged so
+ * useMemo keeps referential identity for the non-filtering path.
+ * Input is never mutated; `readonly` is preserved.
+ */
+export function filterDiagnostics(
+  diagnostics: readonly DashboardRuntimeDiagnostic[],
+  query: string,
+): readonly DashboardRuntimeDiagnostic[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return diagnostics
+  return diagnostics.filter(item => {
+    if (item.kind.toLowerCase().includes(needle)) return true
+    if (item.signal && item.signal.toLowerCase().includes(needle)) return true
+    if (item.message.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
 
 function toneClass(status: string): string {
   switch (status) {
@@ -392,6 +418,14 @@ export function ConfigResolutionPanel({
   resolution: DashboardConfigResolution | undefined
   runtimeResolution?: DashboardRuntimeResolution
 }) {
+  const diagnosticsQuery = useSignal('')
+  const allDiagnostics = runtimeResolution?.diagnostics ?? []
+  const visibleDiagnostics = useMemo(
+    () => filterDiagnostics(allDiagnostics, diagnosticsQuery.value),
+    [allDiagnostics, diagnosticsQuery.value],
+  )
+  const isFilteringDiagnostics = diagnosticsQuery.value.trim() !== ''
+
   if (!resolution && !runtimeResolution) return null
 
   const rootPath = resolution?.config_root.path ?? ''
@@ -494,17 +528,37 @@ export function ConfigResolutionPanel({
               </div>
 
               <div class="mt-4">
-                <div class="mb-2 text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                  recent diagnostics
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <div class="text-[11px] uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                    recent diagnostics
+                  </div>
+                  ${runtimeResolution.diagnostics.length > 0
+                    ? html`
+                        <input
+                          type="search"
+                          value=${diagnosticsQuery.value}
+                          placeholder="kind / signal / message 필터"
+                          aria-label="Diagnostics 필터"
+                          onInput=${(e: Event) => { diagnosticsQuery.value = (e.target as HTMLInputElement).value }}
+                          class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                        />
+                      `
+                    : null}
                 </div>
                 <div class="flex flex-col gap-3">
-                  ${runtimeResolution.diagnostics.length > 0
-                    ? runtimeResolution.diagnostics.map(item => html`<${DiagnosticRow} item=${item} />`)
-                    : html`
+                  ${runtimeResolution.diagnostics.length === 0
+                    ? html`
                         <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-[12px] text-[var(--text-muted)]">
                           최근 runtime warning이 없습니다.
                         </div>
-                      `}
+                      `
+                    : isFilteringDiagnostics && visibleDiagnostics.length === 0
+                      ? html`
+                          <div class="rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] px-3 py-3 text-center text-[12px] text-[var(--text-muted)]">
+                            필터 결과 없음 (${runtimeResolution.diagnostics.length} diagnostics)
+                          </div>
+                        `
+                      : visibleDiagnostics.map(item => html`<${DiagnosticRow} item=${item} />`)}
                 </div>
               </div>
 

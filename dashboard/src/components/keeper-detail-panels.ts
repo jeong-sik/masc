@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { formatPct, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
+import { CopyIdButton } from './common/copy-id-button'
 import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
@@ -672,7 +673,10 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Prompt Fingerprint</span>
         <span class="text-[10px] text-[var(--text-dim)]">${promptPoints.length} snapshots</span>
         ${latest?.prompt_fingerprint
-          ? html`<span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>`
+          ? html`<span class="inline-flex items-center gap-1">
+              <span class="text-[9px] px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--text-dim)] font-mono" title=${latest.prompt_fingerprint}>${formatFingerprint(latest.prompt_fingerprint)}</span>
+              <${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${10} />
+            </span>`
           : null}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -699,7 +703,10 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
         <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col justify-between">
           <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">latest fingerprint</span>
-          <span class="text-sm font-mono break-all text-[var(--text-strong)]">${latest?.prompt_fingerprint ? formatFingerprint(latest.prompt_fingerprint) : '-'}</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-sm font-mono break-all text-[var(--text-strong)]" title=${latest?.prompt_fingerprint ?? ''}>${latest?.prompt_fingerprint ? formatFingerprint(latest.prompt_fingerprint) : '-'}</span>
+            ${latest?.prompt_fingerprint ? html`<${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${12} />` : null}
+          </div>
           <span class="text-[9px] text-[var(--text-dim)]">${latestSegments.length} segments</span>
         </div>
       </div>
@@ -710,7 +717,10 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
               <div class="flex items-center justify-between gap-2 mb-2">
                 <span class="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">${formatSegmentLabel(segmentKey)}</span>
-                <span class="text-[9px] font-mono text-[var(--text-dim)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
+                <span class="inline-flex items-center gap-1">
+                  <span class="text-[9px] font-mono text-[var(--text-dim)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
+                  ${segment.fingerprint ? html`<${CopyIdButton} value=${segment.fingerprint} label="segment fingerprint" size=${10} />` : null}
+                </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
                 <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">

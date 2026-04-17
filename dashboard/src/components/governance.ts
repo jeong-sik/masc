@@ -95,7 +95,7 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between px-0.5">
       <div class="flex items-center gap-3">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">거버넌스</h2>
-        <span class="rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-muted">
+        <span class="rounded-md border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-[11px] font-medium text-text-muted">
           ${caseTrackingRetired ? judgeOnlyLabel : `진행 중 ${itemCount}건 / 활동 ${activityCount}건`}
         </span>
       </div>
@@ -262,7 +262,7 @@ function GovernanceToolbar() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="rounded-xl border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+              class="rounded-xl border-transparent bg-[var(--white-3)] px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
               onClick=${refreshGovernance}
               disabled=${governanceLoading.value}
             >
@@ -299,7 +299,7 @@ function LiveGovernanceToolbar() {
             <${ActionButton}
               variant="ghost"
               size="lg"
-              class="rounded-xl border-transparent bg-white/5 px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+              class="rounded-xl border-transparent bg-[var(--white-3)] px-3.5 py-2 text-[13px] font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
               onClick=${refreshGovernance}
               disabled=${governanceLoading.value}
             >
@@ -370,9 +370,9 @@ function DecisionInbox() {
                         : null}
                     </div>
                     <div class="mt-3 flex flex-wrap gap-1.5">
-                      ${item.origin ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.origin}</span>` : null}
+                      ${item.origin ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.origin}</span>` : null}
                       ${item.risk_class ? html`<span class="inline-flex items-center rounded-md border border-bad/20 bg-bad/10 px-2 py-0.5 text-[10px] font-medium text-bad">${item.risk_class}</span>` : null}
-                      ${item.provenance ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.provenance}</span>` : null}
+                      ${item.provenance ? html`<span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-medium text-text-muted">${item.provenance}</span>` : null}
                       ${item.status === 'needs_human_gate'
                         ? html`<span class="inline-flex items-center rounded-md border border-warn/30 bg-warn/20 px-2 py-0.5 text-[10px] font-bold text-warn animate-pulse">승인 대기</span>`
                         : null}
@@ -383,7 +383,7 @@ function DecisionInbox() {
                   </div>
                   <div class="flex flex-col items-end justify-between flex-shrink-0 pt-0.5">
                     <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${governanceToneClass(item.status)}">${caseStatusLabel(item.status)}</span>
-                    <span class="mt-auto rounded-md border border-white/5 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-text-dim">의견 ${item.brief_count ?? 0}</span>
+                    <span class="mt-auto rounded-md border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-[11px] font-medium text-text-dim">의견 ${item.brief_count ?? 0}</span>
                   </div>
                 </button>
               `
@@ -476,7 +476,7 @@ export function approvalRiskToneClass(riskLevel: string): string {
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent'
-  return 'border-white/10 bg-white/5 text-text-muted'
+  return 'border-white/10 bg-[var(--white-3)] text-text-muted'
 }
 
 const RISK_RANK: Record<string, number> = {
@@ -558,7 +558,7 @@ function KeeperApprovalQueueSection() {
     ? (maxRisk === 'critical' || maxRisk === 'high'
         ? 'border-bad/40 bg-bad/15 text-bad text-[13px] px-3 py-1 font-extrabold'
         : 'border-warn/40 bg-warn/15 text-warn text-[13px] px-3 py-1 font-extrabold')
-    : 'border-white/10 bg-white/5 text-text-muted text-[11px] px-2 py-0.5 font-bold'
+    : 'border-white/10 bg-[var(--white-3)] text-text-muted text-[11px] px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
@@ -579,7 +579,7 @@ function KeeperApprovalQueueSection() {
                 return html`
                   <div class="rounded-xl border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded-md border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-[10px] font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
                       <span class="inline-flex items-center rounded-md border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-[10px] font-bold text-accent">

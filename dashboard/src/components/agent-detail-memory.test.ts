@@ -1,5 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeKeeperName, matchesKeeper } from './agent-detail-memory'
+import {
+  normalizeKeeperName,
+  matchesKeeper,
+  filterEpisodes,
+} from './agent-detail-memory'
+import type { MemorySubsystemsEpisode } from '../api/dashboard'
+
+function makeEpisode(
+  overrides: Partial<MemorySubsystemsEpisode> = {},
+): MemorySubsystemsEpisode {
+  return {
+    id: 'ep-1',
+    timestamp: 0,
+    participants: [],
+    event_type: 'task_complete',
+    summary: 'summary text',
+    outcome: 'success',
+    learnings: [],
+    context: {},
+    ...overrides,
+  }
+}
 
 describe('normalizeKeeperName', () => {
   it('removes keeper- prefix', () => {
@@ -62,5 +83,52 @@ describe('matchesKeeper', () => {
 
   it('is case-sensitive', () => {
     expect(matchesKeeper('Janitor', 'janitor')).toBe(false)
+  })
+})
+
+describe('filterEpisodes', () => {
+  const episodes: readonly MemorySubsystemsEpisode[] = [
+    makeEpisode({ id: 'a', summary: 'fixed flaky test on dashboard', event_type: 'task_complete', learnings: ['prefer deterministic mocks'] }),
+    makeEpisode({ id: 'b', summary: 'resolved OAS cascade blocker', event_type: 'decision', learnings: [] }),
+    makeEpisode({ id: 'c', summary: 'idle tick', event_type: 'heartbeat', learnings: ['no-op when queue empty'] }),
+  ]
+
+  it('returns input reference unchanged on empty query', () => {
+    expect(filterEpisodes(episodes, '')).toBe(episodes)
+  })
+
+  it('returns input reference unchanged on whitespace query', () => {
+    expect(filterEpisodes(episodes, '   ')).toBe(episodes)
+  })
+
+  it('is case-insensitive', () => {
+    const hits = filterEpisodes(episodes, 'OAS')
+    expect(hits.map(e => e.id)).toEqual(['b'])
+    const hitsLower = filterEpisodes(episodes, 'oas')
+    expect(hitsLower.map(e => e.id)).toEqual(['b'])
+  })
+
+  it('trims leading/trailing whitespace', () => {
+    const hits = filterEpisodes(episodes, '  heartbeat  ')
+    expect(hits.map(e => e.id)).toEqual(['c'])
+  })
+
+  it('matches across summary, event_type, and learnings', () => {
+    // summary hit
+    expect(filterEpisodes(episodes, 'dashboard').map(e => e.id)).toEqual(['a'])
+    // event_type hit
+    expect(filterEpisodes(episodes, 'decision').map(e => e.id)).toEqual(['b'])
+    // learnings hit
+    expect(filterEpisodes(episodes, 'deterministic').map(e => e.id)).toEqual(['a'])
+  })
+
+  it('returns empty array when nothing matches', () => {
+    expect(filterEpisodes(episodes, 'nonexistent-token')).toEqual([])
+  })
+
+  it('does not mutate the input', () => {
+    const snapshot = episodes.map(e => ({ ...e }))
+    filterEpisodes(episodes, 'oas')
+    expect(episodes).toEqual(snapshot)
   })
 })

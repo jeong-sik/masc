@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
 import { Card } from './common/card'
 import {
@@ -26,12 +26,42 @@ export function matchesKeeper(synapseAgent: string, keeperName: string): boolean
   return a === b
 }
 
+/**
+ * Pure filter for recent episodes.
+ *
+ * Case-insensitive substring match on `summary`, `event_type`, and any
+ * element of `learnings`. Operators typically recall an episode by what
+ * the keeper was doing (event_type), a keyword from the one-line summary,
+ * or a phrase from a learning — so these three text fields are covered.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated.
+ */
+export function filterEpisodes(
+  episodes: readonly MemorySubsystemsEpisode[],
+  query: string,
+): readonly MemorySubsystemsEpisode[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return episodes
+  return episodes.filter(ep => {
+    if (ep.summary.toLowerCase().includes(needle)) return true
+    if (ep.event_type.toLowerCase().includes(needle)) return true
+    for (const learning of ep.learnings) {
+      if (learning.toLowerCase().includes(needle)) return true
+    }
+    return false
+  })
+}
+
 export function AgentDetailMemory({ agentName }: Props) {
   const state = useSignal<{
     loading: boolean
     error: string | null
     data: MemorySubsystemsResponse | null
   }>({ loading: true, error: null, data: null })
+  const episodeQuery = useSignal('')
 
   useEffect(() => {
     const ac = new AbortController()
@@ -76,6 +106,11 @@ export function AgentDetailMemory({ agentName }: Props) {
   )
 
   const episodes = data.episodes?.items ?? []
+  const visibleEpisodes = useMemo(
+    () => filterEpisodes(episodes, episodeQuery.value),
+    [episodes, episodeQuery.value],
+  )
+  const isFilteringEpisodes = episodeQuery.value.trim() !== ''
 
   return html`
     <${Card} title="협업 & 기억">
@@ -149,17 +184,39 @@ export function AgentDetailMemory({ agentName }: Props) {
 
         <!-- Recent episodes for this keeper -->
         <div>
-          <div class="text-xs text-[var(--text-dim)] uppercase tracking-wide mb-2">
-            최근 에피소드 (${data.episodes?.filtered ?? 0}개)
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <div class="text-xs text-[var(--text-dim)] uppercase tracking-wide">
+              최근 에피소드 (${
+                isFilteringEpisodes
+                  ? `${visibleEpisodes.length}/${episodes.length}`
+                  : `${data.episodes?.filtered ?? 0}`
+              }개)
+            </div>
+            ${episodes.length > 0
+              ? html`<input
+                  type="search"
+                  value=${episodeQuery.value}
+                  placeholder="summary / event / learning 필터"
+                  aria-label="에피소드 필터"
+                  onInput=${(e: Event) => {
+                    episodeQuery.value = (e.target as HTMLInputElement).value
+                  }}
+                  class="min-w-[160px] max-w-[240px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                />`
+              : null}
           </div>
           ${
             episodes.length === 0
               ? html`<div class="text-sm text-[var(--text-dim)]">
                   이 키퍼의 에피소드 기록이 없습니다.
                 </div>`
-              : html`
+              : visibleEpisodes.length === 0
+                ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">
+                    필터 결과 없음 (${episodes.length}개 중 0)
+                  </div>`
+                : html`
                   <div class="space-y-1.5 max-h-[240px] overflow-y-auto pr-1 custom-scrollbar">
-                    ${episodes
+                    ${visibleEpisodes
                       .slice()
                       .reverse()
                       .map((ep: MemorySubsystemsEpisode) => {

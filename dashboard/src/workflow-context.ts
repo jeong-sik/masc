@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import type { OperatorAttentionItem, OperatorRecommendedAction, RouteState } from './types'
+import type { OperatorRecommendedAction, RouteState } from './types'
 import { isRecord } from './components/common/normalize'
 import { isRootTarget } from './components/ops/helpers'
 
@@ -172,36 +172,6 @@ function workflowContextId(
     createdAt,
   ].join(':')
 }
-
-export function createMissionWorkflowContext(
-  action?: OperatorRecommendedAction | null,
-  incident?: OperatorAttentionItem | null,
-  sourceLabel = '상황판 추천 액션',
-): DashboardWorkflowContext {
-  const createdAt = new Date().toISOString()
-  const payload = extractActionPayload(action)
-  const targetType = action?.target_type ?? incident?.target_type ?? null
-  const targetId = action?.target_id ?? incident?.target_id ?? null
-  const focusKind = incident?.kind ?? action?.action_type ?? null
-  const summary = action?.reason ?? incident?.summary ?? sourceLabel
-  return {
-    id: workflowContextId('mission', sourceLabel, action?.action_type ?? null, targetType, targetId, focusKind, null, createdAt),
-    source_surface: 'mission',
-    source_label: sourceLabel,
-    action_type: action?.action_type ?? null,
-    target_type: targetType,
-    target_id: targetId,
-    focus_kind: focusKind,
-    operation_id: null,
-    summary,
-    payload_preview: summarizePayloadPreview(payload),
-    suggested_payload: payload,
-    preview: action?.preview ?? null,
-    evidence: incident?.evidence ?? null,
-    created_at: createdAt,
-  }
-}
-
 
 function matchesRouteParams(
   context: DashboardWorkflowContext,

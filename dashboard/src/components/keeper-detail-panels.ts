@@ -7,6 +7,7 @@ import { signal } from '@preact/signals'
 import { formatPct, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
 import { CopyIdButton } from './common/copy-id-button'
+import { ProgressBar } from './common/progress-bar'
 import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
@@ -435,9 +436,13 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
                   return html`
                     <div class="flex items-center gap-2 text-xs">
                       <span class="shrink-0 w-[140px] truncate font-mono text-[11px] text-[var(--accent)]" title=${model}>${model}</span>
-                      <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
-                        <div class="h-full rounded-full bg-[var(--accent)]" style="width:${pct}%"></div>
-                      </div>
+                      <${ProgressBar}
+                        pct=${pct}
+                        size="sm"
+                        tone="accent"
+                        trackTone="dim"
+                        trackClass="flex-1"
+                      />
                       <span class="shrink-0 w-10 text-right text-[var(--text-muted)]">${count}회</span>
                     </div>
                   `

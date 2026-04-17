@@ -6,6 +6,7 @@ import { useSignal } from '@preact/signals'
 import { JsonViewerCard, parseJsonLikeData } from '../common/json-viewer'
 import { TimeAgo } from '../common/time-ago'
 import { Markdown } from '../common/markdown'
+import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
@@ -360,9 +361,13 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
         ${saved != null && saved > 0 ? html`
           <div class="flex items-center gap-2">
-            <div class="flex-1 h-2 bg-[var(--white-8)] rounded-full overflow-hidden">
-              <div class="h-full bg-[#38bdf8] rounded-full" style="width: ${Math.min(ratio ?? 0, 100).toFixed(1)}%"></div>
-            </div>
+            <${ProgressBar}
+              pct=${ratio ?? 0}
+              size="md"
+              trackTone="muted"
+              trackClass="flex-1"
+              class="bg-[#38bdf8]"
+            />
             <span class="text-[10px] font-mono text-[#38bdf8]">-${saved.toLocaleString()}tok (${(ratio ?? 0).toFixed(0)}%)</span>
           </div>
         ` : null}

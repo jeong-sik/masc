@@ -349,6 +349,60 @@ let parse_body_pairs body_str : ((string * string) list, string) result =
   | _ -> Error "body must be a JSON object"
   | exception _ -> Error "body is not valid JSON"
 
+(** GET /api/v1/sidecar/config?name=<id>
+
+    Reads the current runtime TOML and returns the values as a flat map
+    so the dashboard form can prefill instead of showing only schema
+    defaults. Empty file or missing file → [exists: false] envelope so
+    the form falls back to defaults gracefully.
+
+    All values are stringified for transport — the dashboard is the
+    one rendering the form, and the form already knows the type from
+    the schema response. Keeps the wire format simple. *)
+let handle_get_config _state request reqd =
+  match parse_name request with
+  | Error msg -> bad_request request reqd msg
+  | Ok id ->
+      let path = config_toml_path id in
+      if not (Sys.file_exists path) then
+        respond_json request reqd ~status:`OK
+          (`Assoc [
+             ("ok", `Bool true);
+             ("id", `String id);
+             ("path", `String path);
+             ("exists", `Bool false);
+             ("values", `Assoc []);
+           ])
+      else
+        let content =
+          try In_channel.with_open_text path In_channel.input_all
+          with _ -> ""
+        in
+        (match Keeper_toml_loader.parse_toml content with
+         | Error msg ->
+             respond_json request reqd ~status:`Internal_server_error
+               (`Assoc [
+                  ("ok", `Bool false);
+                  ("error", `String (Printf.sprintf "TOML parse failed: %s" msg));
+                ])
+         | Ok doc ->
+             let pairs = List.filter_map (fun (k, v) ->
+               match v with
+               | Keeper_toml_loader.Toml_string s -> Some (k, `String s)
+               | Keeper_toml_loader.Toml_int n -> Some (k, `String (string_of_int n))
+               | Keeper_toml_loader.Toml_float f -> Some (k, `String (Printf.sprintf "%g" f))
+               | Keeper_toml_loader.Toml_bool b -> Some (k, `String (if b then "true" else "false"))
+               | Keeper_toml_loader.Toml_string_array _ -> None
+             ) doc in
+             respond_json request reqd ~status:`OK
+               (`Assoc [
+                  ("ok", `Bool true);
+                  ("id", `String id);
+                  ("path", `String path);
+                  ("exists", `Bool true);
+                  ("values", `Assoc pairs);
+                ]))
+
 let handle_put_config _state request reqd =
   match parse_name request with
   | Error msg -> bad_request request reqd msg
@@ -486,4 +540,11 @@ let add_routes ~sw:_ ~clock:_ router =
   |> Http.Router.post "/api/v1/sidecar/config" (fun request reqd ->
        with_tool_auth ~tool_name:"sidecar" (fun state _req reqd ->
          handle_put_config state request reqd
+       ) request reqd)
+
+  (* Read current runtime TOML so the dashboard form prefills with what's
+     actually on disk. Tokens may surface in the response, so [tool_auth]. *)
+  |> Http.Router.get "/api/v1/sidecar/config" (fun request reqd ->
+       with_tool_auth ~tool_name:"sidecar" (fun state _req reqd ->
+         handle_get_config state request reqd
        ) request reqd)

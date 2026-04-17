@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/verifier_oas.ml
+  - lib/memory_oas_bridge.ml
+  - lib/worker_oas.ml
+---
+
 # OAS Integration
 
 | 항목 | 값 |

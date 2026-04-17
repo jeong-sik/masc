@@ -1,3 +1,15 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/server/
+  - lib/grpc/
+  - lib/sse.ml
+  - lib/transport.ml
+  - bin/main_eio.ml
+  - bin/main_stdio_eio.ml
+---
+
 # Server & Transport
 
 | 항목 | 값 |

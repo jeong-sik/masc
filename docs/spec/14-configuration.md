@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - lib/config/
+  - lib/env_config.mli
+  - config/
+---
+
 # Configuration
 
 | 항목 | 값 |

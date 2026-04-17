@@ -16,6 +16,23 @@ import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight }
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
+import { HeartbeatStrip } from './common/heartbeat-strip'
+import { recordHeartbeat, useHeartbeatHistory, type HeartbeatState } from '../lib/heartbeat-history'
+
+/** Sampling cadence for the heartbeat ring buffer. Chosen so 45 bars
+    cover ~22 minutes of history — matches Uptime Kuma's default
+    "last 45 checks at 30s interval" visual rhythm. */
+const HEARTBEAT_SAMPLE_MS = 30_000
+
+/** Pure: derive the heartbeat state for a connector from the gate info
+    that the overview strip already polls. No extra network calls. */
+export function deriveHeartbeatState(
+  connector: GateConnectorInfo | null,
+): HeartbeatState {
+  if (connector === null) return 'unknown'
+  if (connector.available === true) return 'up'
+  return 'down'
+}
 
 const bulkInflight = signal<{ start: boolean; stop: boolean }>({ start: false, stop: false })
 
@@ -171,8 +188,23 @@ function OverviewTile({ id, connector, keeperCount }: {
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
+      <${TileHeartbeatStrip} id=${id} />
     </div>
   `
+}
+
+/** Uptime Kuma style pulse row under each overview tile. Samples the
+    connector's up/down state every HEARTBEAT_SAMPLE_MS into a per-id
+    ring buffer; the strip reads from that buffer and refreshes via the
+    signal subscription. */
+function TileHeartbeatStrip({ id }: { id: KnownConnectorId }) {
+  const history = useHeartbeatHistory(id)
+  return html`<${HeartbeatStrip}
+    history=${history}
+    slots=${45}
+    class="-ml-[1px]"
+    testId=${`heartbeat-strip-${id}`}
+  />`
 }
 
 /** Standalone export of the bulk Start All / Stop All buttons so the
@@ -313,6 +345,22 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
 export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
   useEffect(() => {
     stripMemory.value = updateStripMemory(stripMemory.value, connectors, Date.now())
+  }, [connectors])
+
+  // Heartbeat sampler — push the current up/down state for each known
+  // connector into the per-id ring buffer on a fixed cadence. This is
+  // what feeds the Uptime Kuma style pulse strip below each tile; the
+  // 30s interval × 45 bars gives ~22 minutes of rolling history.
+  useEffect(() => {
+    const sample = () => {
+      for (const id of KNOWN_CONNECTOR_IDS) {
+        const c = findConnector(connectors, id)
+        recordHeartbeat(id, deriveHeartbeatState(c))
+      }
+    }
+    sample() // immediate first sample so new tiles show a bar straight away
+    const t = window.setInterval(sample, HEARTBEAT_SAMPLE_MS)
+    return () => window.clearInterval(t)
   }, [connectors])
 
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())

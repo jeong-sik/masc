@@ -146,8 +146,15 @@ function Pill({ pill }: { pill: RailPill }) {
 }
 
 export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
+  // Grid (not flex-wrap) so all four pills share equal column widths. Under
+  // flex-wrap, per-pill width depended on intrinsic content, which meant
+  // short-label pills (Token) snapped tiny while long-label pills (Bindings)
+  // blew out and wrapped mid-word ("BINDIN…", "필…"). A 4-column grid makes
+  // every card's rail line up at the same cell boundaries across the 4-tile
+  // strip, and labels truncate symmetrically when the tile is narrow instead
+  // of each pill truncating at a different point.
   return html`
-    <div class="mt-2 flex flex-wrap items-stretch gap-2">
+    <div class="mt-2 grid grid-cols-4 items-stretch gap-2" data-rail-layout="grid-4">
       ${pills.map(pill => html`<${Pill} pill=${pill} />`)}
     </div>
   `

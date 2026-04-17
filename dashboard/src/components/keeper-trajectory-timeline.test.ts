@@ -3,8 +3,10 @@ import { describe, it, expect } from 'vitest'
 import {
   entryMatchesType,
   entryMatchesSearch,
+  entryMatchesOutcome,
   filterTrajectoryEntries,
   countByType,
+  countByOutcome,
   groupByTurn,
 } from './keeper-trajectory-timeline'
 import type { TrajectoryEntry } from '../api/dashboard'
@@ -97,35 +99,151 @@ describe('filterTrajectoryEntries', () => {
   ]
 
   it('returns all entries when filter is neutral', () => {
-    expect(filterTrajectoryEntries(entries, { type: 'all', search: '' })).toHaveLength(4)
+    expect(filterTrajectoryEntries(entries, { type: 'all', outcome: 'all', search: '' })).toHaveLength(4)
   })
 
   it('filters by type=tool', () => {
-    const out = filterTrajectoryEntries(entries, { type: 'tool', search: '' })
+    const out = filterTrajectoryEntries(entries, { type: 'tool', outcome: 'all', search: '' })
     expect(out).toHaveLength(3)
     expect(out.every(e => e.type !== 'thinking')).toBe(true)
   })
 
   it('filters by type=thinking', () => {
-    const out = filterTrajectoryEntries(entries, { type: 'thinking', search: '' })
+    const out = filterTrajectoryEntries(entries, { type: 'thinking', outcome: 'all', search: '' })
     expect(out).toHaveLength(1)
     expect(out[0]?.type).toBe('thinking')
   })
 
   it('filters by search string across type', () => {
-    const out = filterTrajectoryEntries(entries, { type: 'all', search: 'plan' })
+    const out = filterTrajectoryEntries(entries, { type: 'all', outcome: 'all', search: 'plan' })
     expect(out).toHaveLength(1)
     expect(out[0]?.type).toBe('thinking')
   })
 
   it('combines type and search filters', () => {
-    const out = filterTrajectoryEntries(entries, { type: 'tool', search: 'etc' })
+    const out = filterTrajectoryEntries(entries, { type: 'tool', outcome: 'all', search: 'etc' })
     expect(out).toHaveLength(1)
     expect(out[0]?.tool_name).toBe('read_file')
   })
 
   it('returns empty array when no entries match', () => {
-    expect(filterTrajectoryEntries(entries, { type: 'all', search: 'xyz-no-match' })).toEqual([])
+    expect(filterTrajectoryEntries(entries, { type: 'all', outcome: 'all', search: 'xyz-no-match' })).toEqual([])
+  })
+})
+
+describe('entryMatchesOutcome', () => {
+  it('returns true for any non-thinking entry when outcome=all', () => {
+    expect(entryMatchesOutcome(makeToolEntry(), 'all')).toBe(true)
+    expect(entryMatchesOutcome(makeToolEntry({ error: 'boom' }), 'all')).toBe(true)
+    expect(entryMatchesOutcome(makeToolEntry({ gate: { status: 'reject', reason: 'policy' } }), 'all')).toBe(true)
+  })
+
+  it('returns true for thinking entries only when outcome=all', () => {
+    expect(entryMatchesOutcome(makeThinkingEntry(), 'all')).toBe(true)
+    expect(entryMatchesOutcome(makeThinkingEntry(), 'error')).toBe(false)
+    expect(entryMatchesOutcome(makeThinkingEntry(), 'rejected')).toBe(false)
+    expect(entryMatchesOutcome(makeThinkingEntry(), 'completed')).toBe(false)
+  })
+
+  it('matches error entries when outcome=error', () => {
+    expect(entryMatchesOutcome(makeToolEntry({ error: 'network timeout' }), 'error')).toBe(true)
+    expect(entryMatchesOutcome(makeToolEntry({ error: null }), 'error')).toBe(false)
+    expect(entryMatchesOutcome(makeToolEntry({ error: '' }), 'error')).toBe(false)
+    expect(entryMatchesOutcome(makeToolEntry(), 'error')).toBe(false)
+  })
+
+  it('matches gate-rejected entries when outcome=rejected', () => {
+    const rejected = makeToolEntry({ gate: { status: 'reject', reason: 'policy violation' } })
+    expect(entryMatchesOutcome(rejected, 'rejected')).toBe(true)
+    expect(entryMatchesOutcome(makeToolEntry({ gate: { status: 'pass' } }), 'rejected')).toBe(false)
+    expect(entryMatchesOutcome(makeToolEntry(), 'rejected')).toBe(false)
+  })
+
+  it('matches completed entries (no error, not rejected) when outcome=completed', () => {
+    expect(entryMatchesOutcome(makeToolEntry(), 'completed')).toBe(true)
+    expect(entryMatchesOutcome(makeToolEntry({ gate: { status: 'pass' } }), 'completed')).toBe(true)
+    expect(entryMatchesOutcome(makeToolEntry({ error: 'boom' }), 'completed')).toBe(false)
+    expect(entryMatchesOutcome(
+      makeToolEntry({ gate: { status: 'reject', reason: 'x' } }),
+      'completed',
+    )).toBe(false)
+  })
+
+  it('treats reject as rejected even when error is also set', () => {
+    const both = makeToolEntry({
+      error: 'tool threw',
+      gate: { status: 'reject', reason: 'policy' },
+    })
+    expect(entryMatchesOutcome(both, 'rejected')).toBe(true)
+    // rejected takes precedence in countByOutcome — but entryMatchesOutcome
+    // treats error/rejected as independent predicates that can both match:
+    expect(entryMatchesOutcome(both, 'error')).toBe(true)
+    expect(entryMatchesOutcome(both, 'completed')).toBe(false)
+  })
+})
+
+describe('countByOutcome', () => {
+  it('counts zero for empty input', () => {
+    expect(countByOutcome([])).toEqual({ error: 0, rejected: 0, completed: 0 })
+  })
+
+  it('skips thinking entries', () => {
+    expect(countByOutcome([makeThinkingEntry(), makeThinkingEntry()]))
+      .toEqual({ error: 0, rejected: 0, completed: 0 })
+  })
+
+  it('buckets tool entries by outcome precedence rejected > error > completed', () => {
+    const entries: TrajectoryEntry[] = [
+      makeToolEntry(),                                                       // completed
+      makeToolEntry({ error: 'boom' }),                                      // error
+      makeToolEntry({ gate: { status: 'reject', reason: 'nope' } }),         // rejected
+      makeToolEntry({ error: 'x', gate: { status: 'reject', reason: 'y' } }), // rejected (precedence)
+      makeThinkingEntry(),                                                   // skipped
+    ]
+    expect(countByOutcome(entries)).toEqual({ error: 1, rejected: 2, completed: 1 })
+  })
+})
+
+describe('filterTrajectoryEntries with outcome axis', () => {
+  const entries: TrajectoryEntry[] = [
+    makeToolEntry({ turn: 1, tool_name: 'ok_tool' }),
+    makeToolEntry({ turn: 1, tool_name: 'err_tool', error: 'timeout' }),
+    makeToolEntry({
+      turn: 2, tool_name: 'blocked', gate: { status: 'reject', reason: 'policy' },
+    }),
+    makeThinkingEntry({ turn: 2, content: 'plan ahead' }),
+  ]
+
+  it('narrows to error entries only', () => {
+    const out = filterTrajectoryEntries(entries, { type: 'all', outcome: 'error', search: '' })
+    expect(out).toHaveLength(1)
+    expect(out[0]?.tool_name).toBe('err_tool')
+  })
+
+  it('narrows to rejected entries only', () => {
+    const out = filterTrajectoryEntries(entries, { type: 'all', outcome: 'rejected', search: '' })
+    expect(out).toHaveLength(1)
+    expect(out[0]?.tool_name).toBe('blocked')
+  })
+
+  it('narrows to completed entries only (drops thinking + rejected + error)', () => {
+    const out = filterTrajectoryEntries(entries, { type: 'all', outcome: 'completed', search: '' })
+    expect(out).toHaveLength(1)
+    expect(out[0]?.tool_name).toBe('ok_tool')
+  })
+
+  it('combines outcome with type filter (thinking + outcome!=all is empty)', () => {
+    const out = filterTrajectoryEntries(entries, { type: 'thinking', outcome: 'error', search: '' })
+    expect(out).toEqual([])
+  })
+
+  it('combines outcome with search filter', () => {
+    const out = filterTrajectoryEntries(
+      entries,
+      { type: 'all', outcome: 'error', search: 'err' },
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]?.tool_name).toBe('err_tool')
   })
 })
 

@@ -45,6 +45,52 @@ export function filterVerdicts(
   })
 }
 
+/**
+ * Pure filter for pre-compact events.
+ *
+ * Case-insensitive substring match on `keeper_name`, `trigger`, `model_family`,
+ * and any entry of `strategies`. Empty/whitespace query returns the input
+ * reference unchanged so `useMemo` keeps referential equality. Input is
+ * never mutated.
+ */
+export function filterPreCompactEvents(
+  items: readonly PreCompactEvent[],
+  query: string,
+): readonly PreCompactEvent[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return items
+  return items.filter(item => {
+    if (item.keeper_name && item.keeper_name.toLowerCase().includes(needle)) return true
+    if (item.trigger && item.trigger.toLowerCase().includes(needle)) return true
+    if (item.model_family && item.model_family.toLowerCase().includes(needle)) return true
+    if (item.strategies.some(s => s.toLowerCase().includes(needle))) return true
+    return false
+  })
+}
+
+/**
+ * Pure filter for handoff events.
+ *
+ * Case-insensitive substring match on `keeper_name`, `to_model`, `trace_id`,
+ * `prev_trace_id`, and `new_trace_id`. Empty/whitespace query returns the
+ * input reference unchanged. Input is never mutated.
+ */
+export function filterHandoffEvents(
+  items: readonly HandoffEvent[],
+  query: string,
+): readonly HandoffEvent[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return items
+  return items.filter(item => {
+    if (item.keeper_name && item.keeper_name.toLowerCase().includes(needle)) return true
+    if (item.to_model && item.to_model.toLowerCase().includes(needle)) return true
+    if (item.trace_id && item.trace_id.toLowerCase().includes(needle)) return true
+    if (item.prev_trace_id && item.prev_trace_id.toLowerCase().includes(needle)) return true
+    if (item.new_trace_id && item.new_trace_id.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
 // ── Helper functions ──
 
 export function railStatusLabel(status: RailStatus): string {
@@ -350,62 +396,100 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
 }
 
 export function PreCompactList({ section }: { section: HarnessSignalSection<PreCompactEvent> }) {
+  const query = useSignal('')
+  const visibleItems = useMemo(
+    () => filterPreCompactEvents(section.recent_events, query.value),
+    [section.recent_events, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
+
   if (section.recent_events.length === 0) {
     return html`<${EmptySignal} text=${emptyReasonText(section.empty_reason)} />`
   }
 
   return html`
     <div class="space-y-2">
-      ${section.recent_events.map(item => html`
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-          <div class="flex items-start justify-between gap-3">
-            <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
-            <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
-          </div>
-          <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
-            <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
-            <span>메시지 ${item.message_count}건</span>
-            <span>토큰 ${item.token_count.toLocaleString()}</span>
-            <span>${item.model_family || '모델 미확인'}</span>
-          </div>
-          <div class="mt-2 text-xs text-[var(--text-muted)]">${item.trigger}</div>
-          ${item.strategies.length > 0 ? html`
-            <div class="mt-2 flex flex-wrap gap-1">
-              ${item.strategies.map(strategy => html`
-                <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${strategy}</span>
-              `)}
+      <div class="flex justify-end">
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="keeper / trigger / model / strategy 필터"
+          aria-label="압축 이벤트 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && visibleItems.length === 0
+        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        : visibleItems.map(item => html`
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
+              <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
             </div>
-          ` : null}
-        </div>
-      `)}
+            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
+              <span>컨텍스트 ${Math.round(item.context_ratio * 100)}%</span>
+              <span>메시지 ${item.message_count}건</span>
+              <span>토큰 ${item.token_count.toLocaleString()}</span>
+              <span>${item.model_family || '모델 미확인'}</span>
+            </div>
+            <div class="mt-2 text-xs text-[var(--text-muted)]">${item.trigger}</div>
+            ${item.strategies.length > 0 ? html`
+              <div class="mt-2 flex flex-wrap gap-1">
+                ${item.strategies.map(strategy => html`
+                  <span class="rounded-full border border-[var(--white-8)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">${strategy}</span>
+                `)}
+              </div>
+            ` : null}
+          </div>
+        `)}
     </div>
   `
 }
 
 export function HandoffList({ section }: { section: HarnessSignalSection<HandoffEvent> }) {
+  const query = useSignal('')
+  const visibleItems = useMemo(
+    () => filterHandoffEvents(section.recent_events, query.value),
+    [section.recent_events, query.value],
+  )
+  const isFiltering = query.value.trim() !== ''
+
   if (section.recent_events.length === 0) {
     return html`<${EmptySignal} text=${emptyReasonText(section.empty_reason)} />`
   }
 
   return html`
     <div class="space-y-2">
-      ${section.recent_events.map(item => html`
-        <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-          <div class="flex items-start justify-between gap-3">
-            <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
-            <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
+      <div class="flex justify-end">
+        <input
+          type="search"
+          value=${query.value}
+          placeholder="keeper / model / trace_id 필터"
+          aria-label="세대 교체 필터"
+          onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+        />
+      </div>
+      ${isFiltering && visibleItems.length === 0
+        ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
+        : visibleItems.map(item => html`
+          <div class="rounded-lg border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="text-sm font-medium text-[var(--text-strong)]">${item.keeper_name}</div>
+              <div class="text-xs text-[var(--text-muted)]">${formatTimestamp(item.timestamp)}</div>
+            </div>
+            <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
+              <span>${item.generation}세대</span>
+              <span>다음 ${item.next_generation ?? '-'}세대</span>
+              <span class="font-mono">${item.trace_id.slice(0, 8)}</span>
+              <span>${item.to_model ?? '모델 미확인'}</span>
+            </div>
+            ${item.prev_trace_id ? html`
+              <div class="mt-2 text-xs text-[var(--text-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
+            ` : null}
           </div>
-          <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-body)]">
-            <span>${item.generation}세대</span>
-            <span>다음 ${item.next_generation ?? '-'}세대</span>
-            <span class="font-mono">${item.trace_id.slice(0, 8)}</span>
-            <span>${item.to_model ?? '모델 미확인'}</span>
-          </div>
-          ${item.prev_trace_id ? html`
-            <div class="mt-2 text-xs text-[var(--text-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
-          ` : null}
-        </div>
-      `)}
+        `)}
     </div>
   `
 }

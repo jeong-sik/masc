@@ -12,8 +12,15 @@ import {
   verdictTone,
   verdictSummary,
   filterVerdicts,
+  filterPreCompactEvents,
+  filterHandoffEvents,
 } from './harness-health-sections'
-import type { HarnessHealthData, HarnessVerdictItem } from './harness-health-state'
+import type {
+  HarnessHealthData,
+  HarnessVerdictItem,
+  PreCompactEvent,
+  HandoffEvent,
+} from './harness-health-state'
 
 function makeVerdict(overrides: Partial<HarnessVerdictItem> = {}): HarnessVerdictItem {
   return {
@@ -426,5 +433,155 @@ describe('filterVerdicts', () => {
     ]
     expect(filterVerdicts(sparse, 'approve')).toHaveLength(1)
     expect(filterVerdicts(sparse, 'anything-else')).toHaveLength(0)
+  })
+})
+
+// ================================================================
+// filterPreCompactEvents
+// ================================================================
+
+function makePreCompact(overrides: Partial<PreCompactEvent> = {}): PreCompactEvent {
+  return {
+    timestamp: 1_700_000_000_000,
+    keeper_name: 'keeper-alpha',
+    context_ratio: 0.5,
+    message_count: 10,
+    token_count: 1000,
+    strategies: ['summarize'],
+    model_family: 'claude-sonnet',
+    trigger: 'ratio_threshold',
+    ...overrides,
+  }
+}
+
+describe('filterPreCompactEvents', () => {
+  const items: PreCompactEvent[] = [
+    makePreCompact({ keeper_name: 'keeper-alpha', trigger: 'ratio_threshold', model_family: 'claude-sonnet', strategies: ['summarize', 'drop_old'] }),
+    makePreCompact({ keeper_name: 'keeper-beta', trigger: 'manual', model_family: 'glm-4.6', strategies: ['handoff'] }),
+    makePreCompact({ keeper_name: 'keeper-gamma', trigger: 'token_cap', model_family: 'qwen-3', strategies: [] }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterPreCompactEvents(items, '')).toBe(items)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterPreCompactEvents(items, '   ')).toBe(items)
+  })
+
+  it('matches by keeper_name (case-insensitive)', () => {
+    const result = filterPreCompactEvents(items, 'ALPHA')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-alpha'])
+  })
+
+  it('matches by trigger substring', () => {
+    const result = filterPreCompactEvents(items, 'manual')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+  })
+
+  it('matches by model_family substring', () => {
+    const result = filterPreCompactEvents(items, 'glm')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+  })
+
+  it('matches by strategies entry substring', () => {
+    const result = filterPreCompactEvents(items, 'drop_old')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-alpha'])
+  })
+
+  it('matches strategies case-insensitively', () => {
+    const result = filterPreCompactEvents(items, 'HANDOFF')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterPreCompactEvents(items, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterPreCompactEvents(items, '  gamma  ')).toHaveLength(1)
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = items.slice()
+    filterPreCompactEvents(items, 'alpha')
+    expect(items).toEqual(copy)
+  })
+})
+
+// ================================================================
+// filterHandoffEvents
+// ================================================================
+
+function makeHandoff(overrides: Partial<HandoffEvent> = {}): HandoffEvent {
+  return {
+    timestamp: 1_700_000_000_000,
+    keeper_name: 'keeper-alpha',
+    trace_id: 'abc12345deadbeef',
+    generation: 3,
+    next_generation: 4,
+    prev_trace_id: 'oldtrace0000',
+    new_trace_id: 'newtrace9999',
+    to_model: 'claude-sonnet',
+    ...overrides,
+  }
+}
+
+describe('filterHandoffEvents', () => {
+  const items: HandoffEvent[] = [
+    makeHandoff({ keeper_name: 'keeper-alpha', to_model: 'claude-sonnet', trace_id: 'alpha-trace-aaaa', prev_trace_id: 'prev-alpha', new_trace_id: 'new-alpha' }),
+    makeHandoff({ keeper_name: 'keeper-beta', to_model: 'glm-4.6', trace_id: 'beta-trace-bbbb', prev_trace_id: 'prev-beta', new_trace_id: 'new-beta' }),
+    makeHandoff({ keeper_name: 'keeper-gamma', to_model: null, trace_id: 'gamma-trace-cccc', prev_trace_id: null, new_trace_id: null }),
+  ]
+
+  it('returns the input reference when query is empty', () => {
+    expect(filterHandoffEvents(items, '')).toBe(items)
+  })
+
+  it('returns the input reference for whitespace-only query', () => {
+    expect(filterHandoffEvents(items, '   ')).toBe(items)
+  })
+
+  it('matches by keeper_name (case-insensitive)', () => {
+    const result = filterHandoffEvents(items, 'BETA')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+  })
+
+  it('matches by to_model substring', () => {
+    const result = filterHandoffEvents(items, 'glm')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+  })
+
+  it('matches by trace_id substring', () => {
+    const result = filterHandoffEvents(items, 'gamma-trace')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-gamma'])
+  })
+
+  it('matches by prev_trace_id substring', () => {
+    const result = filterHandoffEvents(items, 'prev-alpha')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-alpha'])
+  })
+
+  it('matches by new_trace_id substring', () => {
+    const result = filterHandoffEvents(items, 'new-beta')
+    expect(result.map(r => r.keeper_name)).toEqual(['keeper-beta'])
+  })
+
+  it('handles null to_model safely', () => {
+    expect(filterHandoffEvents(items, 'keeper-gamma')).toHaveLength(1)
+  })
+
+  it('returns empty when no field matches', () => {
+    expect(filterHandoffEvents(items, 'nonexistent-token')).toHaveLength(0)
+  })
+
+  it('trims query before matching', () => {
+    expect(filterHandoffEvents(items, '  alpha  ')).toHaveLength(1)
+  })
+
+  it('does not mutate the input array', () => {
+    const copy = items.slice()
+    filterHandoffEvents(items, 'alpha')
+    expect(items).toEqual(copy)
   })
 })

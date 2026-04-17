@@ -4,22 +4,6 @@
 
 /* ═══ Dashboard ═══ */
 
-/* ── Runtime Collapsible ── */
-.runtime-summary::-webkit-details-marker,
-.overview-section-collapsible > summary::-webkit-details-marker,
-.mission-collapsible-summary::-webkit-details-marker {
-  display: none;
-}
-
-.runtime-summary::before {
-  content: '\25B8 ';
-  display: inline;
-}
-
-.runtime-collapsible[open] > .runtime-summary::before {
-  content: '\25BE ';
-}
-
 /* ── Collapsible Sections ── */
 .overview-section-collapsible > summary {
   transition: background 0.15s;
@@ -37,17 +21,8 @@
   color: var(--text-slate);
 }
 
-.overview-section-collapsible[open] > summary::before,
-.mission-collapsible-section[open] > .mission-collapsible-summary::before {
+.overview-section-collapsible[open] > summary::before {
   transform: rotate(90deg);
-}
-
-.mission-collapsible-summary::before {
-  content: '\25B8';
-  font-size: var(--fs-xs);
-  color: var(--text-slate);
-  transition: transform 0.15s;
-  display: inline-block;
 }
 
 /* board-post content-visibility: folded into @utility board-post below */
@@ -69,6 +44,7 @@
 .mission-activity-card.mission-state-idle:hover {
   opacity: 0.85;
 }
+
 
 /* ── Empty state (standardized) ── */
 @utility empty-state {
@@ -94,24 +70,11 @@
 @media (max-width: 880px) {
   .control-row { grid-template-columns: 1fr; }
 }
-@media (max-width: 600px) {
-  .metric-tip-pop {
-    left: 0;
-    transform: none;
-    min-width: 220px;
-    max-width: min(320px, calc(100vw - 56px));
-  }
-}
-
 /* ── Agent card hover ── */
 .agent-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   transform: translateY(-2px);
   border-color: var(--accent);
-}
-
-.logs-module-input::placeholder {
-  color: var(--text-muted);
 }
 
 @utility logs-refresh-btn { &:hover { border-color: var(--accent); } }
@@ -178,16 +141,6 @@
 /* ── Goals ────────────────────────────────────── */
 
 /* ── Mission ─────────────────────────────────── */
-
-/* mission .is-selected: compound selectors, kept as raw CSS */
-.mission-crew-card.is-selected {
-  box-shadow: 0 0 0 1px rgba(71,184,255,0.45);
-  background: linear-gradient(180deg, var(--accent-14), var(--white-4));
-}
-
-.proof-artifact-row .command-meta-line span {
-  overflow-wrap: anywhere;
-}
 
 /* ═══ UI ═══ */
 

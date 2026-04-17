@@ -2,6 +2,83 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { escapeMermaidLabel, flowStatusClass } from './harness-health'
+
+// ── Pure function tests ──
+
+describe('escapeMermaidLabel', () => {
+  it('returns plain text unchanged', () => {
+    expect(escapeMermaidLabel('hello world')).toBe('hello world')
+  })
+
+  it('replaces double quotes with single quotes', () => {
+    expect(escapeMermaidLabel('say "hello"')).toBe("say 'hello'")
+  })
+
+  it('replaces square brackets with spaces', () => {
+    expect(escapeMermaidLabel('arr[0]')).toBe('arr 0')
+  })
+
+  it('replaces curly braces with spaces', () => {
+    expect(escapeMermaidLabel('{key: val}')).toBe('key: val')
+  })
+
+  it('replaces parens with spaces', () => {
+    expect(escapeMermaidLabel('func()')).toBe('func')
+  })
+
+  it('replaces pipe and hash with spaces', () => {
+    expect(escapeMermaidLabel('a|b#c')).toBe('a b c')
+  })
+
+  it('replaces semicolons with spaces', () => {
+    expect(escapeMermaidLabel('a;b')).toBe('a b')
+  })
+
+  it('collapses multiple whitespace', () => {
+    expect(escapeMermaidLabel('a   b')).toBe('a b')
+  })
+
+  it('replaces newlines with spaces', () => {
+    expect(escapeMermaidLabel('line1\nline2')).toBe('line1 line2')
+  })
+
+  it('trims leading and trailing whitespace', () => {
+    expect(escapeMermaidLabel('  hello  ')).toBe('hello')
+  })
+
+  it('handles empty string', () => {
+    expect(escapeMermaidLabel('')).toBe('')
+  })
+
+  it('handles complex mermaid-breaking input', () => {
+    expect(escapeMermaidLabel('eval "test" [warn] {ok} (a|b); done')).toBe("eval 'test' warn ok a b done")
+  })
+})
+
+describe('flowStatusClass', () => {
+  it('returns healthyRail for healthy', () => {
+    expect(flowStatusClass('healthy')).toBe('healthyRail')
+  })
+
+  it('returns warningRail for warning', () => {
+    expect(flowStatusClass('warning')).toBe('warningRail')
+  })
+
+  it('returns staleRail for stale', () => {
+    expect(flowStatusClass('stale')).toBe('staleRail')
+  })
+
+  it('returns idleRail for idle', () => {
+    expect(flowStatusClass('idle')).toBe('idleRail')
+  })
+
+  it('returns idleRail for unknown status', () => {
+    expect(flowStatusClass('broken' as never)).toBe('idleRail')
+  })
+})
+
+// ── Integration tests below ──
 
 function sampleResponse() {
   return {

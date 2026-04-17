@@ -7,6 +7,10 @@ import {
   heroBody,
   railDetail,
   railFreshness,
+  statusCardClass,
+  emptyReasonText,
+  verdictTone,
+  verdictSummary,
 } from './harness-health-sections'
 import type { HarnessHealthData } from './harness-health-state'
 
@@ -248,5 +252,93 @@ describe('railFreshness', () => {
   it('returns fallback when no event', () => {
     const data = makeData({ evaluator_last_event_at: null })
     expect(railFreshness(data, 'evaluator')).toBe('기록 없음')
+  })
+})
+
+describe('statusCardClass', () => {
+  it('returns ok border for healthy', () => {
+    expect(statusCardClass('healthy')).toBe('border-[var(--ok-30)] bg-[var(--ok-12)]')
+  })
+
+  it('returns warn border for warning', () => {
+    expect(statusCardClass('warning')).toBe('border-[var(--warn-30)] bg-[var(--warn-12)]')
+  })
+
+  it('returns white border for stale', () => {
+    expect(statusCardClass('stale')).toBe('border-[var(--white-12)] bg-[var(--white-4)]')
+  })
+
+  it('returns dim border for idle', () => {
+    expect(statusCardClass('idle')).toBe('border-[var(--white-8)] bg-[var(--white-4)]')
+  })
+
+  it('returns dim border for unknown', () => {
+    expect(statusCardClass('broken' as never)).toBe('border-[var(--white-8)] bg-[var(--white-4)]')
+  })
+})
+
+describe('emptyReasonText', () => {
+  it('returns window_empty message', () => {
+    expect(emptyReasonText('window_empty')).toBe('선택된 범위에는 신호가 없습니다.')
+  })
+
+  it('returns no_recent_events message', () => {
+    expect(emptyReasonText('no_recent_events')).toBe('기록은 있지만 최근 신호가 없습니다.')
+  })
+
+  it('returns default message for no_runtime_activity', () => {
+    expect(emptyReasonText('no_runtime_activity')).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+  })
+
+  it('returns default message for null', () => {
+    expect(emptyReasonText(null)).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+  })
+
+  it('returns default message for undefined', () => {
+    expect(emptyReasonText(undefined)).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+  })
+
+  it('returns default message for unknown reason', () => {
+    expect(emptyReasonText('something_else')).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+  })
+})
+
+describe('verdictTone', () => {
+  it('returns ok for approve', () => {
+    expect(verdictTone('approve')).toBe('bg-[var(--ok)]')
+  })
+
+  it('returns ok for approve:conditional', () => {
+    expect(verdictTone('approve:conditional')).toBe('bg-[var(--ok)]')
+  })
+
+  it('returns bad for reject', () => {
+    expect(verdictTone('reject')).toBe('bg-[var(--bad)]')
+  })
+
+  it('returns bad for reject:vague notes', () => {
+    expect(verdictTone('reject:vague notes')).toBe('bg-[var(--bad)]')
+  })
+})
+
+describe('verdictSummary', () => {
+  it('passes through non-reject verdicts', () => {
+    expect(verdictSummary('approve')).toBe('approve')
+  })
+
+  it('strips reject: prefix', () => {
+    expect(verdictSummary('reject:vague notes')).toBe('vague notes')
+  })
+
+  it('strips reject: prefix and trims', () => {
+    expect(verdictSummary('reject:  too long  ')).toBe('too long')
+  })
+
+  it('returns reject for empty reason', () => {
+    expect(verdictSummary('reject:')).toBe('reject')
+  })
+
+  it('returns reject for whitespace-only reason', () => {
+    expect(verdictSummary('reject:   ')).toBe('reject')
   })
 })

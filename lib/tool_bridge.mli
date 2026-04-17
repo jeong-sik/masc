@@ -9,12 +9,34 @@
     @since 2.95.1 — result conversion
     @since 2.110.0 — schema conversion + OAS Tool.t creation *)
 
+(** {1 Tool Output Externalization}
+
+    Tool outputs above [externalize_threshold_bytes ()] are stored in
+    the content-addressed blob store ([Tool_blob_store]) and the OAS
+    [content] field carries a sentinel marker
+    ([Tool_output.encode_for_oas (Stored ...)]).
+
+    Disabled when [MASC_BASE_PATH] is unset OR when [MASC_TOOL_EXTERNALIZE]
+    is one of [0|false|no|off]. *)
+
+val default_externalize_threshold_bytes : int
+(** Compile-time default; overridable via [MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES]. *)
+
+val externalize_threshold_bytes : unit -> int
+(** Resolved threshold in bytes. *)
+
+val maybe_externalize : ?mime:string -> string -> string
+(** Externalize when over threshold and a blob store is available;
+    pass through otherwise. Best-effort — storage failures fall back to
+    the original [msg]. *)
+
 (** {1 Result Conversion} *)
 
 val to_oas_tool_result :
   ?recoverable:bool -> bool * string -> Agent_sdk.Types.tool_result
 (** Convert MASC [(success, message)] to OAS [tool_result].
-    [recoverable] defaults to [true] for error cases. *)
+    [recoverable] defaults to [true] for error cases.
+    Large [message] values are externalized via {!maybe_externalize}. *)
 
 val of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string
 (** Convert OAS [tool_result] back to MASC [(success, message)]. *)

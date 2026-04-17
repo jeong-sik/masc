@@ -33,6 +33,26 @@ export const loopActionError = signal<string | null>(null)
 let pendingRefreshDetail = false
 let detailRequestSeq = 0
 
+export const authorFilter = signal<string>('all')
+
+export const filteredLoops = computed<AutoresearchLoopSummary[]>(() => {
+  const state = loopsResource.state.value
+  const loops = state.status === 'loaded' ? state.data.loops : []
+  const filter = authorFilter.value
+  if (filter === 'all') return loops
+  return loops.filter(l => l.author === filter || (filter === 'unknown' && !l.author))
+})
+
+export const availableAuthors = computed<string[]>(() => {
+  const state = loopsResource.state.value
+  if (state.status !== 'loaded') return []
+  const authors = new Set<string>()
+  for (const loop of state.data.loops) {
+    if (loop.author) authors.add(loop.author)
+  }
+  return Array.from(authors).sort()
+})
+
 // --- Computed ---
 
 export const selectedLoop = computed<AutoresearchLoopSummary | null>(() => {

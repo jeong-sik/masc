@@ -32,6 +32,7 @@ import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
+import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
@@ -365,7 +366,7 @@ export async function stopSidecar(connectorId: string) {
   }
 }
 
-async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
+export async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
   const keeper = keeperName.trim()
   const channel = channelId.trim()
   if (!keeper || !channel) return
@@ -626,6 +627,10 @@ function ConnectorLivePanel({
       />
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
+
+      ${connector?.available === true && configuredBindings.length === 0 && keepers.length > 0
+        ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
+        : null}
 
       ${headerExpanded.value
         ? html`

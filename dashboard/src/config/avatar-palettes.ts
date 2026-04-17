@@ -1,7 +1,7 @@
 // MASC Dashboard — Deterministic agent name -> avatar palette mapping
 // Uses a simple string hash to pick colors and template from agent name.
 
-export type AvatarTemplate = 'humanoid' | 'robot' | 'animal' | 'abstract'
+type AvatarTemplate = 'humanoid' | 'robot' | 'animal' | 'abstract'
 
 export interface AvatarPalette {
   skin: string
@@ -57,7 +57,7 @@ export function templateForAgent(name: string, traits?: string[]): AvatarTemplat
 // 8x8 pixel templates: 1 = skin, 2 = hair, 3 = point, 4 = highlight, 0 = transparent
 // Each template is a flat 64-element array (8 rows x 8 cols)
 
-export type PixelGrid = readonly number[]
+type PixelGrid = readonly number[]
 
 export const PIXEL_TEMPLATES: Record<AvatarTemplate, PixelGrid> = {
   humanoid: [

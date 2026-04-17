@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { ConnectorOverviewStrip } from './connector-overview-strip'
+import { ConnectorOverviewStrip, _testResetBulkInflight } from './connector-overview-strip'
 import type { GateConnectorInfo } from '../api/gate'
 
 const mkConnector = (overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
@@ -49,6 +49,50 @@ describe('ConnectorOverviewStrip', () => {
     const imessageTile = container.querySelector('[data-overview-tile="imessage"]')!
     expect(discordTile.textContent).toContain('connected')
     expect(imessageTile.textContent).toContain('offline')
+  })
+
+  it('Start All button counts only sidecars currently down', () => {
+    _testResetBulkInflight()
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[
+          mkConnector({ connector_id: 'discord', available: true }),
+          mkConnector({ connector_id: 'slack', available: true }),
+        ]}
+        keeperCount=${0}
+      />`,
+      container,
+    )
+    const startBtn = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
+    const stopBtn = container.querySelector('[data-bulk-action="stop"]') as HTMLButtonElement
+    // 2 of 4 are up → 2 down → Start All shows (2). 2 up → Stop All (2).
+    expect(startBtn.textContent).toContain('(2)')
+    expect(stopBtn.textContent).toContain('(2)')
+  })
+
+  it('Start All disabled when all sidecars are already up', () => {
+    _testResetBulkInflight()
+    const allUp = ['discord', 'imessage', 'slack', 'telegram'].map(id =>
+      mkConnector({ connector_id: id, available: true }),
+    )
+    render(
+      html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`,
+      container,
+    )
+    const startBtn = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
+    expect(startBtn.disabled).toBe(true)
+    expect(startBtn.title).toContain('이미 실행')
+  })
+
+  it('Stop All disabled when nothing is up', () => {
+    _testResetBulkInflight()
+    render(
+      html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
+      container,
+    )
+    const stopBtn = container.querySelector('[data-bulk-action="stop"]') as HTMLButtonElement
+    expect(stopBtn.disabled).toBe(true)
+    expect(stopBtn.title).toContain('실행 중인 sidecar 없음')
   })
 
   it('renders 4 readiness pills inside each tile', () => {

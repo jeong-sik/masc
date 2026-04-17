@@ -9,10 +9,34 @@
 // at-a-glance strip on top.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
+
+const bulkInflight = signal<{ start: boolean; stop: boolean }>({ start: false, stop: false })
+
+async function runBulk(
+  kind: 'start' | 'stop',
+  predicate: (c: GateConnectorInfo | null) => boolean,
+  connectors: GateConnectorInfo[],
+) {
+  if (bulkInflight.value[kind]) return
+  bulkInflight.value = { ...bulkInflight.value, [kind]: true }
+  try {
+    const targets = KNOWN_CONNECTOR_IDS.filter(id => predicate(findConnector(connectors, id)))
+    // Per-connector pulse (the same withRailInflight that single-pill uses) so
+    // each tile's Process pill shows progress; runs in parallel.
+    await Promise.allSettled(
+      targets.map(id =>
+        withRailInflight(id, 'process', () => kind === 'start' ? startSidecar(id) : stopSidecar(id)),
+      ),
+    )
+  } finally {
+    bulkInflight.value = { ...bulkInflight.value, [kind]: false }
+  }
+}
 
 interface OverviewProps {
   connectors: GateConnectorInfo[]
@@ -81,16 +105,55 @@ function OverviewTile({ id, connector, keeperCount }: {
   `
 }
 
-export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
+function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
+  const downCount = KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available !== true).length
+  const upCount = KNOWN_CONNECTOR_IDS.length - downCount
+  const startBusy = bulkInflight.value.start
+  const stopBusy = bulkInflight.value.stop
   return html`
-    <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      ${KNOWN_CONNECTOR_IDS.map(id => html`
-        <${OverviewTile}
-          id=${id}
-          connector=${findConnector(connectors, id)}
-          keeperCount=${keeperCount}
-        />
-      `)}
+    <div class="mb-2 flex items-center justify-end gap-2 text-[11px] text-[var(--text-dim)]">
+      <span>일괄:</span>
+      <button
+        type="button"
+        class="cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled=${startBusy || downCount === 0}
+        title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
+        onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
+        data-bulk-action="start"
+      >
+        ${startBusy ? '시작 중...' : `▶ Start All (${downCount})`}
+      </button>
+      <button
+        type="button"
+        class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-100 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled=${stopBusy || upCount === 0}
+        title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
+        onClick=${() => { void runBulk('stop', c => c?.available === true, connectors) }}
+        data-bulk-action="stop"
+      >
+        ${stopBusy ? '정지 중...' : `■ Stop All (${upCount})`}
+      </button>
     </div>
   `
+}
+
+export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
+  return html`
+    <div class="mb-4">
+      <${BulkActions} connectors=${connectors} />
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        ${KNOWN_CONNECTOR_IDS.map(id => html`
+          <${OverviewTile}
+            id=${id}
+            connector=${findConnector(connectors, id)}
+            keeperCount=${keeperCount}
+          />
+        `)}
+      </div>
+    </div>
+  `
+}
+
+export function _testResetBulkInflight() {
+  bulkInflight.value = { start: false, stop: false }
 }

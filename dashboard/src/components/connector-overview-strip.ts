@@ -36,13 +36,94 @@ import {
   type KnownConnectorId,
 } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
+import { CopyableCode } from './common/copyable-code'
 
 const bulkInflight = signal<{ start: boolean; stop: boolean }>({ start: false, stop: false })
 const expandedRow = signal<KnownConnectorId | null>(null)
+const pathsExpanded = signal<boolean>(false)
 
 export function _testResetBulkInflight() {
   bulkInflight.value = { start: false, stop: false }
   expandedRow.value = null
+  pathsExpanded.value = false
+}
+
+export interface MascPaths {
+  connectorsDir: string | null
+  logsDir: string | null
+  keepersDir: string
+  sidecarsDir: string
+}
+
+/** Derive MASC-managed paths from the first connector that has a names_path.
+    Returns `null` fields when no runtime has been observed yet. Keeper and
+    sidecar paths are repo-relative conventions and never null. Pure helper. */
+export function deriveMascPaths(connectors: GateConnectorInfo[]): MascPaths {
+  const fallback: MascPaths = {
+    connectorsDir: null,
+    logsDir: null,
+    keepersDir: 'config/keepers/',
+    sidecarsDir: 'sidecars/',
+  }
+  const withPath = connectors.find(c => typeof c.names_path === 'string' && c.names_path.length > 0)
+  if (!withPath) return fallback
+  const match = withPath.names_path.match(/^(.*)\/connectors\/[^/]+\/names\.json$/)
+  if (!match) return fallback
+  const mascRoot = match[1] ?? ''
+  return {
+    connectorsDir: `${mascRoot}/connectors/`,
+    logsDir: `${mascRoot}/logs/`,
+    keepersDir: 'config/keepers/',
+    sidecarsDir: 'sidecars/',
+  }
+}
+
+function PathRow({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return html`
+    <div class="flex items-center gap-2" data-paths-row=${label}>
+      <span class="w-[100px] shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]" title=${hint}>${label}</span>
+      <div class="min-w-0 flex-1">
+        <${CopyableCode} command=${value} ariaLabel=${`Copy ${label} path`} />
+      </div>
+    </div>
+  `
+}
+
+function PathsStrip({ connectors }: { connectors: GateConnectorInfo[] }) {
+  const paths = deriveMascPaths(connectors)
+  const open = pathsExpanded.value
+  return html`
+    <div class="mb-3 rounded-lg border border-[var(--card-border)] bg-[var(--bg-1)]" data-panel="connector-paths-strip">
+      <button
+        type="button"
+        class="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2 text-left text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+        onClick=${() => { pathsExpanded.value = !open }}
+        aria-expanded=${open}
+        aria-controls="connector-paths-body"
+      >
+        <span>
+          <span class="mr-2 text-[10px] uppercase tracking-[0.14em]">Paths</span>
+          <span class="font-mono">${paths.connectorsDir ?? paths.sidecarsDir}</span>
+          <span class="ml-2 text-[var(--text-dim)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
+        </span>
+        <span>${open ? '▴' : '▾'}</span>
+      </button>
+      ${open
+        ? html`
+            <div id="connector-paths-body" class="space-y-1.5 border-t border-[var(--card-border)] px-3 py-2">
+              ${paths.connectorsDir
+                ? html`<${PathRow} label="Connectors" value=${paths.connectorsDir} hint="sidecar names.json / status.json 위치" />`
+                : null}
+              ${paths.logsDir
+                ? html`<${PathRow} label="Logs" value=${paths.logsDir} hint="sidecar 로그 디렉토리" />`
+                : null}
+              <${PathRow} label="Keepers" value=${paths.keepersDir} hint="keeper TOML 설정 파일" />
+              <${PathRow} label="Sidecars" value=${paths.sidecarsDir} hint="sidecar 스크립트 (run.sh) 위치" />
+            </div>
+          `
+        : null}
+    </div>
+  `
 }
 
 function findConnector(connectors: GateConnectorInfo[], id: string): GateConnectorInfo | null {
@@ -286,6 +367,22 @@ function ConnectorRow({ id, connector, keepers, renderExpandedDetail }: RowProps
           <button
             type="button"
             class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 py-0.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            onClick=${() => openConnectorConfig(id)}
+            title=${`${displayName} 설정 폼 열기`}
+            aria-label=${`${displayName} config`}
+            data-row-action="config"
+          >⚙</button>
+          <button
+            type="button"
+            class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 py-0.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            onClick=${() => { expandedRow.value = id }}
+            title=${`${displayName} 설치 가이드 (3 STEPS)`}
+            aria-label=${`${displayName} guide`}
+            data-row-action="guide"
+          >?</button>
+          <button
+            type="button"
+            class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 py-0.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
             onClick=${toggleExpand}
             aria-label=${`${displayName} detail toggle`}
           >${isExpanded ? '▴' : '▾'}</button>
@@ -308,6 +405,7 @@ export function ConnectorOverviewStrip({ connectors, keepers, renderExpandedDeta
   return html`
     <div class="mb-4" data-panel="connector-overview">
       <${SummaryBar} connectors=${connectors} keepers=${keepers} />
+      <${PathsStrip} connectors=${connectors} />
       <div class="grid gap-1.5 px-1 pb-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]"
            style=${ROW_GRID_COLS}>
         <span></span>

@@ -238,7 +238,7 @@ spawn 시 인자로 직접 설정하는 필드.
 의미:
 
 - keeper shell write는 자기 playground 안에서만 허용된다.
-- `docker_hardened`는 별도 runtime slice가 적용되면 hardened execution path를 사용한다.
+- `docker_hardened`는 keeper_bash를 ephemeral Docker sandbox로 실행한다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private playground mount, network=`none`이다.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 
@@ -255,6 +255,7 @@ guardrail:
 - path traversal / symlink escape는 차단된다.
 - secret-like payload는 team memory write에서 차단된다.
 - team memory는 keeper context에서만 허용되고, `room`은 항상 `default`여야 한다.
+- `legacy_local`는 `network_mode=none`을 허용하지 않는다. `none`은 `docker_hardened`와 함께 써야 한다.
 
 ### 3.2 페르소나 로드 필드 (Profile-Loaded)
 

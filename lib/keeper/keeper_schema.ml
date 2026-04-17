@@ -241,17 +241,17 @@ let keeper_schemas : tool_schema list = [
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "legacy_local"; `String "docker_hardened"]);
-          ("description", `String "Filesystem/process sandbox profile. 'legacy_local' preserves current behavior. 'docker_hardened' reserves the hardened execution path.");
+          ("description", `String "Filesystem/process sandbox profile. 'legacy_local' keeps the current local execution model. 'docker_hardened' runs keeper_bash in an ephemeral hardened Docker container rooted at the keeper playground.");
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "none"; `String "inherit"]);
-          ("description", `String "Network policy associated with the sandbox profile.");
+          ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker_hardened'.");
         ]);
         ("shared_memory_scope", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "disabled"; `String "room"]);
-          ("description", `String "Typed shared-memory lane policy. Runtime enforcement is introduced in follow-up slices.");
+          ("description", `String "Typed shared-memory lane policy. 'room' enables keeper-authorized masc_team_memory_* access on the flattened default namespace.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

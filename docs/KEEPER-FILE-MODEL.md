@@ -203,6 +203,7 @@ Operational intent:
 - private writable lane: `.masc/playground/<keeper>/...`
 - shared lane: `masc_team_memory_read/write/search` only, on flattened `room="default"`
 - no arbitrary shared writable shell directory
+- `docker_hardened`는 `allowed_paths=["*"]`를 거부하고, private playground root 밖 경로도 허용하지 않는다
 
 ### Removed / forbidden fields (hard-rejected)
 

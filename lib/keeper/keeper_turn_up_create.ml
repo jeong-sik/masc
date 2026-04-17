@@ -42,6 +42,22 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     |> first_some p.profile_defaults.execution_scope
     |> Option.value ~default:default_execution_scope
   in
+  let sandbox_profile =
+    resolve_sandbox_profile
+      ~preferred:p.sandbox_profile_opt
+      ~fallback:None
+  in
+  let network_mode =
+    resolve_network_mode
+      ~sandbox_profile
+      ~preferred:p.network_mode_opt
+      ~fallback:None
+  in
+  let shared_memory_scope =
+    resolve_shared_memory_scope
+      ~preferred:p.shared_memory_scope_opt
+      ~fallback:None
+  in
   let voice_enabled =
     Option.value ~default:(default_voice_enabled_for p.name) p.voice_enabled_opt
   in
@@ -72,6 +88,19 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     (false, "goal is required when creating a keeper")
   end
   else
+    match
+      validate_sandbox_settings
+        ~config:ctx.config
+        ~keeper_name:p.name
+        ~sandbox_profile
+        ~network_mode
+        ~allowed_paths
+    with
+    | Error err ->
+        Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
+          p.name err;
+        (false, err)
+    | Ok () ->
     let max_active_keepers = Env_config.KeeperBootstrap.max_active_keepers in
     let active_keepers = Keeper_registry.count_running () in
     if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
@@ -260,18 +289,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         instructions;
         policy_voice_enabled;
         execution_scope;
-        sandbox_profile =
-          Option.value ~default:default_sandbox_profile p.sandbox_profile_opt;
-        network_mode =
-          Option.value
-            ~default:
-              (default_network_mode_for_profile
-                 (Option.value ~default:default_sandbox_profile
-                    p.sandbox_profile_opt))
-            p.network_mode_opt;
-        shared_memory_scope =
-          Option.value ~default:default_shared_memory_scope
-            p.shared_memory_scope_opt;
+        sandbox_profile;
+        network_mode;
+        shared_memory_scope;
         allowed_paths;
         tool_access;
         tool_denylist;

@@ -359,3 +359,97 @@ let resolve_mention_targets ~mention_targets_in ~fallback_targets ~name =
     else [ name ]
   in
   raw |> List.filter (fun s -> String.trim s <> "") |> dedupe_keep_order
+
+let resolve_sandbox_profile ~preferred ~fallback =
+  first_some preferred fallback
+  |> Option.value ~default:default_sandbox_profile
+
+let resolve_network_mode ~sandbox_profile ~preferred ~fallback =
+  first_some preferred fallback
+  |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
+
+let resolve_shared_memory_scope ~preferred ~fallback =
+  first_some preferred fallback
+  |> Option.value ~default:default_shared_memory_scope
+
+let private_workspace_root_rel keeper_name =
+  Keeper_alerting_path.playground_path_of_keeper keeper_name
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let private_workspace_root_abs ~(config : Coord.config) keeper_name =
+  Filename.concat
+    (Keeper_alerting_path.project_root_of_config config)
+    (private_workspace_root_rel keeper_name)
+  |> Keeper_alerting_path.normalize_path_for_check
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let sandbox_allowed_path_has_forbidden_segments path =
+  let has_glob =
+    String.exists (function
+      | '*' | '?' | '[' | ']' -> true
+      | _ -> false)
+      path
+  in
+  has_glob
+  || (path
+      |> String.split_on_char '/'
+      |> List.exists (function
+           | "." | ".." -> true
+           | _ -> false))
+
+let sandbox_allowed_path_within_private_root
+    ~(config : Coord.config)
+    ~keeper_name
+    path =
+  let trimmed = String.trim path in
+  if trimmed = "" then false
+  else if sandbox_allowed_path_has_forbidden_segments trimmed then
+    false
+  else
+    let private_root = private_workspace_root_abs ~config keeper_name in
+    let candidate =
+      (if Filename.is_relative trimmed then
+         Filename.concat
+           (Keeper_alerting_path.project_root_of_config config)
+           trimmed
+       else
+         trimmed)
+      |> Keeper_alerting_path.normalize_path_for_check
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    candidate = private_root
+    || String.starts_with ~prefix:(private_root ^ "/") candidate
+
+let validate_sandbox_settings
+    ~(config : Coord.config)
+    ~keeper_name
+    ~sandbox_profile
+    ~network_mode
+    ~allowed_paths =
+  match sandbox_profile with
+  | Legacy_local -> (
+      match network_mode with
+      | Network_inherit -> Ok ()
+      | Network_none ->
+          Error
+            "network_mode=none requires sandbox_profile=docker_hardened")
+  | Docker_hardened ->
+      if allowed_paths = [ "*" ] then
+        Error
+          "docker_hardened rejects allowed_paths=[\"*\"]; keep writes inside the private playground root"
+      else
+        let escaping =
+          List.filter
+            (fun path ->
+              not
+                (sandbox_allowed_path_within_private_root ~config ~keeper_name path))
+            allowed_paths
+        in
+        match escaping with
+        | [] -> Ok ()
+        | _ ->
+            Error
+              (Printf.sprintf
+                 "docker_hardened allowed_paths must stay under %s (rejected: %s)"
+                 (private_workspace_root_rel keeper_name)
+                 (String.concat ", " escaping))

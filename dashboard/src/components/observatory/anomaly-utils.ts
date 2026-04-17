@@ -6,7 +6,7 @@
 
 import type { ToolQualityHourlyPoint } from '../../api/dashboard'
 
-export interface AnomalyResult {
+interface AnomalyResult {
   point: ToolQualityHourlyPoint
   ts: number
   zScore: number

@@ -729,15 +729,42 @@ function ConnectorLivePanel({
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
       ${keeperDirectoryError && keepers.length === 0
-        ? html`<div class="mt-3 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">keeper directory unavailable, manual entry only</div>`
+        ? html`
+            <div
+              class="mt-3 rounded-md border border-amber-400/30 border-l-4 border-l-amber-500 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-100"
+              data-keeper-directory-error-panel
+            >
+              <span
+                class="mr-2 inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200"
+                aria-label="Keeper directory status: unavailable"
+              >
+                <span aria-hidden="true">⚠</span>
+                <span>Directory error</span>
+              </span>
+              keeper directory unavailable, manual entry only
+            </div>
+          `
         : null}
 
       ${showNoKeeperEmpty
         ? html`
-            <div class="mt-3 rounded-md border border-dashed border-[var(--card-border)] bg-[var(--white-4)] px-3 py-3 text-[12px]">
-              <div class="font-medium text-[var(--text-body)]">No keepers configured</div>
-              <div class="mt-1 text-[10px] text-[var(--text-dim)]">
-                Add keeper config files under config/keepers/ and restart the server.
+            <div
+              class="mt-3 rounded-md border border-dashed border-amber-400/30 border-l-4 border-l-amber-500 bg-amber-500/5 px-3 py-3 text-[12px]"
+              data-no-keepers-empty-panel
+            >
+              <div class="mb-1 flex items-center gap-2">
+                <span
+                  class="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-200"
+                  aria-label="Keeper configuration status: none configured"
+                  data-no-keepers-status-chip
+                >
+                  <span aria-hidden="true">⊘</span>
+                  <span>Not configured</span>
+                </span>
+                <span class="font-medium text-[var(--text-body)]">No keepers configured</span>
+              </div>
+              <div class="text-[10px] text-amber-100/80">
+                Add keeper config files under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart the server.
               </div>
             </div>
           `

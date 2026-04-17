@@ -812,10 +812,17 @@ function ConnectorLivePanel({
                   Click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal.
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
-                  <${CopyableCode} label="start" command=${cmds.start} />
-                  <${CopyableCode} label="tail logs" command=${cmds.tail} />
-                  <${CopyableCode} label="status" command=${cmds.status} />
-                  <${CopyableCode} label="stop" command=${cmds.stop} />
+                  <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
+                </div>
+                <div class="mt-2">
+                  <div class="mb-1 text-[9px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
+                    Or for diagnostics
+                  </div>
+                  <div class="grid grid-cols-1 gap-1.5" data-sidecar-secondary-cmds>
+                    <${CopyableCode} label="tail logs" command=${cmds.tail} variant="secondary" />
+                    <${CopyableCode} label="status" command=${cmds.status} variant="secondary" />
+                    <${CopyableCode} label="stop" command=${cmds.stop} variant="secondary" />
+                  </div>
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />
               </div>

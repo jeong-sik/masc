@@ -63,8 +63,8 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
         <strong>Start</strong>를 누르면 backend가 sidecar를 spawn합니다. 또는 명령을 복사해 새 터미널에서 직접 실행하세요.
       </div>
       <div class="mt-2 grid grid-cols-1 gap-1.5">
-        <${CopyableCode} label="start" command=${cmds.start} />
-        <${CopyableCode} label="tail logs" command=${cmds.tail} />
+        <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
+        <${CopyableCode} label="tail logs" command=${cmds.tail} variant="secondary" />
       </div>
       <${SetupGuideCard} connectorId=${connectorId} />
     </div>

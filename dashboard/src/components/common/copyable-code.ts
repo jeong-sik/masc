@@ -7,10 +7,19 @@ import { Copy, Check } from 'lucide-preact'
 import { useState } from 'preact/hooks'
 import { showToast } from './toast'
 
+export type CopyableVariant = 'primary' | 'secondary'
+
 export interface CopyableCodeProps {
   command: string
   label?: string
   ariaLabel?: string
+  /** Visual weight. `primary` = accented border + brighter label,
+      used for the main CTA command in a sequence (e.g. the Start cmd
+      in a sidecar onboarding block). `secondary` (default) = muted,
+      used for diagnostic / follow-up commands grouped below the
+      primary. Inspired by Vercel "Deploy your project" and Railway
+      deploy-log next-steps hierarchy. */
+  variant?: CopyableVariant
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
@@ -40,7 +49,36 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   return ok
 }
 
-export function CopyableCode({ command, label, ariaLabel }: CopyableCodeProps) {
+/** Pure: classes for the outer wrapper per variant. Exposed so callers
+    that want to group several secondary commands in a shared container
+    can align their own styling with the primitive's tone. */
+export function copyableWrapperClasses(variant: CopyableVariant): string {
+  switch (variant) {
+    case 'primary':
+      // Accented border, stronger bg, tighter padding to read like a
+      // "hero command". Matches Vercel "Deploy your project" primary CTA.
+      return 'border-[var(--accent-30)] bg-[var(--accent-12)] px-2.5 py-2'
+    case 'secondary':
+    default:
+      return 'border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1.5'
+  }
+}
+
+/** Pure: classes for the label chip per variant. Primary gets the accent
+    text + slightly bolder weight so the label stops being a silent chip
+    at the left edge and starts leading the reader's eye into the command. */
+export function copyableLabelClasses(variant: CopyableVariant): string {
+  return variant === 'primary'
+    ? 'shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent)]'
+    : 'shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]'
+}
+
+export function CopyableCode({
+  command,
+  label,
+  ariaLabel,
+  variant = 'secondary',
+}: CopyableCodeProps) {
   const [justCopied, setJustCopied] = useState(false)
   const onCopy = async () => {
     const ok = await copyToClipboard(command)
@@ -58,14 +96,17 @@ export function CopyableCode({ command, label, ariaLabel }: CopyableCodeProps) {
   // target terminal, so we flash a tiny text pill next to it for ~1.4s.
   // aria-live="polite" makes screen readers announce the success even
   // when they weren't focused on the button.
+  const wrapperTone = copyableWrapperClasses(variant)
+  const labelTone = copyableLabelClasses(variant)
   return html`
     <div
-      class="group flex items-center gap-2 rounded-md border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-1.5 transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)]"
+      class=${`group flex items-center gap-2 rounded-md border transition-colors hover:border-[var(--white-10)] hover:bg-[var(--white-4)] ${wrapperTone}`}
       data-copyable-code
+      data-copyable-variant=${variant}
       data-copied=${justCopied ? 'true' : 'false'}
     >
       ${label
-        ? html`<span class="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${label}</span>`
+        ? html`<span class=${labelTone}>${label}</span>`
         : null}
       <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-[var(--text-body)]">${command}</code>
       ${justCopied

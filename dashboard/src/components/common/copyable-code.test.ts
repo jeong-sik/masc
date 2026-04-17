@@ -2,7 +2,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { CopyableCode } from './copyable-code'
+import {
+  CopyableCode,
+  copyableWrapperClasses,
+  copyableLabelClasses,
+} from './copyable-code'
 
 const flushUi = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
@@ -123,5 +127,71 @@ describe('CopyableCode', () => {
 
     expect(container.querySelector('[data-copyable-code]')!.getAttribute('data-copied')).toBe('false')
     expect(container.querySelector('[data-copied-badge]')).toBeNull()
+  })
+
+  it('default variant is secondary — quiet muted chrome, non-accented border', () => {
+    render(html`<${CopyableCode} label="tail" command="./run.sh tail" />`, container)
+    const wrap = container.querySelector('[data-copyable-code]')!
+    expect(wrap.getAttribute('data-copyable-variant')).toBe('secondary')
+    expect(wrap.className).toContain('border-[var(--white-8)]')
+    expect(wrap.className).not.toContain('border-[var(--accent-30)]')
+  })
+
+  it('variant="primary" uses accented border + brighter label (Vercel next-steps CTA)', () => {
+    // Regression guard: "primary" must read as the hero command in a
+    // sequence — accent border + accented label tone — so the operator
+    // knows which command to reach for first. Vercel "Deploy your
+    // project" and Railway deploy-log next-steps use this hierarchy.
+    render(html`<${CopyableCode} label="start" command="./run.sh" variant="primary" />`, container)
+    const wrap = container.querySelector('[data-copyable-code]')!
+    expect(wrap.getAttribute('data-copyable-variant')).toBe('primary')
+    expect(wrap.className).toContain('border-[var(--accent-30)]')
+    expect(wrap.className).toContain('bg-[var(--accent-12)]')
+    const label = wrap.querySelector('span')!
+    expect(label.className).toContain('text-[var(--accent)]')
+    expect(label.className).toContain('font-semibold')
+  })
+
+  it('variant="primary" label weight is bolder than secondary (visual hierarchy)', () => {
+    // Semantic guard — secondary uppercase chip has no font-semibold;
+    // primary does. If this reverses, the hierarchy inverts silently.
+    render(html`<${CopyableCode} label="tail" command="x" variant="secondary" />`, container)
+    const secondaryLabel = container.querySelector('[data-copyable-code] span')!
+    expect(secondaryLabel.className).not.toContain('font-semibold')
+  })
+})
+
+describe('copyableWrapperClasses (pure)', () => {
+  it('primary returns accent-colored border + background tokens', () => {
+    const cls = copyableWrapperClasses('primary')
+    expect(cls).toContain('border-[var(--accent-30)]')
+    expect(cls).toContain('bg-[var(--accent-12)]')
+  })
+
+  it('secondary returns muted white-channel tokens', () => {
+    const cls = copyableWrapperClasses('secondary')
+    expect(cls).toContain('border-[var(--white-8)]')
+    expect(cls).toContain('bg-[var(--white-2)]')
+  })
+
+  it('primary has tighter padding than secondary (hero command reads larger)', () => {
+    // py-2 vs py-1.5 — small but intentional. Regression guard against
+    // a cleanup flattening the two variants to identical padding.
+    expect(copyableWrapperClasses('primary')).toContain('py-2')
+    expect(copyableWrapperClasses('secondary')).toContain('py-1.5')
+  })
+})
+
+describe('copyableLabelClasses (pure)', () => {
+  it('primary label uses accent color + font-semibold', () => {
+    const cls = copyableLabelClasses('primary')
+    expect(cls).toContain('text-[var(--accent)]')
+    expect(cls).toContain('font-semibold')
+  })
+
+  it('secondary label uses muted text-dim + no bold', () => {
+    const cls = copyableLabelClasses('secondary')
+    expect(cls).toContain('text-[var(--text-dim)]')
+    expect(cls).not.toContain('font-semibold')
   })
 })

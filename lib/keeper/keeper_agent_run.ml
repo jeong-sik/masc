@@ -1968,7 +1968,7 @@ let run_turn
              in
              let emit_keeper_activity ~kind ~payload ~tags =
                try
-                 !Coord_hooks.activity_emit_fn config
+                 (Atomic.get Coord_hooks.activity_emit_fn) config
                    ~actor:Coord_hooks.{ kind = "agent"; id = meta.agent_name }
                    ?subject:task_subject
                    ~kind ~payload ~tags ()
@@ -2069,7 +2069,7 @@ let run_turn
                  (* Emit activity event so episode flushes appear in
                     the activity graph / telemetry surface. *)
                  (try
-                    !Coord_hooks.activity_emit_fn config
+                    (Atomic.get Coord_hooks.activity_emit_fn) config
                       ~actor:Coord_hooks.{ kind = "keeper"; id = meta.name }
                       ~kind:"episode.flush"
                       ~payload:(`Assoc [

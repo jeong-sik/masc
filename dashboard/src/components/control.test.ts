@@ -72,16 +72,11 @@ describe('Operations control surface', () => {
     expect(container.textContent).toContain('Governance')
   })
 
-  it('renders ConnectorStatusPanel when view is connectors (Phase 6)', async () => {
-    route.value.params = { section: 'operations', view: 'connectors' }
-    const { Operations } = await loadOperations()
-    render(html`<${Operations} />`, container)
-    await flushUi()
-
-    expect(container.textContent).toContain('Connectors')
-    expect(container.textContent).not.toContain('Ops')
-    expect(container.textContent).not.toContain('Governance')
-  })
+  // Phase 7: Connectors was promoted to its own top-level surface so the
+  // Operations panel no longer routes `view=connectors`. Legacy URLs are
+  // handled by a redirect in operations-panel.ts (covered separately by
+  // operations-panel.test.ts). The chip-under-operations rendering test
+  // was removed here because it pinned dead behavior.
 
   it('renders LabInspector when view is inspector (Phase 6)', async () => {
     route.value.params = { section: 'operations', view: 'inspector' }

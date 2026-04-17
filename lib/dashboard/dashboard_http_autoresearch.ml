@@ -459,11 +459,25 @@ let retry_loop_json ~(base_path : string) ~(loop_id : string) :
                       ("loop", loop_summary_json base_path state);
                     ]))))
 
-let delete_loop_json ~(base_path : string) ~(loop_id : string) :
+let delete_loop_json ~(base_path : string) ~(loop_id : string) ~(requester_agent : string option) :
     (Yojson.Safe.t, string) result =
   match validate_loop_id loop_id with
   | Error _ as error -> error
   | Ok () ->
+      let can_delete =
+        match requester_agent with
+        | None | Some "dashboard" | Some "admin" -> true
+        | Some requester ->
+            match Autoresearch.load_state ~base_path loop_id with
+            | None -> true
+            | Some state ->
+                match state.author with
+                | Some a when a <> requester -> false
+                | _ -> true
+      in
+      if not can_delete then
+        Error "Access denied: you can only delete loops that you started."
+      else
       let state_or_persisted =
         Autoresearch.with_loops_rw (fun () ->
           let active = Hashtbl.find_opt Autoresearch.active_loops loop_id in

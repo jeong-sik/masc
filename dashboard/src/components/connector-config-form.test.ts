@@ -317,6 +317,132 @@ describe('ConnectorConfigForm', () => {
     expect(container.querySelector('[data-field-hint="GATE_BASE_URL"]')).toBeNull()
   })
 
+
+  it('auto-restart OFF by default; Save button label stays "Save"; single POST on click', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            id: 'discord',
+            schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // config POST
+
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    const toggle = container.querySelector('[data-auto-restart-toggle]') as HTMLInputElement
+    expect(toggle).toBeTruthy()
+    expect(toggle.checked).toBe(false)
+
+    const saveBtn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Save') as HTMLButtonElement
+    expect(saveBtn).toBeTruthy()
+    saveBtn.click()
+    await flushUi()
+    await flushUi()
+    // schema + values + config POST, no stop/start
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+  })
+
+  it('auto-restart ON: Save button becomes "Save & Apply" and chains config→stop→start', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            id: 'discord',
+            schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // config
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, signaled: true }), { status: 200 })) // stop
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 })) // start
+
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    const toggle = container.querySelector('[data-auto-restart-toggle]') as HTMLInputElement
+    toggle.click()
+    await flushUi()
+
+    const btn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Save & Apply') as HTMLButtonElement
+    expect(btn).toBeTruthy()
+    btn.click()
+    await new Promise(r => setTimeout(r, 1000))
+    await flushUi()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5)
+    const urls = fetchSpy.mock.calls.slice(2).map(c => String(c[0]))
+    expect(urls[0]).toContain('/api/v1/sidecar/config?name=discord')
+    expect(urls[1]).toContain('/api/v1/sidecar/stop?name=discord')
+    expect(urls[2]).toContain('/api/v1/sidecar/start?name=discord')
+  })
+
+  it('auto-restart soft-stop: if stop rejects, start still fires', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            id: 'discord',
+            schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // config
+      .mockRejectedValueOnce(new Error('stop refused')) // stop rejects
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 })) // start still fires
+
+    render(html`
+      <div>
+        <${ConnectorConfigToggle} connectorId="discord" />
+        <${ConnectorConfigForm} connectorId="discord" />
+      </div>
+    `, container)
+    ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
+    await flushUi()
+    await flushUi()
+
+    ;(container.querySelector('[data-auto-restart-toggle]') as HTMLInputElement).click()
+    await flushUi()
+    const btn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.trim() === 'Save & Apply') as HTMLButtonElement
+    btn.click()
+    await new Promise(r => setTimeout(r, 1000))
+    await flushUi()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(5)
+    const last = fetchSpy.mock.calls.slice(-2).map(c => String(c[0]))
+    expect(last[0]).toContain('/sidecar/stop')
+    expect(last[1]).toContain('/sidecar/start')
+  })
+
   it('after toggle + fetch, renders required field marker and password input for token', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(

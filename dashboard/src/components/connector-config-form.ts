@@ -61,6 +61,7 @@ interface FormEntry {
   saving: boolean
   lastSavedAt: number | null
   restarting: boolean
+  autoRestart: boolean
 }
 
 const formState = signal<Record<string, FormEntry>>({})
@@ -76,6 +77,7 @@ function emptyEntry(): FormEntry {
     saving: false,
     lastSavedAt: null,
     restarting: false,
+    autoRestart: false,
   }
 }
 
@@ -240,24 +242,35 @@ async function saveConfig(id: string) {
       throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`)
     }
     setEntry(id, { saving: false, lastSavedAt: Date.now() })
-    showToast(`${id} config 저장됨 — sidecar 재시작 시 반영`, 'success', 2400)
+    if (getEntry(id).autoRestart) {
+      // Auto-restart path: apply-config chains save → apply so the
+      // operator doesn't have to click 🔄. "apply" is a soft restart —
+      // stop is best-effort (sidecar may be down), start is strict.
+      showToast(`${id} config 저장됨 — 자동 적용 중...`, 'success', 1500)
+      await applyConfigChange(id)
+    } else {
+      showToast(`${id} config 저장됨 — sidecar 재시작 시 반영`, 'success', 2400)
+    }
   } catch (err) {
     setEntry(id, { saving: false })
     showToast(err instanceof Error ? err.message : 'config save failed', 'error')
   }
 }
 
-async function restartSidecar(id: string) {
+/** Soft restart: stop (best-effort — sidecar may already be down),
+    800ms grace, then start (strict). Used both as the backing for the
+    manual 🔄 button and as the auto-restart step after save. */
+async function applyConfigChange(id: string) {
   setEntry(id, { restarting: true })
   try {
-    const stopRes = await fetch(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-    })
-    if (!stopRes.ok) throw new Error(`stop HTTP ${stopRes.status}`)
-    // Brief grace so the SIGTERM has a moment to land before we re-spawn —
-    // run.sh stop returns once it has signalled, not once the process has
-    // exited. 800ms is enough for a clean shutdown of the bridges we ship.
+    try {
+      await fetch(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      })
+    } catch {
+      // Stop failures are non-fatal here — target might not be running.
+    }
     await new Promise(r => setTimeout(r, 800))
     const startRes = await fetch(`/api/v1/sidecar/start?name=${encodeURIComponent(id)}`, {
       method: 'POST',
@@ -266,10 +279,16 @@ async function restartSidecar(id: string) {
     if (!startRes.ok) throw new Error(`start HTTP ${startRes.status}`)
     showToast(`${id} 재시작 완료 — 새 config 적용됨`, 'success', 2400)
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'restart failed', 'error')
+    showToast(err instanceof Error ? err.message : 'apply failed', 'error')
   } finally {
     setEntry(id, { restarting: false })
   }
+}
+
+async function restartSidecar(id: string) {
+  // Manual 🔄 button and auto-restart both route through the same soft
+  // restart — the only difference is who triggered it.
+  await applyConfigChange(id)
 }
 
 function buildEnvBlock(entry: FormEntry): string {
@@ -452,17 +471,42 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               `
             : null}
         </div>
-        <${ActionButton}
-          variant="ghost"
-          size="sm"
-          disabled=${entry.saving || missingRequired(entry).length > 0}
-          title=${missingRequired(entry).length > 0
-            ? `필수 필드: ${missingRequired(entry).join(', ')}`
-            : 'POST /api/v1/sidecar/config — sidecar 재시작 시 반영'}
-          onClick=${() => { void saveConfig(connectorId) }}
-        >
-          ${entry.saving ? '저장 중...' : 'Save'}
-        <//>
+        <div class="flex items-center gap-2">
+          <label
+            class="flex cursor-pointer items-center gap-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
+          >
+            <input
+              type="checkbox"
+              class="cursor-pointer"
+              checked=${entry.autoRestart}
+              data-auto-restart-toggle
+              onChange=${(ev: Event) => {
+                setEntry(connectorId, { autoRestart: (ev.target as HTMLInputElement).checked })
+              }}
+            />
+            <span>Auto restart</span>
+          </label>
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            disabled=${entry.saving || entry.restarting || missingRequired(entry).length > 0}
+            title=${missingRequired(entry).length > 0
+              ? `필수 필드: ${missingRequired(entry).join(', ')}`
+              : entry.autoRestart
+                ? 'POST /sidecar/config → stop → 800ms → start'
+                : 'POST /api/v1/sidecar/config — sidecar 재시작 시 반영'}
+            onClick=${() => { void saveConfig(connectorId) }}
+          >
+            ${entry.saving
+              ? '저장 중...'
+              : entry.restarting
+                ? '적용 중...'
+                : entry.autoRestart
+                  ? 'Save & Apply'
+                  : 'Save'}
+          <//>
+        </div>
       </div>
 
       <div class="space-y-2.5">

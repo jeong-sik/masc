@@ -28,7 +28,12 @@ export function categoryForActivityKind(kind: string): ActivityCategory {
   ) return 'session'
   if (kind.startsWith('message.')) return 'message'
   if (kind.startsWith('board.')) return 'board'
-  if (kind.startsWith('decision.') || kind.startsWith('policy.')) return 'governance'
+  if (
+    kind.startsWith('decision.')
+    || kind.startsWith('policy.')
+    || kind === 'keeper.contract_verdict'
+    || kind === 'keeper.friction'
+  ) return 'governance'
   if (
     kind === 'agent.joined'
     || kind === 'agent.left'
@@ -70,6 +75,9 @@ export function eventKindLabel(kind: string): string {
     case 'task.done': return '완료'
     case 'task.released': return '반환'
     case 'task.cancelled': return '취소'
+    case 'task.submit_for_verification': return '검증 요청'
+    case 'task.approved': return '검증 승인'
+    case 'task.rejected': return '검증 반려'
     case 'board.posted': return '게시'
     case 'board.commented': return '댓글'
     case 'board.voted': return '투표'
@@ -87,8 +95,11 @@ export function eventKindLabel(kind: string): string {
     case 'policy.denied': return '정책 거절'
     case 'keeper.autonomy_started': return '자율 시작'
     case 'keeper.autonomy_completed': return '자율 완료'
+    case 'keeper.contract_verdict': return '계약 판정'
+    case 'keeper.friction': return '마찰 신호'
     case 'keeper.compaction': return '컴팩션'
     case 'keeper.guardrail': return '가드레일'
+    case 'tool.called': return '툴 호출'
     default: return kind
   }
 }
@@ -131,7 +142,21 @@ function payloadString(event: ActivityGraphTimelineEvent, keys: string[]): strin
 }
 
 export function eventDetail(event: ActivityGraphTimelineEvent, max = 120): string {
-  const text = payloadString(event, ['message', 'content', 'task_title', 'title', 'reason'])
+  const text = payloadString(event, [
+    'message',
+    'content',
+    'task_title',
+    'title',
+    'reason',
+    'notes',
+    'cmd',
+    'tool_args_preview',
+    'tool_name',
+    'verification_id',
+    'contract_id',
+    'run_id',
+    'target_id',
+  ])
   const base = text || eventSubjectId(event) || event.kind
   return base.length > max ? `${base.slice(0, max - 3)}...` : base
 }

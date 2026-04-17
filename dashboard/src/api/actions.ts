@@ -2,6 +2,7 @@ import { post, fetchWithTimeout } from './core'
 import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
 import {
+  ActionsActivitySchemaDriftError,
   parseActivityGraphResponse,
   parseSwimlaneResponse,
   type ActivityGraphResponse,
@@ -35,26 +36,32 @@ export async function fetchTaskHistory(taskId: string, limit = 20): Promise<stri
 // --- Activity Graph ---
 
 export async function fetchActivityGraph(since?: string): Promise<ActivityGraphResponse | null> {
+  const params = since ? `?since=${since}` : ''
   try {
-    const params = since ? `?since=${since}` : ''
     const resp = await fetchWithTimeout(`/api/v1/activity/graph${params}`, {}, ACTIVITY_TIMEOUT_MS)
-    if (!resp.ok) return null
+    if (!resp.ok) {
+      throw new Error(`GET /api/v1/activity/graph failed: ${resp.status} ${resp.statusText}`)
+    }
     return parseActivityGraphResponse(await resp.json())
   } catch (err) {
+    if (err instanceof ActionsActivitySchemaDriftError) throw err
     console.debug('[activity] graph fetch failed', err instanceof Error ? err.message : err)
-    return null
+    throw err
   }
 }
 
 export async function fetchSwimlane(since?: string): Promise<SwimlaneResponse | null> {
+  const params = since ? `?since=${since}` : ''
   try {
-    const params = since ? `?since=${since}` : ''
     const resp = await fetchWithTimeout(`/api/v1/activity/swimlane${params}`, {}, ACTIVITY_TIMEOUT_MS)
-    if (!resp.ok) return null
+    if (!resp.ok) {
+      throw new Error(`GET /api/v1/activity/swimlane failed: ${resp.status} ${resp.statusText}`)
+    }
     return parseSwimlaneResponse(await resp.json())
   } catch (err) {
+    if (err instanceof ActionsActivitySchemaDriftError) throw err
     console.debug('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)
-    return null
+    throw err
   }
 }
 
@@ -69,4 +76,3 @@ export async function deleteTask(taskId: string): Promise<boolean> {
   const resp = await post<{ ok: boolean }>('/api/v1/dashboard/tasks/delete', { task_id: taskId })
   return resp.ok
 }
-

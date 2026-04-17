@@ -39,7 +39,7 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
-export type RefreshTask =
+type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
   | 'missionSnapshot'

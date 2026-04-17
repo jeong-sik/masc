@@ -131,7 +131,7 @@ export interface DashboardNamespaceTruthMetaCognitionDigest {
   provenance?: string | null
 }
 
-export interface DashboardNamespaceTruthMetaCognition {
+interface DashboardNamespaceTruthMetaCognition {
   summary?: DashboardShellMetaCognitionSummary | null
   latest_digest?: DashboardNamespaceTruthMetaCognitionDigest | null
   provenance?: string | null
@@ -188,7 +188,7 @@ export interface ServerBuildIdentity {
   uptime_seconds: number
 }
 
-export type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
+type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
 export type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
 export type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
 export type DashboardExecutionQueueKind = 'session' | 'operation'

@@ -113,6 +113,39 @@ const actionLoading = signal(false)
 const channelDraft = signal('')
 const expandedKeeperFor = signal<string | null>(null)
 const headerExpanded = signal(false)
+const keeperGroupQuery = signal('')
+
+/**
+ * Pure filter for keeper groups rendered in the "Keeper-first" panel.
+ *
+ * Case-insensitive substring match on `group.name`, the keeper's
+ * resolved model label (active_model / model / primary_model), and
+ * the keeper's resolved runtime label (agent_name when distinct from
+ * name). Operators on a crowded connector can locate a keeper by
+ * partial name, by the model it is running, or by its runtime agent.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no
+ * new array allocation, preserves referential equality).
+ *
+ * Input is never mutated. `unknown` keeper groups are surfaced
+ * separately below this panel, so the filter only applies to the
+ * `knownGroups` array — matching what the operator can see.
+ */
+export function filterKeeperGroups(
+  groups: readonly KeeperGroup[],
+  query: string,
+): readonly KeeperGroup[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return groups
+  return groups.filter(group => {
+    if (group.name.toLowerCase().includes(needle)) return true
+    const model = modelLabelForKeeper(group.keeper).toLowerCase()
+    if (model !== '' && model.includes(needle)) return true
+    const runtime = runtimeLabelForKeeper(group.keeper).toLowerCase()
+    if (runtime !== '' && runtime.includes(needle)) return true
+    return false
+  })
+}
 
 type ConnectorStatusSnapshot = {
   gate: GateStatusData | null
@@ -482,6 +515,10 @@ function ConnectorLivePanel({
     unknownGroups.push({ name, keeper: null, bindings, unknown: true })
   }
 
+  const keeperQuery = keeperGroupQuery.value
+  const visibleKnownGroups = filterKeeperGroups(knownGroups, keeperQuery)
+  const isFilteringKeepers = keeperQuery.trim() !== ''
+
   const browserDot: LivenessDot = {
     label: 'Browser → Server',
     state: connectorError ? 'down' : 'ok',
@@ -718,7 +755,21 @@ function ConnectorLivePanel({
       ${knownGroups.length > 0
         ? html`
             <div class="mt-3 space-y-2" id=${`keepers-${connectorId}`}>
-              ${knownGroups.map(group => {
+              <div class="flex items-center justify-end">
+                <input
+                  type="search"
+                  value=${keeperQuery}
+                  placeholder="keeper / model / runtime 필터"
+                  aria-label="Keeper 필터"
+                  data-testid=${`keeper-filter-${connectorId}`}
+                  onInput=${(e: Event) => { keeperGroupQuery.value = (e.target as HTMLInputElement).value }}
+                  class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+                />
+              </div>
+              ${isFilteringKeepers && visibleKnownGroups.length === 0
+                ? html`<div class="py-4 text-center text-[11px] text-[var(--text-dim)]">필터 결과 없음 (${knownGroups.length} keepers)</div>`
+                : null}
+              ${visibleKnownGroups.map(group => {
                 const keeper = group.keeper
                 const expanded = expandedKeeperFor.value === group.name
                 const toggleExpand = () => {
@@ -1243,4 +1294,5 @@ export function resetConnectorStatusState() {
   channelDraft.value = ''
   expandedKeeperFor.value = null
   headerExpanded.value = false
+  keeperGroupQuery.value = ''
 }

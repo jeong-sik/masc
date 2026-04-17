@@ -103,19 +103,9 @@ code_refs:
 | TOML Config | config/keepers/*.toml | IMPL | keeper_toml_loader.ml |
 | OAS Memory.t Bridge | 5-tier JSONL-only mapping | IMPL | memory_oas_bridge.ml (v2.140.0 filesystem-first 완료) |
 
-### 06-Command Plane (95% IMPL)
+### 06-Command Plane (RETIRED)
 
-| Section | Feature | Status | Evidence |
-|---------|---------|--------|----------|
-| Unit Hierarchy | Company→Platoon→Squad→Agent_unit | IMPL | cp_types.ml + units.json |
-| Operation Lifecycle | Planned→Active→Paused→Completed | IMPL | cp_lifecycle.ml + 100+ operations |
-| Search Fabric V1 | 10-dimension Bayesian scoring | IMPL | cp_search_fabric.ml 622 LOC |
-| Snapshot System | 6-section mtime cache | IMPL | cp_snapshot_core.ml 758 LOC |
-| Cleanup Pipeline | 5-stage cascading GC | IMPL | cp_cleanup.ml 266 LOC |
-| Orchestra | Node/edge/signal graph synthesis | IMPL | command_plane_orchestra.ml 798 LOC |
-| Policy Decisions | Pending→Approved/Denied/Expired | IMPL | cp_lifecycle_policy.ml 838 LOC |
-| Event Trace | Append-only events.jsonl | IMPL | 58KB, 1000+ entries |
-| Intent Tools | create/status/update/forecast | IMPL | MCP tool registry 등록 + dispatch 연결 완료 |
+전체 Command Plane 서브시스템(`lib/command_plane/`, `cp_lifecycle.ml`, `cp_search_fabric.ml`, `cp_snapshot_core.ml`, `cp_cleanup.ml`, `command_plane_orchestra.ml`, `cp_lifecycle_policy.ml`, `cp_types.ml`, `command_plane_v2.ml`)와 HTTP compatibility lane은 retired surface다. 역사적 맥락은 `docs/spec/06-command-plane.md`의 "Historical Reference" status와 `docs/spec/00-glossary.md`의 Command Plane 항목을 참고한다. 현재 coordination truth는 `board_posts` + keeper FSM으로 대체됐다.
 
 ### 07-Team Session (RETIRED)
 

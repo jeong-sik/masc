@@ -39,33 +39,6 @@ export type {
 }
 export { GateConnectorsSchemaDriftError } from './schemas/gate-connectors'
 
-// Thin null-returning wrappers preserving the pre-migration contract
-// for `src/api/gate.test.ts` assertions. New call sites should use the
-// throw-on-drift parsers directly.
-export function decodeGateStatusData(raw: unknown): GateStatusData | null {
-  try {
-    return parseGateStatusData(raw)
-  } catch {
-    return null
-  }
-}
-
-export function decodeGateKeepersData(raw: unknown): GateKeepersData | null {
-  try {
-    return parseGateKeepersData(raw)
-  } catch {
-    return null
-  }
-}
-
-export function decodeGateConnectorsData(raw: unknown): GateConnectorsData | null {
-  try {
-    return parseGateConnectorsData(raw)
-  } catch {
-    return null
-  }
-}
-
 export async function fetchGateStatus(signal?: AbortSignal): Promise<GateStatusData> {
   const raw = await get<unknown>('/api/v1/gate/status', { signal })
   return parseGateStatusData(raw)

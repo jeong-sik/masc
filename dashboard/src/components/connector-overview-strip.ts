@@ -13,7 +13,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
-import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
+import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
 import { HeartbeatStrip } from './common/heartbeat-strip'
@@ -129,24 +129,85 @@ async function runBulk(
 interface OverviewProps {
   connectors: GateConnectorInfo[]
   keeperCount: number
+  selectedConnectorId?: KnownConnectorId | null
+  onSelectConnector?: (connectorId: KnownConnectorId) => void
+  detailTargetId?: string
 }
 
 function findConnector(connectors: GateConnectorInfo[], id: string): GateConnectorInfo | null {
   return connectors.find(c => c.connector_id === id) ?? null
 }
 
-function scrollToCard(id: string) {
-  const el = document.getElementById(`connector-card-${id}`)
+function scrollToDetail(targetId: string) {
+  const el = document.getElementById(targetId)
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function OverviewTile({ id, connector, keeperCount }: {
+interface OverviewTileSummary {
+  badge: string
+  badgeClass: string
+  detail: string
+}
+
+export function summarizeOverviewTile(
+  connector: GateConnectorInfo | null,
+  keeperCount: number,
+): OverviewTileSummary {
+  if (connector === null || connector.available !== true) {
+    return {
+      badge: '설정 필요',
+      badgeClass: 'border-amber-400/30 bg-amber-500/10 text-amber-100',
+      detail: keeperCount > 0
+        ? '아직 시작되지 않음 · 시작 후 keeper를 바인딩하세요'
+        : '아직 시작되지 않음 · 먼저 Config와 Start가 필요합니다',
+    }
+  }
+
+  const bindingCount = connector.configured_bindings?.length ?? 0
+  const stateLabel = connectorStateLabel(connector)
+  if (stateLabel === 'stale' || stateLabel === 'disconnected' || connector.gate_healthy === false) {
+    return {
+      badge: '주의',
+      badgeClass: 'border-rose-400/30 bg-rose-500/10 text-rose-100',
+      detail: stateLabel === 'stale'
+        ? 'heartbeat가 stale 상태입니다 · 로그와 gate 상태를 확인하세요'
+        : stateLabel === 'disconnected'
+          ? 'sidecar는 실행 중이지만 채널 연결이 비정상입니다'
+          : 'gate health가 비정상입니다 · 상세 카드에서 원인을 확인하세요',
+    }
+  }
+
+  if (bindingCount === 0) {
+    return {
+      badge: '바인딩 필요',
+      badgeClass: 'border-amber-400/30 bg-amber-500/10 text-amber-100',
+      detail: keeperCount > 0
+        ? '실행 중 · 아직 channel binding이 없습니다'
+        : '실행 중 · keeper 디렉토리가 비어 있습니다',
+    }
+  }
+
+  return {
+    badge: '정상',
+    badgeClass: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100',
+    detail: `실행 중 · ${bindingCount} ${bindingCount === 1 ? 'binding' : 'bindings'} active`,
+  }
+}
+
+function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector, detailTargetId }: {
   id: KnownConnectorId
   connector: GateConnectorInfo | null
   keeperCount: number
+  selected: boolean
+  onSelectConnector?: (connectorId: KnownConnectorId) => void
+  detailTargetId: string
 }) {
   const sidecarUp = connector?.available === true
   const uptimeLabel = sidecarUp ? formatConnectorUptime(connector?.last_ready_at, Date.now()) : null
+  const selectConnector = (scroll: boolean = true) => {
+    onSelectConnector?.(id)
+    if (scroll) scrollToDetail(detailTargetId)
+  }
   const pills = deriveRail(
     {
       sidecarUp,
@@ -161,48 +222,56 @@ function OverviewTile({ id, connector, keeperCount }: {
           sidecarUp ? stopSidecar(id) : startSidecar(id),
         )
       },
-      expandHeader: () => scrollToCard(id),
-      scrollToBindings: () => scrollToCard(id),
+      expandHeader: () => selectConnector(true),
+      scrollToBindings: () => selectConnector(true),
     },
     getRailInflight(id),
   )
   const accent = connectorAccentStyle(id)
   const displayName = CONNECTOR_DISPLAY_NAMES[id] ?? id
+  const summary = summarizeOverviewTile(connector, keeperCount)
 
   return html`
     <div
-      class="flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--white-8)] bg-[var(--bg-1)] p-3 transition-colors hover:border-[var(--white-10)]"
+      class=${`flex min-w-0 flex-col gap-3 rounded-xl border bg-[var(--bg-1)] p-3 transition-colors ${
+        selected
+          ? 'border-[var(--accent)] shadow-[0_0_0_1px_rgba(71,184,255,0.18)]'
+          : 'border-[var(--white-8)] hover:border-[var(--white-10)]'
+      }`}
       data-overview-tile=${id}
+      data-overview-selected=${selected ? 'true' : 'false'}
     >
       <button
         type="button"
-        class="flex min-w-0 cursor-pointer items-center gap-2 text-left"
-        onClick=${() => scrollToCard(id)}
-        aria-label=${`${displayName} 카드로 이동`}
+        class="flex min-w-0 cursor-pointer items-start gap-3 text-left"
+        onClick=${() => selectConnector(true)}
+        aria-label=${`${displayName} 상세 보기`}
+        aria-pressed=${selected ? 'true' : 'false'}
       >
         <span
           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[14px]"
           style=${accent}
         >${channelIcon(id)}</span>
         <span class="min-w-0 flex-1">
-          <span class="block truncate text-[13px] font-semibold text-[var(--text-body)]">${displayName}</span>
-          <span class="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">
-            <span>${sidecarUp ? '🟢 connected' : '⊘ offline'}</span>
+          <span class="flex items-center gap-2">
+            <span class="block truncate text-[13px] font-semibold text-[var(--text-body)]">${displayName}</span>
+            <span class=${`rounded-full border px-2 py-0.5 text-[9px] font-medium ${summary.badgeClass}`}>${summary.badge}</span>
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-full border border-emerald-400/20 bg-emerald-500/5 px-1.5 py-[1px] text-[9px] font-normal normal-case tracking-normal text-emerald-200/80"
+                    class="rounded-full border border-emerald-400/20 bg-emerald-500/5 px-1.5 py-[1px] text-[9px] font-normal text-emerald-200/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
                 `
               : null}
           </span>
+          <span class="mt-1 block text-[11px] leading-5 text-[var(--text-dim)]" data-overview-summary>${summary.detail}</span>
           ${(() => {
             const identity = formatTileIdentityLine(connector)
             return identity !== null
               ? html`<span
-                  class="block truncate text-[10px] text-[var(--text-dim)]"
+                  class="mt-1 block truncate text-[10px] text-[var(--text-dim)]"
                   data-tile-identity=${id}
                   title=${identity}
                 >${identity}</span>`
@@ -211,6 +280,9 @@ function OverviewTile({ id, connector, keeperCount }: {
         </span>
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
+      <span class=${`text-[10px] uppercase tracking-[0.14em] ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--text-dim)]'}`}>
+        ${selected ? 'Selected' : 'View Details'}
+      </span>
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
       <${TileErrorNotice} connector=${connector} />
       <${TileHeartbeatStrip} id=${id} />
@@ -450,8 +522,7 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   const startBusy = bulkInflight.value.start
   const stopBusy = bulkInflight.value.stop
   return html`
-    <div class="mb-2 flex items-center justify-end gap-2 text-[11px] text-[var(--text-dim)]">
-      <span>일괄:</span>
+    <div class="flex items-center gap-2 text-[11px] text-[var(--text-dim)]">
       <button
         type="button"
         class="cursor-pointer rounded border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
@@ -481,10 +552,10 @@ export function countConnectedSidecars(connectors: GateConnectorInfo[]): number 
 }
 
 export interface ConnectorStripSummary {
-  sidecarUp: number
-  sidecarTotal: number
+  runningCount: number
+  healthyCount: number
+  connectorTotal: number
   bindingCount: number
-  keeperCount: number
 }
 
 /** Pure: roll up the at-a-glance stats that feed the strip header line.
@@ -498,18 +569,25 @@ export interface ConnectorStripSummary {
     banners (celebration / incident) come and go. */
 export function summarizeConnectorStrip(
   connectors: GateConnectorInfo[],
-  keeperCount: number,
+  _keeperCount: number,
 ): ConnectorStripSummary {
-  const sidecarUp = countConnectedSidecars(connectors)
+  const runningCount = countConnectedSidecars(connectors)
+  const healthyCount = KNOWN_CONNECTOR_IDS.filter(id => {
+    const connector = findConnector(connectors, id)
+    return connector !== null
+      && connector.available === true
+      && connector.gate_healthy !== false
+      && connectorStateLabel(connector) === 'connected'
+  }).length
   const bindingCount = KNOWN_CONNECTOR_IDS.reduce((acc, id) => {
     const c = findConnector(connectors, id)
     return acc + (c?.configured_bindings?.length ?? 0)
   }, 0)
   return {
-    sidecarUp,
-    sidecarTotal: KNOWN_CONNECTOR_IDS.length,
+    runningCount,
+    healthyCount,
+    connectorTotal: KNOWN_CONNECTOR_IDS.length,
     bindingCount,
-    keeperCount,
   }
 }
 
@@ -557,7 +635,7 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
   const offlineLabel = formatOfflineConnectorLabel(offlineConnectorNames(connectors))
   return html`
     <div
-      class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
+      class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
       data-strip-summary
     >
       <${LivePulseDot}
@@ -567,8 +645,8 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
         testId="overview-strip-live"
       />
       <span>
-        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-sidecars>${summary.sidecarUp} of ${summary.sidecarTotal}</span>
-        <span> sidecars running</span>
+        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-running>${summary.runningCount}/${summary.connectorTotal}</span>
+        <span> running</span>
         ${offlineLabel !== null
           ? html`<span
               class="ml-1 text-rose-300/80"
@@ -579,28 +657,14 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
       </span>
       <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
       <span>
-        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-bindings>${summary.bindingCount}</span>
-        <span> ${summary.bindingCount === 1 ? 'binding' : 'bindings'} configured</span>
+        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-healthy>${summary.healthyCount}/${summary.connectorTotal}</span>
+        <span> healthy</span>
       </span>
       <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
       <span>
-        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-keepers>${summary.keeperCount}</span>
-        <span> ${summary.keeperCount === 1 ? 'keeper' : 'keepers'} online</span>
+        <span class="font-semibold text-[var(--text-body)]" data-strip-summary-bindings>${summary.bindingCount}</span>
+        <span> ${summary.bindingCount === 1 ? 'binding' : 'bindings'}</span>
       </span>
-    </div>
-  `
-}
-
-function CelebrationBanner({ connectedCount }: { connectedCount: number }) {
-  if (connectedCount < KNOWN_CONNECTOR_IDS.length) return null
-  return html`
-    <div
-      class="mb-2 flex items-center justify-center gap-2 rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-100"
-      data-celebration="all-connected"
-    >
-      <span aria-hidden="true">✨</span>
-      <span>${connectedCount}/${KNOWN_CONNECTOR_IDS.length} 커넥터 모두 정상 — 운영 준비 완료</span>
-      <span aria-hidden="true">✨</span>
     </div>
   `
 }
@@ -623,7 +687,13 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
   `
 }
 
-export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProps) {
+export function ConnectorOverviewStrip({
+  connectors,
+  keeperCount,
+  selectedConnectorId = null,
+  onSelectConnector,
+  detailTargetId = 'connector-detail-panel',
+}: OverviewProps) {
   useEffect(() => {
     stripMemory.value = updateStripMemory(stripMemory.value, connectors, Date.now())
   }, [connectors])
@@ -645,23 +715,26 @@ export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProp
   }, [connectors])
 
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
-  const connectedCount = countConnectedSidecars(connectors)
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
     <div
-      class="sticky top-0 z-10 mb-4 -mx-4 border-b border-[var(--card-border)] bg-[var(--bg-0)]/95 px-4 pt-2 pb-3 backdrop-blur supports-[backdrop-filter]:bg-[var(--bg-0)]/80"
+      class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-1)] p-3"
       data-overview-strip-root
     >
       <${IncidentBanner} droppedIds=${droppedIds} />
-      <${CelebrationBanner} connectedCount=${connectedCount} />
-      <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
-      <${BulkActions} connectors=${connectors} />
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
+        <${BulkActions} connectors=${connectors} />
+      </div>
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         ${KNOWN_CONNECTOR_IDS.map(id => html`
           <${OverviewTile}
             id=${id}
             connector=${findConnector(connectors, id)}
             keeperCount=${keeperCount}
+            selected=${selectedConnectorId === id}
+            onSelectConnector=${onSelectConnector}
+            detailTargetId=${detailTargetId}
           />
         `)}
       </div>

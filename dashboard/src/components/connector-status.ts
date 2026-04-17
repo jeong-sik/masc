@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
 import {
   fetchGateConnectors,
@@ -35,7 +36,6 @@ import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight }
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
-import { ConnectorKeyboardShortcuts } from './connector-keyboard-shortcuts'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
@@ -113,11 +113,41 @@ export function connectorAccentStyle(connectorId: string): string {
   return `background:linear-gradient(135deg,rgba(${rgb},0.16),rgba(${rgb},0.04))`
 }
 
-const actionLoading = signal(false)
-const channelDraft = signal('')
-const expandedKeeperFor = signal<string | null>(null)
-const headerExpanded = signal(false)
-const keeperGroupQuery = signal('')
+interface ConnectorUiState {
+  actionLoading: boolean
+  channelDraft: string
+  expandedKeeperFor: string | null
+  headerExpanded: boolean
+  keeperGroupQuery: string
+}
+
+function emptyConnectorUiState(): ConnectorUiState {
+  return {
+    actionLoading: false,
+    channelDraft: '',
+    expandedKeeperFor: null,
+    headerExpanded: false,
+    keeperGroupQuery: '',
+  }
+}
+
+const connectorUiState = signal<Record<string, ConnectorUiState>>({})
+const selectedConnectorId = signal<KnownConnectorId | null>(null)
+
+function getConnectorUiState(connectorId: string): ConnectorUiState {
+  return connectorUiState.value[connectorId] ?? emptyConnectorUiState()
+}
+
+function patchConnectorUiState(connectorId: string, patch: Partial<ConnectorUiState>) {
+  if (!connectorId) return
+  connectorUiState.value = {
+    ...connectorUiState.value,
+    [connectorId]: {
+      ...getConnectorUiState(connectorId),
+      ...patch,
+    },
+  }
+}
 
 /**
  * Pure filter for keeper groups rendered in the "Keeper-first" panel.
@@ -455,13 +485,122 @@ function connectorStateTone(connector: GateConnectorInfo | null): string {
   return 'border-amber-400/30 bg-amber-500/12 text-amber-100'
 }
 
+function findKnownConnector(connectors: GateConnectorInfo[], connectorId: KnownConnectorId): GateConnectorInfo | null {
+  return connectors.find(connector => connector.connector_id === connectorId) ?? null
+}
+
+export function connectorFocusScore(
+  connector: GateConnectorInfo | null,
+  keeperCount: number,
+): number {
+  if (connector === null) return 30
+  const state = connectorStateLabel(connector)
+  if (state === 'stale' || state === 'disconnected') return 100
+  if (connector.available !== true) return 40
+  if (connector.gate_healthy === false) return 90
+  const bindingCount = connector.configured_bindings?.length ?? 0
+  if (keeperCount > 0 && bindingCount === 0) return 80
+  if (bindingCount === 0) return 70
+  if (state === 'connected') return 60
+  return 20
+}
+
+export function resolveConnectorFocusId(
+  connectors: GateConnectorInfo[],
+  keeperCount: number,
+  preferredId: KnownConnectorId | null,
+): KnownConnectorId {
+  if (preferredId !== null) return preferredId
+  let bestId: KnownConnectorId = KNOWN_CONNECTOR_IDS[0]
+  let bestScore = Number.NEGATIVE_INFINITY
+  for (const connectorId of KNOWN_CONNECTOR_IDS) {
+    const score = connectorFocusScore(findKnownConnector(connectors, connectorId), keeperCount)
+    if (score > bestScore) {
+      bestScore = score
+      bestId = connectorId
+    }
+  }
+  return bestId
+}
+
+function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo {
+  return {
+    connector_id: connectorId,
+    display_name: CONNECTOR_DISPLAY_NAMES[connectorId],
+    channel: connectorId,
+    capabilities: ['bindings'],
+    status: 'offline',
+    available: false,
+    connected: false,
+    stale: false,
+    stale_after_sec: 0,
+    error: '',
+    status_path: '',
+    binding_store_path: '',
+    audit_path: '',
+    updated_at: '',
+    reply_mode: '',
+    self_chat_guid: '',
+    last_ready_at: '',
+    bot_user_name: '',
+    bot_user_id: '',
+    guild_count: 0,
+    gate_base_url: '',
+    gate_healthy: null,
+    gate_health_checked_at: '',
+    binding_source: '',
+    runtime_bindings_count: 0,
+    pid: 0,
+    configured_bindings: [],
+    recent_audit: [],
+    storage_paths: {
+      status_path: '',
+      binding_store_path: '',
+      audit_path: '',
+      names_path: '',
+    },
+    runtime_summary: {
+      available: false,
+      connected: false,
+      stale: false,
+      stale_after_sec: 0,
+      status: 'offline',
+      error: '',
+      updated_at: '',
+      reply_mode: '',
+      self_chat_guid: '',
+      last_ready_at: '',
+      bot_user_name: '',
+      bot_user_id: '',
+      guild_count: 0,
+      gate_base_url: '',
+      gate_healthy: null,
+      gate_health_checked_at: '',
+      pid: 0,
+    },
+    binding_summary: {
+      binding_source: '',
+      runtime_bindings_count: 0,
+      configured_bindings_count: 0,
+    },
+    observed_channel: null,
+    names_path: '',
+    names: {
+      guild_names: {},
+      channel_names: {},
+      channel_to_guild: {},
+      updated_at: '',
+    },
+  }
+}
+
 // Native lifecycle hits the new /api/v1/sidecar/{start,stop} endpoints
 // (see lib/server/server_routes_http_routes_sidecar.ml). The endpoints
 // shell out to the same ./run.sh wrapper the operator would otherwise
 // run by hand, so the dashboard button and the copy-paste command are
 // behaviourally identical — only convenience differs.
 export async function startSidecar(connectorId: string) {
-  actionLoading.value = true
+  patchConnectorUiState(connectorId, { actionLoading: true })
   markStartAttempt(connectorId)
   try {
     await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
@@ -470,12 +609,12 @@ export async function startSidecar(connectorId: string) {
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'start failed', 'error')
   } finally {
-    actionLoading.value = false
+    patchConnectorUiState(connectorId, { actionLoading: false })
   }
 }
 
 export async function stopSidecar(connectorId: string) {
-  actionLoading.value = true
+  patchConnectorUiState(connectorId, { actionLoading: true })
   // Stop is the operator's signal that the previous start attempt is no
   // longer relevant — the startup-warning would just be misleading.
   clearStartAttempt(connectorId)
@@ -486,7 +625,7 @@ export async function stopSidecar(connectorId: string) {
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'stop failed', 'error')
   } finally {
-    actionLoading.value = false
+    patchConnectorUiState(connectorId, { actionLoading: false })
   }
 }
 
@@ -495,20 +634,22 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
   const channel = channelId.trim()
   if (!keeper || !channel) return
 
-  actionLoading.value = true
+  patchConnectorUiState(connectorId, { actionLoading: true })
   try {
     await post(`/api/v1/gate/connector/bind?name=${encodeURIComponent(connectorId)}`, {
       channel_id: channel,
       keeper_name: keeper,
     })
-    channelDraft.value = ''
-    expandedKeeperFor.value = null
+    patchConnectorUiState(connectorId, {
+      channelDraft: '',
+      expandedKeeperFor: null,
+    })
     await refresh()
     showToast(`Bound ${channel} -> ${keeper}`, 'success')
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'bind failed', 'error')
   } finally {
-    actionLoading.value = false
+    patchConnectorUiState(connectorId, { actionLoading: false })
   }
 }
 
@@ -516,7 +657,7 @@ export async function unbindConnector(connectorId: string, channelId: string) {
   const channel = channelId.trim()
   if (!channel) return
 
-  actionLoading.value = true
+  patchConnectorUiState(connectorId, { actionLoading: true })
   try {
     await post(`/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`, {
       channel_id: channel,
@@ -526,7 +667,7 @@ export async function unbindConnector(connectorId: string, channelId: string) {
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'unbind failed', 'error')
   } finally {
-    actionLoading.value = false
+    patchConnectorUiState(connectorId, { actionLoading: false })
   }
 }
 
@@ -556,6 +697,8 @@ function ConnectorLivePanel({
   const names = connector?.names
   const connectorName = connector?.display_name || 'Connector'
   const connectorId = connector?.connector_id ?? ''
+  const ui = getConnectorUiState(connectorId)
+  const isActionLoading = ui.actionLoading
   const bindingActionsEnabled = connector != null && connector.capabilities.includes('bindings')
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
@@ -606,7 +749,7 @@ function ConnectorLivePanel({
     unknownGroups.push({ name, keeper: null, bindings, unknown: true })
   }
 
-  const keeperQuery = keeperGroupQuery.value
+  const keeperQuery = ui.keeperGroupQuery
   const visibleKnownGroups = filterKeeperGroups(knownGroups, keeperQuery)
   const isFilteringKeepers = keeperQuery.trim() !== ''
 
@@ -708,10 +851,10 @@ function ConnectorLivePanel({
                 <button
                   type="button"
                   class="cursor-pointer rounded border border-rose-400/30 bg-rose-500/12 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-rose-100 hover:bg-rose-500/20 disabled:opacity-50"
-                  disabled=${actionLoading.value}
+                  disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
-                >${actionLoading.value ? '…' : 'Stop'}</button>
+                >${isActionLoading ? '…' : 'Stop'}</button>
               `
             : null}
           <${SidecarLogToggle} connectorId=${connectorId} />
@@ -723,8 +866,8 @@ function ConnectorLivePanel({
             type="button"
             class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-[11px] text-[var(--text-dim)] hover:text-[var(--text-body)]"
             aria-label="toggle header details"
-            onClick=${() => { headerExpanded.value = !headerExpanded.value }}
-          >${headerExpanded.value ? '▴' : '▾'}</button>
+            onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
+          >${ui.headerExpanded ? '▴' : '▾'}</button>
         </span>
       </div>
 
@@ -744,7 +887,7 @@ function ConnectorLivePanel({
                 isUp ? stopSidecar(connectorId) : startSidecar(connectorId),
               )
             },
-            expandHeader: () => { headerExpanded.value = true },
+            expandHeader: () => { patchConnectorUiState(connectorId, { headerExpanded: true }) },
             scrollToBindings: () => {
               const el = document.getElementById(`keepers-${connectorId}`)
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -760,7 +903,7 @@ function ConnectorLivePanel({
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
         : null}
 
-      ${headerExpanded.value
+      ${ui.headerExpanded
         ? html`
             <div class="mt-2 rounded-md border border-[var(--card-border)] bg-[var(--white-4)] p-3 text-[11px]">
               <div class="space-y-1.5">
@@ -783,7 +926,7 @@ function ConnectorLivePanel({
                 <span>keeper dir ${keepers.length}</span>
               </div>
               <div class="mt-3">
-                <${ActionButton} variant="ghost" size="sm" disabled=${loading || actionLoading.value} onClick=${() => { void refresh() }}>Refresh<//>
+                <${ActionButton} variant="ghost" size="sm" disabled=${loading || isActionLoading} onClick=${() => { void refresh() }}>Refresh<//>
               </div>
             </div>
           `
@@ -870,9 +1013,9 @@ function ConnectorLivePanel({
                     <${ActionButton}
                       variant="primary"
                       size="sm"
-                      disabled=${actionLoading.value}
+                      disabled=${isActionLoading}
                       onClick=${() => { void startSidecar(connectorId) }}
-                    >${actionLoading.value ? '...' : 'Start'}<//>
+                    >${isActionLoading ? '...' : 'Start'}<//>
                     <span class="text-[10px] uppercase tracking-[0.14em] text-[var(--text-dim)]">${connectorName}</span>
                   </div>
                 </div>
@@ -908,7 +1051,7 @@ function ConnectorLivePanel({
                   placeholder="keeper / model / runtime 필터"
                   aria-label="Keeper 필터"
                   data-testid=${`keeper-filter-${connectorId}`}
-                  onInput=${(e: Event) => { keeperGroupQuery.value = (e.target as HTMLInputElement).value }}
+                  onInput=${(e: Event) => { patchConnectorUiState(connectorId, { keeperGroupQuery: (e.target as HTMLInputElement).value }) }}
                   class="min-w-[160px] max-w-[260px] flex-1 rounded-md border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-[11px] text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
@@ -917,13 +1060,15 @@ function ConnectorLivePanel({
                 : null}
               ${visibleKnownGroups.map(group => {
                 const keeper = group.keeper
-                const expanded = expandedKeeperFor.value === group.name
+                const expanded = ui.expandedKeeperFor === group.name
                 const toggleExpand = () => {
                   if (expanded) {
-                    expandedKeeperFor.value = null
+                    patchConnectorUiState(connectorId, { expandedKeeperFor: null })
                   } else {
-                    expandedKeeperFor.value = group.name
-                    channelDraft.value = ''
+                    patchConnectorUiState(connectorId, {
+                      expandedKeeperFor: group.name,
+                      channelDraft: '',
+                    })
                   }
                 }
                 return html`
@@ -961,7 +1106,7 @@ function ConnectorLivePanel({
                                         <${ActionButton}
                                           variant="ghost"
                                           size="sm"
-                                          disabled=${actionLoading.value}
+                                          disabled=${isActionLoading}
                                           ariaLabel=${`unbind ${binding.channel_id}`}
                                           onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}
                                         >unbind<//>
@@ -987,13 +1132,13 @@ function ConnectorLivePanel({
                             ? html`
                                 <div class="mt-2 rounded border border-dashed border-[var(--card-border)] bg-[var(--white-3)] p-2">
                                   <${TextInput}
-                                    value=${channelDraft.value}
+                                    value=${ui.channelDraft}
                                     placeholder=${`Paste ${connectorName} channel ID — right-click a channel → Copy ID`}
                                     ariaLabel=${`${connectorName} channel id`}
-                                    onInput=${(e: Event) => { channelDraft.value = (e.target as HTMLInputElement).value }}
+                                    onInput=${(e: Event) => { patchConnectorUiState(connectorId, { channelDraft: (e.target as HTMLInputElement).value }) }}
                                   />
-                                  ${channelDraft.value.trim() && humanizeChannel(names, channelDraft.value.trim())
-                                    ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">resolves to ${humanizeChannel(names, channelDraft.value.trim())}</div>`
+                                  ${ui.channelDraft.trim() && humanizeChannel(names, ui.channelDraft.trim())
+                                    ? html`<div class="mt-1 text-[10px] text-[var(--text-dim)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
                                     : null}
                                   ${observedRooms.length > 0
                                     ? html`
@@ -1005,7 +1150,7 @@ function ConnectorLivePanel({
                                                 type="button"
                                                 class="cursor-pointer rounded-full border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 text-[10px] text-[var(--text-body)] hover:bg-[var(--white-8)]"
                                                 title=${roomId}
-                                                onClick=${() => { channelDraft.value = roomId }}
+                                                onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
                                               >${humanized
                                                 ? html`<span>${humanized}</span><span class="ml-1 text-[var(--text-dim)]">· ${truncateMiddle(roomId, 10)}</span>`
                                                 : truncateMiddle(roomId, 22)}</button>
@@ -1018,9 +1163,9 @@ function ConnectorLivePanel({
                                     <${ActionButton}
                                       variant="primary"
                                       size="sm"
-                                      disabled=${actionLoading.value || channelDraft.value.trim().length === 0}
-                                      onClick=${() => { void bindConnector(connectorId, group.name, channelDraft.value.trim()) }}
-                                    >${actionLoading.value ? 'Applying...' : 'bind'}<//>
+                                      disabled=${isActionLoading || ui.channelDraft.trim().length === 0}
+                                      onClick=${() => { void bindConnector(connectorId, group.name, ui.channelDraft.trim()) }}
+                                    >${isActionLoading ? 'Applying...' : 'bind'}<//>
                                   </div>
                                 </div>
                               `
@@ -1063,7 +1208,7 @@ function ConnectorLivePanel({
                                 <${ActionButton}
                                   variant="ghost"
                                   size="sm"
-                                  disabled=${actionLoading.value}
+                                  disabled=${isActionLoading}
                                   ariaLabel=${`unbind ${binding.channel_id}`}
                                   onClick=${() => { void unbindConnector(connectorId, binding.channel_id) }}
                                 >unbind<//>
@@ -1258,6 +1403,122 @@ function EventRow({ event }: { event: GateEventInfo }) {
   `
 }
 
+function DisclosurePanel({
+  title,
+  subtitle,
+  children,
+  testId,
+}: {
+  title: string
+  subtitle: string
+  children: ComponentChildren
+  testId: string
+}) {
+  return html`
+    <details class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-1)]" data-testid=${testId}>
+      <summary class="cursor-pointer list-none px-3 py-2.5">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-body)]">${title}</div>
+            <div class="mt-1 text-[11px] text-[var(--text-dim)]">${subtitle}</div>
+          </div>
+          <span class="text-[11px] text-[var(--text-dim)]">펴기</span>
+        </div>
+      </summary>
+      <div class="border-t border-[var(--card-border)] px-3 py-3">
+        ${children}
+      </div>
+    </details>
+  `
+}
+
+function GateAnalyticsSection({
+  gate,
+  gateError,
+}: {
+  gate: GateStatusData | null
+  gateError: string | null
+}) {
+  let subtitle = '메시지, 에러, 최근 이벤트와 room binding을 필요할 때만 펼쳐 봅니다.'
+  if (gateError) {
+    subtitle = `Gate metrics unavailable: ${gateError}`
+  } else if (gate === null) {
+    subtitle = 'Gate-observed traffic is not available yet.'
+  }
+
+  return html`
+    <${DisclosurePanel}
+      title="Gate Analytics"
+      subtitle=${subtitle}
+      testId="connector-gate-analytics"
+    >
+      ${gate === null
+        ? html`
+            <div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
+              Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
+            </div>
+          `
+        : html`
+            <div>
+              <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
+                <${StatCard} label="Messages" value=${gate.total_messages} />
+                <${StatCard} label="Success" value=${gate.total_success} />
+                <${StatCard} label="Errors" value=${gate.total_errors} />
+                <${StatCard} label="Dedup Keys" value=${gate.dedup_table_size} />
+              </div>
+
+              <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
+                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+                  duplicate suppressions
+                  <span class="ml-2 font-mono text-[var(--text-body)]">${gate.total_duplicates}</span>
+                </div>
+                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
+                  active connectors
+                  <span class="ml-2 font-mono text-[var(--text-body)]">${gate.channels.length}</span>
+                </div>
+              </div>
+
+              <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+                <div>
+                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                    Observed room bindings
+                  </div>
+                  ${gate.bindings.length === 0
+                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
+                    : html`
+                        <div class="space-y-2">
+                          ${gate.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
+                        </div>
+                      `}
+                </div>
+
+                <div>
+                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
+                    Recent gate events
+                  </div>
+                  ${gate.recent_events.length === 0
+                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
+                    : html`
+                        <div class="space-y-2">
+                          ${gate.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
+                        </div>
+                      `}
+                </div>
+              </div>
+
+              ${gate.channels.length === 0
+                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">활성 커넥터 없음</div>`
+                : html`
+                    <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
+                      ${gate.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
+                    </div>
+                  `}
+            </div>
+          `}
+    <//>
+  `
+}
+
 export function ConnectorStatusPanel() {
   useEffect(() => {
     void refresh()
@@ -1315,162 +1576,108 @@ export function ConnectorStatusPanel() {
     return null
   }
 
-  // Progress hint for the "전체" view: how many of the 4 known sidecars
-  // are currently advertising a 'connected' state. Hidden in single-bridge
-  // sub-sections — the per-panel status dot already conveys that.
-  const knownConnectedCount = allConnectors.filter(
-    c => (KNOWN_CONNECTOR_IDS as readonly string[]).includes(c.connector_id)
-      && connectorStateLabel(c) === 'connected',
-  ).length
+  const focusedConnectorId = filterId
+    ? filterId as KnownConnectorId
+    : resolveConnectorFocusId(allConnectors, snapshot.keepers.length, selectedConnectorId.value)
+  const focusedConnector = filterId
+    ? visibleConnectors[0] ?? placeholderConnector(focusedConnectorId)
+    : findKnownConnector(allConnectors, focusedConnectorId) ?? placeholderConnector(focusedConnectorId)
 
   return html`
     <div>
-      <div class="mb-3 flex items-center justify-between gap-3">
+      <div class="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 class="text-sm font-semibold text-[var(--text-body)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
           <div class="mt-1 text-[11px] text-[var(--text-dim)]">
             ${filterId
               ? `${CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? filterId} sidecar의 라이브 상태와 keeper 바인딩.`
-              : '4종 채널 sidecar(Discord, iMessage, Slack, Telegram)의 라이브 상태와 keeper 바인딩을 한 곳에서.'}
+              : '4종 채널 sidecar overview 카드에서 커넥터를 고르면 아래 상세 패널이 교체됩니다.'}
           </div>
         </div>
-        ${!filterId
+        ${filterId
           ? html`
-              <!-- Grafana Stat-panel style header strip: three mini tiles
-                   (big number + tiny label below) side-by-side. Replaces
-                   the previous 3 right-aligned text lines which read as
-                   dense small-caps metadata rather than scannable stats. -->
-              <div class="flex items-stretch gap-2" data-header-stat-strip>
-                <${HeaderMiniStat}
-                  label="connected"
-                  value=${`${knownConnectedCount}/${KNOWN_CONNECTOR_IDS.length}`}
-                  tone=${headerConnectedTone(knownConnectedCount, KNOWN_CONNECTOR_IDS.length)}
-                  testId="header-stat-connected"
-                />
-                <${HeaderMiniStat}
-                  label="success"
-                  value=${d ? `${d.success_rate_pct}%` : '—'}
-                  tone=${d ? headerSuccessTone(d.success_rate_pct) : 'default'}
-                  testId="header-stat-success"
-                />
-                <${HeaderMiniStat}
-                  label="uptime"
-                  value=${d ? formatUptime(d.uptime_seconds) : '—'}
-                  tone="default"
-                  testId="header-stat-uptime"
-                />
-              </div>
-            `
-          : html`
               <div class="text-right text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
                 <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
                 <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : 'gate metrics unavailable'}</div>
               </div>
-            `}
+            `
+          : null}
       </div>
 
       ${!filterId
-        ? html`<${ConnectorOverviewStrip} connectors=${visibleConnectors} keeperCount=${snapshot.keepers.length} />`
-        : null}
-      ${!filterId
-        ? html`<${ConnectorKeeperMatrix} matrix=${deriveMatrix(visibleConnectors, snapshot.keepers)} />`
-        : null}
-      ${!filterId
-        ? html`<${ConnectorPathsStrip} connectors=${visibleConnectors} />`
-        : null}
-      ${!filterId ? html`<${ConnectorKeyboardShortcuts} />` : null}
-
-      ${visibleConnectors.map(c => html`
-        <${ConnectorLivePanel}
-          connector=${c}
-          gate=${d}
-          keepers=${snapshot.keepers}
-          connectorError=${snapshot.connectorError}
-          keeperDirectoryError=${snapshot.keeperError}
-          loading=${loading}
-        />
-      `)}
-
-      ${snapshot.gateError
         ? html`
-            <div class="mb-4 rounded-md border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-100">
-              Gate metrics unavailable: ${snapshot.gateError}
+            <${ConnectorOverviewStrip}
+              connectors=${allConnectors}
+              keeperCount=${snapshot.keepers.length}
+              selectedConnectorId=${focusedConnectorId}
+              onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
+              detailTargetId="connector-detail-panel"
+            />
+          `
+        : null}
+
+      ${!filterId
+        ? html`
+            <div
+              id="connector-detail-panel"
+              class="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-0)]/40 p-3"
+              data-testid="connector-detail-panel"
+            >
+              <div class="mb-3 flex items-center justify-between gap-3 text-[11px]">
+                <div>
+                  <span class="font-semibold text-[var(--text-body)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
+                  <span class="ml-2 text-[var(--text-dim)]">선택한 커넥터의 상세와 액션만 보여줍니다.</span>
+                </div>
+                <span class="text-[var(--text-dim)]">overview 카드에서 전환</span>
+              </div>
+              <${ConnectorLivePanel}
+                connector=${focusedConnector}
+                gate=${d}
+                keepers=${snapshot.keepers}
+                connectorError=${snapshot.connectorError}
+                keeperDirectoryError=${snapshot.keeperError}
+                loading=${loading}
+              />
             </div>
           `
         : null}
 
-      ${!d
+      ${filterId
         ? html`
-            <div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
-              Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
-            </div>
+            <${ConnectorLivePanel}
+              connector=${focusedConnector}
+              gate=${d}
+              keepers=${snapshot.keepers}
+              connectorError=${snapshot.connectorError}
+              keeperDirectoryError=${snapshot.keeperError}
+              loading=${loading}
+            />
           `
-        : html`
-            <div>
-              <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
-                <${StatCard} label="Messages" value=${d.total_messages} />
-                <${StatCard} label="Success" value=${d.total_success} />
-                <${StatCard} label="Errors" value=${d.total_errors} />
-                <${StatCard} label="Dedup Keys" value=${d.dedup_table_size} />
-              </div>
+        : null}
 
-              <div class="mb-4 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-dim)] max-[720px]:grid-cols-1">
-                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
-                  duplicate suppressions
-                  <span class="ml-2 font-mono text-[var(--text-body)]">${d.total_duplicates}</span>
-                </div>
-                <div class="rounded-md border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2">
-                  active connectors
-                  <span class="ml-2 font-mono text-[var(--text-body)]">${d.channels.length}</span>
-                </div>
-              </div>
+      ${!filterId
+        ? html`
+            <${DisclosurePanel}
+              title="Keeper Matrix"
+              subtitle="cross-connector binding 현황은 필요할 때만 펼쳐 봅니다."
+              testId="connector-matrix-disclosure"
+            >
+              <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />
+            <//>
+          `
+        : null}
 
-              <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
-                <div>
-                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-                    Observed room bindings
-                  </div>
-                  ${d.bindings.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">관찰된 room 바인딩 없음</div>`
-                    : html`
-                        <div class="space-y-2">
-                          ${d.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
-                        </div>
-                      `}
-                </div>
+      ${!filterId
+        ? html`<${ConnectorPathsStrip} connectors=${allConnectors} />`
+        : null}
 
-                <div>
-                  <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-dim)]">
-                    Recent gate events
-                  </div>
-                  ${d.recent_events.length === 0
-                    ? html`<div class="rounded-md border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">커넥터 이벤트 기록 없음</div>`
-                    : html`
-                        <div class="space-y-2">
-                          ${d.recent_events.slice(0, 8).map(event => html`<${EventRow} event=${event} />`)}
-                        </div>
-                      `}
-                </div>
-              </div>
-
-              ${d.channels.length === 0
-                ? html`<div class="py-4 text-center text-xs text-[var(--text-dim)]">활성 커넥터 없음</div>`
-                : html`
-                    <div class="grid grid-cols-2 gap-2 max-[900px]:grid-cols-1">
-                      ${d.channels.map(ch => html`<${ChannelCard} ch=${ch} />`)}
-                    </div>
-                  `}
-            </div>
-          `}
+      <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
     </div>
   `
 }
 
 export function resetConnectorStatusState() {
   connectorStatusResource.reset(EMPTY_SNAPSHOT)
-  actionLoading.value = false
-  channelDraft.value = ''
-  expandedKeeperFor.value = null
-  headerExpanded.value = false
-  keeperGroupQuery.value = ''
+  connectorUiState.value = {}
+  selectedConnectorId.value = null
 }

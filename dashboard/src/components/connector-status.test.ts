@@ -259,6 +259,131 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('/tmp/discord_status.json')
   })
 
+  it('renders a single selected-detail panel in the all-connectors view', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const detailPanels = container.querySelectorAll('[data-testid="connector-detail-panel"]')
+    expect(detailPanels.length).toBe(1)
+    expect(detailPanels[0]?.textContent).toContain('Discord')
+    expect(container.querySelectorAll('button[aria-label="toggle header details"]').length).toBe(1)
+  })
+
+  it('switches the selected detail panel when an overview tile is clicked', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const discord = sampleConnectorsResponse().connectors[0]
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [
+        discord,
+        {
+          ...discord,
+          connector_id: 'imessage',
+          display_name: 'iMessage',
+          channel: 'imessage',
+          status_path: '/tmp/imessage_status.json',
+          binding_store_path: '/tmp/imessage_bindings.json',
+          audit_path: '/tmp/imessage_binding_audit.jsonl',
+          names_path: '/tmp/imessage_names.json',
+          bot_user_name: 'Messages Bot',
+          reply_mode: 'self-chat',
+          self_chat_guid: 'self-chat-guid',
+          configured_bindings: [{ channel_id: 'imsg-room', keeper_name: 'nova' }],
+          recent_audit: [],
+        },
+      ],
+      total: 2,
+      active_count: 2,
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const detailPanel = container.querySelector('[data-testid="connector-detail-panel"]') as HTMLElement | null
+    expect(detailPanel).not.toBeNull()
+    expect(detailPanel!.textContent).toContain('Discord')
+
+    const imessageButton = container.querySelector<HTMLButtonElement>('button[aria-label="iMessage 상세 보기"]')
+    expect(imessageButton).not.toBeNull()
+    imessageButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(detailPanel!.textContent).toContain('iMessage')
+    expect(detailPanel!.textContent).toContain('reply self-chat')
+    expect(detailPanel!.textContent).toContain('self-chat self-chat-guid')
+  })
+
+  it('preserves header expansion state per connector when switching selected detail', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const discord = sampleConnectorsResponse().connectors[0]
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [
+        discord,
+        {
+          ...discord,
+          connector_id: 'imessage',
+          display_name: 'iMessage',
+          channel: 'imessage',
+          status_path: '/tmp/imessage_status.json',
+          binding_store_path: '/tmp/imessage_bindings.json',
+          audit_path: '/tmp/imessage_binding_audit.jsonl',
+          names_path: '/tmp/imessage_names.json',
+          configured_bindings: [{ channel_id: 'imsg-room', keeper_name: 'nova' }],
+          recent_audit: [],
+        },
+      ],
+      total: 2,
+      active_count: 2,
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const toggleButton = container.querySelector<HTMLButtonElement>('button[aria-label="toggle header details"]')
+    expect(toggleButton).not.toBeNull()
+    toggleButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+    expect(container.textContent).toContain('Browser → Server')
+
+    const imessageButton = container.querySelector<HTMLButtonElement>('button[aria-label="iMessage 상세 보기"]')
+    expect(imessageButton).not.toBeNull()
+    imessageButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+    expect(container.textContent ?? '').not.toContain('Browser → Server')
+
+    const discordButton = container.querySelector<HTMLButtonElement>('button[aria-label="Discord 상세 보기"]')
+    expect(discordButton).not.toBeNull()
+    discordButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+    expect(container.textContent).toContain('Browser → Server')
+  })
+
   it('still renders direct runtime when gate metrics are unavailable', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockRejectedValue(new Error('GET /api/v1/gate/status: 503 Service Unavailable'))
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({

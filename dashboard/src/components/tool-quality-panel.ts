@@ -1,10 +1,11 @@
 import { html } from 'htm/preact'
-import { computed } from '@preact/signals'
+import { computed, signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { TextInput } from './common/input'
 import {
   cancelSharedToolQuality,
   refreshSharedToolQuality,
@@ -98,6 +99,23 @@ const successColor = computed(() => {
   return 'text-red-400'
 })
 
+// Per-tool search (case-insensitive substring on raw tool name).
+// Kept as a pure function so it can be tested in isolation and re-used if the
+// tool table later moves out of this panel.
+const toolSearchQuery = signal('')
+
+export function toolMatchesSearch(tool: Pick<ToolStat, 'name'>, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (q === '') return true
+  return tool.name.toLowerCase().includes(q)
+}
+
+export function filterTools<T extends Pick<ToolStat, 'name'>>(tools: T[], query: string): T[] {
+  const q = query.trim().toLowerCase()
+  if (q === '') return tools
+  return tools.filter(t => t.name.toLowerCase().includes(q))
+}
+
 function RateGauge({ rate, label }: { rate: number; label: string }) {
   const color = rate >= 95 ? 'bg-emerald-500' : rate >= 90 ? 'bg-yellow-500' : 'bg-red-500'
   return html`
@@ -113,12 +131,27 @@ function RateGauge({ rate, label }: { rate: number; label: string }) {
   `
 }
 
-function ToolTable({ tools, highlightTool }: { tools: ToolStat[]; highlightTool?: string }) {
-  const top = tools.slice(0, 15)
+function ToolTable({
+  tools,
+  highlightTool,
+  query,
+}: {
+  tools: ToolStat[]
+  highlightTool?: string
+  query: string
+}) {
+  const filtered = filterTools(tools, query)
+  const top = filtered.slice(0, 15)
   const displayed = top
   if (highlightTool && !top.some(t => t.name === highlightTool)) {
-    const pinned = tools.find(t => t.name === highlightTool)
+    const pinned = filtered.find(t => t.name === highlightTool)
     if (pinned) displayed.unshift(pinned)
+  }
+  const hasQuery = query.trim() !== ''
+  if (hasQuery && filtered.length === 0) {
+    return html`
+      <div class="text-[11px] text-[var(--text-dim)] py-2">조건에 맞는 도구가 없습니다.</div>
+    `
   }
   return html`
     <div class="overflow-x-auto">
@@ -316,8 +349,23 @@ export function ToolQualityPanel() {
       </div>
 
       <div>
-        <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider mb-1">도구별 성공률</div>
-        <${ToolTable} tools=${d.by_tool} highlightTool=${route.value.params.tool} />
+        <div class="flex items-center justify-between mb-1 gap-2">
+          <div class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">도구별 성공률</div>
+          <${TextInput}
+            class="max-w-[180px]"
+            name="tool_quality_search"
+            ariaLabel="도구 이름 검색"
+            autoComplete="off"
+            placeholder="도구 이름 검색..."
+            value=${toolSearchQuery.value}
+            onInput=${(e: Event) => { toolSearchQuery.value = (e.target as HTMLInputElement).value }}
+          />
+        </div>
+        <${ToolTable}
+          tools=${d.by_tool}
+          highlightTool=${route.value.params.tool}
+          query=${toolSearchQuery.value}
+        />
       </div>
 
       <div>

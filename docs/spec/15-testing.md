@@ -13,7 +13,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `test/`, `lib/eval_gate.ml`, `lib/eval_harness.ml`, `lib/anti_fake.ml`, `lib/trajectory.ml`, `lib/keeper/keeper_verifier.ml`, `lib/keeper/keeper_contract.ml` |
+| Maps to | `test/`, `lib/eval_gate.ml`, `lib/eval_harness.ml`, `lib/trajectory.ml`, `lib/verifier_core.ml`, `lib/verifier_oas.ml`, `lib/keeper/keeper_guards.ml` |
 | Dependencies | (all subsystem specs) |
 | Test Files | 319 (.ml), 6 (bench), 3 (fixtures/other) |
 
@@ -201,36 +201,11 @@ type scenario = {
 - `Deterministic`: 필드(result/tool_name/error)에 대한 Exact/Contains/Regex/NotContains 매칭. 0 지연.
 - `ModelBased`: LLM에 rubric과 결과를 제출하여 0.0-1.0 점수 산출. 비용 발생.
 
-### 5.3 Anti-Fake (lib/anti_fake.ml)
+### 5.3 Anti-Fake (RETIRED)
 
-테스트 코드 품질 자동 점수화. 허위 테스트 패턴을 감지한다.
+`lib/anti_fake.ml`는 허위 테스트 패턴 감지(`assert true`, `let _ =`, `(* TODO *)` 등에 대한 자동 감점 + `score_result`/`audit_summary` 집계)를 제공하던 모듈이었고, #2848 dead-code sweep에서 `lib/agent_ecosystem`/`lib/agent_neo4j`와 함께 제거됐다 (`grep -rn anti_fake lib/ test/` → 0 hits).
 
-**감점 패턴 (penalties)**:
-
-| 패턴 | 감점 | 심각도 |
-|------|------|--------|
-| `assert true` | -0.3 | Critical |
-| `assert_bool "" true` | -0.3 | Critical |
-| `let _ =` | -0.2 | Warning |
-| `(* TODO` / `(* FIXME` | -0.15 | Warning |
-| `skip` / `ignore` | -0.1 | Info |
-| `fun _ ->` | -0.05 | Info |
-
-**가점 지표** (rewards): `Alcotest.check`, `assert_equal`, `roundtrip`, `property`, `QCheck`.
-
-**결과 타입**:
-
-```ocaml
-type score_result = {
-  file_path : string;
-  raw_score : float;
-  final_score : float;
-  findings : finding list;
-  quality_tier : string;      (* 점수 구간에 따른 등급 *)
-}
-```
-
-`audit_summary`는 전체 파일에 대한 avg/min/max 점수와 fake_count/suspect_count를 집계한다.
+현재는 `scripts/check-test-quality.sh`와 `eval_harness`의 trajectory-level assertion 검증이 그 역할을 부분 승계하며, 전용 테스트 품질 게이트는 노출되지 않는다.
 
 ### 5.4 Trajectory (lib/trajectory.ml)
 
@@ -253,29 +228,25 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 
 **trajectory_outcome**: `Completed | Failed | Timeout | CostExceeded | Gated`.
 
-### 5.5 Keeper Verifier (lib/keeper/keeper_verifier.ml)
+### 5.5 Verifier (lib/verifier_core.ml, lib/verifier_oas.ml)
 
-Generator-Verifier 루프. Keeper 자율 행동의 사전 검증.
+`lib/keeper/keeper_verifier.ml`가 단일 모듈로 제공하던 Generator–Verifier 루프는 `lib/verifier_core.ml`(코어 판정 로직)과 `lib/verifier_oas.ml`(OAS-bound execution path)로 2분할됐고, keeper 레벨의 사전 검증(guard gating)은 `lib/keeper/keeper_guards.ml`로 이동했다 (구 `keeper_verifier.ml`는 제거, #2589 및 05-keeper-agent 스펙 참조).
+
+현 루프:
 
 ```
-proposed_action -> risk_level 분류 (Safe/Moderate/Dangerous)
-               -> cost 추정
-               -> Verifier 판정: PASS / WARN / FAIL
+proposed_action -> verifier_core: risk_level 분류 (Safe/Moderate/Dangerous)
+                                  + cost 추정
+                                  + PASS / WARN / FAIL
+              -> keeper_guards: execution-time guard (permission, rate, safety)
+              -> verifier_oas: OAS execution path에서 재확인
 ```
 
-- **PASS**: 실행 진행
-- **WARN**: 실행하되 trajectory에 concern 기록
-- **FAIL**: 실행 차단, broadcast로 통보
+### 5.6 Keeper Contract (RETIRED)
 
-Budget: 검증당 max 200 output tokens (~$0.01).
+`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: `room_scope = Current | All (legacy)`)을 제공했고, single-room 통합 과정에서 `room_scope` 타입과 함께 제거됐다 (`grep -rn 'type room_scope' lib/` → 0 hits; 남은 `room_scope_*` 식별자는 캐시 helper 함수 이름일 뿐 타입 정의가 아님).
 
-### 5.6 Keeper Contract (lib/keeper/keeper_contract.ml)
-
-Keeper 정책/런타임 열거형의 typed 정의. JSON 및 MCP 문자열 표현과의 경계를 타입으로 관리한다.
-
-| 타입 | 값 | 설명 |
-|------|-----|------|
-| `room_scope` | Current (`All` legacy alias) | single-room compatibility field |
+Keeper 관련 enum의 현재 typed boundary는 05-keeper-agent 스펙의 §2 module table을 따른다.
 
 ---
 

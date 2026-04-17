@@ -176,12 +176,12 @@ let heartbeat_stream t ~sw ~env =
        [with _ -> ()] would swallow a cancel racing with [Stream.close],
        leaving the fork fiber alive past the cancel boundary. *)
     let close_request_stream () =
-      try Grpc_eio.Stream.close request_stream
-      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+      Safe_ops.protect ~default:() (fun () ->
+        Grpc_eio.Stream.close request_stream)
     in
     let close_raw_requests () =
-      try Grpc_eio.Stream.close raw_requests
-      with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+      Safe_ops.protect ~default:() (fun () ->
+        Grpc_eio.Stream.close raw_requests)
     in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with

@@ -24,11 +24,16 @@ module Http = Http_server_eio
     for an attacker-controlled id. *)
 let known_ids = [ "discord"; "imessage"; "slack"; "telegram" ]
 
-let parse_name request =
-  match Server_utils.query_param request "name" with
+(** Pure whitelist check; exposed so unit tests can confirm shell-meta and
+    path traversal in [name=] are rejected before any [Sys.command] /
+    [Process_eio] is reached. *)
+let validate_name = function
   | None -> Error "missing 'name' query parameter"
   | Some n when List.mem n known_ids -> Ok n
   | Some n -> Error (Printf.sprintf "unknown sidecar id: %s" n)
+
+let parse_name request =
+  validate_name (Server_utils.query_param request "name")
 
 let base_path () =
   match Sys.getenv_opt "MASC_BASE_PATH" with

@@ -35,6 +35,37 @@ import type { ReadonlySignal } from '@preact/signals'
 
 const OVERVIEW_STALE_MS = 300_000
 
+/** Pure: is an Op Hub tile "active" (non-zero count, draws the eye)?
+    Single-seam helper so the tile style decisions below — number
+    color, border, footnote mute — share one truth source. Reference
+    UIs (Stripe dashboard "$0" customer cards, Linear backlog zero
+    counters, GitHub PR-review counters): when the count is zero the
+    whole tile dims; when non-zero it snaps back to full contrast.
+    The operator's eye then skips the quiet tiles without consciously
+    parsing them. */
+export function opHubTileIsActive(count: number): boolean {
+  return Number.isFinite(count) && count > 0
+}
+
+/** Pure: Tailwind class for the giant count number.
+    Active tile → full strong text; zero/idle → muted so three zero
+    tiles don't collectively shout. */
+export function opHubTileNumberClass(count: number): string {
+  return opHubTileIsActive(count)
+    ? 'mt-1 text-[24px] font-bold text-[var(--text-strong)]'
+    : 'mt-1 text-[24px] font-bold text-[var(--text-dim)]'
+}
+
+/** Pure: Tailwind class for the tile border + background. Active tile
+    gets a gentle accent ring so the eye catches the \"not like the
+    others\" without the tile screaming. Zero tile falls back to the
+    existing subdued card style. */
+export function opHubTileBorderClass(count: number): string {
+  return opHubTileIsActive(count)
+    ? 'rounded-lg border border-accent/30 bg-accent/5 p-3'
+    : 'rounded-lg border border-card-border/35 bg-card/55 p-3'
+}
+
 function timestampToMs(timestamp?: string | null): number | null {
   if (!timestamp) return null
   const value = Date.parse(timestamp)
@@ -584,19 +615,19 @@ function OperationsHubCard() {
               `
             : null}
           <div class="mt-4 grid grid-cols-3 gap-3 max-[720px]:grid-cols-1">
-            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+            <div class=${opHubTileBorderClass(pendingApprovals)}>
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">정책 승인</div>
-              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingApprovals}</div>
+              <div class=${opHubTileNumberClass(pendingApprovals)}>${pendingApprovals}</div>
               <div class="mt-1 text-[11px] text-[var(--text-muted)]">pending approvals</div>
             </div>
-            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+            <div class=${opHubTileBorderClass(pendingConfirms)}>
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">운영 확인</div>
-              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${pendingConfirms}</div>
+              <div class=${opHubTileNumberClass(pendingConfirms)}>${pendingConfirms}</div>
               <div class="mt-1 text-[11px] text-[var(--text-muted)]">operator confirm queue</div>
             </div>
-            <div class="rounded-lg border border-card-border/35 bg-card/55 p-3">
+            <div class=${opHubTileBorderClass(attentionCount)}>
               <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">주의 신호</div>
-              <div class="mt-1 text-[24px] font-bold text-[var(--text-strong)]">${attentionCount}</div>
+              <div class=${opHubTileNumberClass(attentionCount)}>${attentionCount}</div>
               <div class="mt-1 text-[11px] text-[var(--text-muted)]">operator attention summary</div>
             </div>
           </div>

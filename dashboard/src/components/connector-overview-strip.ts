@@ -19,12 +19,22 @@ import { formatElapsedCompact } from '../lib/format-time'
 import { HeartbeatStrip } from './common/heartbeat-strip'
 import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
 import { HeartbeatUptimeChip } from './common/heartbeat-uptime-chip'
-import { recordHeartbeat, useHeartbeatHistory, type HeartbeatState } from '../lib/heartbeat-history'
+import { LivePulseDot } from './common/live-pulse-dot'
+import { recordHeartbeat, useHeartbeatHistory, lastHeartbeatTickMs, type HeartbeatState } from '../lib/heartbeat-history'
 
 /** Sampling cadence for the heartbeat ring buffer. Chosen so 45 bars
     cover ~22 minutes of history — matches Uptime Kuma's default
     "last 45 checks at 30s interval" visual rhythm. */
 const HEARTBEAT_SAMPLE_MS = 30_000
+
+/** Wall-clock tick for the live-pulse indicator — updates every second
+    so the dot can flip from live to stale without needing a prop change.
+    Kept module-scope so every StatusSummaryLine instance shares one
+    timer instead of N. */
+const livePulseNowMs = signal<number>(Date.now())
+if (typeof window !== 'undefined') {
+  window.setInterval(() => { livePulseNowMs.value = Date.now() }, 1000)
+}
 
 /** Pure: derive the heartbeat state for a connector from the gate info
     that the overview strip already polls. No extra network calls. */
@@ -303,11 +313,19 @@ function StatusSummaryLine({ summary }: { summary: ConnectorStripSummary }) {
   // One quiet aggregate sentence — always on, never loud. Sits between
   // the loud banners (celebration / incident) and the action row, so the
   // operator always has baseline numbers even when neither banner fires.
+  const now = livePulseNowMs.value
+  const lastTick = lastHeartbeatTickMs.value
   return html`
     <div
       class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
       data-strip-summary
     >
+      <${LivePulseDot}
+        lastTickMs=${lastTick}
+        nowMs=${now}
+        sampleIntervalMs=${HEARTBEAT_SAMPLE_MS}
+        testId="overview-strip-live"
+      />
       <span>
         <span class="font-semibold text-[var(--text-body)]" data-strip-summary-sidecars>${summary.sidecarUp} of ${summary.sidecarTotal}</span>
         <span> sidecars running</span>

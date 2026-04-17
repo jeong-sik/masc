@@ -2,7 +2,7 @@
 // Used by telemetry-unified, fleet-telemetry-panel, and any view rendering
 // the append-only JSONL telemetry stores.
 
-export type TelemetrySourceKey =
+type TelemetrySourceKey =
   | 'keeper_metric'
   | 'agent_event'
   | 'tool_call_io'
@@ -10,7 +10,7 @@ export type TelemetrySourceKey =
   | 'oas_event'
   | 'tool_metric'
 
-export interface TelemetrySourceMeta {
+interface TelemetrySourceMeta {
   label: string
   sublabel: string
   color: string

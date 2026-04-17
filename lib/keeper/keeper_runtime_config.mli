@@ -1,5 +1,5 @@
 (** Keeper_runtime_config — load startup keeper env seeding from
-    [<base_path>/.masc/config/keeper_runtime.toml].
+    [<resolved config root>/keeper_runtime.toml].
 
     Per-base-path config for keeper turn budgets, semaphore timeouts, and
     other runtime parameters that previously lived only in environment
@@ -8,7 +8,7 @@
 
     Precedence (highest first):
       1. Process env var (caller override, e.g. CI/test)
-      2. TOML value from [<base_path>/.masc/config/keeper_runtime.toml]
+      2. TOML value from [<resolved config root>/keeper_runtime.toml]
       3. Hardcoded default in [Env_config_keeper.KeeperKeepalive].
 
     The TOML loader runs at server startup, before any module that reads
@@ -19,8 +19,11 @@
 
     @since 0.7.1 *)
 
-(** Load TOML from [<base_path>/.masc/config/keeper_runtime.toml] and
+(** Load TOML from [<resolved config root>/keeper_runtime.toml] and
     record any overrides in the process-local boot override store.
+
+    The resolved config root honors [MASC_CONFIG_DIR] when set; otherwise it
+    follows the standard base-path/home fallback chain.
 
     Process-level env vars set by the caller take precedence — the TOML
     value is only applied when the env var is unset. This preserves the

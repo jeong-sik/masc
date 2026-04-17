@@ -1,5 +1,5 @@
 (** Keeper_runtime_config — load startup keeper env seeding from
-    [<base_path>/.masc/config/keeper_runtime.toml].  See [.mli] for design. *)
+    [<resolved config root>/keeper_runtime.toml].  See [.mli] for design. *)
 
 (* TOML key → env var name. Every keeper runtime knob maps here so
    that TOML is the SSOT and env vars become CI/test overrides.
@@ -86,8 +86,16 @@ let key_to_env =
     "debug.enabled",                    "MASC_KEEPER_DEBUG";
   ]
 
+let resolved_config_root ~base_path =
+  let inputs = Config_dir_resolver.inputs_from_env () in
+  let resolution =
+    Config_dir_resolver.resolve_with
+      { inputs with env_base_path = Some base_path }
+  in
+  resolution.Config_dir_resolver.config_root.path
+
 let toml_path ~base_path =
-  Filename.concat base_path ".masc/config/keeper_runtime.toml"
+  Filename.concat (resolved_config_root ~base_path) "keeper_runtime.toml"
 
 let read_file path =
   try Ok (In_channel.with_open_text path In_channel.input_all)

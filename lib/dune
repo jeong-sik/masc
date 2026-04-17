@@ -446,6 +446,7 @@
    keeper_compact_audit
    keeper_rollover
    keeper_post_turn
+   keeper_artifact_hydrator
    keeper_exec_context
    keeper_tools_oas
    keeper_guards

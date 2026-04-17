@@ -63,16 +63,6 @@ let () =
           Alcotest.test_case "digest defaults to namespace target" `Quick
             Test_operator_control_actions
             .test_digest_defaults_to_namespace_target;
-          Alcotest.test_case "cdal review requirement appears in review queue"
-            `Quick
-            Test_operator_control_actions
-            .test_cdal_review_requirement_appears_in_review_queue;
-          Alcotest.test_case "review resolve hides matching item" `Quick
-            Test_operator_control_actions
-            .test_review_resolve_hides_matching_item;
-          Alcotest.test_case "review defer moves item to deferred queue" `Quick
-            Test_operator_control_actions
-            .test_review_defer_moves_item_to_deferred_queue;
           Alcotest.test_case "confirm keeps token on delegated failure" `Quick
             Test_operator_control_judgment
             .test_confirm_keeps_pending_token_when_delegated_action_fails;

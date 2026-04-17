@@ -7,6 +7,9 @@ import {
   statusFilterLabel,
   sortByPriority,
   sortByTimeDesc,
+  filterTasksByQuery,
+  resetTaskSearch,
+  taskSearchQuery,
 } from './goal-helpers'
 import type { Task } from '../../types'
 
@@ -185,5 +188,69 @@ describe('sortByTimeDesc', () => {
     const a = makeTask('', '')
     const b = makeTask('', '')
     expect(sortByTimeDesc(a, b)).toBe(0)
+  })
+})
+
+// ================================================================
+// filterTasksByQuery
+// ================================================================
+
+describe('filterTasksByQuery', () => {
+  type Searchable = { id: string; title: string; description?: string | null; assignee?: string | null }
+  const tasks: Searchable[] = [
+    { id: 't1', title: '[masc-mcp] Fix keeper heartbeat', description: 'Eio timeout regression', assignee: 'claude' },
+    { id: 't2', title: '[oas] Add Groq provider', description: null, assignee: 'codex' },
+    { id: 't3', title: 'Dashboard polish', description: 'Tailwind migration cleanup', assignee: null },
+    { id: 't4', title: 'Write evidence record', description: 'BFCL 67 verification', assignee: 'gemini' },
+  ]
+
+  it('returns a copy of all tasks for an empty query', () => {
+    const result = filterTasksByQuery(tasks, '')
+    expect(result).toHaveLength(tasks.length)
+    expect(result).not.toBe(tasks)
+  })
+
+  it('treats whitespace-only query as empty', () => {
+    expect(filterTasksByQuery(tasks, '   ')).toHaveLength(tasks.length)
+  })
+
+  it('matches on title (case-insensitive)', () => {
+    const result = filterTasksByQuery(tasks, 'KEEPER')
+    expect(result.map(t => t.id)).toEqual(['t1'])
+  })
+
+  it('matches on description', () => {
+    const result = filterTasksByQuery(tasks, 'tailwind')
+    expect(result.map(t => t.id)).toEqual(['t3'])
+  })
+
+  it('matches on assignee', () => {
+    const result = filterTasksByQuery(tasks, 'codex')
+    expect(result.map(t => t.id)).toEqual(['t2'])
+  })
+
+  it('returns empty array on miss', () => {
+    expect(filterTasksByQuery(tasks, 'zzzz')).toEqual([])
+  })
+
+  it('handles null description and assignee without throwing', () => {
+    const result = filterTasksByQuery(tasks, 'dashboard')
+    expect(result.map(t => t.id)).toEqual(['t3'])
+  })
+
+  it('trims query before matching', () => {
+    expect(filterTasksByQuery(tasks, '  groq  ').map(t => t.id)).toEqual(['t2'])
+  })
+})
+
+// ================================================================
+// resetTaskSearch
+// ================================================================
+
+describe('resetTaskSearch', () => {
+  it('clears taskSearchQuery to empty string', () => {
+    taskSearchQuery.value = 'something'
+    resetTaskSearch()
+    expect(taskSearchQuery.value).toBe('')
   })
 })

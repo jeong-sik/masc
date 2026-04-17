@@ -220,6 +220,90 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
       Alcotest.(check int) "lightweight recent_actions omitted" 0
         Yojson.Safe.Util.(json |> member "recent_actions" |> to_list |> List.length))
 
+let test_snapshot_lightweight_summary_keeps_tool_audit () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive "lightweight-audit";
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let keeper_name = "lightweight-audit" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("goal", `String "Surface tool audit in lightweight snapshots");
+                ("proactive_enabled", `Bool false);
+                ("autoboot_enabled", `Bool false);
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      Keeper_keepalive.stop_keepalive keeper_name;
+      let metrics_store = Keeper_types.keeper_metrics_store config keeper_name in
+      let metrics_dir = Dated_jsonl.base_dir metrics_store in
+      cleanup_dir metrics_dir;
+      Fs_compat.mkdir_p metrics_dir;
+      Dated_jsonl.append metrics_store
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("channel", `String "turn");
+            ("tool_call_count", `Int 2);
+            ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
+          ]);
+      Dated_jsonl.append metrics_store
+        (`Assoc
+          [
+            ("ts", `String (Types.now_iso ()));
+            ("channel", `String "turn");
+            ("tool_call_count", `Int 0);
+            ("tools_used", `List []);
+          ]);
+      let json =
+        Operator_control.snapshot_json ~view:"summary"
+          ~include_keepers:true ~include_messages:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "owner")
+      in
+      let keeper =
+        match
+          Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+          |> List.find_opt (fun row ->
+                 Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
+        with
+        | Some keeper -> keeper
+        | None -> Alcotest.fail "expected keeper in lightweight snapshot"
+      in
+      Alcotest.(check string) "lightweight tool audit source retained"
+        "keeper_metrics"
+        Yojson.Safe.Util.(keeper |> member "tool_audit_source" |> to_string);
+      Alcotest.(check int) "lightweight tool audit count retained" 2
+        Yojson.Safe.Util.(keeper |> member "latest_tool_call_count" |> to_int);
+      Alcotest.(check (list string)) "lightweight latest tool names retained"
+        [ "masc_status"; "masc_tasks" ]
+        Yojson.Safe.Util.
+          (keeper |> member "latest_tool_names" |> to_list |> List.map to_string))
+
 let test_snapshot_waiters_share_inflight_result () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

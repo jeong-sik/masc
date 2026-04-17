@@ -5,12 +5,14 @@ WORKDIR /src
 COPY . .
 
 RUN sudo apt-get update \
- && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libsqlite3-dev zlib1g-dev curl git \
- && rm -rf /var/lib/apt/lists/*
+ && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev libsqlite3-dev zlib1g-dev curl git libgmp-dev libprotobuf-dev protobuf-compiler libffi-dev \
+ && sudo rm -rf /var/lib/apt/lists/*
 
-RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y && dune build @install"
+RUN opam exec -- bash -lc "scripts/opam-pin-external-deps.sh && opam install . --deps-only -y && dune build @install"
 
 FROM ocaml/opam:debian-12-ocaml-5.4 AS runtime
+
+USER root
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git libsqlite3-0 libssl3 zlib1g \

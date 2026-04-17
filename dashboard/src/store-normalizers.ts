@@ -3,7 +3,7 @@ import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
   DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
-  DashboardExecutionOperationBrief, DashboardExecutionWorkerSupportBrief,
+  DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
@@ -242,28 +242,6 @@ export function normalizeExecutionSessionBrief(raw: unknown): DashboardExecution
   }
 }
 
-export function normalizeExecutionOperationBrief(raw: unknown): DashboardExecutionOperationBrief | null {
-  if (!isRecord(raw)) return null
-  const operationId = asString(raw.operation_id)
-  const objective = asString(raw.objective)
-  if (!operationId || !objective) return null
-  return {
-    operation_id: operationId,
-    objective,
-    status: asString(raw.status),
-    stage: asString(raw.stage) ?? null,
-    assigned_unit_id: asString(raw.assigned_unit_id) ?? null,
-    assigned_unit_label: asString(raw.assigned_unit_label) ?? null,
-    linked_session_id: asString(raw.linked_session_id) ?? null,
-    linked_detachment_id: asString(raw.linked_detachment_id) ?? null,
-    blocker_summary: asString(raw.blocker_summary) ?? null,
-    search_status: asString(raw.search_status) ?? null,
-    next_tool: asString(raw.next_tool) ?? null,
-    updated_at: asString(raw.updated_at) ?? null,
-    top_handoff: normalizeExecutionHandoff(raw.top_handoff),
-    command_handoff: normalizeExecutionHandoff(raw.command_handoff),
-  }
-}
 
 export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExecutionWorkerSupportBrief | null {
   if (!isRecord(raw)) return null

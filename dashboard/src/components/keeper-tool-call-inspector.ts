@@ -8,6 +8,7 @@ import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
+import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { createManagedAsyncResource, type ManagedAsyncResource } from '../lib/async-state'
 
@@ -67,11 +68,11 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             <div class="text-[10px] text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
           ` : null}
           <div>
-            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Input</div>
+            <${SectionCap} class="mb-1">Input<//>
             <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--text-strong)]">${formatInput(entry.input)}</pre>
           </div>
           <div>
-            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">Output</div>
+            <${SectionCap} class="mb-1">Output<//>
             <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)]">${entry.output || '(empty)'}</pre>
           </div>
         </div>
@@ -148,7 +149,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
       </div>
 
       <div class="border border-[var(--card-border)] rounded overflow-hidden max-h-[500px] overflow-y-auto">
-        <div class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] text-[10px] uppercase tracking-wider text-[var(--text-muted)] border-b border-[var(--card-border)]">
+        <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--card-border)]">
           <span class="w-4"></span>
           <span class="w-16">Time</span>
           <span class="flex-1">Tool</span>

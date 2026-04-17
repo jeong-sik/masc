@@ -14,6 +14,7 @@ import { ErrorState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { TextArea, TextInput } from '../common/input'
 import { FilterChips } from '../common/filter-chips'
+import { StatusChip } from '../common/status-chip'
 
 export type PromptSourceFilter = 'all' | PromptSource
 
@@ -224,7 +225,7 @@ export function PromptRegistryPanel() {
               >
                 <div class="mb-1 flex items-start justify-between gap-2">
                   <div class="font-mono text-[12px] text-[var(--text-strong)]">${prompt.key}</div>
-                  <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${sourceBadgeClass(prompt.source)}">${prompt.source}</span>
+                  <${StatusChip} tone=${sourceBadgeClass(prompt.source)}>${prompt.source}<//>
                 </div>
                 <div class="mb-1 text-[11px] text-[var(--text-muted)]">${prompt.category}</div>
                 <div class="text-[12px] text-[var(--text-body)] leading-relaxed">${prompt.description}</div>
@@ -237,9 +238,9 @@ export function PromptRegistryPanel() {
           ${selectedPrompt ? html`
             <div class="mb-4 flex flex-wrap items-center gap-2">
               <div class="font-mono text-[13px] text-[var(--text-strong)]">${selectedPrompt.key}</div>
-              <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] ${sourceBadgeClass(selectedPrompt.source)}">${selectedPrompt.source}</span>
+              <${StatusChip} tone=${sourceBadgeClass(selectedPrompt.source)}>${selectedPrompt.source}<//>
               ${selectedPrompt.has_override
-                ? html`<span class="rounded-full border border-[rgba(250,204,21,0.28)] bg-[var(--warn-10)] px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-[#fde68a]">오버라이드 활성</span>`
+                ? html`<${StatusChip} tone="warn">오버라이드 활성<//>`
                 : null}
             </div>
 

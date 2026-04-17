@@ -261,23 +261,6 @@ export interface DashboardExecutionSessionBrief {
   command_handoff?: DashboardExecutionHandoff | null
 }
 
-export interface DashboardExecutionOperationBrief {
-  operation_id: string
-  objective: string
-  status?: string
-  stage?: string | null
-  assigned_unit_id?: string | null
-  assigned_unit_label?: string | null
-  linked_session_id?: string | null
-  linked_detachment_id?: string | null
-  blocker_summary?: string | null
-  search_status?: string | null
-  next_tool?: string | null
-  updated_at?: string | null
-  top_handoff?: DashboardExecutionHandoff | null
-  command_handoff?: DashboardExecutionHandoff | null
-}
-
 export interface DashboardExecutionWorkerSupportBrief {
   name: string
   agent_name?: string

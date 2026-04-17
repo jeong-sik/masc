@@ -20,13 +20,10 @@ export const RECONNECT_MAX_MS = 15_000
 
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000
-export const EXECUTION_TTL_MS = 30_000
 export const HEARTBEAT_STALE_MS = 120_000
 export const UI_REFRESH_TTL_MS = 1_000
-export const COMMAND_HELP_TTL_MS = 60_000
 export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
 export const SSE_DEFAULT_DEBOUNCE_MS = 500
-export const SSE_OPERATOR_DEBOUNCE_MS = 300
 export const SSE_ACTIVITY_DEBOUNCE_MS = 2_000
 export const SSE_KEEPER_OPERATOR_DEBOUNCE_MS = 600
 export const SSE_KEEPER_THREAD_DEBOUNCE_MS = 800
@@ -41,19 +38,11 @@ export const TELEMETRY_AUTO_REFRESH_MS = 30_000
 export const CONTEXT_RATIO_CRITICAL = 0.85  // handoff-imminent
 export const CONTEXT_RATIO_WARN = 0.70      // preparing
 export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
-// Fleet overview coloring (intermediate between warn and compacting)
-export const CONTEXT_RATIO_FLEET_WARN = 0.60
-
-// --- Trajectory timeline ---
-export const TRAJECTORY_HEARTBEAT_STALE_MS = 30_000
-export const LIVENESS_TICK_MS = 5_000
 
 // --- Keeper UI/runtime limits ---
-export const KEEPER_STATUS_TAIL_MESSAGES = 50
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
 export const KEEPER_STREAM_IDLE_TIMEOUT_MS = 120_000
 export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
-export const KEEPER_REPLY_PREVIEW_MAX = 200
 
 // --- Buffer & cache sizes ---
 export const MAX_JOURNAL_ENTRIES = 200

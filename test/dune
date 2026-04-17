@@ -116,6 +116,7 @@
         test_keeper_campaign_fsm
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
+        test_team_memory
         test_telemetry_unified
         test_keeper_topk_llm
         test_warn_root_causes
@@ -211,7 +212,8 @@
           test_keeper_campaign_fsm
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
-            test_telemetry_unified
+          test_team_memory
+          test_telemetry_unified
           test_keeper_topk_llm
           test_warn_root_causes
           test_memory_hooks

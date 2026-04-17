@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
+import { useEffect } from 'preact/hooks'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
@@ -414,6 +415,25 @@ export function deriveBreadcrumbTrail(
 }
 
 
+/** Pure: compose the browser tab title from the current surface +
+    section. Reference: every polished SPA (GitHub / Linear / Notion /
+    Vercel) sets document.title so operators with multiple tabs open
+    can distinguish them from the browser's tab list. Without this,
+    4 dashboard tabs all say \"MASC Dashboard\" — users lose track.
+
+    Format: \"MASC · {section}\" when drilled into a section,
+            \"MASC · {tab}\" when on a tab default,
+            \"MASC Dashboard\" on home / unknown (original fallback). */
+export function composeDocumentTitle(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+): string {
+  const leaf = sectionLabel ?? tabLabel
+  if (leaf === null || leaf.trim() === '') return 'MASC Dashboard'
+  return `MASC · ${leaf}`
+}
+
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -428,6 +448,13 @@ function SurfaceLead() {
   const trail = currentSection !== null
     ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
     : []
+
+  // Sync document.title — syncing to an external system (the browser
+  // tab title) is a legitimate useEffect. Keyed on the two labels so
+  // the effect only re-runs on actual navigation, not every render.
+  useEffect(() => {
+    document.title = composeDocumentTitle(currentView?.label ?? null, currentSection?.label ?? null)
+  }, [currentView?.label, currentSection?.label])
 
   return html`
     <div class="mb-3 flex flex-col gap-1.5">

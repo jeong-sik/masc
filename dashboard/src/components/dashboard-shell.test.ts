@@ -5,6 +5,7 @@ import {
   currentSectionShareUrl,
   formatUptimeSecondsHuman,
   deriveBreadcrumbTrail,
+  composeDocumentTitle,
 } from './dashboard-shell'
 
 describe('githubCommitUrl (pure)', () => {
@@ -183,5 +184,44 @@ describe('deriveBreadcrumbTrail (pure)', () => {
       { label: 'Connectors', navigableTab: null },
       { label: 'Discord', navigableTab: null },
     ])
+  })
+})
+
+describe('composeDocumentTitle (pure)', () => {
+  it('both null → fallback to default brand title', () => {
+    expect(composeDocumentTitle(null, null)).toBe('MASC Dashboard')
+  })
+
+  it('whitespace-only labels fall back to default (no ghost \"MASC · \")', () => {
+    expect(composeDocumentTitle('   ', null)).toBe('MASC Dashboard')
+    expect(composeDocumentTitle(null, '   ')).toBe('MASC Dashboard')
+  })
+
+  it('tab only → \"MASC · {tab}\"', () => {
+    expect(composeDocumentTitle('Connectors', null)).toBe('MASC · Connectors')
+  })
+
+  it('section only → \"MASC · {section}\"', () => {
+    expect(composeDocumentTitle(null, 'Discord')).toBe('MASC · Discord')
+  })
+
+  it('section takes precedence over tab (deeper drill wins the tab title)', () => {
+    // The rationale: if an operator has 4 tabs open — Connectors,
+    // Connectors/Discord, Connectors/Slack, Monitoring — the browser
+    // tab list should distinguish the three Connectors-variants by
+    // their leaf section, not repeat \"MASC · Connectors\" three times.
+    expect(composeDocumentTitle('Connectors', 'Discord')).toBe('MASC · Discord')
+  })
+
+  it('returned string always starts with \"MASC\" brand prefix (or is plain brand on fallback)', () => {
+    // Regression guard: a future refactor must not accidentally drop
+    // the brand prefix — operators scanning the browser tab bar look
+    // for \"MASC\" first.
+    const titles = [
+      composeDocumentTitle('Connectors', 'Discord'),
+      composeDocumentTitle('Connectors', null),
+      composeDocumentTitle(null, null),
+    ]
+    for (const t of titles) expect(t.startsWith('MASC')).toBe(true)
   })
 })

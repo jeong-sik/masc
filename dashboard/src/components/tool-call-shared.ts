@@ -5,8 +5,8 @@ import { truncate } from '../lib/truncate'
 
 // ── Constants ────────────────────────────────────────────
 
-export const DURATION_FAST_MS = 500
-export const DURATION_SLOW_MS = 2000
+const DURATION_FAST_MS = 500
+const DURATION_SLOW_MS = 2000
 
 const ARGS_PREVIEW_MAX_CHARS = 80
 const ARGS_VALUE_MAX_CHARS = 30
@@ -15,14 +15,14 @@ const ARGS_MAX_KEYS = 3
 // ── Tool categories ─────────────────────────────────────
 // Order matters: first match wins. More specific patterns before general ones.
 
-export type ToolCategoryEntry = {
+type ToolCategoryEntry = {
   match: (n: string) => boolean
   icon: string
   color: string
   label: string
 }
 
-export const TOOL_CATEGORIES: ToolCategoryEntry[] = [
+const TOOL_CATEGORIES: ToolCategoryEntry[] = [
   // Shell / Bash — execution tools
   { match: n => n.includes('bash') || n.includes('shell'),
     icon: '>', color: 'text-[var(--ok)]', label: 'shell' },
@@ -63,11 +63,11 @@ export const TOOL_CATEGORIES: ToolCategoryEntry[] = [
   { match: n => n.includes('read'),
     icon: 'R', color: 'text-[#60a5fa]', label: 'read' },
 ]
-export const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[#94a3b8]', label: 'tool' }
+const DEFAULT_TOOL_STYLE: Omit<ToolCategoryEntry, 'match'> = { icon: 'T', color: 'text-[#94a3b8]', label: 'tool' }
 
 // ── Functions ───────────────────────────────────────────
 
-export type ToolCategoryResult = { icon: string; color: string; label: string }
+type ToolCategoryResult = { icon: string; color: string; label: string }
 
 export function toolCategory(name: string): ToolCategoryResult {
   const found = TOOL_CATEGORIES.find(c => c.match(name))

@@ -210,6 +210,7 @@ let make_pre_tool_hook
     | Agent_sdk.Hooks.OnError _
     | Agent_sdk.Hooks.OnToolError _
     | Agent_sdk.Hooks.PreCompact _
+    | Agent_sdk.Hooks.PostCompact _
     | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue
 
 (** Install the verifier hook into an existing OAS hooks record.

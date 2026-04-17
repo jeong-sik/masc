@@ -41,13 +41,13 @@ export interface Task {
   execution_links?: TaskExecutionLinks | null
 }
 
-export interface TaskExecutionLinks {
+interface TaskExecutionLinks {
   operation_id?: string | null
   session_id?: string | null
   autoresearch_loop_id?: string | null
 }
 
-export interface TaskContract {
+interface TaskContract {
   strict?: boolean
   completion_contract?: string[]
   required_evidence?: string[]
@@ -56,7 +56,7 @@ export interface TaskContract {
   links?: TaskExecutionLinks | null
 }
 
-export interface TaskHandoffContext {
+interface TaskHandoffContext {
   summary: string
   reason?: string | null
   next_step?: string | null
@@ -66,7 +66,7 @@ export interface TaskHandoffContext {
   updated_by?: string | null
 }
 
-export interface TaskGateCheck {
+interface TaskGateCheck {
   evidence: string
   outcome: 'satisfied' | 'missing' | 'failed' | 'unsupported'
   detail: string
@@ -78,7 +78,7 @@ export interface TaskGateEvaluation {
   reasons?: string[]
 }
 
-export interface TaskGateSnapshot {
+interface TaskGateSnapshot {
   strict?: boolean
   completion_contract?: string[]
   unmet_completion_contract?: string[]

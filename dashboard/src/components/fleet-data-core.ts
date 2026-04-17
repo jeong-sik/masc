@@ -47,7 +47,7 @@ export const sharedToolQualityError: Signal<string | null> = signal(null)
 let toolQualityRequestId = 0
 let toolQualityController: AbortController | null = null
 
-export interface RefreshSharedOptions {
+interface RefreshSharedOptions {
   signal?: AbortSignal
   /** Override default n=5000 for tool-quality fetches. */
   n?: number
@@ -141,7 +141,7 @@ export async function refreshSharedTelemetrySummary(opts: { signal?: AbortSignal
   }
 }
 
-export function cancelSharedTelemetrySummary(): void {
+function cancelSharedTelemetrySummary(): void {
   summaryRequestId += 1
   summaryController?.abort()
   summaryController = null

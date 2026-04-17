@@ -6,6 +6,12 @@ include A2a_types
 
 module SMap = Map.Make(String)
 
+let rec atomic_update atomic f =
+  let old_val = Atomic.get atomic in
+  let new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then ()
+  else atomic_update atomic f
+
 (** Subscription *)
 type subscription = {
   id: string;
@@ -16,8 +22,7 @@ type subscription = {
 } [@@deriving show]
 
 (* Global subscription store — immutable map + mutex for fiber safety *)
-let subscriptions : subscription SMap.t ref = ref SMap.empty
-let subscriptions_mutex = Eio.Mutex.create ()
+let subscriptions : subscription SMap.t Atomic.t = Atomic.make SMap.empty
 
 (* Persistence file path - set by init *)
 let subscriptions_file = ref ""
@@ -67,8 +72,8 @@ let subscription_of_json (json : Yojson.Safe.t) : subscription option =
 let save_subscriptions () =
   if !subscriptions_file = "" then ()
   else
-    let subs = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-      SMap.fold (fun _k v acc -> subscription_to_json v :: acc) !subscriptions []) in
+    let subs =
+      SMap.fold (fun _k v acc -> subscription_to_json v :: acc) (Atomic.get subscriptions) [] in
     let json = `Assoc [("subscriptions", `List subs)] in
     let content = Yojson.Safe.pretty_to_string json in
     try
@@ -88,12 +93,12 @@ let load_subscriptions () =
       let module U = Yojson.Safe.Util in
       let subs = try json |> U.member "subscriptions" |> U.to_list
                  with U.Type_error _ -> [] in
-      Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-        List.iter (fun j ->
+      atomic_update subscriptions (fun map ->
+        List.fold_left (fun acc j ->
           match subscription_of_json j with
-          | Some sub -> subscriptions := SMap.add sub.id sub !subscriptions
-          | None -> ()
-        ) subs)
+          | Some sub -> SMap.add sub.id sub acc
+          | None -> acc
+        ) map subs)
 
 (** Initialize A2A tools with MASC directory *)
 let init ~masc_dir =
@@ -109,20 +114,16 @@ type buffered_event = {
 } [@@deriving show]
 
 (* Event buffer per subscription — immutable map + mutex *)
-let event_buffers : buffered_event list SMap.t ref = ref SMap.empty
-let event_buffers_mutex = Eio.Mutex.create ()
+let event_buffers : buffered_event list SMap.t Atomic.t = Atomic.make SMap.empty
 
 (* Max events per subscription to prevent memory bloat *)
 let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
 (** Generate stable UUIDv4 identifiers for subscriptions and delegated tasks.
     Mutex-protected for fiber safety (Random.State is mutable). *)
-let a2a_rng = Random.State.make_self_init ()
-let a2a_rng_mutex = Eio.Mutex.create ()
 let generate_uuid () =
-  Eio.Mutex.use_ro a2a_rng_mutex (fun () ->
-    let uuid = Uuidm.v4_gen a2a_rng () in
-    Uuidm.to_string uuid)
+  let uuid = Uuidm.v4_gen (Random.get_state ()) () in
+  Uuidm.to_string uuid
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
@@ -159,11 +160,9 @@ type heartbeat_result_snapshot = {
   updated_at: string;
 }
 
-let latest_heartbeat_tasks : heartbeat_task_snapshot SMap.t ref = ref SMap.empty
+let latest_heartbeat_tasks : heartbeat_task_snapshot SMap.t Atomic.t = Atomic.make SMap.empty
 
-let latest_heartbeat_results : heartbeat_result_snapshot SMap.t ref = ref SMap.empty
-
-let heartbeat_mutex = Eio.Mutex.create ()
+let latest_heartbeat_results : heartbeat_result_snapshot SMap.t Atomic.t = Atomic.make SMap.empty
 
 (** Monotonic sequence for heartbeat snapshots.
     Uses [Atomic.t] so the counter stays correct even if a future caller
@@ -195,20 +194,16 @@ let evict_heartbeat_map ~get_ts (m : 'a SMap.t) : 'a SMap.t =
 (** Clear all transient in-memory state (heartbeat snapshots + event buffers).
     Call on shutdown or between flow runs to prevent memory accumulation. *)
 let clear_transient_state () =
-  Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
-    latest_heartbeat_tasks := SMap.empty;
-    latest_heartbeat_results := SMap.empty;
-    Atomic.set heartbeat_snapshot_seq 0);
-  Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-    event_buffers := SMap.empty)
+  Atomic.set latest_heartbeat_tasks SMap.empty;
+  Atomic.set latest_heartbeat_results SMap.empty;
+  Atomic.set heartbeat_snapshot_seq 0;
+  Atomic.set event_buffers SMap.empty
 
 let latest_heartbeat_task agent =
-  Eio_guard.with_mutex heartbeat_mutex (fun () ->
-    SMap.find_opt agent !latest_heartbeat_tasks)
+  SMap.find_opt agent (Atomic.get latest_heartbeat_tasks)
 
 let latest_heartbeat_result agent =
-  Eio_guard.with_mutex heartbeat_mutex (fun () ->
-    SMap.find_opt agent !latest_heartbeat_results)
+  SMap.find_opt agent (Atomic.get latest_heartbeat_results)
 
 let remote_agent_card_paths =
   [ "/.well-known/agent.json"; "/.well-known/agent-card.json" ]
@@ -470,8 +465,8 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
       created_at = now_iso8601 ();
       last_polled_at = now;
     } in
-    Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-      subscriptions := SMap.add sub_id sub !subscriptions);
+    atomic_update subscriptions (fun map ->
+      SMap.add sub_id sub map);
     save_subscriptions ();
     Ok (`Assoc [
       ("subscription_id", `String sub_id);
@@ -489,15 +484,15 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
     @param subscription_id Subscription ID to remove
 *)
 let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
-  let removed = Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-    let prev = !subscriptions in
-    if SMap.mem subscription_id prev then begin
-      subscriptions := SMap.remove subscription_id prev;
-      true
-    end else false) in
-  if removed then begin
-    Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-      event_buffers := SMap.remove subscription_id !event_buffers);
+  let removed = ref false in
+  atomic_update subscriptions (fun map ->
+    if SMap.mem subscription_id map then begin
+      removed := true;
+      SMap.remove subscription_id map
+    end else map
+  );
+  if !removed then begin
+    atomic_update event_buffers (fun map -> SMap.remove subscription_id map);
     save_subscriptions ();
     Ok (`Assoc [
       ("unsubscribed", `Bool true);
@@ -508,8 +503,8 @@ let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
 
 (** List active subscriptions *)
 let list_subscriptions () : Yojson.Safe.t =
-  let buf_snap = Eio.Mutex.use_ro event_buffers_mutex (fun () -> !event_buffers) in
-  let subs = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
+  let buf_snap = Atomic.get event_buffers in
+  let subs =
     SMap.fold (fun _k v acc ->
       let sub_json = `Assoc [
         ("id", `String v.id);
@@ -525,7 +520,7 @@ let list_subscriptions () : Yojson.Safe.t =
         ));
       ] in
       sub_json :: acc
-    ) !subscriptions []) in
+    ) (Atomic.get subscriptions) [] in
   `Assoc [
     ("count", `Int (List.length subs));
     ("subscriptions", `List subs);
@@ -545,39 +540,45 @@ let list_subscriptions () : Yojson.Safe.t =
 *)
 let poll_events ~subscription_id ?(clear = true) ()
     : (Yojson.Safe.t, string) result =
-  let mem = Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-    match SMap.find_opt subscription_id !subscriptions with
-    | None -> false
-    | Some sub -> sub.last_polled_at <- Time_compat.now (); true) in
-  if not mem then
+  let mem = ref false in
+  atomic_update subscriptions (fun map ->
+    match SMap.find_opt subscription_id map with
+    | None -> map
+    | Some sub -> 
+        mem := true;
+        let new_sub = { sub with last_polled_at = Time_compat.now () } in
+        SMap.add subscription_id new_sub map
+  );
+  if not !mem then
     Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
   else
-    let events = Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-      let evts = match SMap.find_opt subscription_id !event_buffers with
+    let events_ref = ref [] in
+    atomic_update event_buffers (fun map ->
+      let evts = match SMap.find_opt subscription_id map with
         | None -> []
         | Some events -> events in
-      if clear then event_buffers := SMap.add subscription_id [] !event_buffers;
-      evts) in
-    (* Convert to JSON *)
+      events_ref := evts;
+      if clear then
+        SMap.add subscription_id [] map
+      else map
+    );
     let events_json = List.map (fun e ->
       `Assoc [
-        ("type", `String (show_event_type e.event_type));
+        ("event_type", `String (show_event_type e.event_type));
+        ("timestamp", `Float e.timestamp);
         ("agent", `String e.agent);
         ("data", e.data);
-        ("timestamp", `Float e.timestamp);
       ]
-    ) events in
+    ) (List.rev !events_ref) in
     Ok (`Assoc [
-      ("subscription_id", `String subscription_id);
-      ("event_count", `Int (List.length events));
       ("events", `List events_json);
-      ("cleared", `Bool clear);
+      ("subscription_id", `String subscription_id)
     ])
 
 (** Buffer an event for a subscription (with max limit enforcement) *)
 let buffer_event sub_id event =
-  Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-    let current = match SMap.find_opt sub_id !event_buffers with
+  atomic_update event_buffers (fun map ->
+    let current = match SMap.find_opt sub_id map with
       | None -> []
       | Some events -> events
     in
@@ -588,14 +589,15 @@ let buffer_event sub_id event =
         | [] -> []
       else current
     in
-    event_buffers := SMap.add sub_id (trimmed @ [event]) !event_buffers)
+    SMap.add sub_id (trimmed @ [event]) map
+  )
 
 (** Notify subscribers of an event (internal use)
     Now also buffers events for polling in addition to SSE broadcast *)
 let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Safe.t) : unit =
   let timestamp = Time_compat.now () in
   (* Snapshot subscriptions to avoid nested locking (subscriptions → event_buffers) *)
-  let matching_subs = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
+  let matching_subs =
     SMap.fold (fun _id sub acc ->
       let agent_match = match sub.agent_filter with
         | None -> true
@@ -604,7 +606,7 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
       in
       let event_match = List.mem event_type sub.event_types in
       if agent_match && event_match then sub :: acc else acc
-    ) !subscriptions []) in
+    ) (Atomic.get subscriptions) [] in
   List.iter (fun sub ->
     let event = { event_type; agent; data; timestamp } in
     buffer_event sub.id event;
@@ -651,7 +653,7 @@ let emit_heartbeat_task
     ?(decision_reason : string option)
     ?(decision_confidence : float option)
     () : unit =
-  Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
+  atomic_update latest_heartbeat_tasks (fun map ->
     let m = SMap.add agent
       {
         seq = next_heartbeat_snapshot_seq ();
@@ -661,9 +663,8 @@ let emit_heartbeat_task
         allowed_tools;
         decision_reason;
         created_at = now_iso8601 ();
-      } !latest_heartbeat_tasks in
-    latest_heartbeat_tasks :=
-      evict_heartbeat_map ~get_ts:(fun s -> s.created_at) m);
+      } map in
+    evict_heartbeat_map ~get_ts:(fun s -> s.created_at) m);
   let data = `Assoc ([
     ("agent", `String agent);
     ("goal", `String goal);
@@ -746,7 +747,7 @@ let submit_heartbeat_result
   (* Broadcast completion event *)
   (match result with
    | Ok _ ->
-       Eio.Mutex.use_rw ~protect:true heartbeat_mutex (fun () ->
+       atomic_update latest_heartbeat_results (fun map ->
          let m = SMap.add agent
            {
              seq = next_heartbeat_snapshot_seq ();
@@ -759,9 +760,8 @@ let submit_heartbeat_result
              decision_confidence;
              failure_reason;
              updated_at = now_iso8601 ();
-           } !latest_heartbeat_results in
-         latest_heartbeat_results :=
-           evict_heartbeat_map ~get_ts:(fun s -> s.updated_at) m);
+           } map in
+         evict_heartbeat_map ~get_ts:(fun s -> s.updated_at) m);
        notify_event ~event_type:Completion ~agent
          ~data:(`Assoc [
            ("worker", `String worker_name);
@@ -787,29 +787,34 @@ let submit_heartbeat_result
     Returns count of removed entries. Safe to call: entries are re-created
     on next heartbeat emission. *)
 let cleanup_stale_heartbeats ~active_agents () =
-  Eio_guard.with_mutex heartbeat_mutex (fun () ->
-    let stale = SMap.fold (fun agent _ acc ->
-      if not (List.mem agent active_agents) then agent :: acc else acc
-    ) !latest_heartbeat_tasks [] in
-    List.iter (fun agent ->
-      latest_heartbeat_tasks := SMap.remove agent !latest_heartbeat_tasks;
-      latest_heartbeat_results := SMap.remove agent !latest_heartbeat_results
-    ) stale;
-    List.length stale)
+  let map = Atomic.get latest_heartbeat_tasks in
+  let stale = SMap.fold (fun agent _ acc ->
+    if not (List.mem agent active_agents) then agent :: acc else acc
+  ) map [] in
+  if stale <> [] then begin
+    atomic_update latest_heartbeat_tasks (fun m ->
+      List.fold_left (fun acc agent -> SMap.remove agent acc) m stale
+    );
+    atomic_update latest_heartbeat_results (fun m ->
+      List.fold_left (fun acc agent -> SMap.remove agent acc) m stale
+    )
+  end;
+  List.length stale
 
 (** Remove event buffer entries whose subscription no longer exists.
     Returns count of removed entries. *)
 let cleanup_orphan_buffers () =
-  (* Snapshot subscriptions first to avoid nested locking *)
-  let sub_snap = Eio.Mutex.use_ro subscriptions_mutex (fun () -> !subscriptions) in
-  Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-    let orphans = SMap.fold (fun sub_id _ acc ->
-      if not (SMap.mem sub_id sub_snap) then sub_id :: acc else acc
-    ) !event_buffers [] in
-    List.iter (fun sub_id ->
-      event_buffers := SMap.remove sub_id !event_buffers
-    ) orphans;
-    List.length orphans)
+  let sub_snap = Atomic.get subscriptions in
+  let map = Atomic.get event_buffers in
+  let orphans = SMap.fold (fun sub_id _ acc ->
+    if not (SMap.mem sub_id sub_snap) then sub_id :: acc else acc
+  ) map [] in
+  if orphans <> [] then begin
+    atomic_update event_buffers (fun m ->
+      List.fold_left (fun acc sub_id -> SMap.remove sub_id acc) m orphans
+    )
+  end;
+  List.length orphans
 
 (** Max idle time before a subscription is expired (24 hours). *)
 let subscription_max_idle_sec = Masc_time_constants.day
@@ -818,23 +823,18 @@ let subscription_max_idle_sec = Masc_time_constants.day
     Also removes their event buffers. Returns count of expired subscriptions. *)
 let cleanup_stale_subscriptions () =
   let now = Time_compat.now () in
-  let stale_ids = Eio.Mutex.use_ro subscriptions_mutex (fun () ->
-    SMap.fold (fun sub_id sub acc ->
-      if now -. sub.last_polled_at > subscription_max_idle_sec then
-        sub_id :: acc
-      else acc
-    ) !subscriptions []) in
+  let stale_ids = SMap.fold (fun sub_id sub acc ->
+    if now -. sub.last_polled_at > subscription_max_idle_sec then
+      sub_id :: acc
+    else acc
+  ) (Atomic.get subscriptions) [] in
   if stale_ids <> [] then begin
-    Eio.Mutex.use_rw ~protect:true subscriptions_mutex (fun () ->
-      List.iter (fun sub_id ->
-        subscriptions := SMap.remove sub_id !subscriptions
-      ) stale_ids);
-    Eio.Mutex.use_rw ~protect:true event_buffers_mutex (fun () ->
-      List.iter (fun sub_id ->
-        event_buffers := SMap.remove sub_id !event_buffers
-      ) stale_ids);
+    atomic_update subscriptions (fun m ->
+      List.fold_left (fun acc sub_id -> SMap.remove sub_id acc) m stale_ids
+    );
+    atomic_update event_buffers (fun m ->
+      List.fold_left (fun acc sub_id -> SMap.remove sub_id acc) m stale_ids
+    );
     save_subscriptions ();
-    Log.Misc.info "[a2a] expired %d stale subscriptions (idle > %.0fs)"
-      (List.length stale_ids) subscription_max_idle_sec
   end;
   List.length stale_ids

@@ -17,7 +17,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-export type KbdSize = 'sm' | 'md'
+type KbdSize = 'sm' | 'md'
 
 const BASE = 'inline-flex items-center justify-center rounded border font-mono text-center'
 
@@ -34,7 +34,7 @@ export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
     : `${BASE} ${sized} ${extra}`
 }
 
-export interface KbdProps {
+interface KbdProps {
   /** Key label — e.g. "⌘K", "?", "1", "Ctrl+P". Supports multi-char
       strings because the primitive deliberately doesn't parse chords;
       callers that want auto-split key chords should compose several

@@ -66,7 +66,7 @@ export function Skeleton({
   ></div>`
 }
 
-export interface SkeletonTextProps {
+interface SkeletonTextProps {
   /** Number of stacked lines. Default 3 — enough for a paragraph preview. */
   lines?: number
   class?: string
@@ -111,7 +111,7 @@ export function SkeletonText({
   >${widths.map(w => html`<div class=${`${SKELETON_BASE} ${w} h-3`} aria-hidden="true"></div>`)}</div>`
 }
 
-export interface SkeletonCircleProps {
+interface SkeletonCircleProps {
   /** Tailwind size (e.g. "h-6 w-6"). Default h-8 w-8. */
   size?: string
   class?: string

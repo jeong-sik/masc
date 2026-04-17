@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 
-export type DistributionTone = 'accent' | 'ok' | 'warn' | 'bad' | 'muted'
+type DistributionTone = 'accent' | 'ok' | 'warn' | 'bad' | 'muted'
 
 export interface DistributionItem {
   label: string

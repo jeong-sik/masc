@@ -165,6 +165,26 @@ let absolute_allowed_paths_result ~(config : Coord.config)
   else
     Ok normalized
 
+(** Build a [path_not_in_allowed_paths] error message that teaches the LLM
+    *why* the path was rejected — not just *that* it was. Bare "X not allowed"
+    triggers retry loops; including the resolved candidate plus the
+    project-root anchor rule lets the keeper correct on the next call without
+    re-trying the same broken interpretation. See
+    [memory/feedback_tool-error-messages-teach-llm.md]. *)
+let format_path_rejection ~(raw : string) ~(resolved : string)
+    ~(allowed_norms : string list) : string =
+  let resolved_hint =
+    if Filename.is_relative raw && resolved <> raw then
+      Printf.sprintf
+        "; relative paths anchor at project root, not playground (resolved=%s)"
+        resolved
+    else
+      ""
+  in
+  Printf.sprintf
+    "path_not_in_allowed_paths: %s%s (allowed: [%s])"
+    raw resolved_hint (String.concat ", " allowed_norms)
+
 let resolve_keeper_target_path ~(config : Coord.config)
     ~(allowed_paths : string list) ~(raw_path : string)
     : (string, string) result =
@@ -202,9 +222,7 @@ let resolve_keeper_target_path ~(config : Coord.config)
       if matches_any then Ok candidate
       else
         Error
-          (Printf.sprintf
-             "path_not_in_allowed_paths: %s (allowed: [%s])"
-             raw (String.concat ", " allowed_norms))
+          (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
 
 (* Playground path SSOT lives in [Playground_paths] (masc_config). These
    names preserve the historical keeper-facing API. Do not re-implement
@@ -295,15 +313,11 @@ let resolve_keeper_read_path ~(config : Coord.config)
            | Ok (Some resolved) -> Ok resolved
            | Ok None ->
                Error
-                 (Printf.sprintf
-                    "path_not_in_allowed_paths: %s (allowed: [%s])"
-                    raw (String.concat ", " allowed_norms))
+                 (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
            | Error e -> Error e)
         else
           Error
-            (Printf.sprintf
-               "path_not_in_allowed_paths: %s (allowed: [%s])"
-               raw (String.concat ", " allowed_norms))
+            (format_path_rejection ~raw ~resolved:target_norm ~allowed_norms)
       else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate then
         Ok candidate
       else if Filename.is_relative raw then

@@ -11,6 +11,32 @@ let pr_number_of_args args =
   if from_pr <> 0 then from_pr
   else Safe_ops.json_int ~default:0 "number" args
 
+(** Detect "PR not found" in [gh] CLI output. Strings stable across [gh]
+    versions; covers both REST 404 and GraphQL "Could not resolve". When
+    matched, the keeper sees a structured error and a redirect hint instead
+    of having to parse a raw stderr blob, which avoids the "tool error
+    messages teach LLM" retry loop documented in
+    [memory/feedback_tool-error-messages-teach-llm.md]. *)
+let pr_not_found_in_output (s : string) : bool =
+  let needles = [
+    "HTTP 404: Not Found";
+    "no pull requests found";
+    "could not resolve to a pullrequest";
+    "could not resolve to a node";
+  ] in
+  let lower = String.lowercase_ascii s in
+  List.exists (fun n ->
+    let nl = String.lowercase_ascii n in
+    let len_s = String.length lower and len_n = String.length nl in
+    if len_n > len_s then false
+    else
+      let rec scan i =
+        if i + len_n > len_s then false
+        else if String.sub lower i len_n = nl then true
+        else scan (i + 1)
+      in
+      scan 0) needles
+
 let handle_keeper_pr_review_read
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -39,15 +65,26 @@ let handle_keeper_pr_review_read
       Process_eio.run_argv_with_status ~timeout_sec:15.0
         [ "/bin/zsh"; "-lc"; diff_cmd ] in
     let diff_truncated = String.length out_diff >= Common.max_tool_output_bytes in
-    Yojson.Safe.to_string
-      (`Assoc
-          [ "ok", `Bool (st_meta = Unix.WEXITED 0)
-          ; "pr_number", `Int pr_number
-          ; "metadata", `String out_meta
-          ; "diff", `String out_diff
-          ; "diff_truncated", `Bool diff_truncated
-          ; "diff_status", `Bool (st_diff = Unix.WEXITED 0)
-          ])
+    let meta_ok = (st_meta = Unix.WEXITED 0) in
+    if not meta_ok && (pr_not_found_in_output out_meta || pr_not_found_in_output out_diff) then
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool false
+            ; "error", `String "pr_not_found"
+            ; "pr_number", `Int pr_number
+            ; "repo", `String repo
+            ; "hint", `String "PR may have been closed/deleted or the number is wrong. Use keeper_pr_list (or `gh pr list`) to see open PRs before retrying."
+            ])
+    else
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool meta_ok
+            ; "pr_number", `Int pr_number
+            ; "metadata", `String out_meta
+            ; "diff", `String out_diff
+            ; "diff_truncated", `Bool diff_truncated
+            ; "diff_status", `Bool (st_diff = Unix.WEXITED 0)
+            ])
 ;;
 
 let handle_keeper_pr_review_comment

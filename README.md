@@ -1,18 +1,24 @@
 # masc-mcp
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
-[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.118.2-blue.svg)](https://github.com/jeong-sik/oas)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.153.0-blue.svg)](https://github.com/jeong-sik/oas)
 
-Multi-Agent Streaming Coordination server built on OCaml 5.x + Eio. Keeps multiple coding agents coordinated inside one repository through shared namespace, task ownership, broadcasts, worktrees, supervisor-visible proof, and OAS-backed keeper execution.
+> Personal project. No production SLA, no external support, no compatibility guarantees. The API surface, schema, and dashboard change on the author's schedule.
+>
+> 개인 프로젝트입니다. 프로덕션 SLA, 외부 지원, 호환성 보증 없음. 사용 시 자기 책임. 자동 코딩 에이전트가 자기 자신의 좌표/턴/리소스를 다른 에이전트와 공유해야 하는 단일-기기 워크플로우를 위해 만들어진 도구.
 
-Built for repo-local, single-machine, trusted-network workflows where several AI agents need shared coordination state instead of ad-hoc terminal coordination.
+Multi-agent coordination server on OCaml 5.x + Eio. Keeps several coding agents pointed at the same repository: shared namespace, task ownership, broadcasts, worktrees, a supervisor-visible audit surface, and OAS-backed keeper execution.
 
-Current product posture:
+Designed for repo-local, single-machine, trusted-network workflows where multiple AI agents need shared coordination state instead of ad-hoc terminal coordination. It is not designed for hostile networks, multi-tenant SaaS, or unattended production duty.
 
-- Production surface: repo coordination for coding workflows
-- Runtime surface: OAS-backed keeper execution and supervised delivery
-- Supporting surface: dashboard, remote-safe operator visibility, and keeper status
-- Historical or retired: command-plane/team-session compatibility lanes, research modules, and archived docs
+Current surface map (what is exercised vs. what is experimental):
+
+- Primary, exercised daily: repo coordination for coding workflows
+- Runtime: OAS-backed keeper execution and operator-supervised delivery
+- Supporting: dashboard, remote-safe operator visibility, keeper status
+- Historical or retired: command-plane/team-session compatibility lanes, research modules, archived docs
+
+"Primary" means it is what the author actually uses; it does not imply external production support.
 
 Use `masc-mcp` when you need to reduce:
 
@@ -64,12 +70,12 @@ All protocols run concurrently from a single Eio fiber pool:
 | SSE | `:8935` | Unlimited streams per h2 connection |
 | gRPC | `:8936` | Keeper queries and subscriptions |
 | WebSocket | `:8937` | Standalone + discovery via `/ws` |
-| WebRTC | `:8935/webrtc` | Signaling at `/offer` and `/answer` |
+| WebRTC | `:8935` | Signaling endpoints `POST /webrtc/offer` and `POST /webrtc/answer` (gated by `Server_webrtc_transport.is_enabled`) |
 
 ### Tech Stack
 
 - **OCaml 5.4+** with Eio structured concurrency (no Lwt)
-- **agent_sdk** >= 0.118.2 (OAS agent runtime)
+- **agent_sdk** >= 0.153.0 (OAS agent runtime; pinned floor in `masc_mcp.opam` and `dune-project`)
 - **mcp_protocol** >= 1.3.0 (MCP JSON-RPC contract)
 - **h2-eio** (HTTP/2), **grpc-direct** (gRPC), **ocaml-webrtc** (WebRTC)
 - **caqti** + PostgreSQL (optional), **sqlite3** (fallback), **neo4j_bolt** (optional graph)
@@ -179,12 +185,24 @@ Keepers are long-running autonomous agents that maintain repo continuity. They r
 
 ### Lifecycle
 
-Keepers follow an 11-state deterministic state machine:
+Keepers follow a 12-state deterministic state machine. The full state list is the source of truth in `lib/keeper/keeper_state_machine.mli` (`type state`):
 
 ```
-Offline → Running → [Failing|Compacting|HandingOff|Draining]
-       → Paused/Stopped/Crashed → Restarting → Dead
+Offline       Registered, no heartbeat fiber yet
+Running       Healthy heartbeat loop
+Failing       Consecutive failures, probing recovery
+Overflowed    Provider context exceeded, auto-compact triggered
+Compacting    Context compaction in progress
+HandingOff    Generation rollover in progress
+Draining      Graceful shutdown, finishing the current turn
+Paused        Operator-paused or compact-retry exhausted
+Stopped       Clean exit (terminal)
+Crashed       Unrecoverable error, restart candidate
+Restarting    Supervisor backoff before re-launch
+Dead          Restart budget exhausted (terminal)
 ```
+
+Schematically: `Offline → Running → {Failing | Overflowed | Compacting | HandingOff | Draining} → Paused / Stopped / Crashed → Restarting → Dead`. If the README ever drifts from `keeper_state_machine.mli`, trust the `.mli`.
 
 ### Autoboot
 

@@ -61,14 +61,14 @@ let json ~agent_name () : Yojson.Safe.t =
   let interests = match agent_data with
     | Some agent ->
       let open Yojson.Safe.Util in
-      (try agent |> member "interests" |> to_list
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [])
+      Safe_ops.protect ~default:[] (fun () ->
+        agent |> member "interests" |> to_list)
     | None -> []
   in
   let relations = match agent_data with
     | Some agent ->
       let open Yojson.Safe.Util in
-      (try
+      Safe_ops.protect ~default:[] (fun () ->
         agent |> member "relations" |> member "edges" |> to_list
         |> List.map (fun edge ->
           let node = edge |> member "node" in
@@ -88,8 +88,7 @@ let json ~agent_name () : Yojson.Safe.t =
             ("confidence", member "confidence" node);
             ("note", member "note" node);
             ("participants", `List participants);
-          ])
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [])
+          ]))
     | None -> []
   in
   `Assoc [

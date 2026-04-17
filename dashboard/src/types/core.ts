@@ -733,7 +733,7 @@ export interface KeeperSupervisorDiagnostics {
 
 // --- Keeper Config (structured read-only view) ---
 
-export interface KeeperConfigPrompt {
+interface KeeperConfigPrompt {
   goal: string
   short_goal: string
   mid_goal: string
@@ -762,13 +762,13 @@ export interface KeeperConfigPrompt {
   effective_system_prompt: string
 }
 
-export interface KeeperConfigExecution {
+interface KeeperConfigExecution {
   models: string[]
   active_model: string
   verify: boolean
 }
 
-export interface KeeperConfigCompaction {
+interface KeeperConfigCompaction {
   profile: string
   ratio_gate: number
   message_gate: number
@@ -776,7 +776,7 @@ export interface KeeperConfigCompaction {
   cooldown_sec: number
 }
 
-export interface KeeperConfigProactive {
+interface KeeperConfigProactive {
   enabled: boolean
   idle_sec: number
   cooldown_sec: number
@@ -784,7 +784,7 @@ export interface KeeperConfigProactive {
 
 export type KeeperFeatureStatus = 'wired' | 'source_only' | 'unwired'
 
-export interface KeeperConfigDrift {
+interface KeeperConfigDrift {
   status: KeeperFeatureStatus
   enabled: boolean | null
   min_turn_gap: number | null
@@ -792,18 +792,18 @@ export interface KeeperConfigDrift {
   last_reason: string | null
 }
 
-export interface KeeperConfigHandoff {
+interface KeeperConfigHandoff {
   auto: boolean
   threshold: number
   cooldown_sec: number
 }
 
-export interface KeeperConfigAutoTeamSession {
+interface KeeperConfigAutoTeamSession {
   status: KeeperFeatureStatus
   enabled: boolean | null
 }
 
-export interface KeeperConfigRuntime {
+interface KeeperConfigRuntime {
   paused: boolean
   registered: boolean
   keepalive_running: boolean
@@ -824,7 +824,7 @@ export interface KeeperConfigRuntime {
   runtime_blocker_continue_gate?: boolean | null
 }
 
-export interface KeeperConfigCoordination {
+interface KeeperConfigCoordination {
   room_scope: string
   mention_targets: string[]
   joined_room_ids: string[]
@@ -843,7 +843,7 @@ export interface KeeperConfigTools {
   total_active: number
 }
 
-export interface KeeperConfigSources {
+interface KeeperConfigSources {
   live_meta_path: string
   default_manifest_path: string | null
   default_source_kind: 'toml' | 'persona' | null
@@ -852,7 +852,7 @@ export interface KeeperConfigSources {
   override_fields: string[]
 }
 
-export interface KeeperConfigMetrics {
+interface KeeperConfigMetrics {
   generation: number
   total_turns: number
   total_input_tokens: number

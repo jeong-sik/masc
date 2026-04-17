@@ -15,25 +15,16 @@ import {
   type GateEventInfo,
   type GateStatusData,
 } from './schemas/gate-status'
+import {
+  parseGateKeepersData,
+  type GateKeeperInfo,
+  type GateKeepersData,
+} from './schemas/gate-keepers'
 
 export type { BindingInfo, ChannelInfo, GateEventInfo, GateStatusData }
 export { GateStatusSchemaDriftError } from './schemas/gate-status'
-
-export interface GateKeeperInfo {
-  name: string
-  agent_name?: string
-  status?: string
-  model?: string
-  active_model?: string
-  primary_model?: string
-  keepalive_running?: boolean
-  last_turn_ago_s?: number | null
-}
-
-export interface GateKeepersData {
-  count: number
-  keepers: GateKeeperInfo[]
-}
+export type { GateKeeperInfo, GateKeepersData }
+export { GateKeepersSchemaDriftError } from './schemas/gate-keepers'
 
 export interface DiscordConfiguredBinding {
   channel_id: string
@@ -154,29 +145,13 @@ function decodeChannelInfo(raw: unknown): ChannelInfo | null {
   return result.success ? result.output : null
 }
 
-function decodeGateKeeperInfo(raw: unknown): GateKeeperInfo | null {
-  if (!isRecord(raw)) return null
-  const name = asString(raw.name)
-  if (!name) return null
-  return {
-    name,
-    agent_name: asString(raw.agent_name),
-    status: asString(raw.status),
-    model: asString(raw.model),
-    active_model: asString(raw.active_model),
-    primary_model: asString(raw.primary_model),
-    keepalive_running: asBoolean(raw.keepalive_running),
-    last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
-  }
-}
-
+// Thin null-returning wrapper — `src/api/gate.test.ts` still asserts
+// null-on-drift. New call sites should use `parseGateKeepersData`.
 export function decodeGateKeepersData(raw: unknown): GateKeepersData | null {
-  if (!isRecord(raw)) return null
-  return {
-    count: asNumber(raw.count, 0),
-    keepers: asRecordArray(raw.keepers)
-      .map(decodeGateKeeperInfo)
-      .filter((item): item is GateKeeperInfo => item !== null),
+  try {
+    return parseGateKeepersData(raw)
+  } catch {
+    return null
   }
 }
 
@@ -355,9 +330,7 @@ export async function fetchGateConnectors(signal?: AbortSignal): Promise<GateCon
 }
 
 export async function fetchGateKeepers(signal?: AbortSignal): Promise<GateKeepersData> {
-  const raw = await get<Record<string, unknown>>('/api/v1/gate/keepers?limit=50&detailed=true', { signal })
-  const decoded = decodeGateKeepersData(raw)
-  if (!decoded) throw new Error('invalid gate keepers payload')
-  return decoded
+  const raw = await get<unknown>('/api/v1/gate/keepers?limit=50&detailed=true', { signal })
+  return parseGateKeepersData(raw)
 }
 

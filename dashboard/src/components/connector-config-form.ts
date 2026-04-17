@@ -103,6 +103,42 @@ function isSensitive(name: string): boolean {
   return /token|secret|password|api[_-]?key/i.test(name)
 }
 
+// Where-to-find hints for credentials. Pydantic `description` fields cover
+// "what this is"; FIELD_HINTS covers "where do I click to obtain it" — the
+// question operators actually ask. Keys match the BotConfig field name
+// verbatim. Absent keys render nothing (no fabrication for unknown fields).
+interface FieldHint {
+  where: string
+  url?: string
+}
+
+const FIELD_HINTS: Record<string, FieldHint> = {
+  DISCORD_BOT_TOKEN: {
+    where: 'Discord Developer Portal → Applications → <your app> → Bot → Reset Token',
+    url: 'https://discord.com/developers/applications',
+  },
+  SLACK_BOT_TOKEN: {
+    where: 'Slack App → OAuth & Permissions → Bot User OAuth Token (xoxb-…)',
+    url: 'https://api.slack.com/apps',
+  },
+  SLACK_APP_TOKEN: {
+    where: 'Slack App → Basic Information → App-Level Tokens → Generate (xapp-…)',
+    url: 'https://api.slack.com/apps',
+  },
+  SLACK_SIGNING_SECRET: {
+    where: 'Slack App → Basic Information → App Credentials → Signing Secret',
+    url: 'https://api.slack.com/apps',
+  },
+  TELEGRAM_BOT_TOKEN: {
+    where: '@BotFather → /newbot (또는 기존 봇이면 /token)',
+    url: 'https://t.me/BotFather',
+  },
+}
+
+function getFieldHint(name: string): FieldHint | null {
+  return FIELD_HINTS[name] ?? null
+}
+
 function defaultToString(value: unknown): string {
   if (value === undefined || value === null) return ''
   if (typeof value === 'boolean') return value ? 'true' : 'false'
@@ -446,6 +482,26 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
             ${field.description
               ? html`<div class="text-[10px] text-[var(--text-dim)]">${field.description}</div>`
               : null}
+            ${(() => {
+              const hint = getFieldHint(field.name)
+              if (hint === null) return null
+              return html`
+                <div class="rounded border border-sky-400/20 bg-sky-500/5 px-2 py-1 text-[10px] text-sky-200" data-field-hint=${field.name}>
+                  <span class="mr-1" aria-hidden="true">📍</span>
+                  <span>${hint.where}</span>
+                  ${hint.url
+                    ? html`
+                        <a
+                          href=${hint.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="ml-1 underline hover:text-sky-100"
+                        >열기 ↗</a>
+                      `
+                    : null}
+                </div>
+              `
+            })()}
           </div>
         `)}
       </div>
@@ -488,4 +544,8 @@ export function _testBuildEnvBlock(fields: FieldShape[], values: Record<string, 
 
 export function _testIsSensitive(name: string): boolean {
   return isSensitive(name)
+}
+
+export function _testGetFieldHint(name: string): FieldHint | null {
+  return getFieldHint(name)
 }

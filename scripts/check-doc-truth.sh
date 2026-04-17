@@ -116,7 +116,7 @@ require_contains docs/spec/01-system-overview.md 'Historical compatibility lane(
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
-require_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` | 56 | Retired compatibility lane removed-surface responder |'
+require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
 require_not_contains docs/spec/09-server-transport.md '| Room | `/api/v1/room/*`'
 require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'

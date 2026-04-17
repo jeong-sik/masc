@@ -863,7 +863,6 @@ sequenceDiagram
 | `server_auth.ml` | 491 | HTTP 레벨 인증/권한 |
 | `server_routes_http.ml` | 17 | 라우트 조립 진입점 |
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
-| `server_command_plane_http.ml` | 56 | Retired compatibility lane removed-surface responder |
 | `server_utils.ml` | 120 | 공용 유틸리티 |
 
 ### 18.3 gRPC (lib/grpc/)

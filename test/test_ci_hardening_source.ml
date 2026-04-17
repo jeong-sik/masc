@@ -127,9 +127,9 @@ let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects system overview front door wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
        "### 7.3 Dashboard and Operator Read Visibility");
-  check bool "doc truth script protects transport removed-surface wording" true
+  check bool "doc truth script forbids dead server_command_plane_http row" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
-       "Retired compatibility lane removed-surface responder");
+       "require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'");
   check bool "doc truth script forbids old dashboard command-plane type wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
        "command-plane.ts         -- Command plane types")

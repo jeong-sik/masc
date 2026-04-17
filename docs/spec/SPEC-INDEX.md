@@ -60,7 +60,6 @@ graph TB
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
 | `03-room-coordination.md` | Room Coordination | Room 생명주기, session 관리, agent join/leave | Draft |
-| `04-chain-engine.md` | Chain Engine | Multi-step chain DSL, execution, snapshot | Historical |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |

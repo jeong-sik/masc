@@ -1,14 +1,20 @@
-# Chain Engine
+# Chain Engine — ARCHIVED
+
+> **이 spec은 chain subsystem이 존재하던 시절의 historical reference입니다.**
+>
+> `lib/chain/` 디렉토리와 `tool_command_plane_chain_*.ml` 모듈은 purge되었습니다. `masc_chain_snapshot` / `masc_chain_run_get` MCP tool도 등록되지 않습니다. 본 문서의 module / LOC / tool 숫자는 purge 이전 기준이며, 현재 runtime truth를 반영하지 않습니다.
+>
+> 이 spec은 migration 과정과 chain DSL 개념의 역사 기록으로만 남겨둡니다. 새 코드가 이 내용을 참조하지 않도록 주의하십시오.
 
 | 항목 | 값 |
 |------|-----|
-| Status | Draft |
-| Team | Chain |
-| Maps to | `lib/chain/` |
+| Status | Archived |
+| Team | Chain (dissolved) |
+| Maps to | `lib/chain/` (removed) |
 | Dependencies | 02-types-and-invariants |
-| Modules | 47 (36 `.ml` + 11 `.mli`) |
-| LOC | ~17,150 |
-| MCP Tools | `masc_chain_snapshot`, `masc_chain_run_get` |
+| Modules | 47 (36 `.ml` + 11 `.mli`) — historical |
+| LOC | ~17,150 — historical |
+| MCP Tools | `masc_chain_snapshot`, `masc_chain_run_get` — not registered |
 
 ---
 

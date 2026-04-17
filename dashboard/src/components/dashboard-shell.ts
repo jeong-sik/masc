@@ -19,6 +19,7 @@ import {
 import { RouteLink } from './common/route-link'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
 
@@ -499,5 +500,6 @@ export function DashboardMain() {
         <${TabContent} />
       </div>
     <//>
+    <${ScrollToTopButton} />
   `
 }

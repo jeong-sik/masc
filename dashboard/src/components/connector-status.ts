@@ -35,6 +35,7 @@ import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidec
 import { QuickBindForm } from './connector-quick-bind'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeyboardShortcuts } from './connector-keyboard-shortcuts'
+import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 
@@ -1201,6 +1202,9 @@ export function ConnectorStatusPanel() {
 
       ${!filterId
         ? html`<${ConnectorOverviewStrip} connectors=${visibleConnectors} keeperCount=${snapshot.keepers.length} />`
+        : null}
+      ${!filterId
+        ? html`<${ConnectorKeeperMatrix} matrix=${deriveMatrix(visibleConnectors, snapshot.keepers)} />`
         : null}
       ${!filterId ? html`<${ConnectorKeyboardShortcuts} />` : null}
 

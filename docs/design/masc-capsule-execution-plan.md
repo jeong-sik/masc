@@ -9,8 +9,16 @@ code_refs:
 
 # MASC Capsule Execution Plan
 
-Updated: 2026-04-02
+Updated: 2026-04-17
 Scope: `masc-mcp` only
+
+> **Note (2026-04-17)**: The Immediate Slices catalog below (Slices A–C) targeted the
+> `team_session` subsystem, which has since been retired — see
+> `docs/spec/00-glossary.md` "Team Session (retired)" and
+> `docs/OAS-MASC-BOUNDARY.md` "Team-session swarm | Removed". The Product Thesis,
+> Boundary Rules, Execution Order, Social Runtime Invariants, and Review Gate
+> sections remain the current design stance. Slices A–C are preserved as
+> migration context only and no longer reflect active implementation targets.
 
 This document is the execution companion for work that stays inside the
 `masc-mcp` capsule.
@@ -121,9 +129,18 @@ Treat these as tested product contracts, not conventions:
 - no delegate-to-broken-worker path
 - no proof/report state that contradicts runtime history
 
-## Immediate Slices
+## Immediate Slices (Historical — team_session retired)
 
-### Slice A. Delegate-Readiness Contract
+The three slices below describe the delegate-readiness / worker-proof /
+runtime-visibility workstreams that were planned against the now-retired
+`team_session` subsystem. The named `lib/team_session/*` and
+`lib/tool_team_session_*` modules no longer exist in the repository. The
+slices are kept so follow-on work on the current coordination surface
+(`board_posts` + keeper FSM + canonical dashboard projections) can reuse
+the framing: "delegate readiness → proof read model → runtime/model
+visibility".
+
+### Slice A. Delegate-Readiness Contract (historical)
 
 Goal:
 
@@ -131,7 +148,7 @@ Goal:
 - delegate failures explain the blocked reason and guidance
 - denial leaves an event trail
 
-Primary modules:
+Primary modules (historical — all removed with the `team_session` purge):
 
 - `lib/team_session/team_session_engine_status.ml`
 - `lib/tool_team_session_step.ml`
@@ -139,36 +156,36 @@ Primary modules:
 - `test/test_tool_team_session_step_routing.ml`
 - `test/test_tool_team_session_misc.ml`
 
-Done when:
+Done when (historical target, not currently pursued):
 
 - checkpoint-only workers are not misreported as delegate-ready
 - in-flight workers are visibly blocked
 - delegate denial says why, not just “not ready”
 
-### Slice B. Worker-Proof Read Model
+### Slice B. Worker-Proof Read Model (historical)
 
 Goal:
 
 - status, proof, and dashboard all surface the same worker-run evidence summary
 
-Primary modules:
+Primary modules (historical — all removed with the `team_session` purge):
 
 - `lib/team_session/team_session_report_proof.ml`
 - `lib/dashboard/dashboard_proof.ml`
 - `lib/team_session/team_session_store.ml`
 
-Done when:
+Done when (historical target, not currently pursued):
 
 - worker proof metadata can be traced from session status to proof views
 - missing evidence is distinguishable from unavailable evidence
 
-### Slice C. Runtime / Model Visibility
+### Slice C. Runtime / Model Visibility (historical)
 
 Goal:
 
 - operator can answer “which worker ran where, with what model, under what tool surface?”
 
-Primary modules:
+Primary modules (historical — all removed with the `team_session` purge):
 
 - `lib/team_session/team_session_oas_bridge.ml`
 - `lib/team_session/team_session_engine_status.ml`

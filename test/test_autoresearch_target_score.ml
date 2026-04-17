@@ -69,7 +69,7 @@ let clear_autoresearch_state () =
       Hashtbl.reset Lib.Autoresearch.active_loops;
       Lib.Autoresearch.latest_loop_id := None);
   Hashtbl.reset Lib.Tool_autoresearch_registry.pending_hypotheses;
-  Hashtbl.reset Lib.Tool_autoresearch_registry.custom_generators
+  Lib.Tool_autoresearch_registry.reset_custom_generators ()
 
 let with_clean_state f =
   clear_autoresearch_state ();

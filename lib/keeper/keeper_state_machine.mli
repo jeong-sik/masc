@@ -295,3 +295,30 @@ val phase_to_mermaid_id : phase -> string
     distinguishes the current phase visually (green for active,
     amber for buffer, gray for terminal). *)
 val phase_to_mermaid : current:phase -> string
+
+(** {1 Attribution envelope (Layer 1)}
+
+    Convert a transition attempt (event + current state) into the typed
+    attribution envelope used by SSE emitters.
+
+    All keeper FSM transitions are [Det]: the comment above the [event]
+    type declares the invariant that non-deterministic measurements must
+    be translated into typed events at the boundary before reaching the
+    state machine. *)
+
+val attribution_of_transition :
+  event:event ->
+  (transition_result, transition_error) result ->
+  Attribution.t
+(** Mapping:
+    - [Ok result]                       → [Attribution.Passed]
+                                          evidence: [{event, from_phase,
+                                          to_phase, timestamp}]
+    - [Error (Invalid_transition ..)]   → [Attribution.Transition_blocked]
+                                          carrying [from_state], [to_state],
+                                          [reason] directly. Evidence adds
+                                          [event].
+    - [Error (Terminal_state ..)]       → [Attribution.Policy_failed]
+                                          reason is formatted from the
+                                          [current] phase and attempted
+                                          event. Evidence adds the phase. *)

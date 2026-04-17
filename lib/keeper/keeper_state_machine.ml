@@ -762,3 +762,45 @@ let phase_to_mermaid ~(current : phase) : string =
    | _ ->
      p "    class %s active\n" (phase_to_mermaid_id current));
   Buffer.contents b
+
+(* --- Attribution envelope conversion (Layer 1) ---
+   Keeper FSM is Det by design: non-deterministic measurements are
+   already translated into typed events at the boundary before this
+   module sees them. See the [event] type docstring. *)
+
+let attribution_of_transition ~event
+    (result : (transition_result, transition_error) result) : Attribution.t =
+  let event_name = event_to_string event in
+  match result with
+  | Ok tr ->
+    let evidence : Yojson.Safe.t =
+      `Assoc [
+        ("event", `String event_name);
+        ("from_phase", `String (phase_to_string tr.prev_phase));
+        ("to_phase", `String (phase_to_string tr.new_phase));
+        ("timestamp", `Float tr.timestamp);
+      ]
+    in
+    Attribution.passed ~origin:Det ~gate:"keeper_fsm" ~evidence
+  | Error (Invalid_transition { from_phase; to_phase; reason }) ->
+    let evidence : Yojson.Safe.t =
+      `Assoc [ ("event", `String event_name) ]
+    in
+    Attribution.transition_blocked ~origin:Det ~gate:"keeper_fsm" ~evidence
+      ~from_state:(phase_to_string from_phase)
+      ~to_state:(phase_to_string to_phase)
+      ~reason
+  | Error (Terminal_state { current; attempted_event }) ->
+    let evidence : Yojson.Safe.t =
+      `Assoc [
+        ("event", `String event_name);
+        ("current_phase", `String (phase_to_string current));
+        ("attempted_event", `String attempted_event);
+      ]
+    in
+    let reason =
+      Printf.sprintf
+        "keeper in terminal phase %s, event %s ignored"
+        (phase_to_string current) attempted_event
+    in
+    Attribution.policy_failed ~origin:Det ~gate:"keeper_fsm" ~evidence ~reason

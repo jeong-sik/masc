@@ -290,6 +290,7 @@
    workflow_guide
    tool_control
    tool_misc
+   tool_team_memory
    tool_agent_timeline
    tool_local_runtime
    tool_local_runtime_core

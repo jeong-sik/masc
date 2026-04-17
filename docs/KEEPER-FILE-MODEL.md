@@ -140,6 +140,9 @@ persona_name = "analyst"
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `execution_scope` | Optional | Deployment-specific execution scope | Only when different from the default. |
+| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `docker_hardened` is the new hardened path; `legacy_local` preserves current behavior. |
+| `network_mode` | Optional | Sandbox network policy | `docker_hardened` defaults to `none`; `legacy_local` defaults to `inherit`. |
+| `shared_memory_scope` | Optional | Typed shared-memory lane | `room` enables `masc_team_memory_*` room-scoped exchange. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
 
@@ -156,7 +159,7 @@ These are still accepted by the loader, but for consistency they should be used 
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
 | `room_signal_prompt_enabled` | bool | Override room-signal prompt behavior |
-| `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on playground default |
+| `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on playground default. `docker_hardened` rejects `["*"]` and paths outside `.masc/playground/<keeper>/...`. |
 | `tool_also_allow` | string array | Extra tool names added to the preset surface |
 | `also_allow` | string array | Backward-compat alias for `tool_also_allow` (will warn as "unknown key" after deprecation) |
 | `tool_denylist` | string array | Tool names blocked regardless of preset |
@@ -176,9 +179,31 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | Field | Allowed values |
 | --- | --- |
 | `execution_scope` | `observe_only`, `workspace`, `local` |
+| `sandbox_profile` | `legacy_local`, `docker_hardened` |
+| `network_mode` | `none`, `inherit` |
+| `shared_memory_scope` | `disabled`, `room` |
 | `tool_preset` | `minimal`, `social`, `messaging`, `coding`, `research`, `delivery`, `full` |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
 | `cascade_name` | any `<name>` such that `<name>_models` exists in `cascade.json` (e.g. `keeper_unified`, `nick0cave`) |
+
+### Sandbox Core V1 quick example
+
+```toml
+[keeper]
+persona_name = "analyst"
+execution_scope = "workspace"
+sandbox_profile = "docker_hardened"
+network_mode = "none"
+shared_memory_scope = "room"
+allowed_paths = [".masc/playground/analyst/repos/demo"]
+```
+
+Operational intent:
+
+- private writable lane: `.masc/playground/<keeper>/...`
+- shared lane: `masc_team_memory_read/write/search` only
+- no arbitrary shared writable shell directory
+- `legacy_local` remains backward-compatible for old keepers
 
 ### Removed / forbidden fields (hard-rejected)
 

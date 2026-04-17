@@ -45,6 +45,28 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
+  let sandbox_profile =
+    resolve_sandbox_profile
+      ~preferred:p.sandbox_profile_opt
+      ~fallback:
+        (first_some p.profile_defaults.sandbox_profile
+           (Some old.sandbox_profile))
+  in
+  let network_mode =
+    resolve_network_mode
+      ~sandbox_profile
+      ~preferred:p.network_mode_opt
+      ~fallback:
+        (first_some p.profile_defaults.network_mode
+           (Some old.network_mode))
+  in
+  let shared_memory_scope =
+    resolve_shared_memory_scope
+      ~preferred:p.shared_memory_scope_opt
+      ~fallback:
+        (first_some p.profile_defaults.shared_memory_scope
+           (Some old.shared_memory_scope))
+  in
   let autoboot_enabled =
     Option.value ~default:old.autoboot_enabled p.autoboot_enabled_opt
   in
@@ -154,6 +176,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     allowed_paths;
     execution_scope =
       Option.value ~default:old.execution_scope p.execution_scope_opt;
+    sandbox_profile;
+    network_mode;
+    shared_memory_scope;
     tool_access;
     tool_denylist;
     autoboot_enabled;
@@ -197,9 +222,22 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     max_context_override = (match p.max_context_override_opt with Some _ as v -> v | None -> old.max_context_override);
     updated_at = now_iso ();
   } in
-  (match write_meta ctx.config updated with
-   | Error e -> (false, e)
-   | Ok () ->
-     stop_keepalive ~base_path:ctx.config.base_path updated.name;
-     start_keepalive ctx updated;
-     (true, Yojson.Safe.to_string (meta_to_json updated)))
+  match
+    validate_sandbox_settings
+      ~config:ctx.config
+      ~keeper_name:p.name
+      ~sandbox_profile
+      ~network_mode
+      ~allowed_paths
+  with
+  | Error err ->
+      Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
+        p.name err;
+      (false, err)
+  | Ok () ->
+      (match write_meta ctx.config updated with
+       | Error e -> (false, e)
+       | Ok () ->
+           stop_keepalive ~base_path:ctx.config.base_path updated.name;
+           start_keepalive ctx updated;
+           (true, Yojson.Safe.to_string (meta_to_json updated)))

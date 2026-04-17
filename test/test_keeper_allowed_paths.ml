@@ -7,6 +7,7 @@ open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
 module KES = Masc_mcp.Keeper_exec_shared
 module KT = Masc_mcp.Keeper_types
+module KTU = Masc_mcp.Keeper_turn_up_args
 
 let make_meta ?(execution_scope = "observe_only") ?(allowed_paths = [])
     ~name () =
@@ -268,6 +269,77 @@ let test_bare_filename_still_works () =
     | Error err -> fail ("bare filename should still work: " ^ err)
     | Ok path -> check string "bare filename" target path)
 
+let test_docker_hardened_rejects_star_allowed_paths () =
+  with_temp_config (fun config ->
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Docker_hardened
+        ~network_mode:KT.Network_none
+        ~allowed_paths:["*"]
+    with
+    | Ok () -> fail "expected docker_hardened wildcard rejection"
+    | Error err ->
+        check bool "mentions wildcard" true
+          (String_util.contains_substring err "allowed_paths=[\"*\"]"))
+
+let test_docker_hardened_rejects_paths_outside_private_root () =
+  with_temp_config (fun config ->
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Docker_hardened
+        ~network_mode:KT.Network_none
+        ~allowed_paths:["workspace/other-repo"]
+    with
+    | Ok () -> fail "expected docker_hardened path rejection"
+    | Error err ->
+        check bool "mentions private playground" true
+          (String_util.contains_substring err ".masc/playground/sangsu"))
+
+let test_docker_hardened_accepts_private_root_paths () =
+  with_temp_config (fun config ->
+    let private_root = KTU.private_workspace_root_rel "sangsu" in
+    ignore (KAP.ensure_playground_bundle ~config ~name:"sangsu");
+    let target_dir =
+      Filename.concat (KAP.project_root_of_config config)
+        (private_root ^ "/repos/demo")
+    in
+    let rec ensure_dir path =
+      if path <> "" && path <> "." && path <> "/" && not (Sys.file_exists path) then (
+        let parent = Filename.dirname path in
+        if parent <> path then ensure_dir parent;
+        Unix.mkdir path 0o755)
+    in
+    ensure_dir target_dir;
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Docker_hardened
+        ~network_mode:KT.Network_none
+        ~allowed_paths:[private_root ^ "/repos/demo"]
+    with
+    | Error err -> fail ("expected private-root allow path, got: " ^ err)
+    | Ok () -> ())
+
+let test_legacy_local_rejects_network_none () =
+  with_temp_config (fun config ->
+    match
+      KTU.validate_sandbox_settings
+        ~config
+        ~keeper_name:"sangsu"
+        ~sandbox_profile:KT.Legacy_local
+        ~network_mode:KT.Network_none
+        ~allowed_paths:[]
+    with
+    | Ok () -> fail "expected legacy_local network rejection"
+    | Error err ->
+        check bool "mentions docker_hardened" true
+          (String_util.contains_substring err "docker_hardened"))
+
 (* ── Runner ── *)
 
 let () =
@@ -321,5 +393,16 @@ let () =
             test_playground_prefix_stripped_relative;
           test_case "bare filename still works after guard" `Quick
             test_bare_filename_still_works;
+        ] );
+      ( "sandbox_validation",
+        [
+          test_case "docker_hardened rejects wildcard allowlist" `Quick
+            test_docker_hardened_rejects_star_allowed_paths;
+          test_case "docker_hardened rejects paths outside private root" `Quick
+            test_docker_hardened_rejects_paths_outside_private_root;
+          test_case "docker_hardened accepts private-root allowlist" `Quick
+            test_docker_hardened_accepts_private_root_paths;
+          test_case "legacy_local rejects network none" `Quick
+            test_legacy_local_rejects_network_none;
         ] );
     ]

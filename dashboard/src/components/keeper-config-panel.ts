@@ -98,9 +98,15 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 
 // Runtime config draft for proactive/compaction/handoff inline editing
 type ExecutionScope = 'observe_only' | 'workspace' | 'local'
+type SandboxProfile = 'legacy_local' | 'docker_hardened'
+type NetworkMode = 'none' | 'inherit'
+type SharedMemoryScope = 'disabled' | 'room'
 
 type RuntimeDraft = {
   execution_scope: ExecutionScope
+  sandbox_profile: SandboxProfile
+  network_mode: NetworkMode
+  shared_memory_scope: SharedMemoryScope
   allowed_paths_text: string
   proactive_enabled: boolean
   proactive_idle_sec: number
@@ -120,6 +126,9 @@ const runtimeSaving = signal(false)
 function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     execution_scope: (c.execution_scope as ExecutionScope) ?? 'workspace',
+    sandbox_profile: (c.sandbox_profile as SandboxProfile) ?? 'legacy_local',
+    network_mode: (c.network_mode as NetworkMode) ?? 'inherit',
+    shared_memory_scope: (c.shared_memory_scope as SharedMemoryScope) ?? 'disabled',
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
@@ -137,6 +146,9 @@ function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   if (draft.execution_scope !== (orig.execution_scope ?? 'workspace')) payload.execution_scope = draft.execution_scope
+  if (draft.sandbox_profile !== (orig.sandbox_profile ?? 'legacy_local')) payload.sandbox_profile = draft.sandbox_profile
+  if (draft.network_mode !== (orig.network_mode ?? 'inherit')) payload.network_mode = draft.network_mode
+  if (draft.shared_memory_scope !== (orig.shared_memory_scope ?? 'disabled')) payload.shared_memory_scope = draft.shared_memory_scope
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
   const origPaths = orig.allowed_paths ?? []
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
@@ -608,18 +620,52 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             <option value="local">local</option>
           </select>
         </div>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-body)]">sandbox_profile</span>
+          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
+            value=${rd.sandbox_profile}
+            onChange=${(e: Event) => updateRuntimeDraft('sandbox_profile', (e.target as HTMLSelectElement).value as SandboxProfile)}>
+            <option value="legacy_local">legacy_local</option>
+            <option value="docker_hardened">docker_hardened</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-body)]">network_mode</span>
+          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
+            value=${rd.network_mode}
+            onChange=${(e: Event) => updateRuntimeDraft('network_mode', (e.target as HTMLSelectElement).value as NetworkMode)}>
+            <option value="inherit">inherit</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-body)]">shared_memory_scope</span>
+          <select class="text-xs bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1 text-[var(--text-body)]"
+            value=${rd.shared_memory_scope}
+            onChange=${(e: Event) => updateRuntimeDraft('shared_memory_scope', (e.target as HTMLSelectElement).value as SharedMemoryScope)}>
+            <option value="disabled">disabled</option>
+            <option value="room">room</option>
+          </select>
+        </div>
         <div class="py-2 px-3 rounded-lg bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
-            <span class="text-[10px] text-[var(--text-muted)]">한 줄에 하나씩. * = 전체 허용</span>
+            <span class="text-[10px] text-[var(--text-muted)]">한 줄에 하나씩. docker_hardened는 private root 밖을 거부</span>
           </div>
           <textarea class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
             rows=${3}
             value=${rd.allowed_paths_text}
-            placeholder=".masc/keepers/<name>/"
+            placeholder=".masc/playground/<name>/repos/demo"
             onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
           ></textarea>
         </div>
+        <${Callout}
+          title="Sandbox Core V1"
+          body=${rd.sandbox_profile === 'docker_hardened'
+            ? 'docker_hardened는 keeper playground만 rw mount하고, 기본 network=none, read-only rootfs로 keeper_bash를 격리합니다. shared_memory_scope=room이면 typed team memory 도구만 공유 lane을 엽니다.'
+            : 'legacy_local는 현재 로컬 실행 모델을 유지합니다. network_mode=none은 docker_hardened에서만 유효합니다.'}
+          tone=${rd.sandbox_profile === 'docker_hardened' ? 'warn' : 'neutral'}
+        />
         ${(c.effective_allowed_paths ?? []).length > 0 ? html`
           <div class="py-1.5 px-3 text-[10px] text-[var(--text-muted)]">
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
@@ -627,8 +673,19 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ` : null}
       ` : html`
         <${ConfigRow} label="execution_scope" value=${c.execution_scope ?? 'workspace'} />
+        <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'legacy_local'} />
+        <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+        <${ConfigRow} label="shared_memory_scope" value=${c.shared_memory_scope ?? 'disabled'} />
         <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
         <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
+        <${ConfigRow} label="private_workspace_root" value=${c.private_workspace_root || '--'} />
+        ${c.sandbox_last_error ? html`
+          <${Callout}
+            title="Sandbox Error"
+            body=${c.sandbox_last_error}
+            tone="warn"
+          />
+        ` : null}
       `}
 
       <${SectionHeader} title="프로액티브" />

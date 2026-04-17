@@ -198,7 +198,7 @@ let resolve_keeper_shell_write_cwd
    The container-side root comes from
    [Env_config_keeper.DockerPlayground.container_playground_root] so the
    mount point is configurable (default "/home/keeper/playground"). *)
-let docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
+let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
   let playground_prefix =
     Filename.concat root Playground_paths.all_playgrounds_prefix
@@ -336,6 +336,126 @@ let resolve_keeper_shell_read_path
     in
     resolve_with_autocorrect resolved_raw_path
 
+let keeper_sandbox_container_name (meta : keeper_meta) =
+  Printf.sprintf "masc-keeper-%s-%d-%d"
+    (Coord_utils.safe_filename meta.name)
+    (Unix.getpid ())
+    (int_of_float (Unix.gettimeofday () *. 1000.0))
+
+let keeper_private_container_root (meta : keeper_meta) =
+  Filename.concat
+    Env_config_keeper.DockerPlayground.container_playground_root
+    (Playground_paths.sanitize_keeper_name meta.name)
+
+let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
+    host_cwd =
+  let normalize_path_for_containment path =
+    Keeper_alerting_path.normalize_path_for_check path
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let host_root =
+    Filename.concat
+      (Keeper_alerting_path.project_root_of_config config)
+      (Keeper_alerting_path.playground_path_of_keeper meta.name)
+    |> normalize_path_for_containment
+  in
+  let container_root = keeper_private_container_root meta in
+  let host_cwd = normalize_path_for_containment host_cwd in
+  if host_cwd = host_root then
+    container_root
+  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd then
+    let suffix =
+      String.sub host_cwd (String.length host_root + 1)
+        (String.length host_cwd - String.length host_root - 1)
+    in
+    Filename.concat container_root suffix
+  else
+    container_root
+
+let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
+  if meta.sandbox_profile = Legacy_local
+     && Env_config_keeper.DockerPlayground.enabled
+     && in_playground
+  then
+    (Docker_hardened, Network_inherit)
+  else
+    (meta.sandbox_profile, meta.network_mode)
+
+let run_docker_hardened_bash
+    ~(config : Coord.config)
+    ~(meta : keeper_meta)
+    ~(cwd : string)
+    ~(timeout_sec : float)
+    ~(cmd : string)
+    ~(network_mode : network_mode) =
+  let image = Env_config_keeper.KeeperSandbox.docker_image in
+  if String.trim image = "" then
+    error_json "keeper sandbox docker image is not configured"
+  else
+    let host_root =
+      keeper_playground_root ~config ~meta
+      |> Keeper_alerting_path.normalize_path_for_check
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    let container_name = keeper_sandbox_container_name meta in
+    let container_root = keeper_private_container_root meta in
+    let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+    let uid = Unix.getuid () in
+    let gid = Unix.getgid () in
+    let network_args =
+      match network_mode with
+      | Network_none -> [ "--network"; "none" ]
+      | Network_inherit -> []
+    in
+    let argv =
+      [
+        "docker";
+        "run";
+        "--rm";
+        "--name";
+        container_name;
+        "-i";
+        "--user";
+        Printf.sprintf "%d:%d" uid gid;
+        "--read-only";
+        "--tmpfs";
+        (Printf.sprintf "/tmp:rw,nosuid,nodev,noexec,size=%s"
+           Env_config_keeper.KeeperSandbox.tmpfs_size);
+        "--cap-drop=ALL";
+        "--security-opt";
+        "no-new-privileges";
+        "--pids-limit";
+        string_of_int Env_config_keeper.KeeperSandbox.pids_limit;
+        "--memory";
+        Env_config_keeper.KeeperSandbox.memory;
+        "-v";
+        host_root ^ ":" ^ container_root ^ ":rw";
+        "--workdir";
+        container_cwd;
+      ]
+      @ network_args
+      @ [ image; "bash"; "-lc"; cmd ^ " 2>&1" ]
+    in
+    let st, out =
+      Process_eio.run_argv_with_status
+        ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+    in
+    if st <> Unix.WEXITED 0 then
+      Keeper_registry.record_error ~base_path:config.base_path meta.name
+        (Printf.sprintf "sandbox docker exec failed (%s): %s"
+           image
+           (Worker_dev_tools.truncate_for_log out));
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("ok", `Bool (st = Unix.WEXITED 0));
+           ("cwd", `String cwd);
+           ("sandbox_profile", `String "docker_hardened");
+           ("network_mode", `String (network_mode_to_string network_mode));
+           ("status", Keeper_alerting_path.process_status_to_json st);
+           ("output", `String out);
+         ])
+
 let handle_keeper_bash
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -380,8 +500,8 @@ let handle_keeper_bash
       String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
       || String.equal playground_abs cwd_canonical
     in
-    let use_docker =
-      Env_config_keeper.DockerPlayground.enabled && in_playground
+    let sandbox_profile, sandbox_network_mode =
+      effective_sandbox_profile ~meta ~in_playground
     in
     (* Destructive guard: always active regardless of Docker or preset *)
     if Worker_dev_tools.is_destructive_bash_operation cmd
@@ -397,147 +517,122 @@ let handle_keeper_bash
                    etc.) and is blocked for all presets." )
             ; "cmd", `String cmd_for_log
             ]))
-    else if use_docker then (
-      (* Docker playground path: skip command whitelist and path validation.
-         The container provides isolation — chaining, pipes, tee are safe.
-         Only the destructive guard above is retained. *)
-      Log.Keeper.info "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s"
-        meta.name cwd cmd_for_log;
-      let container = Env_config_keeper.DockerPlayground.container_name in
-      let container_cwd = docker_playground_cwd ~config ~meta cwd in
-      let st, out =
-        Process_eio.run_argv_with_status
-          ~cwd:(Sys.getcwd ()) ~timeout_sec
-          [ "docker"; "exec"; "-u"; "keeper";
-            "-w"; container_cwd;
-            container; "bash"; "-c"; cmd ^ " 2>&1" ]
-      in
+    else if Worker_dev_tools.is_git_branch_switch cmd
+            && not (write_enabled && in_playground)
+    then (
+      Log.Keeper.info
+        "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
+        cmd_for_log meta.name write_enabled in_playground;
       Yojson.Safe.to_string
         (`Assoc
-            [ "ok", `Bool (st = Unix.WEXITED 0)
-            ; "cwd", `String cwd
-            ; "status", Keeper_alerting_path.process_status_to_json st
-            ; "output", `String out
+            [ "ok", `Bool false
+            ; "error", `String "branch_switch_blocked"
+            ; ( "reason"
+              , `String
+                  "git checkout/switch/branch mutations require a write-enabled preset \
+                   (Coding/Delivery/Full) and a playground clone. \
+                   Clone into your playground first (keeper_shell op=git_clone), \
+                   then set cwd to the cloned repo path." )
+            ; "cmd", `String cmd_for_log
+            ; "hint", `String (Printf.sprintf "Use cwd=%srepos/REPO" (Playground_paths.bundle_root meta.name))
             ]))
+    else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
+    then (
+      Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
+        cmd_for_log meta.name in_playground;
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool false
+            ; "error", `String "write_operation_gated"
+            ; ( "reason"
+              , `String
+                  "This command modifies state (git push/commit, make deploy, etc.). \
+                   A write-enabled preset (Coding/Delivery/Full) is required." )
+            ; "cmd", `String cmd_for_log
+            ]))
+    else if write_enabled
+            && Worker_dev_tools.is_write_operation cmd
+            && not in_playground
+    then (
+      Log.Keeper.info
+        "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
+        cmd_for_log meta.name cwd in_playground;
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "ok", `Bool false
+            ; "error", `String "write_outside_playground_blocked"
+            ; ( "reason"
+              , `String
+                  (Printf.sprintf
+                     "Write operations (git push/commit, make deploy, etc.) \
+                      must run with cwd inside your playground \
+                      (%s). Open a worktree under \
+                      your playground clone first via masc_worktree_create, \
+                      then set cwd to the returned worktree path."
+                     (Playground_paths.bundle_root meta.name)) )
+            ; "cmd", `String cmd_for_log
+            ; "cwd", `String cwd
+            ; "hint", `String (Printf.sprintf "cwd must start with %s" (Playground_paths.bundle_root meta.name))
+            ]))
+    else if sandbox_profile = Docker_hardened then (
+      Log.Keeper.info
+        "DOCKER_HARDENED_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
+        meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
+      run_docker_hardened_bash
+        ~config ~meta ~cwd ~timeout_sec ~cmd
+        ~network_mode:sandbox_network_mode)
     else
-      (* Local execution path: full validation applies *)
+      (* Local execution path: full validation applies. *)
       let validate =
         if write_enabled then Worker_dev_tools.validate_command_coding
         else Worker_dev_tools.validate_command
       in
       match validate cmd with
       | Error reason ->
-        let reason_str = Worker_dev_tools.block_reason_to_string reason in
-        Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
-        let hint =
-          match reason with
-          | Worker_dev_tools.Command_not_allowed name
-            when String.lowercase_ascii name = "gh" ->
-            "`gh` is not allowed via keeper_bash. Use keeper_shell with \
-             op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
-          | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            "Use separate tool calls instead of chaining. Call keeper_bash once per command."
-          | Injection | Process_substitution ->
-            "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
-          | Command_not_allowed _ ->
-            "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
-          | Empty_command ->
-            "Provide a non-empty command string."
-        in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool false
-              ; "error", `String "command_blocked"
-              ; "reason", `String reason_str
-              ; "hint", `String hint
-              ])
-      | Ok () ->
-        (* Branch-switch guard *)
-        if Worker_dev_tools.is_git_branch_switch cmd
-                && not (write_enabled && in_playground)
-        then (
-          Log.Keeper.info
-            "keeper_bash branch-switch blocked: %s (keeper=%s, write_enabled=%b, playground=%b)"
-            cmd_for_log meta.name write_enabled in_playground;
+          let reason_str = Worker_dev_tools.block_reason_to_string reason in
+          Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
+          let hint =
+            match reason with
+            | Worker_dev_tools.Command_not_allowed name
+              when String.lowercase_ascii name = "gh" ->
+                "`gh` is not allowed via keeper_bash. Use keeper_shell with \
+                 op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
+            | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
+                "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+            | Injection | Process_substitution ->
+                "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+            | Command_not_allowed _ ->
+                "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
+            | Empty_command ->
+                "Provide a non-empty command string."
+          in
           Yojson.Safe.to_string
             (`Assoc
                 [ "ok", `Bool false
-                ; "error", `String "branch_switch_blocked"
-                ; ( "reason"
-                  , `String
-                      "git checkout/switch/branch mutations require a write-enabled preset \
-                       (Coding/Delivery/Full) and a playground clone. \
-                       Clone into your playground first (keeper_shell op=git_clone), \
-                       then set cwd to the cloned repo path." )
-                ; "cmd", `String cmd_for_log
-                ; "hint", `String (Printf.sprintf "Use cwd=%srepos/REPO" (Playground_paths.bundle_root meta.name))
-                ]))
-        (* Write gate — preset layer *)
-        else if (not write_enabled) && Worker_dev_tools.is_write_operation cmd
-        then (
-          Log.Keeper.info "keeper_bash write-gate: %s (keeper=%s, playground=%b)"
-            cmd_for_log meta.name in_playground;
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool false
-                ; "error", `String "write_operation_gated"
-                ; ( "reason"
-                  , `String
-                      "This command modifies state (git push/commit, make deploy, etc.). \
-                       A write-enabled preset (Coding/Delivery/Full) is required." )
-                ; "cmd", `String cmd_for_log
-                ]))
-        (* Write gate — playground containment layer (#6527 iter 3).
-           A write-enabled keeper still must not mutate anything outside
-           its own playground bundle. branch-switch already requires
-           in_playground; match the same invariant for the general
-           write operations (git push/commit, make deploy, etc.) so
-           a coding-preset keeper cannot push from, e.g., a
-           workspace-default `.worktrees/` path or `lib/` on the server
-           repo. *)
-        else if write_enabled
-                && Worker_dev_tools.is_write_operation cmd
-                && not in_playground
-        then (
-          Log.Keeper.info
-            "keeper_bash write-containment blocked: %s (keeper=%s, cwd=%s, playground=%b)"
-            cmd_for_log meta.name cwd in_playground;
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool false
-                ; "error", `String "write_outside_playground_blocked"
-                ; ( "reason"
-                  , `String
-                      (Printf.sprintf
-                         "Write operations (git push/commit, make deploy, etc.) \
-                          must run with cwd inside your playground \
-                          (%s). Open a worktree under \
-                          your playground clone first via masc_worktree_create, \
-                          then set cwd to the returned worktree path."
-                         (Playground_paths.bundle_root meta.name)) )
-                ; "cmd", `String cmd_for_log
-                ; "cwd", `String cwd
-                ; "hint", `String (Printf.sprintf "cwd must start with %s" (Playground_paths.bundle_root meta.name))
-                ]))
-        else (
-            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-             | Error e -> error_json e
-             | Ok () ->
-               if write_enabled
-                  && Worker_dev_tools.is_write_operation cmd then
-                 Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
-                   meta.name cwd cmd_for_log in_playground;
-               let st, out =
-                 Process_eio.run_argv_with_status ~cwd ~timeout_sec
-                   [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
-               in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool (st = Unix.WEXITED 0)
-                     ; "cwd", `String cwd
-                     ; "status", Keeper_alerting_path.process_status_to_json st
-                     ; "output", `String out
-                     ])))
+                ; "error", `String "command_blocked"
+                ; "reason", `String reason_str
+                ; "hint", `String hint
+                ])
+      | Ok () -> (
+          match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+          | Error e -> error_json e
+          | Ok () ->
+              if write_enabled
+                 && Worker_dev_tools.is_write_operation cmd then
+                Log.Keeper.info
+                  "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
+                  meta.name cwd cmd_for_log in_playground;
+              let st, out =
+                Process_eio.run_argv_with_status ~cwd ~timeout_sec
+                  [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+              in
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool (st = Unix.WEXITED 0)
+                    ; "cwd", `String cwd
+                    ; "status", Keeper_alerting_path.process_status_to_json st
+                    ; "output", `String out
+                    ]))
 ;;
 
 let handle_keeper_shell

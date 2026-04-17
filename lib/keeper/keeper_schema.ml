@@ -103,6 +103,18 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
         ]);
+        ("sandbox_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy_local"; `String "docker_hardened"]);
+        ]);
+        ("network_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "none"; `String "inherit"]);
+        ]);
+        ("shared_memory_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "disabled"; `String "room"]);
+        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -238,10 +250,25 @@ let keeper_schemas : tool_schema list = [
           ("enum", `List (Keeper_execution_scope.all |> List.map (fun s -> `String (Keeper_execution_scope.to_string s))));
           ("description", `String "Execution scope. 'observe_only' blocks all writes. 'workspace'/'local' enable writes within playground (.masc/playground/<name>/). Extra paths must be listed explicitly in allowed_paths. Default: workspace.");
         ]);
+        ("sandbox_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "legacy_local"; `String "docker_hardened"]);
+          ("description", `String "Filesystem/process sandbox profile. 'legacy_local' keeps the current local execution model. 'docker_hardened' runs keeper_bash in an ephemeral hardened Docker container rooted at the keeper playground.");
+        ]);
+        ("network_mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "none"; `String "inherit"]);
+          ("description", `String "Network policy for sandboxed execution. docker_hardened defaults to none; legacy_local keeps current host behavior via inherit.");
+        ]);
+        ("shared_memory_scope", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "disabled"; `String "room"]);
+          ("description", `String "Typed shared-memory lane. 'room' enables room-scoped team memory tools, without opening a shared writable shell directory.");
+        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/). Use [\"*\"] for explicit full access.");
+          ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/). Use [\"*\"] for explicit full access in legacy_local only; docker_hardened rejects paths outside the private playground root.");
         ]);
         ("tool_access",
           tool_access_schema

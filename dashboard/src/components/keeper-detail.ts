@@ -695,6 +695,84 @@ function ProfileField({ label, value, color }: { label: string; value: string; c
   `
 }
 
+function SandboxSummaryPanel({ keeperName }: { keeperName: string }) {
+  const config = peekLoadedKeeperConfig(keeperName)
+
+  if (!config) {
+    return html`
+      <${SectionCard} title="Sandbox">
+        <div class="text-[12px] text-[var(--text-muted)] leading-relaxed">
+          keeper config 로딩 후 sandbox profile, network, shared lane 정보를 표시합니다.
+        </div>
+      <//>
+    `
+  }
+
+  const laneText = config.shared_memory_scope === 'room'
+    ? 'room typed lane only (masc_team_memory_*)'
+    : 'disabled'
+  const sandboxTone = config.sandbox_profile === 'docker_hardened'
+    ? 'border-amber-400/20 bg-amber-500/10'
+    : 'border-[var(--card-border)] bg-[var(--white-2)]'
+
+  return html`
+    <${SectionCard} title="Sandbox">
+      <div class="flex flex-col gap-3">
+        <div class="rounded-xl border px-3 py-3 ${sandboxTone}">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[var(--accent-12)] text-[var(--accent)] border border-[rgba(71,184,255,0.18)]">
+              ${config.sandbox_profile}
+            </span>
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+              network ${config.network_mode}
+            </span>
+            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--text-muted)]">
+              shared ${config.shared_memory_scope}
+            </span>
+          </div>
+          <div class="mt-2 text-[12px] leading-relaxed text-[var(--text-body)]">
+            ${config.sandbox_profile === 'docker_hardened'
+              ? 'Ephemeral Docker sandbox with private playground write access only.'
+              : 'Legacy local execution path. Sandbox restrictions are compatibility-oriented.'}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-2">
+          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Private Workspace</div>
+            <div class="mt-1 text-[12px] font-mono break-all text-[var(--text-body)]">
+              ${config.private_workspace_root || '--'}
+            </div>
+          </div>
+          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Shared Lane</div>
+            <div class="mt-1 text-[12px] text-[var(--text-body)]">${laneText}</div>
+          </div>
+          <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2">
+            <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Effective Paths</div>
+            <div class="mt-1 text-[12px] leading-relaxed text-[var(--text-body)]">
+              ${(config.effective_allowed_paths ?? []).join(', ') || '(computed default)'}
+            </div>
+          </div>
+        </div>
+
+        ${config.sandbox_last_error
+          ? html`
+              <div class="rounded-xl border border-[rgba(239,68,68,0.26)] bg-[rgba(239,68,68,0.10)] px-3 py-3">
+                <div class="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#fda4af]">Sandbox Last Error</div>
+                <div class="mt-1 text-[12px] leading-relaxed text-[#fecdd3]">${config.sandbox_last_error}</div>
+              </div>
+            `
+          : html`
+              <div class="rounded-xl border border-[var(--card-border)] bg-[var(--white-2)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                shared_memory_scope=room 이어도 공용 writable mount는 열리지 않습니다. 교류는 <span class="font-mono text-[var(--text-body)]">masc_team_memory_*</span>로만 수행합니다.
+              </div>
+            `}
+      </div>
+    <//>
+  `
+}
+
 // ── Playground Repos Panel ──────────────────────────────
 
 interface PlaygroundRepo {
@@ -1190,6 +1268,8 @@ export function KeeperDetailOverlay() {
               <${KeeperNeighborhood} keeper=${keeper} />
             </div>
           </details>
+
+          <${SandboxSummaryPanel} keeperName=${keeper.name} />
 
           <${PlaygroundReposPanel} keeperName=${keeper.name} />
 

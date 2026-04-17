@@ -215,6 +215,63 @@ spawn 시 인자로 직접 설정하는 필드.
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
+| `sandbox_profile` | string | `legacy_local` | 실행 샌드박스 프로필. `docker_hardened`는 ephemeral Docker sandbox를 사용 | `masc_keeper_up`의 `sandbox_profile` 인자 |
+| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker_hardened`는 기본 `none` | `masc_keeper_up`의 `network_mode` 인자 |
+| `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 `masc_team_memory_*` 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
+
+### 3.1.1 Sandbox Core V1 사용법
+
+가장 보수적인 기본 패턴:
+
+```json
+{
+  "name": "analyst",
+  "goal": "Review incoming issues and prepare safe changes",
+  "execution_scope": "workspace",
+  "sandbox_profile": "docker_hardened",
+  "network_mode": "none",
+  "shared_memory_scope": "room",
+  "allowed_paths": [".masc/playground/analyst/repos/demo"],
+  "tool_access": { "kind": "preset", "preset": "coding" }
+}
+```
+
+의미:
+
+- keeper shell write는 자기 playground 안에서만 허용된다.
+- `docker_hardened`는 ephemeral `docker run --rm` 경로를 사용하고, `read-only rootfs + tmpfs /tmp + cap-drop=ALL + no-new-privileges + pids-limit + memory limit`을 건다.
+- `shared_memory_scope=room`은 파일시스템 공유 mount가 아니라 typed lane만 연다.
+
+typed team memory 사용 예시:
+
+```text
+masc_team_memory_write(room="incident-alpha", key="handoff/summary.md", content="현재 상황 요약...")
+masc_team_memory_read(room="incident-alpha", key="handoff/summary.md")
+masc_team_memory_search(room="incident-alpha", query="요약")
+```
+
+guardrail:
+
+- path traversal / symlink escape는 차단된다.
+- secret-like payload는 team memory write에서 차단된다.
+- `docker_hardened`는 `allowed_paths=["*"]`를 거부한다.
+
+### 3.1.2 Dashboard에서 보는 위치
+
+Keeper 상세 화면의 `Sandbox` 카드와 `설정` 섹션에서 다음 필드를 직접 확인할 수 있다.
+
+- `sandbox_profile`
+- `network_mode`
+- `shared_memory_scope`
+- `allowed_paths` / `effective_paths`
+- `private_workspace_root`
+- `sandbox_last_error`
+
+운영 해석:
+
+- `private_workspace_root`는 keeper의 유일한 기본 writable lane이다.
+- `sandbox_last_error`가 있으면 Docker sandbox 실행 실패나 정책 위반 흔적을 먼저 확인한다.
+- `shared_memory_scope=room`이면 공용 파일시스템이 아니라 `masc_team_memory_*` 호출을 기준으로 협업해야 한다.
 
 ### 3.2 페르소나 로드 필드 (Profile-Loaded)
 

@@ -966,10 +966,26 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("total_active", `Int (List.length allowed));
         ]
       in
+      let sandbox_last_error =
+        match Keeper_registry.get ~base_path:config.base_path m.name with
+        | Some entry -> entry.last_error
+        | None -> None
+      in
+      let private_workspace_root =
+        Filename.concat
+          (Keeper_alerting_path.project_root_of_config config)
+          (Keeper_alerting_path.playground_path_of_keeper m.name)
+      in
       (`OK,
        `Assoc [
          ("name", `String m.name);
          ("execution_scope", `String (Keeper_execution_scope.to_string m.execution_scope));
+         ("sandbox_profile", `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
+         ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));
+         ("shared_memory_scope",
+           `String (Keeper_types.shared_memory_scope_to_string m.shared_memory_scope));
+         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ("private_workspace_root", `String private_workspace_root);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
          ("effective_allowed_paths",

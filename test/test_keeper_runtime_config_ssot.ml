@@ -146,6 +146,54 @@ policy_voice_enabled = false
       check execution_scope_testable "execution_scope" Keeper_execution_scope.Observe_only updated.Keeper_types.execution_scope;
       check bool "policy_voice_enabled" false updated.policy_voice_enabled
 
+(** Test: TOML sandbox fields overwrite stale runtime JSON values. *)
+let test_sandbox_policy_resync () =
+  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "sandbox-policy-resync-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+{|[keeper]
+goal = "test"
+sandbox_profile = "docker_hardened"
+network_mode = "none"
+shared_memory_scope = "room"
+|};
+  let config = Coord.default_config room_dir in
+  let initial_meta =
+    match
+      Keeper_types.meta_of_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-sandbox-policy-resync");
+            ("sandbox_profile", `String "legacy_local");
+            ("network_mode", `String "inherit");
+            ("shared_memory_scope", `String "disabled");
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_types.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check string "sandbox_profile" "docker_hardened"
+        (Keeper_types.sandbox_profile_to_string updated.sandbox_profile);
+      check string "network_mode" "none"
+        (Keeper_types.network_mode_to_string updated.network_mode);
+      check string "shared_memory_scope" "room"
+        (Keeper_types.shared_memory_scope_to_string updated.shared_memory_scope)
+
 (** Test: TOML tool policy and allowed_paths overwrite stale runtime JSON values. *)
 let test_tool_policy_resync () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -762,6 +810,10 @@ let () =
             "TOML tool policy fields overwrite stale runtime JSON"
             `Quick
             test_tool_policy_resync;
+          test_case
+            "TOML sandbox policy fields overwrite stale runtime JSON"
+            `Quick
+            test_sandbox_policy_resync;
           test_case
             "custom tool_access is preserved when TOML omits preset"
             `Quick

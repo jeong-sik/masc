@@ -99,6 +99,12 @@ let ensure_keeper_meta config name =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     let target_execution_scope =
       apply_default defaults.execution_scope meta.execution_scope in
+    let target_sandbox_profile =
+      apply_default defaults.sandbox_profile meta.sandbox_profile in
+    let target_network_mode =
+      apply_default defaults.network_mode meta.network_mode in
+    let target_shared_memory_scope =
+      apply_default defaults.shared_memory_scope meta.shared_memory_scope in
     let target_allowed_paths =
       apply_default defaults.allowed_paths meta.allowed_paths in
 
@@ -141,6 +147,9 @@ let ensure_keeper_meta config name =
       || meta.mention_targets <> target_mention_targets
       || meta.tool_access <> target_tool_access
       || meta.execution_scope <> target_execution_scope
+      || meta.sandbox_profile <> target_sandbox_profile
+      || meta.network_mode <> target_network_mode
+      || meta.shared_memory_scope <> target_shared_memory_scope
       || meta.allowed_paths <> target_allowed_paths in
     let discovery_changed =
       meta.work_discovery_enabled <> target_wd_enabled
@@ -191,6 +200,9 @@ let ensure_keeper_meta config name =
         mention_targets = target_mention_targets;
         tool_access = target_tool_access;
         execution_scope = target_execution_scope;
+        sandbox_profile = target_sandbox_profile;
+        network_mode = target_network_mode;
+        shared_memory_scope = target_shared_memory_scope;
         allowed_paths = target_allowed_paths;
         work_discovery_enabled = target_wd_enabled;
         work_discovery_sources = target_wd_sources;

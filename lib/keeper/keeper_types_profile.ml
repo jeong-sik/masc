@@ -7,6 +7,56 @@
 include Keeper_config
 let keeper_debug = Env_config.KeeperRuntime.debug
 
+type sandbox_profile =
+  | Legacy_local
+  | Docker_hardened
+
+type network_mode =
+  | Network_none
+  | Network_inherit
+
+type shared_memory_scope =
+  | Shared_memory_disabled
+  | Shared_memory_room
+
+let sandbox_profile_to_string = function
+  | Legacy_local -> "legacy_local"
+  | Docker_hardened -> "docker_hardened"
+
+let sandbox_profile_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "legacy_local" -> Some Legacy_local
+  | "docker_hardened" -> Some Docker_hardened
+  | _ -> None
+
+let network_mode_to_string = function
+  | Network_none -> "none"
+  | Network_inherit -> "inherit"
+
+let network_mode_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "none" -> Some Network_none
+  | "inherit" -> Some Network_inherit
+  | _ -> None
+
+let shared_memory_scope_to_string = function
+  | Shared_memory_disabled -> "disabled"
+  | Shared_memory_room -> "room"
+
+let shared_memory_scope_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "disabled" -> Some Shared_memory_disabled
+  | "room" -> Some Shared_memory_room
+  | _ -> None
+
+let default_sandbox_profile = Legacy_local
+
+let default_network_mode_for_profile = function
+  | Legacy_local -> Network_inherit
+  | Docker_hardened -> Network_none
+
+let default_shared_memory_scope = Shared_memory_disabled
+
 type 'a context = {
   config: Coord.config;
   agent_name: string;
@@ -148,6 +198,9 @@ type keeper_profile_defaults = {
   shards : string list option;
   allowed_paths : string list option;
   execution_scope : Keeper_execution_scope.t option;
+  sandbox_profile : sandbox_profile option;
+  network_mode : network_mode option;
+  shared_memory_scope : shared_memory_scope option;
   tool_preset : string option;
   tool_also_allow : string list option;
   tool_denylist : string list option;
@@ -197,6 +250,9 @@ let empty_keeper_profile_defaults = {
   shards = None;
   allowed_paths = None;
   execution_scope = None;
+  sandbox_profile = None;
+  network_mode = None;
+  shared_memory_scope = None;
   tool_preset = None;
   tool_also_allow = None;
   tool_denylist = None;
@@ -301,6 +357,45 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  let result =
+    Result.bind result (fun () ->
+        match str "sandbox_profile" with
+        | Some raw -> (
+            match sandbox_profile_of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid sandbox_profile '%s' (allowed: legacy_local, docker_hardened)"
+                     raw))
+        | None -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "network_mode" with
+        | Some raw -> (
+            match network_mode_of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid network_mode '%s' (allowed: none, inherit)"
+                     raw))
+        | None -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "shared_memory_scope" with
+        | Some raw -> (
+            match shared_memory_scope_of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid shared_memory_scope '%s' (allowed: disabled, room)"
+                     raw))
+        | None -> Ok ())
+  in
   Result.map
     (fun () ->
       {
@@ -336,6 +431,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         execution_scope =
           Option.map Keeper_execution_scope.of_string_lossy
             (str "execution_scope");
+        sandbox_profile =
+          Option.bind (str "sandbox_profile") sandbox_profile_of_string;
+        network_mode =
+          Option.bind (str "network_mode") network_mode_of_string;
+        shared_memory_scope =
+          Option.bind (str "shared_memory_scope")
+            shared_memory_scope_of_string;
         tool_preset =
           (match str "tool_preset" with
            | None -> None
@@ -397,6 +499,9 @@ let canonical_keeper_toml_key_names =
   ; "shards"
   ; "allowed_paths"
   ; "execution_scope"
+  ; "sandbox_profile"
+  ; "network_mode"
+  ; "shared_memory_scope"
   ; "tool_preset"
   ; "tool_also_allow"
   ; "also_allow"
@@ -528,6 +633,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 execution_scope =
                   Option.map Keeper_execution_scope.of_string_lossy
                     (Safe_ops.json_string_opt "execution_scope" keeper_json);
+                sandbox_profile = None;
+                network_mode = None;
+                shared_memory_scope = None;
                 tool_preset =
                   (match Safe_ops.json_string_opt "tool_preset" keeper_json with
                   | None -> None
@@ -623,6 +731,10 @@ let merge_keeper_profile_defaults
     shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     execution_scope = prefer overlay.execution_scope base.execution_scope;
+    sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
+    network_mode = prefer overlay.network_mode base.network_mode;
+    shared_memory_scope =
+      prefer overlay.shared_memory_scope base.shared_memory_scope;
     tool_preset = prefer overlay.tool_preset base.tool_preset;
     tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;

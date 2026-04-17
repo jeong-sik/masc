@@ -1101,6 +1101,11 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   return {
     name: asNullableString(data.name) ?? requestedName,
     execution_scope: asNullableString(data.execution_scope) ?? 'workspace',
+    sandbox_profile: asNullableString(data.sandbox_profile) ?? 'legacy_local',
+    network_mode: asNullableString(data.network_mode) ?? 'inherit',
+    shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
+    sandbox_last_error: asNullableString(data.sandbox_last_error),
+    private_workspace_root: asNullableString(data.private_workspace_root),
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {
@@ -1245,6 +1250,9 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 export type KeeperConfigUpdatePayload = {
   // Scope
   execution_scope?: 'observe_only' | 'workspace' | 'local'
+  sandbox_profile?: 'legacy_local' | 'docker_hardened'
+  network_mode?: 'none' | 'inherit'
+  shared_memory_scope?: 'disabled' | 'room'
   allowed_paths?: string[]
   // Prompt fields
   goal?: string

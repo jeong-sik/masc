@@ -81,6 +81,14 @@ describe('filterHookSlots', () => {
 const mocks = vi.hoisted(() => ({
   fetchKeeperConfig: vi.fn(async () => ({
     name: 'keeper-sangsu',
+    execution_scope: 'workspace',
+    sandbox_profile: 'docker_hardened',
+    network_mode: 'none',
+    shared_memory_scope: 'room',
+    sandbox_last_error: 'room shared lane only',
+    private_workspace_root: '.masc/playground/keeper-sangsu',
+    allowed_paths: ['.masc/playground/keeper-sangsu/repos/demo'],
+    effective_allowed_paths: ['.masc/playground/keeper-sangsu/repos/demo'],
     prompt: {
       goal: 'Ship stable keeper ops',
       short_goal: 'Diagnose agent liveness',
@@ -222,6 +230,10 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
+    expect(container.textContent).toContain('sandbox_profile')
+    expect(container.textContent).toContain('docker_hardened')
+    expect(container.textContent).toContain('shared_memory_scope')
+    expect(container.textContent).toContain('.masc/playground/keeper-sangsu')
 
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),
@@ -232,6 +244,7 @@ describe('KeeperConfigPanel', () => {
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+    expect(container.textContent).toContain('Sandbox Core V1')
   })
 
   it('supports forced config refresh for already-loaded keepers', async () => {

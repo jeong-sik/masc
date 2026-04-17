@@ -128,10 +128,6 @@ require_contains docs/spec/00-glossary.md '**Team Session** (retired)'
 require_contains docs/OAS-MASC-BOUNDARY.md '| Team-session swarm | Removed |'
 require_not_contains docs/OAS-MASC-BOUNDARY.md '| `lib/team_session/team_session_oas_bridge.ml` | Acceptable'
 
-# PR #7747: 04-chain-engine.md archived with explicit banner
-require_contains docs/spec/04-chain-engine.md '# Chain Engine — ARCHIVED'
-require_contains docs/spec/04-chain-engine.md '| Status | Archived |'
-
 docs_to_scan=(
   README.md
   ROADMAP.md

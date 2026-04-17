@@ -250,6 +250,74 @@ let dashboard_governance_approval_resolve_http_json ~(args : Yojson.Safe.t) :
                    ])
            | Error message -> Error message)
 
+(* Dashboard-initiated verification verdict. Mirrors the 2-step path that
+   tool_task uses for Approve_verification / Reject_verification: first
+   transition the task FSM (AwaitingVerification -> Done or InProgress),
+   then wire the protocol side effects (Verification store + Board + SSE).
+
+   [verifier] is a namespaced agent_id of the form "operator:<actor>".
+   The colon form is permitted by Validation.Agent_id and keeps operator
+   verdicts distinguishable from peer-agent verdicts in attribution.
+
+   Decisions are strictly approve | reject — unknown values return
+   Bad_request rather than defaulting, per Det/NonDet boundary. *)
+let dashboard_verification_resolve_http_json
+    ~(config : Coord.config) ~(verifier : string)
+    ~(args : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
+  let open Result in
+  let ( let* ) = bind in
+  let* task_id =
+    match Safe_ops.json_string_opt "task_id" args with
+    | Some s when String.trim s <> "" -> Ok (String.trim s)
+    | _ -> Error "task_id is required"
+  in
+  let* verification_id =
+    match Safe_ops.json_string_opt "verification_id" args with
+    | Some s when String.trim s <> "" -> Ok (String.trim s)
+    | _ -> Error "verification_id is required"
+  in
+  let decision_name =
+    Safe_ops.json_string_opt "decision" args
+    |> Option.value ~default:""
+    |> String.trim
+    |> String.lowercase_ascii
+  in
+  let reason =
+    Safe_ops.json_string_opt "reason" args |> Option.value ~default:""
+  in
+  let* action =
+    match decision_name with
+    | "approve" -> Ok Types.Approve_verification
+    | "reject"  -> Ok Types.Reject_verification
+    | "" -> Error "decision is required (approve | reject)"
+    | other ->
+        Error (Printf.sprintf
+          "decision must be 'approve' or 'reject' (got %s)" other)
+  in
+  let fsm_result =
+    Coord.transition_task_r config
+      ~agent_name:verifier ~task_id ~action
+      ~notes:reason ~reason ()
+  in
+  match fsm_result with
+  | Error err -> Error (Types.masc_error_to_string err)
+  | Ok _ ->
+      (match action with
+       | Types.Approve_verification ->
+           Verification_protocol.on_approve_verification
+             ~config ~task_id ~verifier ~verification_id ~notes:reason
+       | Types.Reject_verification ->
+           Verification_protocol.on_reject_verification
+             ~config ~task_id ~verifier ~verification_id ~reason
+       | _ -> ());
+      Ok (`Assoc [
+        ("ok", `Bool true);
+        ("task_id", `String task_id);
+        ("verification_id", `String verification_id);
+        ("decision", `String decision_name);
+        ("verifier", `String verifier);
+      ])
+
 let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in

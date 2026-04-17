@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
 import {
   connectSSE,
@@ -33,7 +34,13 @@ import { AuthStatus, RemoteWarningBanner } from './components/auth-status'
 import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
 
-export const sidebarCollapsed = signal(false)
+// Sidebar collapsed state persists across reloads — a user who picks
+// the dense layout keeps it. Namespaced key avoids clashing with any
+// future per-user preference that might use plain \"sidebar-collapsed\".
+export const sidebarCollapsed = persistentSignal<boolean>({
+  key: 'dashboard:sidebar-collapsed',
+  defaultValue: false,
+})
 export const mobileMenuOpen = signal(false)
 
 export function App() {

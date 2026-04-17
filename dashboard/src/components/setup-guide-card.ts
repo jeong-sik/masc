@@ -46,6 +46,23 @@ export function countCompletedSteps(
   return n
 }
 
+export type SetupGuideTone = 'idle' | 'in-progress' | 'complete'
+
+/** Pure: 0..100 integer progress. Total=0 returns 0 (no div by zero). */
+export function setupGuideProgressPct(done: number, total: number): number {
+  if (total <= 0) return 0
+  return Math.round((Math.min(done, total) / total) * 100)
+}
+
+/** Pure: derive tone from progress. Drives the card header gradient
+    and celebration badge. Linear / Plane onboarding convention —
+    idle muted, in-progress accent, complete emerald. */
+export function setupGuideTone(done: number, total: number): SetupGuideTone {
+  if (total <= 0 || done <= 0) return 'idle'
+  if (done >= total) return 'complete'
+  return 'in-progress'
+}
+
 function toggleStepCompletion(connectorId: string, stepIndex: number) {
   const cur = completedSteps.value[connectorId] ?? {}
   const next = { ...cur, [stepIndex]: !cur[stepIndex] }
@@ -76,9 +93,26 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
   }
   const completedMap = completedSteps.value[connectorId]
   const doneCount = countCompletedSteps(completedMap, guide.steps.length)
+  const pct = setupGuideProgressPct(doneCount, guide.steps.length)
+  const tone = setupGuideTone(doneCount, guide.steps.length)
+  // Linear / Plane onboarding convention: complete state celebrates
+  // with an emerald accent + checkmark badge; in-progress tints the
+  // count chip in accent color so scanning a list of cards shows which
+  // ones are halfway; idle stays muted.
+  const countToneClass =
+    tone === 'complete' ? 'text-emerald-300' :
+    tone === 'in-progress' ? 'text-[var(--accent)]' :
+    'text-[var(--text-dim)]'
+  const progressBarToneClass =
+    tone === 'complete' ? 'bg-emerald-400' :
+    tone === 'in-progress' ? 'bg-[var(--accent)]' :
+    'bg-[var(--white-10)]'
 
   return html`
-    <div class="mt-2 rounded-md border border-[var(--white-8)] bg-[var(--white-2)]">
+    <div
+      class="mt-2 overflow-hidden rounded-md border border-[var(--white-8)] bg-[var(--white-2)]"
+      data-setup-guide-tone=${tone}
+    >
       <button
         type="button"
         class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-[12px] text-[var(--text-body)] hover:bg-[var(--white-4)]"
@@ -91,25 +125,70 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
             <${ChevronRight} size=${14} />
           </span>
           <span class="font-medium">처음 설치하나요? · ${guide.title}</span>
+          ${tone === 'complete'
+            ? html`
+                <span
+                  class="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-200"
+                  aria-label="Setup guide complete"
+                  data-setup-complete-badge
+                >
+                  <span aria-hidden="true">✓</span>
+                  <span>Complete</span>
+                </span>
+              `
+            : null}
         </div>
         <span
-          class=${`text-[10px] uppercase tracking-[0.14em] ${doneCount > 0 ? 'text-emerald-300/80' : 'text-[var(--text-dim)]'}`}
+          class=${`text-[10px] uppercase tracking-[0.14em] tabular-nums ${countToneClass}`}
           data-setup-progress=${connectorId}
+          data-setup-progress-pct=${pct}
         >${stepCompletionSummary(doneCount, guide.steps.length)}</span>
       </button>
+
+      <!-- Linear-style thin progress bar under the header. 2px tall,
+           always visible so the progress signals out even when the
+           card is collapsed (operator scanning multiple cards). -->
+      <div
+        class="h-[2px] w-full bg-[var(--white-4)]"
+        role="progressbar"
+        aria-valuenow=${pct}
+        aria-valuemin=${0}
+        aria-valuemax=${100}
+        aria-label="Setup guide progress"
+        data-setup-progress-bar
+      >
+        <div
+          class=${`h-full transition-all duration-300 ${progressBarToneClass}`}
+          style=${`width: ${pct}%`}
+          data-setup-progress-bar-fill
+        ></div>
+      </div>
 
       ${isOpen
         ? html`
             <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--white-8)] px-3 py-2.5 text-[11px] text-[var(--text-body)]">
               <p class="mb-2 text-[var(--text-dim)]">${guide.intro}</p>
-              <ol class="ml-4 list-none space-y-1.5">
+              <ol class="list-none space-y-2" data-setup-step-list>
                 ${guide.steps.map((step, idx) => {
                   const done = completedMap?.[idx] === true
+                  // Plane / Notion step wizard pattern: numbered circle
+                  // gutter on the left so the operator reads the flow
+                  // as "1. Open Discord dev portal → 2. Create a bot …"
+                  // even before checkboxes are ticked. Circle turns
+                  // emerald-filled when the step is complete.
+                  const circleToneClass = done
+                    ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                    : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)]'
                   return html`
-                    <li class="flex items-start gap-2">
+                    <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
+                      <span
+                        class=${`mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold tabular-nums transition-colors ${circleToneClass}`}
+                        aria-hidden="true"
+                        data-setup-step-circle=${`${connectorId}:${idx}`}
+                      >${done ? '✓' : idx + 1}</span>
                       <input
                         type="checkbox"
-                        class="mt-[3px] shrink-0 cursor-pointer accent-emerald-400"
+                        class="mt-[5px] shrink-0 cursor-pointer accent-emerald-400"
                         id=${`setup-step-${connectorId}-${idx}`}
                         data-setup-step=${`${connectorId}:${idx}`}
                         checked=${done}

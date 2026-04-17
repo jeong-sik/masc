@@ -18,6 +18,9 @@ type parsed_args = {
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   execution_scope_opt : Keeper_execution_scope.t option;
+  sandbox_profile_opt : sandbox_profile option;
+  network_mode_opt : network_mode option;
+  shared_memory_scope_opt : shared_memory_scope option;
   voice_enabled_opt : bool option;
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
@@ -91,6 +94,19 @@ let parse_present_string_list_opt args key =
       collect [] 0 items
   | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
   | Some _ -> Error (Printf.sprintf "%s must be an array of strings" key)
+
+let parse_enum_string_opt args key of_string ~allowed_values =
+  match json_assoc_member_opt key args with
+  | None -> Ok None
+  | Some (`String raw) -> (
+      match of_string raw with
+      | Some value -> Ok (Some value)
+      | None ->
+          Error
+            (Printf.sprintf "invalid %s '%s' (allowed: %s)"
+               key raw allowed_values))
+  | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
+  | Some _ -> Error (Printf.sprintf "%s must be a string" key)
 
 let resolve_tool_name_list ~preferred ~fallback =
   first_some preferred fallback
@@ -178,11 +194,35 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     in
     let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
-    match compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res with
-    | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error (false, e)
+    let sandbox_profile_opt_res =
+      parse_enum_string_opt args "sandbox_profile" sandbox_profile_of_string
+        ~allowed_values:"legacy_local, docker_hardened"
+    in
+    let network_mode_opt_res =
+      parse_enum_string_opt args "network_mode" network_mode_of_string
+        ~allowed_values:"none, inherit"
+    in
+    let shared_memory_scope_opt_res =
+      parse_enum_string_opt args "shared_memory_scope"
+        shared_memory_scope_of_string
+        ~allowed_values:"disabled, room"
+    in
+    match
+      compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
+      sandbox_profile_opt_res, network_mode_opt_res, shared_memory_scope_opt_res
+    with
+    | Error e, _, _, _, _, _
+    | _, Error e, _, _, _, _
+    | _, _, Error e, _, _, _
+    | _, _, _, Error e, _, _
+    | _, _, _, _, Error e, _
+    | _, _, _, _, _, Error e -> Error (false, e)
     | Ok compaction_profile_opt,
       Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
-      Ok allowed_paths_opt ->
+      Ok allowed_paths_opt,
+      Ok sandbox_profile_opt,
+      Ok network_mode_opt,
+      Ok shared_memory_scope_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
@@ -281,6 +321,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       allowed_paths_opt;
       autoboot_enabled_opt;
       execution_scope_opt;
+      sandbox_profile_opt;
+      network_mode_opt;
+      shared_memory_scope_opt;
       voice_enabled_opt;
       voice_channel_opt;
       voice_agent_id_opt;

@@ -212,6 +212,7 @@ function OverviewTile({ id, connector, keeperCount }: {
       </button>
       <${ConnectorReadinessRail} pills=${pills} />
       <${TilePrimaryAction} id=${id} sidecarUp=${sidecarUp} />
+      <${TileErrorNotice} connector=${connector} />
       <${TileHeartbeatStrip} id=${id} />
     </div>
   `
@@ -301,6 +302,77 @@ function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp:
       data-tile-primary-action=${id}
       data-tile-primary-action-tone=${view.tone}
     >${view.label}</button>
+  `
+}
+
+/** Pure: derive a single notice view from the connector runtime state.
+    Returns null when nothing notable is happening. Priority:
+    error (non-empty) > stale (stale=true). Error beats stale because
+    an explicit error message is strictly more diagnostic than a
+    \"data is old\" flag; callers that want both must render both. */
+export interface TileNoticeView {
+  tone: 'error' | 'stale'
+  label: string
+  detail: string
+}
+export function deriveTileNotice(
+  connector: GateConnectorInfo | null,
+): TileNoticeView | null {
+  if (connector === null) return null
+  const err = connector.error?.trim() ?? ''
+  if (err !== '') {
+    return {
+      tone: 'error',
+      label: 'Error',
+      detail: err,
+    }
+  }
+  if (connector.stale === true) {
+    const secs = connector.stale_after_sec
+    const ageHint = secs > 0 ? ` (${secs}s threshold)` : ''
+    return {
+      tone: 'stale',
+      label: 'Stale',
+      detail: `데이터 오래됨${ageHint}`,
+    }
+  }
+  return null
+}
+
+const TILE_NOTICE_TONE_CLASS: Record<'error' | 'stale', string> = {
+  // Rose for hard errors (sidecar reported an explicit failure),
+  // amber for stale (data hasn't refreshed but no explicit error).
+  // Matches Sentry \"issue\" rose + Vercel \"warning\" amber convention.
+  error: 'border-rose-400/40 bg-rose-500/10 text-rose-100',
+  stale: 'border-amber-400/40 bg-amber-500/10 text-amber-100',
+}
+
+const TILE_NOTICE_GLYPH: Record<'error' | 'stale', string> = {
+  error: '⚠',
+  stale: '⧗',
+}
+
+/** Surfaces connector.error / connector.stale on the tile so operators
+    scanning the page see them without drilling into the detailed
+    panel. Currently these fields are only visible in the per-connector
+    live-panel below — easy to miss until you click into it. */
+function TileErrorNotice({ connector }: { connector: GateConnectorInfo | null }) {
+  const notice = deriveTileNotice(connector)
+  if (notice === null) return null
+  const tone = TILE_NOTICE_TONE_CLASS[notice.tone]
+  const glyph = TILE_NOTICE_GLYPH[notice.tone]
+  return html`
+    <div
+      class=${`flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] ${tone}`}
+      role="alert"
+      aria-label=${`${notice.label}: ${notice.detail}`}
+      title=${notice.detail}
+      data-tile-notice=${notice.tone}
+    >
+      <span aria-hidden="true" class="shrink-0">${glyph}</span>
+      <span class="shrink-0 font-semibold uppercase tracking-[0.1em]">${notice.label}</span>
+      <span class="min-w-0 truncate font-normal normal-case tracking-normal opacity-80">${notice.detail}</span>
+    </div>
   `
 }
 
@@ -441,12 +513,48 @@ export function summarizeConnectorStrip(
   }
 }
 
-function StatusSummaryLine({ summary }: { summary: ConnectorStripSummary }) {
+/** Pure: list the display names of KNOWN connectors that are currently
+    offline, in the canonical tile order. Returns [] when everything is
+    up, or when a connector isn't advertised yet (we only mark
+    offline once we've observed the connector being non-available —
+    \"missing from the connectors array\" is ambiguous, could be
+    bootstrapping rather than offline).
+
+    Why this exists: StatusSummaryLine says \"3 of 4 sidecars running\"
+    but doesn't name the missing 1 — the operator has to scan four
+    tiles below to find it. This lets the summary line annotate which
+    specific connector(s) are offline, matching Statuspage's
+    \"2 components degraded: Payments, API\" convention. */
+export function offlineConnectorNames(
+  connectors: GateConnectorInfo[],
+): string[] {
+  const out: string[] = []
+  for (const id of KNOWN_CONNECTOR_IDS) {
+    const c = findConnector(connectors, id)
+    if (c === null) continue // not yet observed — don't assert \"offline\"
+    if (c.available === true) continue
+    out.push(CONNECTOR_DISPLAY_NAMES[id] ?? id)
+  }
+  return out
+}
+
+/** Pure: compact label for the offline-connector annotation. Returns
+    null when nothing to annotate. */
+export function formatOfflineConnectorLabel(
+  offlineNames: readonly string[],
+): string | null {
+  if (offlineNames.length === 0) return null
+  if (offlineNames.length <= 2) return `${offlineNames.join(' · ')} offline`
+  return `${offlineNames.slice(0, 2).join(' · ')} · +${offlineNames.length - 2} offline`
+}
+
+function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSummary; connectors: GateConnectorInfo[] }) {
   // One quiet aggregate sentence — always on, never loud. Sits between
   // the loud banners (celebration / incident) and the action row, so the
   // operator always has baseline numbers even when neither banner fires.
   const now = livePulseNowMs.value
   const lastTick = lastHeartbeatTickMs.value
+  const offlineLabel = formatOfflineConnectorLabel(offlineConnectorNames(connectors))
   return html`
     <div
       class="mb-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text-dim)]"
@@ -461,6 +569,13 @@ function StatusSummaryLine({ summary }: { summary: ConnectorStripSummary }) {
       <span>
         <span class="font-semibold text-[var(--text-body)]" data-strip-summary-sidecars>${summary.sidecarUp} of ${summary.sidecarTotal}</span>
         <span> sidecars running</span>
+        ${offlineLabel !== null
+          ? html`<span
+              class="ml-1 text-rose-300/80"
+              data-strip-summary-offline-names
+              title="현재 offline인 커넥터 이름"
+            > · ${offlineLabel}</span>`
+          : null}
       </span>
       <span aria-hidden="true" class="text-[var(--white-10)]">·</span>
       <span>
@@ -539,7 +654,7 @@ export function ConnectorOverviewStrip({ connectors, keeperCount }: OverviewProp
     >
       <${IncidentBanner} droppedIds=${droppedIds} />
       <${CelebrationBanner} connectedCount=${connectedCount} />
-      <${StatusSummaryLine} summary=${summary} />
+      <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
       <${BulkActions} connectors=${connectors} />
       <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         ${KNOWN_CONNECTOR_IDS.map(id => html`

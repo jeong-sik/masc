@@ -7,6 +7,9 @@ import {
   showActionToast,
   ToastContainer,
   MAX_VISIBLE_TOASTS,
+  defaultToastDuration,
+  pauseToastTimer,
+  resumeToastTimer,
   _testResetToasts,
   _testGetToasts,
 } from './toast'
@@ -123,5 +126,107 @@ describe('ToastContainer rendering', () => {
     const remaining = _testGetToasts()
     expect(remaining.length).toBe(1)
     expect(remaining[0]!.message).toBe('keep')
+  })
+})
+
+describe('defaultToastDuration (pure)', () => {
+  it('success dismisses quickly — fire-and-forget confirmation', () => {
+    expect(defaultToastDuration('success')).toBe(3000)
+  })
+
+  it('warning sits in the middle — attention-worthy but not critical', () => {
+    expect(defaultToastDuration('warning')).toBe(5000)
+  })
+
+  it('error lingers longest — operator needs time to read + copy', () => {
+    // Regression guard: errors are the ones operators actually want
+    // to copy (stack trace, id, retry token). Dismissing at 4s has
+    // burned users in the past. The explicit > ordering ensures the
+    // intent (error > warning > success) survives any future tweak.
+    expect(defaultToastDuration('error')).toBe(8000)
+    expect(defaultToastDuration('error')).toBeGreaterThan(defaultToastDuration('warning'))
+    expect(defaultToastDuration('warning')).toBeGreaterThan(defaultToastDuration('success'))
+  })
+})
+
+describe('showToast duration fallbacks', () => {
+  beforeEach(() => { _testResetToasts(); vi.useFakeTimers() })
+  afterEach(() => { _testResetToasts(); vi.useRealTimers() })
+
+  it('error toast defaults to 8000ms, longer than success 3000ms', () => {
+    showToast('you failed', 'error')
+    vi.advanceTimersByTime(3001) // past success default — error must still be around
+    expect(_testGetToasts().length).toBe(1)
+    vi.advanceTimersByTime(5000) // now past 8000 total
+    expect(_testGetToasts().length).toBe(0)
+  })
+
+  it('explicit durationMs still overrides the tiered default', () => {
+    // Regression guard: callers that pass durationMs (the existing API)
+    // must keep their exact behaviour — we only change the fallback.
+    showToast('quick', 'error', 500)
+    vi.advanceTimersByTime(501)
+    expect(_testGetToasts().length).toBe(0)
+  })
+})
+
+describe('pauseToastTimer / resumeToastTimer', () => {
+  beforeEach(() => { _testResetToasts(); vi.useFakeTimers() })
+  afterEach(() => { _testResetToasts(); vi.useRealTimers() })
+
+  it('pause stops the auto-dismiss clock; toast survives past its original deadline', () => {
+    showToast('hover me', 'error', 1000)
+    const id = _testGetToasts()[0]!.id
+    vi.advanceTimersByTime(500)
+    pauseToastTimer(id)
+    vi.advanceTimersByTime(10_000) // well past 1000ms
+    // Toast is still on screen — the timer was paused before it fired.
+    expect(_testGetToasts().length).toBe(1)
+  })
+
+  it('resume dismisses after the remaining time, not the full duration', () => {
+    // Regression guard: a Sonner-style pause-on-hover that restarts
+    // the full duration on leave would annoy operators who hovered
+    // briefly. Resume must fire at \"remaining\", not at \"duration\".
+    showToast('linger then leave', 'error', 1000)
+    const id = _testGetToasts()[0]!.id
+    vi.advanceTimersByTime(600) // 400ms remaining
+    pauseToastTimer(id)
+    vi.advanceTimersByTime(5000) // hover lingers, nothing happens
+    expect(_testGetToasts().length).toBe(1)
+    resumeToastTimer(id)
+    vi.advanceTimersByTime(399)
+    expect(_testGetToasts().length).toBe(1) // still there, 1ms short
+    vi.advanceTimersByTime(2)
+    expect(_testGetToasts().length).toBe(0) // dismissed at ~400ms after resume
+  })
+
+  it('double-pause is a no-op (Sonner behaviour: child hover does not restart)', () => {
+    showToast('nested hover', 'error', 1000)
+    const id = _testGetToasts()[0]!.id
+    vi.advanceTimersByTime(500) // 500ms remaining
+    pauseToastTimer(id)
+    // Child element enters → second pause call. Remaining should NOT
+    // jump back to the full 1000 or reset elapsed tracking.
+    pauseToastTimer(id)
+    resumeToastTimer(id)
+    vi.advanceTimersByTime(499)
+    expect(_testGetToasts().length).toBe(1)
+    vi.advanceTimersByTime(2)
+    expect(_testGetToasts().length).toBe(0)
+  })
+
+  it('resume without prior pause is a no-op (does not double-schedule)', () => {
+    showToast('not paused', 'error', 1000)
+    const id = _testGetToasts()[0]!.id
+    resumeToastTimer(id) // spurious resume — must not schedule a 2nd timer
+    vi.advanceTimersByTime(1001)
+    expect(_testGetToasts().length).toBe(0) // exactly one dismissal
+  })
+
+  it('pause on a dismissed toast id is a no-op (no throw)', () => {
+    // Regression guard: a stale mouseenter event after the toast has
+    // already auto-dismissed must not throw or create a zombie entry.
+    expect(() => pauseToastTimer(999_999)).not.toThrow()
   })
 })

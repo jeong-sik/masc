@@ -8,6 +8,7 @@ import {
   type KeeperTransition,
 } from '../api/keeper'
 import { EmptyState } from './common/empty-state'
+import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 import type { KeeperPhase } from '../types'
@@ -134,7 +135,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   if (loading) {
     return html`
       <div class="flex items-center justify-center gap-2 py-6 text-[11px] text-[var(--text-dim)]">
-        <span class="inline-block h-3 w-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" aria-hidden="true"></span>
+        <${InlineSpinner} />
         composite lifecycle 로딩중
       </div>
     `

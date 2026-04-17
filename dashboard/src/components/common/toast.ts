@@ -57,23 +57,92 @@ const ICON: Record<ToastType, () => ComponentChildren> = {
   error: () => html`<${XCircle} size=${14} />`
 }
 
-export function showToast(message: string, type: ToastType = 'success', durationMs = 4000) {
+/** Pure: default dismiss duration per toast type. Reference — Sentry
+    error banner lingers, GitHub success toast is quick. Error toasts
+    need more reading time AND often carry information the operator
+    wants to copy (stack, id, retry token); dismissing at 4s has
+    burned users. Warnings sit in the middle. Success confirms an
+    already-completed action, so short is fine.
+
+    Callers that pass an explicit \`durationMs\` still win. */
+export function defaultToastDuration(type: ToastType): number {
+  switch (type) {
+    case 'success': return 3000
+    case 'warning': return 5000
+    case 'error': return 8000
+  }
+}
+
+/** Per-toast dismiss bookkeeping — one entry while the toast is
+    visible. `paused === true` means the timer has been cleared and
+    the remaining ms should resume on the next resume call. Tracked
+    here (module scope) instead of on the Toast record so we don't
+    re-render the whole stack every time a timer advances. */
+interface ToastTimer {
+  remainingMs: number
+  startedAt: number
+  timerId: number
+  paused: boolean
+}
+const toastTimers = new Map<number, ToastTimer>()
+
+function scheduleToastDismiss(id: number, ms: number): void {
+  const timerId = (typeof window === 'undefined'
+    ? setTimeout(() => finalizeDismiss(id), ms)
+    : window.setTimeout(() => finalizeDismiss(id), ms)) as unknown as number
+  toastTimers.set(id, { remainingMs: ms, startedAt: Date.now(), timerId, paused: false })
+}
+
+function finalizeDismiss(id: number): void {
+  toasts.value = toasts.value.filter(t => t.id !== id)
+  toastTimers.delete(id)
+}
+
+/** Pause the dismiss timer for a toast — called on hover enter.
+    Computes the elapsed time and stores the remainder so resume can
+    schedule the same wall-clock deadline. Idempotent: calling twice
+    is a no-op (Sonner / Sentry behaviour: nested hover from a child
+    does not restart the clock). */
+export function pauseToastTimer(id: number): void {
+  const t = toastTimers.get(id)
+  if (t === undefined || t.paused) return
+  if (typeof window !== 'undefined') window.clearTimeout(t.timerId)
+  else clearTimeout(t.timerId)
+  const elapsed = Date.now() - t.startedAt
+  const remaining = Math.max(0, t.remainingMs - elapsed)
+  toastTimers.set(id, { remainingMs: remaining, startedAt: 0, timerId: -1, paused: true })
+}
+
+/** Resume a previously-paused dismiss. If the remaining time has
+    already elapsed (e.g. paused at 0s left, mouse lingered forever),
+    dismisses immediately. Idempotent on already-running timers. */
+export function resumeToastTimer(id: number): void {
+  const t = toastTimers.get(id)
+  if (t === undefined || !t.paused) return
+  if (t.remainingMs <= 0) { finalizeDismiss(id); return }
+  scheduleToastDismiss(id, t.remainingMs)
+}
+
+export function showToast(message: string, type: ToastType = 'success', durationMs?: number) {
   const id = ++_nextId
+  const dismissMs = durationMs ?? defaultToastDuration(type)
   enqueueToast({ id, message, type })
-  setTimeout(() => {
-    toasts.value = toasts.value.filter(t => t.id !== id)
-  }, durationMs)
+  scheduleToastDismiss(id, dismissMs)
 }
 
 export function showActionToast(message: string, action: ToastAction, type: ToastType = 'error', durationMs = 12000) {
   const id = ++_nextId
   enqueueToast({ id, message, type, action })
-  setTimeout(() => {
-    toasts.value = toasts.value.filter(t => t.id !== id)
-  }, durationMs)
+  scheduleToastDismiss(id, durationMs)
 }
 
 function dismissToast(id: number) {
+  const t = toastTimers.get(id)
+  if (t !== undefined) {
+    if (typeof window !== 'undefined') window.clearTimeout(t.timerId)
+    else clearTimeout(t.timerId)
+    toastTimers.delete(id)
+  }
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
 
@@ -105,6 +174,11 @@ export function ToastContainer() {
           key=${t.id}
           role=${t.type === 'error' ? 'alert' : 'status'}
           class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-[220px] max-w-[360px] rounded-md border-l-[3px] border-l-solid border border-solid border-[var(--card-border)] bg-[rgba(10,18,34,0.96)] shadow-lg animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}"
+          onMouseEnter=${() => pauseToastTimer(t.id)}
+          onMouseLeave=${() => resumeToastTimer(t.id)}
+          onFocusIn=${() => pauseToastTimer(t.id)}
+          onFocusOut=${() => resumeToastTimer(t.id)}
+          data-toast-id=${t.id}
         >
           <span class="shrink-0 flex items-center ${ICON_COLOR[t.type]}">${ICON[t.type]()}</span>
           <span class="flex-1 text-[13px] text-[var(--text-body)] leading-[1.4]">${t.message}</span>

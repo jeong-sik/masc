@@ -173,8 +173,12 @@ let recent_messages_json config =
   |> List.map Types.message_to_yojson
   |> fun rows -> `List rows
 
-let keeper_tool_audit_fields config (meta : Keeper_types.keeper_meta) =
-  let fallback_allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+let keeper_tool_audit_fields ?(include_allowed_tools = true) config
+    (meta : Keeper_types.keeper_meta) =
+  let fallback_allowed =
+    if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta
+    else []
+  in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
     match
@@ -357,7 +361,18 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  in
                  let allowed_tool_names, latest_tool_names, latest_tool_call_count,
                      latest_action_source, tool_audit_source, tool_audit_at =
-                   if lightweight then ([], [], None, None, None, None)
+                   if lightweight then
+                     let _, latest_tool_names, latest_tool_call_count,
+                         latest_action_source, tool_audit_source, tool_audit_at =
+                       keeper_tool_audit_fields ~include_allowed_tools:false
+                         config meta
+                     in
+                     ( [],
+                       latest_tool_names,
+                       latest_tool_call_count,
+                       latest_action_source,
+                       tool_audit_source,
+                       tool_audit_at )
                    else keeper_tool_audit_fields config meta
                  in
                  let surface_status =

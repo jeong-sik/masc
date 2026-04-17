@@ -29,10 +29,30 @@ type finding = {
 let confidence_to_string = function
   | High -> "high" | Medium -> "medium" | Low -> "low"
 
-let confidence_of_string s =
+(** Partial parser for confidence labels.  Returns [None] when the input
+    does not match a known level — callers that originate from user
+    input (tool args, on-disk JSON) can distinguish "explicit medium"
+    from "garbage or stale label" instead of silently coercing both to
+    [Medium]. *)
+let confidence_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
-  | "high" -> High | "medium" -> Medium | "low" -> Low
-  | _ -> Medium
+  | "high" -> Some High
+  | "medium" -> Some Medium
+  | "low" -> Some Low
+  | _ -> None
+
+(** Total parser kept for backward compatibility.  Falls back to
+    [Medium] on unrecognised input and writes a one-line warning to
+    stderr so operator typos (e.g. [confidence=hihg]) or data drift
+    in stored findings surface instead of silently collapsing. *)
+let confidence_of_string s =
+  match confidence_of_string_opt s with
+  | Some c -> c
+  | None ->
+    Printf.eprintf
+      "[autoresearch] WARN: unrecognised confidence %S, defaulting to medium\n%!"
+      s;
+    Medium
 
 let finding_to_yojson (f : finding) : Yojson.Safe.t =
   `Assoc [

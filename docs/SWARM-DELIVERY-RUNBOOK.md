@@ -1,3 +1,12 @@
+---
+status: runbook
+last_verified: 2026-04-17
+code_refs:
+  - lib/keeper/keeper_supervisor.ml
+  - lib/keeper/keeper_unified_turn.ml
+  - lib/supervisor.ml
+---
+
 # Swarm Delivery Runbook
 
 이 문서는 `MASC` 자체를 구현 substrate로 써서 기능 슬라이스를 계획하고 구현할 때의 표준 순서를 정리한다.

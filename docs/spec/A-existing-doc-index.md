@@ -63,7 +63,7 @@ code_refs:
 | `docs/DASHBOARD-INTEGRATION.md` | Historical | dashboard integration snapshot |
 | `docs/PRODUCT-REVIEW.md` | Historical | product/security review memo |
 | `docs/MASC-V2-DESIGN.md` | Historical | early v2 concept document |
-| `docs/MULTI-ROOM-DESIGN.md` | Historical | compatibility note only |
+| `docs/MULTI-ROOM-DESIGN.md` | Removed | deleted 2026-04-17 (historical, no code refs) |
 | `docs/COMMAND-PLANE-RUNBOOK.md` | Historical | retired command-plane contract and migration context |
 
 ## Archive and Experiment Stores

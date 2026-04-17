@@ -8,6 +8,7 @@ import { StatusBadge } from '../common/status-badge'
 import { EmptyState } from '../common/empty-state'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
+import { TextInput } from '../common/input'
 import { TimeAgo } from '../common/time-ago'
 import { findKeeper } from '../../lib/keeper-utils'
 import {
@@ -16,6 +17,8 @@ import {
   taskEvents,
   taskEventsLoading,
   taskEventsError,
+  taskEventsSearchQuery,
+  filterTaskEvents,
   assigneeGoalIds,
   activeTab,
   switchToActivityTab,
@@ -56,17 +59,41 @@ function TaskEventsSection() {
   const events = taskEvents.value
   const loading = taskEventsLoading.value
   const error = taskEventsError.value
+  const query = taskEventsSearchQuery.value
 
   if (loading) return html`<${LoadingState}>이벤트 불러오는 중...<//>`
   if (error) return html`<${ErrorState} message=${error} />`
   if (events.length === 0) return html`<${EmptyState} message="기록된 이벤트가 없습니다" compact />`
 
+  const visible = filterTaskEvents(events, query)
+  const trimmed = query.trim()
+
   return html`
-    <div class="flex flex-col gap-0.5">
-      ${events.map((evt: NormalizedTaskEvent, i: number) => {
+    <div class="flex flex-col gap-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <${TextInput}
+          type="search"
+          value=${query}
+          placeholder="이벤트 검색 (label/agent/notes)"
+          ariaLabel="이벤트 검색"
+          onInput=${(e: Event) => { taskEventsSearchQuery.value = (e.target as HTMLInputElement).value }}
+          class="min-w-[180px] flex-1 !py-1 !text-[11px]"
+        />
+        <span class="text-[10px] text-[var(--text-muted)] tabular-nums">
+          ${trimmed
+            ? `${visible.length} / ${events.length}`
+            : `${events.length}개`}
+        </span>
+      </div>
+      ${visible.length === 0
+        ? html`<${EmptyState} message="검색 조건에 맞는 이벤트가 없습니다" compact />`
+        : html`
+      <div class="flex flex-col gap-0.5">
+        ${visible.map((evt: NormalizedTaskEvent, i: number) => {
         const { icon, color } = eventBadge(evt.label)
+        const key = evt.ts ? `${evt.ts}-${i}` : `${evt.label}-${i}`
         return html`
-          <div key=${i} class="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-[var(--white-3)] transition-colors">
+          <div key=${key} class="flex items-start gap-3 py-2 px-3 rounded-lg hover:bg-[var(--white-3)] transition-colors">
             <div class="size-7 shrink-0 rounded-md bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-[11px] font-mono font-bold ${color}">
               ${icon}
             </div>
@@ -81,6 +108,8 @@ function TaskEventsSection() {
           </div>
         `
       })}
+      </div>
+        `}
     </div>
   `
 }

@@ -46,6 +46,17 @@ require_not_contains() {
   fi
 }
 
+# Like require_contains but silently skips when the file no longer exists.
+# Use when a regression lock targets a file that may be legitimately
+# deleted by a later PR.
+require_contains_if_exists() {
+  local file="$1"
+  local needle="$2"
+  if [ -f "$file" ]; then
+    require_contains "$file" "$needle"
+  fi
+}
+
 extract_single() {
   local pattern="$1"
   local file="$2"

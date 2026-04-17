@@ -229,5 +229,5 @@ Historical compatibility lane(team-session / command-plane HTTP)은 migration co
 |----|------|----------|------|
 | OQ-SYS-001 | Sub-library 추출을 어디까지 진행할 것인가? keeper(33K LOC)와 chain(30K LOC)은 별도 sub-library 후보. | `lib/keeper/`, `lib/chain/` | Open |
 | OQ-SYS-002 | HTTP/2 h2c를 기본 transport로 전환할 시점은? Cloudflare Tunnel이 cleartext h2를 지원하지 않는 제약. | `bin/main_eio.ml` | Open |
-| OQ-SYS-003 | MASC -> OAS 이관 완료 후 MASC의 최종 범위는? 순수 coordination layer만 남길 것인지. | `docs/OAS-MIGRATION-AUDIT.md` | Open |
+| OQ-SYS-003 | MASC -> OAS 이관 완료 후 MASC의 최종 범위는? 순수 coordination layer만 남길 것인지. | — | Open |
 | OQ-SYS-004 | Multi-protocol transport(SSE/gRPC/WebSocket/WebRTC) 중 어디를 canonical으로 수렴할 것인가? | `lib/grpc/`, `lib/server/` | Open |

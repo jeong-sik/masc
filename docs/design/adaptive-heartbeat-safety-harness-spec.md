@@ -1,3 +1,12 @@
+---
+status: reference
+last_verified: 2026-04-17
+code_refs:
+  - scripts/harness/
+  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper/keeper_composite_observer.ml
+---
+
 # Adaptive Heartbeat Safety Harness Spec
 
 **Status**: Draft, implementation spec

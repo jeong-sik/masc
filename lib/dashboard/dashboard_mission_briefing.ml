@@ -9,14 +9,6 @@ open Briefing_json_helpers
 
 let cache_ttl_sec = Env_config.InternalTimers.briefing_cache_ttl_sec
 
-let mission_briefing_surface_contract_json =
-  `Assoc
-    [
-      ("summary", `String "narrative");
-      ("sections", `String "narrative");
-      ("basis", `String "truth");
-    ]
-
 let mission_briefing_criteria =
   [
     "deterministic_rules_only";
@@ -88,7 +80,6 @@ let pending_json ~now ~last_error =
       ("summary", `String "Generating mission briefing from the latest snapshot.");
       ("provenance", `String "narrative");
       ("authoritative", `Bool false);
-      ("provenance_summary", mission_briefing_surface_contract_json);
       ("model", `Null);
       ("ttl_sec", `Int (int_of_float cache_ttl_sec));
       ("criteria", criteria_json ());
@@ -213,7 +204,6 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
           ("summary", `String watch_summary);
           ("provenance", `String "narrative");
           ("authoritative", `Bool false);
-          ("provenance_summary", mission_briefing_surface_contract_json);
           ("model", `String "deterministic");
           ("ttl_sec", `Int (int_of_float cache_ttl_sec));
           ("criteria", criteria_json ());

@@ -150,7 +150,6 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
             ("summary", `String "cached summary");
             ("provenance", `String "narrative");
             ("authoritative", `Bool false);
-            ("provenance_summary", `Assoc []);
             ("model", `String "deterministic");
             ("ttl_sec", `Int 300);
             ("criteria", `List []);

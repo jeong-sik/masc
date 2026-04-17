@@ -419,31 +419,6 @@ export interface OperatorRecommendedAction {
   preview?: unknown
 }
 
-export interface OperatorWorkerCard {
-  actor?: string | null
-  spawn_agent?: string | null
-  spawn_role?: string | null
-  spawn_model?: string | null
-  worker_class?: string | null
-  parent_actor?: string | null
-  capsule_mode?: string | null
-  runtime_pool?: string | null
-  lane_id?: string | null
-  controller_level?: string | null
-  control_domain?: string | null
-  supervisor_actor?: string | null
-  model_tier?: string | null
-  task_profile?: string | null
-  risk_level?: string | null
-  routing_confidence?: number | null
-  routing_reason?: string | null
-  status: string
-  turn_count: number
-  empty_note_turn_count: number
-  has_turn: boolean
-  last_turn_ts_iso?: string | null
-}
-
 
 export interface OperatorJudgeRuntime {
   enabled?: boolean
@@ -521,7 +496,6 @@ export interface OperatorDigest {
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
   recent_reviews: OperatorReviewDecision[]
-  worker_cards: OperatorWorkerCard[]
 }
 
 export interface KeeperProbeResult {

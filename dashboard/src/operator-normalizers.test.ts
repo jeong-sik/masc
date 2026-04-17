@@ -15,7 +15,6 @@ describe('normalizeOperatorDigest', () => {
     expect(result.attention_items).toEqual([])
     expect(result.recommended_actions).toEqual([])
     expect(result.recent_reviews).toEqual([])
-    expect(result.worker_cards).toEqual([])
   })
 
   it('returns safe defaults for undefined', () => {
@@ -127,27 +126,6 @@ describe('normalizeOperatorDigest', () => {
       operator_judge_runtime: 'invalid',
     })
     expect(result.operator_judge_runtime).toBeNull()
-  })
-
-  it('extracts worker_cards', () => {
-    const result = normalizeOperatorDigest({
-      worker_cards: [
-        { actor: 'agent-1', status: 'running', turn_count: 5 },
-      ],
-    })
-    expect(result.worker_cards).toHaveLength(1)
-    expect(result.worker_cards[0]!.actor).toBe('agent-1')
-    expect(result.worker_cards[0]!.status).toBe('running')
-  })
-
-  it('defaults worker_card fields', () => {
-    const result = normalizeOperatorDigest({
-      worker_cards: [{}],
-    })
-    expect(result.worker_cards).toHaveLength(1)
-    expect(result.worker_cards[0]!.actor).toBeNull()
-    expect(result.worker_cards[0]!.status).toBe('unknown')
-    expect(result.worker_cards[0]!.turn_count).toBe(0)
   })
 
   it('extracts judgment', () => {
